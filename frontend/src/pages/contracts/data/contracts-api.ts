@@ -97,3 +97,9 @@ export function updateContractStatus(contractId: string, payload: JsonPayload) {
 export function updateQuoteStatus(quoteId: string, payload: JsonPayload) {
   return postJson<QuoteItem>(`/quotes/${quoteId}/status`, payload);
 }
+
+export function deleteQuote(quoteId: string) {
+  return apiFetch<void>(`/quotes/${quoteId}`, {
+    method: "DELETE",
+  });
+}

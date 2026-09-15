@@ -57,7 +57,7 @@ pub fn router() -> Router<AppState> {
             "/orders/{order_id}/quotes",
             get(list_order_quotes).post(create_quote),
         )
-        .route("/quotes/{quote_id}", get(get_quote))
+        .route("/quotes/{quote_id}", get(get_quote).delete(delete_quote))
         .route("/quotes/{quote_id}/versions", get(list_quote_versions))
         .route("/quotes/{quote_id}/status", post(update_quote_status))
 }
@@ -3118,6 +3118,112 @@ async fn get_quote(
         Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
         Err(resp) => resp,
     }
+}
+
+async fn delete_quote(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(quote_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let subject = match load_quote_subject(&state, quote_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_subject_access(&state, &auth, subject).await {
+        return response;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "begin quote deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete quote");
+        }
+    };
+    let quote = match sqlx::query(
+        "SELECT order_id, quote_number, status FROM quotes WHERE id = $1 FOR UPDATE",
+    )
+    .bind(quote_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "lock quote for deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete quote");
+        }
+    };
+    let status = quote.try_get::<String, _>("status").unwrap_or_default();
+    if !matches!(status.as_str(), "draft" | "rejected" | "expired") {
+        return err(
+            StatusCode::CONFLICT,
+            "Only draft, rejected, or expired quotes can be deleted",
+        );
+    }
+    let has_invoices = match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM invoices WHERE quote_id = $1)",
+    )
+    .bind(quote_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "check quote invoices before deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete quote");
+        }
+    };
+    if has_invoices {
+        return err(
+            StatusCode::CONFLICT,
+            "A quote with linked invoices cannot be deleted",
+        );
+    }
+
+    if let Err(error) = sqlx::query("DELETE FROM quotes WHERE id = $1")
+        .bind(quote_id)
+        .execute(&mut *tx)
+        .await
+    {
+        tracing::error!(%error, %quote_id, "delete quote");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete quote");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %quote_id, "commit quote deletion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete quote");
+    }
+
+    let order_id = quote.try_get::<Uuid, _>("order_id").unwrap_or_default();
+    let quote_number = quote
+        .try_get::<String, _>("quote_number")
+        .unwrap_or_default();
+    state.audit_sender.try_send(audit::domain_event(
+        "delete_quote",
+        Some(auth.user_id),
+        "quote",
+        Some(quote_id),
+        json!({
+            "order_id": order_id,
+            "quote_number": quote_number,
+            "status": status,
+        }),
+    ));
+    crate::realtime::publish_quote_event(
+        &state,
+        Some(auth.user_id),
+        "quote.deleted",
+        quote_id,
+        json!({ "order_id": order_id }),
+    )
+    .await;
+
+    StatusCode::NO_CONTENT.into_response()
 }
 
 async fn list_quote_versions(

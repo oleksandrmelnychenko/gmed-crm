@@ -333,13 +333,15 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
     let workspace_path = format!("/api/v1/patients/{patient_id}/billing-workspace");
     let (status, workspace) = json_request(&app, "GET", &workspace_path, &bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{workspace}");
-    assert!(
-        workspace["orders"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|row| { row["id"] == anchor_order.to_string() && row["status"] == "completed" })
-    );
+    let anchor = workspace["orders"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == anchor_order.to_string())
+        .expect("completed anchor order in billing workspace");
+    assert_eq!(anchor["status"], "completed");
+    assert!(anchor["package_coverage_status"].is_string());
+    assert_eq!(anchor["services"], json!([]));
     let expense = workspace["expenses"]
         .as_array()
         .unwrap()

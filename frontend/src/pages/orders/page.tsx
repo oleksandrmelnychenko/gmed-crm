@@ -20,18 +20,20 @@ import {
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
-  Circle,
   ClipboardList,
   FileText,
   LoaderCircle,
   Pause,
   Play,
   Plus,
+  ReceiptText,
   RefreshCw,
   Search,
   ShieldCheck,
   UserRound,
+  WalletCards,
   X,
 } from "lucide-react";
 
@@ -85,6 +87,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { localizeWorkflowItemText } from "@/lib/workflow-labels";
+import { summarizeOrderNeeds } from "./model/order-needs";
 import {
   createOrderServiceGroup,
   fetchOrderServiceGroup,
@@ -362,11 +365,31 @@ function MiniMetric({
   );
 }
 
-function OrderFinancialMetric({ label, value }: { label: string; value: ReactNode }) {
+function OrderFinancialMetric({
+  label,
+  value,
+  emphasis = false,
+}: {
+  label: string;
+  value: ReactNode;
+  emphasis?: boolean;
+}) {
   return (
-    <div className="flex min-w-0 flex-col justify-between gap-1.5 rounded-lg border border-border/70 bg-card px-3 py-2.5">
-      <dt className="text-xs leading-5 text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 font-mono text-sm font-semibold leading-5 tabular-nums text-foreground">
+    <div
+      className={cn(
+        "flex min-w-0 flex-col justify-between gap-2 rounded-lg border px-3.5 py-3",
+        emphasis
+          ? "border-orange-200 bg-orange-50/60"
+          : "border-border/70 bg-card",
+      )}
+    >
+      <dt className="text-xs font-medium leading-5 text-muted-foreground">{label}</dt>
+      <dd
+        className={cn(
+          "min-w-0 font-mono text-base font-semibold leading-5 tabular-nums",
+          emphasis ? "text-orange-800" : "text-foreground",
+        )}
+      >
         {value}
       </dd>
     </div>
@@ -1407,6 +1430,10 @@ function useOrdersPageContent() {
       net: sumLeistungTotals(items),
     };
   }, [orderDetail]);
+  const orderNeedSummary = useMemo(
+    () => summarizeOrderNeeds(orderDetail?.needs_description),
+    [orderDetail?.needs_description],
+  );
   const serviceGroupMetrics = useMemo(
     () => ({
       total: orderServiceGroups.length,
@@ -1489,6 +1516,9 @@ function useOrdersPageContent() {
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
   );
+  const currentLifecyclePhaseIndex = orderDetail
+    ? ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number])
+    : -1;
   const planningReadinessApplicable = isOrderReadinessGateApplicable(
     orderDetail?.phase,
     "planning",
@@ -3719,50 +3749,76 @@ function useOrdersPageContent() {
             ) : (
               <div className="min-w-0 space-y-4 rounded-xl">
                 {detailError ? <Banner tone="error" withIcon>{detailError}</Banner> : null}
-                <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                  <div className="relative p-4">
+                <section className="relative rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                  <div className="relative p-5">
                     <span
                       className={cn(
-                        "absolute bottom-4 left-0 top-4 w-1 rounded-r-full",
+                        "absolute bottom-5 left-0 top-5 w-1 rounded-r-full",
                         orderAccentClass(orderDetail.phase, orderDetail.status),
                       )}
                     />
-                    <div className="flex min-w-0 flex-col gap-3 pl-2">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
-                            {phaseLabel(orderDetail.phase)}
-                          </StatusBadge>
-                          <StatusBadge tone={orderStatusTone(orderDetail.status)}>
-                            {orderStatusLabel(orderDetail.status)}
-                          </StatusBadge>
+                    <div className="min-w-0 pl-2">
+                      <div className="grid min-w-0 gap-5 @container @min-[52rem]:grid-cols-[minmax(0,1fr)_auto] @min-[52rem]:items-start">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                              {lang === "de" ? "Auftrag" : "Заказ"}
+                            </span>
+                            <span className="font-mono text-xs font-medium text-foreground">
+                              {orderDetail.order_number}
+                            </span>
+                            <StatusBadge tone={orderStatusTone(orderDetail.status)}>
+                              {orderStatusLabel(orderDetail.status)}
+                            </StatusBadge>
+                          </div>
+                          <h1 className="mt-2 min-w-0 max-w-full break-words text-2xl font-semibold leading-tight tracking-tight text-foreground">
+                            {detailSubjectName}
+                          </h1>
+                          <p className="mt-1.5 text-sm text-muted-foreground">
+                            {detailSubjectLabel}
+                            {detailSubjectReference ? (
+                              <span className="ml-2 font-mono text-xs text-foreground">
+                                {detailSubjectReference}
+                              </span>
+                            ) : null}
+                          </p>
                         </div>
-                        <h1 className="mt-2 min-w-0 max-w-full break-words text-xl font-semibold leading-snug text-foreground">
-                          {detailSubjectName}
-                        </h1>
-                        <p className="mt-1.5 break-words font-mono text-xs leading-5 text-muted-foreground">
-                          {[orderDetail.order_number, detailSubjectReference]
-                            .filter(Boolean)
-                            .join(" - ")}
-                        </p>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="rounded-full">
-                            {lang === "de" ? "Brutto" : "Брутто"}: {formatMoney(orderDetail.total_estimated)}
-                          </Badge>
-                          <Badge variant="outline" className="rounded-full">
-                            {leistungMetrics.total} {tx.providers_services}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {l("orders_aktualisiert")}: {formatDateTimeLabel(orderDetail.updated_at)}
-                          </span>
-                        </div>
+
+                        <dl className="grid min-w-0 gap-2 sm:grid-cols-3 @min-[52rem]:min-w-[460px]">
+                          <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
+                            <dt className="text-[11px] font-medium text-muted-foreground">
+                              {lang === "de" ? "Auftragssumme" : "Сумма заказа"}
+                            </dt>
+                            <dd className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+                              {formatMoney(orderDetail.total_estimated)}
+                            </dd>
+                          </div>
+                          <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
+                            <dt className="text-[11px] font-medium text-muted-foreground">
+                              {lang === "de" ? "Leistungen" : "Услуги"}
+                            </dt>
+                            <dd className="mt-1 text-sm font-semibold text-foreground">
+                              {leistungMetrics.total}
+                            </dd>
+                          </div>
+                          <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
+                            <dt className="text-[11px] font-medium text-muted-foreground">
+                              {lang === "de" ? "Aktualisiert" : "Обновлено"}
+                            </dt>
+                            <dd className="mt-1 text-xs font-medium leading-5 text-foreground">
+                              {formatDateTimeLabel(orderDetail.updated_at)}
+                            </dd>
+                          </div>
+                        </dl>
                       </div>
-                      <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-border/60 pt-3 [&_[data-slot=button]]:h-8 [&_[data-slot=button]]:max-w-full [&_[data-slot=button]]:whitespace-normal [&_[data-slot=button]]:rounded-md">
+
+                      <div className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+                        <div className="flex min-w-0 flex-wrap gap-2">
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="justify-center rounded-lg"
+                            className="h-8 rounded-md"
                             disabled={!detailSubjectHref}
                             onClick={() => {
                               if (detailSubjectHref) {
@@ -3781,7 +3837,7 @@ function useOrdersPageContent() {
                             type="button"
                             variant="outline"
                             size="sm"
-                            className="justify-center rounded-lg"
+                            className="h-8 rounded-md"
                             onClick={() =>
                               window.open(
                                 detailDocumentsHref,
@@ -3790,11 +3846,20 @@ function useOrdersPageContent() {
                               )
                             }
                           >
-                            <ArrowUpRight className="size-3.5" />
+                            <FileText className="size-3.5" />
                             {l("orders_dokumente")}
                           </Button>
-                          {permissions.canManagePhase
-                            ? (orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
+                        </div>
+
+                        {permissions.canManagePhase &&
+                        (orderDetail.lifecycle?.allowed_status_transitions?.length ?? 0) > 0 ? (
+                          <details className="group relative">
+                            <summary className="flex h-8 cursor-pointer list-none items-center gap-2 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                              {lang === "de" ? "Auftrag verwalten" : "Управление заказом"}
+                              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+                            </summary>
+                            <div className="absolute right-0 z-20 mt-2 grid min-w-56 gap-1 rounded-lg border border-border bg-popover p-1.5 shadow-lg">
+                              {(orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
                                 (transition) => {
                                   const label =
                                     transition.status === "active"
@@ -3826,17 +3891,18 @@ function useOrdersPageContent() {
                                     <Button
                                       key={transition.status}
                                       type="button"
+                                      aria-label={label}
                                       size="sm"
-                                      variant={
-                                        transition.status === "cancelled"
-                                          ? "destructive"
-                                          : transition.status === "completed"
-                                            ? "default"
-                                            : "outline"
-                                      }
-                                      className="justify-center rounded-lg"
+                                      variant="ghost"
+                                      className={cn(
+                                        "h-8 justify-start rounded-md",
+                                        transition.status === "cancelled" &&
+                                          "text-destructive hover:text-destructive",
+                                      )}
                                       disabled={
-                                        statusSaving != null || phaseSaving || transition.blocked
+                                        statusSaving != null ||
+                                        phaseSaving ||
+                                        transition.blocked
                                       }
                                       title={
                                         transition.reasons
@@ -3856,10 +3922,13 @@ function useOrdersPageContent() {
                                     </Button>
                                   );
                                 },
-                              )
-                            : null}
+                              )}
+                            </div>
+                          </details>
+                        ) : null}
                       </div>
                     </div>
+
                     {statusError ? (
                       <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                         {statusError}
@@ -3867,93 +3936,127 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
 
-                  <div className="@container border-t border-border/70 bg-muted/20 px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <ShieldCheck className="size-4 text-primary" />
-                          <span className="text-sm font-semibold text-foreground">
-                            {lang === "de" ? "Prozessstatus" : "Статус процесса"}
-                          </span>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "rounded-full",
-                              nextLifecycleTransition?.blocked
-                                ? "border-amber-200 bg-amber-50 text-amber-800"
-                                : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                            )}
-                          >
+                  <div className="@container rounded-b-xl border-t border-border/70 bg-muted/15 p-5">
+                    <div className="grid min-w-0 gap-4 @min-[52rem]:grid-cols-[minmax(0,1fr)_auto] @min-[52rem]:items-center">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span
+                          className={cn(
+                            "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                            nextLifecycleTransition?.blocked
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-emerald-100 text-emerald-700",
+                          )}
+                        >
+                          {nextLifecycleTransition?.blocked ? (
+                            <AlertTriangle className="size-5" />
+                          ) : (
+                            <CheckCircle2 className="size-5" />
+                          )}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              {lang === "de"
+                                ? "Aktuelle Phase"
+                                : "Текущий этап"}{" "}
+                              {currentLifecyclePhaseIndex >= 0
+                                ? [currentLifecyclePhaseIndex + 1, ORDER_PHASES.length].join(" / ")
+                                : ""}
+                            </p>
+                            <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
+                              {phaseLabel(orderDetail.phase)}
+                            </StatusBadge>
+                          </div>
+                          <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">
                             {nextLifecycleTransition?.blocked
-                              ? l("orders_blockiert_2")
+                              ? lang === "de"
+                                ? nextLifecycleTransition.reasons.length + " Aufgaben vor dem nächsten Schritt"
+                                : "До следующего этапа осталось: " + nextLifecycleTransition.reasons.length
                               : orderDetail.lifecycle?.next_stage
-                                ? l("orders_bereit_2")
+                                ? lang === "de"
+                                  ? "Bereit für den nächsten Schritt"
+                                  : "Можно переходить к следующему этапу"
                                 : lang === "de"
-                                  ? "Abgeschlossen"
-                                  : "Завершено"}
-                          </Badge>
-                        </div>
-                        <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                          {nextLifecycleTransition?.blocked
-                            ? lang === "de"
-                              ? `${nextLifecycleTransition.reasons.length} Blocker vor dem nächsten Schritt`
-                              : `${nextLifecycleTransition.reasons.length} блокирующих пунктов перед следующим шагом`
-                            : orderDetail.lifecycle?.next_stage
-                              ? `${l("orders_nachste_phase")}: ${phaseLabel(orderDetail.lifecycle.next_stage)}`
+                                  ? "Auftrag abgeschlossen"
+                                  : "Заказ завершён"}
+                          </h2>
+                          <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                            {orderDetail.lifecycle?.next_stage
+                              ? lang === "de"
+                                ? "Als Nächstes: " + phaseLabel(orderDetail.lifecycle.next_stage)
+                                : "Следующий этап: " + phaseLabel(orderDetail.lifecycle.next_stage)
                               : lang === "de"
-                                ? "Keine weitere Phase erforderlich"
-                                : "Следующий этап не требуется"}
-                        </p>
+                                ? "Für diesen Auftrag ist keine weitere Phase erforderlich."
+                                : "Для этого заказа больше нет обязательных этапов."}
+                          </p>
+                        </div>
                       </div>
+
                       {permissions.canManagePhase &&
                       !detailRequiresPatient &&
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
                           type="button"
-                          className="h-auto min-h-8 max-w-full rounded-md py-1.5 text-xs whitespace-normal"
+                          className="min-h-9 max-w-full rounded-lg whitespace-normal"
                           onClick={() => void handleAdvancePhase()}
                           disabled={
-                            phaseSaving || statusSaving != null ||
+                            phaseSaving ||
+                            statusSaving != null ||
                             orderDetail.status !== "active" ||
                             Boolean(nextLifecycleTransition?.blocked)
                           }
                         >
                           {phaseSaving ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                          {l("orders_weiter_zu")} {phaseLabel(orderDetail.lifecycle.next_stage)}
+                          {lang === "de" ? "Weiter zu" : "Перейти в"}{" "}
+                          {phaseLabel(orderDetail.lifecycle.next_stage)}
                           <ChevronRight className="size-4" />
                         </Button>
                       ) : null}
                     </div>
 
-                    {phaseError ? <div role="alert" className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700">{phaseError}</div> : null}
+                    {phaseError ? (
+                      <div
+                        role="alert"
+                        className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"
+                      >
+                        {phaseError}
+                      </div>
+                    ) : null}
 
-                    <div className="mt-3 grid gap-1.5 @min-[32rem]:grid-cols-5">
+                    <div className="mt-4 grid gap-2 @min-[38rem]:grid-cols-5">
                       {ORDER_PHASES.map((phase, index) => {
-                        const currentIndex = ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number]);
                         const isCurrent = phase === orderDetail.phase;
-                        const isCompleted = currentIndex >= 0 && index < currentIndex;
-                        const isNext = orderDetail.lifecycle?.next_stage === phase;
+                        const isCompleted =
+                          currentLifecyclePhaseIndex >= 0 &&
+                          index < currentLifecyclePhaseIndex;
                         return (
                           <div
                             key={phase}
                             className={cn(
-                              "flex min-w-0 items-center gap-2 rounded-md border px-2.5 py-2",
+                              "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5",
                               isCurrent
-                                ? "border-primary bg-primary text-primary-foreground"
+                                ? "border-orange-300 bg-orange-50 text-orange-950"
                                 : isCompleted
                                   ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
-                                  : isNext
-                                    ? "border-border bg-card text-foreground"
-                                    : "border-transparent text-muted-foreground",
+                                  : "border-border/60 bg-card text-muted-foreground",
                             )}
                           >
-                            {isCompleted ? (
-                              <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
-                            ) : isCurrent ? (
-                              <CheckCircle2 className="size-4 shrink-0" />
-                            ) : (
-                              <Circle className="size-4 shrink-0 text-muted-foreground/50" />
-                            )}
+                            <span
+                              className={cn(
+                                "flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold",
+                                isCompleted
+                                  ? "bg-emerald-600 text-white"
+                                  : isCurrent
+                                    ? "bg-orange-500 text-white"
+                                    : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {isCompleted ? (
+                                <CheckCircle2 className="size-3.5" />
+                              ) : (
+                                index + 1
+                              )}
+                            </span>
                             <span className="min-w-0 break-words text-xs font-medium leading-4">
                               {phaseLabel(phase)}
                             </span>
@@ -3963,55 +4066,275 @@ function useOrdersPageContent() {
                     </div>
 
                     {nextLifecycleTransition?.blocked ? (
-                      <div className="mt-3 overflow-hidden rounded-lg border border-amber-200 bg-amber-50 text-amber-950">
-                        <div className="flex items-center gap-2 px-3 py-2.5 text-xs">
-                          <AlertTriangle className="size-4 shrink-0" />
-                          <span className="font-semibold">{l("orders_blockierende_grunde")}</span>
+                      <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-card">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-200 bg-amber-50/70 px-4 py-3">
+                          <div>
+                            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                              <ShieldCheck className="size-4 text-amber-700" />
+                              {lang === "de"
+                                ? "Was noch zu erledigen ist"
+                                : "Что ещё нужно сделать"}
+                            </h3>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {lang === "de"
+                                ? "Öffnen Sie einen Punkt, um ihn direkt zu vervollständigen."
+                                : "Откройте пункт — система сразу покажет, где его завершить."}
+                            </p>
+                          </div>
                           <Badge
                             variant="outline"
-                            className="ml-auto rounded-full border-amber-300 bg-white/70 text-amber-900"
+                            className="rounded-full border-amber-300 bg-white text-amber-900"
                           >
                             {nextLifecycleTransition.reasons.length}
                           </Badge>
                         </div>
-                        <div className="grid border-t border-amber-200/80 p-1.5 sm:grid-cols-2">
-                          {nextLifecycleTransition.reasons.map((reason) => {
+                        <ol className="divide-y divide-border/60">
+                          {nextLifecycleTransition.reasons.map((reason, index) => {
                             const targetSection = orderBlockingReasonSection(reason);
                             return (
-                              <button
-                                key={reason}
-                                type="button"
-                                className="group flex min-h-10 min-w-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs leading-4 transition-colors hover:bg-amber-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                                onClick={() =>
-                                  staffGo(
-                                    buildOrderWorkspaceHref(
-                                      orderDetail.id,
-                                      targetSection,
-                                      detailPatientId || "",
-                                    ),
-                                  )
-                                }
-                              >
-                                <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-amber-500" />
-                                <span className="min-w-0 flex-1">{localizedBlockingReason(reason)}</span>
-                                <ChevronRight className="size-3.5 shrink-0 text-amber-700 transition-transform group-hover:translate-x-0.5" />
-                              </button>
+                              <li key={reason}>
+                                <button
+                                  type="button"
+                                  className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
+                                  onClick={() =>
+                                    staffGo(
+                                      buildOrderWorkspaceHref(
+                                        orderDetail.id,
+                                        targetSection,
+                                        detailPatientId || "",
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
+                                    {index + 1}
+                                  </span>
+                                  <span className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">
+                                    {localizedBlockingReason(reason)}
+                                  </span>
+                                  <span className="hidden shrink-0 items-center gap-1 text-xs font-semibold text-amber-800 sm:flex">
+                                    {lang === "de" ? "Öffnen" : "Открыть"}
+                                    <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                                  </span>
+                                </button>
+                              </li>
                             );
                           })}
-                        </div>
+                        </ol>
+                      </div>
+                    ) : orderDetail.lifecycle?.next_stage ? (
+                      <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                        <CheckCircle2 className="size-4 shrink-0" />
+                        {lang === "de"
+                          ? "Alle erforderlichen Aufgaben für den nächsten Schritt sind erledigt."
+                          : "Все обязательные пункты для перехода выполнены."}
                       </div>
                     ) : null}
                   </div>
                 </section>
-
                 {shouldRenderOrderSection("overview") ? (
                   <>
                     <SectionCard
-                      title={lang === "de" ? "Wirtschaftlichkeit des Auftrags" : "Экономика заказа"}
+                      title={lang === "de" ? "Auftrag auf einen Blick" : "Главное о заказе"}
                       description={
                         lang === "de"
-                          ? "Plan, tatsächliche Abrechnung, Zahlungen und Partnerkosten in der Auftragswährung."
-                          : "План, фактическое выставление счетов, оплаты и затраты на партнёров в валюте заказа."
+                          ? "Patientenbedarf, Vereinbarungen und Leistungsfortschritt."
+                          : "Потребность пациента, договорённости и состояние услуг."
+                      }
+                    >
+                      <div className="grid min-w-0 gap-4 @min-[52rem]:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
+                        <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card">
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-foreground">
+                              {lang === "de" ? "Bedarf des Patienten" : "Потребность пациента"}
+                            </p>
+                            {orderNeedSummary.interpreterRequired ? (
+                              <StatusBadge tone="warning">
+                                {lang === "de" ? "Dolmetscher erforderlich" : "Нужен переводчик"}
+                              </StatusBadge>
+                            ) : null}
+                          </div>
+
+                          <div className="divide-y divide-border/60">
+                            <div className="grid gap-1.5 px-4 py-3 sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
+                              <p className="text-xs font-medium text-muted-foreground">
+                                {lang === "de" ? "Hauptanliegen" : "Основная потребность"}
+                              </p>
+                              <p className="break-words text-sm font-semibold leading-5 text-foreground">
+                                {orderNeedSummary.primaryNeed || tx.common_not_set}
+                              </p>
+                            </div>
+
+                            {orderNeedSummary.services.length > 0 ? (
+                              <div className="px-4 py-3">
+                                <p className="text-xs font-medium text-muted-foreground">
+                                  {lang === "de" ? "Gewünschte Leistungen" : "Запрошенные услуги"}
+                                </p>
+                                <ol className="mt-2 space-y-2">
+                                  {orderNeedSummary.services.map((service, index) => (
+                                    <li
+                                      key={`${service.name}-${index}`}
+                                      className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2.5 rounded-lg border border-border/60 bg-muted/10 px-3 py-2.5"
+                                    >
+                                      <span className="flex size-6 items-center justify-center rounded-full bg-orange-100 font-mono text-[11px] font-semibold text-orange-800">
+                                        {index + 1}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <span className="block break-words text-sm font-semibold leading-5 text-foreground">
+                                          {service.name}
+                                        </span>
+                                        {service.note ? (
+                                          <span className="mt-0.5 block break-words text-xs leading-5 text-muted-foreground">
+                                            {service.note}
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+                            ) : null}
+
+                            {orderNeedSummary.facts.length > 0 || orderNeedSummary.additionalNotes.length > 0 ? (
+                              <div className="space-y-2 px-4 py-3">
+                                {orderNeedSummary.facts.map((fact) => (
+                                  <div key={`${fact.label}-${fact.value}`} className="grid gap-1 text-xs sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
+                                    <span className="text-muted-foreground">{fact.label}</span>
+                                    <span className="font-medium text-foreground">{fact.value}</span>
+                                  </div>
+                                ))}
+                                {orderNeedSummary.additionalNotes.map((note, index) => (
+                                  <p key={`${note}-${index}`} className="break-words text-xs leading-5 text-muted-foreground">{note}</p>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <dl className="min-w-0 divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70">
+                          {[
+                            [
+                              lang === "de" ? "Erstellt" : "Создан",
+                              formatDateTimeLabel(orderDetail.created_at),
+                            ],
+                            [
+                              lang === "de" ? "Unterschriften" : "Подписи",
+                              (lang === "de" ? "Patient: " : "Пациент: ") +
+                                (orderDetail.signed_patient
+                                  ? tx.contracts_signed
+                                  : tx.mfa_pending) +
+                                " · GMED: " +
+                                (orderDetail.signed_agency
+                                  ? tx.contracts_signed
+                                  : tx.mfa_pending),
+                            ],
+                            [
+                              lang === "de" ? "Leistungsfortschritt" : "Состояние услуг",
+                              l("orders_leistung_metrics_summary", {
+                                total: leistungMetrics.total,
+                                delivered: leistungMetrics.delivered,
+                                approved: leistungMetrics.approved,
+                              }),
+                            ],
+                          ].map(([label, value]) => (
+                            <div
+                              key={String(label)}
+                              className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-3 px-4 py-3 text-xs leading-5"
+                            >
+                              <dt className="min-w-0 break-words text-muted-foreground">
+                                {label}
+                              </dt>
+                              <dd className="min-w-0 break-words text-right font-medium text-foreground">
+                                {value}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </div>
+
+                      <div className="mt-4 border-t border-border/60 pt-4">
+                        <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                          {lang === "de" ? "Zugehörige Bereiche" : "Связанные данные"}
+                        </h3>
+                        <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-2 @min-[64rem]:grid-cols-5">
+                          {detailOverviewLinks.map((link) => (
+                            <button
+                              key={link.href}
+                              type="button"
+                              className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              onClick={() =>
+                                window.open(
+                                  link.href,
+                                  "_blank",
+                                  "noopener,noreferrer",
+                                )
+                              }
+                            >
+                              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground group-hover:bg-orange-100 group-hover:text-orange-700">
+                                <ArrowUpRight aria-hidden className="size-4" />
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-xs font-semibold text-foreground">
+                                  {link.label}
+                                </span>
+                                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                                  {link.description}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </SectionCard>
+
+                    <SectionCard
+                      title={lang === "de" ? "Finanzen des Auftrags" : "Деньги по заказу"}
+                      description={
+                        lang === "de"
+                          ? "Die wichtigsten Beträge für die tägliche Arbeit. Der vollständige Bericht ist unten verfügbar."
+                          : "Основные суммы для работы. Полный расчёт можно раскрыть ниже."
+                      }
+                      action={
+                        orderDetail ? (
+                          <>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-md"
+                              onClick={() =>
+                                staffGo(
+                                  buildOrderWorkspaceHref(
+                                    orderDetail.id,
+                                    "services",
+                                    detailPatientId || "",
+                                  ),
+                                )
+                              }
+                            >
+                              <WalletCards className="size-3.5" />
+                              {lang === "de" ? "Leistungen" : "Услуги и стоимость"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-md"
+                              onClick={() =>
+                                staffGo(
+                                  buildOrderWorkspaceHref(
+                                    orderDetail.id,
+                                    "invoices",
+                                    detailPatientId || "",
+                                  ),
+                                )
+                              }
+                            >
+                              <ReceiptText className="size-3.5" />
+                              {lang === "de" ? "Eingangsrechnungen" : "Входящие счета"}
+                            </Button>
+                          </>
+                        ) : undefined
                       }
                     >
                       {orderEconomicsLoading && !orderEconomics ? (
@@ -4020,192 +4343,244 @@ function useOrdersPageContent() {
                           {t.common_loading}
                         </div>
                       ) : orderEconomicsError ? (
-                        <Banner tone="error" withIcon>{orderEconomicsError}</Banner>
+                        <Banner tone="error" withIcon>
+                          {orderEconomicsError}
+                        </Banner>
                       ) : orderEconomics ? (
                         <div className="space-y-4">
+                          <dl className="grid gap-2 @min-[30rem]:grid-cols-2 @min-[56rem]:grid-cols-4">
+                            <OrderFinancialMetric
+                              label={lang === "de" ? "Auftragssumme" : "Сумма заказа"}
+                              value={formatMoney(
+                                orderEconomics.planned.revenue_gross,
+                                orderEconomics.currency,
+                              )}
+                              emphasis
+                            />
+                            <OrderFinancialMetric
+                              label={lang === "de" ? "Dem Patienten berechnet" : "Выставлено пациенту"}
+                              value={formatMoney(
+                                orderEconomics.actual.recognized_revenue_gross,
+                                orderEconomics.currency,
+                              )}
+                            />
+                            <OrderFinancialMetric
+                              label={lang === "de" ? "Vom Patienten erhalten" : "Получено от пациента"}
+                              value={formatMoney(
+                                orderEconomics.actual.patient_cash_collected_gross,
+                                orderEconomics.currency,
+                              )}
+                            />
+                            <OrderFinancialMetric
+                              label={lang === "de" ? "Noch vom Patienten zu erhalten" : "Осталось получить"}
+                              value={formatMoney(
+                                orderEconomics.actual.invoice_outstanding_gross,
+                                orderEconomics.currency,
+                              )}
+                            />
+                          </dl>
+
                           {orderEconomics.warnings.length > 0 ? (
                             <Banner tone="warning" withIcon>
-                              <div className="space-y-1">
-                                {orderEconomics.warnings.map((warning) => (
-                                  <div key={warning}>
-                                    {warning === "external_invoice_currency_mismatch"
-                                      ? lang === "de"
-                                        ? "Mindestens eine Partnerrechnung hat eine andere Währung. Die Marge wird deshalb nicht berechnet."
-                                        : "Хотя бы один счёт партнёра имеет другую валюту. Поэтому маржа не рассчитывается."
-                                      : warning === "order_service_currency_mismatch"
-                                        ? lang === "de"
-                                          ? "Mindestens eine Leistung hat eine andere Währung als der Auftrag. Planwerte und Marge werden nicht berechnet."
-                                          : "Хотя бы одна услуга имеет другую валюту, чем заказ. Плановые суммы и маржа не рассчитываются."
-                                      : warning === "order_service_amount_mismatch"
-                                        ? lang === "de"
-                                          ? "Mindestens eine Leistung enthält einen nicht unterstützten Betrag. Planwerte und Marge werden nicht berechnet."
-                                          : "Хотя бы одна услуга содержит неподдерживаемую сумму. Плановые значения и маржа не рассчитываются."
-                                      : warning === "external_invoice_amount_mismatch"
-                                        ? lang === "de"
-                                          ? "Bei mindestens einer Partnerrechnung stimmen Nettobetrag, Mehrwertsteuer und Bruttobetrag nicht überein."
-                                          : "Хотя бы в одном счёте партнёра сумма без налога, налог и сумма с налогом не совпадают."
-                                        : warning === "unassigned_external_costs"
-                                          ? lang === "de"
-                                            ? `Partnerkosten ohne Leistungszuordnung: ${formatOptionalMoney(orderEconomics.unassigned_external_cost_gross, orderEconomics.currency)}.`
-                                            : `Затраты на партнёров без привязки к услуге: ${formatOptionalMoney(orderEconomics.unassigned_external_cost_gross, orderEconomics.currency)}.`
-                                          : warning === "unbilled_patient_receivable"
-                                            ? lang === "de"
-                                              ? "Ein Teil der vom Patienten zu erstattenden Partnerkosten ist noch keiner Patientenrechnung zugeordnet."
-                                              : "Часть затрат, подлежащих возмещению пациентом, ещё не связана со счётом пациента."
-                                            : lang === "de"
-                                              ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet."
-                                              : "Часть выставленного дохода не связана с услугой заказа."}
-                                  </div>
-                                ))}
-                              </div>
+                              {lang === "de"
+                                ? "Einige Beträge benötigen Aufmerksamkeit. Öffnen Sie den vollständigen Bericht für Details."
+                                : "Некоторые суммы требуют внимания. Откройте полный расчёт для подробностей."}
                             </Banner>
                           ) : null}
 
-                          <div className="space-y-4">
-                            <div className="min-w-0">
-                              <h3 className="text-sm font-semibold text-foreground">
-                                {lang === "de" ? "Plan" : "План"}
-                              </h3>
-                              <dl className="mt-2 grid gap-2 @min-[28rem]:grid-cols-2 @min-[44rem]:grid-cols-4">
-                                <OrderFinancialMetric
-                                  label={lang === "de" ? "Geplanter Erlös ohne Mehrwertsteuer" : "Плановый доход без налога"}
-                                  value={formatMoney(orderEconomics.planned.revenue_net, orderEconomics.currency)}
-                                />
-                                <OrderFinancialMetric
-                                  label={lang === "de" ? "Geplanter Erlös mit Mehrwertsteuer" : "Плановый доход с налогом"}
-                                  value={formatMoney(orderEconomics.planned.revenue_gross, orderEconomics.currency)}
-                                />
-                                {orderEconomics.margin_visible ? (
-                                  <>
-                                    <OrderFinancialMetric
-                                      label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёров без налога"}
-                                      value={formatOptionalMoney(orderEconomics.planned.partner_cost_net, orderEconomics.currency)}
-                                    />
-                                    <OrderFinancialMetric
-                                      label={lang === "de" ? "Geplante Marge ohne Mehrwertsteuer" : "Плановая маржа без налога"}
-                                      value={formatOptionalMoney(orderEconomics.planned.margin_net, orderEconomics.currency)}
-                                    />
-                                  </>
-                                ) : null}
-                              </dl>
-                            </div>
+                          <details className="group overflow-hidden rounded-xl border border-border/70 bg-card">
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-muted/15 px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                              <span>
+                                {lang === "de"
+                                  ? "Vollständige Finanzübersicht"
+                                  : "Показать полный финансовый расчёт"}
+                              </span>
+                              <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+                            </summary>
 
-                            <div className="min-w-0">
-                              <h3 className="text-sm font-semibold text-foreground">
-                                {lang === "de" ? "Tatsächlicher Stand" : "Фактическое состояние"}
-                              </h3>
-                              <dl className="mt-2 grid gap-2 @min-[28rem]:grid-cols-2 @min-[44rem]:grid-cols-4">
-                                <OrderFinancialMetric
-                                  label={lang === "de" ? "Abgerechneter Erlös ohne Mehrwertsteuer" : "Выставленный доход без налога"}
-                                  value={formatMoney(orderEconomics.actual.recognized_revenue_net, orderEconomics.currency)}
-                                />
-                                <OrderFinancialMetric
-                                  label={lang === "de" ? "Vom Patienten tatsächlich erhalten" : "Фактически получено от пациента"}
-                                  value={formatMoney(orderEconomics.actual.patient_cash_collected_gross, orderEconomics.currency)}
-                                />
-                                <OrderFinancialMetric
-                                  label={lang === "de" ? "Noch vom Patienten zu zahlen" : "Осталось оплатить пациенту"}
-                                  value={formatMoney(orderEconomics.actual.invoice_outstanding_gross, orderEconomics.currency)}
-                                />
-                                <OrderFinancialMetric
-                                  label={lang === "de" ? "Direkt vom Patienten an Partner bezahlt" : "Оплачено пациентом напрямую партнёру"}
-                                  value={formatMoney(orderEconomics.actual.paid_directly_by_patient_gross, orderEconomics.currency)}
-                                />
-                                {orderEconomics.margin_visible ? (
-                                  <>
-                                    <OrderFinancialMetric
-                                      label={lang === "de" ? "Tatsächliche Partnerkosten ohne Mehrwertsteuer" : "Фактические затраты на партнёров без налога"}
-                                      value={formatOptionalMoney(orderEconomics.actual.partner_cost_net, orderEconomics.currency)}
-                                    />
-                                    <OrderFinancialMetric
-                                      label={lang === "de" ? "An Partner bezahlt" : "Оплачено партнёрам"}
-                                      value={formatOptionalMoney(orderEconomics.actual.paid_to_partner_gross, orderEconomics.currency)}
-                                    />
-                                    <OrderFinancialMetric
-                                      label={lang === "de" ? "Noch an Partner oder Leistungserbringer zu zahlen" : "Осталось выплатить партнёру или исполнителю"}
-                                      value={formatOptionalMoney(orderEconomics.actual.unpaid_to_partner_gross, orderEconomics.currency)}
-                                    />
-                                    <OrderFinancialMetric
-                                      label={lang === "de" ? "Tatsächliche Marge ohne Mehrwertsteuer" : "Фактическая маржа без налога"}
-                                      value={orderEconomics.economics_valid
-                                        ? `${formatMoney(orderEconomics.actual.margin_net, orderEconomics.currency)} (${formatNumber(orderEconomics.actual.margin_percent, locale)}%)`
-                                        : lang === "de" ? "Nicht berechenbar" : "Нельзя рассчитать"}
-                                    />
-                                  </>
-                                ) : null}
-                              </dl>
-                            </div>
-                          </div>
+                            <div className="space-y-5 border-t border-border/60 p-4">
+                              {orderEconomics.warnings.length > 0 ? (
+                                <Banner tone="warning" withIcon>
+                                  <div className="space-y-1">
+                                    {orderEconomics.warnings.map((warning) => (
+                                      <div key={warning}>
+                                        {warning === "external_invoice_currency_mismatch"
+                                          ? lang === "de"
+                                            ? "Mindestens eine Partnerrechnung hat eine andere Währung. Die Marge wird deshalb nicht berechnet."
+                                            : "Хотя бы один счёт партнёра имеет другую валюту. Поэтому маржа не рассчитывается."
+                                          : warning === "order_service_currency_mismatch"
+                                            ? lang === "de"
+                                              ? "Mindestens eine Leistung hat eine andere Währung als der Auftrag. Planwerte und Marge werden nicht berechnet."
+                                              : "Хотя бы одна услуга имеет другую валюту, чем заказ. Плановые суммы и маржа не рассчитываются."
+                                            : warning === "order_service_amount_mismatch"
+                                              ? lang === "de"
+                                                ? "Mindestens eine Leistung enthält einen nicht unterstützten Betrag. Planwerte und Marge werden nicht berechnet."
+                                                : "Хотя бы одна услуга содержит неподдерживаемую сумму. Плановые значения и маржа не рассчитываются."
+                                              : warning === "external_invoice_amount_mismatch"
+                                                ? lang === "de"
+                                                  ? "Bei mindestens einer Partnerrechnung stimmen Nettobetrag, Mehrwertsteuer und Bruttobetrag nicht überein."
+                                                  : "Хотя бы в одном счёте партнёра сумма без налога, налог и сумма с налогом не совпадают."
+                                                : warning === "unassigned_external_costs"
+                                                  ? lang === "de"
+                                                    ? "Partnerkosten ohne Leistungszuordnung: " +
+                                                      formatOptionalMoney(
+                                                        orderEconomics.unassigned_external_cost_gross,
+                                                        orderEconomics.currency,
+                                                      ) +
+                                                      "."
+                                                    : "Затраты на партнёров без привязки к услуге: " +
+                                                      formatOptionalMoney(
+                                                        orderEconomics.unassigned_external_cost_gross,
+                                                        orderEconomics.currency,
+                                                      ) +
+                                                      "."
+                                                  : warning === "unbilled_patient_receivable"
+                                                    ? lang === "de"
+                                                      ? "Ein Teil der vom Patienten zu erstattenden Partnerkosten ist noch keiner Patientenrechnung zugeordnet."
+                                                      : "Часть затрат, подлежащих возмещению пациентом, ещё не связана со счётом пациента."
+                                                    : lang === "de"
+                                                      ? "Ein Teil des abgerechneten Erlöses ist keiner Auftragsleistung zugeordnet."
+                                                      : "Часть выставленного дохода не связана с услугой заказа."}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </Banner>
+                              ) : null}
 
-                          <OrderEconomicsTable economics={orderEconomics} lang={lang} formatMoney={formatOptionalMoney} />
+                              <div className="grid min-w-0 gap-5 @min-[64rem]:grid-cols-2">
+                                <div className="min-w-0">
+                                  <h3 className="text-sm font-semibold text-foreground">
+                                    {lang === "de" ? "Plan" : "План"}
+                                  </h3>
+                                  <dl className="mt-2 grid gap-2 @min-[30rem]:grid-cols-2">
+                                    <OrderFinancialMetric
+                                      label={lang === "de" ? "Erlös ohne MwSt." : "Доход без налога"}
+                                      value={formatMoney(
+                                        orderEconomics.planned.revenue_net,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={lang === "de" ? "Erlös mit MwSt." : "Доход с налогом"}
+                                      value={formatMoney(
+                                        orderEconomics.planned.revenue_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    {orderEconomics.margin_visible ? (
+                                      <>
+                                        <OrderFinancialMetric
+                                          label={lang === "de" ? "Partnerkosten ohne MwSt." : "Затраты на партнёров"}
+                                          value={formatOptionalMoney(
+                                            orderEconomics.planned.partner_cost_net,
+                                            orderEconomics.currency,
+                                          )}
+                                        />
+                                        <OrderFinancialMetric
+                                          label={lang === "de" ? "Marge ohne MwSt." : "Плановая маржа"}
+                                          value={formatOptionalMoney(
+                                            orderEconomics.planned.margin_net,
+                                            orderEconomics.currency,
+                                          )}
+                                        />
+                                      </>
+                                    ) : null}
+                                  </dl>
+                                </div>
+
+                                <div className="min-w-0">
+                                  <h3 className="text-sm font-semibold text-foreground">
+                                    {lang === "de" ? "Aktueller Stand" : "Фактическое состояние"}
+                                  </h3>
+                                  <dl className="mt-2 grid gap-2 @min-[30rem]:grid-cols-2">
+                                    <OrderFinancialMetric
+                                      label={lang === "de" ? "Berechneter Erlös ohne MwSt." : "Выставленный доход"}
+                                      value={formatMoney(
+                                        orderEconomics.actual.recognized_revenue_net,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={lang === "de" ? "Vom Patienten erhalten" : "Получено от пациента"}
+                                      value={formatMoney(
+                                        orderEconomics.actual.patient_cash_collected_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={lang === "de" ? "Offen beim Patienten" : "Осталось получить"}
+                                      value={formatMoney(
+                                        orderEconomics.actual.invoice_outstanding_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={lang === "de" ? "Direkt an Partner bezahlt" : "Пациент оплатил партнёру"}
+                                      value={formatMoney(
+                                        orderEconomics.actual.paid_directly_by_patient_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    {orderEconomics.margin_visible ? (
+                                      <>
+                                        <OrderFinancialMetric
+                                          label={lang === "de" ? "Tatsächliche Partnerkosten" : "Фактические затраты"}
+                                          value={formatOptionalMoney(
+                                            orderEconomics.actual.partner_cost_net,
+                                            orderEconomics.currency,
+                                          )}
+                                        />
+                                        <OrderFinancialMetric
+                                          label={lang === "de" ? "An Partner bezahlt" : "Оплачено партнёрам"}
+                                          value={formatOptionalMoney(
+                                            orderEconomics.actual.paid_to_partner_gross,
+                                            orderEconomics.currency,
+                                          )}
+                                        />
+                                        <OrderFinancialMetric
+                                          label={lang === "de" ? "Noch an Partner zu zahlen" : "Осталось выплатить партнёрам"}
+                                          value={formatOptionalMoney(
+                                            orderEconomics.actual.unpaid_to_partner_gross,
+                                            orderEconomics.currency,
+                                          )}
+                                        />
+                                        <OrderFinancialMetric
+                                          label={lang === "de" ? "Tatsächliche Marge" : "Фактическая маржа"}
+                                          value={
+                                            orderEconomics.economics_valid
+                                              ? formatMoney(
+                                                  orderEconomics.actual.margin_net,
+                                                  orderEconomics.currency,
+                                                ) +
+                                                " (" +
+                                                formatNumber(
+                                                  orderEconomics.actual.margin_percent,
+                                                  locale,
+                                                ) +
+                                                "%)"
+                                              : lang === "de"
+                                                ? "Nicht berechenbar"
+                                                : "Нельзя рассчитать"
+                                          }
+                                        />
+                                      </>
+                                    ) : null}
+                                  </dl>
+                                </div>
+                              </div>
+
+                              <OrderEconomicsTable
+                                economics={orderEconomics}
+                                lang={lang}
+                                formatMoney={formatOptionalMoney}
+                              />
+                            </div>
+                          </details>
                         </div>
                       ) : null}
                     </SectionCard>
-
-                    <SectionCard title={lang === "de" ? "Auftrag" : "Заказ"}>
-                      <div className="grid min-w-0 gap-4 @min-[48rem]:grid-cols-2">
-                        <dl className="min-w-0 divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70">
-                          {[
-                            [detailSubjectLabel,
-                              detailSubjectReference
-                                ? `${detailSubjectName} (${detailSubjectReference})`
-                                : detailSubjectName],
-                            [tx.patients_created, formatDateTimeLabel(orderDetail.created_at)],
-                            [tx.contracts_signed, `${orderDetail.signed_patient ? tx.contracts_signed : tx.mfa_pending} / ${
-                              orderDetail.signed_agency
-                                ? tx.contracts_signed
-                                : tx.mfa_pending
-                            }`],
-                            [tx.providers_services, l("orders_leistung_metrics_summary", {
-                              total: leistungMetrics.total,
-                              delivered: leistungMetrics.delivered,
-                              approved: leistungMetrics.approved,
-                            })],
-                          ].map(([label, value]) => (
-                            <div key={label} className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3 px-3 py-2.5 text-xs leading-5">
-                              <dt className="min-w-0 break-words text-muted-foreground">{label}</dt>
-                              <dd className="min-w-0 break-words font-medium text-foreground">{value}</dd>
-                            </div>
-                          ))}
-                        </dl>
-                        <div className="min-w-0 overflow-hidden rounded-lg border border-border/70">
-                          <h3 className="border-b border-border/60 bg-muted/20 px-3 py-2.5 text-xs font-semibold text-foreground">
-                            {t.leads_needs}
-                          </h3>
-                          <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-sm leading-6 text-muted-foreground">
-                            {orderDetail.needs_description || tx.common_not_set}
-                          </div>
-                        </div>
-                      </div>
-                    </SectionCard>
-
-                    <SectionCard title={l("orders_bedarfsklarung")}>
-                      <div className="grid gap-2 @min-[28rem]:grid-cols-2 @min-[56rem]:grid-cols-4">
-                        {detailOverviewLinks.map((link) => (
-                          <button
-                            key={link.href}
-                            type="button"
-                            className="group flex min-w-0 items-start justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-3 text-left hover:border-primary/40 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            onClick={() =>
-                              window.open(link.href, "_blank", "noopener,noreferrer")
-                            }
-                          >
-                            <div className="min-w-0">
-                              <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
-                                {link.label}
-                              </h3>
-                              <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">
-                                {link.description}
-                              </p>
-                            </div>
-                            <ArrowUpRight aria-hidden className="mt-0.5 size-4 shrink-0 text-primary" />
-                          </button>
-                        ))}
-                      </div>
-                    </SectionCard>
                   </>
                 ) : null}
-
                 {shouldRenderOrderSection("gates") && orderDetail.process_gates ? (
                   <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -4639,6 +5014,32 @@ function useOrdersPageContent() {
                           }
                         />
                       </div>
+
+                      {orderDetail.planning_preparation.interpreter_required ? (
+                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-200 bg-orange-50/60 px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-orange-950">
+                              {lang === "de" ? "Dolmetscher einem Termin zuweisen" : "Назначить переводчика"}
+                            </p>
+                            <p className="mt-0.5 text-xs leading-5 text-orange-900/75">
+                              {lang === "de"
+                                ? "Der Dolmetscher wird einem konkreten Termin dieses Auftrags zugewiesen."
+                                : "Переводчик назначается на конкретный приём этого заказа."}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 shrink-0 rounded-lg"
+                            onClick={() => staffGo(detailAppointmentsHref)}
+                          >
+                            <CalendarClock className="size-3.5" />
+                            {orderDetail.planning_preparation.interpreter_assigned > 0
+                              ? (lang === "de" ? "Zuweisung prüfen" : "Проверить назначение")
+                              : (lang === "de" ? "Termin öffnen" : "Открыть приёмы")}
+                          </Button>
+                        </div>
+                      ) : null}
 
                       {planningReadinessApplicable ? (
                         orderDetail.planning_preparation.blocking_reasons

@@ -4864,6 +4864,15 @@ async fn get_patient_billing_workspace(
                     'phase', patient_order.phase,
                     'currency', UPPER(patient_order.currency),
                     'billing_release_status', patient_order.billing_release_status,
+                    'package_coverage_status', patient_order.package_coverage_status,
+                    'services', COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object(
+                            'id', service.id,
+                            'status', service.status
+                        ) ORDER BY service.created_at, service.id)
+                        FROM order_leistungen service
+                        WHERE service.order_id = patient_order.id
+                    ), '[]'::jsonb),
                     'updated_at', patient_order.updated_at
                 ) ORDER BY
                     CASE patient_order.status WHEN 'active' THEN 0 WHEN 'paused' THEN 1

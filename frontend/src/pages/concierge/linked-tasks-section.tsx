@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowUpRight,
   CalendarClock,
+  Eye,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -13,10 +13,10 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
-import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
+import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 
 import {
   assignableConciergeTaskUsers,
@@ -160,7 +160,6 @@ export function LinkedTasksSection({
   const { lang } = useLang();
   const { user } = useAuth();
   const labels = copy[lang];
-  const { staffGo } = useStaffNavigate();
   const [tasks, setTasks] = useState<ConciergeTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -171,6 +170,7 @@ export function LinkedTasksSection({
   const [assignees, setAssignees] = useState<ConciergeAssignee[]>([]);
   const [patients, setPatients] = useState<ConciergeTaskPatientOption[]>([]);
   const [providers, setProviders] = useState<ConciergeProvider[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const createRequestIdRef = useRef<string | null>(null);
   const requestPath = useMemo(
     () => linkedTasksRequestPath({ patientId, providerId }),
@@ -337,7 +337,7 @@ export function LinkedTasksSection({
               role="listitem"
               aria-label={`${labels.openTask}: ${localizeTaskTitle(task.title, lang)}`}
               className="group grid w-full min-w-0 gap-2 border-b border-border/60 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-orange-50/30 md:grid-cols-[minmax(0,1fr)_8rem_minmax(8rem,0.42fr)_10rem_2rem] md:items-center md:gap-3"
-              onClick={() => staffGo(`/task-manager?task=${encodeURIComponent(task.id)}`)}
+              onClick={() => setSelectedTaskId(task.id)}
             >
               <div className="min-w-0">
                 <div className="flex min-w-0 items-center gap-2">
@@ -358,7 +358,7 @@ export function LinkedTasksSection({
                 <CalendarClock className="size-3.5 shrink-0" />
                 {taskDateLabel(task, lang, labels.noDate)}
               </span>
-              <ArrowUpRight className="hidden size-4 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-orange-700 md:block" />
+              <Eye className="hidden size-4 text-muted-foreground group-hover:text-orange-700 md:block" />
             </button>
           ))}
         </div>
@@ -388,6 +388,17 @@ export function LinkedTasksSection({
           onSave={createContextTask}
         />
       ) : null}
+      <ConciergeTaskDetailDialog
+        taskId={selectedTaskId}
+        relatedTasks={rows}
+        onOpenRelated={(task) => setSelectedTaskId(task.id)}
+        lang={lang}
+        open={Boolean(selectedTaskId)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedTaskId(null);
+        }}
+        onChanged={refresh}
+      />
     </section>
   );
 }

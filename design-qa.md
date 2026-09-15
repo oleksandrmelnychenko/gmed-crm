@@ -1,3 +1,75 @@
+# Design QA — Patient order overview hierarchy
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-642e29bd-03e7-46e3-b9ca-67a802d903be.png`.
+- Implementation capture: live in-app browser verification on `http://127.0.0.1:5173/orders/:orderId?patient=:patientId`.
+- State: active patient order in the intake phase with three requirements before execution and two services.
+
+## Comparison
+
+- The header now identifies the record as an order, keeps the patient as the main subject, and shows only the order total, service count, and update timestamp.
+- Lifecycle status is presented as the current phase, the next phase, and a numbered list of actions that lead directly to the correct section.
+- Pause, completion, and cancellation actions are grouped under `Управление заказом` instead of competing with the primary workflow.
+- The overview starts with a structured patient-need card: the primary request, each requested service and its own comment, plus a visible `НУЖЕН ПЕРЕВОДЧИК` marker instead of one unformatted paragraph.
+- The planning section explains that an interpreter is assigned to a specific appointment and provides a prominent `Открыть приёмы` action.
+- Linked records use compact rows. Finance is reduced to four operational totals, while the accounting breakdown and service economics table remain available in a collapsed disclosure.
+- Workspace navigation uses task-oriented labels such as `Главное`, `Что нужно сделать`, `Услуги и стоимость`, and `Счета поставщиков`.
+
+## Verification
+
+- Live desktop inspection confirmed clear visual priority, readable service comments, a visible interpreter requirement, and an unclipped order-management menu.
+- The interpreter action and all three actionable blockers are exposed to keyboard and accessibility navigation.
+- The compact finance state and the full-report disclosure are both keyboard-accessible native controls.
+- TypeScript project check and targeted ESLint check passed.
+
+final result: passed
+
+---
+
+# Design QA — Quote related data and deletion
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-0c9873df-2605-4c50-8953-49de93c0209b.png`.
+- Implementation capture: live in-app browser verification on `http://127.0.0.1:5173/contracts?quote=:quoteId`.
+- State: rejected quote with patient, order, invoices, documents, and two saved versions.
+
+## Comparison
+
+- The misleading `Привязанные пациенты` heading is now `Связанные данные`.
+- Four oversized cards are replaced by compact rows that show the linked patient and order identifiers while retaining direct actions for invoices and documents.
+- The unrelated aggregate electronic-signature action is removed from the quote sheet.
+- Rejected, draft, and expired quotes expose a destructive `Удалить предложение` action with a focused confirmation dialog. Accepted and sent quotes stay protected.
+
+## Verification
+
+- Live browser inspection confirmed the compact rows, absence of the signature action, visible delete action, and Russian confirmation copy.
+- The confirmation was cancelled during visual QA, so the existing DEV quote was not changed.
+- The server deletion policy is covered by a targeted integration test for a rejected quote and an accepted quote.
+- No clipping, overlap, or actionable P0/P1/P2 issue remains in the sheet.
+
+final result: passed
+
+---
+
+# Design QA — Patient task in-context preview
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-201bc3ab-99c1-4ff7-a632-44d6121d9031.png`.
+- Implementation capture: live in-app browser verification on `http://127.0.0.1:5173/patients/:patientId`.
+
+## Comparison and verification
+
+- Clicking any linked task now opens the existing task detail dialog over the patient profile.
+- Status, assignee, dates, relations, files, checklist, comments, and history remain available in the dialog.
+- The patient URL remains unchanged, preserving the working context. Closing the dialog returns to the same task list position.
+
+final result: passed
+
+---
+
 # Design QA — Medication AI result dialog
 
 ## Evidence

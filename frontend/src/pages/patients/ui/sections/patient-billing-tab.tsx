@@ -14,6 +14,10 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import {
+  invoiceCreationErrorMessage,
+  invoiceServiceApproval,
+} from "@/pages/invoices/model/billing-release";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
 
 type BillingOrder = {
@@ -23,6 +27,8 @@ type BillingOrder = {
   phase: string;
   currency: string;
   billing_release_status: string;
+  package_coverage_status: string;
+  services: Array<{ id: string; status: string }>;
 };
 
 type BillingExpense = {
@@ -98,6 +104,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     late: "Kosten können auftragsübergreifend oder ohne Auftrag berechnet werden. Auch später eingehende Belege bleiben verfügbar.",
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMed", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
+    approveServices: "Ausgewählte Leistungen zuerst im Auftrag genehmigen.", openServices: "Leistungen öffnen",
   } : {
     title: "Выставление пациенту", subtitle: "Соберите услуги и оплаченные GMed внешние расходы в одном счёте.",
     order: "Заказ (необязательно)", noOrder: "Без заказа", currency: "Валюта", quote: "Предложение с услугами", noQuote: "Только расходы — без предложения", type: "Тип счёта",
@@ -111,6 +118,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     late: "Расходы можно объединить по пациенту из разных заказов или выставить без заказа. Поздние документы также остаются доступными.",
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMed", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
+    approveServices: "Сначала утвердите выбранные услуги в заказе.", openServices: "Открыть услуги заказа",
   };
 
   useEffect(() => {
@@ -170,6 +178,20 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const expenseTotal = readyExpenses.filter(expense => selectedExpenses.includes(expense.id))
     .reduce((sum, expense) => sum + Number(expense.remaining_receivable_gross || 0), 0);
   const total = serviceTotal + expenseTotal;
+  const selectedServiceIds = selectedLines.flatMap((index) => {
+    const id = serviceLines[index]?.source_order_leistung_id;
+    return id ? [id] : [];
+  });
+  const serviceApproval = invoiceServiceApproval(
+    selectedServiceIds,
+    invoiceType,
+    order ? {
+      billing_release_status: order.billing_release_status as "pending" | "granted" | "denied",
+      billing_release_note: null,
+      package_coverage_status: order.package_coverage_status,
+      services: order.services,
+    } : null,
+  );
 
   function selectQuote(nextId: string) {
     const next = orderQuotes.find(item => item.id === nextId) ?? null;
@@ -180,7 +202,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (total <= 0 || saving || (order && order.billing_release_status !== "granted")) return;
+    if (total <= 0 || saving || (order && order.billing_release_status !== "granted") || serviceApproval !== "approved") return;
     setSaving(true);
     setError(null);
     try {
@@ -203,8 +225,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       setQuoteId("");
       setSelectedLines([]);
       setRevision(value => value + 1);
-    } catch {
-      setError(copy.saveFailed);
+    } catch (saveError) {
+      setError(invoiceCreationErrorMessage(saveError, lang, copy.saveFailed));
     } finally {
       setSaving(false);
     }
@@ -244,6 +266,14 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           <Field label={copy.due}><Input type="date" disabled={saving} value={dueDate} onChange={event => setDueDate(event.target.value)} /></Field>
         </div>
         {order && order.billing_release_status !== "granted" ? <Banner tone="warning">{copy.release}</Banner> : null}
+        {quote && serviceApproval !== "approved" ? (
+          <Banner tone="warning">
+            <span className="flex flex-wrap items-center justify-between gap-3">
+              <span>{serviceApproval === "pending" ? copy.approveServices : invoiceCreationErrorMessage(new Error("invoice_services_unavailable"), lang, copy.saveFailed)}</span>
+              {order ? <StaffLink className="font-semibold text-amber-900 underline underline-offset-2" to={`/orders/${order.id}?patient=${encodeURIComponent(patientId)}&section=services`}>{copy.openServices}</StaffLink> : null}
+            </span>
+          </Banner>
+        ) : null}
         {error ? <Banner tone="error">{error}</Banner> : null}
         {created ? <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2"><CheckCircle2 className="size-4" />{copy.success}</span><StaffLink className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground" to={`/invoices?invoice=${created.id}`}>{copy.open}</StaffLink></div></div> : null}
 
@@ -267,7 +297,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div><p className="text-xs text-muted-foreground">{copy.total}</p><p className="font-mono text-lg font-semibold tabular-nums">{formatMoneyAmount(String(total), activeCurrency)}</p></div>
-          <div className="text-right"><Button type="submit" disabled={!canCreate || saving || (Boolean(order) && order?.billing_release_status !== "granted") || total <= 0}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}{saving ? copy.creating : copy.create}</Button>{total <= 0 ? <p className="mt-1 text-xs text-muted-foreground">{copy.choose}</p> : null}</div>
+          <div className="text-right"><Button type="submit" disabled={!canCreate || saving || (Boolean(order) && order?.billing_release_status !== "granted") || serviceApproval !== "approved" || total <= 0}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}{saving ? copy.creating : copy.create}</Button>{total <= 0 ? <p className="mt-1 text-xs text-muted-foreground">{copy.choose}</p> : null}</div>
         </div>
       </form>
     </section>

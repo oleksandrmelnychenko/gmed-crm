@@ -21,11 +21,13 @@ import {
   LoaderCircle,
   Plus,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   AdminSheetScaffold,
@@ -97,6 +99,7 @@ import {
 import {
   createContract,
   createQuote,
+  deleteQuote,
   fetchAgencyServices,
   fetchContract,
   fetchContracts,
@@ -133,6 +136,7 @@ const CONTRACT_REALTIME_EVENTS = [
   "framework_contract.created",
   "framework_contract.status_changed",
   "quote.created",
+  "quote.deleted",
   "quote.status_changed",
 ] as const;
 const CONTRACT_SEARCH_DEBOUNCE_MS = 220;
@@ -405,8 +409,24 @@ function useContractsPageContent() {
       snapshotFallback: t.revenue_quotes_version_snapshot,
       lineItemsCount: t.revenue_quotes_line_items_count,
       updatedAt: t.revenue_common_updated_at,
+      linkedData: lang === "de" ? "Verknüpfte Daten" : "Связанные данные",
+      openLinkedRecord: lang === "de" ? "Öffnen" : "Открыть",
+      deleteQuote: lang === "de" ? "Angebot löschen" : "Удалить предложение",
+      deleteQuoteTitle: lang === "de" ? "Angebot löschen?" : "Удалить предложение?",
+      deleteQuoteMessage:
+        lang === "de"
+          ? "Das abgelehnte Angebot und seine Versionshistorie werden dauerhaft gelöscht."
+          : "Предложение и история его версий будут удалены без возможности восстановления.",
+      deleteQuoteLinkedInvoiceError:
+        lang === "de"
+          ? "Das Angebot kann nicht gelöscht werden, weil bereits eine Rechnung damit verknüpft ist."
+          : "Предложение нельзя удалить: с ним уже связан счёт.",
+      deleteQuoteStatusError:
+        lang === "de"
+          ? "Nur Entwürfe sowie abgelehnte oder abgelaufene Angebote können gelöscht werden."
+          : "Удалить можно только черновик, отклонённое или просроченное предложение.",
     }),
-    [t],
+    [lang, t],
   );
   const contractStatusLabel = useCallback(
     (status: string) => formatEnumLabelFromKeys(status, CONTRACT_STATUS_LABEL_KEYS, t),
@@ -583,6 +603,8 @@ function useContractsPageContent() {
     selectedContractId,
     selectedQuoteId,
   } = contractsWorkspaceState;
+  const [quoteDeleteConfirmOpen, setQuoteDeleteConfirmOpen] = useState(false);
+  const [quoteDeleteBusy, setQuoteDeleteBusy] = useState(false);
   const setContracts = (nextValue: SetStateAction<ContractItem[]>) =>
     dispatchContractsWorkspaceState((current) => ({
       contracts: resolveStateAction(nextValue, current.contracts),
@@ -1889,6 +1911,37 @@ function useContractsPageContent() {
     }
   }
 
+  async function handleDeleteQuote() {
+    if (!selectedQuoteId || !quoteDetail || quoteDeleteBusy) return;
+    setQuoteDeleteBusy(true);
+    setQuoteStatusError(null);
+    try {
+      await deleteQuote(selectedQuoteId);
+      clearApiCache("/quotes");
+      clearApiCache(`/quotes/${selectedQuoteId}`);
+      clearApiCache(`/quotes/${selectedQuoteId}/versions`);
+      setQuotes((current) => current.filter((quote) => quote.id !== selectedQuoteId));
+      setQuoteDeleteConfirmOpen(false);
+      setSelectedQuoteId("");
+      setQuoteDetail(null);
+      setQuoteVersions([]);
+      syncQuery({ quote: null }, { replace: false });
+      setQuotesReloadToken((current) => current + 1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("linked invoices")) {
+        setQuoteStatusError(text.deleteQuoteLinkedInvoiceError);
+      } else if (message.includes("draft, rejected, or expired")) {
+        setQuoteStatusError(text.deleteQuoteStatusError);
+      } else {
+        setQuoteStatusError(message || t.common_error);
+      }
+      setQuoteDeleteConfirmOpen(false);
+    } finally {
+      setQuoteDeleteBusy(false);
+    }
+  }
+
   function openContract(contractId: string) {
     setSelectedQuoteId("");
     setSelectedContractId(contractId);
@@ -3018,72 +3071,50 @@ function useContractsPageContent() {
                   <section>
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.providers_linked_patients)}</h2>
+                        <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.linkedData)}</h2>
                       </div>
                     </div>
-                    <div className="mt-5 grid gap-3 md:grid-cols-4">
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                        onClick={() => window.open(`/patients?patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{t.contracts_patient}</h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.quoteLinkedPatientCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                        onClick={() => window.open(`/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.order}</h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.quoteLinkedOrderCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                        onClick={() => window.open(`/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.invoices}</h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.quoteLinkedInvoicesCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                        onClick={() => window.open(`/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`, "_blank", "noopener,noreferrer")}
-                      >
-                        <div className="relative z-10">
-                          <h3 className="text-[13px] font-semibold tracking-tight text-foreground">{text.documents}</h3>
-                          <p className="mt-2 text-xs leading-tight text-muted-foreground">
-                            {text.quoteLinkedDocumentsCard}
-                          </p>
-                        </div>
-                        <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                          <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                        </span>
-                      </button>
+                    <div className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
+                      {[
+                        {
+                          label: t.contracts_patient,
+                          value: `${quoteDetail.patient_name} · ${quoteDetail.patient_pid}`,
+                          href: `/patients?patient=${quoteDetail.patient_id}`,
+                        },
+                        {
+                          label: text.order,
+                          value: quoteDetail.order_number,
+                          href: `/orders?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`,
+                        },
+                        {
+                          label: text.invoices,
+                          value: text.quoteLinkedInvoicesCard,
+                          href: `/invoices?quote=${quoteDetail.id}&order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`,
+                        },
+                        {
+                          label: text.documents,
+                          value: text.quoteLinkedDocumentsCard,
+                          href: `/documents?order=${quoteDetail.order_id}&patient=${quoteDetail.patient_id}`,
+                        },
+                      ].map((item, index) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          className={cn(
+                            "group flex w-full items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-orange-50/60",
+                            index > 0 && "border-t border-border/70",
+                          )}
+                          onClick={() => window.open(item.href, "_blank", "noopener,noreferrer")}
+                        >
+                          <span className="w-24 shrink-0 text-xs font-medium text-muted-foreground">{item.label}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.value}</span>
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-orange-700">
+                            {text.openLinkedRecord}
+                            <ArrowUpRight className="size-3.5 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                    <div className="mt-3"><DocumentSignatureAction scope={{ orderId: quoteDetail.order_id }} title={quoteDetail.quote_number} /></div>
                   </section>
 
                   <section>
@@ -3133,7 +3164,19 @@ function useContractsPageContent() {
                           />
                         </Field>
                       </div>
-                      <div className="flex justify-end pt-1">
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        {(["draft", "rejected", "expired"] as string[]).includes(quoteDetail.status) ? (
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            className="h-9 rounded-lg px-3.5"
+                            onClick={() => setQuoteDeleteConfirmOpen(true)}
+                            disabled={quoteDeleteBusy || !permissions.canManageQuote}
+                          >
+                            {quoteDeleteBusy ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                            {text.deleteQuote}
+                          </Button>
+                        ) : <span />}
                         <Button
                           type="button"
                           className="h-9 rounded-lg px-3.5"
@@ -3191,6 +3234,17 @@ function useContractsPageContent() {
           </AdminSheetScaffold>
         </SheetContent>
       </Sheet>
+      <DirtyDismissConfirmDialog
+        open={quoteDeleteConfirmOpen}
+        title={text.deleteQuoteTitle}
+        message={text.deleteQuoteMessage}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.common_delete}
+        confirmDisabled={quoteDeleteBusy}
+        destructive
+        onCancel={() => setQuoteDeleteConfirmOpen(false)}
+        onConfirm={() => void handleDeleteQuote()}
+      />
     </>
   );
 }

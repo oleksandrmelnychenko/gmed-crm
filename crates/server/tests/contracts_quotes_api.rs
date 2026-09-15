@@ -2316,3 +2316,90 @@ async fn sales_and_concierge_cannot_access_agency_service_catalog() {
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
 }
+
+#[tokio::test]
+async fn rejected_quote_can_be_deleted_but_accepted_quote_is_preserved() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("delete-quote");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, needs_description, created_by)
+           VALUES ($1, $2, 'Quote deletion policy', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let rejected_quote_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO quotes (
+                order_id, quote_number, total_net, total_vat, total_gross,
+                status, created_by
+           ) VALUES ($1, $2, 100, 19, 119, 'rejected', $3)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(format!("REJECTED-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/quotes/{rejected_quote_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "response: {body}");
+    let rejected_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM quotes WHERE id = $1)")
+            .bind(rejected_quote_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!rejected_exists);
+
+    let accepted_quote_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO quotes (
+                order_id, quote_number, total_net, total_vat, total_gross,
+                status, created_by
+           ) VALUES ($1, $2, 100, 19, 119, 'accepted', $3)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(format!("ACCEPTED-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/quotes/{accepted_quote_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(
+        body["error"],
+        "Only draft, rejected, or expired quotes can be deleted"
+    );
+    let accepted_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM quotes WHERE id = $1)")
+            .bind(accepted_quote_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(accepted_exists);
+}
