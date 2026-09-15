@@ -1724,13 +1724,14 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
                 primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
                 consent_healthcare, consent_privacy_practices,
-                intake_source, intake_model, created_by
+                intake_source, intake_model, created_by, wizard_state
            ) VALUES (
                 'Identity', 'First', $1, '+4915112345678', 'DE', 'de',
                 DATE '1990-05-01', 'female', 'Hauptstr. 1', 'Berlin', '10115',
                 'Chronic knee pain', '["orthopedics"]'::jsonb,
                 'qualified', 'signed', true, true,
-                'staff_wizard', 'patient_first', $2
+                'staff_wizard', 'patient_first', $2,
+                '{"registration_country":"UA","passport_expiry":"2034-05-31"}'::jsonb
            ) RETURNING id"#,
     )
     .bind(&email)
@@ -1763,6 +1764,20 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
             .await
             .unwrap();
     assert_eq!(lifecycle, ("prospective".to_string(), false));
+    let prospect_passport: (Option<String>, Option<chrono::NaiveDate>) =
+        sqlx::query_as("SELECT nationality, passport_expiry FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(prospect_passport.0.as_deref(), Some("UA"));
+    assert_eq!(
+        prospect_passport
+            .1
+            .map(|value| value.to_string())
+            .as_deref(),
+        Some("2034-05-31")
+    );
     let case_subject: (Option<Uuid>, Option<Uuid>, Option<Uuid>) =
         sqlx::query_as("SELECT patient_id, lead_id, source_lead_id FROM cases WHERE id = $1")
             .bind(case_id)
@@ -1778,6 +1793,16 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
     .await
     .unwrap();
     assert!(assignment_count >= 1);
+
+    sqlx::query(
+        r#"UPDATE leads
+           SET wizard_state = wizard_state || '{"registration_country":"AT","passport_expiry":"2035-06-30"}'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
 
     let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
     assert_eq!(artifacts.case_id, case_id);
@@ -1797,13 +1822,19 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
     assert_eq!(status, StatusCode::OK, "{converted}");
     assert_eq!(converted["patient_id"], patient_id.to_string());
 
-    let activated: (String, bool) =
-        sqlx::query_as("SELECT lifecycle_status, is_active FROM patients WHERE id = $1")
+    let activated: (String, bool, Option<String>, Option<chrono::NaiveDate>) =
+        sqlx::query_as("SELECT lifecycle_status, is_active, nationality, passport_expiry FROM patients WHERE id = $1")
             .bind(patient_id)
             .fetch_one(pool)
             .await
             .unwrap();
-    assert_eq!(activated, ("active".to_string(), true));
+    assert_eq!(activated.0, "active");
+    assert!(activated.1);
+    assert_eq!(activated.2.as_deref(), Some("AT"));
+    assert_eq!(
+        activated.3.map(|value| value.to_string()).as_deref(),
+        Some("2035-06-30")
+    );
     let patient_count: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
         .bind(&email)
         .fetch_one(pool)
@@ -2275,6 +2306,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
         json!({
             "discovery_source": "customer_referral",
             "referrer": "Dr. Referral",
+            "registration_country": "UA",
+            "passport_expiry": "2034-05-31",
             "program_date_from": "2026-09-01",
             "program_date_to": "2026-09-30",
             "service_comments": {
@@ -2458,7 +2491,11 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .unwrap();
     assert_eq!(patient.0, "Atomic Marie");
     assert_eq!(patient.1, "Onboarding Jr.");
-    assert_eq!(patient.2, None, "country must not be stored as nationality");
+    assert_eq!(
+        patient.2.as_deref(),
+        Some("UA"),
+        "citizenship must come from the dedicated wizard field"
+    );
     assert_eq!(patient.3.as_deref(), Some("Ukraine"));
     assert_eq!(patient.4, vec!["uk".to_string()]);
     assert_eq!(patient.5.as_deref(), Some("+49 30 4444"));
@@ -2488,6 +2525,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     assert_eq!(patient.13["whatsapp_consent"], false);
     assert_eq!(patient.13["program_date_from"], "2026-09-01");
     assert_eq!(patient.13["program_date_to"], "2026-09-30");
+    assert_eq!(patient.13["nationality"], "UA");
+    assert_eq!(patient.13["passport_expiry"], "2034-05-31");
     assert_eq!(
         patient.13["service_comments"]["interpreter_support"],
         "Ukrainian interpreter for every appointment"
@@ -2544,6 +2583,8 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     .await;
     assert_eq!(patient_status, StatusCode::OK, "{patient_detail}");
     assert_eq!(patient_detail["source_lead_id"], lead_id.to_string());
+    assert_eq!(patient_detail["nationality"], "UA");
+    assert_eq!(patient_detail["passport_expiry"], "2034-05-31");
     assert_eq!(patient_detail["lead_snapshot"]["id"], lead_id.to_string());
     assert_eq!(
         patient_detail["intake_profile"]["service_comments"]["medical_treatment"],
@@ -2682,6 +2723,14 @@ async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     for document_id in &artifacts.document_ids {
         assert!(patient_document_ids.contains(&document_id.to_string()));
     }
+    assert!(
+        patient_documents
+            .as_array()
+            .expect("patient documents")
+            .iter()
+            .any(|document| document["art"] == "identity"
+                && document["compliance_kind"] == "identity")
+    );
 
     let (contract_patient_id, contract_lead_id): (Option<Uuid>, Option<Uuid>) =
         sqlx::query_as("SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1")

@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   ClipboardCheck,
+  FileText,
   LoaderCircle,
   NotebookText,
   Pencil,
@@ -13,6 +14,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/api";
 import { getLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
@@ -39,7 +41,7 @@ import {
   fetchPatientRelations,
 } from "../../data/patient-detail-mutations";
 import { patientRelationTypeLabel } from "../../model/detail-model";
-import type { RelationItem } from "../../model/detail-tab-types";
+import type { DocumentItem, RelationItem } from "../../model/detail-tab-types";
 import type { PatientLegalStatus } from "../../model/legal-status";
 import type { PatientDetail } from "../../model/list-model";
 import {
@@ -83,6 +85,18 @@ type LiveRelationsState = {
 function profileRecordString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+export function isPatientIdentityDocument(document: DocumentItem) {
+  const markers = [document.art, document.category, document.compliance_kind]
+    .map((value) => value?.trim().toLowerCase())
+    .filter(Boolean);
+  return markers.some((value) => [
+    "identity",
+    "passport",
+    "passport_scan",
+    "personal_passport",
+  ].includes(value ?? ""));
 }
 
 function useLivePatientRelations(patientId: string): LiveRelationsState {
@@ -534,6 +548,38 @@ function usePatientProfileTabContent({
     canViewInvoices,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
+  const [identityDocumentsState, setIdentityDocumentsState] = useState<{
+    patientId: string;
+    documents: DocumentItem[] | null;
+  }>({ patientId: id ?? "", documents: null });
+
+  useEffect(() => {
+    if (!id || !canViewDocuments) {
+      setIdentityDocumentsState({ patientId: id ?? "", documents: [] });
+      return;
+    }
+    let active = true;
+    setIdentityDocumentsState({ patientId: id, documents: null });
+    void apiFetch<DocumentItem[]>(`/patients/${id}/documents`)
+      .then((documents) => {
+        if (active) {
+          setIdentityDocumentsState({
+            patientId: id,
+            documents: documents.filter(isPatientIdentityDocument),
+          });
+        }
+      })
+      .catch(() => {
+        if (active) setIdentityDocumentsState({ patientId: id, documents: [] });
+      });
+    return () => {
+      active = false;
+    };
+  }, [canViewDocuments, detail.updated_at, id]);
+
+  const identityDocuments = identityDocumentsState.patientId === (id ?? "")
+    ? identityDocumentsState.documents
+    : null;
 
   function handleLegalStatusSheetOpenChange(open: boolean) {
     if (open) void loadPatientLegalStatusSheet();
@@ -947,6 +993,31 @@ function usePatientProfileTabContent({
         ) : null}
 
         <ProfileSummaryCard title={t.patient_profile_editor_passport}>
+          {canViewDocuments ? (
+            <ProfileSummaryLine
+              label={l("required_doc_passport_scan")}
+              value={identityDocuments == null ? (
+                <LoaderCircle className="size-4 animate-spin text-muted-foreground" aria-label={t.common_loading} />
+              ) : identityDocuments.length > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex max-w-full items-center gap-2 text-left text-[var(--brand)] underline-offset-2 hover:underline"
+                  title={identityDocuments[0]?.filename}
+                  onClick={() => onOpenTab("documents")}
+                >
+                  <FileText className="size-4 shrink-0" />
+                  <span className="truncate">{identityDocuments[0]?.filename}</span>
+                  {identityDocuments.length > 1 ? (
+                    <Badge variant="outline" className="h-5 rounded-full px-1.5 text-[10px]">
+                      +{identityDocuments.length - 1}
+                    </Badge>
+                  ) : null}
+                </button>
+              ) : (
+                t.common_not_set
+              )}
+            />
+          ) : null}
           <ProfileSummaryLine
             label={t.patient_profile_editor_passport_number}
             value={fieldValue(detail.passport_number, t.common_not_set)}

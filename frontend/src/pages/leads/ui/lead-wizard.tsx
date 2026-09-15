@@ -272,6 +272,7 @@ type Draft = {
   zip: string;
   country: string;
   registrationCountry: string;
+  passportExpiry: string;
   amlEnhancedDueDiligence: AmlEnhancedDueDiligenceDraft;
   language: string;
   whatsappNumber: string;
@@ -822,6 +823,7 @@ function autosavePayload(
       framework_contract_id: draft.frameworkContractId || null,
       cost_threshold: draft.costThreshold,
       registration_country: draft.registrationCountry,
+      passport_expiry: draft.passportExpiry,
       aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
       selected_specialization_work_type_ids:
         draft.selectedSpecializationWorkTypeIds,
@@ -1414,6 +1416,7 @@ function draftFromLead(lead: LeadDetail): Draft {
     zip: lead.zip_code ?? "",
     country: lead.country ?? "",
     registrationCountry: inputString(lead.wizard_state?.["registration_country"]),
+    passportExpiry: inputString(lead.wizard_state?.["passport_expiry"]),
     amlEnhancedDueDiligence: amlEnhancedDueDiligenceFromLead(lead),
     language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
     whatsappNumber: lead.whatsapp_number ?? "",
@@ -1479,6 +1482,7 @@ function blankDraft(): Draft {
     zip: "",
     country: "",
     registrationCountry: "",
+    passportExpiry: "",
     amlEnhancedDueDiligence: blankAmlEnhancedDueDiligence(),
     language: "",
     whatsappNumber: "",
@@ -1549,6 +1553,8 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     city: patient.address_city?.trim() ?? "",
     zip: patient.address_zip?.trim() ?? "",
     country: patient.address_country?.trim() || patient.residence_country?.trim() || "",
+    registrationCountry: patient.nationality?.trim() ?? "",
+    passportExpiry: patient.passport_expiry?.trim() ?? "",
     language: normalizedLanguageCode(patient.languages?.[0]),
     hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
     privacyConsent: legal?.dsgvo_signed === true,
@@ -6891,9 +6897,20 @@ ${serviceCommentLines.join("\n")}`
                   </span>
                 )}
               >
-                <p className="text-xs text-muted-foreground">
-                  {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
-                </p>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] sm:items-end">
+                  <Field label={tx("Действителен до", "Gültig bis")}>
+                    <Input
+                      name="passport_expiry"
+                      type="date"
+                      className={inputClass}
+                      value={draft.passportExpiry}
+                      onChange={(event) => patch("passportExpiry", event.target.value)}
+                    />
+                  </Field>
+                  <p className="pb-2 text-xs text-muted-foreground">
+                    {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
+                  </p>
+                </div>
                 <WizardDocumentRows
                   documents={wizardDocuments.identity}
                   complianceKind="identity"

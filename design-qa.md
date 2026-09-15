@@ -57,6 +57,35 @@ final result: passed
 
 ---
 
+# Design QA — Lead passport data in the patient profile
+
+## Evidence
+
+- Source visual truth: `C:/Users/oleks/AppData/Local/Temp/codex-clipboard-45ab5aa8-16a0-4763-aebe-e6c978c33cfc.png` (3480 × 942 px).
+- Implementation captures: Codex in-app browser captures from the patient profile and the source lead wizard in this task.
+- Patient route: `http://127.0.0.1:5173/patients/:patientId`.
+- Lead route: `http://127.0.0.1:5173/leads?lead=:leadId&view=wizard`.
+- Verified viewport: 1468 × 1272 CSS px.
+
+## Comparison
+
+- The patient Passport card now begins with a `Скан паспорта` row and shows the transferred lead file as a compact orange document link.
+- The existing passport number and expiry rows keep their original spacing and typography.
+- The lead identity-document card now contains a `Действителен до` date picker beside the existing file-format hint, directly below the upload action.
+- Citizenship remains a separate field from country of residence. The lead visibly contains `Украина` in both fields; the patient profile will receive only the dedicated citizenship value.
+- Existing card borders, heading markers, input height, calendar affordance, and responsive wizard footer remain aligned with the shared GMED style.
+
+## Verification
+
+- The accessibility tree exposes the passport filename as a button that opens the patient Documents tab.
+- The lead wizard exposes the new passport expiry control as a date input with day, month, year, and calendar controls.
+- The focused desktop captures show no clipped controls, overlap, layout shift, or actionable P0/P1/P2 visual issue.
+- Targeted TypeScript, ESLint, Rust formatting, server compile, migration hygiene, and frontend production build checks passed.
+
+final result: passed
+
+---
+
 # Design QA — Lead wizard medication table
 
 ## Evidence

@@ -3892,6 +3892,20 @@ fn patient_country(value: Option<&str>) -> Option<String> {
     Some(canonical.to_string())
 }
 
+fn lead_wizard_text(wizard_state: &Value, key: &str) -> Option<String> {
+    wizard_state
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn lead_wizard_date(wizard_state: &Value, key: &str) -> Option<NaiveDate> {
+    lead_wizard_text(wizard_state, key)
+        .and_then(|value| NaiveDate::parse_from_str(&value, "%Y-%m-%d").ok())
+}
+
 async fn import_lead_attachments_internal(
     state: &AppState,
     lead_id: Uuid,
@@ -4563,6 +4577,8 @@ async fn create_prospect_patient(
         None => explicit_insurance_type,
     };
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let nationality = lead_wizard_text(&wizard_state, "registration_country");
+    let passport_expiry = lead_wizard_date(&wizard_state, "passport_expiry");
     let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
 
@@ -4586,10 +4602,10 @@ async fn create_prospect_patient(
                                  emergency_contact_name, emergency_contact_phone,
                                  emergency_contact_relation, intake_profile, legal_status,
                                  notes, source_lead_id, lead_snapshot, created_by,
-                                 lifecycle_status, is_active)
+                                 nationality, passport_expiry, lifecycle_status, is_active)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25,
-                   'prospective', false)
+                   $26, $27, 'prospective', false)
            RETURNING id"#,
     )
     .bind(&pid)
@@ -4657,6 +4673,8 @@ async fn create_prospect_patient(
     .bind(lead_id)
     .bind(lead_snapshot)
     .bind(auth.user_id)
+    .bind(nationality)
+    .bind(passport_expiry)
     .fetch_one(&mut *tx)
     .await
     {
@@ -5019,6 +5037,8 @@ async fn convert_lead(
     let zip_code: Option<String> = lead.try_get("zip_code").ok().flatten();
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
+    let nationality = lead_wizard_text(&wizard_state, "registration_country");
+    let passport_expiry = lead_wizard_date(&wizard_state, "passport_expiry");
     let selected_work_type_ids = wizard_state
         .get("selected_specialization_work_type_ids")
         .and_then(Value::as_array)
@@ -5127,6 +5147,8 @@ async fn convert_lead(
         "cost_estimate_additional_language": requested_work_type_language.clone(),
         "program_date_from": wizard_state.get("program_date_from").cloned().unwrap_or(Value::Null),
         "program_date_to": wizard_state.get("program_date_to").cloned().unwrap_or(Value::Null),
+        "nationality": nationality.clone(),
+        "passport_expiry": passport_expiry.map(|value| value.to_string()),
         "notes": lead_notes.clone(),
         "has_insurance": has_insurance,
         "insurance_covers_germany": lead.try_get::<Option<String>, _>("insurance_covers_germany").unwrap_or_default(),
@@ -5214,6 +5236,7 @@ async fn convert_lead(
                            legal_status = $22,
                            notes = COALESCE(NULLIF(btrim(notes), ''), $23),
                            source_lead_id = $24, lead_snapshot = $25,
+                           nationality = $26, passport_expiry = $27,
                            lifecycle_status = 'active', is_active = true, updated_at = now()
                        WHERE id = $1 AND lifecycle_status = 'prospective'
                        RETURNING patient_id"#,
@@ -5243,6 +5266,8 @@ async fn convert_lead(
                 .bind(lead_notes.as_deref())
                 .bind(lead_id)
                 .bind(&lead_snapshot)
+                .bind(nationality.as_deref())
+                .bind(passport_expiry)
                 .fetch_optional(&mut *tx)
                 .await
                 {
@@ -5281,6 +5306,8 @@ async fn convert_lead(
                            ),
                            legal_status = COALESCE(legal_status, '{}'::jsonb) || $5::jsonb,
                            notes = COALESCE(NULLIF(btrim(notes), ''), $6),
+                           nationality = COALESCE($7, nationality),
+                           passport_expiry = COALESCE($8, passport_expiry),
                            updated_at = now()
                        WHERE id = $1 AND lifecycle_status IN ('active', 'inactive')
                        RETURNING patient_id"#,
@@ -5291,6 +5318,8 @@ async fn convert_lead(
                 .bind(&lead_snapshot)
                 .bind(&legal_status)
                 .bind(lead_notes.as_deref())
+                .bind(nationality.as_deref())
+                .bind(passport_expiry)
                 .fetch_optional(&mut *tx)
                 .await
                 {
@@ -5333,9 +5362,11 @@ async fn convert_lead(
                                          address_country, insurance_provider, insurance_number,
                                          insurance_type, emergency_contact_name, emergency_contact_phone,
                                          emergency_contact_relation, intake_profile, legal_status, notes,
-                                         source_lead_id, lead_snapshot, created_by)
+                                         source_lead_id, lead_snapshot, created_by,
+                                         nationality, passport_expiry)
                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-                           $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+                           $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26,
+                           $27, $28)
                    RETURNING id"#,
             )
             .bind(&pid)
@@ -5364,6 +5395,8 @@ async fn convert_lead(
             .bind(lead_id)
             .bind(lead_snapshot)
             .bind(auth.user_id)
+            .bind(nationality)
+            .bind(passport_expiry)
             .fetch_one(&mut *tx)
             .await
             {
