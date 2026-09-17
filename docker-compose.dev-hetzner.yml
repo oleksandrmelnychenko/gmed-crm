@@ -36,6 +36,11 @@ services:
     environment:
       INVOICE_PARSER_URL: "http://invoice-parser:8091"
       INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the DEV invoice parser service key}"
+      # DEV holds synthetic data only: no malware scan. Each standalone clamscan
+      # cost about 7 s and 1 GiB, slowing uploads and starving DEV builds. PROD
+      # keeps the scan mandatory; the backend refuses to start with both flags set.
+      GMED_UPLOAD_SCANNER_REQUIRED: "false"
+      GMED_UPLOAD_SCANNER_DISABLED: "true"
     networks: [default, invoice-internal]
     # Publish the metrics-only listener so monitoring's Prometheus can
     # scrape `gmed-dev:9091` via tailnet. The main API port (3000)

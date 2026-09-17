@@ -13,18 +13,34 @@ pub enum FileScanOutcome {
     Skipped,
 }
 
+fn env_flag(name: &str) -> bool {
+    std::env::var(name).ok().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
+
 fn scanner_required() -> bool {
-    std::env::var("GMED_UPLOAD_SCANNER_REQUIRED")
-        .ok()
-        .is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
+    env_flag("GMED_UPLOAD_SCANNER_REQUIRED")
+}
+
+/// DEV holds synthetic data only. A standalone scan loads the whole signature
+/// database every time (about 7 s and 1 GiB), which slowed every upload and
+/// starved concurrent DEV builds, so that environment switches scanning off.
+fn scanner_disabled() -> bool {
+    env_flag("GMED_UPLOAD_SCANNER_DISABLED")
 }
 
 pub fn ensure_upload_scanner_ready() -> Result<(), String> {
+    if scanner_required() && scanner_disabled() {
+        // Never let a stray switch silently remove a mandatory scan.
+        return Err(
+            "GMED_UPLOAD_SCANNER_DISABLED cannot be combined with GMED_UPLOAD_SCANNER_REQUIRED"
+                .to_string(),
+        );
+    }
     if !scanner_required() {
         return Ok(());
     }
@@ -50,6 +66,9 @@ pub async fn scan_upload_bytes(
     original_filename: Option<&str>,
     bytes: &[u8],
 ) -> Result<FileScanOutcome, String> {
+    if scanner_disabled() && !scanner_required() {
+        return Ok(FileScanOutcome::Skipped);
+    }
     let temp_path = build_temp_scan_path(original_filename);
     if let Some(parent) = temp_path.parent() {
         tokio::fs::create_dir_all(parent)
