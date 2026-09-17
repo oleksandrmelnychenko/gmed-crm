@@ -708,7 +708,7 @@ scopes `datev:accounting:clients` / `datev:accounting:exchange`, заголов�
 інші невизначені результати, як і раніше, вимагають повторного входу. HTTP 400
 від API даних тепер `datev_request_rejected`, а не вимога повторного входу
 (400 від token endpoint лишається `invalid_grant`). Міграція
-`20260917210000_datev_long_term_access.sql` додає колонки прив'язки та CHECK на
+`20260917211000_datev_long_term_access.sql` додає колонки прив'язки та CHECK на
 статус, цілісність трьох полів токена і прив'язки. Журнал `datev_read_events`
 зберігає 400 днів (постійний запис — audit event). HTTP-клієнт спільний.
 
