@@ -12426,11 +12426,6 @@ async fn generate_document(
     {
         return resp;
     }
-    if let Some(lead_uuid) = lead_id
-        && let Err(resp) = super::leads::require_lead_edit_lease(&state, &auth, lead_uuid).await
-    {
-        return resp;
-    }
 
     if lead_id.is_some() && !is_lead_allowed_document_template(template.id) {
         return err(
@@ -21716,12 +21711,6 @@ async fn upload_document_with_mode(
             StatusCode::FORBIDDEN,
             "Insufficient permissions for lead documents",
         );
-    }
-    if let Some(document_lead_id) = lead_id
-        && let Err(resp) =
-            super::leads::require_lead_edit_lease(&state, &auth, document_lead_id).await
-    {
-        return resp;
     }
 
     if auth.role == Role::Concierge {

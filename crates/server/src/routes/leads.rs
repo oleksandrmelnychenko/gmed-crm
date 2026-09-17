@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono::{Datelike, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -69,15 +69,6 @@ pub fn router() -> Router<AppState> {
             post(retired_repeat_patient_intake),
         )
         .route("/leads/{lead_id}", get(get_lead))
-        .route("/leads/{lead_id}/edit-lease", post(acquire_lead_edit_lease))
-        .route(
-            "/leads/{lead_id}/edit-lease/heartbeat",
-            post(heartbeat_lead_edit_lease),
-        )
-        .route(
-            "/leads/{lead_id}/edit-lease/release",
-            post(release_lead_edit_lease),
-        )
         .route("/leads/{lead_id}/update", post(update_lead))
         .route(
             "/leads/{lead_id}/import-attachments",
@@ -107,221 +98,6 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
-}
-
-const LEAD_EDIT_LEASE_SECONDS: i64 = 180;
-
-fn lead_edit_locked_response(
-    holder_user_id: Uuid,
-    holder_name: &str,
-    expires_at: chrono::DateTime<Utc>,
-) -> axum::response::Response {
-    (
-        StatusCode::CONFLICT,
-        Json(json!({
-            "error": "lead_edit_locked",
-            "message": "Lead is currently being edited by another user",
-            "editable": false,
-            "holder": {
-                "user_id": holder_user_id,
-                "name": holder_name,
-            },
-            "expires_at": expires_at.to_rfc3339(),
-        })),
-    )
-        .into_response()
-}
-
-async fn active_lead_edit_lease(
-    state: &AppState,
-    lead_id: Uuid,
-) -> Result<Option<(Uuid, String, chrono::DateTime<Utc>)>, axum::response::Response> {
-    sqlx::query_as::<_, (Uuid, String, chrono::DateTime<Utc>)>(
-        r#"SELECT lease.user_id, user_account.name, lease.expires_at
-           FROM lead_edit_leases lease
-           JOIN users user_account ON user_account.id = lease.user_id
-           WHERE lease.lead_id = $1 AND lease.expires_at > now()"#,
-    )
-    .bind(lead_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, %lead_id, "load lead edit lease");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load lead edit lease",
-        )
-    })
-}
-
-pub(crate) async fn require_lead_edit_lease(
-    state: &AppState,
-    auth: &AuthUser,
-    lead_id: Uuid,
-) -> Result<(), axum::response::Response> {
-    match active_lead_edit_lease(state, lead_id).await? {
-        Some((holder_user_id, holder_name, expires_at)) if holder_user_id != auth.user_id => Err(
-            lead_edit_locked_response(holder_user_id, &holder_name, expires_at),
-        ),
-        _ => Ok(()),
-    }
-}
-
-async fn acquire_lead_edit_lease(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(lead_id): Path<Uuid>,
-) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
-        return response;
-    }
-
-    let expires_at = Utc::now() + Duration::seconds(LEAD_EDIT_LEASE_SECONDS);
-    let acquired = match sqlx::query_as::<_, (Uuid, String, chrono::DateTime<Utc>)>(
-        r#"WITH acquired AS (
-               INSERT INTO lead_edit_leases (
-                   lead_id, user_id, acquired_at, heartbeat_at, expires_at
-               )
-               SELECT $1, $2, now(), now(), $3
-               WHERE EXISTS (SELECT 1 FROM leads WHERE id = $1)
-               ON CONFLICT (lead_id) DO UPDATE
-               SET user_id = EXCLUDED.user_id,
-                   acquired_at = CASE
-                       WHEN lead_edit_leases.user_id = EXCLUDED.user_id
-                           THEN lead_edit_leases.acquired_at
-                       ELSE now()
-                   END,
-                   heartbeat_at = now(),
-                   expires_at = EXCLUDED.expires_at
-               WHERE lead_edit_leases.user_id = EXCLUDED.user_id
-                  OR lead_edit_leases.expires_at <= now()
-               RETURNING user_id, expires_at
-           )
-           SELECT acquired.user_id, user_account.name, acquired.expires_at
-           FROM acquired
-           JOIN users user_account ON user_account.id = acquired.user_id"#,
-    )
-    .bind(lead_id)
-    .bind(auth.user_id)
-    .bind(expires_at)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(%error, %lead_id, user_id = %auth.user_id, "acquire lead edit lease");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to acquire lead edit lease",
-            );
-        }
-    };
-
-    if let Some((holder_user_id, holder_name, lease_expires_at)) = acquired {
-        return Json(json!({
-            "editable": true,
-            "holder": {
-                "user_id": holder_user_id,
-                "name": holder_name,
-            },
-            "expires_at": lease_expires_at.to_rfc3339(),
-        }))
-        .into_response();
-    }
-
-    match active_lead_edit_lease(&state, lead_id).await {
-        Ok(Some((holder_user_id, holder_name, lease_expires_at))) => {
-            lead_edit_locked_response(holder_user_id, &holder_name, lease_expires_at)
-        }
-        Ok(None) => {
-            let exists =
-                sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM leads WHERE id = $1)")
-                    .bind(lead_id)
-                    .fetch_one(&state.db)
-                    .await
-                    .unwrap_or(false);
-            if exists {
-                err(StatusCode::CONFLICT, "Lead edit lease changed; retry")
-            } else {
-                err(StatusCode::NOT_FOUND, "Lead not found")
-            }
-        }
-        Err(response) => response,
-    }
-}
-
-async fn heartbeat_lead_edit_lease(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(lead_id): Path<Uuid>,
-) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
-        return response;
-    }
-
-    let expires_at = Utc::now() + Duration::seconds(LEAD_EDIT_LEASE_SECONDS);
-    let renewed = match sqlx::query_scalar::<_, chrono::DateTime<Utc>>(
-        r#"UPDATE lead_edit_leases
-           SET heartbeat_at = now(), expires_at = $3
-           WHERE lead_id = $1 AND user_id = $2
-           RETURNING expires_at"#,
-    )
-    .bind(lead_id)
-    .bind(auth.user_id)
-    .bind(expires_at)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(%error, %lead_id, user_id = %auth.user_id, "renew lead edit lease");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to renew lead edit lease",
-            );
-        }
-    };
-
-    match renewed {
-        Some(lease_expires_at) => Json(json!({
-            "editable": true,
-            "expires_at": lease_expires_at.to_rfc3339(),
-        }))
-        .into_response(),
-        None => match active_lead_edit_lease(&state, lead_id).await {
-            Ok(Some((holder_user_id, holder_name, lease_expires_at))) => {
-                lead_edit_locked_response(holder_user_id, &holder_name, lease_expires_at)
-            }
-            Ok(None) => err(StatusCode::CONFLICT, "Lead edit lease expired"),
-            Err(response) => response,
-        },
-    }
-}
-
-async fn release_lead_edit_lease(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(lead_id): Path<Uuid>,
-) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
-        return response;
-    }
-
-    match sqlx::query("DELETE FROM lead_edit_leases WHERE lead_id = $1 AND user_id = $2")
-        .bind(lead_id)
-        .bind(auth.user_id)
-        .execute(&state.db)
-        .await
-    {
-        Ok(_) => Json(json!({ "ok": true })).into_response(),
-        Err(error) => {
-            tracing::error!(%error, %lead_id, user_id = %auth.user_id, "release lead edit lease");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to release lead edit lease",
-            )
-        }
-    }
 }
 
 fn normalized_language_code(value: &str) -> Option<&'static str> {
@@ -2970,9 +2746,6 @@ async fn update_lead(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
         return e;
     }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
-    }
 
     let compliance_status = body.compliance_status.as_deref().map(str::to_lowercase);
     if let Some(ref value) = compliance_status
@@ -3440,9 +3213,6 @@ async fn promote_lead_to_console(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
         return e;
     }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
-    }
 
     let current = match sqlx::query(
         r#"SELECT intake_source, source, flow, qualification_status,
@@ -3585,9 +3355,6 @@ async fn qualify_lead(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
         return e;
-    }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
     }
 
     match body.status.as_str() {
@@ -4052,9 +3819,6 @@ async fn import_lead_attachments(
     if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
         return response;
     }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
-    }
 
     match import_lead_attachments_internal(&state, lead_id, auth.user_id).await {
         Ok(imported) => Json(json!({ "imported": imported })).into_response(),
@@ -4206,9 +3970,6 @@ async fn create_prospect_patient(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
-    }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
     }
 
     if let Some(patient_id) = body.attach_patient_id
@@ -4767,9 +4528,6 @@ async fn convert_lead(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
-    }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
     }
 
     let preflight = match sqlx::query(
@@ -5870,9 +5628,6 @@ async fn resolve_failed_lead(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Ceo]) {
         return e;
-    }
-    if let Err(response) = require_lead_edit_lease(&state, &auth, lead_id).await {
-        return response;
     }
 
     let resolution = body.resolution.trim().to_lowercase();

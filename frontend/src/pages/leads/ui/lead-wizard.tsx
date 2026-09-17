@@ -178,14 +178,11 @@ import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import { isMinor } from "../model/lead-wizard.model";
 
 import {
-  acquireLeadEditLease,
   createLead,
   createLeadProspect,
   fetchLeadDetail,
   fetchLeadReferrerPatients,
-  heartbeatLeadEditLease,
   importLeadAttachments,
-  releaseLeadEditLease,
   resolveFailedLead,
   updateLeadStatus,
   updateLeadWizard,
@@ -316,10 +313,6 @@ type Draft = {
 export type { ServiceLine } from "@/pages/orders/model/order-service-line";
 
 type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
-type LeadEditLeaseState = {
-  status: "idle" | "acquiring" | "editable" | "blocked";
-  holderName?: string;
-};
 type WizardDocumentKind =
   | "identity"
   | "confidentiality_release"
@@ -513,8 +506,6 @@ type WizardDocumentPreview = {
 const ignoreDocumentPreviewReady = () => undefined;
 
 const AUTOSAVE_DELAY_MS = 800;
-const LEAD_EDIT_LEASE_HEARTBEAT_MS = 60_000;
-const LEAD_EDIT_LEASE_RETRY_MS = 10_000;
 const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024;
 const LeadMedicalIntakeForm = lazy(() =>
   import("./lead-medical-intake-form").then((module) => ({
@@ -1994,20 +1985,6 @@ function errorText(error: unknown, tx: Tx): string {
   return leadErrorMessage(error, tx);
 }
 
-function leadEditLeaseHolderName(error: unknown): string | undefined {
-  if (!(error instanceof ApiRequestError) || error.status !== 409) return undefined;
-  const holder = error.body?.["holder"];
-  if (!holder || typeof holder !== "object") return undefined;
-  const name = (holder as Record<string, unknown>)["name"];
-  return typeof name === "string" && name.trim() ? name.trim() : undefined;
-}
-
-function isLeadEditLeaseConflict(error: unknown): error is ApiRequestError {
-  return error instanceof ApiRequestError
-    && error.status === 409
-    && error.body?.["error"] === "lead_edit_locked";
-}
-
 function readinessStepLabel(key: string, tx: Tx, repeatIntake = false) {
   const labels: Record<string, string> = {
     master_data: tx("Данные клиента", "Personendaten"),
@@ -2659,9 +2636,6 @@ export function LeadWizard({
   const [conversionConfirmed, setConversionConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [editLeaseLeadId, setEditLeaseLeadId] = useState<string | null>(leadId);
-  const [editLeaseState, setEditLeaseState] = useState<LeadEditLeaseState>({ status: "idle" });
-  const editAccessBlocked = Boolean(editLeaseLeadId && editLeaseState.status !== "editable");
   const [error, setError] = useState("");
   const [commercialSaveFeedback, setCommercialSaveFeedback] = useState<{
     tone: "error" | "success" | "warning";
@@ -2751,7 +2725,6 @@ export function LeadWizard({
   const [prospectResolutionBusy, setProspectResolutionBusy] = useState(false);
   const documentPreviewUrlRef = useRef<string | null>(null);
   const lastPersistedLeadIdRef = useRef<string | null>(null);
-  const editLeaseOwnerRef = useRef<string | null>(null);
   // Service options that were present when the draft was hydrated. Kept so that
   // unchecking a lead-supplied service (one outside the fixed questionnaire options)
   // leaves its row in place instead of removing it and making it unrecoverable.
@@ -2763,87 +2736,6 @@ export function LeadWizard({
     prepayment_amount: 0,
     prepayment_due_at: 0,
   });
-
-  useEffect(() => {
-    if (leadId) setEditLeaseLeadId(leadId);
-    else if (!open) setEditLeaseLeadId(null);
-  }, [leadId, open]);
-
-  useEffect(() => {
-    if (!open || !editLeaseLeadId) {
-      setEditLeaseState({ status: "idle" });
-      return;
-    }
-
-    const leaseLeadId = editLeaseLeadId;
-    let disposed = false;
-    let timer: number | undefined;
-    setEditLeaseState({ status: "acquiring" });
-
-    const schedule = (callback: () => void, delay: number) => {
-      if (timer !== undefined) window.clearTimeout(timer);
-      timer = window.setTimeout(callback, delay);
-    };
-
-    const acquire = async () => {
-      try {
-        await acquireLeadEditLease(leaseLeadId);
-        if (disposed) {
-          void releaseLeadEditLease(leaseLeadId).catch(() => undefined);
-          return;
-        }
-        editLeaseOwnerRef.current = leaseLeadId;
-        setEditLeaseState({ status: "editable" });
-        schedule(() => void heartbeat(), LEAD_EDIT_LEASE_HEARTBEAT_MS);
-      } catch (cause) {
-        if (disposed) return;
-        if (editLeaseOwnerRef.current === leaseLeadId) editLeaseOwnerRef.current = null;
-        setEditLeaseState({
-          status: "blocked",
-          holderName: leadEditLeaseHolderName(cause),
-        });
-        schedule(() => void acquire(), LEAD_EDIT_LEASE_RETRY_MS);
-      }
-    };
-
-    const heartbeat = async () => {
-      try {
-        await heartbeatLeadEditLease(leaseLeadId);
-        if (!disposed) schedule(() => void heartbeat(), LEAD_EDIT_LEASE_HEARTBEAT_MS);
-      } catch (cause) {
-        if (disposed) return;
-        if (cause instanceof ApiRequestError && cause.status === 409) {
-          if (editLeaseOwnerRef.current === leaseLeadId) editLeaseOwnerRef.current = null;
-          setEditLeaseState({
-            status: "blocked",
-            holderName: leadEditLeaseHolderName(cause),
-          });
-          schedule(() => void acquire(), LEAD_EDIT_LEASE_RETRY_MS);
-          return;
-        }
-        schedule(() => void heartbeat(), LEAD_EDIT_LEASE_RETRY_MS);
-      }
-    };
-
-    void acquire();
-    return () => {
-      disposed = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-      if (editLeaseOwnerRef.current === leaseLeadId) {
-        editLeaseOwnerRef.current = null;
-        void releaseLeadEditLease(leaseLeadId).catch(() => undefined);
-      }
-    };
-  }, [editLeaseLeadId, open]);
-
-  useEffect(() => {
-    if (!editAccessBlocked) return;
-    setArchiveConfirmOpen(false);
-    setDeleteServiceLine(null);
-    setDeleteDocument(null);
-    setTrustedContactEditor(null);
-    setAmlSheetOpen(false);
-  }, [editAccessBlocked]);
 
   useEffect(() => {
     if (!open || draft?.discoverySource !== "customer_referral") {
@@ -3455,15 +3347,15 @@ export function LeadWizard({
   }, [createMode, existingPatient, leadId, open]);
 
   useEffect(() => {
-    if (!open || !leadId || ["idle", "acquiring"].includes(editLeaseState.status)) return;
-    void reload(hydrated.current !== leadId, false, editLeaseState.status !== "editable");
-  }, [editLeaseState.status, leadId, open, reload]);
+    if (!open || !leadId) return;
+    void reload(hydrated.current !== leadId);
+  }, [leadId, open, reload]);
 
   // Opening the wizard on a brand-new lead moves it into "in progress"
   // (see docs/lead-status-strategy-ua.md). Guarded to fire once per lead.
   const promotedInProgressRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!open || !leadId || editLeaseState.status !== "editable" || lead?.qualification_status !== "new") return;
+    if (!open || !leadId || lead?.qualification_status !== "new") return;
     if (promotedInProgressRef.current === leadId) return;
     promotedInProgressRef.current = leadId;
     void updateLeadStatus(leadId, "in_progress")
@@ -3472,7 +3364,7 @@ export function LeadWizard({
         return refreshLeadState();
       })
       .catch(() => undefined);
-  }, [editLeaseState.status, open, leadId, lead?.qualification_status, refreshLeadState]);
+  }, [open, leadId, lead?.qualification_status, refreshLeadState]);
 
   useEffect(() => {
     if (open) return;
@@ -4137,14 +4029,6 @@ export function LeadWizard({
           lastPersistedLeadIdRef.current = targetLeadId;
         }
 
-        stage = "edit-lease";
-        if (editLeaseOwnerRef.current !== targetLeadId) {
-          await acquireLeadEditLease(targetLeadId);
-          editLeaseOwnerRef.current = targetLeadId;
-          setEditLeaseState({ status: "editable" });
-        }
-        setEditLeaseLeadId(targetLeadId);
-
         lastPersistedLeadIdRef.current = targetLeadId;
         stage = "lead-update";
         await updateLeadWizard(targetLeadId, payload);
@@ -4205,15 +4089,6 @@ export function LeadWizard({
           onCreated?.(targetLeadId);
         }
       } catch (nextError) {
-        if (isLeadEditLeaseConflict(nextError)) {
-          if (targetLeadId && editLeaseOwnerRef.current === targetLeadId) {
-            editLeaseOwnerRef.current = null;
-          }
-          setEditLeaseState({
-            status: "blocked",
-            holderName: leadEditLeaseHolderName(nextError),
-          });
-        }
         if (
           (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
           currentAutosaveSignatureRef.current === signature
@@ -4235,7 +4110,7 @@ export function LeadWizard({
   }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, onCreated, tx]);
 
   useEffect(() => {
-    if (!open || !autosaveSnapshot || loading || editAccessBlocked) return;
+    if (!open || !autosaveSnapshot || loading) return;
 
     const signature = autosaveSnapshotSignature(autosaveSnapshot);
     currentAutosaveSignatureRef.current = signature;
@@ -4260,7 +4135,6 @@ export function LeadWizard({
     loading,
     open,
     persistSnapshot,
-    editAccessBlocked,
   ]);
 
   const patch = <K extends keyof Draft>(key: K, value: Draft[K]) => {
@@ -5537,11 +5411,6 @@ ${serviceCommentLines.join("\n")}`
     setOrderValidationAttempted(false);
     setMedicalValidationAttempted(false);
 
-    if (editAccessBlocked) {
-      setStep(target);
-      return;
-    }
-
     if (!leadId && createMode) {
       stepNavigationInFlightRef.current = true;
       void createLeadAndNavigate(target).catch(showWizardError);
@@ -5828,7 +5697,7 @@ ${serviceCommentLines.join("\n")}`
                 variant="outline"
                 size="sm"
                 className="h-8 rounded-lg border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
-                disabled={loading || isBusy || editAccessBlocked}
+                disabled={loading || isBusy}
                 onClick={() => {
                   if (!leadId) return;
                   void updateLeadStatus(leadId, "not_qualified")
@@ -5845,7 +5714,7 @@ ${serviceCommentLines.join("\n")}`
                 variant="ghost"
                 size="sm"
                 className="h-8"
-                disabled={loading || isBusy || editAccessBlocked}
+                disabled={loading || isBusy}
                 onClick={() => {
                   if (!leadId) return;
                   void updateLeadStatus(leadId, "in_progress")
@@ -5864,7 +5733,7 @@ ${serviceCommentLines.join("\n")}`
                 className="text-destructive hover:text-destructive"
                 title={tx("Архивировать обращение", "Lead archivieren")}
                 aria-label={tx("Архивировать обращение", "Lead archivieren")}
-                disabled={loading || isBusy || editAccessBlocked}
+                disabled={loading || isBusy}
                 onClick={() => setArchiveConfirmOpen(true)}
               >
                 <Archive aria-hidden="true" className="size-3.5" />
@@ -5884,34 +5753,12 @@ ${serviceCommentLines.join("\n")}`
               </Button>
             ) : null}
             {leadId ? (
-              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true, false, editAccessBlocked), patientReview.refresh()]).catch(showWizardError)}>
+              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true), patientReview.refresh()]).catch(showWizardError)}>
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
             ) : null}
           </div>
         </header>
-
-        {editLeaseLeadId && editLeaseState.status === "acquiring" ? (
-          <div className="shrink-0 border-b border-border px-4 py-2 sm:px-5">
-            <Banner tone="warning">
-              {tx("Проверяем доступ к редактированию…", "Bearbeitungszugriff wird geprüft…")}
-            </Banner>
-          </div>
-        ) : editLeaseLeadId && editLeaseState.status === "blocked" ? (
-          <div className="shrink-0 border-b border-border px-4 py-2 sm:px-5">
-            <Banner tone="warning">
-              {editLeaseState.holderName
-                ? tx(
-                    `Лид сейчас редактирует ${editLeaseState.holderName}. Доступен только просмотр.`,
-                    `${editLeaseState.holderName} bearbeitet diesen Lead gerade. Nur Ansicht ist verfügbar.`,
-                  )
-                : tx(
-                    "Редактирование временно недоступно. Доступен только просмотр; система повторит проверку автоматически.",
-                    "Die Bearbeitung ist vorübergehend nicht verfügbar. Nur Ansicht ist verfügbar; die Prüfung wird automatisch wiederholt.",
-                  )}
-            </Banner>
-          </div>
-        ) : null}
 
         <nav
           ref={stepNavRef}
@@ -5976,7 +5823,6 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
-        <fieldset disabled={editAccessBlocked} className="contents">
         <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain px-4 py-5 outline-none [scrollbar-gutter:stable] sm:px-5">
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
@@ -8143,7 +7989,6 @@ ${serviceCommentLines.join("\n")}`
             </div>
           </footer>
         ) : error ? <div role="alert" className="shrink-0 border-t border-border p-4"><Banner tone="error">{error}</Banner></div> : null}
-        </fieldset>
       </DialogContent>
       </Dialog>
       <Sheet open={amlSheetOpen} onOpenChange={setAmlSheetOpen}>

@@ -37,27 +37,6 @@ export function fetchLeadDetail(leadId: string) {
   return apiFetch<LeadDetail>(`/leads/${leadId}`);
 }
 
-export type LeadEditLease = {
-  editable: boolean;
-  holder?: {
-    user_id: string;
-    name: string;
-  };
-  expires_at: string;
-};
-
-export function acquireLeadEditLease(leadId: string) {
-  return postJson<LeadEditLease>(`/leads/${leadId}/edit-lease`, {});
-}
-
-export function heartbeatLeadEditLease(leadId: string) {
-  return postJson<LeadEditLease>(`/leads/${leadId}/edit-lease/heartbeat`, {});
-}
-
-export function releaseLeadEditLease(leadId: string) {
-  return postJson<{ ok: boolean }>(`/leads/${leadId}/edit-lease/release`, {});
-}
-
 export type LeadReferrerPatientOption = {
   id: string;
   patient_id: string;
