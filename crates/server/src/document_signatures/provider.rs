@@ -26,6 +26,26 @@ pub struct Signer {
     pub role: String,
 }
 
+/// The client signs first; everyone else is invited only once the client has
+/// signed, so the agency receives an already signed package. A request for one
+/// side only keeps the provider's default and carries no sequence.
+fn signature_entries(signers: &[Signer]) -> Vec<Value> {
+    let ordered = signers.iter().any(|signer| signer.role == "client")
+        && signers.iter().any(|signer| signer.role != "client");
+    signers
+        .iter()
+        .map(|signer| {
+            let mut entry = json!({"notify":true,"language":"de",
+                "signer_identity_data":{"email_address":signer.email,
+                "first_name":signer.first_name,"last_name":signer.last_name,"language":"de"}});
+            if ordered {
+                entry["sequence"] = json!(if signer.role == "client" { 1 } else { 2 });
+            }
+            entry
+        })
+        .collect()
+}
+
 pub fn normalize_signers(mut signers: Vec<Signer>) -> Result<Vec<Signer>, &'static str> {
     if !(1..=6).contains(&signers.len()) {
         return Err("signers_count");
@@ -235,9 +255,7 @@ impl Provider {
         let body = json!({"title":title,"content":STANDARD.encode(bytes),
             "content_type":"application/pdf","legislation":"EIDAS","quality":self.quality(),
             "custom":custom(id,hash),"attach_on_success":[],
-            "signatures":signers.iter().map(|s| json!({"notify":true,
-                "language":"de","signer_identity_data":{"email_address":s.email,
-                "first_name":s.first_name,"last_name":s.last_name,"language":"de"}})).collect::<Vec<_>>()});
+            "signatures":signature_entries(signers)});
         // Never retry POST: an HTTP timeout may have occurred after invitations were sent.
         let bytes = self
             .request(Method::POST, "/signature-requests", Some(body), MAX_JSON)
@@ -282,10 +300,14 @@ impl Provider {
     pub async fn invite(&self, id: Uuid, signers: &[Signer]) -> Result<Value, &'static str> {
         // The package was created without recipients. PUT the complete set only
         // after the informational attachment has been verified. Never retry PUT.
-        let bytes = self.request(Method::PUT, "/signature-requests", Some(json!({"id":id,
-            "signatures":signers.iter().map(|s| json!({"notify":true,"language":"de",
-                "signer_identity_data":{"email_address":s.email,"first_name":s.first_name,"last_name":s.last_name,"language":"de"}})).collect::<Vec<_>>()
-        })), MAX_JSON).await?;
+        let bytes = self
+            .request(
+                Method::PUT,
+                "/signature-requests",
+                Some(json!({"id":id,"signatures":signature_entries(signers)})),
+                MAX_JSON,
+            )
+            .await?;
         serde_json::from_slice(&bytes).map_err(|_| "provider_invalid_json")
     }
     pub async fn find(&self, id: Uuid) -> Result<Vec<Value>, &'static str> {

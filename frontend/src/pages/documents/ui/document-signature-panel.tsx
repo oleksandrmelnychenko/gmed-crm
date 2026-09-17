@@ -51,6 +51,12 @@ const ineligibleMessages: Record<string, [string, string]> = {
   document_already_signed: ["Этот документ уже отмечен как подписанный.", "Dieses Dokument ist bereits als unterzeichnet markiert."],
 };
 
+function signingPackageLabel(template: string, tx: (ru: string, de: string) => string) {
+  if (template === "single_order") return tx("Заказ", "Einzelauftrag");
+  if (template === "confidentiality_release") return tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung");
+  return tx("Согласие на сбор и использование данных", "Einwilligung zur Datenübermittlung");
+}
+
 function requestStatusClassName(status: SignatureStatus) {
   if (status === "completed") {
     return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300";
@@ -61,7 +67,7 @@ function requestStatusClassName(status: SignatureStatus) {
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300";
 }
 
-export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; onPreviewRelated?: (id: string, kind: "signing" | "review") => void; onPackageSelectionChange?: (selection: { signingDocumentId: string; attachmentId: string }) => void; previewedDocumentIds?: string[]; expanded?: boolean; previewReady?: boolean }) {
+export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; onPreviewRelated?: (id: string, kind: "signing" | "review") => void; onPackageSelectionChange?: (selection: { signingDocumentIds: string[]; attachmentId: string }) => void; previewedDocumentIds?: string[]; expanded?: boolean; previewReady?: boolean }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
@@ -73,7 +79,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const [composeNew, setComposeNew] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [selectedAttachment, setSelectedAttachment] = useState("");
-  const [selectedSigningDocument, setSelectedSigningDocument] = useState("");
+  const [selectedSigningDocuments, setSelectedSigningDocuments] = useState<Record<string, string>>({});
   const previousPackages = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -94,9 +100,12 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const dirty = confirmed || excludedSigners.length > 0 || JSON.stringify(signers) !== JSON.stringify(baseline);
   useLayoutEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   const attachmentId = selectedAttachment || (state?.review_package?.documents.length === 1 ? state.review_package.documents[0].id : "");
-  const signingDocumentId = selectedSigningDocument || (state?.signing_package?.documents.length === 1 ? state.signing_package.documents[0].id : "");
+  const signingPackages = state?.signing_packages ?? [];
+  // A template with a single candidate needs no choice; several versions do.
+  const signingDocumentIds = signingPackages.map(pkg => selectedSigningDocuments[pkg.template] || (pkg.documents.length === 1 ? pkg.documents[0].id : ""));
+  const signingSelectionKey = signingDocumentIds.join(",");
   // The workspace previews the whole package, so it follows the documents chosen here.
-  useEffect(() => { onPackageSelectionChange?.({ signingDocumentId, attachmentId }); }, [signingDocumentId, attachmentId, onPackageSelectionChange]);
+  useEffect(() => { onPackageSelectionChange?.({ signingDocumentIds: signingSelectionKey.split(",").filter(Boolean), attachmentId }); }, [signingSelectionKey, attachmentId, onPackageSelectionChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -107,9 +116,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
         const next = await fetchSignatureState(documentId);
         if (cancelled) return;
         const pending = next.requests.some(r => isSignaturePending(r.status));
-        const packageSnapshot = JSON.stringify([next.signing_package, next.review_package]);
+        const packageSnapshot = JSON.stringify([next.signing_packages, next.review_package]);
         if (packageSnapshot !== previousPackages.current) {
-          setConfirmed(false); setSelectedAttachment(""); setSelectedSigningDocument(""); previousPackages.current = packageSnapshot;
+          setConfirmed(false); setSelectedAttachment(""); setSelectedSigningDocuments({}); previousPackages.current = packageSnapshot;
         }
         setState(next); setError(false); setAwaitingState(false);
         onStateChangeRef.current?.(next);
@@ -145,7 +154,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
       setActionError(code === "review_attachment_required" || code === "review_attachment_changed"
         ? tx("Выберите актуальное приложение для ознакомления и проверьте его PDF.", "Wählen und prüfen Sie die aktuelle Anlage zur Kenntnisnahme.")
         : code === "signing_document_required" || code === "signing_document_changed"
-        ? tx("Выберите и проверьте актуальное согласие на передачу данных.", "Wählen und prüfen Sie die aktuelle Einwilligung zur Datenübermittlung.")
+        ? tx("Выберите и проверьте актуальные версии всех документов пакета.", "Wählen und prüfen Sie die aktuellen Versionen aller Dokumente des Pakets.")
         : code === "both_contract_parties_required"
         ? tx("Для договора нужны клиент и представитель агентства.", "Verträge benötigen Kunde und Agenturvertretung.")
         : code === "patient_signature_only"
@@ -167,7 +176,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const clientOnly = state?.signer_policy === "client_only";
   const agencyOnly = state?.signer_policy === "agency_only";
   const attachmentReady =!state?.review_package || (!!attachmentId && state.review_package.documents.some(d => d.id === attachmentId) && previewedDocumentIds.includes(attachmentId));
-  const signingDocumentReady =!state?.signing_package || (!!signingDocumentId && state.signing_package.documents.some(d => d.id === signingDocumentId) && previewedDocumentIds.includes(signingDocumentId));
+  const signingDocumentReady = signingPackages.every((pkg, index) => !!signingDocumentIds[index] && pkg.documents.some(d => d.id === signingDocumentIds[index]) && previewedDocumentIds.includes(signingDocumentIds[index]));
   const updateSigner = (index: number, patch: Partial<Signer>) => {
     setConfirmed(false);
     setEditingSigners(current => current.includes(index) ? current : [...current, index]);
@@ -266,16 +275,25 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
             </div>
             <div className="space-y-4 p-4">
-              {state.signing_package ? <div className="space-y-2 rounded-lg border border-[var(--brand)]/30 bg-[var(--brand)]/[0.025] p-3">
-                <AdminSectionTitle>{tx("Второй документ для подписи", "Zweites Dokument zur Unterschrift")}</AdminSectionTitle>
-                <p className="text-xs text-muted-foreground">{tx("Освобождение от медицинской тайны и согласие на передачу данных будут объединены в один подписываемый PDF.", "Schweigepflichtsentbindung und Einwilligung zur Datenübermittlung werden zu einem signierten PDF zusammengeführt.")}</p>
-                {state.signing_package.documents.length ? <>
-                  <NativeComboboxSelect aria-label={tx("Второй документ для подписи", "Zweites Dokument zur Unterschrift")} value={signingDocumentId} disabled={busy || awaitingState} onChange={event => { setSelectedSigningDocument(event.target.value); setConfirmed(false); }}>
-                    <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
-                    {state.signing_package.documents.map(doc => <option key={doc.id} value={doc.id}>{doc.title} · v{doc.version}</option>)}
-                  </NativeComboboxSelect>
-                  <Button type="button" variant="outline" size="sm" disabled={!signingDocumentId || busy || !onPreviewRelated} onClick={() => onPreviewRelated?.(signingDocumentId, "signing")}><Eye className="size-4" />{tx("Проверить второй документ", "Zweites Dokument prüfen")}</Button>
-                </> : <p role="alert" className="text-xs text-destructive">{tx("Сначала создайте согласие на передачу данных в этой карточке. Отправка пакета недоступна.", "Erstellen Sie zuerst die Einwilligung zur Datenübermittlung. Der Paketversand ist sonst nicht möglich.")}</p>}
+              {signingPackages.length > 0 ? <div className="space-y-3 rounded-lg border border-[var(--brand)]/30 bg-[var(--brand)]/[0.025] p-3">
+                <AdminSectionTitle>{tx("Документы пакета на подпись", "Dokumente des Signaturpakets")}</AdminSectionTitle>
+                <p className="text-xs text-muted-foreground">{clientOnly
+                  ? tx("Эти документы будут объединены с основным в один подписываемый PDF.", "Diese Dokumente werden mit dem Hauptdokument zu einem signierten PDF zusammengeführt.")
+                  : tx("Клиент получит одно приглашение со всеми документами и подпишет первым; агентство получит пакет после подписи клиента.", "Die Kundenseite erhält eine Einladung mit allen Dokumenten und unterzeichnet zuerst; die Agentur erhält das Paket danach.")}</p>
+                {signingPackages.map((pkg, index) => {
+                  const selectedId = signingDocumentIds[index];
+                  const label = signingPackageLabel(pkg.template, tx);
+                  return <div key={pkg.template} className="space-y-1.5">
+                    <p className="text-xs font-medium text-foreground">{index + 2}. {label}</p>
+                    {pkg.documents.length ? <div className="flex flex-wrap items-center gap-2">
+                      <NativeComboboxSelect className="min-w-0 flex-1" aria-label={label} value={selectedId} disabled={busy || awaitingState} onChange={event => { const value = event.target.value; setSelectedSigningDocuments(current => ({ ...current, [pkg.template]: value })); setConfirmed(false); }}>
+                        <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
+                        {pkg.documents.map(doc => <option key={doc.id} value={doc.id}>{doc.title} · v{doc.version}</option>)}
+                      </NativeComboboxSelect>
+                      <Button type="button" variant="outline" size="sm" disabled={!selectedId || busy || !onPreviewRelated} onClick={() => onPreviewRelated?.(selectedId, "signing")}><Eye className="size-4" />{tx("Проверить", "Prüfen")}</Button>
+                    </div> : <p role="alert" className="text-xs text-destructive">{tx(`Сначала создайте документ «${label}». Без него пакет не отправляется.`, `Erstellen Sie zuerst das Dokument „${label}“. Ohne dieses wird das Paket nicht versendet.`)}</p>}
+                  </div>;
+                })}
               </div> : null}
               {state.review_package ? <div className="space-y-2 rounded-lg border border-border p-3">
                 <AdminSectionTitle>{tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme")}</AdminSectionTitle>
@@ -316,9 +334,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               {!clientOnly && !agencyOnly && signers.length < 6 ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => { setConfirmed(false); setSigners(current => [...current, emptySigner("other")]); }}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
             </div>
             <div className="border-t border-border/60 bg-muted/10 p-4">
-              <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{state.review_package || state.signing_package ? tx("Я проверил все PDF пакета и адреса. Отправить пакет выбранным подписантам через Skribble.", "Ich habe alle PDFs des Pakets und die Adressen geprüft. Dieses Paket über Skribble versenden.") : tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>
+              <label className="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-amber-50/60 px-3.5 py-3 text-xs leading-5 dark:border-amber-800 dark:bg-amber-950/30"><input type="checkbox" checked={confirmed} disabled={busy} onChange={e => setConfirmed(e.target.checked)} className="mt-1 size-4 shrink-0 accent-[var(--brand)]" /><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand)]" /><span>{state.review_package || signingPackages.length > 0 ? tx("Я проверил все PDF пакета и адреса. Отправить пакет выбранным подписантам через Skribble.", "Ich habe alle PDFs des Pakets und die Adressen geprüft. Dieses Paket über Skribble versenden.") : tx("Я проверил сохранённый PDF и адреса. Отправить этот документ выбранным подписантам через Skribble.", "Ich habe die gespeicherte PDF und die Adressen geprüft. Dieses Dokument über Skribble an die ausgewählten Personen senden.")}</span></label>
               <div className="mt-3 flex justify-end">
-                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !attachmentReady || !signingDocumentReady || !confirmed || !validSigners(selectedSigners)} onClick={() => void run(async () => { await createSignatureRequest(documentId, selectedSigners, state.review_package ? attachmentId : undefined, state.signing_package ? signingDocumentId : undefined); previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : state.review_package || state.signing_package ? tx("Отправить пакет на подпись", "Paket zur Unterschrift senden") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
+                <Button type="button" className="h-9 rounded-lg" disabled={mutationDisabled || !previewReady || !attachmentReady || !signingDocumentReady || !confirmed || !validSigners(selectedSigners)} onClick={() => void run(async () => { await createSignatureRequest(documentId, selectedSigners, state.review_package ? attachmentId : undefined, signingDocumentIds); previousPending.current = true; setSigners(baseline); setExcludedSigners([]); setConfirmed(false); setComposeNew(false); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{busy ? tx("Отправка…", "Wird versendet…") : state.review_package || signingPackages.length > 0 ? tx("Отправить пакет на подпись", "Paket zur Unterschrift senden") : tx("Отправить на подпись", "Zur Unterschrift senden")}</Button>
               </div>
             </div>
           </section> : null}

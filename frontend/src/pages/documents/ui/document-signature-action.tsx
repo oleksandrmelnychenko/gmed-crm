@@ -80,7 +80,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [error, setError] = useState(false);
   const [relatedPreview, setRelatedPreview] = useState<{ id: string; kind: "signing" | "review" } | null>(null);
   const [previewedDocuments, setPreviewedDocuments] = useState<string[]>([]);
-  const [packageSelection, setPackageSelection] = useState({ signingDocumentId: "", attachmentId: "" });
+  const [packageSelection, setPackageSelection] = useState<{ signingDocumentIds: string[]; attachmentId: string }>({ signingDocumentIds: [], attachmentId: "" });
   const handlePreviewReady = useCallback((id: string) => {
     if (id) setPreviewedDocuments(current => current.includes(id) ? current : [...current, id]);
   }, []);
@@ -123,20 +123,23 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const selectedTitle = documentId ? title : documents.find(row => row.id === selectedId)?.auto_name ?? title;
   // While a request is being composed, the preview shows every PDF that will be
   // sent, in sending order, so nothing leaves without having been on screen.
-  const signingMember = signatureState?.signing_package?.documents.find(row => row.id === packageSelection.signingDocumentId);
+  const signingMembers = (signatureState?.signing_packages ?? []).flatMap(pkg => {
+    const member = pkg.documents.find(row => packageSelection.signingDocumentIds.includes(row.id));
+    return member ? [{ id: member.id, title: member.title, kind: "signing" as const }] : [];
+  });
   const reviewAttachment = signatureState?.review_package?.documents.find(row => row.id === packageSelection.attachmentId);
-  const packageDocuments: SignaturePreviewSource[] = !relatedPreview && previewId === selectedId && (!availableResult || composingNew) && (signingMember || reviewAttachment)
+  const packageDocuments: SignaturePreviewSource[] = !relatedPreview && previewId === selectedId && (!availableResult || composingNew) && (signingMembers.length > 0 || reviewAttachment)
     ? [
         { id: selectedId, title: selectedTitle, kind: "signing" },
-        ...(signingMember ? [{ id: signingMember.id, title: signingMember.title, kind: "signing" as const }] : []),
+        ...signingMembers,
         ...(reviewAttachment ? [{ id: reviewAttachment.id, title: reviewAttachment.title, kind: "review" as const }] : []),
       ]
     : [];
-  const hasPackage = Boolean(signatureState?.signing_package || signatureState?.review_package);
+  const hasPackage = Boolean(signatureState?.signing_packages?.length || signatureState?.review_package);
   return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
     <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
-        <AdminSectionTitle>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Второй документ для подписи", "Zweites Dokument zur Unterschrift") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : packageDocuments.length > 1 ? `${tx("Пакет на подпись", "Signaturpaket")} · ${packageDocuments.length} PDF` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
+        <AdminSectionTitle>{relatedPreview?.kind === "review" ? tx("Приложение для ознакомления", "Anlage zur Kenntnisnahme") : relatedPreview?.kind === "signing" ? tx("Документ пакета на подпись", "Dokument des Signaturpakets") : displayedResult ? `${displayedResult.test_mode ? "TEST · " : ""}${tx("Подписанный PDF", "Signiertes PDF")}` : packageDocuments.length > 1 ? `${tx("Пакет на подпись", "Signaturpaket")} · ${packageDocuments.length} PDF` : tx("Документ для подписи", "Dokument zur Unterschrift")}</AdminSectionTitle>
         {relatedPreview ? <Button type="button" size="sm" variant="outline" onClick={() => setRelatedPreview(null)}>{hasPackage ? tx("Ко всему пакету", "Zum gesamten Paket") : tx("К основному документу", "Zum Hauptdokument")}</Button> : null}
         {selectedId && !relatedPreview ? <span className="min-w-0 break-words text-xs text-muted-foreground">{selectedTitle}</span> : null}
         {availableResult && !relatedPreview ? <div className="flex w-full flex-wrap gap-2" aria-label={tx("Версия PDF", "PDF-Version")}>
@@ -153,7 +156,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setRelatedPreview(null); setPreviewedDocuments([]); setPackageSelection({ signingDocumentId: "", attachmentId: "" }); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setRelatedPreview(null); setPreviewedDocuments([]); setPackageSelection({ signingDocumentIds: [], attachmentId: "" }); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>

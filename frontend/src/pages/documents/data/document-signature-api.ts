@@ -10,13 +10,15 @@ export type SignatureRequest = {
   can_withdraw?: boolean;
   evidence: { signatures?: { email: string; status: string; signed_at: string | null }[] };
 };
+export type SigningPackage = { template: "single_order" | "confidentiality_release" | "privacy_consents"; documents: { id: string; title: string; version: number }[] };
 export type SignatureState = {
   enabled: boolean; region: "DE"; test_mode: boolean; can_send: boolean; can_configure: boolean;
   signer_policy?: "flexible" | "client_only" | "agency_only" | "both_parties";
   ineligible_reason: string | null; requests: SignatureRequest[];
   suggested_signers?: Signer[];
   review_package?: { template: "privacy_information" | "cost_estimate"; documents: { id: string; title: string; version: number }[] } | null;
-  signing_package?: { template: "privacy_consents"; documents: { id: string; title: string; version: number }[] } | null;
+  // One entry per document signed together with this one, in bundle order.
+  signing_packages?: SigningPackage[];
 };
 export const isSignaturePending = (status: SignatureStatus) => ["submitting", "submission_unknown", "pending"].includes(status);
 export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/documents/${id}/signature-requests`, { forceFresh: true });
@@ -24,7 +26,7 @@ export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/do
 // standalone scanner start takes several seconds. Aborting at the default
 // timeout cancelled a request that would have succeeded moments later.
 const CREATE_SIGNATURE_REQUEST_TIMEOUT_MS = 90_000;
-export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string, signingDocumentId?: string) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS, body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}), ...(signingDocumentId ? { signing_document_id: signingDocumentId } : {}) }) });
+export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string, signingDocumentIds: string[] = []) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS, body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}), ...(signingDocumentIds.length ? { signing_document_ids: signingDocumentIds } : {}) }) });
 export const signatureAction = (id: string, action: "refresh" | "withdraw") => apiFetch(`/document-signature-requests/${id}/${action}`, { method: "POST" });
 export type SignatureConnection = { configured: boolean; region: "DE"; mode: "demo" | "live"; username: string | null; source: "database" | "environment" };
 export const fetchSignatureConnection = () => apiFetch<SignatureConnection>("/document-signatures/connection", { forceFresh: true });

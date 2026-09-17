@@ -12,11 +12,40 @@ pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
     }
 }
 
-pub(super) fn signing_companion(template: Option<&str>) -> Option<&'static str> {
+/// Documents signed together with the source as one PDF, in bundle order.
+///
+/// During lead intake the framework contract carries the whole onboarding
+/// package: the client gets one invitation for the contract, the order and both
+/// consents, signs first, and the agency is invited afterwards. Outside intake a
+/// contract or an order is still signed on its own.
+pub(super) fn signing_companions(
+    template: Option<&str>,
+    lead_intake: bool,
+) -> &'static [&'static str] {
     match template {
-        Some("confidentiality_release") => Some("privacy_consents"),
-        _ => None,
+        Some("framework_contract") if lead_intake => &[
+            "single_order",
+            "confidentiality_release",
+            "privacy_consents",
+        ],
+        Some("confidentiality_release") => &["privacy_consents"],
+        _ => &[],
     }
+}
+
+/// A lead's documents belong to no patient until the lead is converted.
+fn is_lead_intake(source: &PgRow) -> bool {
+    source.get::<Option<Uuid>, _>("lead_id").is_some()
+        && source.get::<Option<Uuid>, _>("patient_id").is_none()
+}
+
+fn source_signing_companions(source: &PgRow) -> &'static [&'static str] {
+    signing_companions(
+        source
+            .get::<Option<String>, _>("generated_template_id")
+            .as_deref(),
+        is_lead_intake(source),
+    )
 }
 
 fn same_scope(source: &PgRow, candidate: &PgRow) -> bool {
@@ -70,34 +99,33 @@ pub(super) async fn options(
     Ok(json!({"template":template,"documents":choices}))
 }
 
+/// One entry per companion template, in bundle order; an entry without documents
+/// tells the client which document still has to be created.
 pub(super) async fn signing_options(
     state: &AppState,
     auth: &AuthUser,
     source: &PgRow,
 ) -> Result<Value, Response> {
-    let Some(template) = signing_companion(
-        source
-            .get::<Option<String>, _>("generated_template_id")
-            .as_deref(),
-    ) else {
-        return Ok(Value::Null);
-    };
-    let ids: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM documents WHERE generated_template_id=$1 AND file_deleted_at IS NULL AND status<>'archived'
-         AND (($2::uuid IS NOT NULL AND lead_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND patient_id=$3))
-         ORDER BY created_at DESC,id DESC LIMIT 100"
-    ).bind(template).bind(source.get::<Option<Uuid>,_>("lead_id")).bind(source.get::<Option<Uuid>,_>("patient_id"))
-        .fetch_all(&state.db).await.map_err(db_error)?;
-    let mut choices = Vec::new();
-    for id in ids {
-        if let Ok(row) = signature_document_access(state, auth, id, false).await
-            && same_scope(source, &row)
-            && eligibility(&row).is_none()
-        {
-            choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number")}));
+    let mut packages = Vec::new();
+    for template in source_signing_companions(source) {
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM documents WHERE generated_template_id=$1 AND file_deleted_at IS NULL AND status<>'archived'
+             AND (($2::uuid IS NOT NULL AND lead_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND patient_id=$3))
+             ORDER BY created_at DESC,id DESC LIMIT 100"
+        ).bind(template).bind(source.get::<Option<Uuid>,_>("lead_id")).bind(source.get::<Option<Uuid>,_>("patient_id"))
+            .fetch_all(&state.db).await.map_err(db_error)?;
+        let mut choices = Vec::new();
+        for id in ids {
+            if let Ok(row) = signature_document_access(state, auth, id, false).await
+                && same_scope(source, &row)
+                && eligibility(&row).is_none()
+            {
+                choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number")}));
+            }
         }
+        packages.push(json!({"template":template,"documents":choices}));
     }
-    Ok(json!({"template":template,"documents":choices}))
+    Ok(Value::Array(packages))
 }
 
 pub(super) struct Prepared {
@@ -112,68 +140,75 @@ pub(super) struct PreparedSigningMember {
     pub(super) bytes: Vec<u8>,
 }
 
-pub(super) async fn prepare_signing_member(
+/// Resolve the selected documents into the bundle's members, one per companion
+/// template and in bundle order. The members are not scanned one by one: the
+/// merged bundle, which contains every page of them and is what leaves the
+/// system, is scanned as a whole.
+pub(super) async fn prepare_signing_members(
     state: &AppState,
     auth: &AuthUser,
     source: &PgRow,
-    selected: Option<Uuid>,
-) -> Result<Option<PreparedSigningMember>, Response> {
-    let required = signing_companion(
-        source
-            .get::<Option<String>, _>("generated_template_id")
-            .as_deref(),
-    );
-    let Some(template) = required else {
-        if selected.is_some() {
-            return Err(error(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "unexpected_signing_document",
-            ));
-        }
-        return Ok(None);
-    };
-    let id = selected.ok_or_else(|| {
-        error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "signing_document_required",
-        )
-    })?;
-    let row = signature_document_access(state, auth, id, false).await?;
-    if row
-        .get::<Option<String>, _>("generated_template_id")
-        .as_deref()
-        != Some(template)
-        || !same_scope(source, &row)
-        || eligibility(&row).is_some()
-    {
-        return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
+    selected: &[Uuid],
+) -> Result<Vec<PreparedSigningMember>, Response> {
+    let required = source_signing_companions(source);
+    let mut rows = Vec::with_capacity(selected.len());
+    for id in selected {
+        rows.push(signature_document_access(state, auth, *id, false).await?);
     }
-    let bytes = source_bytes(&row)
-        .await
-        .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    scan_upload_bytes(Some("signing-document.pdf"), &bytes)
-        .await
-        .map_err(|_| error(StatusCode::UNPROCESSABLE_ENTITY, "signature_scan_failed"))?;
-    Ok(Some(PreparedSigningMember {
-        hash: sha256(&bytes),
-        row,
-        bytes,
-    }))
+    let template_of = |row: &PgRow| row.get::<Option<String>, _>("generated_template_id");
+    if rows.iter().any(|row| {
+        !template_of(row)
+            .as_deref()
+            .is_some_and(|template| required.contains(&template))
+    }) || rows.len() > required.len()
+    {
+        return Err(error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unexpected_signing_document",
+        ));
+    }
+    let mut members = Vec::with_capacity(required.len());
+    for template in required {
+        let position = rows
+            .iter()
+            .position(|row| template_of(row).as_deref() == Some(*template))
+            .ok_or_else(|| {
+                error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "signing_document_required",
+                )
+            })?;
+        let row = rows.swap_remove(position);
+        if !same_scope(source, &row) || eligibility(&row).is_some() {
+            return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
+        }
+        let bytes = source_bytes(&row)
+            .await
+            .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+        members.push(PreparedSigningMember {
+            hash: sha256(&bytes),
+            row,
+            bytes,
+        });
+    }
+    Ok(members)
 }
 
 pub(super) fn merge_signing_pdfs(
     primary: &[u8],
-    member: Option<&[u8]>,
+    members: &[&[u8]],
 ) -> Result<Vec<u8>, &'static str> {
-    let Some(member) = member else {
+    if members.is_empty() {
         return Ok(primary.to_vec());
-    };
+    }
     let mut warnings = Vec::new();
     let mut document = PdfDocument::parse(primary, &PdfParseOptions::default(), &mut warnings)
         .map_err(|_| "signature_bundle_invalid_pdf")?;
-    let additional = PdfDocument::parse(member, &PdfParseOptions::default(), &mut warnings)
-        .map_err(|_| "signature_bundle_invalid_pdf")?;
-    document.append_document(additional);
+    for member in members {
+        let additional = PdfDocument::parse(member, &PdfParseOptions::default(), &mut warnings)
+            .map_err(|_| "signature_bundle_invalid_pdf")?;
+        document.append_document(additional);
+    }
     let bytes = document.save(&PdfSaveOptions::default(), &mut warnings);
     if bytes.len() > provider::MAX_PDF || !bytes.starts_with(b"%PDF-") {
         return Err("signature_bundle_too_large");
@@ -181,20 +216,22 @@ pub(super) fn merge_signing_pdfs(
     Ok(bytes)
 }
 
-pub(super) async fn persist_signing_member(
+pub(super) async fn persist_signing_members(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     request_id: Uuid,
-    prepared: &PreparedSigningMember,
+    members: &[PreparedSigningMember],
 ) -> Result<(), Response> {
-    let id: Uuid = prepared.row.get("id");
-    let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
-        .bind(id).fetch_one(&mut **tx).await.map_err(db_error)?;
-    if eligibility(&current).is_some() || context(&current) != context(&prepared.row) {
-        return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
+    for (index, prepared) in members.iter().enumerate() {
+        let id: Uuid = prepared.row.get("id");
+        let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
+            .bind(id).fetch_one(&mut **tx).await.map_err(db_error)?;
+        if eligibility(&current).is_some() || context(&current) != context(&prepared.row) {
+            return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
+        }
+        sqlx::query("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) VALUES ($1,$2,$3,$4,$5)")
+            .bind(request_id).bind(id).bind(index as i16 + 1).bind(&prepared.hash).bind(context(&prepared.row))
+            .execute(&mut **tx).await.map_err(db_error)?;
     }
-    sqlx::query("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context) VALUES ($1,$2,1,$3,$4)")
-        .bind(request_id).bind(id).bind(&prepared.hash).bind(context(&prepared.row))
-        .execute(&mut **tx).await.map_err(db_error)?;
     Ok(())
 }
 
@@ -555,10 +592,22 @@ mod tests {
         assert_eq!(companion(Some("single_order")), None);
         assert_eq!(companion(None), None);
         assert_eq!(
-            signing_companion(Some("confidentiality_release")),
-            Some("privacy_consents")
+            signing_companions(Some("confidentiality_release"), false),
+            ["privacy_consents"]
         );
-        assert_eq!(signing_companion(Some("privacy_consents")), None);
+        assert!(signing_companions(Some("privacy_consents"), true).is_empty());
+        // Lead intake sends the whole onboarding package from the contract; an
+        // existing patient's contract or order is still signed on its own.
+        assert_eq!(
+            signing_companions(Some("framework_contract"), true),
+            [
+                "single_order",
+                "confidentiality_release",
+                "privacy_consents"
+            ]
+        );
+        assert!(signing_companions(Some("framework_contract"), false).is_empty());
+        assert!(signing_companions(Some("single_order"), true).is_empty());
         let id = Uuid::new_v4();
         assert_eq!(
             attachment_id(
@@ -594,9 +643,16 @@ mod tests {
             document.save(&PdfSaveOptions::default(), &mut Vec::new())
         }
 
-        let merged = merge_signing_pdfs(&pdf(2), Some(&pdf(3))).unwrap();
+        let (order, release, consents) = (pdf(3), pdf(1), pdf(2));
+        let merged = merge_signing_pdfs(
+            &pdf(2),
+            &[order.as_slice(), release.as_slice(), consents.as_slice()],
+        )
+        .unwrap();
         let parsed =
             PdfDocument::parse(&merged, &PdfParseOptions::default(), &mut Vec::new()).unwrap();
-        assert_eq!(parsed.pages.len(), 5);
+        assert_eq!(parsed.pages.len(), 8);
+        let alone = pdf(2);
+        assert_eq!(merge_signing_pdfs(&alone, &[]).unwrap(), alone);
     }
 }

@@ -21,6 +21,14 @@ describe("electronic signing in the lead wizard", () => {
   it.each(["consent_data_release_child", "consent_data_release_single"])("supports the %s data consent variant", generated_template_id => {
     expect(canSignWizardDocument({ ...pdf, generated_template_id })).toBe(true);
   });
+  it("signs the order and the release inside the contract package during lead intake", () => {
+    const intake = { lead_id: "lead", patient_id: null };
+    expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "framework_contract" })).toBe(true);
+    expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "single_order" })).toBe(false);
+    expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "confidentiality_release" })).toBe(false);
+    // An existing patient still signs a new order on its own.
+    expect(canSignWizardDocument({ ...pdf, lead_id: "lead", patient_id: "patient", generated_template_id: "single_order" })).toBe(true);
+  });
   it("sends the generated adult privacy consent only inside the confidentiality package", () => {
     expect(canSignWizardDocument({ ...pdf, generated_template_id: "privacy_consents" })).toBe(false);
   });

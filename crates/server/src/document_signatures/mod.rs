@@ -226,10 +226,11 @@ async fn list(
     } else {
         Value::Null
     };
-    let signing_package = if can_send {
+    // One entry per document signed together with this one, in bundle order.
+    let signing_packages = if can_send {
         package::signing_options(&state, &auth, &source).await?
     } else {
-        Value::Null
+        json!([])
     };
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":matches!(auth.role,gmed_domain::role::Role::Ceo|gmed_domain::role::Role::ItAdmin),
@@ -237,7 +238,7 @@ async fn list(
         "signer_policy":signer_policy.as_str(),
         "suggested_signers":suggested_signers,
         "review_package":review_package,
-        "signing_package":signing_package,
+        "signing_packages":signing_packages,
         "ineligible_reason":eligibility(&source),"requests":rows.iter().map(public_request).collect::<Vec<_>>()})))
 }
 
@@ -246,7 +247,8 @@ async fn list(
 struct CreateRequest {
     signers: Vec<Signer>,
     attachment_document_id: Option<Uuid>,
-    signing_document_id: Option<Uuid>,
+    #[serde(default)]
+    signing_document_ids: Vec<Uuid>,
 }
 
 async fn source_bytes(row: &PgRow) -> Result<Vec<u8>, &'static str> {
@@ -294,13 +296,15 @@ async fn create(
     let source_pdf = source_bytes(&source)
         .await
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    let signing_member =
-        package::prepare_signing_member(&state, &auth, &source, body.signing_document_id).await?;
+    let signing_members =
+        package::prepare_signing_members(&state, &auth, &source, &body.signing_document_ids)
+            .await?;
     let bytes = package::merge_signing_pdfs(
         &source_pdf,
-        signing_member
-            .as_ref()
-            .map(|member| member.bytes.as_slice()),
+        &signing_members
+            .iter()
+            .map(|member| member.bytes.as_slice())
+            .collect::<Vec<_>>(),
     )
     .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     let attachment = package::prepare(&state, &auth, &source, body.attachment_document_id).await?;
@@ -344,21 +348,26 @@ async fn create(
     if eligibility(&current).is_some() || context(&current) != context(&source) {
         return Err(error(StatusCode::CONFLICT, "document_changed"));
     }
-    let member_id = signing_member
-        .as_ref()
-        .map(|member| member.row.get::<Uuid, _>("id"));
+    // No document of this bundle may already be out for signature, whether as
+    // the source of another request or as a member of another bundle.
+    let bundle_document_ids: Vec<Uuid> = std::iter::once(id)
+        .chain(
+            signing_members
+                .iter()
+                .map(|member| member.row.get::<Uuid, _>("id")),
+        )
+        .collect();
     let active_conflict: bool = sqlx::query_scalar(
         "SELECT EXISTS(
            SELECT 1 FROM document_signature_requests r
            WHERE r.status IN ('submitting','submission_unknown','pending')
-             AND (r.source_document_id=$1 OR r.source_document_id=$2 OR EXISTS(
+             AND (r.source_document_id = ANY($1) OR EXISTS(
                SELECT 1 FROM document_signature_members m
-               WHERE m.request_id=r.id AND (m.document_id=$1 OR m.document_id=$2)
+               WHERE m.request_id=r.id AND m.document_id = ANY($1)
              ))
          )",
     )
-    .bind(id)
-    .bind(member_id)
+    .bind(&bundle_document_ids)
     .fetch_one(&mut *tx)
     .await
     .map_err(db_error)?;
@@ -375,9 +384,7 @@ async fn create(
     if let Some(attachment) = &attachment {
         package::persist(&mut tx, request_id, attachment).await?;
     }
-    if let Some(member) = &signing_member {
-        package::persist_signing_member(&mut tx, request_id, member).await?;
-    }
+    package::persist_signing_members(&mut tx, request_id, &signing_members).await?;
     tx.commit().await.map_err(db_error)?;
     state.audit_sender.try_send(audit::domain_event(
         "document_signature_requested",
