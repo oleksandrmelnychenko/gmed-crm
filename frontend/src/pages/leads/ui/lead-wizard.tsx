@@ -756,6 +756,13 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
   };
 }
 
+/** Technical line under the autosave error: which request failed and what the server said. */
+function autosaveErrorDetailText(stage: string, error: unknown) {
+  const status = error instanceof ApiRequestError && error.status ? ` · HTTP ${error.status}` : "";
+  const message = error instanceof Error ? error.message.trim().slice(0, 200) : "";
+  return `${stage}${status}${message ? ` · ${message}` : ""}`;
+}
+
 function autosaveSnapshotSignature(snapshot: AutosaveSnapshot) {
   // Moving between tabs is UI navigation, not a data change. Persist the
   // current tab with the next real save without issuing a write for each click.
@@ -1459,11 +1466,14 @@ function draftFromLead(lead: LeadDetail): Draft {
     serviceComments: serviceCommentsFromLead(lead),
     discoverySource: inputString(lead.wizard_state?.["discovery_source"]) || questionnaireText(lead, "discoverySource", "howDidYouHearAboutUs", "referralSource"),
     discoverySourceOther: inputString(lead.wizard_state?.["discovery_source_other"]),
-    referrerPatientId: lead.referrer_patient_id
-      ?? inputString(lead.wizard_state?.["referrer_patient_id"]),
-    referrerPatientLabel: lead.referrer_patient_name
-      ? [lead.referrer_patient_pid, lead.referrer_patient_name].filter(Boolean).join(" · ")
-      : inputString(lead.wizard_state?.["referrer_patient_label"]),
+    // The column is authoritative: it is nulled when the referrer patient is deleted,
+    // while the wizard_state mirror would keep a stale ID that blocks every autosave.
+    referrerPatientId: lead.referrer_patient_id ?? "",
+    referrerPatientLabel: lead.referrer_patient_id
+      ? lead.referrer_patient_name
+        ? [lead.referrer_patient_pid, lead.referrer_patient_name].filter(Boolean).join(" · ")
+        : inputString(lead.wizard_state?.["referrer_patient_label"])
+      : "",
     referrer: inputString(lead.wizard_state?.["referrer"]),
     serviceNotes: lead.notes ?? "",
     specialties: lead.requested_specialties ?? [],
@@ -2663,6 +2673,7 @@ export function LeadWizard({
   const [commercialQuoteError, setCommercialQuoteError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   const [autosaveError, setAutosaveError] = useState("");
+  const [autosaveErrorDetail, setAutosaveErrorDetail] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [serviceReportOpen, setServiceReportOpen] = useState(false);
   const [collapsedWorkTypeSpecializationIds, setCollapsedWorkTypeSpecializationIds] = useState<Set<string>>(
@@ -4087,6 +4098,7 @@ export function LeadWizard({
       if (!force && currentAutosaveSignatureRef.current !== signature) return;
 
       let targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
+      let stage = "lead-create";
       const initializing = !leadId;
       if (
         (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__")) &&
@@ -4125,6 +4137,7 @@ export function LeadWizard({
           lastPersistedLeadIdRef.current = targetLeadId;
         }
 
+        stage = "edit-lease";
         if (editLeaseOwnerRef.current !== targetLeadId) {
           await acquireLeadEditLease(targetLeadId);
           editLeaseOwnerRef.current = targetLeadId;
@@ -4133,6 +4146,7 @@ export function LeadWizard({
         setEditLeaseLeadId(targetLeadId);
 
         lastPersistedLeadIdRef.current = targetLeadId;
+        stage = "lead-update";
         await updateLeadWizard(targetLeadId, payload);
         if (hydrated.current !== targetLeadId) return;
 
@@ -4142,6 +4156,7 @@ export function LeadWizard({
           && !prospectPatientIdRef.current
           && !lead?.prospect_patient_id
         ) {
+          stage = "prospect";
           const prospect = await createLeadProspect(targetLeadId, {
             attach_patient_id: existingPatient.id,
             hauptanfragegrund: snapshot.draft.concern.trim(),
@@ -4164,6 +4179,7 @@ export function LeadWizard({
             const clinical = await loadPatientClinical(existingPatient.id);
             savedDraft = hydrateClinicalDraft(snapshot.draft, clinical, caseIdRef.current);
           }
+          stage = "order-create";
           await createOrder({ source_lead_id: targetLeadId });
         }
 
@@ -4203,6 +4219,7 @@ export function LeadWizard({
           currentAutosaveSignatureRef.current === signature
         ) {
           setAutosaveError(errorText(nextError, tx));
+          setAutosaveErrorDetail(autosaveErrorDetailText(stage, nextError));
           setAutosaveStatus("error");
         }
         throw nextError;
@@ -8061,6 +8078,7 @@ ${serviceCommentLines.join("\n")}`
                     <>
                       <p className="font-medium">{tx("Изменения не сохранены", "Änderungen nicht gespeichert")}</p>
                       {autosaveError || error ? <p className="mt-0.5">{autosaveError || error}</p> : null}
+                      {autosaveErrorDetail ? <p className="mt-0.5 font-mono text-[10px] opacity-70">{autosaveErrorDetail}</p> : null}
                     </>
                   ) : error}
                 </div>
