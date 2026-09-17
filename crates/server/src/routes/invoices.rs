@@ -28,6 +28,8 @@ use crate::services::patient_pdf_brand::{PatientPdfBrand, append_company_chrome}
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
+mod zugferd;
+
 const INVOICE_PDF_PAGE_WIDTH_MM: f32 = 210.0;
 const INVOICE_PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const INVOICE_PDF_LEFT_MARGIN_MM: f32 = 18.0;
@@ -72,6 +74,10 @@ pub fn router() -> Router<AppState> {
         .route("/invoices", get(list_invoices))
         .route("/invoices/{invoice_id}", get(get_invoice))
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
+        .route(
+            "/invoices/{invoice_id}/zugferd.xml",
+            get(download_invoice_zugferd_xml),
+        )
         .route("/invoices/{invoice_id}/status", post(update_invoice_status))
         .route(
             "/invoices/{invoice_id}/payments",
@@ -80,6 +86,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/payments/{payment_id}/reversal",
             post(reverse_invoice_payment),
+        )
+        .route(
+            "/invoices/{invoice_id}/payments/{payment_id}/correction",
+            post(correct_invoice_payment),
         )
         .route(
             "/invoices/{invoice_id}/credit-notes",
@@ -218,6 +228,17 @@ struct CreateInvoicePaymentRequest {
     payment_reference: Option<String>,
     received_on: String,
     note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CorrectInvoicePaymentRequest {
+    request_id: Uuid,
+    amount_gross: MoneyInput,
+    payment_method: String,
+    payment_reference: Option<String>,
+    received_on: String,
+    note: Option<String>,
+    reason: String,
 }
 
 #[derive(Deserialize)]
@@ -534,6 +555,23 @@ fn is_valid_invoice_status(value: &str) -> bool {
         value,
         "draft" | "sent" | "partially_paid" | "paid" | "overdue" | "cancelled"
     )
+}
+
+/// Manual invoice status moves. `paid` and `partially_paid` are derived from
+/// the payment journal, so asking for `sent` on a settled invoice only
+/// re-normalises it through `recompute_invoice_settlement_status`.
+fn is_valid_invoice_status_transition(from: &str, to: &str) -> bool {
+    if from == to {
+        return true;
+    }
+    match from {
+        "draft" => matches!(to, "sent" | "cancelled"),
+        "sent" => matches!(to, "draft" | "overdue" | "cancelled"),
+        "partially_paid" => matches!(to, "sent" | "overdue" | "cancelled"),
+        "paid" => matches!(to, "sent"),
+        "overdue" => matches!(to, "sent" | "cancelled"),
+        _ => false,
+    }
 }
 
 fn is_valid_dunning_level(value: &str) -> bool {
@@ -3255,7 +3293,6 @@ async fn validate_invoice_creation_for_quote(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
     invoice_type: &str,
-    selected_source_ids: &[Uuid],
 ) -> Result<(), axum::response::Response> {
     if matches!(ctx.quote_status.as_str(), "rejected" | "expired") {
         return Err(err(
@@ -3320,37 +3357,6 @@ async fn validate_invoice_creation_for_quote(
             StatusCode::CONFLICT,
             "An active invoice already exists for this quote scope",
         ));
-    }
-
-    if invoice_type != "advance" {
-        let source_ids = selected_source_ids;
-        if !source_ids.is_empty() {
-            let invalid_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*)
-                 FROM order_leistungen
-                 WHERE order_id = $1
-                   AND id = ANY($2)
-                   AND status <> 'approved'",
-            )
-            .bind(ctx.order_id)
-            .bind(source_ids)
-            .fetch_one(&state.db)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, order_id = %ctx.order_id, "validate approved order services");
-                err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to validate order services for invoice",
-                )
-            })?;
-
-            if invalid_count > 0 {
-                return Err(err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "All order services must be approved before invoice creation",
-                ));
-            }
-        }
     }
 
     Ok(())
@@ -5043,13 +5049,8 @@ async fn create_patient_billing_invoice(
             Ok(value) => value,
             Err(response) => return response,
         };
-        let source_ids = value
-            .allocations
-            .iter()
-            .filter_map(|allocation| allocation.order_leistung_id)
-            .collect::<Vec<_>>();
         if let Err(response) =
-            validate_invoice_creation_for_quote(&state, context, &invoice_type, &source_ids).await
+            validate_invoice_creation_for_quote(&state, context, &invoice_type).await
         {
             return response;
         }
@@ -5389,7 +5390,7 @@ async fn create_patient_billing_invoice(
     {
         match sqlx::query(
             "UPDATE order_leistungen SET status = 'invoiced'
-             WHERE order_id = $1 AND id = ANY($2) AND status = 'approved'",
+             WHERE order_id = $1 AND id = ANY($2) AND status <> 'invoiced'",
         )
         .bind(order_id)
         .bind(&completed_source_ids)
@@ -5402,7 +5403,7 @@ async fn create_patient_billing_invoice(
             Ok(_) => {
                 return err(
                     StatusCode::CONFLICT,
-                    "Order service approval changed; reload and try again",
+                    "Order services changed; reload and try again",
                 );
             }
             Err(error) => {
@@ -5534,15 +5535,7 @@ async fn create_invoice_from_quote(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let selected_source_ids = invoice_snapshot
-        .allocations
-        .iter()
-        .filter_map(|allocation| allocation.order_leistung_id)
-        .collect::<Vec<_>>();
-
-    if let Err(resp) =
-        validate_invoice_creation_for_quote(&state, &ctx, &invoice_type, &selected_source_ids).await
-    {
+    if let Err(resp) = validate_invoice_creation_for_quote(&state, &ctx, &invoice_type).await {
         return resp;
     }
 
@@ -5664,7 +5657,7 @@ async fn create_invoice_from_quote(
                      SET status = 'invoiced'
                      WHERE order_id = $1
                        AND id = ANY($2)
-                       AND status = 'approved'",
+                       AND status <> 'invoiced'",
                 )
                 .bind(ctx.order_id)
                 .bind(&completed_source_ids)
@@ -5677,7 +5670,7 @@ async fn create_invoice_from_quote(
                     Ok(_) => {
                         return err(
                             StatusCode::CONFLICT,
-                            "Order service approval changed; reload and try again",
+                            "Order services changed; reload and try again",
                         );
                     }
                     Err(e) => {
@@ -5846,16 +5839,22 @@ async fn recompute_invoice_settlement_status(
                            credit.latest_credit_at
                       ) AS settlement_at,
                       CASE
-                          WHEN locked.status = 'cancelled' THEN locked.status
+                          WHEN locked.status IN ('cancelled', 'draft') THEN locked.status
                            WHEN locked.total_gross - locked.credited_amount >= 0
                             AND cash.paid_amount - refund.refunded_amount + locked.prepayment_applied_amount
                                 >= locked.total_gross - locked.credited_amount
                               THEN 'paid'
+                          -- An overdue invoice keeps that flag after a partial payment;
+                          -- paid_amount carries the partial settlement. Marking a late
+                          -- invoice overdue in the first place stays with the dunning job.
+                          WHEN locked.status = 'overdue'
+                           AND (locked.due_date IS NULL OR locked.due_date < CURRENT_DATE)
+                              THEN 'overdue'
                           WHEN cash.paid_amount - refund.refunded_amount + locked.prepayment_applied_amount > 0
                               THEN 'partially_paid'
                           WHEN locked.status IN ('paid', 'partially_paid')
                            AND locked.due_date < CURRENT_DATE THEN 'overdue'
-                          WHEN locked.status IN ('paid', 'partially_paid') THEN 'sent'
+                          WHEN locked.status IN ('paid', 'partially_paid', 'overdue') THEN 'sent'
                           ELSE locked.status
                       END AS next_status
                FROM locked
@@ -6330,6 +6329,8 @@ fn invoice_payment_row_payload(row: &sqlx::postgres::PgRow, staff_view: bool) ->
         "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
         "transaction_type": transaction_type,
         "reverses_transaction_id": row.try_get::<Option<Uuid>, _>("reverses_transaction_id").unwrap_or_default(),
+        "corrects_transaction_id": row.try_get::<Option<Uuid>, _>("corrects_transaction_id").unwrap_or_default(),
+        "corrected_by_transaction_id": row.try_get::<Option<Uuid>, _>("corrected_by_transaction_id").unwrap_or_default(),
         "reversed_by_transaction_id": row.try_get::<Option<Uuid>, _>("reversed_by_transaction_id").unwrap_or_default(),
         "is_reversed": row.try_get::<bool, _>("is_reversed").unwrap_or(false),
         "amount_gross": decimal_to_string(amount_gross),
@@ -6378,10 +6379,14 @@ async fn load_invoice_payment_history(
                   payment.received_on, payment.note, payment.created_by,
                   payment.created_at, creator.name AS created_by_name,
                   creator.role AS created_by_role,
+                  payment.corrects_transaction_id,
+                  correction.id AS corrected_by_transaction_id,
                   reversal.id AS reversed_by_transaction_id,
                   (reversal.id IS NOT NULL) AS is_reversed
            FROM invoice_payment_transactions payment
            JOIN users creator ON creator.id = payment.created_by
+           LEFT JOIN invoice_payment_transactions correction
+             ON correction.corrects_transaction_id = payment.id
            LEFT JOIN invoice_payment_transactions reversal
              ON reversal.reverses_transaction_id = payment.id
             AND reversal.transaction_type = 'reversal'
@@ -6692,6 +6697,61 @@ async fn list_my_invoice_credit_notes(
     }
 }
 
+/// Once a receipt settles the invoice, reimbursed financial documents follow.
+/// The receipt is already committed, so a failure is audited, not returned.
+async fn run_paid_invoice_follow_up(
+    state: &AppState,
+    auth: &AuthUser,
+    invoice_id: Uuid,
+    payment_id: Uuid,
+) {
+    match sqlx::query("SELECT status, paid_at FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(settlement))
+            if settlement
+                .try_get::<String, _>("status")
+                .unwrap_or_default()
+                == "paid" =>
+        {
+            if let Some(paid_at) = settlement
+                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
+                .unwrap_or_default()
+                && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
+                    state,
+                    invoice_id,
+                    auth.user_id,
+                    paid_at,
+                )
+                .await
+            {
+                tracing::error!(
+                    invoice_id = %invoice_id,
+                    payment_id = %payment_id,
+                    status = %resp.status(),
+                    "payment committed but reimbursed document follow-up failed"
+                );
+                state.audit_sender.try_send(audit::domain_event(
+                    "payment_follow_up_failed",
+                    Some(auth.user_id),
+                    "invoice",
+                    Some(invoice_id),
+                    serde_json::json!({
+                        "payment_transaction_id": payment_id,
+                        "follow_up": "reimbursed_financial_documents",
+                    }),
+                ));
+            }
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "load settlement for payment follow-up");
+        }
+    }
+}
+
 async fn create_invoice_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -6991,51 +7051,7 @@ async fn create_invoice_payment(
         );
     }
 
-    match sqlx::query("SELECT status, paid_at FROM invoices WHERE id = $1")
-        .bind(invoice_id)
-        .fetch_optional(&state.db)
-        .await
-    {
-        Ok(Some(settlement))
-            if settlement
-                .try_get::<String, _>("status")
-                .unwrap_or_default()
-                == "paid" =>
-        {
-            if let Some(paid_at) = settlement
-                .try_get::<Option<DateTime<Utc>>, _>("paid_at")
-                .unwrap_or_default()
-                && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
-                    &state,
-                    invoice_id,
-                    auth.user_id,
-                    paid_at,
-                )
-                .await
-            {
-                tracing::error!(
-                    invoice_id = %invoice_id,
-                    payment_id = %payment_id,
-                    status = %resp.status(),
-                    "payment committed but reimbursed document follow-up failed"
-                );
-                state.audit_sender.try_send(audit::domain_event(
-                    "payment_follow_up_failed",
-                    Some(auth.user_id),
-                    "invoice",
-                    Some(invoice_id),
-                    serde_json::json!({
-                        "payment_transaction_id": payment_id,
-                        "follow_up": "reimbursed_financial_documents",
-                    }),
-                ));
-            }
-        }
-        Ok(_) => {}
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "load settlement for payment follow-up");
-        }
-    }
+    run_paid_invoice_follow_up(&state, &auth, invoice_id, payment_id).await;
 
     write_invoice_audit(
         &state,
@@ -7367,6 +7383,446 @@ async fn reverse_invoice_payment(
 
     match load_invoice_detail(&state, invoice_id, &auth).await {
         Ok(Some(invoice)) => Json(serde_json::json!({
+            "reversal_transaction_id": reversal_id,
+            "invoice": invoice,
+        }))
+        .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+/// Edits a recorded payment. The journal is append-only, so the original
+/// receipt is reversed and the corrected receipt is appended atomically.
+async fn correct_invoice_payment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, payment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CorrectInvoicePaymentRequest>,
+) -> axum::response::Response {
+    const FAILED: &str = "Failed to correct payment";
+    if !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(amount_gross) = body.amount_gross.parse_decimal() else {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
+    };
+    let amount_gross = amount_gross.round_dp(2);
+    if amount_gross <= Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payment amount must be greater than zero",
+        );
+    }
+    let payment_method = body.payment_method.trim();
+    if !is_valid_invoice_payment_method(payment_method) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
+    }
+    let today = Utc::now().date_naive();
+    let received_on = match parse_optional_date(Some(body.received_on.as_str())) {
+        Ok(Some(value)) if value <= today => value,
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date"),
+    };
+    let reason = match normalize_optional(Some(body.reason.as_str())) {
+        Some(value) if value.chars().count() <= 1000 => value,
+        _ => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Correction reason is required",
+            );
+        }
+    };
+    let payment_reference = normalize_optional(body.payment_reference.as_deref());
+    let note = normalize_optional(body.note.as_deref());
+
+    let patient_id = match sqlx::query_scalar::<_, Uuid>(
+        "SELECT patient_id FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice correction access");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "begin payment correction transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    let row = match sqlx::query(
+        r#"SELECT payment.amount_gross, payment.payment_method, payment.received_on,
+                  payment.payment_reference, payment.note, payment.transaction_type,
+                  invoice.order_id, invoice.invoice_number, invoice.status,
+                  invoice.total_vat, invoice.total_gross, invoice.credited_amount,
+                  invoice.prepayment_applied_amount, invoice.line_items, invoice.currency,
+                  EXISTS (
+                      SELECT 1 FROM invoice_payment_transactions reversal
+                      WHERE reversal.reverses_transaction_id = payment.id
+                        AND reversal.transaction_type = 'reversal'
+                  ) AS already_reversed
+           FROM invoice_payment_transactions payment
+           JOIN invoices invoice ON invoice.id = payment.invoice_id
+           WHERE payment.id = $1
+             AND payment.invoice_id = $2
+           FOR UPDATE OF payment, invoice"#,
+    )
+    .bind(payment_id)
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Payment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "lock invoice payment correction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+
+    let replay = match sqlx::query(
+        r#"SELECT id, corrects_transaction_id, amount_gross, payment_method,
+                  payment_reference, received_on, note
+           FROM invoice_payment_transactions
+           WHERE invoice_id = $1
+             AND request_id = $2
+             AND transaction_type = 'payment'"#,
+    )
+    .bind(invoice_id)
+    .bind(body.request_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, request_id = %body.request_id, "load correction idempotency key");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Some(existing) = replay {
+        let same_request = existing
+            .try_get::<Option<Uuid>, _>("corrects_transaction_id")
+            .is_ok_and(|value| value == Some(payment_id))
+            && existing
+                .try_get::<Decimal, _>("amount_gross")
+                .is_ok_and(|value| value == amount_gross)
+            && existing
+                .try_get::<String, _>("payment_method")
+                .is_ok_and(|value| value == payment_method)
+            && existing
+                .try_get::<Option<String>, _>("payment_reference")
+                .is_ok_and(|value| value == payment_reference)
+            && existing
+                .try_get::<NaiveDate, _>("received_on")
+                .is_ok_and(|value| value == received_on)
+            && existing
+                .try_get::<Option<String>, _>("note")
+                .is_ok_and(|value| value == note);
+        if !same_request {
+            return err(
+                StatusCode::CONFLICT,
+                "request_id was already used for another payment",
+            );
+        }
+        let corrected_id = existing.try_get::<Uuid, _>("id").unwrap_or_default();
+        drop(transaction);
+        return match load_invoice_detail(&state, invoice_id, &auth).await {
+            Ok(Some(invoice)) => Json(serde_json::json!({
+                "payment_transaction_id": corrected_id,
+                "invoice": invoice,
+                "idempotent_replay": true,
+            }))
+            .into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+            Err(resp) => resp,
+        };
+    }
+
+    if row
+        .try_get::<String, _>("transaction_type")
+        .unwrap_or_default()
+        != "payment"
+    {
+        return err(StatusCode::CONFLICT, "Only a payment can be corrected");
+    }
+    if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
+        return err(StatusCode::CONFLICT, "Payment was already reversed");
+    }
+    let original_amount = row
+        .try_get::<Decimal, _>("amount_gross")
+        .unwrap_or(Decimal::ZERO);
+    let original_method = row
+        .try_get::<String, _>("payment_method")
+        .unwrap_or_else(|_| "other".to_string());
+    let original_reference = row
+        .try_get::<Option<String>, _>("payment_reference")
+        .unwrap_or_default();
+    let original_received_on = row.try_get::<NaiveDate, _>("received_on").unwrap_or(today);
+    let original_note = row.try_get::<Option<String>, _>("note").unwrap_or_default();
+    if original_method == "legacy_import" {
+        return err(
+            StatusCode::CONFLICT,
+            "Imported opening balances cannot be corrected; reverse them instead",
+        );
+    }
+    if original_amount == amount_gross
+        && original_method == payment_method
+        && original_reference == payment_reference
+        && original_received_on == received_on
+        && original_note == note
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Correction does not change the payment",
+        );
+    }
+    let context = InvoicePaymentContext {
+        invoice_id,
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        patient_id,
+        invoice_number: row
+            .try_get::<String, _>("invoice_number")
+            .unwrap_or_default(),
+        invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        credited_amount: row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+    };
+    if matches!(context.invoice_status.as_str(), "draft" | "cancelled") {
+        return err(
+            StatusCode::CONFLICT,
+            "Payments require an active released invoice",
+        );
+    }
+
+    let capacity = match sqlx::query(
+        r#"SELECT
+               COALESCE((
+                   SELECT SUM(CASE WHEN transaction_type = 'payment' THEN amount_gross ELSE -amount_gross END)
+                   FROM invoice_payment_transactions
+                   WHERE invoice_id = $1
+               ), 0) AS cash_received,
+               COALESCE((
+                   SELECT SUM(CASE WHEN transaction_type = 'refund' THEN amount_gross ELSE -amount_gross END)
+                   FROM invoice_refund_transactions
+                   WHERE invoice_id = $1
+               ), 0) AS cash_refunded,
+               COALESCE((
+                   SELECT SUM(amount_gross)
+                   FROM invoice_prepayment_allocations
+                   WHERE advance_invoice_id = $1
+               ), 0) AS allocated_advance"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "load payment correction capacity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    let cash_after = capacity
+        .try_get::<Decimal, _>("cash_received")
+        .unwrap_or(Decimal::ZERO)
+        - original_amount
+        + amount_gross;
+    let cash_refunded = capacity
+        .try_get::<Decimal, _>("cash_refunded")
+        .unwrap_or(Decimal::ZERO);
+    let allocated_advance = capacity
+        .try_get::<Decimal, _>("allocated_advance")
+        .unwrap_or(Decimal::ZERO);
+    if cash_after < cash_refunded + allocated_advance {
+        return err(
+            StatusCode::CONFLICT,
+            "Refunds and applied advances must be reversed or released before this payment can be reduced",
+        );
+    }
+    if cash_after - cash_refunded + context.prepayment_applied_amount
+        > context.total_gross - context.credited_amount
+    {
+        return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+    }
+
+    // The reversal is dated today: the correction happens now, while the
+    // corrected receipt keeps the real value date entered by billing.
+    let reversal_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, reverses_transaction_id,
+                amount_gross, payment_method, payment_reference,
+                received_on, note, created_by
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(payment_id)
+    .bind(original_amount)
+    .bind(original_method.clone())
+    .bind(original_reference.clone())
+    .bind(today)
+    .bind(format!("Correction: {reason}"))
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(reversal_id) => reversal_id,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+            return err(StatusCode::CONFLICT, "Payment was already reversed");
+        }
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
+            return err(
+                StatusCode::CONFLICT,
+                "Applied advances must be released before this payment can be corrected",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert correction reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Err(e) = insert_invoice_payment_accounting_entries(
+        &mut transaction,
+        &context,
+        reversal_id,
+        "reversal",
+        original_amount,
+        &original_method,
+        original_reference.as_deref(),
+        today,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert correction reversal accounting entries");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    let corrected_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO invoice_payment_transactions (
+                invoice_id, transaction_type, request_id, corrects_transaction_id,
+                amount_gross, payment_method, payment_reference, received_on, note, created_by
+           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING id"#,
+    )
+    .bind(invoice_id)
+    .bind(body.request_id)
+    .bind(payment_id)
+    .bind(amount_gross)
+    .bind(payment_method)
+    .bind(payment_reference.clone())
+    .bind(received_on)
+    .bind(note.clone())
+    .bind(auth.user_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(corrected_id) => corrected_id,
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
+            return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "insert corrected payment");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Err(e) = insert_invoice_payment_accounting_entries(
+        &mut transaction,
+        &context,
+        corrected_id,
+        "payment",
+        amount_gross,
+        payment_method,
+        payment_reference.as_deref(),
+        received_on,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %corrected_id, "insert corrected payment accounting entries");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after payment correction");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit payment correction");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    run_paid_invoice_follow_up(&state, &auth, invoice_id, corrected_id).await;
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "payment_corrected",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "reversal_transaction_id": reversal_id,
+            "corrected_transaction_id": corrected_id,
+            "request_id": body.request_id,
+            "reason": reason,
+            "before": {
+                "amount_gross": decimal_to_string(original_amount),
+                "payment_method": original_method,
+                "payment_reference": original_reference,
+                "received_on": original_received_on.to_string(),
+            },
+            "after": {
+                "amount_gross": decimal_to_string(amount_gross),
+                "payment_method": payment_method,
+                "payment_reference": payment_reference,
+                "received_on": received_on.to_string(),
+            },
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.payment_corrected",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "corrected_transaction_id": corrected_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await;
+
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => Json(serde_json::json!({
+            "payment_transaction_id": corrected_id,
             "reversal_transaction_id": reversal_id,
             "invoice": invoice,
         }))
@@ -8699,6 +9155,7 @@ async fn download_invoice_pdf(
         Ok(bytes) => bytes,
         Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
+    let pdf_bytes = attach_zugferd_xml(&state, &context, pdf_bytes).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "download_invoice_pdf",
@@ -8754,6 +9211,7 @@ async fn download_my_invoice_pdf(
         Ok(bytes) => bytes,
         Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
     };
+    let pdf_bytes = attach_zugferd_xml(&state, &context, pdf_bytes).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "download_portal_invoice_pdf",
@@ -8772,6 +9230,256 @@ async fn download_my_invoice_pdf(
     );
 
     invoice_pdf_response(pdf_bytes, disposition)
+}
+
+/// Invoice data for the ZUGFeRD XML, read from the same rows the PDF uses.
+async fn load_einvoice(
+    state: &AppState,
+    invoice_id: Uuid,
+) -> Result<Option<zugferd::EInvoice>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT i.invoice_number, i.invoice_type, i.issued_at, i.created_at, i.due_date,
+                  i.currency, i.total_gross, i.prepayment_applied_amount, i.line_items, i.notes,
+                  i.payer_contact_name, i.payer_contact_email, o.order_number,
+                  p.first_name, p.last_name, p.email AS patient_email,
+                  p.address_street, p.address_zip, p.address_city,
+                  p.address_country, p.residence_country,
+                  (SELECT jsonb_object_agg(key, value #>> '{}') FROM system_settings
+                    WHERE key LIKE 'agency\_%') AS agency
+           FROM invoices i
+           JOIN patients p ON p.id = i.patient_id
+           LEFT JOIN orders o ON o.id = i.order_id
+           WHERE i.id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await?
+    else {
+        return Ok(None);
+    };
+
+    let agency = row
+        .try_get::<Option<Value>, _>("agency")
+        .unwrap_or_default()
+        .unwrap_or_else(|| json!({}));
+    let setting = |key: &str| normalize_optional(agency.get(key).and_then(Value::as_str));
+    let optional = |column: &str| {
+        normalize_optional(
+            row.try_get::<Option<String>, _>(column)
+                .unwrap_or_default()
+                .as_deref(),
+        )
+    };
+    let decimal = |value: Option<&Value>| match value {
+        Some(Value::String(text)) => Decimal::from_str(text.trim()).ok(),
+        Some(Value::Number(number)) => Decimal::from_str(&number.to_string()).ok(),
+        _ => None,
+    };
+
+    let (seller_street, seller_postcode, seller_city) =
+        zugferd::split_german_address(&setting("agency_address").unwrap_or_default());
+    let patient_name = [optional("first_name"), optional("last_name")]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let lines = row
+        .try_get::<Value, _>("line_items")
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .map(|line| {
+            let quantity = decimal(line.get("quantity")).unwrap_or(Decimal::ONE);
+            let unit_net = decimal(line.get("unit_price")).unwrap_or(Decimal::ZERO);
+            zugferd::EInvoiceLine {
+                name: line
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                quantity,
+                unit_net,
+                line_net: decimal(line.get("line_net")).unwrap_or(quantity * unit_net),
+                vat_rate: decimal(line.get("vat_rate")).unwrap_or(Decimal::ZERO),
+                is_cost_passthrough: line
+                    .get("is_cost_passthrough")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }
+        })
+        .collect();
+    let issued_at = row
+        .try_get::<Option<DateTime<Utc>>, _>("issued_at")
+        .unwrap_or_default()
+        .or(row.try_get::<DateTime<Utc>, _>("created_at").ok())
+        .unwrap_or_else(Utc::now);
+
+    Ok(Some(zugferd::EInvoice {
+        number: row.try_get("invoice_number").unwrap_or_default(),
+        invoice_type: row.try_get("invoice_type").unwrap_or_default(),
+        issue_date: issued_at.date_naive(),
+        due_date: row.try_get("due_date").unwrap_or_default(),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+        order_number: optional("order_number"),
+        note: optional("notes"),
+        seller: zugferd::EInvoiceParty {
+            name: setting("agency_name").unwrap_or_default(),
+            address_line: seller_street,
+            postcode: seller_postcode,
+            city: seller_city,
+            country_code: setting("agency_country_code").map(|code| code.to_uppercase()),
+            email: setting("agency_email"),
+            vat_id: setting("agency_vat_id"),
+            tax_number: setting("agency_tax_number"),
+        },
+        buyer: zugferd::EInvoiceParty {
+            name: optional("payer_contact_name").unwrap_or(patient_name),
+            address_line: optional("address_street"),
+            postcode: optional("address_zip"),
+            city: optional("address_city"),
+            country_code: crate::routes::patients::patient_label_country_code(
+                optional("address_country").as_deref(),
+                optional("residence_country").as_deref(),
+            ),
+            email: optional("payer_contact_email").or(optional("patient_email")),
+            vat_id: None,
+            tax_number: None,
+        },
+        lines,
+        total_gross: row.try_get("total_gross").unwrap_or(Decimal::ZERO),
+        prepaid_amount: row
+            .try_get("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        bank_iban: setting("agency_bank_iban"),
+        bank_bic: setting("agency_bank_swift"),
+        bank_holder: setting("agency_bank_holder"),
+    }))
+}
+
+/// Turns the rendered PDF into a ZUGFeRD hybrid when the invoice is released
+/// and every mandatory EN 16931 field is known; otherwise the PDF stays as is.
+async fn attach_zugferd_xml(
+    state: &AppState,
+    context: &InvoicePdfContext,
+    pdf: Vec<u8>,
+) -> Vec<u8> {
+    if context.status == "draft" {
+        return pdf;
+    }
+    let invoice = match load_einvoice(state, context.invoice_id).await {
+        Ok(Some(invoice)) => invoice,
+        Ok(None) => return pdf,
+        Err(error) => {
+            tracing::error!(%error, invoice_id = %context.invoice_id, "load zugferd invoice");
+            return pdf;
+        }
+    };
+    let missing = zugferd::missing_requirements(&invoice);
+    if !missing.is_empty() {
+        tracing::info!(invoice_id = %context.invoice_id, ?missing, "invoice pdf served without zugferd xml");
+        return pdf;
+    }
+    let xml = zugferd::build_cii_xml(&invoice);
+    match zugferd::embed_xml_in_pdf(&pdf, &xml, &context.invoice_number, context.issued_at) {
+        Ok(hybrid) => hybrid,
+        Err(error) => {
+            tracing::error!(%error, invoice_id = %context.invoice_id, "embed zugferd xml");
+            pdf
+        }
+    }
+}
+
+async fn download_invoice_zugferd_xml(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let patient_id =
+        match sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(patient_id)) => patient_id,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "load zugferd access context");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to build e-invoice",
+                );
+            }
+        };
+    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+        return resp;
+    }
+    let invoice = match load_einvoice(&state, invoice_id).await {
+        Ok(Some(invoice)) => invoice,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load zugferd invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
+    };
+    let missing = zugferd::missing_requirements(&invoice);
+    if !missing.is_empty() {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({
+                "message": format!("E-invoice is missing mandatory data: {}", missing.join(", ")),
+                "missing": missing,
+            })),
+        )
+            .into_response();
+    }
+    let xml = zugferd::build_cii_xml(&invoice);
+    state.audit_sender.try_send(audit::domain_event(
+        "download_invoice_zugferd_xml",
+        Some(auth.user_id),
+        "invoice",
+        Some(invoice_id),
+        json!({ "invoice_number": invoice.number }),
+    ));
+    let filename = invoice
+        .number
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    match axum::response::Response::builder()
+        .header("content-type", "application/xml; charset=utf-8")
+        .header(
+            "content-disposition",
+            format!(
+                "attachment; filename=\"{filename}-{}\"",
+                zugferd::ZUGFERD_XML_FILENAME
+            ),
+        )
+        .body(Body::from(xml))
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(%error, "build zugferd xml response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            )
+        }
+    }
 }
 
 fn invoice_pdf_response(pdf_bytes: Vec<u8>, disposition: String) -> axum::response::Response {
@@ -9372,7 +10080,7 @@ async fn update_invoice_status(
     };
 
     let locked_invoice = match sqlx::query(
-        r#"SELECT invoice.status, invoice.invoice_type,
+        r#"SELECT invoice.status, invoice.invoice_type, invoice.due_date,
                   invoice.prepayment_applied_amount, invoice.credited_amount,
                   COALESCE((
                       SELECT SUM(
@@ -9427,6 +10135,38 @@ async fn update_invoice_status(
             StatusCode::CONFLICT,
             "Cancelled invoices cannot be reactivated",
         );
+    }
+    let settles_through_payment = requested_paid_amount.is_some()
+        || matches!(requested_status.as_str(), "paid" | "partially_paid");
+    if !settles_through_payment
+        && !is_valid_invoice_status_transition(&locked_status, &requested_status)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Invoice status cannot move from the current status to the requested one",
+        );
+    }
+    if requested_status == "draft"
+        && locked_status != "draft"
+        && (locked_paid_amount > Decimal::ZERO
+            || locked_prepayment_amount > Decimal::ZERO
+            || locked_credited_amount > Decimal::ZERO)
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "An invoice with payments, prepayments or credit notes cannot return to draft",
+        );
+    }
+    if requested_status == "overdue" && locked_status != "overdue" {
+        let effective_due_date = due_date.or(locked_invoice
+            .try_get::<Option<NaiveDate>, _>("due_date")
+            .unwrap_or_default());
+        if effective_due_date.is_some_and(|value| value >= Utc::now().date_naive()) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invoice is not past its due date",
+            );
+        }
     }
     if let Some(requested_paid_amount) = requested_paid_amount
         && requested_paid_amount < locked_paid_amount
@@ -9859,6 +10599,17 @@ mod tests {
         };
 
         let bytes = build_invoice_pdf(&context).unwrap();
+        // The ZUGFeRD hybrid keeps the rendered pages readable and carries the XML.
+        let hybrid = super::zugferd::embed_xml_in_pdf(
+            &bytes,
+            "<rsm:CrossIndustryInvoice/>",
+            &context.invoice_number,
+            context.issued_at,
+        )
+        .unwrap();
+        let hybrid_text = pdf_extract::extract_text_from_mem(&hybrid).unwrap();
+        assert!(hybrid_text.contains("Медицинская консультация"));
+        assert!(hybrid.windows(12).any(|window| window == b"factur-x.xml"));
         let extracted_text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
         assert!(extracted_text.contains("INV-UNIT-1"));
         assert!(extracted_text.contains("Медицинская консультация"));

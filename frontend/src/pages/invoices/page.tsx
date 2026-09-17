@@ -67,10 +67,13 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { IncomingInvoices } from "./ui/incoming-invoices";
+import { PaymentEditForm } from "./ui/payment-edit-form";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
 import { dunningBlockReason, dunningErrorKey } from "./model/invoice-dunning";
+import { buildPaymentCorrectionPayload, canCorrectPayment } from "./model/payment-correction";
+import { zugferdErrorMessage } from "./model/zugferd";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
@@ -96,9 +99,11 @@ import {
   fetchAccountingLedgerExportBlob,
   fetchInvoiceLookups,
   fetchInvoicePdfBlob,
+  fetchInvoiceZugferdXmlBlob,
   fetchInvoiceWorkspace,
   fetchInvoices,
   releaseInvoicePrepayment,
+  correctInvoicePayment,
   reverseInvoicePayment,
   reverseInvoiceCreditNote,
   reverseInvoiceRefund,
@@ -110,6 +115,7 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_INVOICE_PAGE_SIZE,
   INVOICE_STATUSES,
+  canPickInvoiceStatus,
   INVOICE_TYPES,
   blankCreateForm,
   buildInvoicesPath,
@@ -284,6 +290,18 @@ async function downloadInvoicePdf(
   const link = document.createElement("a");
   link.href = url;
   link.download = filename || fallbackFilename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadInvoiceZugferdXml(invoiceId: string, invoiceNumber: string) {
+  const blob = await fetchInvoiceZugferdXmlBlob(invoiceId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${invoiceNumber || "invoice"}-factur-x.xml`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -857,6 +875,7 @@ function useStaffInvoicesPageContent() {
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [reversingPaymentId, setReversingPaymentId] = useState("");
+  const [editingPaymentId, setEditingPaymentId] = useState("");
   const [reversalNote, setReversalNote] = useState("");
   const [creditNoteForm, setCreditNoteForm] = useState({
     requestId: crypto.randomUUID(),
@@ -1651,10 +1670,7 @@ function useStaffInvoicesPageContent() {
         due_date: createForm.dueDate || null,
         notes: createForm.notes.trim() || null,
         line_items: selectedLines,
-      }, selectedCreateQuote.order_id, createForm.selectedLineIndexes.flatMap((index) => {
-        const id = selectedCreateQuote.line_items[index]?.source_order_leistung_id;
-        return id ? [id] : [];
-      }));
+      }, selectedCreateQuote.order_id);
       clearApiCache();
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));
@@ -1725,6 +1741,24 @@ function useStaffInvoicesPageContent() {
       });
       setReversingPaymentId("");
       setReversalNote("");
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setPaymentError(error instanceof Error ? error.message : t.common_error);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function handleCorrectPayment(
+    paymentId: string,
+    payload: ReturnType<typeof buildPaymentCorrectionPayload>,
+  ) {
+    if (!detail) return;
+    setPaymentBusy(true);
+    setPaymentError(null);
+    try {
+      await correctInvoicePayment(detail.id, paymentId, payload);
+      setEditingPaymentId("");
       setReloadToken((current) => current + 1);
     } catch (error) {
       setPaymentError(error instanceof Error ? error.message : t.common_error);
@@ -2544,6 +2578,23 @@ function useStaffInvoicesPageContent() {
                             <Download className="size-3.5" />
                             {text.downloadPdf}
                           </Button>
+                          {detail.status !== "draft" ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1.5 rounded-lg"
+                              title="ZUGFeRD / Factur-X (EN 16931, CII)"
+                              onClick={() =>
+                                void downloadInvoiceZugferdXml(detail.id, detail.invoice_number ?? "").catch((error) =>
+                                  setDetailError(zugferdErrorMessage(error, lang, text.pdfDownloadError)),
+                                )
+                              }
+                            >
+                              <Download className="size-3.5" />
+                              {lang === "de" ? "E-Rechnung XML" : "E-счёт XML"}
+                            </Button>
+                          ) : null}
                         </div>
                       </div>
                     </div>
@@ -2739,6 +2790,8 @@ function useStaffInvoicesPageContent() {
                             !isReversal &&
                             !payment.is_reversed &&
                             detail.status !== "cancelled";
+                          const canEdit =
+                            access.canManage && canCorrectPayment(payment, detail.status);
                           return (
                             <div
                               key={payment.id}
@@ -2755,6 +2808,16 @@ function useStaffInvoicesPageContent() {
                                     </span>
                                     {payment.is_reversed ? (
                                       <StatusBadge tone="neutral">{text.reversed}</StatusBadge>
+                                    ) : null}
+                                    {payment.corrected_by_transaction_id ? (
+                                      <StatusBadge tone="neutral">
+                                        {lang === "de" ? "Korrigiert" : "Исправлен"}
+                                      </StatusBadge>
+                                    ) : null}
+                                    {payment.corrects_transaction_id ? (
+                                      <StatusBadge tone="info">
+                                        {lang === "de" ? "Korrektur" : "Исправление"}
+                                      </StatusBadge>
                                     ) : null}
                                   </div>
                                   <div className="mt-1 text-xs text-muted-foreground">
@@ -2788,6 +2851,20 @@ function useStaffInvoicesPageContent() {
                                     {isReversal ? "−" : "+"}
                                     {formatMoney(payment.amount_gross, detail?.currency)}
                                   </div>
+                                  {canEdit ? (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      className="mt-1 h-7 px-2 text-xs"
+                                      onClick={() => {
+                                        setEditingPaymentId(payment.id);
+                                        setReversingPaymentId("");
+                                      }}
+                                    >
+                                      {lang === "de" ? "Bearbeiten" : "Редактировать"}
+                                    </Button>
+                                  ) : null}
                                   {canReverse ? (
                                     <Button
                                       type="button"
@@ -2796,6 +2873,7 @@ function useStaffInvoicesPageContent() {
                                       className="mt-1 h-7 px-2 text-xs"
                                       onClick={() => {
                                         setReversingPaymentId(payment.id);
+                                        setEditingPaymentId("");
                                         setReversalNote("");
                                       }}
                                     >
@@ -2804,6 +2882,18 @@ function useStaffInvoicesPageContent() {
                                   ) : null}
                                 </div>
                               </div>
+                              {editingPaymentId === payment.id && canEdit ? (
+                                <PaymentEditForm
+                                  lang={lang}
+                                  payment={payment}
+                                  maxAmount={Number(detail.balance_due ?? 0) + Number(payment.amount_gross ?? 0)}
+                                  methodLabels={text.paymentMethods}
+                                  busy={paymentBusy}
+                                  cancelLabel={t.common_cancel}
+                                  onCancel={() => setEditingPaymentId("")}
+                                  onSubmit={(payload) => void handleCorrectPayment(payment.id, payload)}
+                                />
+                              ) : null}
                               {reversingPaymentId === payment.id ? (
                                 <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row">
                                   <Input
@@ -3968,7 +4058,7 @@ function useStaffInvoicesPageContent() {
                       <option
                         key={status}
                         value={status}
-                        disabled={["paid", "partially_paid"].includes(status)}
+                        disabled={!detail || !canPickInvoiceStatus(detail.status, status)}
                       >
                         {invoiceStatusLabel(status)}
                       </option>

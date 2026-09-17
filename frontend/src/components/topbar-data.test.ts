@@ -73,6 +73,13 @@ describe("notificationHrefForRole", () => {
     expect(notificationHrefForRole(notification("privacy_request"), "patient")).toBe("/privacy");
   });
 
+  it("opens an overdue company invoice in company finance", () => {
+    expect(notificationHrefForRole(notification("external_invoice", "invoice-1"), "billing")).toBe(
+      "/company-finance?provider_invoice=invoice-1",
+    );
+    expect(notificationHrefForRole(notification("external_invoice", "invoice-1"), "patient")).toBeNull();
+  });
+
   it("opens Medication AI notifications on the patient's clinical workspace", () => {
     const item = notification("patient", "patient-1");
     item.kind = "medication_ai_ready";

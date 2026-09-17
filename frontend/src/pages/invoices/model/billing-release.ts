@@ -12,10 +12,6 @@ export function hasInvoiceBillingRelease(release?: InvoiceBillingRelease | null)
 export function invoiceCreationErrorMessage(error: unknown, lang: string, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   const de = lang === "de";
-  if (message === "invoice_services_unavailable") {
-    return de ? "Die Auftragsleistungen konnten nicht geprüft werden. Aktualisieren Sie die Prüfung."
-      : "Не удалось проверить услуги заказа. Повторите проверку.";
-  }
   if (message === "invoice_billing_release_unavailable") {
     return de ? "Die Abrechnungsfreigabe konnte nicht geprüft werden. Versuchen Sie es erneut."
       : "Не удалось проверить разрешение бухгалтерии. Повторите проверку.";
@@ -25,10 +21,6 @@ export function invoiceCreationErrorMessage(error: unknown, lang: string, fallba
     return de
       ? "Für diesen Auftrag fehlt die Abrechnungsfreigabe. Buchhaltung oder Geschäftsführung müssen sie vor der Rechnungserstellung erteilen."
       : "Для этого заказа нет разрешения на выставление счёта. Его должен выдать бухгалтер или директор.";
-  }
-  if (message === "All order services must be approved before invoice creation") {
-    return de ? "Die ausgewählten Auftragsleistungen müssen vor der Rechnungserstellung genehmigt werden."
-      : "Перед созданием счёта необходимо утвердить выбранные услуги в заказе.";
   }
   if (message === "Cannot invoice a rejected or expired quote") {
     return de ? "Für ein abgelehntes oder abgelaufenes Angebot kann keine Rechnung erstellt werden."
@@ -55,14 +47,4 @@ export function invoiceCreationErrorMessage(error: unknown, lang: string, fallba
       : "В предложении нет позиций для выставления счёта. Проверьте услуги в заказе.";
   }
   return message;
-}
-
-export function invoiceServiceApproval(
-  sourceIds: string[], invoiceType: string, release?: InvoiceBillingRelease | null,
-): "approved" | "pending" | "unavailable" {
-  if (invoiceType === "advance" || !sourceIds.length) return "approved";
-  if (!release?.services) return "unavailable";
-  const services = new Map(release.services.map((service) => [service.id, service.status]));
-  if (sourceIds.some((id) => !services.has(id))) return "unavailable";
-  return sourceIds.some((id) => services.get(id) !== "approved") ? "pending" : "approved";
 }

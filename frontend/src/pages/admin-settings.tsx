@@ -165,6 +165,9 @@ const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "agency_bank_name", labelKey: "settings_agency_bank_name", inputType: "text" },
   { key: "agency_bank_swift", labelKey: "settings_agency_bank_swift", inputType: "text" },
   { key: "agency_bank_iban", labelKey: "settings_agency_bank_iban", inputType: "text" },
+  { key: "agency_vat_id", labelKey: "settings_agency_vat_id", inputType: "text" },
+  { key: "agency_tax_number", labelKey: "settings_agency_tax_number", inputType: "text" },
+  { key: "agency_country_code", labelKey: "settings_agency_country_code", inputType: "text", maxLength: 2 },
 ];
 
 const DOCUMENT_REQUIREMENT_SETTING_FIELDS: SettingFieldMeta[] = [
@@ -917,8 +920,33 @@ function useAdminSettingsPageContent() {
 
         {!loading && !error ? (
           <>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {SETTINGS_GROUPS.map((group) => {
+                const GroupIcon = group.icon;
+                return (
+                  <button
+                    key={group.id}
+                    type="button"
+                    onClick={() => openGroupSheet(group.id)}
+                    className="flex min-w-0 items-start gap-3 rounded-lg border border-border/70 bg-card px-3.5 py-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <GroupIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-semibold text-foreground">
+                        {tr[group.titleKey] ?? group.id}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {t.common_edit} · {group.fields.length}
+                      </span>
+                    </span>
+                    <Pencil className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  </button>
+                );
+              })}
+            </div>
             <DataTableSurface
               rows={settingsPagination.pagedRows}
+
               columns={settingsTableColumns}
               defaultDensity="comfortable"
               dictionary={t as unknown as Record<string, string>}

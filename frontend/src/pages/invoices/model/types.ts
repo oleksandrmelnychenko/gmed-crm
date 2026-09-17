@@ -60,6 +60,8 @@ export type InvoicePaymentTransaction = {
   invoice_id: string;
   transaction_type: "payment" | "reversal";
   reverses_transaction_id: string | null;
+  corrects_transaction_id?: string | null;
+  corrected_by_transaction_id?: string | null;
   reversed_by_transaction_id: string | null;
   is_reversed: boolean;
   amount_gross: unknown;

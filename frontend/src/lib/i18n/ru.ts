@@ -675,6 +675,9 @@ export const ru = {
   settings_agency_bank_name: "Банк",
   settings_agency_bank_swift: "SWIFT/BIC",
   settings_agency_bank_iban: "IBAN",
+  settings_agency_vat_id: "ИНН по НДС / USt-IdNr. (для e-счёта)",
+  settings_agency_tax_number: "Налоговый номер / Steuernummer (для e-счёта)",
+  settings_agency_country_code: "Код страны агентства (ISO, напр. DE)",
   settings_agency_hint:
     "Эти данные используются в стикерах, договорах, согласиях и финансовых документах.",
   settings_document_requirements: "Обязательные документы",

@@ -135,6 +135,9 @@ pub async fn update_setting(
         "agency_bank_name" => validate_string_setting(value, 160, true, "Agency bank name")?,
         "agency_bank_swift" => validate_string_setting(value, 32, true, "Agency SWIFT/BIC")?,
         "agency_bank_iban" => validate_string_setting(value, 64, true, "Agency IBAN")?,
+        "agency_vat_id" => validate_string_setting(value, 32, true, "Agency VAT ID")?,
+        "agency_tax_number" => validate_string_setting(value, 32, true, "Agency tax number")?,
+        "agency_country_code" => validate_string_setting(value, 2, false, "Agency country code")?,
         "required_patient_documents" => validate_required_patient_documents_setting(value)?,
         _ => validate_positive_integer_setting(key, value)?,
     };

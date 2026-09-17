@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchFile } from "@/lib/api";
-import { hasInvoiceBillingRelease, invoiceServiceApproval } from "../model/billing-release";
+import { hasInvoiceBillingRelease } from "../model/billing-release";
 
 import type {
   AccountingLedgerPayload,
@@ -80,15 +80,12 @@ export function fetchAccountingLedger(year: string, currency = "EUR") {
   );
 }
 
-export async function createInvoice(quoteId: string, payload: JsonPayload, orderId: string, sourceIds: string[] = []) {
+export async function createInvoice(quoteId: string, payload: JsonPayload, orderId: string) {
   // Use fresh order state so a revoked release cannot be submitted from a stale form.
   const release = await fetchInvoiceBillingRelease(orderId);
   if (!hasInvoiceBillingRelease(release)) {
     throw new Error("Order requires billing release before invoice creation");
   }
-  const approval = invoiceServiceApproval(sourceIds, String(payload.invoice_type), release);
-  if (approval === "unavailable") throw new Error("invoice_services_unavailable");
-  if (approval === "pending") throw new Error("All order services must be approved before invoice creation");
   return postJson<InvoiceItem>(`/quotes/${quoteId}/invoices`, payload);
 }
 
@@ -125,6 +122,17 @@ export function reverseInvoicePayment(
 ) {
   return postJson(
     `/invoices/${invoiceId}/payments/${paymentId}/reversal`,
+    payload,
+  );
+}
+
+export function correctInvoicePayment(
+  invoiceId: string,
+  paymentId: string,
+  payload: JsonPayload,
+) {
+  return postJson(
+    `/invoices/${invoiceId}/payments/${paymentId}/correction`,
     payload,
   );
 }
@@ -190,6 +198,10 @@ export function createDunningEvent(invoiceId: string, payload: JsonPayload) {
 
 export function fetchInvoicePdfBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
+}
+
+export function fetchInvoiceZugferdXmlBlob(invoiceId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/zugferd.xml`);
 }
 
 export function fetchAccountingLedgerExportBlob(year: string, currency = "EUR") {

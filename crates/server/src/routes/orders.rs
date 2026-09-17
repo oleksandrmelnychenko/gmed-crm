@@ -17,10 +17,12 @@ use gmed_domain::role::Role;
 use sqlx::Row;
 
 mod incoming_invoices;
+mod pipeline;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(incoming_invoices::router())
+        .merge(pipeline::router())
         .route("/me/followup-milestones", get(list_my_followup_milestones))
         .route("/orders", get(list_orders).post(create_order))
         .route("/orders/debt-management", get(list_debt_management_queue))
@@ -402,7 +404,7 @@ fn is_valid_external_invoice_transition(current: &str, next: &str) -> bool {
         || matches!(
             (current, next),
             ("expected", "received" | "cancelled")
-                | ("received", "approved" | "overdue" | "cancelled")
+                | ("received", "approved" | "cancelled")
                 | ("approved", "paid" | "overdue" | "cancelled")
                 | ("overdue", "paid" | "cancelled")
         )
@@ -8470,12 +8472,15 @@ pub async fn run_external_invoice_deadline_scheduler_once(
 
     let candidates = sqlx::query(
         r#"SELECT ei.id, ei.order_id, ei.patient_id, ei.external_invoice_number, ei.due_date,
-                  ei.amount_gross, ei.currency, o.order_number
+                  ei.amount_gross, ei.currency, o.order_number,
+                  COALESCE(provider.name, ei.supplier_name) AS supplier_name
            FROM external_invoices ei
-           JOIN orders o ON o.id = ei.order_id
+           -- Company invoices carry no order; they are tracked in company finance.
+           LEFT JOIN orders o ON o.id = ei.order_id
+           LEFT JOIN providers provider ON provider.id = ei.provider_id
            WHERE ei.due_date IS NOT NULL
              AND ei.due_date < $1
-             AND ei.status NOT IN ('paid', 'cancelled', 'overdue')
+             AND ei.status = 'approved'
            ORDER BY ei.due_date, ei.created_at"#,
     )
     .bind(today)
@@ -8484,10 +8489,15 @@ pub async fn run_external_invoice_deadline_scheduler_once(
 
     for row in candidates {
         let external_invoice_id: Uuid = row.try_get("id").unwrap_or_default();
-        let order_id: Uuid = row.try_get("order_id").unwrap_or_default();
-        let patient_id: Uuid = row.try_get("patient_id").unwrap_or_default();
+        let order_id: Option<Uuid> = row.try_get("order_id").unwrap_or_default();
+        let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
         let external_invoice_number: String =
             row.try_get("external_invoice_number").unwrap_or_default();
+        // The notification opens the order, or the invoice in company finance.
+        let (entity_type, entity_id) = match order_id {
+            Some(order_id) => ("order", order_id),
+            None => ("external_invoice", external_invoice_id),
+        };
         let due_date: chrono::NaiveDate = row.try_get("due_date").unwrap_or(today);
         let amount_gross: rust_decimal::Decimal = row
             .try_get("amount_gross")
@@ -8495,13 +8505,17 @@ pub async fn run_external_invoice_deadline_scheduler_once(
         let currency: String = row
             .try_get("currency")
             .unwrap_or_else(|_| "EUR".to_string());
-        let order_number: String = row.try_get("order_number").unwrap_or_default();
+        let subject = row
+            .try_get::<Option<String>, _>("order_number")
+            .unwrap_or_default()
+            .or(row.try_get("supplier_name").unwrap_or_default())
+            .unwrap_or_else(|| external_invoice_number.clone());
 
         let result = sqlx::query(
             r#"UPDATE external_invoices
                SET status = 'overdue'
                WHERE id = $1
-                 AND status NOT IN ('paid', 'cancelled', 'overdue')"#,
+                 AND status = 'approved'"#,
         )
         .bind(external_invoice_id)
         .execute(&state.db)
@@ -8516,12 +8530,12 @@ pub async fn run_external_invoice_deadline_scheduler_once(
         for recipient_id in &recipients {
             let notification_row = sqlx::query(
                 r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-                   VALUES ($1, $2, $3, $4, 'order', $5)
+                   VALUES ($1, $2, $3, $4, $5, $6)
                    RETURNING id, user_id"#,
             )
             .bind(recipient_id)
             .bind("external_invoice_overdue")
-            .bind(format!("External invoice overdue for {order_number}"))
+            .bind(format!("External invoice overdue for {subject}"))
             .bind(format!(
                 "External invoice {} became overdue on {} ({} {}).",
                 external_invoice_number,
@@ -8529,7 +8543,8 @@ pub async fn run_external_invoice_deadline_scheduler_once(
                 amount_gross,
                 currency
             ))
-            .bind(order_id)
+            .bind(entity_type)
+            .bind(entity_id)
             .fetch_one(&state.db)
             .await?;
             let notification_id: Uuid = notification_row.try_get("id").unwrap_or_default();
@@ -8541,8 +8556,8 @@ pub async fn run_external_invoice_deadline_scheduler_once(
                     "notification.created",
                     Some(notification_id),
                     serde_json::json!({
-                        "entity_type": "order",
-                        "entity_id": order_id,
+                        "entity_type": entity_type,
+                        "entity_id": entity_id,
                     }),
                 )
                 .await;
@@ -8553,8 +8568,8 @@ pub async fn run_external_invoice_deadline_scheduler_once(
         state.audit_sender.try_send(audit::domain_event(
             "auto_mark_external_invoice_overdue".to_string(),
             None,
-            "order",
-            Some(order_id),
+            entity_type,
+            Some(entity_id),
             serde_json::json!({
                 "external_invoice_id": external_invoice_id,
                 "external_invoice_number": external_invoice_number,
@@ -8562,6 +8577,9 @@ pub async fn run_external_invoice_deadline_scheduler_once(
                 "due_date": due_date.to_string(),
             }),
         ));
+        let Some(order_id) = order_id else {
+            continue;
+        };
         crate::realtime::publish_order_event(
             state,
             None,

@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { AlertCircle, CheckCircle2, ExternalLink, FileText, LoaderCircle, RefreshCw } from "lucide-react";
-import { StaffLink } from "@/components/staff-link";
+import { AlertCircle, CheckCircle2, FileText, LoaderCircle, RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -13,7 +12,7 @@ import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { fetchInvoiceBillingRelease, grantInvoiceBillingRelease } from "../data/invoice-api";
-import { canGrantInvoiceBillingRelease, hasInvoiceBillingRelease, invoiceServiceApproval } from "../model/billing-release";
+import { canGrantInvoiceBillingRelease, hasInvoiceBillingRelease } from "../model/billing-release";
 import {
   INVOICE_TYPES,
   calculateInvoiceSelectionTotals,
@@ -111,26 +110,15 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (formBusy || billingLoading || !billingGranted || billing?.error || !orderId || optionsBusy || optionsError || !valid || serviceApproval !== "approved") return;
+    if (formBusy || billingLoading || !billingGranted || billing?.error || !orderId || optionsBusy || optionsError || !valid) return;
     onSubmit(event);
   }
   const lines = selectedQuote?.line_items ?? [];
   const totals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
   const valid = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType)) && isInvoiceSelectionValid(lines, form) && totals.gross > 0;
-  const sourceIds = form.selectedLineIndexes.flatMap((index) => {
-    const id = lines[index]?.source_order_leistung_id;
-    return id ? [id] : [];
-  });
-  const serviceApproval = invoiceServiceApproval(sourceIds, form.invoiceType, billing?.release);
-  const approvalMessage = serviceApproval === "pending"
-    ? (de ? "Die ausgewählten Leistungen müssen im Auftrag genehmigt werden. Öffnen Sie die Leistungen und prüfen Sie danach erneut."
-      : "Утвердите выбранные услуги в заказе, затем повторите проверку.")
-    : serviceApproval === "unavailable"
-      ? (de ? "Die Auftragsleistungen konnten nicht geprüft werden. Wiederholen Sie die Prüfung."
-        : "Не удалось проверить услуги заказа. Повторите проверку.") : null;
   const footerMessage = error || optionsError || billing?.error || (!billingLoading && selectedQuote ? (
     !billingGranted ? (de ? "Für diesen Auftrag ist eine Abrechnungsfreigabe erforderlich." : "Для заказа нужно разрешение бухгалтерии.")
-      : approvalMessage || (!valid ? (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.") : null)
+      : (!valid ? (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.") : null)
   ) : null);
   const footerError = Boolean(error || optionsError || billing?.error);
   const final = form.invoiceType === "final";
@@ -234,7 +222,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                         ) : null}
                       </>
                     ) : null}
-                    {!billingLoading && serviceApproval !== "approved" ? <p className="text-xs leading-5 text-amber-700 dark:text-amber-400">{approvalMessage}</p> : null}
                   </section>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -299,8 +286,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                               }} />
                             <div className="min-w-0">
                               <p className="break-words text-sm font-medium">{name}</p>
-                              {!billingLoading && selected && line.source_order_leistung_id && invoiceServiceApproval([line.source_order_leistung_id], form.invoiceType, billing?.release) === "pending"
-                                ? <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">{de ? "Noch nicht genehmigt" : "Услуга не утверждена"}</p> : null}
                               <p className="mt-1 text-xs leading-5 text-muted-foreground">{de ? "Preis netto" : "Цена без НДС"}: {money(line.unit_price)} · {t.invoices_vat}: {line.vat_rate}%</p>
                               {notes && notes !== line.description.trim() ? (
                                 <details className="mt-1 text-xs text-muted-foreground">
@@ -367,7 +352,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
             {footerMessage ? <div role={footerError ? "alert" : "status"} className={cn("flex max-h-[min(24dvh,9rem)] items-start gap-2 overflow-y-auto border-b px-4 py-2.5 text-xs leading-5 sm:px-5", footerError ? "border-destructive/20 bg-destructive/5 text-destructive" : "border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-950/20 dark:text-amber-300")}>
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 break-words">{footerMessage}
-                {orderId && approvalMessage ? <StaffLink to={`/orders?order=${encodeURIComponent(orderId)}&section=services`} target="_blank" rel="noopener noreferrer" className="mt-1 flex w-fit items-center gap-1 font-medium underline underline-offset-2">{de ? "Auftragsleistungen öffnen" : "Открыть услуги заказа"}<ExternalLink className="size-3" /></StaffLink> : null}
               </div>
               <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" disabled={formBusy || billingLoading || optionsBusy} onClick={() => { setBillingReload((current) => current + 1); onRetry(); }}>{de ? "Prüfen" : "Проверить"}</Button>
             </div> : null}
@@ -375,7 +359,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
             <p className="text-sm tabular-nums"><span className="text-muted-foreground">{t.invoices_total}: </span><strong>{money(totals.gross)}</strong></p>
             <div className="flex gap-2">
               <Button type="button" variant="outline" disabled={formBusy} onClick={() => onOpenChange(false)}>{t.common_cancel}</Button>
-              <Button type="submit" requireChanges={false} disabled={formBusy || billingLoading || !billingGranted || serviceApproval !== "approved" || Boolean(billing?.error) || optionsBusy || Boolean(optionsError) || !valid}>
+              <Button type="submit" requireChanges={false} disabled={formBusy || billingLoading || !billingGranted || Boolean(billing?.error) || optionsBusy || Boolean(optionsError) || !valid}>
                 {formBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                 {de ? "Rechnung erstellen" : "Создать счёт"}
               </Button>

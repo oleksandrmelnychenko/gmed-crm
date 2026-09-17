@@ -7,6 +7,7 @@ import {
   ReceiptText,
   ShieldCheck,
   Wallet,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -14,6 +15,7 @@ import { uiText, type Lang } from "@/lib/i18n";
 
 export type OrderSectionKey =
   | "overview"
+  | "pipeline"
   | "gates"
   | "planning"
   | "execution"
@@ -38,6 +40,12 @@ export const ORDER_WORKSPACE_SECTIONS: readonly OrderSectionDefinition[] = [
     group: "context",
     icon: FileText,
     labelKey: "orders_section_overview",
+  },
+  {
+    key: "pipeline",
+    group: "workflow",
+    icon: Workflow,
+    labelKey: "orders_section_pipeline",
   },
   {
     key: "gates",

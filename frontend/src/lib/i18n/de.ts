@@ -676,6 +676,9 @@ export const de = {
   settings_agency_bank_name: "Bank",
   settings_agency_bank_swift: "SWIFT/BIC",
   settings_agency_bank_iban: "IBAN",
+  settings_agency_vat_id: "USt-IdNr. (für E-Rechnung)",
+  settings_agency_tax_number: "Steuernummer (für E-Rechnung)",
+  settings_agency_country_code: "Ländercode der Agentur (ISO, z. B. DE)",
   settings_agency_hint:
     "Diese Angaben werden in Patientenetiketten, Verträgen, Einwilligungen und Finanzdokumenten verwendet.",
   settings_document_requirements: "Pflichtunterlagen",

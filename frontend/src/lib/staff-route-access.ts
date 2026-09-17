@@ -46,6 +46,14 @@ const ROLES_CONTRACTS_INVOICES = [
   "billing",
 ] as const satisfies readonly StaffRole[];
 
+// Mirrors can_read_invoices on the server; the page itself limits what each role may change.
+const ROLES_INVOICES = [
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "billing",
+] as const satisfies readonly StaffRole[];
+
 const ROLES_FINANCE_CATALOG = [
   "ceo",
   "billing",
@@ -438,7 +446,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     id: "invoices",
     match: "exact",
     path: "/invoices",
-    roles: ROLES_CONTRACTS_INVOICES,
+    roles: ROLES_INVOICES,
     nav: { section: "accounting", labelKey: "nav_invoices" },
   },
   {

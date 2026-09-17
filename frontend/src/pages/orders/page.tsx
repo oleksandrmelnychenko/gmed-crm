@@ -212,6 +212,7 @@ import type {
 import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderGroupPanel } from "./ui/order-group-panel";
+import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
   OrderServiceGroupPanel,
@@ -4587,6 +4588,30 @@ function useOrdersPageContent() {
                     </SectionCard>
                   </>
                 ) : null}
+                {shouldRenderOrderSection("pipeline") ? (
+                  <SectionCard
+                    title={lang === "de" ? "Pipeline des Auftrags" : "Пайплайн заказа"}
+                    description={
+                      lang === "de"
+                        ? "Medizinische Akte, Anbieter und Ärzte, Termine, Durchführung und Abschluss – der Stand ergibt sich aus den Systemdaten."
+                        : "Медицинская часть, провайдеры и врачи, приёмы, выполнение и закрытие — состояние этапов считается по данным системы."
+                    }
+                  >
+                    <OrderPipelinePanel
+                      orderId={orderDetail.id}
+                      lang={lang}
+                      locale={locale}
+                      reloadNonce={reloadNonce}
+                      appointmentsHref={detailAppointmentsHref}
+                      providersHref={detailProvidersHref}
+                      onOpenSection={(section) => {
+                        staffGo(buildOrderWorkspaceHref(orderDetail.id, section, detailPatientId || ""));
+                        orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
+                    />
+                  </SectionCard>
+                ) : null}
+
                 {shouldRenderOrderSection("gates") && orderDetail.process_gates ? (
                   <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">

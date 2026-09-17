@@ -1213,3 +1213,77 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
     .unwrap();
     assert_eq!(notifications, 1);
 }
+
+#[tokio::test]
+async fn deadline_scheduler_marks_approved_company_invoice_overdue_and_skips_unapproved() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("company-invoice-overdue");
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let bearer = auth_header_for(admin_id, "ceo");
+    let due_date = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
+
+    let mut invoice_ids = Vec::new();
+    for suffix in ["approved", "received"] {
+        let (status, created) = json_request(
+            &app,
+            "POST",
+            "/api/v1/external-invoices/company",
+            &bearer,
+            Some(json!({
+                "supplier_name": format!("Supplier {tag}"),
+                "external_invoice_number": format!("RE-{tag}-{suffix}"),
+                "invoice_date": due_date,
+                "due_date": due_date,
+                "amount_net": 100.0,
+                "amount_vat": 19.0,
+                "amount_gross": 119.0,
+                "currency": "EUR"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        let invoice_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+        sqlx::query("UPDATE external_invoices SET status = $2 WHERE id = $1")
+            .bind(invoice_id)
+            .bind(suffix)
+            .execute(&pool)
+            .await
+            .unwrap();
+        invoice_ids.push(invoice_id);
+    }
+
+    let state = AppState::new(
+        pool.clone(),
+        TEST_SECRET,
+        SettingsCache::new(TokenSettings::default()),
+    );
+    gmed_server::routes::orders::run_external_invoice_deadline_scheduler_once(&state)
+        .await
+        .expect("company invoice deadline run");
+
+    let statuses: Vec<String> = sqlx::query_scalar(
+        "SELECT status FROM external_invoices WHERE id = ANY($1) ORDER BY array_position($1, id)",
+    )
+    .bind(&invoice_ids)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(statuses, vec!["overdue", "received"]);
+
+    let notifications: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM user_notifications
+           WHERE user_id = $1
+             AND kind = 'external_invoice_overdue'
+             AND entity_type = 'external_invoice'
+             AND entity_id = $2"#,
+    )
+    .bind(billing_id)
+    .bind(invoice_ids[0])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notifications, 1);
+}
