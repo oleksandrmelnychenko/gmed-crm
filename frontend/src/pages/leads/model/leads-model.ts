@@ -23,6 +23,11 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "lead is not selected": ["Обращение не выбрано", "Kein Lead ausgewählt"],
   "lead could not be saved": ["Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"],
   "lead not found": ["Лид больше не найден", "Der Lead wurde nicht gefunden"],
+  // A converted lead is closed for intake work; reloading the page cannot help.
+  "converted lead must use its patient context": [
+    "Лид уже конвертирован в пациента. Создавайте и меняйте документы в карточке пациента или заказа",
+    "Der Lead wurde bereits in einen Patienten umgewandelt. Dokumente bitte in der Patienten- oder Auftragskarte erstellen und ändern",
+  ],
   "case not found": ["Медицинское дело больше не найдено", "Der medizinische Fall wurde nicht gefunden"],
   "document not found": ["Документ больше не найден", "Das Dokument wurde nicht gefunden"],
   "attachment not found": ["Файл больше не найден", "Die Datei wurde nicht gefunden"],

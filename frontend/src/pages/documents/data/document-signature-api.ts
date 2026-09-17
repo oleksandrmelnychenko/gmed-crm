@@ -20,7 +20,11 @@ export type SignatureState = {
 };
 export const isSignaturePending = (status: SignatureStatus) => ["submitting", "submission_unknown", "pending"].includes(status);
 export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/documents/${id}/signature-requests`, { forceFresh: true });
-export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string, signingDocumentId?: string) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}), ...(signingDocumentId ? { signing_document_id: signingDocumentId } : {}) }) });
+// Every PDF of a package is malware-scanned before anything is sent, and a
+// standalone scanner start takes several seconds. Aborting at the default
+// timeout cancelled a request that would have succeeded moments later.
+const CREATE_SIGNATURE_REQUEST_TIMEOUT_MS = 90_000;
+export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string, signingDocumentId?: string) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS, body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}), ...(signingDocumentId ? { signing_document_id: signingDocumentId } : {}) }) });
 export const signatureAction = (id: string, action: "refresh" | "withdraw") => apiFetch(`/document-signature-requests/${id}/${action}`, { method: "POST" });
 export type SignatureConnection = { configured: boolean; region: "DE"; mode: "demo" | "live"; username: string | null; source: "database" | "environment" };
 export const fetchSignatureConnection = () => apiFetch<SignatureConnection>("/document-signatures/connection", { forceFresh: true });

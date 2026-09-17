@@ -109,6 +109,13 @@ describe("lead errors", () => {
   const ru = (ruText: string) => ruText;
   const de = (_ruText: string, deText: string) => deText;
 
+  it("names the real reason when a converted lead rejects intake work", () => {
+    // The backend answers 409, whose generic text ("data changed, reload") would mislead.
+    const conflict = Object.assign(new Error("Converted lead must use its patient context"), { status: 409 });
+    expect(leadErrorMessage(conflict, ru)).toContain("Лид уже конвертирован в пациента");
+    expect(leadErrorMessage(conflict, de)).toContain("bereits in einen Patienten umgewandelt");
+  });
+
   it("translates known backend messages in both interface languages", () => {
     expect(leadErrorMessage(new Error("Case intake is incomplete"), ru)).toBe(
       "Заполните причину обращения и анамнез",
