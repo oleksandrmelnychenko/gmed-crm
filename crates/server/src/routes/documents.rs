@@ -18508,9 +18508,10 @@ async fn load_lead_cost_estimate_catalog_selection(
                 "Failed to decode specialization work type maximum price",
             ));
         };
-        let duration = f64::from(duration_hours);
-        total_min += min_price * duration;
-        total_max += max_price * duration;
+        // A catalog price is the price of the whole service; its duration is
+        // informational and never multiplies the price.
+        total_min += min_price;
+        total_max += max_price;
 
         let localized_sections = localized_estimate_work_type_sections(
             additional_language,
@@ -18524,7 +18525,7 @@ async fn load_lead_cost_estimate_catalog_selection(
                 .unwrap_or_default(),
         );
         let price_range = format_eur_range(min_price, max_price);
-        let line_total_range = format_eur_range(min_price * duration, max_price * duration);
+        let line_total_range = price_range.clone();
         line_items.push(GeneratedContractLineItem {
             description_items: None,
             localized_sections,
