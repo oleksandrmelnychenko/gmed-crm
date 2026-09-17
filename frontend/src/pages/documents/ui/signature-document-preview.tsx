@@ -7,22 +7,32 @@ import { apiFetchFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { signaturePreviewError, signaturePreviewErrorMessage, type SignaturePreviewError } from "./signature-preview-error";
 
-type Props = { documentId: string; onReady: (id: string) => void };
+export type SignaturePreviewSource = { id: string; title: string; kind: "signing" | "review" };
+// `packageDocuments` lists every PDF of one signing package, in sending order.
+// They render as one continuous scroll; `onReady` reports each of them.
+type Props = { documentId: string; onReady: (id: string) => void; packageDocuments?: SignaturePreviewSource[] };
+type LoadedPdf = { source: SignaturePreviewSource | null; id: string; pdf: PDFDocumentProxy };
 
 const DEFAULT_ZOOM = 0.85;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 1.75;
 const ZOOM_STEP = 0.15;
 
-export function SignatureDocumentPreview(props: Props) {
-  const [revision, setRevision] = useState(0);
-  return <PdfPreview key={`${props.documentId}:${revision}`} {...props} onRetry={() => setRevision(value => value + 1)} />;
+function sourceKindLabel(kind: SignaturePreviewSource["kind"], lang: string) {
+  if (kind === "signing") return lang === "de" ? "zur Unterschrift" : "на подпись";
+  return lang === "de" ? "zur Kenntnisnahme" : "для ознакомления";
 }
 
-function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => void }) {
+export function SignatureDocumentPreview(props: Props) {
+  const [revision, setRevision] = useState(0);
+  const sourceKey = props.packageDocuments?.map(source => source.id).join(",") ?? props.documentId;
+  return <PdfPreview key={`${sourceKey}:${revision}`} {...props} onRetry={() => setRevision(value => value + 1)} />;
+}
+
+function PdfPreview({ documentId, packageDocuments, onReady, onRetry }: Props & { onRetry: () => void }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
-  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
+  const [pdfs, setPdfs] = useState<LoadedPdf[] | null>(null);
   const [error, setError] = useState<SignaturePreviewError | null>(null);
   const [rendering, setRendering] = useState(true);
   const [pageNumber, setPageNumber] = useState(1);
@@ -33,35 +43,39 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
   const pageRef = useRef<HTMLDivElement>(null);
   const currentPageRef = useRef(1);
   const textId = useId();
+  // The component is keyed by its document ids, so the first list stays valid.
+  const [sources] = useState<SignaturePreviewSource[] | null>(() => packageDocuments && packageDocuments.length > 1 ? packageDocuments : null);
+  const pageCount = pdfs?.reduce((total, loaded) => total + loaded.pdf.numPages, 0) ?? 0;
 
   useEffect(() => {
     const controller = new AbortController();
-    let loadingTask: PDFDocumentLoadingTask | undefined;
+    const loadingTasks: PDFDocumentLoadingTask[] = [];
     onReady("");
     void (async () => {
-      const [file, pdfjs] = await Promise.all([
-        apiFetchFile(`/documents/${documentId}/download`, { cache: "no-store", signal: controller.signal }),
-        import("pdfjs-dist/legacy/build/pdf.mjs"),
-      ]);
-      if (controller.signal.aborted) return;
-      // Stored PDFs may be served as application/octet-stream. Validate their
-      // actual bytes with the PDF parser rather than relying on the HTTP type.
-      const data = await file.blob.arrayBuffer();
-      if (controller.signal.aborted) return;
+      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
       pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
       const resourcePath = import.meta.env.DEV ? "/node_modules/pdfjs-dist/" : `${import.meta.env.BASE_URL}pdfjs/${pdfjs.version}/`;
       const resources = new URL(resourcePath, window.location.href).href;
-      loadingTask = pdfjs.getDocument({
-        data, cMapUrl: `${resources}cmaps/`, cMapPacked: true,
-        standardFontDataUrl: `${resources}standard_fonts/`, wasmUrl: `${resources}wasm/`, iccUrl: `${resources}iccs/`,
-      });
-      // Encrypted PDFs need to be unlocked before they can be sent for signing.
-      loadingTask.onPassword = () => { if (!controller.signal.aborted) setError("password"); void loadingTask?.destroy(); };
-      const document = await loadingTask.promise;
-      if (!controller.signal.aborted) setPdf(document);
+      const targets = sources?.map(source => ({ source, id: source.id })) ?? [{ source: null, id: documentId }];
+      const loaded = await Promise.all(targets.map(async target => {
+        const file = await apiFetchFile(`/documents/${target.id}/download`, { cache: "no-store", signal: controller.signal });
+        // Stored PDFs may be served as application/octet-stream. Validate their
+        // actual bytes with the PDF parser rather than relying on the HTTP type.
+        const data = await file.blob.arrayBuffer();
+        if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
+        const loadingTask = pdfjs.getDocument({
+          data, cMapUrl: `${resources}cmaps/`, cMapPacked: true,
+          standardFontDataUrl: `${resources}standard_fonts/`, wasmUrl: `${resources}wasm/`, iccUrl: `${resources}iccs/`,
+        });
+        loadingTasks.push(loadingTask);
+        // Encrypted PDFs need to be unlocked before they can be sent for signing.
+        loadingTask.onPassword = () => { if (!controller.signal.aborted) setError("password"); void loadingTask.destroy(); };
+        return { ...target, pdf: await loadingTask.promise };
+      }));
+      if (!controller.signal.aborted) setPdfs(loaded);
     })().catch(cause => { if (!controller.signal.aborted) setError(current => current ?? signaturePreviewError(cause, "load")); });
-    return () => { controller.abort(); void loadingTask?.destroy(); };
-  }, [documentId, onReady]);
+    return () => { controller.abort(); loadingTasks.forEach(task => { void task.destroy(); }); };
+  }, [documentId, sources, onReady]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -72,7 +86,7 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
   }, []);
 
   useEffect(() => {
-    if (!pdf || width <= 0) return;
+    if (!pdfs || width <= 0) return;
     let cancelled = false;
     const tasks = new Set<RenderTask>();
     const container = pageRef.current;
@@ -81,8 +95,18 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
     container?.replaceChildren();
     void (async () => {
       const textByPage: string[] = [];
-      for (let currentPage = 1; currentPage <= pdf.numPages; currentPage += 1) {
-        const page = await pdf.getPage(currentPage);
+      // Pages are numbered through the whole package, as the recipient scrolls it.
+      const pages = pdfs.flatMap((loaded, index) => Array.from({ length: loaded.pdf.numPages }, (_, offset) => ({ loaded, index, documentPage: offset + 1 })));
+      for (const [pageIndex, { loaded, index, documentPage }] of pages.entries()) {
+        const currentPage = pageIndex + 1;
+        if (loaded.source && documentPage === 1) {
+          const header = document.createElement("div");
+          header.className = "w-full rounded-md border border-border/70 bg-card px-3 py-2 text-xs font-medium text-foreground shadow-xs";
+          header.dataset.pdfDocument = loaded.id;
+          header.textContent = `${index + 1} / ${pdfs.length} · ${loaded.source.title} · ${sourceKindLabel(loaded.source.kind, lang)}`;
+          container?.append(header);
+        }
+        const page = await loaded.pdf.getPage(documentPage);
         if (cancelled) return;
         const natural = page.getViewport({ scale: 1 });
         const viewport = page.getViewport({ scale: width / natural.width * zoom });
@@ -95,9 +119,9 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
         canvas.style.height = `${viewport.height}px`;
         canvas.className = "block bg-white shadow-sm";
         canvas.setAttribute("role", "img");
-        canvas.setAttribute("aria-label", lang === "de" ? `PDF, Seite ${currentPage}` : `PDF, страница ${currentPage}`);
+        canvas.setAttribute("aria-label", `${loaded.source ? `${loaded.source.title}. ` : ""}${lang === "de" ? `PDF, Seite ${currentPage}` : `PDF, страница ${currentPage}`}`);
         canvas.setAttribute("aria-describedby", textId);
-        canvas.dataset.documentId = documentId;
+        canvas.dataset.documentId = loaded.id;
 
         const pageContainer = document.createElement("div");
         pageContainer.className = "flex w-full justify-center";
@@ -118,17 +142,18 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
 
       if (cancelled) return;
       setPageText(textByPage.join(" "));
-      setRendering(false); onReady(documentId);
+      setRendering(false); pdfs.forEach(loaded => onReady(loaded.id));
       window.requestAnimationFrame(() => {
         const viewport = viewportRef.current;
         const restoredPage = container?.querySelector<HTMLElement>(`[data-pdf-page="${pageToRestore}"]`);
-        if (!viewport || !restoredPage) return;
+        // Page 1 keeps the natural top, where a package shows its first header.
+        if (!viewport || !restoredPage || pageToRestore === 1) return;
         const top = viewport.scrollTop + restoredPage.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 12;
         viewport.scrollTo({ top });
       });
     })().catch(cause => { if (!cancelled) { setError(signaturePreviewError(cause, "render")); onReady(""); } });
     return () => { cancelled = true; tasks.forEach(task => task.cancel()); container?.replaceChildren(); };
-  }, [pdf, width, zoom, lang, documentId, onReady, textId]);
+  }, [pdfs, width, zoom, lang, onReady, textId]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -162,17 +187,30 @@ function PdfPreview({ documentId, onReady, onRetry }: Props & { onRetry: () => v
     viewport.scrollTo({ top, behavior: "smooth" });
   };
 
+  const goToDocument = (id: string) => {
+    const viewport = viewportRef.current;
+    const header = pageRef.current?.querySelector<HTMLElement>(`[data-pdf-document="${id}"]`);
+    if (!viewport || !header) return;
+    const top = viewport.scrollTop + header.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 12;
+    viewport.scrollTo({ top, behavior: "smooth" });
+  };
+
   return <div aria-label={tx("PDF для подписи", "PDF zur Unterschrift")} className="m-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-muted/30 shadow-sm">
+    {sources ? <nav aria-label={tx("Документы пакета", "Dokumente des Pakets")} className="flex shrink-0 flex-wrap gap-1.5 border-b border-border/70 bg-card px-2 py-1.5">
+      {sources.map((source, index) => <Button key={source.id} type="button" variant="outline" size="sm" className="h-auto min-h-7 max-w-full whitespace-normal py-1 text-left text-xs" disabled={rendering || Boolean(error)} onClick={() => goToDocument(source.id)}>
+        {index + 1}. {source.title} · <span className={source.kind === "signing" ? "text-[var(--brand)]" : "text-muted-foreground"}>{sourceKindLabel(source.kind, lang)}</span>
+      </Button>)}
+    </nav> : null}
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-1 border-b border-border/70 bg-card px-2 py-1.5">
       <div className="flex items-center gap-1">
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Предыдущая страница", "Vorherige Seite")} disabled={!pdf || pageNumber === 1 || Boolean(error)} onClick={() => goToPage(pageNumber - 1)}><ChevronLeft className="size-4" /></Button>
-        <span aria-live="polite" className="min-w-12 text-center text-xs tabular-nums">{pdf ? `${pageNumber} / ${pdf.numPages}` : "—"}</span>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Следующая страница", "Nächste Seite")} disabled={!pdf || pageNumber === pdf.numPages || Boolean(error)} onClick={() => goToPage(pageNumber + 1)}><ChevronRight className="size-4" /></Button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Предыдущая страница", "Vorherige Seite")} disabled={!pdfs || pageNumber === 1 || Boolean(error)} onClick={() => goToPage(pageNumber - 1)}><ChevronLeft className="size-4" /></Button>
+        <span aria-live="polite" className="min-w-12 text-center text-xs tabular-nums">{pdfs ? `${pageNumber} / ${pageCount}` : "—"}</span>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Следующая страница", "Nächste Seite")} disabled={!pdfs || pageNumber === pageCount || Boolean(error)} onClick={() => goToPage(pageNumber + 1)}><ChevronRight className="size-4" /></Button>
       </div>
       <div className="flex items-center gap-1">
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Уменьшить", "Verkleinern")} disabled={!pdf || zoom <= MIN_ZOOM || Boolean(error)} onClick={() => setZoom(value => Math.max(MIN_ZOOM, Number((value - ZOOM_STEP).toFixed(2))))}><Minus className="size-4" /></Button>
-        <Button type="button" variant="ghost" size="sm" title={tx("Подогнать по ширине", "An Breite anpassen")} disabled={!pdf || Boolean(error)} onClick={() => setZoom(1)}>{zoom === 1 ? tx("По ширине", "Seitenbreite") : `${Math.round(zoom * 100)}%`}</Button>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Увеличить", "Vergrößern")} disabled={!pdf || zoom >= MAX_ZOOM || Boolean(error)} onClick={() => setZoom(value => Math.min(MAX_ZOOM, Number((value + ZOOM_STEP).toFixed(2))))}><Plus className="size-4" /></Button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Уменьшить", "Verkleinern")} disabled={!pdfs || zoom <= MIN_ZOOM || Boolean(error)} onClick={() => setZoom(value => Math.max(MIN_ZOOM, Number((value - ZOOM_STEP).toFixed(2))))}><Minus className="size-4" /></Button>
+        <Button type="button" variant="ghost" size="sm" title={tx("Подогнать по ширине", "An Breite anpassen")} disabled={!pdfs || Boolean(error)} onClick={() => setZoom(1)}>{zoom === 1 ? tx("По ширине", "Seitenbreite") : `${Math.round(zoom * 100)}%`}</Button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={tx("Увеличить", "Vergrößern")} disabled={!pdfs || zoom >= MAX_ZOOM || Boolean(error)} onClick={() => setZoom(value => Math.min(MAX_ZOOM, Number((value + ZOOM_STEP).toFixed(2))))}><Plus className="size-4" /></Button>
       </div>
     </div>
     <div ref={viewportRef} className="relative h-[420px] min-h-[300px] overflow-auto lg:h-auto lg:min-h-0 lg:flex-1">

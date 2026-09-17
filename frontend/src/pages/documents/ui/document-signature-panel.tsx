@@ -61,7 +61,7 @@ function requestStatusClassName(status: SignatureStatus) {
   return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300";
 }
 
-export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, previewedDocumentIds = [], expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; onPreviewRelated?: (id: string, kind: "signing" | "review") => void; previewedDocumentIds?: string[]; expanded?: boolean; previewReady?: boolean }) {
+export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onStateChange, onPreviewResult, onComposeNew, onPreviewRelated, onPackageSelectionChange, previewedDocumentIds = [], expanded = false, previewReady = true }: { documentId: string; onDone?: () => void; onDirtyChange?: (dirty: boolean) => void; onStateChange?: (state: SignatureState) => void; onPreviewResult?: (request: SignatureRequest) => void; onComposeNew?: () => void; onPreviewRelated?: (id: string, kind: "signing" | "review") => void; onPackageSelectionChange?: (selection: { signingDocumentId: string; attachmentId: string }) => void; previewedDocumentIds?: string[]; expanded?: boolean; previewReady?: boolean }) {
   const { lang } = useLang();
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [open, setOpen] = useState(expanded);
@@ -93,6 +93,10 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const selectedSigners = signers.filter((_, index) => !excludedSigners.includes(index));
   const dirty = confirmed || excludedSigners.length > 0 || JSON.stringify(signers) !== JSON.stringify(baseline);
   useLayoutEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  const attachmentId = selectedAttachment || (state?.review_package?.documents.length === 1 ? state.review_package.documents[0].id : "");
+  const signingDocumentId = selectedSigningDocument || (state?.signing_package?.documents.length === 1 ? state.signing_package.documents[0].id : "");
+  // The workspace previews the whole package, so it follows the documents chosen here.
+  useEffect(() => { onPackageSelectionChange?.({ signingDocumentId, attachmentId }); }, [signingDocumentId, attachmentId, onPackageSelectionChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -162,10 +166,8 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const completed = state?.requests.some(r => r.status === "completed");
   const clientOnly = state?.signer_policy === "client_only";
   const agencyOnly = state?.signer_policy === "agency_only";
-  const attachmentId = selectedAttachment || (state?.review_package?.documents.length === 1 ? state.review_package.documents[0].id : "");
-  const attachmentReady = !state?.review_package || (!!attachmentId && state.review_package.documents.some(d => d.id === attachmentId) && previewedDocumentIds.includes(attachmentId));
-  const signingDocumentId = selectedSigningDocument || (state?.signing_package?.documents.length === 1 ? state.signing_package.documents[0].id : "");
-  const signingDocumentReady = !state?.signing_package || (!!signingDocumentId && state.signing_package.documents.some(d => d.id === signingDocumentId) && previewedDocumentIds.includes(signingDocumentId));
+  const attachmentReady =!state?.review_package || (!!attachmentId && state.review_package.documents.some(d => d.id === attachmentId) && previewedDocumentIds.includes(attachmentId));
+  const signingDocumentReady =!state?.signing_package || (!!signingDocumentId && state.signing_package.documents.some(d => d.id === signingDocumentId) && previewedDocumentIds.includes(signingDocumentId));
   const updateSigner = (index: number, patch: Partial<Signer>) => {
     setConfirmed(false);
     setEditingSigners(current => current.includes(index) ? current : [...current, index]);
