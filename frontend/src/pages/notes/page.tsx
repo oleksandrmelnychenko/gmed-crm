@@ -307,14 +307,14 @@ export function InternalNotesPage() {
               <Input className="h-9 rounded-lg bg-field pl-9" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} />
             </div>
           </div>
-          <div className="min-h-0 max-h-[280px] flex-1 overflow-y-auto overscroll-contain p-2 lg:max-h-none">
+          <div className="flex min-h-0 max-h-[280px] flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-2 lg:max-h-none">
             {loading ? <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
             {!loading && visibleNotes.length === 0 ? <p className="px-4 py-12 text-center text-sm text-muted-foreground">{labels.noNotes}</p> : null}
             {visibleNotes.map((note) => (
               <button
                 key={note.id}
                 type="button"
-                className={cn("relative mb-1 w-full rounded-lg px-2.5 py-2 text-left transition-colors", selectedId === note.id ? "bg-muted/70 before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]" : "hover:bg-muted/45")}
+                className={cn("relative w-full shrink-0 rounded-lg px-2.5 py-2 text-left transition-colors", selectedId === note.id ? "bg-muted/70 before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]" : "hover:bg-muted/45")}
                 onClick={() => setSelectedId(note.id)}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -356,7 +356,7 @@ export function InternalNotesPage() {
               <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
                 <span>{labels.noteBody}</span>
                 <textarea
-                  className="min-h-40 w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+                  className="field-sizing-content min-h-[30rem] w-full resize-y rounded-lg border border-input bg-field px-3 py-3 text-sm font-normal leading-6 outline-none placeholder:font-normal placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
                   value={draftBody}
                   maxLength={20_000}
                   placeholder={labels.bodyPlaceholder}
