@@ -767,6 +767,42 @@ async fn reset_password(
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
     }
 
+    // The history was recorded on every reset but never consulted, so the 90-day
+    // expiry could be satisfied by setting the same password again.
+    let previous_hashes: Vec<String> = sqlx::query_scalar(
+        r#"SELECT hash FROM (
+               SELECT password_hash AS hash, 2147483647 AS age FROM users WHERE id = $1
+               UNION ALL
+               SELECT entry.value #>> '{}', entry.ordinality::int
+               FROM users u,
+                    jsonb_array_elements(COALESCE(u.password_history, '[]'::jsonb))
+                        WITH ORDINALITY AS entry(value, ordinality)
+               WHERE u.id = $1
+               ORDER BY age DESC
+               LIMIT 5
+           ) recent
+           WHERE hash IS NOT NULL"#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load password history");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reset password",
+        )
+    })?;
+    if previous_hashes
+        .iter()
+        .any(|hash| password::verify_password(&body.new_password, hash).unwrap_or(false))
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Password was used recently; choose a new one",
+        ));
+    }
+
     let hash = match password::hash_password(&body.new_password) {
         Ok(h) => h,
         Err(e) => {
