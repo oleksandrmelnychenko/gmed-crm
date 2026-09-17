@@ -743,7 +743,8 @@ pub(crate) async fn export_patient_data_response(
     match format {
         PatientExportFormat::Json => Ok(Json(payload).into_response()),
         PatientExportFormat::Zip => {
-            let zip_bytes = build_patient_export_zip(&payload)?;
+            let documents = load_patient_export_files(state, patient_id).await?;
+            let zip_bytes = build_patient_export_zip(&payload, &documents)?;
             let disposition = format!(
                 "attachment; filename=\"{}\"",
                 patient_export_archive_name(&payload).replace('"', "")
@@ -777,8 +778,103 @@ fn patient_export_archive_name(payload: &Value) -> String {
     )
 }
 
+/// Upper bound for the files packed into one export, so a patient with years of
+/// imaging cannot exhaust the server's memory. What does not fit is listed in
+/// the README and has to be handed over separately.
+const EXPORT_FILES_BYTE_BUDGET: usize = 400 * 1024 * 1024;
+
+struct ExportedDocumentFiles {
+    files: Vec<(String, Vec<u8>)>,
+    skipped: Vec<String>,
+}
+
+/// Art. 15 Abs. 3 DSGVO asks for a copy of the data, not a list of file names.
+async fn load_patient_export_files(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<ExportedDocumentFiles, axum::response::Response> {
+    let rows = sqlx::query(
+        r#"SELECT id, auto_name, original_filename, mime_type, storage_key
+           FROM documents
+           WHERE patient_id = $1
+             AND storage_key IS NOT NULL
+             AND file_deleted_at IS NULL
+           ORDER BY created_at"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "load patient export files");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build patient export",
+        )
+    })?;
+
+    let mut exported = ExportedDocumentFiles {
+        files: Vec::new(),
+        skipped: Vec::new(),
+    };
+    let mut used = 0usize;
+    for (index, row) in rows.iter().enumerate() {
+        let id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
+        let auto_name = row.try_get::<String, _>("auto_name").unwrap_or_default();
+        let original = row
+            .try_get::<Option<String>, _>("original_filename")
+            .unwrap_or_default();
+        let mime_type = row
+            .try_get::<Option<String>, _>("mime_type")
+            .unwrap_or_default();
+        let storage_key = row
+            .try_get::<Option<String>, _>("storage_key")
+            .unwrap_or_default()
+            .unwrap_or_default();
+        let label = original.clone().unwrap_or_else(|| auto_name.clone());
+
+        let bytes = match super::documents::read_document_storage_bytes(
+            id,
+            &storage_key,
+            mime_type.as_deref(),
+            original.as_deref(),
+            Some(auto_name.as_str()),
+        )
+        .await
+        {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                exported.skipped.push(format!("{label} (file missing)"));
+                continue;
+            }
+        };
+        if used + bytes.len() > EXPORT_FILES_BYTE_BUDGET {
+            exported.skipped.push(format!("{label} (size limit)"));
+            continue;
+        }
+        used += bytes.len();
+
+        let safe: String = label
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        exported
+            .files
+            .push((format!("documents/{:03}-{}", index + 1, safe.trim()), bytes));
+    }
+    Ok(exported)
+}
+
 #[allow(clippy::result_large_err)]
-fn build_patient_export_zip(payload: &Value) -> Result<Vec<u8>, axum::response::Response> {
+fn build_patient_export_zip(
+    payload: &Value,
+    documents: &ExportedDocumentFiles,
+) -> Result<Vec<u8>, axum::response::Response> {
     let export_json = serde_json::to_vec_pretty(payload).map_err(|_| {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -814,11 +910,38 @@ fn build_patient_export_zip(payload: &Value) -> Result<Vec<u8>, axum::response::
                 "Failed to build export bundle",
             )
         })?;
-    archive
-        .write_all(
-            b"DSGVO Art. 15 export bundle\r\n\r\nThis archive contains the structured patient export in patient-export.json.\r\n",
+    let mut readme = String::from(
+        "DSGVO Art. 15 export bundle\r\n\r\nThis archive contains the structured patient export in patient-export.json\r\nand the stored files of the patient in the documents folder.\r\n",
+    );
+    if !documents.skipped.is_empty() {
+        readme.push_str("\r\nNot included, hand over separately:\r\n");
+        for label in &documents.skipped {
+            readme.push_str(&format!("- {label}\r\n"));
+        }
+    }
+    archive.write_all(readme.as_bytes()).map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build export bundle",
         )
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to build export bundle"))?;
+    })?;
+
+    // Scans and PDFs are already compressed; storing them keeps the export fast.
+    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (name, bytes) in &documents.files {
+        archive.start_file(name.as_str(), stored).map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build export bundle",
+            )
+        })?;
+        archive.write_all(bytes).map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build export bundle",
+            )
+        })?;
+    }
 
     archive
         .finish()
