@@ -46,11 +46,8 @@ export function downloadDatevResult(result: ReadResult) {
 
 const CALLBACK = "/api/v1/datev/oauth/callback";
 export const datevRedirects = { dev: `https://console-dev.gmed-health.com${CALLBACK}`, production: `https://console.gmed-health.com${CALLBACK}` };
-/** Redirect URLs the server accepts; localhost exists only for a sandbox app opened on a developer machine. */
-export function redirectOptions(origin: string, mode: Credentials["mode"]) {
-  const local = mode === "sandbox" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ? [`${origin}${CALLBACK}`] : [];
-  return [datevRedirects.dev, datevRedirects.production, ...local];
-}
+/** Only the registered GMed consoles; a localhost callback is not offered. */
+export const redirectOptions = [datevRedirects.dev, datevRedirects.production];
 export function defaultRedirect(origin: string, mode: Credentials["mode"]) {
   const own = `${origin}${CALLBACK}`;
   if (own === datevRedirects.dev || own === datevRedirects.production) return own;

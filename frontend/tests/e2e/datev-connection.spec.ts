@@ -12,7 +12,10 @@ test("credentials are submitted only on save and never persisted in browser stor
   await confirm(page, panel, "DATEV · Сохранить ключи");
   await expect(panel.getByText("Ключи сохранены. Теперь подключитесь через DATEV.")).toBeVisible();
   await expect(panel.getByLabel("Client Secret", { exact: true })).toHaveValue("");
-  await expect(panel.getByRole("button", { name: "Подключить через DATEV" })).toBeEnabled();
+  // Saved from a local page, the keys point at the DEV console, so sign-in is offered only there.
+  expect((calls[0]?.payload as { credentials: { redirect_uri: string } }).credentials.redirect_uri).toBe("https://console-dev.gmed-health.com/api/v1/datev/oauth/callback");
+  await expect(panel.getByRole("button", { name: "Подключить через DATEV" })).toBeDisabled();
+  await expect(panel).toContainText("https://console-dev.gmed-health.com/admin/datev");
   expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain("synthetic-secret");
   expect(calls.map((c) => c.path)).toEqual(["/admin/datev/connection"]);
 });

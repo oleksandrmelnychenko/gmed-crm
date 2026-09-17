@@ -719,7 +719,7 @@ scopes `datev:accounting:clients` / `datev:accounting:exchange`, заголов�
 сторінки (на машині розробника це був `http://localhost:5173/...`). Це вибір із
 двох зареєстрованих консолей: `https://console-dev.gmed-health.com/...` (типово
 для sandbox) і `https://console.gmed-health.com/...` (типово для production);
-localhost пропонується лише для sandbox, коли сторінку відкрито з localhost.
+localhost в інтерфейсі не пропонується взагалі.
 Оскільки cookie входу існує тільки на сайті, який почав авторизацію, кнопки
 підключення вимкнені, якщо сторінку відкрито не з origin збереженого Redirect URL,
 і показано адресу, де її відкрити.

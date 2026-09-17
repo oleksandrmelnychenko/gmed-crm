@@ -11,9 +11,7 @@ describe("DATEV redirect URL", () => {
     expect(defaultRedirect("http://localhost:5173", "sandbox")).toBe(datevRedirects.dev);
     expect(defaultRedirect("http://localhost:5173", "production")).toBe(datevRedirects.production);
     expect(defaultRedirect("https://console.gmed-health.com", "sandbox")).toBe(datevRedirects.production);
-    expect(redirectOptions("https://console-dev.gmed-health.com", "sandbox")).toEqual([datevRedirects.dev, datevRedirects.production]);
-    expect(redirectOptions("http://localhost:5173", "production")).toHaveLength(2);
-    expect(redirectOptions("http://localhost:5173", "sandbox")).toHaveLength(3);
+    expect(redirectOptions).toEqual([datevRedirects.dev, datevRedirects.production]);
   });
   it("allows sign-in only from the site DATEV returns to", () => {
     expect(sameSite(datevRedirects.dev, "https://console-dev.gmed-health.com")).toBe(true);
