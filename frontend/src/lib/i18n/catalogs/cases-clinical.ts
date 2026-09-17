@@ -417,10 +417,10 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_empty_title: "Медикаментов пока нет.",
   cases_medications_add_first: "Добавить первый медикамент",
   cases_medications_missing_brand: "Укажите торговое название.",
-  cases_medications_missing_active_ingredient: "Укажите �ACT-значение.",
+  cases_medications_missing_active_ingredient: "Укажите ACT-значение.",
   cases_medications_untitled: "Без названия",
   cases_medications_brand_name: "Торговое название",
-  cases_medications_active_ingredient: "�ACT-значение",
+  cases_medications_active_ingredient: "ACT-значение",
   cases_medications_dose: "Доза",
   cases_medications_unit: "Единица",
   cases_medications_regimen: "Схема приёма",
@@ -444,7 +444,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_equivalent_verify_error:
     "Не удалось проверить эквивалент.",
   cases_medications_drug_search_required:
-    "Введите название препарата, ATC-код или �ACT-значение.",
+    "Введите название препарата, ATC-код или ACT-значение.",
   cases_medications_drug_search_failed:
     "Не удалось выполнить поиск препаратов.",
   cases_medications_product_verify_failed:
@@ -479,7 +479,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_match_reject: "Отклонить связь",
   cases_medications_search_results_empty:
     "Результаты поиска появятся здесь.",
-  cases_medications_substances: "�ACT-значения",
+  cases_medications_substances: "ACT-значения",
   cases_medications_unknown: "Неизвестно",
   cases_medications_product_verify: "Проверить препарат",
   cases_medications_reject: "Отклонить",
@@ -500,7 +500,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_equivalents_find: "Найти",
   cases_medications_equivalents_warning:
     "Только для внутренней проверки команды. Это не назначение; непроверенные варианты пациенту не показываются.",
-  cases_medications_equivalents_active_substance: "�ACT-значение",
+  cases_medications_equivalents_active_substance: "ACT-значение",
   cases_medications_equivalents_include_unverified:
     "Включить непроверенные кандидаты только для команды",
   cases_medications_equivalents_empty:

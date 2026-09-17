@@ -296,7 +296,7 @@ function OfficialSafetyAlertFinding({
         ) : null}
         {finding.substances.length > 0 ? (
           <span>
-            {tx("�ACT-значение", "ACT-Bedeutung")}: <span className="font-medium text-foreground">{finding.substances.join(", ")}</span>
+            {tx("ACT-значение", "ACT-Bedeutung")}: <span className="font-medium text-foreground">{finding.substances.join(", ")}</span>
           </span>
         ) : null}
         {source ? (
@@ -447,7 +447,7 @@ function MedicationsTable({
         <thead className="bg-muted/20 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           <tr>
             <th className="px-3.5 py-2 font-semibold">{tx("Препарат", "Medikament")}</th>
-            <th className="px-3.5 py-2 font-semibold">{tx("�ACT-значение", "ACT-Bedeutung")}</th>
+            <th className="px-3.5 py-2 font-semibold">{tx("ACT-значение", "ACT-Bedeutung")}</th>
             <th className="px-3.5 py-2 font-semibold">ATC</th>
             <th className="px-3.5 py-2 font-semibold">PZN</th>
             <th className="px-3.5 py-2 font-semibold">{tx("Страна", "Land")}</th>

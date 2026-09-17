@@ -665,7 +665,7 @@ export function PatientMedicationTable({
       <table className="w-full min-w-[1160px] border-collapse text-left text-xs">
         <thead className="border-b border-border/40 bg-card">
           <tr>
-            <th scope="col" className={headCell}>{tx("�ACT-значение", "ACT-Bedeutung")}</th>
+            <th scope="col" className={headCell}>{tx("ACT-значение", "ACT-Bedeutung")}</th>
             <th scope="col" className={headCell}>{tx("Торговое название", "Handelsname")}</th>
             <th scope="col" className={headCell}>{tx("Дозировка", "Stärke")}</th>
             <th scope="col" className={headCell}>{tx("Форма", "Form")}</th>

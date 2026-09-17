@@ -640,7 +640,7 @@ export function PatientMedicationTable({
   const columns: ColumnDef<MedicationTableRow>[] = [
     {
       id: "substance",
-      label: tx("�ACT-значение", "ACT-Bedeutung"),
+      label: tx("ACT-значение", "ACT-Bedeutung"),
       accessor: (row) => row.item.wirkstoff,
       width: 180,
       cellClassName: "whitespace-normal",

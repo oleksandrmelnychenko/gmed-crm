@@ -54,7 +54,7 @@ export function MedicationNameReview({ names, confirmation, onConfirm, onChoose,
       ? tx("Есть похожие названия. Проверьте написание перед добавлением.", "Ähnliche Namen gefunden. Bitte vor dem Hinzufügen die Schreibweise prüfen.")
       : tx("Новая пара названий для справочника", "Neue Namenskombination für das Verzeichnis")}</p>
     {(["handelsname", "wirkstoff"] as const).map(field => review[field].similar.length ? <div key={field} className="min-w-0 space-y-1">
-      <p className="text-[11px] text-muted-foreground">{field === "handelsname" ? tx("Похожие торговые названия", "Ähnliche Handelsnamen") : tx("Похожие �ACT-значения", "Ähnliche ACT-Bedeutungen")}</p>
+      <p className="text-[11px] text-muted-foreground">{field === "handelsname" ? tx("Похожие торговые названия", "Ähnliche Handelsnamen") : tx("Похожие ACT-значения", "Ähnliche ACT-Bedeutungen")}</p>
       <div className="flex flex-wrap gap-1.5">{review[field].similar.map(name => <Button key={name} type="button" variant="outline" size="sm" className="h-auto max-w-full whitespace-normal break-words text-left" onClick={() => onChoose(field, name)}>{name}</Button>)}</div>
     </div> : null)}
     <label className="flex items-start gap-2 text-xs leading-relaxed">

@@ -95,10 +95,10 @@ function blockingReasonLabel(value: string, tx: Bilingual) {
     candidate_expired: ["Набор кандидатов устарел", "Kandidatensatz ist abgelaufen"],
     missing_required_identity: ["Не хватает идентификационных данных", "Erforderliche Identitätsdaten fehlen"],
     exact_brand_required: ["Торговое название не совпадает точно", "Der Handelsname stimmt nicht exakt überein"],
-    substance_mismatch: ["�ACT-значение не совпадает", "Die ACT-Bedeutung stimmt nicht überein"],
+    substance_mismatch: ["ACT-значение не совпадает", "Die ACT-Bedeutung stimmt nicht überein"],
     strength_contradiction: ["Дозировка противоречит записи пациента", "Die Stärke widerspricht dem Patienteneintrag"],
     form_contradiction: ["Лекарственная форма противоречит записи пациента", "Die Darreichungsform widerspricht dem Patienteneintrag"],
-    substance_only_not_identity: ["Совпадения только по �ACT-значению недостаточно", "Eine Übereinstimmung nur bei der ACT-Bedeutung reicht nicht aus"],
+    substance_only_not_identity: ["Совпадения только по ACT-значению недостаточно", "Eine Übereinstimmung nur bei der ACT-Bedeutung reicht nicht aus"],
     atc_only_not_identity: ["Совпадения только по ATC недостаточно", "Eine Übereinstimmung nur beim ATC-Code reicht nicht aus"],
     insufficient_identity_evidence: ["Недостаточно точных признаков для идентификации", "Für die Identifikation fehlen ausreichende exakte Merkmale"],
     source_not_internal_curated: ["Источник не допущен к подтверждению", "Die Quelle ist nicht zur Bestätigung freigegeben"],
@@ -426,7 +426,7 @@ function CandidateReview({
             />
             <span>
               {tx(
-                "Я сверил название, �ACT-значение, дозировку, форму и происхождение кандидата. Подтверждение связывает записи, но не изменяет лечение.",
+                "Я сверил название, ACT-значение, дозировку, форму и происхождение кандидата. Подтверждение связывает записи, но не изменяет лечение.",
                 "Ich habe Name, ACT-Bedeutung, Stärke, Form und Herkunft des Kandidaten geprüft. Die Bestätigung verknüpft Datensätze, ändert aber keine Therapie.",
               )}
             </span>
