@@ -24,6 +24,25 @@ describe("summarizeOrderNeeds", () => {
     });
   });
 
+  it("keeps a comment typed on several lines with its service", () => {
+    expect(summarizeOrderNeeds([
+      "Причина обращения",
+      "Gewünschte Leistungen: Concierge-Services, Dolmetscherbegleitung",
+      "Kommentare zu Leistungen:",
+      "- Concierge-Services: Hotel am Klinikum",
+      "- Dolmetscherbegleitung: Russisch",
+      "auch bei der Aufnahme",
+      "Dolmetscher benötigt",
+    ].join("\n"))).toMatchObject({
+      services: [
+        { name: "Concierge-Services", note: "Hotel am Klinikum" },
+        { name: "Dolmetscherbegleitung", note: "Russisch\nauch bei der Aufnahme" },
+      ],
+      interpreterRequired: true,
+      additionalNotes: [],
+    });
+  });
+
   it("keeps ordinary extra lines visible", () => {
     expect(summarizeOrderNeeds("Primary need\nAdditional context")).toMatchObject({
       primaryNeed: "Primary need",
