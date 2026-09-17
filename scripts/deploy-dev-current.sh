@@ -32,8 +32,11 @@ esac
 LOG_FILE="${LOG_FILE:-$DEPLOY_DIR/deploy-dev-current.log}"
 # DEV uses dev-fast with one Cargo job instead of release/LTO. Retain the RAM
 # guard and OCR recovery even with the lower-memory compiler profile.
+# The single gmed-server crate peaks near 4.9 GiB of a 7.7 GiB host, so a 768 MiB
+# floor cancelled builds that missed it by a few MiB; 512 MiB still leaves the
+# live DEV stack (about 1.7 GiB resident) room to answer.
 BUILD_MEMORY_HEADROOM_MB="${BUILD_MEMORY_HEADROOM_MB:-6144}"
-BUILD_MEMORY_ABORT_MB="${BUILD_MEMORY_ABORT_MB:-768}"
+BUILD_MEMORY_ABORT_MB="${BUILD_MEMORY_ABORT_MB:-512}"
 BUILD_PID=""
 STOPPED_OCR_CONTAINERS=()
 STAGING_DIR=""
