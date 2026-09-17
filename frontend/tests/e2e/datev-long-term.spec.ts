@@ -35,11 +35,23 @@ test("an unconfirmed revocation can be left only through an explicit forced disc
   await page.route("**/admin/datev/disconnect", async (route) => {
     const payload = route.request().postDataJSON(); pending.calls.push({ path: "/admin/datev/disconnect", payload });
     pending.setStatus({ status: "disconnected", has_tokens: false });
-    return route.fulfill({ json: { configured: true, ...target, redirect_uri: "http://localhost:5174/api/v1/datev/oauth/callback", exchange_enabled: true, status: "disconnected", has_tokens: false, long_term: false, revocation_confirmed: false, accounting_writes_enabled: false, invoice_originals_supported: false } });
+    return route.fulfill({ json: { configured: true, ...target, redirect_uri: "http://127.0.0.1:5174/api/v1/datev/oauth/callback", exchange_enabled: true, status: "disconnected", has_tokens: false, long_term: false, revocation_confirmed: false, accounting_writes_enabled: false, invoice_originals_supported: false } });
   });
   await confirm(page, pending.panel, force);
   await expect(pending.panel).toContainText("DATEV не подтвердил отзыв");
   expect(pending.calls).toEqual([{ path: "/admin/datev/disconnect", payload: { expected: target, force: true } }]);
   await expect(pending.panel.getByRole("button", { name: force, exact: true })).toHaveCount(0);
   expect(calls.every((c) => c.path !== "/admin/datev/disconnect" || (c.payload as { force?: boolean }).force === true)).toBe(true);
+});
+
+test("sign-in is offered only on the site DATEV returns to, and new keys never default to localhost", async ({ page }) => {
+  const { panel } = await setup(page, true, "ru", { status: "disconnected", has_tokens: false, redirect_uri: "https://console-dev.gmed-health.com/api/v1/datev/oauth/callback" });
+  await expect(panel.getByRole("button", { name: "Подключить через DATEV", exact: true })).toBeDisabled();
+  await expect(panel).toContainText("https://console-dev.gmed-health.com/admin/datev");
+  await panel.getByText("Ключи приложения", { exact: true }).click();
+  const redirect = panel.locator("select").nth(1);
+  await expect(redirect).toHaveValue("https://console-dev.gmed-health.com/api/v1/datev/oauth/callback");
+  await panel.locator("select").first().selectOption("production");
+  await expect(redirect).toHaveValue("https://console-dev.gmed-health.com/api/v1/datev/oauth/callback");
+  await expect(redirect.locator("option")).toHaveText(["https://console-dev.gmed-health.com/api/v1/datev/oauth/callback", "https://console.gmed-health.com/api/v1/datev/oauth/callback"]);
 });

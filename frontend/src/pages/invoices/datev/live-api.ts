@@ -43,3 +43,18 @@ export function downloadDatevResult(result: ReadResult) {
   a.href = url; a.download = `DATEV-${result.mode}-${result.kind}.json`; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+const CALLBACK = "/api/v1/datev/oauth/callback";
+export const datevRedirects = { dev: `https://console-dev.gmed-health.com${CALLBACK}`, production: `https://console.gmed-health.com${CALLBACK}` };
+/** Redirect URLs the server accepts; localhost exists only for a sandbox app opened on a developer machine. */
+export function redirectOptions(origin: string, mode: Credentials["mode"]) {
+  const local = mode === "sandbox" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ? [`${origin}${CALLBACK}`] : [];
+  return [datevRedirects.dev, datevRedirects.production, ...local];
+}
+export function defaultRedirect(origin: string, mode: Credentials["mode"]) {
+  const own = `${origin}${CALLBACK}`;
+  if (own === datevRedirects.dev || own === datevRedirects.production) return own;
+  return mode === "production" ? datevRedirects.production : datevRedirects.dev;
+}
+/** DATEV returns the browser to the redirect URL; the sign-in cookie exists only on the site that started it. */
+export const sameSite = (redirect: string | undefined, origin: string) => !!redirect && redirect.startsWith(`${origin}/`);

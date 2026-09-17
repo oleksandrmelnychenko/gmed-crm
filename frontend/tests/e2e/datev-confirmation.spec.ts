@@ -42,7 +42,7 @@ for (const operation of ["authorize", "disconnect"] as const) test(`${operation}
   const { panel, setStatus } = await setup(page, true, "ru", disconnected ? { status: "disconnected", has_tokens: false } : {});
   const label = disconnected ? "Подключить через DATEV" : "DATEV · Отключить доступ";
   await panel.getByRole("button", { name: label, exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("http://localhost:5174/api/v1/datev/oauth/callback");
+  await expect(page.getByRole("dialog")).toContainText("http://127.0.0.1:5174/api/v1/datev/oauth/callback");
   const nextGeneration = "00000000-0000-0000-0000-000000000099";
   setStatus({ generation: nextGeneration });
   const requests: unknown[] = [];

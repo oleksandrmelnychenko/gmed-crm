@@ -11,7 +11,7 @@ import { ApiRequestError } from "@/lib/api";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { DatevSetupSection } from "./setup-section";
 import { useDatevText } from "./text";
-import { authorizeDatev, checkDatev, disconnectDatev, loadConnection, loadDatevEvents, readDatev, safeAuthorizationUrl, saveCredentials, type AccessCheck, type Connection, type Credentials, type ReadEvent, type ReadKind, type ReadResult } from "./live-api";
+import { authorizeDatev, checkDatev, defaultRedirect, redirectOptions, sameSite, disconnectDatev, loadConnection, loadDatevEvents, readDatev, safeAuthorizationUrl, saveCredentials, type AccessCheck, type Connection, type Credentials, type ReadEvent, type ReadKind, type ReadResult } from "./live-api";
 import { liveDe, liveError, liveRu } from "./live-text";
 
 const selectClass = "h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm";
@@ -34,7 +34,7 @@ export function DatevLiveConnection() {
   const [busy, setBusy] = useState(false); const lock = useRef(false);
   const [error, setError] = useState(""); const [notice, setNotice] = useState("");
   const [kind, setKind] = useState<ReadKind>("fiscal-years"); const [year, setYear] = useState("");
-  const [credentials, setCredentials] = useState<Credentials>({ client_id: "", client_secret: "", mode: "sandbox", redirect_uri: `${window.location.origin}/api/v1/datev/oauth/callback`, exchange_enabled: false });
+  const [credentials, setCredentials] = useState<Credentials>({ client_id: "", client_secret: "", mode: "sandbox", redirect_uri: defaultRedirect(window.location.origin, "sandbox"), exchange_enabled: false });
   const [reload, setReload] = useState(0);
   useEffect(() => {
     const changed = () => { epoch.current += 1; setReady(false); setAccess(null); setResult(null); setReload((n) => n + 1); };
@@ -51,7 +51,7 @@ export function DatevLiveConnection() {
       const revision = value.revision ?? "unconfigured";
       if (hydrated.current !== revision) {
         hydrated.current = revision; setReconnectFor(null);
-        setCredentials((old) => ({ ...old, mode: value.mode ?? old.mode, redirect_uri: value.redirect_uri ?? old.redirect_uri, exchange_enabled: value.exchange_enabled ?? false }));
+        setCredentials((old) => ({ ...old, mode: value.mode ?? old.mode, redirect_uri: value.redirect_uri && redirectOptions(window.location.origin, value.mode ?? old.mode).includes(value.redirect_uri) ? value.redirect_uri : defaultRedirect(window.location.origin, value.mode ?? old.mode), exchange_enabled: value.exchange_enabled ?? false }));
       }
     }).catch((cause: unknown) => { if (active) { setReady(false); setConnection(null); setProfile(null); setAccess(null); setResult(null); setError(liveError(cause instanceof ApiRequestError ? cause.code : undefined, de)); } });
     loadDatevEvents().then((value) => { if (active) { setEvents(value); setHistoryError(false); } }).catch(() => { if (active) { setEvents([]); setHistoryError(true); } });
@@ -81,7 +81,8 @@ export function DatevLiveConnection() {
   const blocked = busy || !ready;
   const hasCompany = !!profileRevision && !!profile && /^\d{1,7}$/.test(profile.consultant_number) && Number(profile.consultant_number) > 0 && /^\d{1,5}$/.test(profile.client_number) && Number(profile.client_number) > 0;
   const canRead = !blocked && !requiresReconnect && hasCompany && connection?.status === "connected" && connection.exchange_enabled;
-  const canLongTerm = !blocked && hasCompany && !!connection?.configured && !connection.has_tokens && connection.status !== "revocation_pending" && connection.checked_consultant === Number(profile?.consultant_number) && connection.checked_client === Number(profile?.client_number);
+  const here = sameSite(connection?.redirect_uri, window.location.origin);
+  const canLongTerm = here && !blocked && hasCompany && !!connection?.configured && !connection.has_tokens && connection.status !== "revocation_pending" && connection.checked_consultant === Number(profile?.consultant_number) && connection.checked_client === Number(profile?.client_number);
   const identity = `${connection?.revision}:${connection?.generation}:${connection?.status}:${profileRevision}:${profile?.consultant_number}:${profile?.client_number}:${reload}`;
   const keysBlocked = blocked || !!connection?.has_tokens || connection?.status === "revocation_pending";
   function connectionTarget() {
@@ -106,13 +107,14 @@ export function DatevLiveConnection() {
       {!connection && !error ? <p role="status" className="text-sm">{t.loading}</p> : null}
       <div className="flex flex-wrap gap-2">
         {connection?.configured ? <Badge variant="secondary">{connection.mode === "production" ? "Production" : "Sandbox"}</Badge> : null}
-        <DatevActionButton title={t.connect} description={describe("connect")} context={connectionContext} contextKey={identity} size="sm" disabled={blocked || !connection?.configured || connection.has_tokens || connection.status === "revocation_pending"} onConfirm={() => run(async (current) => { const response = await authorizeDatev(connectionTarget()); if (current()) window.location.assign(safeAuthorizationUrl(response.authorization_url)); })}><Link2 className="size-4" />{t.connect}</DatevActionButton>
+        <DatevActionButton title={t.connect} description={describe("connect")} context={connectionContext} contextKey={identity} size="sm" disabled={!here || blocked || !connection?.configured || connection.has_tokens || connection.status === "revocation_pending"} onConfirm={() => run(async (current) => { const response = await authorizeDatev(connectionTarget()); if (current()) window.location.assign(safeAuthorizationUrl(response.authorization_url)); })}><Link2 className="size-4" />{t.connect}</DatevActionButton>
         <DatevActionButton title={t.connectLong} description={describe("connectLong")} context={<>{connectionContext}{context}</>} contextKey={identity} size="sm" disabled={!canLongTerm} onConfirm={() => run(async (current) => { const response = await authorizeDatev(connectionTarget(), true); if (current()) window.location.assign(safeAuthorizationUrl(response.authorization_url)); })}><Link2 className="size-4" />{t.connectLong}</DatevActionButton>
         <DatevActionButton title={t.check} description={describe("check")} context={context} contextKey={identity} size="sm" disabled={blocked || requiresReconnect || !hasCompany || connection?.status !== "connected"} onConfirm={() => run(async (current) => { clearRead(); const value = await checkDatev(confirmedTarget()); value.clients.forEach((client) => matchesCompany({ ...client, mode: value.mode })); if (current()) setAccess(value); })}>{t.check}</DatevActionButton>
         <DatevActionButton title={t.disconnect} description={describe("disconnect")} context={connectionContext} contextKey={identity} size="sm" disabled={blocked || !connection?.configured || connection.status === "disconnected"} onConfirm={() => run(async () => { clearRead(); setConnection(await disconnectDatev(connectionTarget())); })}><Unplug className="size-4" />{t.disconnect}</DatevActionButton>
         {connection?.status === "revocation_pending" ? <DatevActionButton title={t.forceDisconnect} description={describe("forceDisconnect")} context={connectionContext} contextKey={identity} size="sm" disabled={blocked} onConfirm={() => run(async () => { clearRead(); const value = await disconnectDatev(connectionTarget(), true); setConnection(value); if (value.revocation_confirmed === false) setNotice(t.forcedNotice); })}><Unplug className="size-4" />{t.forceDisconnect}</DatevActionButton> : null}
         <DatevActionButton title={t.refresh} description={describe("refresh")} size="sm" disabled={busy} onConfirm={() => { clearRead(); setError(""); setReady(false); epoch.current += 1; setReload((n) => n + 1); }}><RefreshCw className="size-4" />{t.refresh}</DatevActionButton>
       </div>
+      {connection?.configured && !here ? <p role="note" className="break-words text-xs text-amber-700 dark:text-amber-400">{t.otherSite} {connection.redirect_uri ? `${new URL(connection.redirect_uri).origin}/admin/datev` : ""}</p> : null}
       {busy ? <p role="status" className="text-sm text-muted-foreground">{t.busy}</p> : null}
       <p className="text-xs text-muted-foreground">{t.numbersHint}</p><div className="text-xs text-muted-foreground">{context}</div>
       {connection?.configured ? <dl className="grid gap-2 text-xs sm:grid-cols-2"><div><dt className="text-muted-foreground">{t.checked}</dt><dd>{date(connection.checked_at)}{connection.checked_at && connection.checked_consultant ? ` · ${connection.checked_consultant} / ${connection.checked_client}` : ""}</dd></div><div><dt className="text-muted-foreground">{t.expires}</dt><dd>{date(connection.expires_at)}</dd></div>{connection.long_term ? <div><dt className="text-muted-foreground">{t.longTermFor}</dt><dd>{connection.bound_consultant} / {connection.bound_client}</dd></div> : connection.session_expires_at ? <div><dt className="text-muted-foreground">{t.session}</dt><dd>{date(connection.session_expires_at)}</dd></div> : null}</dl> : null}
@@ -122,10 +124,10 @@ export function DatevLiveConnection() {
         <summary className="cursor-pointer text-sm font-medium">{t.settings}</summary>
         <form className="mt-3 space-y-3" autoComplete="off" onSubmit={(e) => { e.preventDefault(); e.currentTarget.querySelector<HTMLButtonElement>('button[type="submit"]')?.click(); }}>
           <fieldset disabled={keysBlocked} className="grid min-w-0 gap-3 sm:grid-cols-2 disabled:opacity-60">
-            <label className="space-y-1 text-xs">{t.mode}<select className={selectClass} value={credentials.mode} onChange={(e) => setCredentials((c) => ({ ...c, mode: e.target.value as Credentials["mode"] }))}><option value="sandbox">Sandbox</option><option value="production">Production</option></select></label>
+            <label className="space-y-1 text-xs">{t.mode}<select className={selectClass} value={credentials.mode} onChange={(e) => { const mode = e.target.value as Credentials["mode"]; setCredentials((c) => ({ ...c, mode, redirect_uri: redirectOptions(window.location.origin, mode).includes(c.redirect_uri) ? c.redirect_uri : defaultRedirect(window.location.origin, mode) })); }}><option value="sandbox">Sandbox</option><option value="production">Production</option></select></label>
             <label className="space-y-1 text-xs">{t.id}<Input required autoComplete="off" maxLength={256} value={credentials.client_id} onChange={(e) => setCredentials((c) => ({ ...c, client_id: e.target.value }))} /></label>
             <label className="space-y-1 text-xs">{t.secret}<Input required type="password" autoComplete="new-password" maxLength={256} value={credentials.client_secret} onChange={(e) => setCredentials((c) => ({ ...c, client_secret: e.target.value }))} /></label>
-            <label className="space-y-1 text-xs">{t.redirect}<Input required type="url" value={credentials.redirect_uri} onChange={(e) => setCredentials((c) => ({ ...c, redirect_uri: e.target.value }))} /></label>
+            <label className="space-y-1 text-xs">{t.redirect}<select required className={selectClass} value={credentials.redirect_uri} onChange={(e) => setCredentials((c) => ({ ...c, redirect_uri: e.target.value }))}>{redirectOptions(window.location.origin, credentials.mode).map((url) => <option key={url} value={url}>{url}</option>)}</select></label>
             <label className="flex items-start gap-2 text-xs sm:col-span-2"><input type="checkbox" className="mt-0.5 accent-primary" checked={credentials.exchange_enabled} onChange={(e) => setCredentials((c) => ({ ...c, exchange_enabled: e.target.checked }))} />{t.exchange}</label>
             <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{t.keyHint} {t.exchangeHint}</p>
             <DatevActionButton type="submit" size="sm" className="justify-self-start" title={t.save} description={describe("save")} context={<><p>{credentials.mode === "production" ? "Production" : "Sandbox"}</p><p className="break-all">{credentials.redirect_uri}</p></>} contextKey={`${identity}:${credentials.mode}:${credentials.redirect_uri}:${credentials.exchange_enabled}`} disabled={keysBlocked || !credentials.client_id.trim() || !credentials.client_secret.trim()} onConfirm={() => run(async () => {

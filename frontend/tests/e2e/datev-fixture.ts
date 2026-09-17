@@ -1,7 +1,7 @@
 import { expect, type Page, type Locator } from "@playwright/test";
 export const expectedTarget = { revision: "00000000-0000-0000-0000-000000000002", generation: "00000000-0000-0000-0000-000000000003", mode: "sandbox", profile_revision: "00000000-0000-0000-0000-000000000004", consultant_number: 29098, client_number: 55003 };
 export async function setup(page: Page, connected = false, lang = "ru", overrides: Record<string, unknown> = {}) {
-  let status = { configured: connected, generation: expectedTarget.generation, revision: "00000000-0000-0000-0000-000000000002", mode: "sandbox", redirect_uri: "http://localhost:5174/api/v1/datev/oauth/callback", exchange_enabled: true, status: connected ? "connected" : "not_configured", has_tokens: connected, checked_at: null, expires_at: "2026-09-14T15:00:00Z", accounting_writes_enabled: false, invoice_originals_supported: false, ...overrides };
+  let status = { configured: connected, generation: expectedTarget.generation, revision: "00000000-0000-0000-0000-000000000002", mode: "sandbox", redirect_uri: "http://127.0.0.1:5174/api/v1/datev/oauth/callback", exchange_enabled: true, status: connected ? "connected" : "not_configured", has_tokens: connected, checked_at: null, expires_at: "2026-09-14T15:00:00Z", accounting_writes_enabled: false, invoice_originals_supported: false, ...overrides };
   const calls: { path: string; payload: unknown }[] = [];
   await page.addInitScript((lang) => { localStorage.setItem("gmed_access_token", "datev-ui-test"); localStorage.setItem("gmed_refresh_token", "datev-ui-refresh"); localStorage.setItem("gmed_lang", lang); }, lang);
   await page.route("**/api/v1/**", async (route) => {
