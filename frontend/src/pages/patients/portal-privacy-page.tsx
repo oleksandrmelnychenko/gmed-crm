@@ -37,7 +37,14 @@ import {
 import type { PortalPrivacyRequest } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
-type RequestType = "erasure" | "restriction" | "third_party_revoke";
+type RequestType =
+  | "erasure"
+  | "restriction"
+  | "third_party_revoke"
+  | "access"
+  | "rectification"
+  | "portability"
+  | "objection";
 
 function privacyStatusBadgeTone(status: string): StatusTone {
   if (status === "executed" || status === "completed") return "success";
@@ -236,6 +243,10 @@ export function PatientPrivacyPage() {
                 <option value="restriction">{t.portal_privacy_request_restriction}</option>
                 <option value="erasure">{t.portal_privacy_request_erasure}</option>
                 <option value="third_party_revoke">{t.portal_privacy_request_third_party_revoke}</option>
+                <option value="access">{t.portal_privacy_request_access}</option>
+                <option value="rectification">{t.portal_privacy_request_rectification}</option>
+                <option value="portability">{t.portal_privacy_request_portability}</option>
+                <option value="objection">{t.portal_privacy_request_objection}</option>
               </NativeComboboxSelect>
             </Field>
             <Field label={t.portal_privacy_reason} htmlFor="privacy-reason">

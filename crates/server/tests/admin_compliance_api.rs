@@ -1202,3 +1202,96 @@ async fn direct_patient_delete_is_blocked_in_favor_of_compliance_workflow() {
         "Direct patient deletion is disabled. Use the DSGVO compliance workflow."
     );
 }
+
+#[tokio::test]
+async fn access_request_is_fulfilled_manually_and_records_the_art_12_steps() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("privacy-access");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &pm,
+        Some(json!({ "request_type": "access", "reason": "Patient asked for a copy by letter" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let request_id = body["id"].as_str().expect("request id").to_string();
+    let step_path = format!("/api/v1/admin/compliance/privacy-requests/{request_id}/step");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &step_path,
+        &pm,
+        Some(json!({ "step": "verify_identity", "method": "id_document" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // An extension needs a reason and is granted only once.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &step_path,
+        &pm,
+        Some(json!({ "step": "extend_deadline" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let extension = json!({ "step": "extend_deadline", "note": "Archive boxes must be retrieved" });
+    let (status, _) = json_request(&app, "POST", &step_path, &pm, Some(extension.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(&app, "POST", &step_path, &pm, Some(extension)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/review"),
+        &pm,
+        Some(json!({ "action": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A patient manager may close an access request; the record is untouched.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["execution"]["mode"], "manual_fulfilment");
+
+    let still_active: bool = sqlx::query_scalar("SELECT is_active FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(still_active);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let record = &body.as_array().expect("requests")[0];
+    assert_eq!(record["identity_verification"]["method"], "id_document");
+    assert_eq!(record["deadline_extension"]["days"], 60);
+}

@@ -59,6 +59,10 @@ export interface PatientsPortalTranslations {
   portal_invoice_type_interim: string;
 
   portal_privacy_request_erasure: string;
+  portal_privacy_request_access: string;
+  portal_privacy_request_rectification: string;
+  portal_privacy_request_portability: string;
+  portal_privacy_request_objection: string;
   portal_privacy_request_restriction: string;
   portal_privacy_request_third_party_revoke: string;
   portal_privacy_source_patient_portal: string;
@@ -997,6 +1001,10 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_invoice_type_interim: "Промежуточный счет",
 
   portal_privacy_request_erasure: "Удалить данные",
+  portal_privacy_request_access: "Получить копию моих данных",
+  portal_privacy_request_rectification: "Исправить мои данные",
+  portal_privacy_request_portability: "Передать мои данные в машиночитаемом виде",
+  portal_privacy_request_objection: "Возразить против обработки",
   portal_privacy_request_restriction: "Ограничить обработку",
   portal_privacy_request_third_party_revoke: "Отозвать передачу третьим лицам",
   portal_privacy_source_patient_portal: "Портал пациента",
@@ -1926,6 +1934,10 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_invoice_type_interim: "Zwischenrechnung",
 
   portal_privacy_request_erasure: "Daten löschen",
+  portal_privacy_request_access: "Auskunft und Kopie meiner Daten",
+  portal_privacy_request_rectification: "Meine Daten berichtigen",
+  portal_privacy_request_portability: "Meine Daten maschinenlesbar übertragen",
+  portal_privacy_request_objection: "Der Verarbeitung widersprechen",
   portal_privacy_request_restriction: "Verarbeitung einschränken",
   portal_privacy_request_third_party_revoke: "Weitergabe an Dritte widerrufen",
   portal_privacy_source_patient_portal: "Patientenportal",

@@ -298,3 +298,13 @@ export function liftPatientProcessingRestriction(patientId: string, reason: stri
     { reason },
   );
 }
+
+export function recordCompliancePrivacyRequestStep(
+  requestId: string,
+  payload: { step: string; method?: string; note?: string },
+) {
+  return postJson<{ ok: boolean; step: string; details: Record<string, unknown> }>(
+    `/admin/compliance/privacy-requests/${requestId}/step`,
+    payload,
+  );
+}

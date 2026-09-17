@@ -57,6 +57,10 @@ import {
 } from "@/pages/admin/data/admin-api";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
+import {
+  PrivacyRequestSteps,
+  type PrivacyRequestStepFacts,
+} from "@/pages/admin/ui/privacy-request-steps";
 
 interface RecordSummary {
   appointments?: number;
@@ -88,15 +92,29 @@ interface PrivacyRequestRecord {
   record_summary?: RecordSummary | null;
   manual_override: boolean;
   is_overdue: boolean;
+  identity_verification?: PrivacyRequestStepFacts["identity_verification"];
+  deadline_extension?: PrivacyRequestStepFacts["deadline_extension"];
+  subject_notification?: PrivacyRequestStepFacts["subject_notification"];
 }
 
-type PrivacyRequestType = "erasure" | "restriction" | "third_party_revoke";
+type PrivacyRequestType =
+  | "erasure"
+  | "restriction"
+  | "third_party_revoke"
+  | "access"
+  | "rectification"
+  | "portability"
+  | "objection";
 type PrivacyReviewAction = "approve" | "hold" | "reject";
 
 const PRIVACY_REQUEST_TYPE_VALUES = [
   "erasure",
   "restriction",
   "third_party_revoke",
+  "access",
+  "rectification",
+  "portability",
+  "objection",
 ] as const;
 
 const PRIVACY_SOURCE_LABEL_KEYS = {
@@ -131,6 +149,14 @@ function privacyRequestTypeLabel(
       return t.compliance_request_type_restriction;
     case "third_party_revoke":
       return t.compliance_request_type_third_party_revoke;
+    case "access":
+      return t.compliance_request_type_access;
+    case "rectification":
+      return t.compliance_request_type_rectification;
+    case "portability":
+      return t.compliance_request_type_portability;
+    case "objection":
+      return t.compliance_request_type_objection;
     default:
       return formatUnknownValue(requestType, t);
   }
@@ -212,7 +238,12 @@ function canExecutePrivacyRequest(
     return true;
   }
 
-  return role === "patient_manager" && requestType === "third_party_revoke";
+  // Erasure and restriction change the record itself and stay with CEO / IT.
+  return (
+    role === "patient_manager" &&
+    requestType !== "erasure" &&
+    requestType !== "restriction"
+  );
 }
 
 type AdminComplianceState = {
@@ -1133,6 +1164,15 @@ function useAdminCompliancePageContent() {
                         </p>
                       ))}
                     </div>
+
+                    <PrivacyRequestSteps
+                      key={reviewSheetRecord.id}
+                      requestId={reviewSheetRecord.id}
+                      status={reviewSheetRecord.status}
+                      facts={reviewSheetRecord}
+                      t={t}
+                      onRecorded={loadPrivacyQueue}
+                    />
 
                     {reviewSheetRecord.request_type === "erasure" ? (
                       <Banner tone="warning" withIcon>

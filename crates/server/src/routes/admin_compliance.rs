@@ -57,6 +57,10 @@ pub fn router() -> Router<AppState> {
             post(review_privacy_request),
         )
         .route(
+            "/admin/compliance/privacy-requests/{request_id}/step",
+            post(record_privacy_request_step),
+        )
+        .route(
             "/admin/compliance/privacy-requests/{request_id}/execute",
             post(execute_privacy_request),
         )
@@ -80,6 +84,13 @@ struct CreatePrivacyRequestRequest {
 #[derive(Deserialize)]
 struct LiftProcessingRestrictionRequest {
     reason: String,
+}
+
+#[derive(Deserialize)]
+struct PrivacyRequestStepRequest {
+    step: String,
+    method: Option<String>,
+    note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1501,6 +1512,141 @@ async fn review_privacy_request(
     }
 }
 
+/// Records the Art. 12 DSGVO steps around a request without changing its
+/// decision: who checked the requester's identity, a one-off extension of the
+/// one-month deadline (with the reason owed to the data subject), and that the
+/// data subject was told the outcome.
+async fn record_privacy_request_step(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(request_id): Path<Uuid>,
+    Json(body): Json<PrivacyRequestStepRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+        return e;
+    }
+    let request = match fetch_privacy_request_meta(&state, request_id).await {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+    if let Err(e) = ensure_patient_visible(&state, &auth, request.patient_id).await {
+        return e;
+    }
+
+    let note = normalize_optional(body.note.as_deref());
+    if note.as_deref().is_some_and(|value| value.len() > 2000) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "note too long");
+    }
+    let is_open = !matches!(request.status.as_str(), "completed" | "rejected");
+    let now = Utc::now();
+    let step = body.step.trim().to_lowercase();
+
+    let (context_key, payload, extend_days) = match step.as_str() {
+        "verify_identity" => {
+            let method = body.method.as_deref().map(str::trim).unwrap_or_default();
+            if !matches!(
+                method,
+                "portal_login" | "id_document" | "callback" | "signed_letter" | "in_person"
+            ) {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown identity verification method",
+                );
+            }
+            (
+                "identity_verification",
+                json!({ "method": method, "at": now.to_rfc3339(), "by": auth.user_id, "note": note }),
+                None,
+            )
+        }
+        "extend_deadline" => {
+            if !is_open {
+                return err(StatusCode::CONFLICT, "Privacy request is already closed");
+            }
+            // Art. 12 Abs. 3: once, by up to two months, and only with a reason.
+            let Some(reason) = note.clone().filter(|value| value.len() >= 10) else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "An extension needs a reason of at least 10 characters",
+                );
+            };
+            (
+                "deadline_extension",
+                json!({ "reason": reason, "at": now.to_rfc3339(), "by": auth.user_id, "days": 60 }),
+                Some(60_i32),
+            )
+        }
+        "notify_subject" => {
+            let channel = body.method.as_deref().map(str::trim).unwrap_or_default();
+            if !matches!(
+                channel,
+                "email" | "portal" | "postal_mail" | "phone" | "in_person"
+            ) {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown notification channel",
+                );
+            }
+            (
+                "subject_notification",
+                json!({ "channel": channel, "at": now.to_rfc3339(), "by": auth.user_id, "note": note }),
+                None,
+            )
+        }
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown step"),
+    };
+
+    let updated = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE patient_privacy_requests
+           SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb),
+               due_at = CASE WHEN $4::int IS NULL THEN due_at
+                             ELSE COALESCE(due_at, now()) + make_interval(days => $4::int) END,
+               updated_at = now()
+           WHERE id = $1
+             AND ($4::int IS NULL OR NOT COALESCE(context, '{}'::jsonb) ? 'deadline_extension')
+           RETURNING id"#,
+    )
+    .bind(request_id)
+    .bind(context_key)
+    .bind(&payload)
+    .bind(extend_days)
+    .fetch_optional(&state.db)
+    .await;
+
+    match updated {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return err(
+                StatusCode::CONFLICT,
+                "The deadline of this request was already extended once",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "record privacy request step");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record privacy request step",
+            );
+        }
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "privacy_request_step_recorded",
+        Some(auth.user_id),
+        "patient",
+        Some(request.patient_id),
+        json!({
+            "request_id": request_id,
+            "request_type": request.request_type,
+            "step": context_key,
+            "details": payload,
+        }),
+    ));
+
+    Json(json!({ "ok": true, "request_id": request_id, "step": context_key, "details": payload }))
+        .into_response()
+}
+
 async fn execute_privacy_request(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1526,7 +1672,9 @@ async fn execute_privacy_request(
         );
     }
 
-    if auth.role == Role::PatientManager && request.request_type != "third_party_revoke" {
+    if auth.role == Role::PatientManager
+        && matches!(request.request_type.as_str(), "erasure" | "restriction")
+    {
         return err(
             StatusCode::FORBIDDEN,
             "Only CEO or IT admin can execute this privacy request type",
@@ -2148,12 +2296,30 @@ async fn complete_privacy_request_execution(
     actor_id: Uuid,
     manual_override: bool,
 ) -> Result<Value, axum::response::Response> {
-    let execution = if request_type == "restriction" {
-        apply_processing_restriction(state, patient_id, request_id, actor_id).await?
-    } else if request_type == "third_party_revoke" {
-        revoke_third_party_consents(state, patient_id, request_id, actor_id).await?
-    } else {
-        anonymize_patient_record(state, patient_id, request_id, actor_id, manual_override).await?
+    // Dispatch by name: an unknown type must never fall through to erasure.
+    let execution = match request_type {
+        "restriction" => {
+            apply_processing_restriction(state, patient_id, request_id, actor_id).await?
+        }
+        "third_party_revoke" => {
+            revoke_third_party_consents(state, patient_id, request_id, actor_id).await?
+        }
+        "erasure" => {
+            anonymize_patient_record(state, patient_id, request_id, actor_id, manual_override)
+                .await?
+        }
+        // Answered by staff outside the system (export handed over, data
+        // corrected, objection assessed); execution records that it was done.
+        "access" | "rectification" | "portability" | "objection" => json!({
+            "mode": "manual_fulfilment",
+            "request_type": request_type,
+        }),
+        _ => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Unknown privacy request type",
+            ));
+        }
     };
 
     let executed_at = Utc::now();
@@ -2749,6 +2915,9 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "record_summary": context.get("record_summary").cloned(),
         "manual_override": context.get("manual_override").and_then(Value::as_bool).unwrap_or(false),
         "is_overdue": due_at.map(|value| value < Utc::now()).unwrap_or(false),
+        "identity_verification": context.get("identity_verification").cloned(),
+        "deadline_extension": context.get("deadline_extension").cloned(),
+        "subject_notification": context.get("subject_notification").cloned(),
     })
 }
 
@@ -2825,13 +2994,19 @@ fn normalize_privacy_request_type(value: &str) -> Result<String, axum::response:
 
     if matches!(
         normalized.as_str(),
-        "erasure" | "restriction" | "third_party_revoke"
+        "erasure"
+            | "restriction"
+            | "third_party_revoke"
+            | "access"
+            | "rectification"
+            | "portability"
+            | "objection"
     ) {
         Ok(normalized)
     } else {
         Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Privacy request type must be erasure, restriction or third_party_revoke",
+            "Unknown privacy request type",
         ))
     }
 }

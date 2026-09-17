@@ -258,8 +258,12 @@ async fn create_my_privacy_request(
             "The patient requested revocation of third-party sharing consents. Due by {}.",
             due_at.format("%Y-%m-%d")
         ),
-        _ => format!(
+        "erasure" => format!(
             "The patient submitted an erasure request. Due by {}.",
+            due_at.format("%Y-%m-%d")
+        ),
+        other => format!(
+            "The patient submitted a data subject request ({other}). Due by {}.",
             due_at.format("%Y-%m-%d")
         ),
     };
@@ -952,13 +956,19 @@ fn normalize_privacy_request_type(value: &str) -> Result<String, axum::response:
 
     if matches!(
         normalized.as_str(),
-        "erasure" | "restriction" | "third_party_revoke"
+        "erasure"
+            | "restriction"
+            | "third_party_revoke"
+            | "access"
+            | "rectification"
+            | "portability"
+            | "objection"
     ) {
         Ok(normalized)
     } else {
         Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Privacy request type must be erasure, restriction or third_party_revoke",
+            "Unknown privacy request type",
         ))
     }
 }
