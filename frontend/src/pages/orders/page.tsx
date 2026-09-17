@@ -1571,6 +1571,7 @@ function useOrdersPageContent() {
     user?.role === "patient_manager" ||
     user?.role === "billing" ||
     user?.role === "ceo";
+  const orderSectionAnchorRef = useRef<HTMLDivElement>(null);
   const shouldRenderOrderSection = (section: OrderSectionKey) =>
     !isOrderRouteDetail || activeOrderSection === normalizeOrderSectionKey(section);
 
@@ -4096,15 +4097,18 @@ function useOrdersPageContent() {
                                 <button
                                   type="button"
                                   className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
-                                  onClick={() =>
+                                  onClick={() => {
                                     staffGo(
                                       buildOrderWorkspaceHref(
                                         orderDetail.id,
                                         targetSection,
                                         detailPatientId || "",
                                       ),
-                                    )
-                                  }
+                                    );
+                                    // The section opens below this list; bring it into view,
+                                    // also when it is already the active one.
+                                    orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                  }}
                                 >
                                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
                                     {index + 1}
@@ -4132,6 +4136,7 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
                 </section>
+                <div ref={orderSectionAnchorRef} className="scroll-mt-4" />
                 {shouldRenderOrderSection("overview") ? (
                   <>
                     <SectionCard
