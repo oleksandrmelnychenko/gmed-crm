@@ -5760,6 +5760,11 @@ async fn convert_lead(
         {
             tracing::error!(order_id=%order_id, status=%response.status(), "failed to initialize converted order");
         }
+        if let Err(error) =
+            super::orders::carry_lead_needs_into_order_planning(&state, order_id, lead_id).await
+        {
+            tracing::error!(error = %error, order_id = %order_id, lead_id = %lead_id, "failed to carry lead needs into order planning");
+        }
         if crate::routes::workflow_checklists::ensure_default_order_workflow(
             &state,
             order_id,

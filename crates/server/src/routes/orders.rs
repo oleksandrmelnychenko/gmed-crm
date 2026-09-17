@@ -2470,6 +2470,56 @@ async fn initialize_order_planning_from_lead(
     Ok(())
 }
 
+/// The planning row is created together with the lead's order, long before the
+/// wizard collects the requested services, so the initial seeding sees an empty
+/// lead. At conversion the lead is final: carry its interpreter and non-medical
+/// needs over. It only switches requirements on and never removes a manager's choice.
+pub(crate) async fn carry_lead_needs_into_order_planning(
+    state: &AppState,
+    order_id: Uuid,
+    lead_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE order_planning_preparation AS planning
+           SET interpreter_required = planning.interpreter_required OR source.requires_interpreter,
+               interpreter_briefing_status = CASE
+                   WHEN source.requires_interpreter
+                        AND planning.interpreter_briefing_status = 'not_needed' THEN 'pending'
+                   ELSE planning.interpreter_briefing_status
+               END,
+               non_medical_required = planning.non_medical_required OR source.requires_non_medical
+           FROM (
+               SELECT
+                   COALESCE(needs_interpreter, false)
+                       OR COALESCE(services, ARRAY[]::text[])
+                          && ARRAY['interpreter_support']::text[]
+                       AS requires_interpreter,
+                   COALESCE(services, ARRAY[]::text[])
+                       && ARRAY[
+                           'driver',
+                           'concierge',
+                           'concierge_support',
+                           'medical-transport',
+                           'medical_transport',
+                           'air-ambulance',
+                           'air_ambulance',
+                           'business-aviation',
+                           'business_aviation'
+                       ]::text[]
+                       AS requires_non_medical
+               FROM leads
+               WHERE id = $2
+           ) AS source
+           WHERE planning.order_id = $1
+             AND (source.requires_interpreter OR source.requires_non_medical)"#,
+    )
+    .bind(order_id)
+    .bind(lead_id)
+    .execute(&state.db)
+    .await?;
+    Ok(())
+}
+
 /// Resolve the clinical episode an order belongs to (RFC D8). An explicit
 /// `case_id` must belong to the order's subject; otherwise the lead's case is
 /// used when there is one.
