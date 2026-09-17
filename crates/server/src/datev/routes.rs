@@ -447,9 +447,10 @@ async fn finish_exchange(
     tokens.id_token = None;
     // Without a granted offline_access this is an ordinary 11-hour session.
     let bound = p.bound.filter(|_| {
-        tokens.scope.as_deref().map_or(true, |scope| {
-            scope.split_whitespace().any(|s| s == "offline_access")
-        })
+        tokens
+            .scope
+            .as_deref()
+            .is_none_or(|scope| scope.split_whitespace().any(|s| s == "offline_access"))
     });
     if let Err(error) = store_tokens(
         state,
