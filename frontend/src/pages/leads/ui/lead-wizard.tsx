@@ -1741,9 +1741,10 @@ function costEstimateWorkTypeDescription(
     : german;
 }
 
+// A catalog price is the price of the whole service. Its duration is
+// informational: an operation of 15 hours is not 15 times its price.
 function costEstimateWorkTypeRange(item: SpecializationWorkType) {
-  const duration = Math.max(1, item.duration_hours);
-  return `${formatMoneyValue(item.min_price_eur * duration, "de")} - ${formatMoneyValue(item.max_price_eur * duration, "de")} EUR`;
+  return `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} EUR`;
 }
 
 function costEstimateServiceLines(
@@ -1753,7 +1754,7 @@ function costEstimateServiceLines(
   return workTypes.map((item) => ({
     description: costEstimateWorkTypeDescription(item, additionalLanguage),
     quantity: `${Math.max(1, item.duration_hours)} Std.`,
-    fee: `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} EUR/Std.`,
+    fee: costEstimateWorkTypeRange(item),
     line_total: costEstimateWorkTypeRange(item),
   }));
 }
@@ -1763,8 +1764,8 @@ function costEstimateTotalRange(
 ) {
   const total = workTypes.reduce(
     (result, item) => ({
-      minimum: result.minimum + item.min_price_eur * Math.max(1, item.duration_hours),
-      maximum: result.maximum + item.max_price_eur * Math.max(1, item.duration_hours),
+      minimum: result.minimum + item.min_price_eur,
+      maximum: result.maximum + item.max_price_eur,
     }),
     { minimum: 0, maximum: 0 },
   );
@@ -7316,9 +7317,9 @@ ${serviceCommentLines.join("\n")}`
                                                   {workTypeDurationLabel(durationHours, tx)}
                                                 </span>
                                                 <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono font-medium tabular-nums text-emerald-800 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                                                  {formatMoneyValue(workType.min_price_eur * durationHours, lang)}
+                                                  {formatMoneyValue(workType.min_price_eur, lang)}
                                                   {" – "}
-                                                  {formatMoneyValue(workType.max_price_eur * durationHours, lang)} EUR
+                                                  {formatMoneyValue(workType.max_price_eur, lang)} EUR
                                                 </span>
                                               </span>
                                             </span>

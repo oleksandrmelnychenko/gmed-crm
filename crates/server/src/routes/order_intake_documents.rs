@@ -134,10 +134,11 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
         .map(|item| {
             let min = decimal(&item["min_price_eur"]);
             let max = decimal(&item["max_price_eur"]);
-            // Keep the estimate calculation identical to the main lead wizard.
+            // A catalog price is the price of the whole service, as in the main lead
+            // wizard; its duration is informational and never multiplies the price.
             let duration = item["duration_hours"].as_i64().unwrap_or(1);
-            minimum += min * duration as f64;
-            maximum += max * duration as f64;
+            minimum += min;
+            maximum += max;
             let descriptions: Vec<(String, String)> = item["descriptions"]
                 .as_array()
                 .into_iter()
@@ -162,7 +163,7 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
                 description: String::new(),
                 quantity: duration.to_string(),
                 unit_price: format_eur_range(min, max),
-                line_gross: format_eur_range(min * duration as f64, max * duration as f64),
+                line_gross: format_eur_range(min, max),
                 vat_rate: None,
                 notes: None,
             }
@@ -294,7 +295,11 @@ mod tests {
             selection.line_items[0].unit_price,
             "28.000,00 - 35.000,00 EUR"
         );
-        assert_eq!(selection.total_range, "420.000,00 - 525.000,00 EUR");
+        assert_eq!(
+            selection.line_items[0].line_gross,
+            "28.000,00 - 35.000,00 EUR"
+        );
+        assert_eq!(selection.total_range, "28.000,00 - 35.000,00 EUR");
         assert_eq!(selection.line_items[0].quantity, "15");
         assert_eq!(selection.line_items[0].localized_sections.len(), 2);
     }
