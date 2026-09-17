@@ -308,3 +308,41 @@ export function recordCompliancePrivacyRequestStep(
     payload,
   );
 }
+
+export type SecurityIncident = {
+  id: string;
+  reference: string;
+  title: string;
+  description: string;
+  category: string;
+  severity: string;
+  status: string;
+  risk_assessment: string;
+  occurred_at: string | null;
+  became_aware_at: string;
+  authority_deadline: string;
+  authority_notified_at: string | null;
+  authority_reference: string | null;
+  no_notification_reason: string | null;
+  notification_decision_documented: boolean;
+  authority_deadline_missed: boolean;
+  subjects_notified_at: string | null;
+  affected_subjects_count: number | null;
+  data_categories: string[];
+  root_cause: string | null;
+  measures_taken: string | null;
+  reported_by_name: string;
+  created_at: string;
+};
+
+export function fetchSecurityIncidents() {
+  return apiFetch<SecurityIncident[]>("/admin/compliance/incidents", { cache: "no-store" });
+}
+
+export function reportSecurityIncident(payload: JsonPayload) {
+  return postJson<{ id: string; reference: string }>("/admin/compliance/incidents", payload);
+}
+
+export function updateSecurityIncident(incidentId: string, payload: JsonPayload) {
+  return postJson<SecurityIncident>(`/admin/compliance/incidents/${incidentId}`, payload);
+}

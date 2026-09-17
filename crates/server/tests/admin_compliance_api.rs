@@ -1295,3 +1295,74 @@ async fn access_request_is_fulfilled_manually_and_records_the_art_12_steps() {
     assert_eq!(record["identity_verification"]["method"], "id_document");
     assert_eq!(record["deadline_extension"]["days"], 60);
 }
+
+#[tokio::test]
+async fn incident_register_tracks_the_72_hour_decision() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("incident");
+    let interpreter = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let it_admin = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+    let reporter = auth_header_for(interpreter, "interpreter");
+    let manager = auth_header_for(it_admin, "it_admin");
+
+    // Any member of staff can report, but only compliance reads the register.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/compliance/incidents",
+        &reporter,
+        Some(json!({
+            "title": format!("Report sent to the wrong clinic {tag}"),
+            "description": "A discharge letter went to the wrong provider by e-mail.",
+            "category": "confidentiality",
+            "severity": "high",
+            "affected_subjects_count": 1
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let incident_id = body["id"].as_str().expect("incident id").to_string();
+    assert!(body["reference"].as_str().unwrap().starts_with("INC-"));
+
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/compliance/incidents",
+        &reporter,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Closing without the report or the reason for not reporting is refused.
+    let path = format!("/api/v1/admin/compliance/incidents/{incident_id}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "status": "closed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({
+            "status": "closed",
+            "risk_assessment": "no_risk",
+            "no_notification_reason": "Recipient is bound by medical secrecy and deleted the letter"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "closed");
+    assert_eq!(body["notification_decision_documented"], true);
+    assert_eq!(body["authority_deadline_missed"], false);
+}

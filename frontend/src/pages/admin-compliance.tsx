@@ -57,6 +57,7 @@ import {
 } from "@/pages/admin/data/admin-api";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
+import { IncidentRegisterSection } from "@/pages/admin/ui/incident-register-section";
 import {
   PrivacyRequestSteps,
   type PrivacyRequestStepFacts,
@@ -1283,6 +1284,10 @@ function useAdminCompliancePageContent() {
               ) : null}
             </SheetContent>
           </Sheet>
+
+      <IncidentRegisterSection
+        canManage={user?.role === "ceo" || user?.role === "it_admin"}
+      />
     </div>
   );
 }

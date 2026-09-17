@@ -53,6 +53,7 @@ pub mod provider_documents;
 pub mod provider_people;
 pub mod providers;
 pub mod realtime;
+pub mod security_incidents;
 pub mod service_packages;
 pub mod sops;
 pub mod staff_access;
@@ -120,6 +121,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(admin_security::router())
         .merge(key_rotation::router())
         .merge(admin_compliance::router())
+        .merge(security_incidents::router())
         .merge(notifications::router())
         .merge(custom_fields::router())
         .merge(documents::router())
