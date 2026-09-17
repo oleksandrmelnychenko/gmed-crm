@@ -116,14 +116,7 @@ available_memory_mb() {
 
 pause_ocr_for_build() {
   local container running
-  # The malware daemon holds its signature database in RAM (about 1.2 GiB). It is
-  # paused like OCR; uploads fall back to a standalone clamscan meanwhile.
-  for container in gmed-crm-clinical-document-parser-1 gmed-crm-invoice-parser-1 gmed-clamav; do
-    if [[ "$container" == gmed-clamav ]] &&
-       ! docker inspect --format '{{.State.Running}}' "$container" >/dev/null 2>&1; then
-      # The first deployment that introduces the daemon has nothing to pause yet.
-      continue
-    fi
+  for container in gmed-crm-clinical-document-parser-1 gmed-crm-invoice-parser-1; do
     running="$(docker inspect --format '{{.State.Running}}' "$container")" || return 1
     if [[ "$running" == "true" ]]; then
       # Record before stopping so a partial stop failure is recovered by EXIT.

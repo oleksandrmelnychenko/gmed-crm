@@ -36,9 +36,6 @@ services:
     environment:
       INVOICE_PARSER_URL: "http://invoice-parser:8091"
       INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the DEV invoice parser service key}"
-      # Scan through the resident daemon. If it is down (it is paused while a DEV
-      # build needs the RAM) the backend falls back to a standalone clamscan.
-      GMED_CLAMD_ADDRESS: "clamav:3310"
     networks: [default, invoice-internal]
     # Publish the metrics-only listener so monitoring's Prometheus can
     # scrape `gmed-dev:9091` via tailnet. The main API port (3000)
@@ -46,18 +43,6 @@ services:
     # ingress for /api on DEV too.
     ports:
       - "9091:9091"
-
-  # The signature database stays in the daemon's memory (about 1.2 GiB), so a
-  # scan takes milliseconds. A standalone clamscan reloads it on every upload:
-  # roughly 7 s and 1 GiB each, which also starved concurrent DEV builds.
-  clamav:
-    image: clamav/clamav:1.4
-    container_name: gmed-clamav
-    restart: unless-stopped
-    environment:
-      CLAMAV_NO_MILTERD: "true"
-    volumes:
-      - clamav_db:/var/lib/clamav
 
   invoice-parser:
     build:
@@ -185,7 +170,6 @@ services:
 
 volumes:
   promtail_positions:
-  clamav_db:
 
 networks:
   invoice-internal:

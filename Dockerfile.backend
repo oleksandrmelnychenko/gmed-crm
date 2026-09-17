@@ -49,7 +49,6 @@ RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
         ca-certificates \
         clamav \
         clamav-freshclam \
-        clamdscan \
         curl \
         openssl \
         tesseract-ocr \
