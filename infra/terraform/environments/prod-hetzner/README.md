@@ -391,6 +391,22 @@ sudo /opt/gmed/repo/scripts/restore-postgres.sh \
 sudo shred -u /etc/gmed/backup-age.key
 ```
 
+#### Uploaded files (patient documents)
+
+The database dump only references documents; the files live in the
+`gmed-crm_uploads` Docker volume and are backed up separately at 02:45 UTC
+by `scripts/backup-uploads.sh` (same bucket, prefix `uploads/`, same age
+recipients). Always restore the dump and the uploads from the same night,
+and do it before shredding the key in Step 5:
+
+```bash
+sudo /opt/gmed/repo/scripts/restore-uploads.sh --list
+# verify only — decrypts and walks the archive, writes nothing
+sudo /opt/gmed/repo/scripts/restore-uploads.sh uploads/gmed-prod-2026-05-13T024500Z.tar.gz.age
+# stop the backend, then restore
+sudo /opt/gmed/repo/scripts/restore-uploads.sh uploads/gmed-prod-2026-05-13T024500Z.tar.gz.age --yes-overwrite-uploads
+```
+
 ### Release flow (GHCR + cosign)
 
 PROD never runs `docker build`. The

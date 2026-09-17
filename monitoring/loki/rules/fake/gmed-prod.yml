@@ -156,7 +156,7 @@ groups:
           sum by (host) (
             count_over_time(
               {job="gmed-host-ops"}
-              |~ "(deploy-prod|deploy-monitoring|restore-postgres|backup-postgres) finished rc=[1-9][0-9]*" [10m]
+              |~ "(deploy-prod|deploy-monitoring|restore-postgres|restore-uploads|backup-postgres|backup-uploads) finished rc=[1-9][0-9]*" [10m]
             )
           ) > 0
         for: 1m
@@ -181,3 +181,18 @@ groups:
         annotations:
           summary: "No successful backup log in 26h"
           description: "Loki has not seen a successful backup-postgres final rc line from gmed-prod in 26 hours. Confirm cron, Promtail shipping, and Healthchecks.io state."
+
+      - alert: UploadsBackupCronSilent
+        # The database dump only references patient documents; the files
+        # live in the uploads volume and are backed up at 02:45 UTC.
+        expr: |
+          absent_over_time(
+            {job="gmed-host-ops", host="gmed-prod"}
+            |= "backup-uploads finished rc=0" [26h]
+          ) == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No successful uploads backup log in 26h"
+          description: "Loki has not seen a successful backup-uploads final rc line from gmed-prod in 26 hours. Without it a restore brings back document records whose files are missing."
