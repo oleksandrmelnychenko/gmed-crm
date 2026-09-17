@@ -4693,14 +4693,157 @@ impl TreatmentPlanPdfLayout {
         self.y_mm = self.top_start_y_mm();
     }
 
-    fn ensure_space(&mut self, needed_mm: f32) {
-        let content_bottom_mm = if self.page_style == PdfPageStyle::Legal {
+    fn content_bottom_mm(&self) -> f32 {
+        if self.page_style == PdfPageStyle::Legal {
             PDF_LEGAL_CONTENT_BOTTOM_MM
         } else {
             PDF_BOTTOM_MARGIN_MM + PDF_FOOTER_GAP_MM
-        };
-        if self.y_mm - needed_mm < content_bottom_mm {
+        }
+    }
+
+    fn ensure_space(&mut self, needed_mm: f32) {
+        if self.y_mm - needed_mm < self.content_bottom_mm() {
             self.finish_page();
+        }
+    }
+
+    /// Subdued legal notice in the tinted box with the brand rule used by the
+    /// medication list. Its text stays smaller than the document body, and a
+    /// long notice continues on the next page instead of leaving a gap.
+    fn notice_box(&mut self, sections: &[(&str, &str)], before_mm: f32) {
+        const TITLE_SIZE_PT: f32 = 8.5;
+        const BODY_SIZE_PT: f32 = 7.5;
+        const PADDING_MM: f32 = 3.0;
+        const TEXT_INSET_MM: f32 = 4.0;
+        const MIN_LINES_PER_PAGE: usize = 3;
+
+        let text_width_mm = PDF_CONTENT_WIDTH_MM - TEXT_INSET_MM - PADDING_MM;
+        // (text, is_title, line height, gap before)
+        let mut lines = Vec::<(String, bool, f32, f32)>::new();
+        for (title, body) in sections {
+            let section_gap_mm = if lines.is_empty() { 0.0 } else { 2.0 };
+            let title_lines = wrap_text_to_width_precise(title, TITLE_SIZE_PT, text_width_mm);
+            for (index, line) in title_lines.iter().enumerate() {
+                lines.push((
+                    line.clone(),
+                    true,
+                    pdf_line_height_mm(TITLE_SIZE_PT, 1.35),
+                    if index == 0 { section_gap_mm } else { 0.0 },
+                ));
+            }
+            for (index, line) in wrap_text_to_width_precise(body, BODY_SIZE_PT, text_width_mm)
+                .into_iter()
+                .enumerate()
+            {
+                lines.push((
+                    line,
+                    false,
+                    pdf_line_height_mm(BODY_SIZE_PT, 1.35),
+                    if index > 0 {
+                        0.0
+                    } else if title_lines.is_empty() {
+                        section_gap_mm
+                    } else {
+                        0.8
+                    },
+                ));
+            }
+        }
+        if lines.is_empty() {
+            return;
+        }
+        if before_mm > 0.0 {
+            self.spacer(before_mm);
+        }
+
+        let mut start = 0;
+        let mut on_fresh_page = false;
+        while start < lines.len() {
+            let available_mm = self.y_mm - self.content_bottom_mm() - 2.0 * PADDING_MM;
+            let mut count = 0;
+            let mut height_mm = 0.0;
+            for (offset, (_, _, line_height_mm, gap_mm)) in lines[start..].iter().enumerate() {
+                let needed_mm = line_height_mm + if offset == 0 { 0.0 } else { *gap_mm };
+                if height_mm + needed_mm > available_mm {
+                    break;
+                }
+                height_mm += needed_mm;
+                count += 1;
+            }
+            let mut rest = lines.len() - start - count;
+            // Keep a title with its text and never strand one line after the break.
+            while count > 0 && rest > 0 && (rest == 1 || lines[start + count - 1].1) {
+                let (_, _, line_height_mm, gap_mm) = &lines[start + count - 1];
+                height_mm -= line_height_mm + if count == 1 { 0.0 } else { *gap_mm };
+                count -= 1;
+                rest += 1;
+            }
+            if count < MIN_LINES_PER_PAGE.min(lines.len() - start) && !on_fresh_page {
+                self.finish_page();
+                on_fresh_page = true;
+                continue;
+            }
+            if count == 0 {
+                count = 1;
+                height_mm = lines[start].2;
+            }
+
+            let box_top_mm = self.y_mm;
+            let box_height_mm = height_mm + 2.0 * PADDING_MM;
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                box_top_mm - box_height_mm,
+                PDF_CONTENT_WIDTH_MM,
+                box_height_mm,
+                Color::Rgb(Rgb::new(0.975, 0.975, 0.978, None)),
+            );
+            append_pdf_filled_rect(
+                &mut self.page_ops,
+                PDF_LEFT_MARGIN_MM,
+                box_top_mm - box_height_mm,
+                0.8,
+                box_height_mm,
+                treatment_plan_pdf_color(TreatmentPlanPdfColor::Primary),
+            );
+            let mut cursor_y_mm = box_top_mm - PADDING_MM;
+            for (offset, (line, is_title, line_height_mm, gap_mm)) in
+                lines[start..start + count].iter().enumerate()
+            {
+                if offset > 0 {
+                    cursor_y_mm -= gap_mm;
+                }
+                let size_pt = if *is_title {
+                    TITLE_SIZE_PT
+                } else {
+                    BODY_SIZE_PT
+                };
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    line,
+                    PDF_LEFT_MARGIN_MM + TEXT_INSET_MM,
+                    cursor_y_mm - pt_to_mm(size_pt),
+                    size_pt,
+                    if *is_title {
+                        &self.bold_font
+                    } else {
+                        &self.regular_font
+                    },
+                    if *is_title {
+                        TreatmentPlanPdfColor::Body
+                    } else {
+                        TreatmentPlanPdfColor::Muted
+                    },
+                );
+                cursor_y_mm -= line_height_mm;
+            }
+            self.y_mm = box_top_mm - box_height_mm;
+            start += count;
+            on_fresh_page = false;
+            if start < lines.len() {
+                self.finish_page();
+                on_fresh_page = true;
+            }
         }
     }
 
@@ -4939,59 +5082,120 @@ impl TreatmentPlanPdfLayout {
             .iter()
             .map(|(_, _, line_height_mm, gap_before_mm)| line_height_mm + gap_before_mm)
             .sum();
+        const KEEP_TOGETHER_LINES: usize = 6;
+        const MIN_SPLIT_LINES: usize = 3;
         let price_font_size_pt = 9.5;
         let price_glyph_height_mm = pt_to_mm(price_font_size_pt);
-        let row_height_mm =
-            (content_height_mm + 4.0).max(pdf_line_height_mm(price_font_size_pt, 1.25) + 4.0);
-        self.ensure_space(row_height_mm + 0.2);
-
-        let row_top_mm = self.y_mm;
-        let row_bottom_mm = row_top_mm - row_height_mm;
-        append_pdf_filled_rect(
-            &mut self.page_ops,
-            PDF_LEFT_MARGIN_MM,
-            row_bottom_mm,
-            PDF_CONTENT_WIDTH_MM,
-            0.2,
-            Color::Rgb(Rgb::new(0.84, 0.83, 0.82, None)),
-        );
-
-        let mut cursor_y_mm = row_top_mm - 2.0;
-        for (line, bold, line_height_mm, gap_before_mm) in lines {
-            cursor_y_mm -= gap_before_mm;
-            let font_size_pt = if bold { 9.0 } else { 9.5 };
-            let glyph_height_mm = pt_to_mm(font_size_pt);
-            append_pdf_text_line(
-                &mut self.page_ops,
-                &line,
-                PDF_LEFT_MARGIN_MM + 2.0,
-                cursor_y_mm - glyph_height_mm,
-                font_size_pt,
-                if bold {
-                    &self.bold_font
-                } else {
-                    &self.regular_font
-                },
-                TreatmentPlanPdfColor::Body,
-            );
-            cursor_y_mm -= line_height_mm;
+        let min_row_height_mm = pdf_line_height_mm(price_font_size_pt, 1.25) + 4.0;
+        // A short row stays whole. A long one continues on the next page, so the
+        // page in front of it is not left half empty.
+        if lines.len() <= KEEP_TOGETHER_LINES {
+            self.ensure_space((content_height_mm + 4.0).max(min_row_height_mm) + 0.2);
         }
 
-        let price_x_mm = (PDF_LEFT_MARGIN_MM + service_width_mm + price_width_mm
-            - 2.0
-            - approx_text_width_mm(price, price_font_size_pt))
-        .max(PDF_LEFT_MARGIN_MM + service_width_mm + 2.0);
-        append_pdf_text_line(
-            &mut self.page_ops,
-            price,
-            price_x_mm,
-            row_bottom_mm + (row_height_mm - price_glyph_height_mm) / 2.0,
-            price_font_size_pt,
-            &self.regular_font,
-            TreatmentPlanPdfColor::Body,
-        );
+        let mut start = 0;
+        let mut on_fresh_page = false;
+        while start < lines.len() {
+            let available_mm = self.y_mm - self.content_bottom_mm() - 4.2;
+            let mut count = 0;
+            let mut height_mm = 0.0;
+            for (offset, (_, _, line_height_mm, gap_before_mm)) in lines[start..].iter().enumerate()
+            {
+                let needed_mm = line_height_mm + if offset == 0 { 0.0 } else { *gap_before_mm };
+                if height_mm + needed_mm > available_mm {
+                    break;
+                }
+                height_mm += needed_mm;
+                count += 1;
+            }
+            let mut rest = lines.len() - start - count;
+            // Keep a heading with its text and never strand one line after the break.
+            while count > 0 && rest > 0 && (rest == 1 || lines[start + count - 1].1) {
+                let (_, _, line_height_mm, gap_before_mm) = &lines[start + count - 1];
+                height_mm -= line_height_mm + if count == 1 { 0.0 } else { *gap_before_mm };
+                count -= 1;
+                rest += 1;
+            }
+            if rest > 0 && count < MIN_SPLIT_LINES && !on_fresh_page {
+                self.finish_page();
+                on_fresh_page = true;
+                continue;
+            }
+            if count == 0 {
+                count = 1;
+                height_mm = lines[start].2;
+            }
 
-        self.y_mm = row_bottom_mm;
+            let is_first_segment = start == 0;
+            let is_last_segment = start + count == lines.len();
+            let segment_height_mm = if is_first_segment && is_last_segment {
+                (height_mm + 4.0).max(min_row_height_mm)
+            } else {
+                height_mm + 4.0
+            };
+            let segment_top_mm = self.y_mm;
+            let segment_bottom_mm = segment_top_mm - segment_height_mm;
+            if is_last_segment {
+                append_pdf_filled_rect(
+                    &mut self.page_ops,
+                    PDF_LEFT_MARGIN_MM,
+                    segment_bottom_mm,
+                    PDF_CONTENT_WIDTH_MM,
+                    0.2,
+                    Color::Rgb(Rgb::new(0.84, 0.83, 0.82, None)),
+                );
+            }
+
+            let mut cursor_y_mm = segment_top_mm - 2.0;
+            for (offset, (line, bold, line_height_mm, gap_before_mm)) in
+                lines[start..start + count].iter().enumerate()
+            {
+                if offset > 0 {
+                    cursor_y_mm -= gap_before_mm;
+                }
+                let font_size_pt = if *bold { 9.0 } else { 9.5 };
+                let glyph_height_mm = pt_to_mm(font_size_pt);
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    line,
+                    PDF_LEFT_MARGIN_MM + 2.0,
+                    cursor_y_mm - glyph_height_mm,
+                    font_size_pt,
+                    if *bold {
+                        &self.bold_font
+                    } else {
+                        &self.regular_font
+                    },
+                    TreatmentPlanPdfColor::Body,
+                );
+                cursor_y_mm -= line_height_mm;
+            }
+
+            // The price belongs to the row's first part, where the service is named.
+            if is_first_segment {
+                let price_x_mm = (PDF_LEFT_MARGIN_MM + service_width_mm + price_width_mm
+                    - 2.0
+                    - approx_text_width_mm(price, price_font_size_pt))
+                .max(PDF_LEFT_MARGIN_MM + service_width_mm + 2.0);
+                append_pdf_text_line(
+                    &mut self.page_ops,
+                    price,
+                    price_x_mm,
+                    segment_bottom_mm + (segment_height_mm - price_glyph_height_mm) / 2.0,
+                    price_font_size_pt,
+                    &self.regular_font,
+                    TreatmentPlanPdfColor::Body,
+                );
+            }
+
+            self.y_mm = segment_bottom_mm;
+            start += count;
+            on_fresh_page = false;
+            if !is_last_segment {
+                self.finish_page();
+                on_fresh_page = true;
+            }
+        }
     }
 
     fn table_row_styled(
@@ -16258,8 +16462,9 @@ fn cost_estimate_total_label(language: &str) -> &'static str {
     }
 }
 
-fn cost_estimate_legal_notice(language: &str) -> String {
-    let german = "Rechtliche Hinweise: Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
+/// Notice sections as (title, text); the title is set apart in the notice box.
+fn cost_estimate_legal_notice(language: &str) -> Vec<(&'static str, &'static str)> {
+    let german = "Die Kosten für medizinische Diagnostik und/oder Behandlung können von \
      angegebenen Preisen/Kosten abweichen und dienen ausschließlich Informationszwecken. \
      Dementsprechend geben wir keine Gewährleistungen oder Zusicherungen hinsichtlich der \
      Genauigkeit, Vollständigkeit oder Richtigkeit der hierin enthaltenen Informationen oder \
@@ -16269,7 +16474,7 @@ fn cost_estimate_legal_notice(language: &str) -> String {
      entsprechen dem Stand zum Zeitpunkt der Erstellung des Dokuments und entspricht den \
      Medianpreisen für aufgeführte medizinische Leistungen aufgrund unserer Erfahrung. Sie können \
      aufgrund künftiger Entwicklungen überholt sein, ohne dass das Dokument geändert wurde.";
-    let russian = "Правовая информация: Стоимость медицинской диагностики и/или лечения может \
+    let russian = "Стоимость медицинской диагностики и/или лечения может \
          отличаться от заявленных цен/стоимостей и представлена исключительно в информационных \
          целях. Следовательно, мы не предоставляем никаких гарантий или заявлений относительно \
          точности, полноты или правильности любой информации или мнения, содержащихся здесь. Мы \
@@ -16278,10 +16483,12 @@ fn cost_estimate_legal_notice(language: &str) -> String {
          статусу на момент создания документа и соответствует среднему диапазону цен за \
          указанные медицинские услуги исходя из нашего опыта. Дальнейшее развитие может сделать \
          предоставленную информацию устаревшей без внесения изменений в данный документ.";
+    let german = ("Rechtliche Hinweise", german);
+    let russian = ("Правовая информация", russian);
     match language {
-        "ru" => russian.to_string(),
-        "de-ru" => format!("{german} / {russian}"),
-        _ => german.to_string(),
+        "ru" => vec![russian],
+        "de-ru" => vec![german, russian],
+        _ => vec![german],
     }
 }
 
@@ -16426,12 +16633,7 @@ fn build_cost_estimate_pdf(
         true,
     );
 
-    admin_block(
-        &mut layout,
-        &cost_estimate_legal_notice(&context.language),
-        8.0,
-        3.0,
-    );
+    layout.notice_box(&cost_estimate_legal_notice(&context.language), 6.0);
 
     let _ = &context.patient_pid;
 
@@ -25357,6 +25559,52 @@ mod tests {
             legal_document_reference(Some("  "), "DOC-FALLBACK"),
             "DOC-FALLBACK"
         );
+    }
+
+    #[test]
+    fn cost_estimate_pdf_continues_long_rows_and_sets_the_notice_apart() {
+        let long_item = |marker: &str| GeneratedContractLineItem {
+            description_items: None,
+            localized_sections: vec![(
+                format!("{marker}ANFANG Untersuchung und Beratung"),
+                format!("{}{marker}ENDE", "Untersuchung ".repeat(110)),
+            )],
+            description: String::new(),
+            quantity: "1".to_string(),
+            unit_price: "100,00 - 1000,00 EUR".to_string(),
+            line_gross: "100,00 - 1000,00 EUR".to_string(),
+            vat_rate: None,
+            notes: None,
+        };
+        let context = GeneratedCostEstimateContext {
+            language: "de".to_string(),
+            auto_name: "Kostenschätzung".to_string(),
+            title_override: None,
+            patient: legal_test_party("Germany"),
+            patient_pid: "PT-LEGAL-5".to_string(),
+            order_number: Some("A-2026-0101".to_string()),
+            estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
+            line_items: vec![long_item("EINS"), long_item("ZWEI")],
+            total_range: Some("200,00 - 2000,00 EUR".to_string()),
+            agency: legal_test_agency(),
+            generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
+        };
+
+        let bytes = build_cost_estimate_pdf(&context, "VKS-20260716-LONGROWS0001").unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "VKS-20260716-LONGROWS0001");
+        let pages = normalized_pdf_pages(&bytes);
+
+        // The second row starts in the space left under the first one and
+        // continues on the next page instead of moving there as a whole.
+        assert!(pages[0].contains("EINSENDE"));
+        assert!(pages[0].contains("ZWEIANFANG"));
+        assert!(!pages[0].contains("ZWEIENDE"));
+        assert!(pages[1].contains("ZWEIENDE"));
+        assert_eq!(text.matches("100,00 - 1000,00 EUR").count(), 2);
+
+        assert_eq!(text.matches("Rechtliche Hinweise").count(), 1);
+        assert!(!text.contains("Rechtliche Hinweise:"));
+        assert!(text.contains("ohne dass das Dokument geändert wurde."));
     }
 
     #[test]
