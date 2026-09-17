@@ -15,6 +15,7 @@ import {
   getStoredAccessToken,
   persistAuthTokens,
 } from "@/lib/auth-storage";
+import { resolveIdleLogoutMinutes, useIdleLogout } from "@/lib/idle-logout";
 import { uiText } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
 
@@ -388,6 +389,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
   };
+
+  useIdleLogout(
+    Boolean(user),
+    () => void logout(),
+    resolveIdleLogoutMinutes(import.meta.env.VITE_IDLE_LOGOUT_MINUTES),
+  );
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, checkPending }}>
