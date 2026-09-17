@@ -22,6 +22,10 @@ export const liveRu = {
   count: "Получено записей", first: "Показаны первые 50 записей. Скачать можно весь полученный результат.",
   details: "Открыть поля записи", history: "Журнал обмена", noHistory: "Операций пока нет.", success: "Успешно", failed: "Не выполнено", started: "Начато",
   revokeLink: "Управление доступом на стороне DATEV", busy: "Выполняется…", genericError: "Не удалось выполнить запрос. Проверьте подключение и повторите.",
+  connectLong: "DATEV · Подключить на длительный срок", forceDisconnect: "DATEV · Отключить без подтверждения",
+  session: "Вход в DATEV действует до", sessionHint: "Обычный вход DATEV действует не более 11 часов, затем потребуется повторный вход. Длительный доступ (до 2 лет) выдаётся только для одной проверенной компании.",
+  longTerm: "Длительный доступ", longTermFor: "Длительный доступ для компании", longTermNeedsCheck: "Длительное подключение доступно после успешной проверки доступа к компании из профиля: подключитесь обычным входом, выполните «Проверить доступ», затем отключитесь.",
+  forcedNotice: "Токены удалены в GMed, но DATEV не подтвердил отзыв. Отзовите доступ приложения на стороне DATEV (ссылка ниже).",
 };
 export const liveDe: typeof liveRu = {
   connectionScope: "Die Verbindung gilt für die in DATEV freigegebenen Daten. Der Zugriff auf ein Unternehmen wird separat anhand von Beraternummer und Mandantennummer geprüft.",
@@ -47,6 +51,10 @@ export const liveDe: typeof liveRu = {
   count: "Abgerufene Datensätze", first: "Die ersten 50 Datensätze werden angezeigt. Der Download enthält das vollständige abgerufene Ergebnis.",
   details: "Datensatzfelder öffnen", history: "Übertragungsprotokoll", noHistory: "Noch keine Vorgänge.", success: "Erfolgreich", failed: "Fehlgeschlagen", started: "Gestartet",
   revokeLink: "Zugriff bei DATEV verwalten", busy: "Wird ausgeführt…", genericError: "Anfrage fehlgeschlagen. Verbindung prüfen und erneut versuchen.",
+  connectLong: "DATEV · Langfristig verbinden", forceDisconnect: "DATEV · Ohne Bestätigung trennen",
+  session: "DATEV-Anmeldung gültig bis", sessionHint: "Eine normale DATEV-Anmeldung gilt höchstens 11 Stunden, danach ist eine neue Anmeldung nötig. Der Langzeitzugriff (bis zu 2 Jahre) wird nur für ein geprüftes Unternehmen erteilt.",
+  longTerm: "Langzeitzugriff", longTermFor: "Langzeitzugriff für Unternehmen", longTermNeedsCheck: "Die langfristige Verbindung ist nach einer erfolgreichen Zugriffsprüfung des Unternehmens aus dem Profil möglich: normal verbinden, „Zugriff prüfen“ ausführen, dann trennen.",
+  forcedNotice: "Die Tokens wurden in GMed gelöscht, DATEV hat den Widerruf jedoch nicht bestätigt. Den App-Zugriff bei DATEV widerrufen (Link unten).",
 };
 export function liveError(code: string | undefined, de: boolean) {
   const errors: Record<string, [string,string]> = {
@@ -64,6 +72,11 @@ export function liveError(code: string | undefined, de: boolean) {
     datev_reconnect_required: ["Сессия DATEV недоступна. Отключите её и войдите повторно.", "DATEV-Sitzung nicht verfügbar. Verbindung trennen und erneut anmelden."],
     datev_connection_changed: ["Подключение или профиль компании изменились. Обновите статус, проверьте компанию и подтвердите действие заново.", "Verbindung oder Unternehmensprofil wurde geändert. Status aktualisieren, Unternehmen prüfen und den Vorgang erneut bestätigen."],
     datev_revocation_unconfirmed: ["Чтение заблокировано, но DATEV не подтвердил отзыв токенов. Повторите отключение или отзовите доступ в DATEV.", "Lesen ist gesperrt, der Token-Widerruf wurde von DATEV nicht bestätigt. Trennung wiederholen oder Zugriff bei DATEV widerrufen."],
+    datev_check_required: ["Сначала проверьте доступ к компании из профиля обычным подключением, затем отключитесь и запросите длительный доступ.", "Zuerst den Zugriff auf das Unternehmen aus dem Profil mit einer normalen Verbindung prüfen, dann trennen und den Langzeitzugriff anfordern."],
+    datev_company_bound: ["Длительный доступ выдан для другой компании. Отключите его и подключитесь заново для компании из профиля.", "Der Langzeitzugriff gilt für ein anderes Unternehmen. Trennen und für das Unternehmen aus dem Profil neu verbinden."],
+    datev_request_rejected: ["DATEV отклонил запрос как некорректный. Подключение остаётся активным; проверьте номера компании и выбранный период.", "DATEV hat die Anfrage als ungültig abgelehnt. Die Verbindung bleibt aktiv; Unternehmensnummern und Zeitraum prüfen."],
+    datev_unavailable: ["DATEV сейчас недоступен. Повторите позже.", "DATEV ist derzeit nicht erreichbar. Später erneut versuchen."],
+    datev_unreachable: ["Не удалось связаться с DATEV. Повторите позже.", "DATEV konnte nicht erreicht werden. Später erneut versuchen."],
     datev_redirect_invalid: ["Нужен callback GMed: /api/v1/datev/oauth/callback. Production требует HTTPS-домен GMed.", "GMed-Callback erforderlich: /api/v1/datev/oauth/callback. Production erfordert eine HTTPS-Domain von GMed."],
     datev_rate_limited: ["DATEV ограничил частоту запросов. Повторите позже.", "DATEV-Anfragelimit erreicht. Später erneut versuchen."],
     datev_response_too_large: ["Ответ превышает лимит 8 MiB. Данные не показаны частично; нужен отдельный потоковый экспорт.", "Antwort überschreitet 8 MiB. Keine Teildaten angezeigt; ein separater Streaming-Export ist erforderlich."],

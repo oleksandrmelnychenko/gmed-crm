@@ -6,6 +6,8 @@ export type Connection = {
   redirect_uri?: string; exchange_enabled?: boolean; status: string; has_tokens: boolean;
   checked_at?: string | null; expires_at?: string | null;
   checked_consultant?: number | null; checked_client?: number | null;
+  long_term?: boolean; bound_consultant?: number | null; bound_client?: number | null; session_expires_at?: string | null;
+  revocation_confirmed?: boolean;
   accounting_writes_enabled: false; invoice_originals_supported: false;
 };
 export type Credentials = { client_id: string; client_secret: string; mode: "sandbox" | "production"; redirect_uri: string; exchange_enabled: boolean };
@@ -24,8 +26,8 @@ export type ConfirmedTarget = { revision: string; generation: string; mode: "san
 const base = "/admin/datev";
 export const loadConnection = async () => connectionResponse(await apiFetch<unknown>(`${base}/connection`, { forceFresh: true }));
 export const saveCredentials = async (credentials: Credentials, revision?: string, generation?: string) => connectionResponse(await apiFetch<unknown>(`${base}/connection`, { method: "PUT", body: JSON.stringify({ credentials, revision: revision ?? null, generation: generation ?? null }) }));
-export const authorizeDatev = (expected: ConnectionTarget) => apiFetch<{ authorization_url: string }>(`${base}/authorize`, { method: "POST", body: JSON.stringify({ expected }), credentials: "same-origin" });
-export const disconnectDatev = async (expected: ConnectionTarget) => connectionResponse(await apiFetch<unknown>(`${base}/disconnect`, { method: "POST", body: JSON.stringify({ expected }), timeoutMs: 60000 }));
+export const authorizeDatev = (expected: ConnectionTarget, longTerm = false) => apiFetch<{ authorization_url: string }>(`${base}/authorize`, { method: "POST", body: JSON.stringify({ expected, long_term: longTerm }), credentials: "same-origin" });
+export const disconnectDatev = async (expected: ConnectionTarget, force = false) => connectionResponse(await apiFetch<unknown>(`${base}/disconnect`, { method: "POST", body: JSON.stringify({ expected, force }), timeoutMs: 60000 }));
 export const checkDatev = async (expected: ConfirmedTarget) => accessResponse(await apiFetch<unknown>(`${base}/check`, { method: "POST", body: JSON.stringify({ expected }), timeoutMs: 90000 }));
 export const readDatev = async (expected: ConfirmedTarget, kind: ReadKind, fiscalYear?: number) => readResponse(await apiFetch<unknown>(`${base}/read`, { method: "POST", body: JSON.stringify({ expected, kind, fiscal_year: fiscalYear ?? null }), timeoutMs: 120000 }), kind, fiscalYear);
 export const loadDatevEvents = async () => eventsResponse(await apiFetch<unknown>(`${base}/events`, { forceFresh: true }));

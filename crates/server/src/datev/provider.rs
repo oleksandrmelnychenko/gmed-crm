@@ -4,10 +4,12 @@ use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{sync::OnceLock, time::Duration};
 
 pub type Result<T> = std::result::Result<T, &'static str>;
 pub const CALLBACK: &str = "/api/v1/datev/oauth/callback";
+/// Example client ID from DATEV's public API reference; validates a request's shape before any company is known.
+pub const REFERENCE_CLIENT_ID: &str = "29098-55003";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,7 +76,24 @@ impl Credentials {
             }
         )
     }
-    pub fn authorize(&self, state: &str, nonce: &str, verifier: &str) -> Result<String> {
+    // DATEV issues the two-year refresh token only for one company:
+    // offline_access plus datev:iam:client:<consultant>-<client>.
+    pub fn requested_scopes(&self, long_term: Option<(u32, u32)>) -> String {
+        match long_term {
+            Some((consultant, number)) => format!(
+                "{} offline_access datev:iam:client:{consultant}-{number}",
+                self.scopes()
+            ),
+            None => self.scopes(),
+        }
+    }
+    pub fn authorize(
+        &self,
+        state: &str,
+        nonce: &str,
+        verifier: &str,
+        long_term: Option<(u32, u32)>,
+    ) -> Result<String> {
         self.validate()?;
         let mut url = Url::parse(&format!("{}/authorize", self.issuer()))
             .map_err(|_| "datev_configuration_invalid")?;
@@ -82,7 +101,7 @@ impl Credentials {
             ("response_type", "code"),
             ("client_id", self.client_id.as_str()),
             ("redirect_uri", self.redirect_uri.as_str()),
-            ("scope", self.scopes().as_str()),
+            ("scope", self.requested_scopes(long_term).as_str()),
             ("state", state),
             ("nonce", nonce),
             ("code_challenge", challenge(verifier).as_str()),
@@ -111,17 +130,26 @@ pub fn challenge(value: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()))
 }
 pub fn client() -> Result<Client> {
-    Client::builder()
-        .timeout(Duration::from_secs(25))
-        .connect_timeout(Duration::from_secs(8))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|_| "datev_unavailable")
+    static CLIENT: OnceLock<Option<Client>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            Client::builder()
+                .timeout(Duration::from_secs(25))
+                .connect_timeout(Duration::from_secs(8))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .ok()
+        })
+        .clone()
+        .ok_or("datev_unavailable")
 }
 
-pub async fn body(mut response: reqwest::Response, limit: usize) -> Result<Vec<u8>> {
+// A 400 from the token endpoint is invalid_grant: the session is over.
+// A 400 from a data API is a rejected request and says nothing about the session.
+pub async fn body(mut response: reqwest::Response, limit: usize, token: bool) -> Result<Vec<u8>> {
     if !response.status().is_success() {
         return Err(match response.status().as_u16() {
+            400 if !token => "datev_request_rejected",
             400 | 401 => "datev_reconnect_required",
             403 => "datev_access_denied",
             404 => "datev_data_unavailable",
@@ -167,8 +195,15 @@ pub async fn exchange(c: &Credentials, fields: &[(&str, &str)]) -> Result<Tokens
         .body(encoded)
         .send()
         .await
-        .map_err(|_| "datev_unavailable")?;
-    let tokens: Tokens = serde_json::from_slice(&body(response, 128 * 1024).await?)
+        // Never reached DATEV: a refresh token in this request was not consumed.
+        .map_err(|e| {
+            if e.is_connect() {
+                "datev_unreachable"
+            } else {
+                "datev_unavailable"
+            }
+        })?;
+    let tokens: Tokens = serde_json::from_slice(&body(response, 128 * 1024, true).await?)
         .map_err(|_| "datev_protocol_error")?;
     if !tokens.token_type.eq_ignore_ascii_case("bearer")
         || tokens.access_token.is_empty()
@@ -204,7 +239,7 @@ pub async fn validate_identity(c: &Credentials, tokens: &Tokens, nonce: &str) ->
         .send()
         .await
         .map_err(|_| "datev_unavailable")?;
-    let keys: JwkSet = serde_json::from_slice(&body(response, 256 * 1024).await?)
+    let keys: JwkSet = serde_json::from_slice(&body(response, 256 * 1024, false).await?)
         .map_err(|_| "datev_identity_invalid")?;
     validate_jwt(c, tokens, nonce, jwt, &keys)
 }
@@ -303,33 +338,31 @@ pub async fn get(c: &Credentials, access: &str, url: Url, limit: usize) -> Resul
         .send()
         .await
         .map_err(|_| "datev_unavailable")?;
-    body(response, limit).await
+    body(response, limit, false).await
 }
 
-pub async fn clients(
+// The company is read by its path ID: a long-term token is bound to one
+// company and DATEV rejects it on the unfiltered client list.
+pub async fn company(
     c: &Credentials,
     access: &str,
     consultant: u32,
     number: u32,
-) -> Result<Vec<DatevClient>> {
-    let filter = format!("consultant_number eq {consultant} and client_number eq {number}");
-    let url = Url::parse_with_params(
-        &format!("{}/clients", c.api_base(false)),
-        [("filter", filter.as_str()), ("top", "100")],
-    )
-    .map_err(|_| "datev_protocol_error")?;
-    let rows: Vec<DatevClient> = serde_json::from_slice(&get(c, access, url, 1024 * 1024).await?)
+) -> Result<Option<DatevClient>> {
+    let id = format!("{consultant}-{number}");
+    data_path("fiscal-years", &id, None)?;
+    let url = Url::parse(&format!("{}/clients/{id}", c.api_base(false)))
         .map_err(|_| "datev_protocol_error")?;
-    if rows.len() > 100
-        || rows.iter().any(|r| {
-            r.consultant_number != consultant
-                || r.client_number != number
-                || r.id != format!("{consultant}-{number}")
-        })
-    {
+    let bytes = match get(c, access, url, 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err("datev_data_unavailable") => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let row: DatevClient = serde_json::from_slice(&bytes).map_err(|_| "datev_protocol_error")?;
+    if row.consultant_number != consultant || row.client_number != number || row.id != id {
         return Err("datev_client_mismatch");
     }
-    Ok(rows)
+    Ok(Some(row))
 }
 
 pub fn data_path(kind: &str, client_id: &str, year: Option<u32>) -> Result<String> {
@@ -426,7 +459,12 @@ mod tests {
     #[test]
     fn authorization_uses_pkce_and_read_scopes() {
         let c = config();
-        let url = Url::parse(&c.authorize(&random(), &random(), "verifier").unwrap()).unwrap();
+        let long = c
+            .authorize(&random(), &random(), "verifier", Some((29098, 55003)))
+            .unwrap();
+        assert!(long.contains("+offline_access+datev%3Aiam%3Aclient%3A29098-55003&"));
+        let url =
+            Url::parse(&c.authorize(&random(), &random(), "verifier", None).unwrap()).unwrap();
         let pairs: std::collections::HashMap<_, _> = url.query_pairs().collect();
         assert_eq!(pairs["code_challenge_method"], "S256");
         assert_eq!(pairs["code_challenge"], challenge("verifier"));

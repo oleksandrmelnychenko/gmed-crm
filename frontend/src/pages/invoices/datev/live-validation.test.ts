@@ -5,6 +5,8 @@ const result = { source: "DATEV", mode: "sandbox", kind: "fiscal-years", fiscal_
 describe("DATEV response boundaries", () => {
   it("rejects unknown or contradictory connection states", () => {
     expect(connectionResponse(connected).status).toBe("connected");
+    expect(connectionResponse({ ...connected, long_term: true, bound_consultant: 29098, bound_client: 55003, session_expires_at: null }).long_term).toBe(true);
+    for (const v of [{ ...connected, long_term: true }, { ...connected, long_term: "yes" }, { ...connected, session_expires_at: "invalid" }]) expect(() => connectionResponse(v)).toThrow();
     for (const v of [[], null, { ...connected, generation: undefined }, { ...connected, generation: "" }, { ...connected, status: "mystery" }, { ...connected, has_tokens: false }, { ...connected, mode: "demo" }, { ...connected, accounting_writes_enabled: true }, { ...connected, expires_at: "invalid" }]) expect(() => connectionResponse(v)).toThrow();
   });
   it("checks result identity, period, size and object records before display/download", () => {

@@ -50,6 +50,8 @@ fn err(code: &'static str) -> Response {
         | "datev_reconnect_required"
         | "datev_connection_changed"
         | "datev_disconnect_first"
+        | "datev_check_required"
+        | "datev_company_bound"
         | "datev_profile_required" => StatusCode::CONFLICT,
         "datev_access_denied" | "datev_client_mismatch" => StatusCode::FORBIDDEN,
         "datev_configuration_invalid"
@@ -124,6 +126,11 @@ async fn event(state: &AppState, actor: Uuid, operation: &str, outcome: &str, co
     if saved.is_err() {
         tracing::warn!("DATEV operation history could not be saved");
     }
+    // The screen shows the latest 50 rows; the permanent record is the audit event below.
+    let _ =
+        sqlx::query("DELETE FROM datev_read_events WHERE created_at < now() - interval '400 days'")
+            .execute(&state.db)
+            .await;
     state.audit_sender.try_send(audit::domain_event(
         "datev_read_operation",
         Some(actor),
@@ -131,6 +138,16 @@ async fn event(state: &AppState, actor: Uuid, operation: &str, outcome: &str, co
         None,
         json!({"operation":operation,"outcome":outcome,"record_count":count}),
     ));
+}
+// DATEV ends a standard session 11 hours after sign-in, however often it is refreshed.
+fn session_end(row: &PgRow) -> Option<DateTime<Utc>> {
+    if row.get::<bool, _>("long_term")
+        || row.get::<Option<Vec<u8>>, _>("token_ciphertext").is_none()
+    {
+        return None;
+    }
+    row.get::<Option<DateTime<Utc>>, _>("connected_at")
+        .map(|t| t + chrono::Duration::hours(11))
 }
 fn summary(row: &PgRow) -> Value {
     json!({"configured":true,"revision":row.get::<Uuid,_>("revision").to_string(),"generation":row.get::<Uuid,_>("generation").to_string(),"mode":row.get::<String,_>("mode"),
@@ -140,6 +157,10 @@ fn summary(row: &PgRow) -> Value {
         "checked_at":row.get::<Option<DateTime<Utc>>,_>("checked_at").map(|t|t.to_rfc3339()),
         "checked_consultant":row.get::<Option<i32>,_>("checked_consultant"),
         "checked_client":row.get::<Option<i32>,_>("checked_client"),
+        "long_term":row.get::<bool,_>("long_term"),
+        "bound_consultant":row.get::<Option<i32>,_>("bound_consultant"),
+        "bound_client":row.get::<Option<i32>,_>("bound_client"),
+        "session_expires_at":session_end(row).map(|t|t.to_rfc3339()),
         "accounting_writes_enabled":false,"invoice_originals_supported":false})
 }
 async fn status(
@@ -175,7 +196,7 @@ async fn configure(
     let revision = Uuid::new_v4();
     let c = request.credentials;
     let row = if let Some(expected) = request.revision {
-        sqlx::query("UPDATE datev_read_connection SET revision=$1, generation=$1, mode=$2, redirect_uri=$3, exchange_enabled=$4, ciphertext=$5, nonce=$6, key_id=$7, status='disconnected', checked_at=NULL, expires_at=NULL, updated_at=now() WHERE singleton AND revision=$8 AND generation=$9 AND token_ciphertext IS NULL AND status <> 'revocation_pending' RETURNING *")
+        sqlx::query("UPDATE datev_read_connection SET revision=$1, generation=$1, mode=$2, redirect_uri=$3, exchange_enabled=$4, ciphertext=$5, nonce=$6, key_id=$7, status='disconnected', checked_at=NULL, checked_consultant=NULL, checked_client=NULL, long_term=false, bound_consultant=NULL, bound_client=NULL, connected_at=NULL, expires_at=NULL, updated_at=now() WHERE singleton AND revision=$8 AND generation=$9 AND token_ciphertext IS NULL AND status <> 'revocation_pending' RETURNING *")
             .bind(revision).bind(&c.mode).bind(&c.redirect_uri).bind(c.exchange_enabled).bind(ct).bind(nonce).bind(key).bind(expected).bind(request.generation).fetch_optional(&state.db).await.map_err(db)?
     } else {
         sqlx::query("INSERT INTO datev_read_connection (revision,generation,mode,redirect_uri,exchange_enabled,ciphertext,nonce,key_id) VALUES ($1,$1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING *")
@@ -189,6 +210,9 @@ async fn configure(
 struct Pending {
     verifier: String,
     nonce: String,
+    // Company a long-term authorization was requested for.
+    #[serde(default)]
+    bound: Option<(u32, u32)>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -201,6 +225,12 @@ struct ConnectionTarget {
 #[serde(deny_unknown_fields)]
 struct ConnectionAction {
     expected: ConnectionTarget,
+    // authorize: request DATEV's two-year token for the checked company.
+    #[serde(default)]
+    long_term: bool,
+    // disconnect: after an unconfirmed revocation, discard the tokens locally.
+    #[serde(default)]
+    force: bool,
 }
 fn match_connection(row: &PgRow, expected: &ConnectionTarget) -> Result<()> {
     if row.get::<Uuid, _>("revision") != expected.revision
@@ -218,7 +248,10 @@ async fn authorize(
 ) -> Result<Response> {
     admin(&auth)?;
     let Json(request) = request.map_err(|_| err("datev_confirmation_required"))?;
-    let result = authorize_inner(&state, auth.user_id, &request.expected).await;
+    if request.force {
+        return Err(err("datev_confirmation_required"));
+    }
+    let result = authorize_inner(&state, auth.user_id, &request.expected, request.long_term).await;
     event(
         &state,
         auth.user_id,
@@ -237,6 +270,7 @@ async fn authorize_inner(
     state: &AppState,
     actor: Uuid,
     expected: &ConnectionTarget,
+    long_term: bool,
 ) -> Result<Response> {
     // Keep configuration changes outside the short transaction that creates
     // the pending authorization. No external request is made while locked.
@@ -253,14 +287,35 @@ async fn authorize_inner(
         return Err(err("datev_disconnect_first"));
     }
     let c: Credentials = unseal(state, &row, "", "datev-credentials-v1")?;
+    // DATEV requires access to the company to be verified before a long-term
+    // token is requested; the token is then bound to exactly that company.
+    let bound = if long_term {
+        let profile: Option<Value> =
+            sqlx::query_scalar("SELECT profile FROM datev_integration_setup WHERE singleton")
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db)?;
+        let company = numbers(&profile.ok_or_else(|| err("datev_profile_required"))?)?;
+        let checked = (
+            row.get::<Option<i32>, _>("checked_consultant"),
+            row.get::<Option<i32>, _>("checked_client"),
+        );
+        if checked != (Some(company.0 as i32), Some(company.1 as i32)) {
+            return Err(err("datev_check_required"));
+        }
+        Some(company)
+    } else {
+        None
+    };
     let state_value = provider::random();
     let browser = provider::random();
     let pending = Pending {
         verifier: provider::random(),
         nonce: provider::random(),
+        bound,
     };
     let url = c
-        .authorize(&state_value, &pending.nonce, &pending.verifier)
+        .authorize(&state_value, &pending.nonce, &pending.verifier, bound)
         .map_err(err)?;
     let (ct, nonce, key) = seal(state, "datev-pending-v1", &pending)?;
     sqlx::query("DELETE FROM datev_oauth_pending WHERE expires_at < now() OR actor_id=$1")
@@ -390,7 +445,20 @@ async fn finish_exchange(
         return Err(err(error));
     }
     tokens.id_token = None;
-    if let Err(error) = store_tokens(state, &row, row.get("generation"), &tokens, Some(actor)).await
+    // Without a granted offline_access this is an ordinary 11-hour session.
+    let bound = p.bound.filter(|_| {
+        tokens.scope.as_deref().map_or(true, |scope| {
+            scope.split_whitespace().any(|s| s == "offline_access")
+        })
+    });
+    if let Err(error) = store_tokens(
+        state,
+        &row,
+        row.get("generation"),
+        &tokens,
+        Some((actor, bound)),
+    )
+    .await
     {
         let _ = provider::revoke(&c, &tokens).await;
         return Err(error);
@@ -402,12 +470,16 @@ async fn store_tokens(
     row: &PgRow,
     expected: Uuid,
     tokens: &Tokens,
-    actor: Option<Uuid>,
+    // A new sign-in names its actor and company binding; a refresh keeps both.
+    sign_in: Option<(Uuid, Option<(u32, u32)>)>,
 ) -> Result<Uuid> {
     let (ct, nonce, key) = seal(state, "datev-tokens-v1", tokens)?;
     let generation = Uuid::new_v4();
-    let count = sqlx::query("UPDATE datev_read_connection SET token_ciphertext=$1, token_nonce=$2, token_key_id=$3, expires_at=now()+make_interval(secs => $4), status='connected', generation=$5, connected_by=COALESCE($8,connected_by), updated_at=now() WHERE singleton AND revision=$6 AND generation=$7")
-        .bind(ct).bind(nonce).bind(key).bind(tokens.expires_in as f64).bind(generation).bind(row.get::<Uuid,_>("revision")).bind(expected).bind(actor).execute(&state.db).await.map_err(db)?.rows_affected();
+    let bound = sign_in.and_then(|(_, bound)| bound);
+    let count = sqlx::query("UPDATE datev_read_connection SET token_ciphertext=$1, token_nonce=$2, token_key_id=$3, expires_at=now()+make_interval(secs => $4), status='connected', generation=$5, connected_by=COALESCE($8,connected_by), connected_at=CASE WHEN $9 THEN now() ELSE connected_at END, long_term=CASE WHEN $9 THEN $10 ELSE long_term END, bound_consultant=CASE WHEN $9 THEN $11 ELSE bound_consultant END, bound_client=CASE WHEN $9 THEN $12 ELSE bound_client END, updated_at=now() WHERE singleton AND revision=$6 AND generation=$7")
+        .bind(ct).bind(nonce).bind(key).bind(tokens.expires_in as f64).bind(generation).bind(row.get::<Uuid,_>("revision")).bind(expected).bind(sign_in.map(|(actor, _)| actor))
+        .bind(sign_in.is_some()).bind(bound.is_some()).bind(bound.map(|b| b.0 as i32)).bind(bound.map(|b| b.1 as i32))
+        .execute(&state.db).await.map_err(db)?.rows_affected();
     if count != 1 {
         return Err(err("datev_connection_changed"));
     }
@@ -435,7 +507,7 @@ async fn access(state: &AppState, row: &PgRow) -> Result<(Credentials, String, U
     if count != 1 {
         return Err(err("datev_connection_changed"));
     }
-    let mut renewed = provider::exchange(
+    let mut renewed = match provider::exchange(
         &c,
         &[
             ("grant_type", "refresh_token"),
@@ -443,7 +515,17 @@ async fn access(state: &AppState, row: &PgRow) -> Result<(Credentials, String, U
         ],
     )
     .await
-    .map_err(err)?;
+    {
+        Ok(renewed) => renewed,
+        Err("datev_unreachable") => {
+            // No connection was made, so DATEV never saw the refresh token: put it back.
+            let _ = sqlx::query("UPDATE datev_read_connection SET token_ciphertext=$1, token_nonce=$2, token_key_id=$3, status='connected', generation=$4 WHERE singleton AND generation=$5")
+                .bind(row.get::<Vec<u8>, _>("token_ciphertext")).bind(row.get::<Vec<u8>, _>("token_nonce")).bind(row.get::<String, _>("token_key_id"))
+                .bind(Uuid::new_v4()).bind(claimed).execute(&state.db).await;
+            return Err(err("datev_unavailable"));
+        }
+        Err(error) => return Err(err(error)),
+    };
     renewed.id_token = None;
     let next = match store_tokens(state, row, claimed, &renewed, None).await {
         Ok(next) => next,
@@ -462,39 +544,56 @@ async fn disconnect(
 ) -> Result<Response> {
     admin(&auth)?;
     let Json(request) = request.map_err(|_| err("datev_confirmation_required"))?;
-    let result = disconnect_inner(&state, &request.expected).await;
-    event(
-        &state,
-        auth.user_id,
-        "disconnect",
-        if result.is_ok() {
-            "disconnected"
-        } else {
-            outcome(&result)
-        },
-        0,
-    )
-    .await;
-    result
+    if request.long_term {
+        return Err(err("datev_confirmation_required"));
+    }
+    let result = disconnect_inner(&state, &request.expected, request.force).await;
+    let saved = match &result {
+        Ok((_, true)) => "disconnected",
+        Ok((_, false)) => "disconnected_unconfirmed",
+        Err(_) => outcome(&result),
+    };
+    event(&state, auth.user_id, "disconnect", saved, 0).await;
+    result.map(|(response, _)| response)
 }
-async fn disconnect_inner(state: &AppState, expected: &ConnectionTarget) -> Result<Response> {
+// Returns whether DATEV confirmed the revocation.
+async fn disconnect_inner(
+    state: &AppState,
+    expected: &ConnectionTarget,
+    force: bool,
+) -> Result<(Response, bool)> {
     let row = connection(state).await?;
     match_connection(&row, expected)?;
+    // Forcing is the way out only after a normal disconnect already failed.
+    let force = force && row.get::<String, _>("status") == "revocation_pending";
     let generation = Uuid::new_v4();
     let count = sqlx::query("UPDATE datev_read_connection SET generation=$1,status='revocation_pending',checked_at=NULL WHERE singleton AND generation=$2")
         .bind(generation).bind(row.get::<Uuid,_>("generation")).execute(&state.db).await.map_err(db)?.rows_affected();
     if count != 1 {
         return Err(err("datev_connection_changed"));
     }
+    let mut confirmed = true;
     if row.get::<Option<Vec<u8>>, _>("token_ciphertext").is_some() {
-        let c: Credentials = unseal(state, &row, "", "datev-credentials-v1")?;
-        let tokens: Tokens = unseal(state, &row, "token_", "datev-tokens-v1")?;
-        provider::revoke(&c, &tokens).await.map_err(err)?;
+        let revoked = async {
+            let c: Credentials = unseal(state, &row, "", "datev-credentials-v1")?;
+            let tokens: Tokens = unseal(state, &row, "token_", "datev-tokens-v1")?;
+            provider::revoke(&c, &tokens).await.map_err(err)
+        }
+        .await;
+        match revoked {
+            Ok(()) => {}
+            // Unreadable tokens or a changed app secret would otherwise block
+            // the connection for good. The user revokes access at DATEV instead.
+            Err(_) if force => confirmed = false,
+            Err(error) => return Err(error),
+        }
     }
-    let row = sqlx::query("UPDATE datev_read_connection SET status='disconnected', token_ciphertext=NULL, token_nonce=NULL, token_key_id=NULL, expires_at=NULL, connected_by=NULL WHERE singleton AND generation=$1 RETURNING *")
+    let row = sqlx::query("UPDATE datev_read_connection SET status='disconnected', token_ciphertext=NULL, token_nonce=NULL, token_key_id=NULL, expires_at=NULL, connected_by=NULL, connected_at=NULL, long_term=false, bound_consultant=NULL, bound_client=NULL WHERE singleton AND generation=$1 RETURNING *")
         .bind(generation).fetch_optional(&state.db).await.map_err(db)?
         .ok_or_else(|| err("datev_connection_changed"))?;
-    Ok(output(summary(&row)))
+    let mut value = summary(&row);
+    value["revocation_confirmed"] = json!(confirmed);
+    Ok((output(value), confirmed))
 }
 
 #[derive(Deserialize)]
@@ -547,8 +646,18 @@ async fn confirmed_connection(
     let profile = row
         .get::<Option<Value>, _>("profile")
         .ok_or_else(|| err("datev_profile_required"))?;
-    if numbers(&profile)? != (expected.consultant_number, expected.client_number) {
+    let company = numbers(&profile)?;
+    if company != (expected.consultant_number, expected.client_number) {
         return Err(err("datev_connection_changed"));
+    }
+    // A long-term token only ever works for the company it was issued for.
+    let bound = (
+        row.get::<Option<i32>, _>("bound_consultant"),
+        row.get::<Option<i32>, _>("bound_client"),
+    );
+    if row.get::<bool, _>("long_term") && bound != (Some(company.0 as i32), Some(company.1 as i32))
+    {
+        return Err(err("datev_company_bound"));
     }
     Ok(row)
 }
@@ -579,13 +688,11 @@ async fn check_inner(state: &AppState, expected: &ConfirmedTarget) -> Result<Res
     let selected = (expected.consultant_number, expected.client_number);
     let (c, token, generation) = access(state, &row).await?;
     ensure_current(state, expected, generation).await?;
-    let rows = provider::clients(&c, &token, selected.0, selected.1)
+    let company = provider::company(&c, &token, selected.0, selected.1)
         .await
         .map_err(err)?;
     ensure_current(state, expected, generation).await?;
-    if rows.is_empty() {
-        return Err(err("datev_access_denied"));
-    }
+    let rows = [company.ok_or_else(|| err("datev_access_denied"))?];
     sqlx::query(
         "UPDATE datev_read_connection SET checked_at=now(), checked_consultant=$2, checked_client=$3 WHERE singleton AND generation=$1",
     )
@@ -614,7 +721,12 @@ async fn read(
     // Technical administration does not grant access to financial records.
     auth.require_exact_role(&[Role::Ceo])?;
     let Json(request) = request.map_err(|_| err("datev_confirmation_required"))?;
-    provider::data_path(&request.kind, "29098-55003", request.fiscal_year).map_err(err)?;
+    provider::data_path(
+        &request.kind,
+        provider::REFERENCE_CLIENT_ID,
+        request.fiscal_year,
+    )
+    .map_err(err)?;
     let result = read_inner(&state, &request).await;
     let count = result
         .as_ref()
@@ -633,10 +745,10 @@ async fn read_inner(state: &AppState, request: &Read) -> Result<Value> {
         return Err(err("datev_scope_missing"));
     }
     ensure_current(state, expected, generation).await?;
-    let clients = provider::clients(&c, &token, selected.0, selected.1)
+    let company = provider::company(&c, &token, selected.0, selected.1)
         .await
-        .map_err(err)?;
-    let company = clients.first().ok_or_else(|| err("datev_access_denied"))?;
+        .map_err(err)?
+        .ok_or_else(|| err("datev_access_denied"))?;
     ensure_current(state, expected, generation).await?;
     let path = provider::data_path(&request.kind, &company.id, request.fiscal_year).map_err(err)?;
     let url = reqwest::Url::parse(&format!("{}{path}", c.api_base(true)))

@@ -21,6 +21,9 @@ export function connectionResponse(v: unknown): Connection {
   if (v.status === "disconnected") requireValid(v.has_tokens === false);
   requireValid(v.checked_at == null || date(v.checked_at));
   requireValid(v.expires_at == null || date(v.expires_at));
+  requireValid(v.session_expires_at == null || date(v.session_expires_at));
+  requireValid(v.long_term == null || typeof v.long_term === "boolean");
+  if (v.long_term) requireValid(positive(v.bound_consultant) && positive(v.bound_client));
   return v as Connection;
 }
 export function accessResponse(v: unknown): AccessCheck {

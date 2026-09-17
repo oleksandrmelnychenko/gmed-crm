@@ -76,6 +76,12 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
     .execute(&pool)
     .await
     .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../migrations/20260917210000_datev_long_term_access.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO users(id) VALUES ($1)")
         .bind(id)
@@ -570,4 +576,153 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
             .await
             .unwrap();
     assert!(tokens.is_none());
+}
+
+#[tokio::test]
+async fn long_term_access_is_company_bound_and_failed_revocation_is_not_a_dead_end() {
+    let database = support::isolated_schema_database()
+        .await
+        .expect("isolated DATEV database required");
+    let pool = database.pool.clone();
+    sqlx::raw_sql("CREATE TABLE users(id uuid PRIMARY KEY, role text NOT NULL DEFAULT 'ceo', is_active boolean NOT NULL DEFAULT true, password_reset_required boolean NOT NULL DEFAULT false)").execute(&pool).await.unwrap();
+    for migration in [
+        include_str!("../../../migrations/20260905210000_datev_integration_setup.sql"),
+        include_str!("../../../migrations/20260914120000_datev_read_connection.sql"),
+        include_str!("../../../migrations/20260917210000_datev_long_term_access.sql"),
+    ] {
+        sqlx::raw_sql(migration).execute(&pool).await.unwrap();
+    }
+    let id = Uuid::new_v4();
+    sqlx::query("INSERT INTO users(id) VALUES ($1)")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let auth = AuthUser {
+        user_id: id,
+        role: gmed_domain::role::Role::Ceo,
+        family_id: Uuid::new_v4(),
+        access_token_jti: Uuid::new_v4(),
+        access_token_expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+    };
+    let state = AppState::new(
+        pool.clone(),
+        "datev-test-secret-more-than-thirty-two-characters",
+        SettingsCache::new(TokenSettings::default()),
+    );
+    let app = gmed_server::datev::router().with_state(state);
+    let post = |path: &'static str, payload: Value| {
+        let (app, auth) = (app.clone(), auth.clone());
+        async move {
+            let (status, _, body) = call(
+                &app,
+                Some(auth),
+                "POST",
+                &format!("/admin/datev/{path}"),
+                payload,
+                None,
+            )
+            .await;
+            (status, body)
+        }
+    };
+    let (_, _, saved) = call(
+        &app,
+        Some(auth.clone()),
+        "PUT",
+        "/admin/datev/connection",
+        json!({"revision":null,"credentials":{"client_id":"test-app-id","client_secret":"synthetic-secret","mode":"sandbox","redirect_uri":"http://localhost:5173/api/v1/datev/oauth/callback","exchange_enabled":false}}),
+        None,
+    )
+    .await;
+    assert_eq!(saved["long_term"], false);
+    let profile_revision = Uuid::new_v4();
+    sqlx::query("INSERT INTO datev_integration_setup (revision,profile) VALUES ($1,$2)")
+        .bind(profile_revision)
+        .bind(json!({"company_name":"Synthetic company","consultant_number":"29098","client_number":"55003"}))
+        .execute(&pool).await.unwrap();
+    let target =
+        json!({"revision":saved["revision"],"generation":saved["generation"],"mode":"sandbox"});
+
+    // DATEV requires a verified company before the two-year token is requested.
+    let (status, body) = post("authorize", json!({"expected":target,"long_term":true})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"], "datev_check_required");
+    sqlx::query("UPDATE datev_read_connection SET checked_consultant=29098, checked_client=55003")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = post("authorize", json!({"expected":target,"long_term":true})).await;
+    assert_eq!(status, StatusCode::OK);
+    let url = body["authorization_url"].as_str().unwrap();
+    assert!(url.contains("offline_access+datev%3Aiam%3Aclient%3A29098-55003"));
+    let (_, body) = post("authorize", json!({"expected":target})).await;
+    assert!(
+        !body["authorization_url"]
+            .as_str()
+            .unwrap()
+            .contains("offline_access")
+    );
+
+    // A long-term token never follows the profile to another company.
+    sqlx::query("UPDATE datev_read_connection SET status='connected', long_term=true, bound_consultant=29098, bound_client=1, token_ciphertext=decode('00','hex'), token_nonce=nonce, token_key_id=key_id")
+        .execute(&pool).await.unwrap();
+    let confirmed = json!({"revision":saved["revision"],"generation":saved["generation"],"mode":"sandbox","profile_revision":profile_revision,"consultant_number":29098,"client_number":55003});
+    let (status, body) = post("check", json!({"expected":confirmed})).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["error"], "datev_company_bound");
+
+    // Unreadable tokens cannot be revoked. The first attempt must fail even
+    // when forced; only a repeated, forced attempt discards them locally.
+    let (status, body) = post("disconnect", json!({"expected":target,"force":true})).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(body["error"], "datev_decryption_failed");
+    let (_, _, pending) = call(
+        &app,
+        Some(auth.clone()),
+        "GET",
+        "/admin/datev/connection",
+        Value::Null,
+        None,
+    )
+    .await;
+    assert_eq!(pending["status"], "revocation_pending");
+    assert_eq!(pending["has_tokens"], true);
+    let target =
+        json!({"revision":pending["revision"],"generation":pending["generation"],"mode":"sandbox"});
+    let (status, _) = post("disconnect", json!({"expected":target})).await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let (_, _, pending) = call(
+        &app,
+        Some(auth.clone()),
+        "GET",
+        "/admin/datev/connection",
+        Value::Null,
+        None,
+    )
+    .await;
+    let target =
+        json!({"revision":pending["revision"],"generation":pending["generation"],"mode":"sandbox"});
+    let (status, body) = post("disconnect", json!({"expected":target,"force":true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "disconnected");
+    assert_eq!(body["has_tokens"], false);
+    assert_eq!(body["long_term"], false);
+    assert_eq!(body["revocation_confirmed"], false);
+    let (_, _, events) = call(
+        &app,
+        Some(auth.clone()),
+        "GET",
+        "/admin/datev/events",
+        Value::Null,
+        None,
+    )
+    .await;
+    assert!(
+        events
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["outcome"] == "disconnected_unconfirmed")
+    );
 }
