@@ -6466,7 +6466,7 @@ pub struct LeadPurgeReport {
 /// source of truth for what "delete a lead" means at the database layer;
 /// both the manual `resolve_failed_lead` handler and the background
 /// sweeper funnel through it.
-async fn anonymize_lead_pii(
+pub(crate) async fn anonymize_lead_pii(
     executor: impl sqlx::PgExecutor<'_>,
     lead_id: Uuid,
     failed_from_status: Option<String>,

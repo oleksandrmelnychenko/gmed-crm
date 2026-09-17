@@ -2593,6 +2593,11 @@ async fn anonymize_patient_record(
                emergency_contact_phone = NULL,
                emergency_contact_relation = NULL,
                notes = NULL,
+               passport_number = NULL,
+               passport_expiry = NULL,
+               clinical_warnings = NULL,
+               intake_profile = '{}'::jsonb,
+               lead_snapshot = '{}'::jsonb,
                is_active = false,
                legal_status = COALESCE(legal_status, '{}'::jsonb) || $3,
                updated_at = now()
@@ -2649,6 +2654,82 @@ async fn anonymize_patient_record(
     })?
     .rows_affected();
 
+    // The lead the patient came from holds the same identity once more.
+    let source_lead_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT l.id
+           FROM leads l
+           WHERE l.converted_patient_id = $1
+              OR l.prospect_patient_id = $1
+              OR l.repeat_patient_id = $1
+              OR l.id = (SELECT source_lead_id FROM patients WHERE id = $1)"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "load source leads for erasure");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?;
+    for lead_id in &source_lead_ids {
+        super::leads::anonymize_lead_pii(
+            &mut *tx,
+            *lead_id,
+            None,
+            "dsgvo_erasure",
+            None,
+            Some(actor_id),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, lead_id = %lead_id, "anonymize source lead for erasure");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to anonymize patient",
+            )
+        })?;
+    }
+
+    // Files go too, except what commercial and tax law oblige the agency to keep
+    // (invoices, contracts, orders: § 257 HGB, § 147 AO). Those stay restricted to
+    // that purpose; Art. 17 Abs. 3 lit. b DSGVO covers the exception.
+    let erased_file_keys: Vec<String> = sqlx::query_scalar(
+        r#"UPDATE documents
+           SET status = 'archived',
+               visibility = 'internal',
+               storage_key = NULL,
+               original_filename = NULL,
+               notes = NULL,
+               file_deleted_at = now(),
+               file_deleted_by = $2,
+               file_delete_reason = 'dsgvo_erasure'
+           FROM (
+               SELECT id, storage_key AS old_key
+               FROM documents
+               WHERE patient_id = $1
+                 AND storage_key IS NOT NULL
+                 AND file_deleted_at IS NULL
+                 AND lower(concat_ws(' ', category, art)) !~
+                     '(invoice|rechnung|kosten|payment|financ|contract|vertrag|order|auftrag)'
+               FOR UPDATE
+           ) doomed
+           WHERE documents.id = doomed.id
+           RETURNING doomed.old_key"#,
+    )
+    .bind(patient_id)
+    .bind(actor_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "erase patient document files");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?;
+
     let (redacted_messages, attachment_keys) =
         redact_patient_direct_messages(&mut tx, patient_id).await?;
     tx.commit().await.map_err(|e| {
@@ -2660,6 +2741,10 @@ async fn anonymize_patient_record(
     })?;
 
     let removed_attachments = remove_redacted_chat_attachments(patient_id, attachment_keys).await;
+    // Blobs are removed only after the commit, so a failed erasure keeps them.
+    for storage_key in &erased_file_keys {
+        super::documents::remove_document_blob(storage_key).await;
+    }
 
     state.audit_sender.try_send(audit::domain_event(
         "dsgvo_anonymize",
@@ -2675,6 +2760,8 @@ async fn anonymize_patient_record(
             "consents_revoked": consents_revoked,
             "redacted_messages": redacted_messages,
             "removed_message_attachments": removed_attachments,
+            "erased_document_files": erased_file_keys.len(),
+            "anonymized_source_leads": source_lead_ids.len(),
         }),
     ));
 
@@ -2688,6 +2775,8 @@ async fn anonymize_patient_record(
         "consents_revoked": consents_revoked,
         "redacted_messages": redacted_messages,
         "removed_message_attachments": removed_attachments,
+        "erased_document_files": erased_file_keys.len(),
+        "anonymized_source_leads": source_lead_ids.len(),
     }))
 }
 
