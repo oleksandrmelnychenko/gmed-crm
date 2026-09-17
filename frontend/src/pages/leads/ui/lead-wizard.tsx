@@ -2156,7 +2156,7 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   if (!draft.programDateFrom && draft.programDateTo) {
     issues.push({
       key: "program-date-from",
-      step: "order",
+      step: "service",
       message: tx("Укажите дату начала программы", "Startdatum des Programms angeben"),
       fieldId: ORDER_DATE_FROM_ID,
     });
@@ -2164,7 +2164,7 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   if (draft.programDateFrom && !draft.programDateTo) {
     issues.push({
       key: "program-date-to",
-      step: "order",
+      step: "service",
       message: tx("Укажите дату окончания программы", "Enddatum des Programms angeben"),
       fieldId: ORDER_DATE_TO_ID,
     });
@@ -2175,7 +2175,7 @@ function orderValidationIssues(draft: Draft | null, tx: Tx): ValidationIssue[] {
   ) {
     issues.push({
       key: "program-date-range",
-      step: "order",
+      step: "service",
       message: tx(
         "Дата окончания не может быть раньше даты начала",
         "Das Enddatum darf nicht vor dem Startdatum liegen",
@@ -4498,8 +4498,7 @@ export function LeadWizard({
       setError("");
       setValidationContext({ kind: "order" });
       setOrderValidationAttempted(true);
-      setStep("order");
-      window.requestAnimationFrame(() => document.getElementById(issues[0]?.fieldId ?? "")?.focus());
+      openValidationIssue(issues[0]);
       return false;
     }
     const saved = await save(targetStep);
@@ -5547,10 +5546,20 @@ ${serviceCommentLines.join("\n")}`
 
   function openValidationIssue(issue: ValidationIssue) {
     setStep(issue.step);
-    if (!issue.fieldId) return;
-    window.requestAnimationFrame(() => {
-      document.getElementById(issue.fieldId ?? "")?.focus();
-    });
+    const fieldId = issue.fieldId;
+    if (!fieldId) return;
+    // The target step may still be mounting (lazy sections), so retry for a few frames.
+    let attempts = 0;
+    const focusField = () => {
+      const field = document.getElementById(fieldId);
+      if (field) {
+        field.scrollIntoView({ block: "center" });
+        field.focus({ preventScroll: true });
+      } else if (++attempts < 30) {
+        window.requestAnimationFrame(focusField);
+      }
+    };
+    window.requestAnimationFrame(focusField);
   }
 
   function openReadinessReason(reason: string) {
