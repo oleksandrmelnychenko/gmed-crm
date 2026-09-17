@@ -1,7 +1,6 @@
 //! Prepare a non-signing attachment before inviting anyone. Each remote mutation
 //! has a durable phase; ambiguous writes are reconciled, never blindly replayed.
 use super::*;
-use printpdf::{PdfDocument, PdfParseOptions, PdfSaveOptions};
 
 pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
     match template {
@@ -194,22 +193,119 @@ pub(super) async fn prepare_signing_members(
     Ok(members)
 }
 
+/// Merges at the PDF object level. The pages, their content streams and the
+/// embedded fonts are copied untouched: re-parsing and re-saving a generated PDF
+/// through printpdf drops the text's font mapping and the recipient sees glyph
+/// indices instead of letters.
 pub(super) fn merge_signing_pdfs(
     primary: &[u8],
     members: &[&[u8]],
 ) -> Result<Vec<u8>, &'static str> {
+    use lopdf::{Dictionary, Document, Object, ObjectId};
+
     if members.is_empty() {
         return Ok(primary.to_vec());
     }
-    let mut warnings = Vec::new();
-    let mut document = PdfDocument::parse(primary, &PdfParseOptions::default(), &mut warnings)
-        .map_err(|_| "signature_bundle_invalid_pdf")?;
-    for member in members {
-        let additional = PdfDocument::parse(member, &PdfParseOptions::default(), &mut warnings)
-            .map_err(|_| "signature_bundle_invalid_pdf")?;
-        document.append_document(additional);
+    let mut merged = Document::with_version("1.7");
+    let mut next_id = 1;
+    let mut page_ids: Vec<ObjectId> = Vec::new();
+    for bytes in std::iter::once(&primary).chain(members.iter()) {
+        let mut document = Document::load_mem(bytes).map_err(|_| "signature_bundle_invalid_pdf")?;
+        if document.is_encrypted() {
+            return Err("signature_bundle_invalid_pdf");
+        }
+        document.renumber_objects_with(next_id);
+        next_id = document
+            .objects
+            .keys()
+            .map(|id| id.0)
+            .max()
+            .map_or(next_id, |max| max + 1);
+        let pages = document.get_pages();
+        if pages.is_empty() {
+            return Err("signature_bundle_invalid_pdf");
+        }
+        // A page may inherit these from its parent `Pages` node, which is
+        // replaced below, so pin them on the page itself first.
+        for page_id in pages.values() {
+            let mut inherited = Vec::new();
+            for key in [&b"Resources"[..], b"MediaBox", b"CropBox", b"Rotate"] {
+                let page = document
+                    .get_dictionary(*page_id)
+                    .map_err(|_| "signature_bundle_invalid_pdf")?;
+                if page.has(key) {
+                    continue;
+                }
+                let mut parent = page.get(b"Parent").and_then(Object::as_reference).ok();
+                while let Some(parent_id) = parent {
+                    let Ok(node) = document.get_dictionary(parent_id) else {
+                        break;
+                    };
+                    if let Ok(value) = node.get(key) {
+                        inherited.push((key.to_vec(), value.clone()));
+                        break;
+                    }
+                    parent = node.get(b"Parent").and_then(Object::as_reference).ok();
+                }
+            }
+            let page = document
+                .get_dictionary_mut(*page_id)
+                .map_err(|_| "signature_bundle_invalid_pdf")?;
+            for (key, value) in inherited {
+                page.set(key, value);
+            }
+        }
+        page_ids.extend(pages.values().copied());
+        for (id, object) in std::mem::take(&mut document.objects) {
+            let node_type = object
+                .as_dict()
+                .ok()
+                .and_then(|dict| dict.get(b"Type").ok())
+                .and_then(|value| value.as_name().ok());
+            // The bundle gets one fresh catalog and page tree; outlines would
+            // point into a tree that no longer exists.
+            if matches!(
+                node_type,
+                Some(b"Catalog") | Some(b"Pages") | Some(b"Outlines") | Some(b"Outline")
+            ) {
+                continue;
+            }
+            merged.objects.insert(id, object);
+        }
     }
-    let bytes = document.save(&PdfSaveOptions::default(), &mut warnings);
+
+    let pages_id: ObjectId = (next_id, 0);
+    let catalog_id: ObjectId = (next_id + 1, 0);
+    for page_id in &page_ids {
+        let page = merged
+            .get_dictionary_mut(*page_id)
+            .map_err(|_| "signature_bundle_invalid_pdf")?;
+        page.set("Parent", pages_id);
+    }
+    let mut pages = Dictionary::new();
+    pages.set("Type", Object::Name(b"Pages".to_vec()));
+    pages.set("Count", page_ids.len() as i64);
+    pages.set(
+        "Kids",
+        page_ids
+            .iter()
+            .map(|id| Object::Reference(*id))
+            .collect::<Vec<_>>(),
+    );
+    merged.objects.insert(pages_id, Object::Dictionary(pages));
+    let mut catalog = Dictionary::new();
+    catalog.set("Type", Object::Name(b"Catalog".to_vec()));
+    catalog.set("Pages", pages_id);
+    merged
+        .objects
+        .insert(catalog_id, Object::Dictionary(catalog));
+    merged.trailer.set("Root", catalog_id);
+    merged.max_id = catalog_id.0;
+
+    let mut bytes = Vec::new();
+    merged
+        .save_to(&mut bytes)
+        .map_err(|_| "signature_bundle_invalid_pdf")?;
     if bytes.len() > provider::MAX_PDF || !bytes.starts_with(b"%PDF-") {
         return Err("signature_bundle_too_large");
     }
@@ -574,7 +670,7 @@ async fn set_stage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use printpdf::{Mm, PdfPage};
+    use printpdf::{Mm, PdfDocument, PdfPage, PdfParseOptions, PdfSaveOptions};
     #[test]
     fn explicit_companion_mapping_and_exact_attachment_identity() {
         assert_eq!(
@@ -654,5 +750,27 @@ mod tests {
         assert_eq!(parsed.pages.len(), 8);
         let alone = pdf(2);
         assert_eq!(merge_signing_pdfs(&alone, &[]).unwrap(), alone);
+    }
+
+    #[test]
+    fn signing_bundle_keeps_text_readable() {
+        use crate::services::patient_medication_pdf::{
+            MedicationPlanContext, build_medication_plan_pdf,
+        };
+        fn pdf(patient_name: &str) -> Vec<u8> {
+            build_medication_plan_pdf(&MedicationPlanContext {
+                patient_name: patient_name.into(),
+                ..Default::default()
+            })
+            .unwrap()
+        }
+        let (contract, order) = (pdf("Rahmenvertrag Müller"), pdf("Auftrag Приклад"));
+        let merged = merge_signing_pdfs(&contract, &[order.as_slice()]).unwrap();
+        let text = pdf_extract::extract_text_from_mem(&merged).unwrap();
+        assert!(text.contains("Rahmenvertrag Müller"), "{text}");
+        assert!(text.contains("Auftrag Приклад"), "{text}");
+        // Both members keep their own embedded font programs.
+        let fonts = |bytes: &[u8]| bytes.windows(9).filter(|w| w == b"FontFile2").count();
+        assert_eq!(fonts(&merged), fonts(&contract) + fonts(&order));
     }
 }
