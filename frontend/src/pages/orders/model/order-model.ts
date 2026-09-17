@@ -198,6 +198,7 @@ export function blankOrderPlanningForm(): OrderPlanningFormState {
   return {
     treatmentPlanStatus: "draft",
     treatmentPlanNote: "",
+    medicalRequired: true,
     nonMedicalRequired: false,
     interpreterRequired: false,
     preparationDocumentsStatus: "pending",
@@ -259,6 +260,7 @@ export function orderPlanningToForm(
   return {
     treatmentPlanStatus: planning.treatment_plan_status,
     treatmentPlanNote: planning.treatment_plan_note ?? "",
+    medicalRequired: planning.medical_required ?? true,
     nonMedicalRequired: planning.non_medical_required,
     interpreterRequired: planning.interpreter_required,
     preparationDocumentsStatus: planning.preparation_documents_status,

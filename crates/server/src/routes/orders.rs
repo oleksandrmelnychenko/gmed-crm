@@ -175,6 +175,7 @@ struct UpdateOrderDebtManagementRequest {
 struct UpdateOrderPlanningPreparationRequest {
     treatment_plan_status: Option<String>,
     treatment_plan_note: Option<String>,
+    medical_required: Option<bool>,
     non_medical_required: Option<bool>,
     interpreter_required: Option<bool>,
     preparation_documents_status: Option<String>,
@@ -1409,6 +1410,7 @@ async fn load_order_planning_readiness(
     let planning_row = sqlx::query(
         r#"SELECT opp.treatment_plan_status,
                   opp.treatment_plan_note,
+                  opp.medical_required,
                   opp.non_medical_required,
                   opp.interpreter_required,
                   opp.preparation_documents_status,
@@ -1488,6 +1490,9 @@ async fn load_order_planning_readiness(
     let treatment_plan_note: Option<String> = planning_row
         .try_get("treatment_plan_note")
         .unwrap_or_default();
+    // A purely non-medical order (concierge, interpreter, consulting) has no
+    // medical appointment to confirm; the manager switches the requirement off.
+    let medical_required: bool = planning_row.try_get("medical_required").unwrap_or(true);
     let non_medical_required: bool = planning_row
         .try_get("non_medical_required")
         .unwrap_or(false);
@@ -1548,7 +1553,7 @@ async fn load_order_planning_readiness(
         .unwrap_or_default();
 
     let treatment_plan_ready = treatment_plan_status == "finalized";
-    let medical_bookings_ready = medical_confirmed > 0;
+    let medical_bookings_ready = !medical_required || medical_confirmed > 0;
     let non_medical_bookings_ready = !non_medical_required || non_medical_confirmed > 0;
     let interpreter_assignment_ready = !interpreter_required || interpreter_assigned > 0;
     let interpreter_confirmation_ready = !interpreter_required || interpreter_confirmed > 0;
@@ -1589,6 +1594,7 @@ async fn load_order_planning_readiness(
             "planning_ready": planning_ready,
             "treatment_plan_status": treatment_plan_status,
             "treatment_plan_note": treatment_plan_note,
+            "medical_required": medical_required,
             "non_medical_required": non_medical_required,
             "interpreter_required": interpreter_required,
             "preparation_documents_status": preparation_documents_status,
@@ -2365,6 +2371,26 @@ pub(crate) async fn ensure_created_order_state(
         return Ok(());
     }
     ensure_order_planning_preparation_state(state, order_id).await?;
+    // The planning row appears only once the order has left its draft, so the
+    // lead's interpreter and non-medical needs are seeded here. Seeding while the
+    // wizard still prepares the draft finds no row to update.
+    let source_lead_id = sqlx::query_scalar::<_, Option<Uuid>>(
+        "SELECT source_lead_id FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "load created order source lead");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to initialize order",
+        )
+    })?
+    .flatten();
+    if let Some(source_lead_id) = source_lead_id {
+        initialize_order_planning_from_lead(state, order_id, source_lead_id).await?;
+    }
     ensure_order_execution_flow_state(state, order_id).await?;
     ensure_order_followup_flow_state(state, order_id).await?;
     crate::routes::debt_management::ensure_order_debt_management_state(state, order_id).await?;
@@ -4979,6 +5005,7 @@ async fn update_planning_preparation(
 
     if body.treatment_plan_status.is_none()
         && body.treatment_plan_note.is_none()
+        && body.medical_required.is_none()
         && body.non_medical_required.is_none()
         && body.interpreter_required.is_none()
         && body.preparation_documents_status.is_none()
@@ -5065,6 +5092,7 @@ async fn update_planning_preparation(
         r#"UPDATE order_planning_preparation
            SET treatment_plan_status = COALESCE($2, treatment_plan_status),
                treatment_plan_note = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE treatment_plan_note END,
+               medical_required = COALESCE($9, medical_required),
                non_medical_required = COALESCE($4, non_medical_required),
                interpreter_required = COALESCE($5, interpreter_required),
                preparation_documents_status = COALESCE($6, preparation_documents_status),
@@ -5109,6 +5137,7 @@ async fn update_planning_preparation(
     .bind(preparation_documents_status.clone())
     .bind(effective_interpreter_briefing_status.clone())
     .bind(auth.user_id)
+    .bind(body.medical_required)
     .execute(&state.db)
     .await
     {
@@ -5116,6 +5145,7 @@ async fn update_planning_preparation(
             let realtime_payload = serde_json::json!({
                 "treatment_plan_status": treatment_plan_status,
                 "treatment_plan_note": body.treatment_plan_note,
+                "medical_required": body.medical_required,
                 "non_medical_required": body.non_medical_required,
                 "interpreter_required": body.interpreter_required,
                 "preparation_documents_status": preparation_documents_status,

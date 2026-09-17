@@ -2738,6 +2738,7 @@ function useOrdersPageContent() {
       await updateOrderPlanningPreparation(selectedOrderId, {
         treatment_plan_status: planningForm.treatmentPlanStatus,
         treatment_plan_note: optString(planningForm.treatmentPlanNote),
+        medical_required: planningForm.medicalRequired,
         non_medical_required: planningForm.nonMedicalRequired,
         interpreter_required: planningForm.interpreterRequired,
         preparation_documents_status: planningForm.preparationDocumentsStatus,
@@ -4950,11 +4951,15 @@ function useOrdersPageContent() {
                         />
                         <OrderSummaryLine
                           label={l("orders_medizinische_termine")}
-                          value={l("orders_planning_medical_confirmed_summary", {
-                            confirmed:
-                              orderDetail.planning_preparation.medical_confirmed,
-                            total: orderDetail.planning_preparation.medical_total,
-                          })}
+                          value={
+                            orderDetail.planning_preparation.medical_required ?? true
+                              ? l("orders_planning_medical_confirmed_summary", {
+                                  confirmed:
+                                    orderDetail.planning_preparation.medical_confirmed,
+                                  total: orderDetail.planning_preparation.medical_total,
+                                })
+                              : l("orders_nicht_erforderlich")
+                          }
                         />
                         <OrderSummaryLine
                           label={l("orders_vorbereitungsunterlagen")}
@@ -5115,6 +5120,22 @@ function useOrdersPageContent() {
                                 className={textareaClassName}
                                 placeholder={l("orders_notiz_zum_behandlungsplan")}
                               />
+                              <label className="flex items-center gap-2 text-sm text-foreground">
+                                <input
+                                  type="checkbox"
+                                  className={checkboxClass}
+                                  checked={planningForm.medicalRequired}
+                                  onChange={(event) =>
+                                    setPlanningForm((current) => ({
+                                      ...current,
+                                      medicalRequired: event.target.checked,
+                                    }))
+                                  }
+                                />
+                                {lang === "de"
+                                  ? "Medizinische Termine sind erforderlich"
+                                  : "Медицинские приёмы требуются"}
+                              </label>
                               <label className="flex items-center gap-2 text-sm text-foreground">
                                 <input
                                   type="checkbox"

@@ -360,6 +360,8 @@ export type OrderPlanningPreparation = {
   planning_ready: boolean;
   treatment_plan_status: TreatmentPlanStatus;
   treatment_plan_note: string | null;
+  // Absent on a backend older than the medical requirement flag: treated as required.
+  medical_required?: boolean;
   non_medical_required: boolean;
   interpreter_required: boolean;
   preparation_documents_status: PreparationDocumentsStatus;
@@ -542,6 +544,7 @@ export type OrderProcessGateFormState = {
 export type OrderPlanningFormState = {
   treatmentPlanStatus: TreatmentPlanStatus;
   treatmentPlanNote: string;
+  medicalRequired: boolean;
   nonMedicalRequired: boolean;
   interpreterRequired: boolean;
   preparationDocumentsStatus: PreparationDocumentsStatus;
