@@ -51,6 +51,7 @@ export function summarizeOrderNeeds(value: string | null | undefined): OrderNeed
   const lines = (value ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   let readingServiceComments = false;
   const comments = new Map<string, string>();
+  let lastCommentedService: string | null = null;
 
   for (const line of lines) {
     if (COMMENT_HEADINGS.includes(line)) {
@@ -85,9 +86,16 @@ export function summarizeOrderNeeds(value: string | null | undefined): OrderNeed
     if (readingServiceComments && line.startsWith("- ")) {
       const separator = line.indexOf(":", 2);
       if (separator > 2) {
-        comments.set(line.slice(2, separator).trim(), line.slice(separator + 1).trim());
+        lastCommentedService = line.slice(2, separator).trim();
+        comments.set(lastCommentedService, line.slice(separator + 1).trim());
         continue;
       }
+    }
+
+    // A comment typed on several lines stays with its service.
+    if (readingServiceComments && lastCommentedService) {
+      comments.set(lastCommentedService, `${comments.get(lastCommentedService)}\n${line}`.trim());
+      continue;
     }
 
     if (!summary.primaryNeed) summary.primaryNeed = line;
