@@ -826,6 +826,50 @@ async fn restriction_request_updates_legal_status_and_queue_is_assignment_scoped
     assert_eq!(legal_status["processing_restricted"], true);
     assert_eq!(legal_status["processing_restriction_request_id"], request_a);
 
+    // The restriction is enforced, not just recorded: edits are locked …
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_a}/update"),
+        &auth_header_for(pm_a, "patient_manager"),
+        Some(json!({ "notes": "changed while restricted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::LOCKED);
+
+    // … lifting needs a reason …
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_a}/restriction/lift"),
+        &auth_header_for(it_admin_id, "it_admin"),
+        Some(json!({ "reason": "short" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_a}/restriction/lift"),
+        &auth_header_for(it_admin_id, "it_admin"),
+        Some(json!({ "reason": "Accuracy check finished, patient informed by e-mail" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["restricted"], false);
+
+    // … and afterwards the record is editable again.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_a}/update"),
+        &auth_header_for(pm_a, "patient_manager"),
+        Some(json!({ "notes": "changed after lifting" })),
+    )
+    .await;
+    assert_ne!(status, StatusCode::LOCKED);
+
     let (status, body) = json_request(
         &app,
         "GET",

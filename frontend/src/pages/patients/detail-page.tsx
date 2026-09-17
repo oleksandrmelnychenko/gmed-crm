@@ -66,6 +66,7 @@ import type {
 } from "./model/list-model";
 import { patientWorkspaceNavigation } from "./model/patient-navigation";
 import { usePatientDetailCoreData } from "./data/use-patient-detail-core-data";
+import { ProcessingRestrictionBanner } from "./ui/shared/processing-restriction-banner";
 import {
   completePatientWorkflowChecklistItem,
   createFrameworkContract,
@@ -1988,6 +1989,14 @@ function usePatientDetailPageContent() {
 
   return (
     <>
+      <ProcessingRestrictionBanner
+        patientId={id ?? ""}
+        legalStatus={detail?.legal_status}
+        canLift={user?.role === "ceo" || user?.role === "it_admin"}
+        formatDateTime={fmtDateTime}
+        l={l}
+        onLifted={reload}
+      />
       <PatientDetailWorkspaceContent
         activeTab={activeTab}
         activeWorkflowAssignees={activeWorkflowAssignees}

@@ -35,6 +35,10 @@ pub fn router() -> Router<AppState> {
             post(anonymize_patient),
         )
         .route(
+            "/admin/compliance/patient/{patient_id}/restriction/lift",
+            post(lift_processing_restriction),
+        )
+        .route(
             "/admin/compliance/patient/{patient_id}/consents",
             get(list_patient_consents).post(upsert_patient_consent),
         )
@@ -71,6 +75,11 @@ struct CreatePrivacyRequestRequest {
     request_type: String,
     source: Option<String>,
     reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LiftProcessingRestrictionRequest {
+    reason: String,
 }
 
 #[derive(Deserialize)]
@@ -843,6 +852,79 @@ async fn anonymize_patient(
         Ok(payload) => Json(payload).into_response(),
         Err(response) => response,
     }
+}
+
+async fn lift_processing_restriction(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Json(body): Json<LiftProcessingRestrictionRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin]) {
+        return e;
+    }
+    if let Err(response) = ensure_patient_visible(&state, &auth, patient_id).await {
+        return response;
+    }
+
+    // Lifting must be explained: the data subject has to be told before
+    // processing resumes (Art. 18 Abs. 3 DSGVO), and the reason is the record.
+    let reason = body.reason.trim();
+    if reason.len() < 10 || reason.len() > 2000 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "reason must be between 10 and 2000 characters",
+        );
+    }
+
+    let lifted_at = Utc::now();
+    let lifted = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE patients
+           SET legal_status = legal_status || $2,
+               updated_at = now()
+           WHERE id = $1
+             AND COALESCE((legal_status->>'processing_restricted')::boolean, false)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(json!({
+        "processing_restricted": false,
+        "processing_restriction_lifted_at": lifted_at.to_rfc3339(),
+        "processing_restriction_lifted_by": auth.user_id.to_string(),
+    }))
+    .fetch_optional(&state.db)
+    .await;
+
+    match lifted {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::CONFLICT, "patient processing is not restricted"),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "lift processing restriction");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to lift processing restriction",
+            );
+        }
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "processing_restriction_lifted",
+        Some(auth.user_id),
+        "patient",
+        Some(patient_id),
+        json!({
+            "reason": reason,
+            "lifted_at": lifted_at.to_rfc3339(),
+        }),
+    ));
+
+    Json(json!({
+        "ok": true,
+        "patient_id": patient_id,
+        "restricted": false,
+        "lifted_at": lifted_at.to_rfc3339(),
+    }))
+    .into_response()
 }
 
 async fn list_patient_consents(

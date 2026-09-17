@@ -3142,13 +3142,7 @@ async fn update_patient(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update patient",
-            );
-        }
+        Err(response) => return response,
     }
 
     let current = match sqlx::query(
@@ -3592,7 +3586,8 @@ async fn update_patient(
             emergency_contact_name = $21,
             emergency_contact_phone = $22,
             emergency_contact_relation = $23,
-            legal_status = COALESCE($24::jsonb, legal_status),
+            legal_status = CASE WHEN $24::jsonb IS NULL THEN legal_status
+                                ELSE COALESCE(legal_status, '{}'::jsonb) || $24::jsonb END,
             notes = $25,
             clinical_warnings = CASE WHEN $26 THEN $27 ELSE clinical_warnings END,
             passport_number = $28,
@@ -3776,13 +3771,7 @@ async fn update_patient_lab_result(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_response) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access for lab correction");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update lab result",
-            );
-        }
+        Err(response) => return response,
     }
     let (lab, correction_note) = match normalize_patient_lab_result_correction_payload(&raw_body) {
         Ok(normalized) => normalized,
@@ -4039,13 +4028,7 @@ async fn delete_patient_lab_result(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_response) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access for lab deletion");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to delete lab result",
-            );
-        }
+        Err(response) => return response,
     }
     let deletion_note = body.deletion_note.trim();
     if deletion_note.is_empty() || deletion_note.chars().count() > 500 {
@@ -4217,12 +4200,7 @@ async fn create_patient_lab_result(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate patient access",
-            );
-        }
+        Err(response) => return response,
     }
     let lab = match normalize_patient_lab_result_payload(&raw_body) {
         Ok(lab) => lab,
@@ -4526,13 +4504,7 @@ async fn create_patient_vital_measurement(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to record patient vitals",
-            );
-        }
+        Err(response) => return response,
     }
 
     let vital = match normalize_patient_vital_measurement_payload(&raw_body) {
@@ -4809,13 +4781,7 @@ async fn update_patient_vital_measurement(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update patient vitals",
-            );
-        }
+        Err(response) => return response,
     }
 
     let vital = match normalize_patient_vital_measurement_payload(&raw_body) {
@@ -4945,13 +4911,7 @@ async fn delete_patient_vital_measurement(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to delete patient vitals",
-            );
-        }
+        Err(response) => return response,
     }
 
     let imported = match sqlx::query_scalar::<_, bool>(
@@ -5113,13 +5073,7 @@ async fn create_patient_card_entry(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create patient card entry",
-            );
-        }
+        Err(response) => return response,
     }
 
     let entry_date = match parse_vital_measurement_timestamp(&body.entry_date) {
@@ -5272,13 +5226,7 @@ async fn create_patient_medical_order(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create patient medical order",
-            );
-        }
+        Err(response) => return response,
     }
 
     let order_date = match parse_vital_measurement_timestamp(&body.order_date) {
@@ -5370,13 +5318,7 @@ async fn update_patient_medical_order(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update patient medical order",
-            );
-        }
+        Err(response) => return response,
     }
 
     let current = match sqlx::query(
@@ -5623,13 +5565,7 @@ async fn create_patient_risk_score(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create patient risk score",
-            );
-        }
+        Err(response) => return response,
     }
 
     let ValidatedPatientRiskScore {
@@ -5711,13 +5647,7 @@ async fn update_patient_risk_score(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update patient risk score",
-            );
-        }
+        Err(response) => return response,
     }
 
     let ValidatedPatientRiskScore {
@@ -5817,13 +5747,7 @@ async fn delete_patient_risk_score(
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
-        Err(_) => {
-            tracing::error!(patient_id = %patient_uuid, "Failed to validate patient access");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to delete patient risk score",
-            );
-        }
+        Err(response) => return response,
     }
 
     let deleted = match sqlx::query(
@@ -10027,11 +9951,43 @@ pub(crate) async fn has_patient_access(
     has_baseline_patient_access(state, auth, patient_id).await
 }
 
+/// Art. 18 DSGVO: once a restriction request is executed the record may still
+/// be stored and read, but no longer changed. Every patient mutation goes
+/// through `has_patient_edit_access`, so the block lives here; only compliance
+/// (lifting the restriction, erasure) writes around it.
+pub(crate) async fn ensure_patient_processing_not_restricted(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let restricted = sqlx::query_scalar::<_, bool>(
+        r#"SELECT COALESCE((legal_status->>'processing_restricted')::boolean, false)
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "Failed to read processing restriction");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate patient access",
+        )
+    })?
+    .unwrap_or(false);
+
+    if restricted {
+        return Err(err(StatusCode::LOCKED, "patient processing is restricted"));
+    }
+    Ok(())
+}
+
 pub(crate) async fn has_patient_edit_access(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
+    ensure_patient_processing_not_restricted(state, patient_id).await?;
     has_patient_secondary_capability_access(state, auth, patient_id, AccessCapability::Edit).await
 }
 

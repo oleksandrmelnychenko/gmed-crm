@@ -291,3 +291,10 @@ export function downloadPatientComplianceExport(patientId: string) {
     `${patientId}-dsgvo-export.zip`,
   );
 }
+
+export function liftPatientProcessingRestriction(patientId: string, reason: string) {
+  return postJson<{ ok: boolean; restricted: boolean; lifted_at: string }>(
+    `/admin/compliance/patient/${patientId}/restriction/lift`,
+    { reason },
+  );
+}

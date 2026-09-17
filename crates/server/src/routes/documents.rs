@@ -9256,6 +9256,11 @@ async fn validate_document_share_target(
     channel: &str,
 ) -> Result<(), axum::response::Response> {
     if let Some(provider_id) = shared_with_provider_id {
+        // Art. 18 DSGVO: a restricted record is not disclosed to third parties.
+        // Handing a document to the patient themselves stays possible.
+        if let Some(patient_id) = document.patient_id {
+            super::patients::ensure_patient_processing_not_restricted(state, patient_id).await?;
+        }
         if !is_allowed_provider_share_channel(channel) {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
