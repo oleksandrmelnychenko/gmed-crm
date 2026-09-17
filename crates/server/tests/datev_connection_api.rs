@@ -77,7 +77,7 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../migrations/20260917210000_datev_long_term_access.sql"
+        "../../../migrations/20260917211000_datev_long_term_access.sql"
     ))
     .execute(&pool)
     .await
@@ -588,7 +588,7 @@ async fn long_term_access_is_company_bound_and_failed_revocation_is_not_a_dead_e
     for migration in [
         include_str!("../../../migrations/20260905210000_datev_integration_setup.sql"),
         include_str!("../../../migrations/20260914120000_datev_read_connection.sql"),
-        include_str!("../../../migrations/20260917210000_datev_long_term_access.sql"),
+        include_str!("../../../migrations/20260917211000_datev_long_term_access.sql"),
     ] {
         sqlx::raw_sql(migration).execute(&pool).await.unwrap();
     }
