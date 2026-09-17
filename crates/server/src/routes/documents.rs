@@ -20792,6 +20792,19 @@ async fn download_document(
 
     let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
 
+    // Who took a copy of a patient file is part of the disclosure record, so it
+    // is a domain event (kept a year) rather than a short-lived request row.
+    state.audit_sender.try_send(audit::domain_event(
+        "download_document",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+            "downloaded_by": "staff",
+        }),
+    ));
+
     document_attachment_response(&mime_type, disposition, data)
 }
 
@@ -20945,6 +20958,19 @@ async fn download_my_uploaded_document(
     };
 
     let disposition = format!("attachment; filename=\"{}\"", filename.replace('"', ""));
+
+    // Who took a copy of a patient file is part of the disclosure record, so it
+    // is a domain event (kept a year) rather than a short-lived request row.
+    state.audit_sender.try_send(audit::domain_event(
+        "download_document",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "patient_id": patient_id,
+            "downloaded_by": "patient",
+        }),
+    ));
 
     document_attachment_response(&mime_type, disposition, data)
 }
