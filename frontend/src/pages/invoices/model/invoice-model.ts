@@ -27,6 +27,26 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
   "cancelled",
 ];
 
+/**
+ * Manual status moves accepted by POST /invoices/{id}/status. `paid` and
+ * `partially_paid` are derived from the payment journal and never picked by hand.
+ */
+const INVOICE_STATUS_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
+  draft: ["sent", "cancelled"],
+  sent: ["draft", "overdue", "cancelled"],
+  partially_paid: ["sent", "overdue", "cancelled"],
+  paid: [],
+  overdue: ["sent", "cancelled"],
+  cancelled: [],
+};
+
+export function canPickInvoiceStatus(current: string, next: InvoiceStatus): boolean {
+  return (
+    current === next ||
+    (INVOICE_STATUS_TRANSITIONS[current as InvoiceStatus] ?? []).includes(next)
+  );
+}
+
 export const DEFAULT_FILTERS: Filters = {
   search: "",
   patientId: "",

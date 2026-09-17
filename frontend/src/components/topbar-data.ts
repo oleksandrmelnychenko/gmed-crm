@@ -185,6 +185,9 @@ export function notificationHrefForRole(item: Notification, role: string) {
   }
   if (item.entity_type === "document") return `/documents?document=${item.entity_id}`;
   if (item.entity_type === "invoice") return `/invoices?invoice=${item.entity_id}`;
+  if (item.entity_type === "external_invoice") {
+    return `/company-finance?provider_invoice=${item.entity_id}`;
+  }
   if (item.entity_type === "privacy_request") return "/admin/compliance";
   if (item.entity_type === "feedback") return "/feedback";
   if (item.entity_type === "case") return "/patients";

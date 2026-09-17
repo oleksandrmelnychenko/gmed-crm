@@ -103,6 +103,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     if (row.settlement_status === "paid") return tx("Оплачен", "Bezahlt");
     if (row.settlement_status === "partial") return tx("Частично оплачен", "Teilweise bezahlt");
     if (row.status === "received") return tx("На проверке", "Zu prüfen");
+    if (row.status === "overdue") return tx("Просрочен", "Überfällig");
     return tx("К оплате", "Zu zahlen");
   };
   const payerLabel = (row: IncomingInvoice) => row.paid_by === "patient"
@@ -169,7 +170,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const columns: ColumnDef<IncomingInvoice>[] = [
     { id: "document", label: tx("Входящий счёт", "Eingangsrechnung"), accessor: row => row.external_invoice_number, required: true, pinned: "left", width: 200, render: row => <span className="font-mono font-semibold">{row.external_invoice_number}</span> },
     { id: "provider", label: tx("Поставщик", "Lieferant"), accessor: row => row.provider_name ?? "", width: 220, render: row => row.provider_name || "—" },
-    { id: "status", label: tx("Статус", "Status"), accessor: statusLabel, width: 190, render: row => <StatusBadge tone={row.status === "cancelled" ? "neutral" : Number(row.remaining_gross) === 0 ? "success" : row.status === "received" || row.status === "expected" ? "warning" : "error"}>{statusLabel(row)}</StatusBadge> },
+    { id: "status", label: tx("Статус", "Status"), accessor: statusLabel, width: 190, render: row => <StatusBadge tone={row.status === "cancelled" ? "neutral" : Number(row.remaining_gross) === 0 ? "success" : row.status === "received" || row.status === "expected" ? "warning" : row.status === "overdue" ? "error" : "info"}>{statusLabel(row)}</StatusBadge> },
     { id: "payer", label: tx("Кто оплатил", "Bezahlt von"), accessor: payerLabel, width: 145, render: row => <StatusBadge tone={row.paid_by === "patient" ? "info" : Number(row.company_paid_gross) > 0 ? "success" : "neutral"}>{payerLabel(row)}</StatusBadge> },
     { id: "patient_billing", label: tx("Счёт пациенту", "Patientenrechnung"), accessor: patientBillingLabel, width: 195, render: row => {
       const badge = <StatusBadge tone={patientBillingLabel(row) === tx("Не выставлено", "Nicht berechnet") ? "warning" : Number(row.remaining_receivable_gross) <= 0 && Number(row.patient_receivable_gross) > 0 ? "success" : "neutral"}>{patientBillingLabel(row)}</StatusBadge>;

@@ -569,6 +569,9 @@ export interface Translations
   settings_agency_bank_name: string;
   settings_agency_bank_swift: string;
   settings_agency_bank_iban: string;
+  settings_agency_vat_id: string;
+  settings_agency_tax_number: string;
+  settings_agency_country_code: string;
   settings_agency_hint: string;
   settings_document_requirements: string;
   settings_document_requirements_hint: string;

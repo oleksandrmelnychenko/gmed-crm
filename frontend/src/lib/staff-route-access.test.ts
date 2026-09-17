@@ -89,6 +89,14 @@ describe("first-release staff RBAC", () => {
     }
   });
 
+  it("opens invoices to every role the API lets read them", () => {
+    for (const role of ["ceo", "ceo_assistant", "patient_manager", "billing"] as const) {
+      expect(canAccessStaffRoute(role, "/invoices"), role).toBe(true);
+    }
+    expect(canAccessStaffRoute("patient_manager", "/company-finance")).toBe(false);
+    expect(canAccessStaffRoute("interpreter", "/invoices")).toBe(false);
+  });
+
   it("keeps Billing in finance workspaces and out of operations/admin", () => {
     for (const path of [
       "/",

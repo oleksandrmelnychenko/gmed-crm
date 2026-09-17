@@ -1377,6 +1377,7 @@ dependencies = [
  "hex",
  "http",
  "jsonwebtoken",
+ "lopdf 0.42.0",
  "metrics",
  "pdf-extract",
  "printpdf",

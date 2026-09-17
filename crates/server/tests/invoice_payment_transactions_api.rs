@@ -501,3 +501,194 @@ async fn cash_payment_recompute_preserves_prepayment_allocations() {
     assert_eq!(reversed["invoice"]["status"], "partially_paid");
     assert_eq!(reversed["invoice"]["balance_due"], "59");
 }
+
+#[tokio::test]
+async fn payment_correction_reverses_the_original_and_appends_the_corrected_receipt() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("payment-correction");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    seed_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice_id = seed_invoice(
+        &pool, order_id, patient_id, admin_id, &tag, "interim", 119, false,
+    )
+    .await;
+    let billing = auth_header_for(billing_id, "billing");
+    let manager = auth_header_for(manager_id, "patient_manager");
+
+    let payment = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 100, "WRONG").await;
+    let payment_id = payment["payment_transaction_id"].as_str().unwrap();
+    let correction_path = format!("/api/v1/invoices/{invoice_id}/payments/{payment_id}/correction");
+    let today = chrono::Utc::now().date_naive().to_string();
+    let correction = |amount: i64, request_id: Uuid, reason: &str| {
+        json!({
+            "request_id": request_id,
+            "amount_gross": amount,
+            "payment_method": "cash",
+            "payment_reference": "RIGHT",
+            "received_on": today,
+            "note": null,
+            "reason": reason
+        })
+    };
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &correction_path,
+        &manager,
+        Some(correction(60, Uuid::new_v4(), "typo")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &correction_path,
+        &billing,
+        Some(correction(60, Uuid::new_v4(), " ")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &correction_path,
+        &billing,
+        Some(correction(120, Uuid::new_v4(), "typo")),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "correction above the invoice total"
+    );
+
+    let request_id = Uuid::new_v4();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &correction_path,
+        &billing,
+        Some(correction(60, request_id, "typo")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "correction response: {body:?}");
+    assert_eq!(body["invoice"]["status"], "partially_paid");
+    let corrected_id = body["payment_transaction_id"].as_str().unwrap().to_string();
+
+    let (status, replay) = json_request(
+        &app,
+        "POST",
+        &correction_path,
+        &billing,
+        Some(correction(60, request_id, "typo")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["idempotent_replay"], true);
+    assert_eq!(replay["payment_transaction_id"], corrected_id.as_str());
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &correction_path,
+        &billing,
+        Some(correction(70, Uuid::new_v4(), "again")),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a corrected payment is already reversed"
+    );
+
+    let paid_amount: Decimal = sqlx::query_scalar("SELECT paid_amount FROM invoices WHERE id = $1")
+        .bind(invoice_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(paid_amount, Decimal::new(60, 0));
+
+    let (status, history) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = history["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3, "original, reversal and corrected receipt");
+    let original = items.iter().find(|item| item["id"] == payment_id).unwrap();
+    assert_eq!(original["is_reversed"], true);
+    assert_eq!(
+        original["corrected_by_transaction_id"],
+        corrected_id.as_str()
+    );
+    let corrected = items
+        .iter()
+        .find(|item| item["id"] == corrected_id.as_str())
+        .unwrap();
+    assert_eq!(corrected["corrects_transaction_id"], payment_id);
+    assert_eq!(corrected["payment_method"], "cash");
+
+    let ledger_gross: Decimal = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(amount_gross), 0) FROM accounting_entries
+         WHERE source_invoice_id = $1 AND source_invoice_payment_transaction_id IS NOT NULL",
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ledger_gross, Decimal::new(60, 0));
+}
+
+#[tokio::test]
+async fn overdue_invoice_stays_overdue_after_a_partial_payment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("overdue-partial");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice_id = seed_invoice(
+        &pool, order_id, patient_id, admin_id, &tag, "interim", 119, false,
+    )
+    .await;
+    sqlx::query(
+        "UPDATE invoices SET status = 'overdue', due_date = CURRENT_DATE - 5 WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+
+    let partial = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 19, "PART").await;
+    assert_eq!(partial["invoice"]["status"], "overdue");
+    assert_eq!(partial["invoice"]["paid_amount"], "19");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing,
+        Some(json!({ "status": "draft" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "overdue -> draft: {body:?}");
+
+    let settled = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 100, "REST").await;
+    assert_eq!(settled["invoice"]["status"], "paid");
+}
