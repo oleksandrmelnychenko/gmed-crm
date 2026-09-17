@@ -346,3 +346,9 @@ export function reportSecurityIncident(payload: JsonPayload) {
 export function updateSecurityIncident(incidentId: string, payload: JsonPayload) {
   return postJson<SecurityIncident>(`/admin/compliance/incidents/${incidentId}`, payload);
 }
+
+export function fetchPatientConsents<TConsent>(patientId: string) {
+  return apiFetch<TConsent[]>(`/admin/compliance/patient/${patientId}/consents`, {
+    cache: "no-store",
+  });
+}
