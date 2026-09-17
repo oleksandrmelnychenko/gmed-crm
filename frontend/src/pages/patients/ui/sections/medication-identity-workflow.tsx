@@ -85,7 +85,7 @@ function identityStatusDot(status: MedicationIntelligenceIdentityStatus) {
 
 function matchBasisLabel(value: MedicationIdentityMatchBasis, tx: Bilingual) {
   if (value === "exact_pzn") return tx("Точное совпадение PZN", "Exakte PZN-Übereinstimmung");
-  if (value === "exact_substance") return tx("Совпадает Wirkstoff", "Wirkstoff stimmt überein");
+  if (value === "exact_substance") return tx("Совпадает ACT-значение", "ACT-Bedeutung stimmt überein");
   if (value === "exact_strength") return tx("Совпадает дозировка", "Stärke stimmt überein");
   return tx("Совпадает форма", "Darreichungsform stimmt überein");
 }
@@ -95,10 +95,10 @@ function blockingReasonLabel(value: string, tx: Bilingual) {
     candidate_expired: ["Набор кандидатов устарел", "Kandidatensatz ist abgelaufen"],
     missing_required_identity: ["Не хватает идентификационных данных", "Erforderliche Identitätsdaten fehlen"],
     exact_brand_required: ["Торговое название не совпадает точно", "Der Handelsname stimmt nicht exakt überein"],
-    substance_mismatch: ["Действующее вещество не совпадает", "Der Wirkstoff stimmt nicht überein"],
+    substance_mismatch: ["�ACT-значение не совпадает", "Die ACT-Bedeutung stimmt nicht überein"],
     strength_contradiction: ["Дозировка противоречит записи пациента", "Die Stärke widerspricht dem Patienteneintrag"],
     form_contradiction: ["Лекарственная форма противоречит записи пациента", "Die Darreichungsform widerspricht dem Patienteneintrag"],
-    substance_only_not_identity: ["Совпадения только по действующему веществу недостаточно", "Eine Übereinstimmung nur beim Wirkstoff reicht nicht aus"],
+    substance_only_not_identity: ["Совпадения только по �ACT-значению недостаточно", "Eine Übereinstimmung nur bei der ACT-Bedeutung reicht nicht aus"],
     atc_only_not_identity: ["Совпадения только по ATC недостаточно", "Eine Übereinstimmung nur beim ATC-Code reicht nicht aus"],
     insufficient_identity_evidence: ["Недостаточно точных признаков для идентификации", "Für die Identifikation fehlen ausreichende exakte Merkmale"],
     source_not_internal_curated: ["Источник не допущен к подтверждению", "Die Quelle ist nicht zur Bestätigung freigegeben"],
@@ -395,14 +395,14 @@ function CandidateReview({
         <div className="grid gap-2 sm:grid-cols-2">
           <ReviewColumn title={tx("Запись пациента", "Patienteneintrag")} dotClass="bg-slate-500">
             <CandidateFact label={tx("Название", "Name")} value={medication.name} />
-            <CandidateFact label={tx("Wirkstoff", "Wirkstoff")} value={medication.substance} />
+            <CandidateFact label={tx("ACT-значение", "ACT-Bedeutung")} value={medication.substance} />
             <CandidateFact label={tx("Дозировка", "Stärke")} value={medication.strength} />
             <CandidateFact label={tx("Форма", "Form")} value={medication.form} />
             <CandidateFact label="PZN / ATC" value={[medication.pzn, medication.atc_code].filter(Boolean).join(" / ")} />
           </ReviewColumn>
           <ReviewColumn title={tx("Выбранный кандидат", "Ausgewählter Kandidat")} dotClass="bg-emerald-500">
             <CandidateFact label={tx("Название", "Name")} value={product.brand_name} />
-            <CandidateFact label={tx("Wirkstoff", "Wirkstoff")} value={product.substances.join(", ")} />
+            <CandidateFact label={tx("ACT-значение", "ACT-Bedeutung")} value={product.substances.join(", ")} />
             <CandidateFact label={tx("Дозировка", "Stärke")} value={product.strength} />
             <CandidateFact label={tx("Форма", "Form")} value={product.form} />
             <CandidateFact label="PZN / ATC" value={[product.pzn, product.atc_code].filter(Boolean).join(" / ")} />
@@ -426,8 +426,8 @@ function CandidateReview({
             />
             <span>
               {tx(
-                "Я сверил название, действующее вещество, дозировку, форму и происхождение кандидата. Подтверждение связывает записи, но не изменяет лечение.",
-                "Ich habe Name, Wirkstoff, Stärke, Form und Herkunft des Kandidaten geprüft. Die Bestätigung verknüpft Datensätze, ändert aber keine Therapie.",
+                "Я сверил название, �ACT-значение, дозировку, форму и происхождение кандидата. Подтверждение связывает записи, но не изменяет лечение.",
+                "Ich habe Name, ACT-Bedeutung, Stärke, Form und Herkunft des Kandidaten geprüft. Die Bestätigung verknüpft Datensätze, ändert aber keine Therapie.",
               )}
             </span>
           </label>

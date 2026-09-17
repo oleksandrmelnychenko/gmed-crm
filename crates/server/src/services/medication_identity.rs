@@ -1239,7 +1239,9 @@ fn normalize_key(value: &str) -> String {
 
 fn usable_substance(value: &str) -> Option<&str> {
     let trimmed = value.trim();
-    (!trimmed.is_empty() && !trimmed.eq_ignore_ascii_case("Unbekannter Wirkstoff"))
+    (!trimmed.is_empty()
+        && !trimmed.eq_ignore_ascii_case("Unbekannte ACT-Bedeutung")
+        && !trimmed.eq_ignore_ascii_case("Unbekannter Wirkstoff"))
         .then_some(trimmed)
 }
 
@@ -1386,7 +1388,7 @@ mod tests {
         );
 
         let mut no_substance = medication();
-        no_substance.wirkstoff = "Unbekannter Wirkstoff".to_string();
+        no_substance.wirkstoff = "Unbekannte ACT-Bedeutung".to_string();
         let candidate = evaluate_candidate(
             &no_substance,
             product("Different Brand", "Other", "1 mg", "Kapsel"),

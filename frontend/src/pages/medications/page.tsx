@@ -85,7 +85,7 @@ export function MedicationsPage() {
     } catch (error) {
       const code = error instanceof ApiRequestError ? error.body?.code ?? error.code ?? error.message : "";
       setSaveError(code === "medication_pair_exists"
-        ? tx("Такая торговая марка и действующее вещество уже есть в справочнике.", "Diese Kombination aus Handelsname und Wirkstoff ist bereits vorhanden.")
+        ? tx("Такая торговая марка и ACT-значение уже есть в справочнике.", "Diese Kombination aus Handelsname und ACT-Bedeutung ist bereits vorhanden.")
         : code === "medication_pair_changed" || code === "medication_pair_not_found"
           ? tx("Запись уже изменена. Отмените редактирование и обновите таблицу.", "Der Eintrag wurde bereits geändert. Brechen Sie die Bearbeitung ab und aktualisieren Sie die Tabelle.")
           : tx("Не удалось сохранить медикамент. Повторите попытку.", "Das Medikament konnte nicht gespeichert werden. Bitte erneut versuchen."));
@@ -126,7 +126,7 @@ export function MedicationsPage() {
   const columns: ColumnDef<MedicationCatalogItem>[] = [
     ...(["handelsname", "wirkstoff"] as const).map((field) => ({
       id: field,
-      label: field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("Действующее вещество", "Wirkstoff"),
+      label: field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("ACT-значение", "ACT-Bedeutung"),
       accessor: (item: MedicationCatalogItem) => item[field],
       minWidth: 260,
       required: field === "wirkstoff",
@@ -134,7 +134,7 @@ export function MedicationsPage() {
       cellClassName: "whitespace-normal",
       render: (item: MedicationCatalogItem) => draft?.id === item.id ? (
         <Input
-          aria-label={field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("Действующее вещество", "Wirkstoff")}
+          aria-label={field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("ACT-значение", "ACT-Bedeutung")}
           value={draft[field]}
           autoFocus={field === "handelsname"}
           required={field === "wirkstoff"}
@@ -167,7 +167,7 @@ export function MedicationsPage() {
             <span className="block text-[11px] leading-none text-muted-foreground">{t.common_search}</span>
             <div className="relative">
               <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input aria-label={tx("Поиск медикаментов", "Medikamente suchen")} placeholder={tx("Торговое название или действующее вещество", "Handelsname oder Wirkstoff")} value={search} maxLength={500} disabled={Boolean(draft)} className={cn(inputClass, "h-8 w-full min-w-0 rounded-md pl-8 text-xs")} onChange={(event) => setSearch(event.target.value)} />
+              <Input aria-label={tx("Поиск медикаментов", "Medikamente suchen")} placeholder={tx("Торговое название или ACT-значение", "Handelsname oder ACT-Bedeutung")} value={search} maxLength={500} disabled={Boolean(draft)} className={cn(inputClass, "h-8 w-full min-w-0 rounded-md pl-8 text-xs")} onChange={(event) => setSearch(event.target.value)} />
             </div>
           </label>
           <Button type="submit" variant="outline" className="h-8 rounded-md text-xs" disabled={loading || Boolean(draft)}>{tx("Найти", "Suchen")}</Button>

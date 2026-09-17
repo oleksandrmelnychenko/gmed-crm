@@ -192,7 +192,7 @@ function MedicationRow({
           ) : (
             <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-rose-700">
               <span aria-hidden className="size-1.5 rounded-full bg-rose-500" />
-              {tx("Требуется уточнить: не указано действующее вещество", "Wirkstoff fehlt: Klärung erforderlich")}
+              {tx("Требуется уточнить: не указано �ACT-значение", "ACT-Bedeutung fehlt: Klärung erforderlich")}
             </p>
           )}
         </div>
@@ -810,8 +810,8 @@ export function MedicationBmpImportAction({
                           "Der Server erlaubt die Bestätigung dieser BMP-Version nicht. Prüfen Sie blockierende Punkte und Zugriffsrechte.",
                         )
                       : tx(
-                          "Подтверждение станет доступно только после устранения всех блокирующих пунктов. Торговое название или PZN не заменяют отсутствующее действующее вещество.",
-                          "Die Bestätigung wird erst möglich, wenn alle blockierenden Punkte geklärt sind. Handelsname oder PZN ersetzen keinen fehlenden Wirkstoff.",
+                          "Подтверждение станет доступно только после устранения всех блокирующих пунктов. Торговое название или PZN не заменяют отсутствующее �ACT-значение.",
+                          "Die Bestätigung wird erst möglich, wenn alle blockierenden Punkte geklärt sind. Handelsname oder PZN ersetzen keine fehlende ACT-Bedeutung.",
                         )}
                   </p>
                 ) : null}

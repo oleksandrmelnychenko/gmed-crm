@@ -417,10 +417,10 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_empty_title: "Медикаментов пока нет.",
   cases_medications_add_first: "Добавить первый медикамент",
   cases_medications_missing_brand: "Укажите торговое название.",
-  cases_medications_missing_active_ingredient: "Укажите действующее вещество.",
+  cases_medications_missing_active_ingredient: "Укажите �ACT-значение.",
   cases_medications_untitled: "Без названия",
   cases_medications_brand_name: "Торговое название",
-  cases_medications_active_ingredient: "Действующее вещество",
+  cases_medications_active_ingredient: "�ACT-значение",
   cases_medications_dose: "Доза",
   cases_medications_unit: "Единица",
   cases_medications_regimen: "Схема приёма",
@@ -444,7 +444,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_equivalent_verify_error:
     "Не удалось проверить эквивалент.",
   cases_medications_drug_search_required:
-    "Введите название препарата, ATC-код или действующее вещество.",
+    "Введите название препарата, ATC-код или �ACT-значение.",
   cases_medications_drug_search_failed:
     "Не удалось выполнить поиск препаратов.",
   cases_medications_product_verify_failed:
@@ -479,7 +479,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_match_reject: "Отклонить связь",
   cases_medications_search_results_empty:
     "Результаты поиска появятся здесь.",
-  cases_medications_substances: "Действующие вещества",
+  cases_medications_substances: "�ACT-значения",
   cases_medications_unknown: "Неизвестно",
   cases_medications_product_verify: "Проверить препарат",
   cases_medications_reject: "Отклонить",
@@ -500,7 +500,7 @@ export const casesClinicalRu: CasesClinicalTranslations = {
   cases_medications_equivalents_find: "Найти",
   cases_medications_equivalents_warning:
     "Только для внутренней проверки команды. Это не назначение; непроверенные варианты пациенту не показываются.",
-  cases_medications_equivalents_active_substance: "Действующее вещество",
+  cases_medications_equivalents_active_substance: "�ACT-значение",
   cases_medications_equivalents_include_unverified:
     "Включить непроверенные кандидаты только для команды",
   cases_medications_equivalents_empty:
@@ -708,10 +708,10 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_medications_empty_title: "Keine Medikamente erfasst.",
   cases_medications_add_first: "Erstes Medikament hinzufügen",
   cases_medications_missing_brand: "Bitte den Handelsnamen eingeben.",
-  cases_medications_missing_active_ingredient: "Bitte den Wirkstoff eingeben.",
+  cases_medications_missing_active_ingredient: "Bitte die ACT-Bedeutung eingeben.",
   cases_medications_untitled: "Ohne Namen",
   cases_medications_brand_name: "Handelsname",
-  cases_medications_active_ingredient: "Wirkstoff",
+  cases_medications_active_ingredient: "ACT-Bedeutung",
   cases_medications_dose: "Dosis",
   cases_medications_unit: "Einheit",
   cases_medications_regimen: "Schema",
@@ -735,7 +735,7 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_medications_equivalent_verify_error:
     "Äquivalent konnte nicht verifiziert werden.",
   cases_medications_drug_search_required:
-    "Arzneiname, ATC-Code oder Wirkstoff eingeben.",
+    "Arzneiname, ATC-Code oder ACT-Bedeutung eingeben.",
   cases_medications_drug_search_failed: "Arzneisuche fehlgeschlagen.",
   cases_medications_product_verify_failed:
     "Produkt konnte nicht verifiziert werden.",
@@ -768,7 +768,7 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_medications_match_reject: "Match ablehnen",
   cases_medications_search_results_empty:
     "Suchergebnisse erscheinen hier.",
-  cases_medications_substances: "Wirkstoffe",
+  cases_medications_substances: "ACT-Bedeutungen",
   cases_medications_unknown: "Unbekannt",
   cases_medications_product_verify: "Produkt prüfen",
   cases_medications_reject: "Ablehnen",
@@ -780,7 +780,7 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_medications_preview_import: "Import prüfen",
   cases_medications_import_summary:
     "{received} Zeilen empfangen - {valid} gültige Vorschauzeilen - {issues} mit Hinweisen",
-  cases_medications_no_substances: "Keine Wirkstoffe",
+  cases_medications_no_substances: "Keine ACT-Bedeutungen",
   cases_medications_issues: "Hinweise",
   cases_medications_equivalents_title: "Deutsche Äquivalente",
   cases_medications_equivalents_description:
@@ -789,7 +789,7 @@ export const casesClinicalDe: CasesClinicalTranslations = {
   cases_medications_equivalents_find: "Finden",
   cases_medications_equivalents_warning:
     "Nur zur internen Prüfung durch das Team. Keine Verordnung; ungeprüfte Varianten werden Patienten nicht angezeigt.",
-  cases_medications_equivalents_active_substance: "Wirkstoff",
+  cases_medications_equivalents_active_substance: "ACT-Bedeutung",
   cases_medications_equivalents_include_unverified:
     "Ungeprüfte Team-Kandidaten einschließen",
   cases_medications_equivalents_empty:

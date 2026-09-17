@@ -59,7 +59,7 @@ for (const lang of ["ru", "de"] as const) {
     await expect(page.getByText("1-1 / 1", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: de ? "Bearbeiten" : "Редактировать", exact: true }).click();
     const brand = page.getByRole("textbox", { name: de ? "Handelsname" : "Торговое название", exact: true });
-    const substance = page.getByRole("textbox", { name: de ? "Wirkstoff" : "Действующее вещество", exact: true });
+    const substance = page.getByRole("textbox", { name: de ? "ACT-Bedeutung" : "ACT-значение", exact: true });
     await expect(page.getByRole("button", { name: de ? "Speichern" : "Сохранить", exact: true })).toBeDisabled();
     await brand.fill("Edited Brand");
     await substance.fill("Edited Substance");
@@ -79,7 +79,7 @@ test("catalog adds a pair, cancels drafts and keeps rejected edits", async ({ pa
   const { writes } = await prepare(page);
   await page.getByRole("button", { name: "Добавить медикамент", exact: true }).click();
   const brand = page.getByRole("textbox", { name: "Торговое название", exact: true });
-  const substance = page.getByRole("textbox", { name: "Действующее вещество", exact: true });
+  const substance = page.getByRole("textbox", { name: "ACT-значение", exact: true });
   await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toBeDisabled();
   await brand.fill("Cancel me");
   await page.getByRole("button", { name: "Отмена", exact: true }).click();
@@ -103,7 +103,7 @@ test("catalog editor remains usable on mobile", async ({ page }) => {
   await prepare(page, "de");
   await page.getByRole("button", { name: "Medikament hinzufügen", exact: true }).filter({ visible: true }).click();
   await page.getByRole("textbox", { name: "Handelsname", exact: true }).fill("Mobile Brand");
-  await page.getByRole("textbox", { name: "Wirkstoff", exact: true }).fill("Mobile Substance");
+  await page.getByRole("textbox", { name: "ACT-Bedeutung", exact: true }).fill("Mobile Substance");
   await page.screenshot({ path: test.info().outputPath("catalog-edit-mobile.png") });
   await page.getByRole("button", { name: "Speichern", exact: true }).click();
   await expect(page.getByText("Mobile Brand", { exact: true }).filter({ visible: true })).toBeVisible();

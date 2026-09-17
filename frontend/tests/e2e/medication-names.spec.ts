@@ -59,7 +59,7 @@ async function mount(page: Page, pairs = seed, lang = "de") {
 }
 
 function input(page: Page, field: "handelsname" | "wirkstoff") {
-  return page.getByLabel(field === "handelsname" ? "Handelsname" : "Wirkstoff", { exact: true });
+  return page.getByLabel(field === "handelsname" ? "Handelsname" : "ACT-Bedeutung", { exact: true });
 }
 
 async function choose(page: Page, field: "handelsname" | "wirkstoff", query: string, option: string) {
@@ -157,8 +157,8 @@ test("smart name review fits the Russian mobile medication editor", async ({ pag
   await page.setViewportSize({ width: 390, height: 844 });
   await mount(page, seed, "ru");
   await page.getByLabel("Торговое название", { exact: true }).fill("Unqiue Brand");
-  await page.getByLabel("Действующее вещество", { exact: true }).fill("Новое вещество");
-  await page.getByLabel("Действующее вещество", { exact: true }).press("Escape");
+  await page.getByLabel("ACT-значение", { exact: true }).fill("Новое вещество");
+  await page.getByLabel("ACT-значение", { exact: true }).press("Escape");
   await expect(page.getByRole("checkbox", { name: /Названия проверены/ })).not.toBeChecked();
   const candidate = page.getByRole("button", { name: "Unique Brand", exact: true });
   await expect(candidate).toBeVisible();

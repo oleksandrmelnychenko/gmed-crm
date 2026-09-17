@@ -204,12 +204,12 @@ const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
   english_source_requires_review: { ru: "Английский оригинал: проверьте смысл и перевод", de: "Englisches Original: Bedeutung und Übersetzung prüfen" },
   finding_is_not_an_active_diagnosis: { ru: "Нормальный или улучшенный показатель: сохранён как результат обследования", de: "Normaler oder verbesserter Wert: als Befund erfasst" },
   medication_brand_without_active_ingredient: {
-    ru: "В документе есть торговое название, но действующее вещество нужно указать вручную",
-    de: "Handelsname erkannt, Wirkstoff muss manuell ergänzt werden",
+    ru: "В документе есть торговое название, но �ACT-значение нужно указать вручную",
+    de: "Handelsname erkannt, ACT-Bedeutung muss manuell ergänzt werden",
   },
   active_ingredient_requires_confirmation: {
-    ru: "Укажите и проверьте действующее вещество",
-    de: "Wirkstoff ergänzen und prüfen",
+    ru: "Укажите и проверьте �ACT-значение",
+    de: "ACT-Bedeutung ergänzen und prüfen",
   },
   medication_name_requires_confirmation: {
     ru: "Не удалось надёжно определить название препарата",
@@ -244,8 +244,8 @@ const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
     de: "Erkannten ATC-Code prüfen",
   },
   medication_active_ingredient_requires_confirmation: {
-    ru: "Проверьте действующее вещество по оригиналу документа",
-    de: "Wirkstoff mit dem Originaldokument abgleichen",
+    ru: "Проверьте �ACT-значение по оригиналу документа",
+    de: "ACT-Bedeutung mit dem Originaldokument abgleichen",
   },
   medication_regimen_requires_confirmation: {
     ru: "Проверьте дозировку и схему приёма",
@@ -503,8 +503,8 @@ function MedicationCandidateEditor({
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
           <p className="font-medium">
             {tx(
-              "Укажите действующее вещество — без него запись нельзя импортировать",
-              "Wirkstoff ergänzen – ohne Wirkstoff ist kein Import möglich",
+              "Укажите �ACT-значение — без него запись нельзя импортировать",
+              "ACT-Bedeutung ergänzen – ohne ACT-Bedeutung ist kein Import möglich",
             )}
           </p>
         </div>
@@ -543,8 +543,8 @@ function MedicationCandidateEditor({
           {ambiguousSeries ? (
             <span className="block text-[11px] text-amber-800">
               {tx(
-                "Есть несколько текущих или выбранных записей с этим действующим веществом. Выберите линию вручную — система не будет угадывать.",
-                "Mehrere aktuelle oder ausgewählte Einträge haben diesen Wirkstoff. Serie manuell wählen; es erfolgt keine automatische Zuordnung.",
+                "Есть несколько текущих или выбранных записей с этим �ACT-значением. Выберите линию вручную — система не будет угадывать.",
+                "Mehrere aktuelle oder ausgewählte Einträge haben diese ACT-Bedeutung. Serie manuell wählen; es erfolgt keine automatische Zuordnung.",
               )}
             </span>
           ) : null}
@@ -560,7 +560,7 @@ function MedicationCandidateEditor({
       ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {field("wirkstoff", tx("Действующее вещество", "Wirkstoff"), { required: true, className: "xl:col-span-2" })}
+        {field("wirkstoff", tx("�ACT-значение", "ACT-Bedeutung"), { required: true, className: "xl:col-span-2" })}
         {field("handelsname", tx("Торговое название", "Handelsname"), { className: "xl:col-span-2" })}
         {field("staerke", tx("Дозировка / концентрация", "Stärke / Konzentration"))}
         {field("form", tx("Лекарственная форма", "Darreichungsform"))}
@@ -1576,8 +1576,8 @@ export function ClinicalDocumentImportSheet({
       toast.error(
         reason === "missing_wirkstoff"
           ? tx(
-              "У выбранного медикамента нет действующего вещества. Заполните это поле перед импортом.",
-              "Für das ausgewählte Medikament fehlt der Wirkstoff. Bitte vor dem Import ergänzen.",
+              "У выбранного медикамента нет �ACT-значения. Заполните это поле перед импортом.",
+              "Für das ausgewählte Medikament fehlt die ACT-Bedeutung. Bitte vor dem Import ergänzen.",
             )
           : reason === "unconfirmed_status"
             ? tx(
@@ -1712,8 +1712,8 @@ export function ClinicalDocumentImportSheet({
                   "Markierte Vitalwert-Felder korrigieren: Datum, Ursprungsland, Wertebereiche, Blutdruckpaar und BMI-Konsistenz.",
                 )
             : tx(
-                "Для выбранного медикамента нужны действующее вещество, подтверждённый статус и страна документа.",
-                "Für das ausgewählte Medikament sind Wirkstoff, bestätigter Status und Ursprungsland erforderlich.",
+                "Для выбранного медикамента нужны �ACT-значение, подтверждённый статус и страна документа.",
+                "Für das ausgewählte Medikament sind ACT-Bedeutung, bestätigter Status und Ursprungsland erforderlich.",
               ),
         );
       }

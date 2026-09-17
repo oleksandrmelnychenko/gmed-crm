@@ -195,7 +195,7 @@ describe("MedicationBmpImportPreviewContent", () => {
 
     expect(html).toContain("Metformin Atid");
     expect(html).toContain("PZN 01234567");
-    expect(html).toContain("Wirkstoff fehlt: Klärung erforderlich");
+    expect(html).toContain("ACT-Bedeutung fehlt: Klärung erforderlich");
     expect(html).toContain("Wochentag: 5");
     expect(html).toContain("Blockiert");
     expect(canConfirmMedicationBmpPreview(missingSubstance)).toBe(false);

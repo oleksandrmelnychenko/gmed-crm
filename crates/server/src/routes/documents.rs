@@ -3982,7 +3982,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "medication_permanent") => "Dauermedikation",
         (_, "medication_temporary") => "Temporäre Medikation",
         (_, "medication_name") => "Medikament",
-        (_, "ingredient") => "Wirkstoff",
+        (_, "ingredient") => "ACT-Bedeutung",
         (_, "dose") => "Dosis",
         (_, "schedule") => "Einnahmeschema",
         (_, "dosage_form") => "Darreichungsform",

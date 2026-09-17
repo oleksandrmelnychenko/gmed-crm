@@ -3128,7 +3128,7 @@ test.describe("lead onboarding wizard", () => {
     await medicationSection.getByRole("button", { name: "Hinzufügen" }).click();
     const medicationSheet = page.getByRole("dialog", { name: "Hinzufügen: Medikation" });
     await expect(medicationSheet).toBeVisible();
-    await medicationSheet.getByRole("textbox", { name: "Wirkstoff" }).fill("Ibuprofen");
+    await medicationSheet.getByRole("textbox", { name: "ACT-Bedeutung" }).fill("Ibuprofen");
     await chooseComboboxOption(
       page,
       medicationSheet.getByRole("combobox", { name: "Darreichungsform" }),

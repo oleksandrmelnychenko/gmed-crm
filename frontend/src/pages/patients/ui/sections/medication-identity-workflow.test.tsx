@@ -235,7 +235,7 @@ describe("MedicationIdentityWorkflow", () => {
     );
 
     expect(html).toContain("Handelsname stimmt nicht exakt");
-    expect(html).toContain("Wirkstoff stimmt nicht überein");
+    expect(html).toContain("ACT-Bedeutung stimmt nicht überein");
     expect(html).toContain("Stärke widerspricht");
     expect(html).toContain("ausreichende exakte Merkmale");
   });

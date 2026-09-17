@@ -1038,8 +1038,8 @@ fn parse_substance(attrs: BTreeMap<String, String>, medication: &mut BmpMedicati
         medication.blocking_reasons.push(issue(
             "unknown_attribute",
             &format!("{path}/@{key}"),
-            "Неизвестный атрибут действующего вещества блокирует импорт.",
-            "Ein unbekanntes Wirkstoffattribut blockiert den Import.",
+            "Неизвестный атрибут ACT-значения блокирует импорт.",
+            "Ein unbekanntes ACT-Bedeutungsattribut blockiert den Import.",
             true,
         ));
     }
@@ -1051,8 +1051,8 @@ fn parse_substance(attrs: BTreeMap<String, String>, medication: &mut BmpMedicati
         medication.blocking_reasons.push(issue(
             "missing_substance",
             &path,
-            "Wirkstoff отсутствует; Handelsname не используется как замена.",
-            "Der Wirkstoff fehlt; der Handelsname wird nicht als Ersatz verwendet.",
+            "ACT-значение отсутствует; Handelsname не используется как замена.",
+            "Die ACT-Bedeutung fehlt; der Handelsname wird nicht als Ersatz verwendet.",
             true,
         ));
         return;
@@ -1074,16 +1074,16 @@ fn finalize_medication(state: &mut ParserState) -> Result<(), BmpImportError> {
         medication.blocking_reasons.push(issue(
             "unresolved_substance",
             &format!("/MP/S/M[{}]", medication.index),
-            "В BMP нет явного Wirkstoff; PZN/Handelsname не разрешаются и не подменяют его.",
-            "Im BMP fehlt ein expliziter Wirkstoff; PZN/Handelsname werden nicht aufgelöst und ersetzen ihn nicht.",
+            "В BMP нет явного ACT-значения; PZN/Handelsname не разрешаются и не подменяют его.",
+            "Im BMP fehlt eine explizite ACT-Bedeutung; PZN/Handelsname werden nicht aufgelöst und ersetzen sie nicht.",
             true,
         ));
     } else if medication.substances.len() > 1 {
         medication.blocking_reasons.push(issue(
             "multiple_substances_not_lossless",
             &format!("/MP/S/M[{}]", medication.index),
-            "Несколько Wirkstoff нельзя без потерь сохранить в текущей одиночной модели.",
-            "Mehrere Wirkstoffe können im aktuellen Einzelwirkstoffmodell nicht verlustfrei gespeichert werden.",
+            "Несколько ACT-значений нельзя без потерь сохранить в текущей одиночной модели.",
+            "Mehrere ACT-Bedeutungen können im aktuellen Einzelmodell nicht verlustfrei gespeichert werden.",
             true,
         ));
     }

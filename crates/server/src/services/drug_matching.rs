@@ -41,16 +41,16 @@ pub struct GermanEquivalentResult {
 const ACTIVE_SUBSTANCE_REFERENCE_NOTE_EN: &str =
     "Same active substance reference. Staff information only; not a prescription.";
 const ACTIVE_SUBSTANCE_REFERENCE_NOTE_RU: &str =
-    "Справочная связь по тому же действующему веществу. Только для команды, не назначение.";
+    "Справочная связь по тому же ACT-значению. Только для команды, не назначение.";
 const ACTIVE_SUBSTANCE_REFERENCE_NOTE_DE: &str =
-    "Referenz zum gleichen Wirkstoff. Nur Team-Information, keine Verordnung.";
+    "Referenz zur gleichen ACT-Bedeutung. Nur Team-Information, keine Verordnung.";
 
 const ACTIVE_SUBSTANCE_MATCH_NOTE_EN: &str =
     "Matched by active substance. Staff information only; not a prescription.";
 const ACTIVE_SUBSTANCE_MATCH_NOTE_RU: &str =
-    "Совпадение по действующему веществу. Только для команды, не назначение.";
+    "Совпадение по ACT-значению. Только для команды, не назначение.";
 const ACTIVE_SUBSTANCE_MATCH_NOTE_DE: &str =
-    "Abgleich über den Wirkstoff. Nur Team-Information, keine Verordnung.";
+    "Abgleich über die ACT-Bedeutung. Nur Team-Information, keine Verordnung.";
 
 const STAFF_WARNING_RU: &str =
     "Немецкие эквиваленты являются только справочной информацией для команды, не назначением.";

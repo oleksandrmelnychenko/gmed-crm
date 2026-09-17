@@ -206,7 +206,7 @@ describe("PatientMedicationTable", () => {
 
     expect(html).toContain("<table");
     // BMP Medikationsplan columns
-    expect(html).toContain("Wirkstoff");
+    expect(html).toContain("ACT-Bedeutung");
     expect(html).toContain("Handelsname");
     expect(html).toContain("Morgens");
     expect(html).toContain("Zur Nacht");

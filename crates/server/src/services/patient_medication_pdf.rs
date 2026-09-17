@@ -324,7 +324,7 @@ impl<'a> Layout<'a> {
     fn table_header(&mut self) {
         let labels = if self.context.russian {
             [
-                "Действующее вещество",
+                "ACT-значение",
                 "Торговое название",
                 "Дозировка",
                 "Форма / применение",
@@ -337,7 +337,7 @@ impl<'a> Layout<'a> {
             ]
         } else {
             [
-                "Wirkstoff",
+                "ACT-Bedeutung",
                 "Handelsname",
                 "Stärke",
                 "Form / Anwendung",
@@ -835,7 +835,7 @@ mod tests {
         };
         for value in [
             "WWWWWWWWWWWWWWW",
-            "Действующее вещество",
+            "ACT-значение",
             "Morgens",
             "1/2",
             "verylongunbrokendrugname",

@@ -154,7 +154,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
   return (
     <div className="grid gap-2 md:grid-cols-2">
       {(["handelsname", "wirkstoff"] as const).map((field) => {
-        const label = field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("Действующее вещество", "Wirkstoff");
+        const label = field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("�ACT-значение", "ACT-Bedeutung");
         const open = search?.field === field;
         return (
           <div key={field} className="min-w-0">

@@ -411,7 +411,7 @@ describe("MedicationIntelligencePanelContent", () => {
     expect(html).toContain("BfArM Rote-Hand-Brief");
     expect(html).toContain("Rote-Hand-Brief по препарату");
     expect(html).toContain("Опубликовано");
-    expect(html).toContain("Действующее вещество");
+    expect(html).toContain("ACT-значение");
     expect(html).toContain("Apixaban");
     expect(html).toContain("BfArM Arzneimittelinformationen");
     expect(html).toContain("Открыть официальный документ");

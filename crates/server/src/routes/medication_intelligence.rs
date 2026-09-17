@@ -37,8 +37,8 @@ const DEFAULT_EVIDENCE_PAGE_SIZE: i64 = 50;
 const MAX_EVIDENCE_PAGE_SIZE: i64 = 100;
 const MAX_EVIDENCE_OFFSET: i64 = 10_000;
 
-const DISCLAIMER_RU: &str = "Текущая версия выполняет только ограниченный набор детерминированных проверок. Подключённые официальные сообщения BfArM сопоставляются только при точном совпадении явно указанного действующего вещества; источники со статусом planned или manual_reference не проверяются. Отсутствие предупреждения не подтверждает безопасность препарата, комбинации или дозировки. Решение принимает медицинский специалист.";
-const DISCLAIMER_DE: &str = "Die aktuelle Version führt nur einen begrenzten Satz deterministischer Prüfungen aus. Angebundene amtliche BfArM-Mitteilungen werden nur bei exakter Übereinstimmung eines ausdrücklich genannten Wirkstoffs zugeordnet; Quellen mit dem Status planned oder manual_reference werden nicht geprüft. Das Fehlen eines Hinweises belegt nicht die Sicherheit eines Arzneimittels, einer Kombination oder Dosierung. Die Entscheidung trifft medizinisches Fachpersonal.";
+const DISCLAIMER_RU: &str = "Текущая версия выполняет только ограниченный набор детерминированных проверок. Подключённые официальные сообщения BfArM сопоставляются только при точном совпадении явно указанного ACT-значения; источники со статусом planned или manual_reference не проверяются. Отсутствие предупреждения не подтверждает безопасность препарата, комбинации или дозировки. Решение принимает медицинский специалист.";
+const DISCLAIMER_DE: &str = "Die aktuelle Version führt nur einen begrenzten Satz deterministischer Prüfungen aus. Angebundene amtliche BfArM-Mitteilungen werden nur bei exakter Übereinstimmung einer ausdrücklich genannten ACT-Bedeutung zugeordnet; Quellen mit dem Status planned oder manual_reference werden nicht geprüft. Das Fehlen eines Hinweises belegt nicht die Sicherheit eines Arzneimittels, einer Kombination oder Dosierung. Die Entscheidung trifft medizinisches Fachpersonal.";
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -511,13 +511,13 @@ fn analyze(
             id: stable_finding_id("duplicate-active-ingredient", normalized_substance),
             severity: "warning",
             category: "duplicate_active_ingredient",
-            title_ru: "Возможное дублирование действующего вещества".to_string(),
-            title_de: "Mögliche Wirkstoff-Duplikation".to_string(),
+            title_ru: "Возможное дублирование ACT-значения".to_string(),
+            title_de: "Mögliche ACT-Bedeutung-Duplikation".to_string(),
             detail_ru: format!(
-                "В нескольких активных позициях указано одно действующее вещество: {display_substance}. Требуется проверка медицинским специалистом; это не вывод о взаимодействии или дозировке."
+                "В нескольких активных позициях указано одно ACT-значение: {display_substance}. Требуется проверка медицинским специалистом; это не вывод о взаимодействии или дозировке."
             ),
             detail_de: format!(
-                "Mehrere aktive Einträge enthalten denselben Wirkstoff: {display_substance}. Eine Prüfung durch medizinisches Fachpersonal ist erforderlich; dies ist keine Aussage zu Wechselwirkungen oder Dosierung."
+                "Mehrere aktive Einträge enthalten dieselbe ACT-Bedeutung: {display_substance}. Eine Prüfung durch medizinisches Fachpersonal ist erforderlich; dies ist keine Aussage zu Wechselwirkungen oder Dosierung."
             ),
             evidence_refs: medication_ids
                 .iter()
@@ -591,10 +591,10 @@ fn analyze(
             title_ru: "Официальное сообщение BfArM по безопасности".to_string(),
             title_de: alert.official_title.clone(),
             detail_ru: format!(
-                "Явно указанное в сообщении действующее вещество ({substance_display}) точно совпало с активной позицией пациента. Проверьте оригинал BfArM; это не автоматический вывод о взаимодействии, дозировке или лечении."
+                "Явно указанное в сообщении ACT-значение ({substance_display}) точно совпало с активной позицией пациента. Проверьте оригинал BfArM; это не автоматический вывод о взаимодействии, дозировке или лечении."
             ),
             detail_de: format!(
-                "Der in der Mitteilung ausdrücklich genannte Wirkstoff ({substance_display}) stimmt exakt mit einem aktiven Patienteneintrag überein. Bitte prüfen Sie das BfArM-Original; dies ist keine automatische Aussage zu Wechselwirkung, Dosierung oder Behandlung."
+                "Die in der Mitteilung ausdrücklich genannte ACT-Bedeutung ({substance_display}) stimmt exakt mit einem aktiven Patienteneintrag überein. Bitte prüfen Sie das BfArM-Original; dies ist keine automatische Aussage zu Wechselwirkung, Dosierung oder Behandlung."
             ),
             medication_ids,
             evidence_refs: vec![
@@ -831,7 +831,7 @@ mod tests {
         let response = analyze(
             vec![medication(
                 medication_id,
-                Some("Unbekannter Wirkstoff"),
+                Some("Unbekannte ACT-Bedeutung"),
                 "aktiv",
                 "unresolved",
                 true,

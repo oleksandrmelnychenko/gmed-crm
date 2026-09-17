@@ -816,17 +816,17 @@ fn build_draft(snapshot: &EvidenceSnapshot) -> Result<LocalDraft, MedicationEvid
         match finding.category.as_str() {
             "duplicate_active_ingredient" => Some(DraftItem {
                 text_ru: if substance.is_empty() {
-                    "Проверьте, являются ли несколько активных записей с одинаковым действующим веществом актуальными и намеренными.".to_string()
+                    "Проверьте, являются ли несколько активных записей с одинаковым ACT-значением актуальными и намеренными.".to_string()
                 } else {
                     format!(
-                        "Проверьте, являются ли несколько активных записей с действующим веществом {substance} актуальными и намеренными."
+                        "Проверьте, являются ли несколько активных записей с ACT-значением {substance} актуальными и намеренными."
                     )
                 },
                 text_de: if substance.is_empty() {
-                    "Prüfen Sie, ob mehrere aktive Einträge mit demselben Wirkstoff aktuell und beabsichtigt sind.".to_string()
+                    "Prüfen Sie, ob mehrere aktive Einträge mit derselben ACT-Bedeutung aktuell und beabsichtigt sind.".to_string()
                 } else {
                     format!(
-                        "Prüfen Sie, ob mehrere aktive Einträge mit dem Wirkstoff {substance} aktuell und beabsichtigt sind."
+                        "Prüfen Sie, ob mehrere aktive Einträge mit der ACT-Bedeutung {substance} aktuell und beabsichtigt sind."
                     )
                 },
                 citation_refs: vec![finding.citation_ref.clone()],

@@ -628,7 +628,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 context,
                 row,
                 &[
-                    ("wirkstoff", "Действующее вещество", "Wirkstoff"),
+                    ("wirkstoff", "ACT-значение", "ACT-Bedeutung"),
                     ("staerke", "Дозировка", "Stärke"),
                     ("form", "Форма", "Darreichungsform"),
                     ("einnahmeform", "Способ применения", "Anwendung"),
