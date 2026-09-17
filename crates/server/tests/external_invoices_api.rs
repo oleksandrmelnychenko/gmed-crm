@@ -1226,12 +1226,27 @@ async fn deadline_scheduler_marks_approved_company_invoice_overdue_and_skips_una
 
     let mut invoice_ids = Vec::new();
     for suffix in ["approved", "received"] {
+        let document_id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO documents (
+                   auto_name, art, category, uploaded_by, id, version_root_document_id
+               ) VALUES (
+                   $1, 'invoice_document', 'finance', $2, $3, $3
+               )"#,
+        )
+        .bind(format!("FIN-Rechnung {tag}-{suffix}.pdf"))
+        .bind(admin_id)
+        .bind(document_id)
+        .execute(&pool)
+        .await
+        .unwrap();
         let (status, created) = json_request(
             &app,
             "POST",
             "/api/v1/external-invoices/company",
             &bearer,
             Some(json!({
+                "source_document_id": document_id,
                 "supplier_name": format!("Supplier {tag}"),
                 "external_invoice_number": format!("RE-{tag}-{suffix}"),
                 "invoice_date": due_date,
