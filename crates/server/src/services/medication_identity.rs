@@ -1242,7 +1242,7 @@ fn usable_substance(value: &str) -> Option<&str> {
     (!trimmed.is_empty()
         && !trimmed.eq_ignore_ascii_case("Unbekannte ACT-Bedeutung")
         && !trimmed.eq_ignore_ascii_case("Unbekannter Wirkstoff"))
-        .then_some(trimmed)
+    .then_some(trimmed)
 }
 
 fn exact_optional(left: &Option<String>, right: &Option<String>) -> bool {
