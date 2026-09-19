@@ -87,6 +87,18 @@ export function countryNameForGermanDocument(value: string | null | undefined) {
   return COUNTRY_CODE_SET.has(code) ? countryLabel(code, "de") : normalized;
 }
 
+/** Search text so a manager can find a country by code, or by its German, Russian or English name. */
+function countrySearchText(code: string, label: string): string {
+  const names = [code, label, countryLabel(code, "de"), countryLabel(code, "ru")];
+  try {
+    const english = new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase());
+    if (english) names.push(english);
+  } catch {
+    // Unknown or legacy values keep the plain label.
+  }
+  return Array.from(new Set(names)).join(" ");
+}
+
 /** Localized display label for either a stored ISO code or a legacy country name. */
 export function countryNameForDisplay(
   value: string | null | undefined,
@@ -168,7 +180,7 @@ export function CountrySelect({
     >
       {includeEmpty ? <option value="">{emptyLabel}</option> : null}
       {options.map((option) => (
-        <option key={option.code} value={option.code}>
+        <option key={option.code} value={option.code} data-search-text={countrySearchText(option.code, option.label)}>
           {option.label}
         </option>
       ))}

@@ -56,7 +56,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
-import { LANGUAGE_OPTIONS, languageLabel } from "@/components/ui/language-multi-select";
+import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import {
   Dialog,
   DialogContent,
@@ -6138,7 +6138,7 @@ ${serviceCommentLines.join("\n")}`
                   <NativeComboboxSelect name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
                     <option value="">{tx("Выберите", "Auswählen")}</option>
                     {draft.language && !LANGUAGE_OPTIONS.some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
-                    {LANGUAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{languageLabel(item.value, lang)}</option>)}
+                    {LANGUAGE_OPTIONS.map((item) => <option key={item.value} value={item.value} data-search-text={`${item.value} ${languageLabel(item.value, "ru")} ${languageLabel(item.value, "de")} ${englishLanguageName(item.value)}`}>{languageLabel(item.value, lang)}</option>)}
                   </NativeComboboxSelect>
                 </Field>
                 <Field
@@ -7428,7 +7428,11 @@ ${serviceCommentLines.join("\n")}`
                   </NativeComboboxSelect>
                 </div>
                 {orderServiceLines.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">{tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}
+                    {" · "}
+                    {tx("Виды работ выше задают потребность; договор, заказ и смету можно создать только после добавления хотя бы одной услуги с ценой.", "Die Arbeitsarten oben beschreiben den Bedarf; Vertrag, Auftrag und Kostenvoranschlag lassen sich erst nach mindestens einer Leistung mit Preis erstellen.")}
+                  </p>
                 ) : (
                   <OrderCatalogServicesTable lines={orderServiceLines} catalogById={agencyServiceById} effectiveOn={draft.programDateFrom || undefined} lang={lang} tx={tx} disabled={isBusy}
                     describe={resolvedServiceCatalogDescription} selectedPriceId={selectedAgencyServicePriceId}

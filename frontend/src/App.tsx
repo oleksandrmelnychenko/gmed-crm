@@ -24,42 +24,8 @@ import { LoginPage } from "@/pages/login";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { LegacyCasesRedirect } from "@/pages/cases/legacy-cases-redirect";
+import { reloadOnceForStaleChunk } from "@/lib/stale-chunk";
 
-const STALE_CHUNK_RELOAD_KEY = "gmed:stale-chunk-reload";
-const STALE_CHUNK_ERROR_PATTERNS = [
-  /Failed to fetch dynamically imported module/i,
-  /Importing a module script failed/i,
-  /Failed to load module script/i,
-  /MIME type.*module script/i,
-  /ChunkLoadError/i,
-  /Loading chunk/i,
-  /Unable to preload CSS/i,
-  /text\/html/i,
-];
-
-function isStaleChunkLoadError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error ?? "");
-  return STALE_CHUNK_ERROR_PATTERNS.some((pattern) => pattern.test(message));
-}
-
-function reloadOnceForStaleChunk(error: unknown): boolean {
-  if (!isStaleChunkLoadError(error) || typeof window === "undefined") {
-    return false;
-  }
-
-  const routeKey = `${window.location.pathname}${window.location.search}`;
-  try {
-    if (window.sessionStorage.getItem(STALE_CHUNK_RELOAD_KEY) === routeKey) {
-      return false;
-    }
-    window.sessionStorage.setItem(STALE_CHUNK_RELOAD_KEY, routeKey);
-  } catch {
-    // Session storage can be unavailable in hardened browsers; a reload is still the right recovery.
-  }
-
-  window.location.reload();
-  return true;
-}
 
 const DashboardPage = lazy(() =>
   import("@/pages/dashboard").then((module) => ({

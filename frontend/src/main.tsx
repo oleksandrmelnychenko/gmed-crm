@@ -4,8 +4,10 @@ import './index.css'
 import App from './App.tsx'
 import { initializeAuthStorage } from './lib/auth-storage.ts'
 import { initializeNativeRuntime, isNativeRuntime } from './lib/mobile/runtime.ts'
+import { installStaleChunkRecovery } from './lib/stale-chunk.ts'
 
 async function bootstrap() {
+  installStaleChunkRecovery()
   await initializeAuthStorage()
 
   createRoot(document.getElementById('root')!).render(
