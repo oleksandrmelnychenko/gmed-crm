@@ -27,7 +27,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/company-financial-accounts/{account_id}",
-            post(update_company_financial_account),
+            post(update_company_financial_account).delete(delete_company_financial_account),
         )
         .route(
             "/company-financial-accounts/{account_id}/adjustments",
@@ -63,7 +63,10 @@ struct CreateAccountRequest {
 #[derive(Deserialize)]
 struct UpdateAccountRequest {
     name: Option<String>,
+    account_type: Option<String>,
     iban: Option<String>,
+    opening_balance: Option<String>,
+    opening_balance_on: Option<String>,
     is_default: Option<bool>,
     is_active: Option<bool>,
 }
@@ -591,6 +594,36 @@ async fn update_company_financial_account(
         },
         None => None,
     };
+    let account_type = body
+        .account_type
+        .as_deref()
+        .map(|value| value.trim().to_lowercase());
+    if account_type
+        .as_deref()
+        .is_some_and(|value| !account_type_is_valid(value))
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Unknown account type");
+    }
+    let opening_balance = match body.opening_balance.as_deref() {
+        Some(value) => match parse_amount(value, false) {
+            Ok(value) => Some(value),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        },
+        None => None,
+    };
+    let opening_balance_on = match body.opening_balance_on.as_deref() {
+        Some(value) => match parse_date(value, "opening_balance_on") {
+            Ok(value) if value <= Utc::now().date_naive() => Some(value),
+            Ok(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Opening balance date cannot be in the future",
+                );
+            }
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+        },
+        None => None,
+    };
     let mut transaction = match state.db.begin().await {
         Ok(value) => value,
         Err(error) => {
@@ -649,7 +682,11 @@ async fn update_company_financial_account(
            SET name = COALESCE($2, name),
                iban = CASE WHEN $3::text IS NULL THEN iban ELSE NULLIF($3, '') END,
                is_default = COALESCE($4, is_default),
-               is_active = COALESCE($5, is_active)
+               is_active = COALESCE($5, is_active),
+               account_type = COALESCE($6, account_type),
+               opening_balance = COALESCE($7, opening_balance),
+               opening_balance_on = COALESCE($8, opening_balance_on),
+               updated_at = now()
            WHERE id = $1
            RETURNING id"#,
     )
@@ -658,6 +695,9 @@ async fn update_company_financial_account(
     .bind(iban.as_deref())
     .bind(body.is_default)
     .bind(body.is_active)
+    .bind(account_type.as_deref())
+    .bind(opening_balance)
+    .bind(opening_balance_on)
     .fetch_optional(&mut *transaction)
     .await;
     match updated {
@@ -695,6 +735,58 @@ async fn update_company_financial_account(
     )
     .await;
     Json(json!({ "id": account_id })).into_response()
+}
+
+/// Removes an account that never carried a movement. Anything with history is
+/// deactivated instead, because ledger rows reference it (ON DELETE RESTRICT).
+async fn delete_company_financial_account(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(account_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_manage_company_accounts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let deleted = sqlx::query_scalar::<_, Uuid>(
+        "DELETE FROM company_financial_accounts WHERE id = $1 RETURNING id",
+    )
+    .bind(account_id)
+    .fetch_optional(&state.db)
+    .await;
+    match deleted {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Financial account not found"),
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23503") => {
+            return err(
+                StatusCode::CONFLICT,
+                "This account already has movements; deactivate it instead of deleting",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, account_id = %account_id, "delete company financial account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete financial account",
+            );
+        }
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "company_financial_account.delete".to_string(),
+        Some(auth.user_id),
+        "company_financial_account",
+        Some(account_id),
+        json!({}),
+    ));
+    crate::realtime::publish_company_finance_event(
+        &state,
+        Some(auth.user_id),
+        "company_financial_account.deleted",
+        "company_financial_account",
+        account_id,
+        json!({}),
+    )
+    .await;
+    Json(json!({ "id": account_id, "deleted": true })).into_response()
 }
 
 async fn create_company_financial_account_adjustment(

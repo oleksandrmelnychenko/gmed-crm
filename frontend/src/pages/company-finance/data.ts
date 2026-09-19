@@ -292,3 +292,9 @@ export function downloadCompanyConciergeExpenseReceipt(
     fallbackFilename,
   );
 }
+
+export function deleteCompanyFinancialAccount(accountId: string) {
+  return apiFetch<{ id: string; deleted: boolean }>(`/company-financial-accounts/${accountId}`, {
+    method: "DELETE",
+  });
+}

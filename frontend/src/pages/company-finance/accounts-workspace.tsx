@@ -5,8 +5,10 @@ import {
   Banknote,
   Building2,
   CreditCard,
+  Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   Undo2,
   WalletCards,
 } from "lucide-react";
@@ -33,6 +35,7 @@ import {
   createCompanyFinancialAccountTransfer,
   reverseCompanyFinancialAccountAdjustment,
   reverseCompanyFinancialAccountTransfer,
+  deleteCompanyFinancialAccount,
   updateCompanyFinancialAccount,
 } from "./data";
 import type {
@@ -55,6 +58,13 @@ const copy = {
     create: "Добавить счет",
     createTitle: "Новый счет GMED",
     createDescription: "Банк, касса или карта в одной валюте.",
+    edit: "Редактировать",
+    editTitle: "Редактировать счет",
+    editDescription: "Название, тип, реквизиты и начальный остаток. Валюта не меняется.",
+    activeAccount: "Счет активен",
+    delete: "Удалить",
+    deleteTitle: "Удалить счет?",
+    deleteDescription: "Удалить можно только счет без операций. Счет с историей отключите в редактировании.",
     name: "Название",
     type: "Тип",
     bank: "Банк",
@@ -111,6 +121,13 @@ const copy = {
     create: "Konto hinzufügen",
     createTitle: "Neues GMED-Konto",
     createDescription: "Bank, Kasse oder Karte in einer Währung.",
+    edit: "Bearbeiten",
+    editTitle: "Konto bearbeiten",
+    editDescription: "Name, Typ, Bankverbindung und Anfangsbestand. Die Währung bleibt.",
+    activeAccount: "Konto aktiv",
+    delete: "Löschen",
+    deleteTitle: "Konto löschen?",
+    deleteDescription: "Nur ein Konto ohne Buchungen lässt sich löschen. Konten mit Verlauf bitte in der Bearbeitung deaktivieren.",
     name: "Bezeichnung",
     type: "Typ",
     bank: "Bank",
@@ -216,6 +233,20 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
     reason: "",
   });
   const [defaultBusyId, setDefaultBusyId] = useState("");
+  const [editAccount, setEditAccount] = useState<CompanyFinancialAccount | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    accountType: "bank",
+    iban: "",
+    openingBalance: "0.00",
+    openingBalanceOn: todayIso(),
+    isActive: true,
+  });
+  const [deleteAccount, setDeleteAccount] = useState<CompanyFinancialAccount | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
@@ -286,6 +317,57 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       setCreateError(error instanceof Error ? error.message : "Failed to create account");
     } finally {
       setCreateBusy(false);
+    }
+  }
+
+  function openEditDialog(account: CompanyFinancialAccount) {
+    setEditError(null);
+    setEditForm({
+      name: account.name,
+      accountType: account.account_type,
+      iban: account.iban ?? "",
+      openingBalance: account.opening_balance,
+      openingBalanceOn: account.opening_balance_on,
+      isActive: account.is_active,
+    });
+    setEditAccount(account);
+  }
+
+  async function handleEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editAccount) return;
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await updateCompanyFinancialAccount(editAccount.id, {
+        name: editForm.name.trim(),
+        account_type: editForm.accountType,
+        iban: editForm.iban.trim(),
+        opening_balance: editForm.openingBalance,
+        opening_balance_on: editForm.openingBalanceOn,
+        is_active: editForm.isActive,
+      });
+      setEditAccount(null);
+      onChanged();
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : "Failed to update account");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteAccount) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteCompanyFinancialAccount(deleteAccount.id);
+      setDeleteAccount(null);
+      onChanged();
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : "Failed to delete account");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -542,6 +624,14 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                     {text.makeDefault}
                   </Button>
                 ) : null}
+                <Button type="button" size="xs" variant="ghost" onClick={() => openEditDialog(account)}>
+                  <Pencil />
+                  {text.edit}
+                </Button>
+                <Button type="button" size="xs" variant="ghost" className="text-destructive" onClick={() => { setDeleteError(null); setDeleteAccount(account); }}>
+                  <Trash2 />
+                  {text.delete}
+                </Button>
               </div>
             </article>
           );
@@ -623,6 +713,33 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
             <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={2000} value={reverseTransferForm.note} onChange={(event) => setReverseTransferForm((current) => ({ ...current, note: event.target.value }))} /></label>
             <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setReverseTransfer(null)}>{text.cancel}</Button><Button type="submit" variant="destructive" disabled={reverseTransferBusy || !reverseTransferForm.reference.trim()}>{text.reverse}</Button></div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editAccount !== null} onOpenChange={(open) => { if (!open) setEditAccount(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader><DialogTitle>{text.editTitle}</DialogTitle><DialogDescription>{text.editDescription}</DialogDescription></DialogHeader>
+          <form className="space-y-4" onSubmit={handleEdit}>
+            {editError ? <ShellBanner tone="error">{editError}</ShellBanner> : null}
+            <label className="block space-y-1.5 text-sm"><span>{text.name}</span><Input required maxLength={120} value={editForm.name} onChange={(event) => setEditForm((current) => ({ ...current, name: event.target.value }))} /></label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block space-y-1.5 text-sm"><span>{text.type}</span><select className={shellSelectClassName} value={editForm.accountType} onChange={(event) => setEditForm((current) => ({ ...current, accountType: event.target.value }))}><option value="bank">{text.bank}</option><option value="cash">{text.cash}</option><option value="card">{text.card}</option><option value="other">{text.other}</option></select></label>
+              <label className="block space-y-1.5 text-sm"><span>{text.iban}</span><Input maxLength={64} value={editForm.iban} onChange={(event) => setEditForm((current) => ({ ...current, iban: event.target.value }))} /></label>
+              <label className="block space-y-1.5 text-sm"><span>{text.openingBalance}</span><Input required inputMode="decimal" value={editForm.openingBalance} onChange={(event) => setEditForm((current) => ({ ...current, openingBalance: event.target.value }))} /></label>
+              <label className="block space-y-1.5 text-sm"><span>{text.openingDate}</span><Input required type="date" value={editForm.openingBalanceOn} onChange={(event) => setEditForm((current) => ({ ...current, openingBalanceOn: event.target.value }))} /></label>
+            </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={editForm.isActive} disabled={editAccount?.is_default} onChange={(event) => setEditForm((current) => ({ ...current, isActive: event.target.checked }))} />{text.activeAccount}</label>
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setEditAccount(null)}>{text.cancel}</Button><Button type="submit" disabled={editBusy || !editForm.name.trim()}>{text.save}</Button></div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteAccount !== null} onOpenChange={(open) => { if (!open) setDeleteAccount(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{text.deleteTitle}</DialogTitle><DialogDescription>{text.deleteDescription}</DialogDescription></DialogHeader>
+          {deleteError ? <ShellBanner tone="error">{deleteError}</ShellBanner> : null}
+          <p className="text-sm font-medium">{deleteAccount?.name}</p>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteAccount(null)}>{text.cancel}</Button><Button type="button" variant="destructive" disabled={deleteBusy} onClick={() => void handleDelete()}>{text.delete}</Button></div>
         </DialogContent>
       </Dialog>
 
