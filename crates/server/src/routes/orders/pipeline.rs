@@ -178,17 +178,20 @@ async fn get_order_pipeline(
     let order = match sqlx::query(
         r#"SELECT o.phase, o.status, o.patient_id, o.case_id,
                   c.case_id AS case_code, c.status AS case_status,
-                  (NULLIF(btrim(COALESCE(c.aktuelle_anamnese, '')), '') IS NOT NULL
+                  (NULLIF(btrim(COALESCE(n.anamnese_aktuelle, '')), '') IS NOT NULL
                    OR NULLIF(btrim(COALESCE(c.hauptanfragegrund, '')), '') IS NOT NULL)
                       AS anamnesis_recorded,
                   COALESCE(p.medical_required, true) AS medical_required,
                   COALESCE(p.treatment_plan_status, 'draft') AS treatment_plan_status,
-                  (SELECT COUNT(*) FROM vorerkrankungen v WHERE v.case_id = c.id) AS conditions,
-                  (SELECT COUNT(*) FROM allergien a WHERE a.case_id = c.id) AS allergies,
-                  (SELECT COUNT(*) FROM medikamente m WHERE m.case_id = c.id) AS medications,
-                  (SELECT COUNT(*) FROM operationen op WHERE op.case_id = c.id) AS operations
+                  -- Clinical data lives on the patient since the case tables were retired.
+                  (SELECT COUNT(*) FROM patient_diagnoses d WHERE d.patient_id = o.patient_id) AS conditions,
+                  (SELECT COUNT(*) FROM patient_clinical_warnings w
+                    WHERE w.patient_id = o.patient_id AND w.kind = 'allergie') AS allergies,
+                  (SELECT COUNT(*) FROM patient_medications m WHERE m.patient_id = o.patient_id) AS medications,
+                  (SELECT COUNT(*) FROM patient_procedures pr WHERE pr.patient_id = o.patient_id) AS operations
            FROM orders o
            LEFT JOIN cases c ON c.id = o.case_id
+           LEFT JOIN patient_clinical_narrative n ON n.patient_id = o.patient_id
            LEFT JOIN order_planning_preparation p ON p.order_id = o.id
            WHERE o.id = $1"#,
     )
