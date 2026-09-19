@@ -207,10 +207,10 @@ fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
             }
         };
         group.basis += line.line_net;
-        if let Some(exemption) = exemption {
-            if !group.exemptions.contains(&exemption) {
-                group.exemptions.push(exemption);
-            }
+        if let Some(exemption) = exemption
+            && !group.exemptions.contains(&exemption)
+        {
+            group.exemptions.push(exemption);
         }
     }
     groups
@@ -220,10 +220,11 @@ fn party_xml(tag: &str, party: &EInvoiceParty) -> String {
     let mut xml = format!("<ram:{tag}>");
     // BR-CO-26: a seller without a VAT id still needs an identifier (BT-29);
     // the tax number serves as one and is repeated as BT-32 below.
-    if tag == "SellerTradeParty" && text(&party.vat_id).is_none() {
-        if let Some(tax_number) = text(&party.tax_number) {
-            xml.push_str(&format!("<ram:ID>{}</ram:ID>", escape(tax_number)));
-        }
+    if tag == "SellerTradeParty"
+        && text(&party.vat_id).is_none()
+        && let Some(tax_number) = text(&party.tax_number)
+    {
+        xml.push_str(&format!("<ram:ID>{}</ram:ID>", escape(tax_number)));
     }
     xml.push_str(&format!(
         "<ram:Name>{}</ram:Name>",
@@ -489,10 +490,11 @@ fn declare_cid_to_gid_maps(document: &mut lopdf::Document) {
         }
     }
     for id in referenced {
-        if let Some(Object::Dictionary(dict)) = document.objects.get_mut(&id) {
-            if is_cid_font_type2(dict) && dict.get(b"CIDToGIDMap").is_err() {
-                dict.set("CIDToGIDMap", "Identity");
-            }
+        if let Some(Object::Dictionary(dict)) = document.objects.get_mut(&id)
+            && is_cid_font_type2(dict)
+            && dict.get(b"CIDToGIDMap").is_err()
+        {
+            dict.set("CIDToGIDMap", "Identity");
         }
     }
 }
