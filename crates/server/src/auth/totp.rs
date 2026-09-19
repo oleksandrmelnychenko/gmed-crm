@@ -2,7 +2,7 @@
 //! authenticator app assumes: HMAC-SHA1, 30-second steps, six digits.
 
 use hmac::{Hmac, Mac};
-use rand::RngCore;
+use rand::RngExt;
 use sha1::Sha1;
 
 pub const STEP_SECONDS: u64 = 30;
@@ -15,7 +15,7 @@ const BASE32_ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 pub fn generate_secret() -> [u8; SECRET_LEN] {
     let mut secret = [0u8; SECRET_LEN];
-    rand::rng().fill_bytes(&mut secret);
+    rand::rng().fill(&mut secret);
     secret
 }
 

@@ -1199,3 +1199,165 @@ async fn mfa_pending_login_admin_reject_surfaces_on_check_pending() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(check["status"], "rejected");
 }
+
+#[tokio::test]
+async fn totp_enrolment_adds_a_second_step_to_login_and_refuses_replayed_codes() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let email = format!("totp-{}@example.com", Uuid::new_v4().simple());
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+    let staff = ceo_admin_bearer(user_id).replace("ceo", "patient_manager");
+    let staff = {
+        // A token for the seeded user in their own role.
+        let token =
+            jwt::issue_access_token(TEST_SECRET, user_id, "patient_manager", Uuid::new_v4())
+                .expect("issue jwt");
+        let _ = staff;
+        format!("Bearer {token}")
+    };
+
+    let (status, body) = json_request(&app, "GET", "/api/v1/me/totp", Some(&staff), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["enrolled"], false);
+    assert_eq!(
+        body["required"], true,
+        "patient managers must enrol by default"
+    );
+
+    let (status, setup) =
+        json_request(&app, "POST", "/api/v1/me/totp/setup", Some(&staff), None).await;
+    assert_eq!(status, StatusCode::OK, "{setup}");
+    let secret_b32 = setup["secret"].as_str().expect("secret").to_string();
+    assert!(
+        setup["otpauth_uri"]
+            .as_str()
+            .unwrap()
+            .starts_with("otpauth://totp/")
+    );
+    let secret = base32_decode(&secret_b32);
+
+    // Not confirmed yet: the login is still password-only.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "Str0ng!Passw0rd" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let now = u64::try_from(Utc::now().timestamp()).unwrap();
+    let code = |offset_steps: u64| {
+        format!(
+            "{:06}",
+            gmed_server::auth::totp::code_at_step(
+                &secret,
+                gmed_server::auth::totp::step_for(now) + offset_steps
+            )
+        )
+    };
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/totp/confirm",
+        Some(&staff),
+        Some(json!({ "code": "000000" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/totp/confirm",
+        Some(&staff),
+        Some(json!({ "code": code(0) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // From now on the password only opens a challenge …
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "Str0ng!Passw0rd" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "totp_required");
+    let challenge_id = body["challenge_id"]
+        .as_str()
+        .expect("challenge")
+        .to_string();
+
+    // … a wrong code is refused, the code used at enrolment cannot be replayed,
+    // and the next step's code signs in.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/totp",
+        None,
+        Some(json!({ "challenge_id": challenge_id, "code": "000000" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/totp",
+        None,
+        Some(json!({ "challenge_id": challenge_id, "code": code(0) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "enrolment code replayed");
+    let (status, tokens) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/totp",
+        None,
+        Some(json!({ "challenge_id": challenge_id, "code": code(1) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tokens}");
+    assert!(tokens["access_token"].is_string());
+
+    // The challenge is single use.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/totp",
+        None,
+        Some(json!({ "challenge_id": challenge_id, "code": code(1) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+fn base32_decode(value: &str) -> Vec<u8> {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut out = Vec::new();
+    let mut buffer: u64 = 0;
+    let mut bits = 0u32;
+    for ch in value.bytes() {
+        let index = ALPHABET.iter().position(|c| *c == ch).expect("base32 char") as u64;
+        buffer = (buffer << 5) | index;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buffer >> bits) & 0xff) as u8);
+        }
+    }
+    out
+}

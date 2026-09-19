@@ -29,12 +29,12 @@ Patientenakte → Weitergabe an Leistungserbringer → Abrechnung (DATEV).
 | Risiko | Eintritt | Schwere | Maßnahmen | Restrisiko |
 |---|---|---|---|---|
 | Unbefugter Zugriff auf Akten durch Beschäftigte | mittel | hoch | Zuweisungsprinzip, Feldrichtlinien, Protokoll der Lesezugriffe und Downloads | mittel, bis zweiter Faktor verpflichtend ist |
-| Kontoübernahme | mittel | hoch | Argon2id, Sperre, Rate-Limit, Abmeldung bei Inaktivität | **mittel – TOTP für privilegierte Rollen einführen** |
+| Kontoübernahme | mittel | hoch | Argon2id, Passwort-Historie, Sperre, Rate-Limit, Abmeldung bei Inaktivität, TOTP-Pflicht für CEO, IT-Admin und Patientenmanager | gering, sobald alle Pflichtrollen eingerichtet sind |
 | Fehlversand an falschen Empfänger | mittel | hoch | Freigabe nur an registrierte Kanäle des Leistungserbringers, Bestätigungsschritt, Datenpannen-Register | mittel |
-| Diebstahl oder Verlust des Servers bzw. Datenträgers | gering | hoch | verschlüsselte Backups außerhalb des Hosts | **mittel – Dokumentdateien und sensible Spalten verschlüsseln** |
+| Diebstahl oder Verlust des Servers bzw. Datenträgers | gering | hoch | verschlüsselte Backups außerhalb des Hosts, Dokumentdateien verschlüsselt | mittel – sensible Datenbankspalten noch im Klartext |
 | Datenverlust | gering | hoch | tägliche Sicherung von Datenbank und Dateien, Alarmierung | gering nach erstem Restore-Test |
 | Übermittlung in Drittländer | fallabhängig | hoch | Skribble (CH) mit Angemessenheitsbeschluss; KI-Dienst gesperrt | gering |
-| Überlange Speicherung | hoch | mittel | automatische Lead-Löschung; Löschkonzept | **mittel – automatischer Lauf für beendete Akten fehlt** |
+| Überlange Speicherung | mittel | mittel | automatische Lead-Löschung; täglicher Lauf legt Löschanträge für abgeschlossene Akten an; Backups nach 35 Tagen gelöscht | gering |
 
 ### 4. Abhilfemaßnahmen und Ergebnis
 Die fett markierten Punkte sind umzusetzen oder mit Begründung zu akzeptieren.

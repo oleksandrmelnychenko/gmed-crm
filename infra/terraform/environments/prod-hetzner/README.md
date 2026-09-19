@@ -407,6 +407,26 @@ sudo /opt/gmed/repo/scripts/restore-uploads.sh uploads/gmed-prod-2026-05-13T0245
 sudo /opt/gmed/repo/scripts/restore-uploads.sh uploads/gmed-prod-2026-05-13T024500Z.tar.gz.age --yes-overwrite-uploads
 ```
 
+### Restore drill (quarterly)
+
+The age private key is deliberately absent from the server, so the restore
+cannot be exercised by cron. Once a quarter an operator runs it by hand on a
+scratch host (or the DEV host) and records the date and outcome in
+`docs/compliance/01_tom.md`:
+
+1. Place the key as in Step 2 above.
+2. `restore-postgres.sh <newest key>` and `restore-uploads.sh <newest key>` in
+   verify mode: both must decrypt and list their contents.
+3. On a scratch host only: restore both with the destructive flags, start the
+   stack, open a patient with documents and check that a PDF renders.
+4. Shred the key.
+
+Old copies are pruned automatically after `BACKUP_RETENTION_DAYS` (35) days by
+the backup scripts themselves. Because the bucket has versioning on, that
+prune only writes delete markers: add a lifecycle rule in the Hetzner console
+that expires non-current versions after a further 35 days, otherwise the
+history keeps every copy.
+
 ### Release flow (GHCR + cosign)
 
 PROD never runs `docker build`. The

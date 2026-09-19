@@ -25,4 +25,4 @@ Diese Punkte lassen sich nicht aus dem Code ableiten und fehlen noch:
 - Unterschriebene AVV mit jedem Auftragsverarbeiter aus Dokument 03.
 - Schulungsnachweise, Rollen für die Bearbeitung von Betroffenenanfragen und
   Datenpannen (wer entscheidet innerhalb der 72 Stunden).
-- Datenschutzerklärung und Impressum der öffentlichen Website und des Portals.
+- Datenschutzerklärung und Impressum der öffentlichen Website; im System selbst sind beide unter `/legal` hinterlegt und werden aus den Agenturdaten gespeist (Anschrift, Kontakt, USt-IdNr. dort pflegen).

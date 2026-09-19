@@ -10832,7 +10832,7 @@ async fn activate_patient(
     }
     match sqlx::query(
         r#"UPDATE patients
-           SET lifecycle_status = 'active', is_active = true, updated_at = now()
+           SET lifecycle_status = 'active', is_active = true, inactive_since = NULL, updated_at = now()
            WHERE id = $1 AND lifecycle_status = 'inactive'"#,
     )
     .bind(patient_id)
@@ -10899,7 +10899,7 @@ async fn deactivate_patient(
     }
     match sqlx::query(
         r#"UPDATE patients
-           SET lifecycle_status = 'inactive', is_active = false, updated_at = now()
+           SET lifecycle_status = 'inactive', is_active = false, inactive_since = now(), updated_at = now()
            WHERE id = $1 AND lifecycle_status = 'active'"#,
     )
     .bind(patient_id)

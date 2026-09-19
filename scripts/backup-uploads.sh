@@ -95,6 +95,17 @@ fi
 
 echo "[$(date -u +%FT%TZ)] backup uploaded"
 
+# Retention: old copies are removed once the newest one is safely uploaded, so
+# the bucket never holds more personal data than the recovery window needs
+# (Art. 5 Abs. 1 lit. e DSGVO). Default 35 days; the deletion is a plain
+# object delete, a failure here does not fail the backup.
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-35}"
+if rclone delete --min-age "${RETENTION_DAYS}d" "$REMOTE_NAME:$BACKUP_S3_BUCKET/$PREFIX/"; then
+  echo "[$(date -u +%FT%TZ)] pruned copies older than ${RETENTION_DAYS} days"
+else
+  echo "WARN: pruning old backups failed (backup itself succeeded)"
+fi
+
 if [[ -n "${BACKUP_UPLOADS_HEALTHCHECKS_PING_URL:-}" ]]; then
   curl -fsS --retry 3 --max-time 10 "$BACKUP_UPLOADS_HEALTHCHECKS_PING_URL" >/dev/null \
     || echo "WARN: Healthchecks.io ping failed (backup itself succeeded)"

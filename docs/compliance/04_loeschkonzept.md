@@ -6,14 +6,14 @@ Umsetzung. Fristen in eckigen Klammern legt die Organisation mit dem DSB fest.
 | Datenart | Frist | Beginn | Umsetzung im System |
 |---|---|---|---|
 | Nicht zustande gekommene Anfragen (Leads) | 180 Tage | Archivierung | automatisch, täglich (`spawn_lead_purger`, Einstellung `cleanup_archived_leads_days`); Anonymisierung der Identitätsfelder, Löschung der Anhänge |
-| Patientenakte, medizinische Unterlagen | [z. B. 3 Jahre] | Ende der Betreuung | **offen:** kein automatischer Lauf; heute nur auf Antrag oder manuell über das Compliance-Register |
+| Patientenakte, medizinische Unterlagen | 1095 Tage (`patient_file_retention_days`) | Akte auf „inaktiv“ gesetzt (`inactive_since`) | täglicher Lauf legt einen Löschantrag im Compliance-Register an; Prüfung auf Aufbewahrungspflichten und Ausführung durch CEO/IT |
 | Rechnungen, Buchungsbelege | 8 Jahre (Belege) / 10 Jahre (Bücher) | Ende des Kalenderjahres | von der Löschung ausgenommen (§ 147 AO); nach Ablauf **offen** |
 | Verträge, Aufträge, Geschäftsbriefe | 6 Jahre | Ende des Kalenderjahres | von der Löschung ausgenommen (§ 257 HGB); nach Ablauf **offen** |
 | Direktnachrichten und Anhänge | [Frist] | Versand | automatische Bereinigung abgelaufener Nachrichten und verwaister Anhänge |
 | Audit-Log (Fachereignisse) | 365 Tage | Ereignis | automatisch (`cleanup_audit_log_days`) |
 | Technische Zugriffszeilen | 3 Tage | Ereignis | automatisch (`cleanup_audit_http_days`) |
 | Abgelaufene Tokens | 7 Tage | Ablauf | automatisch |
-| Backups | [z. B. 35 Tage] | Erstellung | **offen:** Lifecycle-Regel im Object-Storage-Bucket einrichten und hier vermerken |
+| Backups | 35 Tage (`BACKUP_RETENTION_DAYS`) | Erstellung | automatisch durch die Backup-Skripte nach jedem erfolgreichen Upload |
 
 ## Löschung auf Antrag (Art. 17)
 
@@ -36,7 +36,6 @@ reidentifizierbar sein.
 ## Mitteilung an Empfänger (Art. 19)
 
 Wurden Daten an Kliniken oder andere Empfänger weitergegeben, sind diese über
-Berichtigung, Löschung oder Einschränkung zu informieren. Das System zeigt die
-Empfänger je Dokument (`document_shares`); die Mitteilung selbst erfolgt heute
-manuell und ist im Register zu vermerken. **Offen:** zusammengefasste
-Empfängerliste je Patient.
+Berichtigung, Löschung oder Einschränkung zu informieren. Das System zeigt je Patient alle Empfänger (Leistungserbringer, interner Zugriff,
+Signaturdienst) auf der Compliance-Seite; die Mitteilung erfolgt manuell und wird
+am Antrag als Schritt „Empfänger informiert“ vermerkt.

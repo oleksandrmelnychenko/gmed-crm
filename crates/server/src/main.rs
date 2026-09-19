@@ -90,6 +90,7 @@ async fn main() {
     spawn_document_blob_sweeper(app_state.clone());
     spawn_expired_message_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
+    spawn_patient_retention_sweeper(app_state.clone());
     spawn_audit_retention_purger(app_state.db.clone());
 
     let cors_origins = cfg
@@ -323,6 +324,26 @@ fn spawn_expired_message_sweeper(state: state::AppState) {
 ///
 /// The sweeper is fail-safe: a DB error logs a warning and the loop
 /// continues, so one bad day never leaves the next day unattended.
+fn spawn_patient_retention_sweeper(state: state::AppState) {
+    // Once a day, an hour after boot so the migration backfill has settled.
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3_600)).await;
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(86_400));
+        loop {
+            ticker.tick().await;
+            match gmed_server::routes::retention::flag_expired_patient_files(&state).await {
+                Ok(report) if report.flagged > 0 => tracing::info!(
+                    retention_days = report.retention_days,
+                    flagged = report.flagged,
+                    "Patient file retention sweep raised erasure requests"
+                ),
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "Patient file retention sweep failed"),
+            }
+        }
+    });
+}
+
 fn spawn_lead_purger(state: state::AppState) {
     tokio::spawn(async move {
         // Once per 24 hours — the window the retention policy operates

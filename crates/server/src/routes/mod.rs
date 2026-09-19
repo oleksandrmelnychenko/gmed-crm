@@ -54,6 +54,7 @@ pub mod provider_documents;
 pub mod provider_people;
 pub mod providers;
 pub mod realtime;
+pub mod retention;
 pub mod security_incidents;
 pub mod service_packages;
 pub mod sops;
