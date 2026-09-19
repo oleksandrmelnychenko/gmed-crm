@@ -68,6 +68,10 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
 
   const submitReport = async (event: FormEvent) => {
     event.preventDefault();
+    if (form.title.trim() === "" || form.description.trim().length < 10) {
+      setError(l("incidents_error_required"));
+      return;
+    }
     setBusy(true);
     setError("");
     setNotice("");
@@ -187,7 +191,7 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
           <Button
             type="submit"
             className="h-9 rounded-lg px-3.5"
-            disabled={busy || form.title.trim() === "" || form.description.trim().length < 10}
+            disabled={busy}
           >
             {l("incidents_report")}
           </Button>
