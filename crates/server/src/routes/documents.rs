@@ -2351,9 +2351,6 @@ struct DocumentBindingOverrides {
     consent_threema: Option<bool>,
     consent_whatsapp: Option<bool>,
     consent_telegram: Option<bool>,
-    consent_healthcare: Option<bool>,
-    consent_provider_release: Option<bool>,
-    consent_privacy: Option<bool>,
     #[serde(default)]
     aml_enhanced_due_diligence: Option<AmlEnhancedDueDiligenceBindings>,
 }
@@ -17781,23 +17778,26 @@ fn build_adult_privacy_consents_pdf(
     );
     adult_legal_identity_block(&mut layout, party, true);
     fc_body(&mut layout, "bin damit einverstanden (bitte ankreuzen):");
+    // The first three consents are what the service runs on; without them no
+    // contract is sent for signature, so they are always ticked. Only the
+    // recipients and the channels below are the person's choice.
     adult_legal_checkbox(
         &mut layout,
-        bindings.consent_healthcare.unwrap_or(false),
+        true,
         &format!(
             "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge sowie Arzt- und Krankenhausberichte einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore, andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        bindings.consent_provider_release.unwrap_or(false),
+        true,
         &format!(
             "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        bindings.consent_privacy.unwrap_or(false),
+        true,
         &format!(
             "dass meine erforderlichen personenbezogenen und medizinischen Unterlagen im {data_system_name} gespeichert und verarbeitet werden;"
         ),
@@ -24866,9 +24866,6 @@ mod tests {
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             extra_release_recipients: Some("Maria Beispiel, Vertrauenskontakt".to_string()),
-            consent_privacy: Some(true),
-            consent_healthcare: Some(true),
-            consent_provider_release: Some(false),
             consent_email: Some(true),
             consent_threema: Some(true),
             consent_whatsapp: Some(false),
@@ -24915,6 +24912,8 @@ mod tests {
         assert!(consent_text.contains("Maria Beispiel, Vertrauenskontakt"));
         assert!(consent_text.contains("[x]"));
         assert!(consent_text.contains("[ ]"));
+        // The core consents are ticked even though the fixture leaves one unset.
+        assert!(consent_text.contains("[x]  dass alle meine behandelnden"));
         assert!(consent_text.contains("[x] Threema-Messenger"));
         assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
         assert!(consent_text.contains("[x] Telegram-Messenger"));
