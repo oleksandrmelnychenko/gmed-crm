@@ -1610,9 +1610,11 @@ async fn patient_manager_can_access_and_create_operational_items() {
     .await;
     assert_eq!(files_status, StatusCode::OK, "{files}");
 
+    // Patient managers belong to the release workspace, so the patients
+    // surface is open to them as well.
     let (patients_status, patients) =
         json_request(&ctx.release_app, "GET", "/api/v1/patients", &bearer, None).await;
-    assert_eq!(patients_status, StatusCode::FORBIDDEN, "{patients}");
+    assert_eq!(patients_status, StatusCode::OK, "{patients}");
 }
 
 #[tokio::test]

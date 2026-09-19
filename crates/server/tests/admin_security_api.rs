@@ -205,13 +205,13 @@ async fn release_router_blocks_unconfigured_staff_workspaces() {
     let Some(app) = test_context().await else {
         return;
     };
-    let pm_id = seed_user(&app.suite.pool, "release-gate", "ceo_assistant").await;
+    let assistant_id = seed_user(&app.suite.pool, "release-gate", "ceo_assistant").await;
 
     let (status, _) = json_request(
         &app.suite.release_app,
         "GET",
         "/api/v1/admin/audit-analytics",
-        &auth_header_for("patient_manager", pm_id),
+        &auth_header_for("ceo_assistant", assistant_id),
         None,
     )
     .await;
