@@ -47,6 +47,9 @@ struct PipelineFacts {
     appointments_completed: i64,
     services_total: i64,
     services_planned: i64,
+    /// Services without a delivery timestamp. Invoicing a service no longer
+    /// implies it was delivered, so execution is judged on delivered_at.
+    services_undelivered: i64,
     services_uninvoiced: i64,
     invoices_open: i64,
     order_completed: bool,
@@ -128,12 +131,12 @@ fn derive_stages(facts: &PipelineFacts) -> Vec<Stage> {
     if facts.appointments_open + facts.appointments_confirmed > 0 {
         execution_missing.push("appointment_not_completed");
     }
-    if facts.services_planned > 0 {
+    if facts.services_undelivered > 0 {
         execution_missing.push("service_not_delivered");
     }
     let execution = stage(
         "execution",
-        facts.appointments_completed > 0 || facts.services_total > facts.services_planned,
+        facts.appointments_completed > 0 || facts.services_total > facts.services_undelivered,
         execution_missing,
     );
 
@@ -297,6 +300,8 @@ async fn get_order_pipeline(
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'planned') AS services_planned,
                (SELECT COUNT(*) FROM order_leistungen
+                 WHERE order_id = $1 AND delivered_at IS NULL) AS services_undelivered,
+               (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'delivered') AS services_delivered,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'approved') AS services_approved,
@@ -366,6 +371,7 @@ async fn get_order_pipeline(
             .count() as i64,
         services_total,
         services_planned: count(&totals, "services_planned"),
+        services_undelivered: count(&totals, "services_undelivered"),
         services_uninvoiced: services_total - services_invoiced,
         invoices_open: count(&totals, "invoices_open"),
         order_completed: order
@@ -490,6 +496,7 @@ mod tests {
             appointments_completed: 1,
             services_total: 2,
             services_planned: 1,
+            services_undelivered: 1,
             services_uninvoiced: 2,
             ..PipelineFacts::default()
         };
@@ -504,6 +511,19 @@ mod tests {
             vec!["appointment_not_completed", "service_not_delivered"]
         );
         assert_eq!(stages[4].state, StageState::Pending);
+    }
+
+    #[test]
+    fn invoiced_but_undelivered_services_keep_execution_open() {
+        let facts = PipelineFacts {
+            services_total: 1,
+            services_planned: 0,
+            services_undelivered: 1,
+            ..PipelineFacts::default()
+        };
+        let stages = derive_stages(&facts);
+        assert_eq!(stages[3].state, StageState::Pending);
+        assert_eq!(stages[3].missing, vec!["service_not_delivered"]);
     }
 
     #[test]
