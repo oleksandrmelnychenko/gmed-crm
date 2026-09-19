@@ -8,6 +8,7 @@ export type PrivacyRequestStepFacts = {
   identity_verification?: { method?: string; at?: string } | null;
   deadline_extension?: { reason?: string; at?: string; days?: number } | null;
   subject_notification?: { channel?: string; at?: string } | null;
+  recipients_notification?: { channel?: string; at?: string; note?: string } | null;
 };
 
 type Props = {
@@ -35,13 +36,18 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
   const [identityMethod, setIdentityMethod] = useState<string>(IDENTITY_METHODS[0]);
   const [notifyChannel, setNotifyChannel] = useState<string>(NOTIFY_CHANNELS[0]);
   const [extensionReason, setExtensionReason] = useState("");
+  const [recipientsNote, setRecipientsNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const merged = { ...facts, ...local };
   const isOpen = status !== "completed" && status !== "rejected";
 
-  const record = async (step: "verify_identity" | "extend_deadline" | "notify_subject", method?: string, note?: string) => {
+  const record = async (
+    step: "verify_identity" | "extend_deadline" | "notify_subject" | "notify_recipients",
+    method?: string,
+    note?: string,
+  ) => {
     setBusy(true);
     setError("");
     try {
@@ -155,6 +161,36 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               onClick={() => void record("notify_subject", notifyChannel)}
             >
               {t.compliance_steps_notified_confirm}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="space-y-1">
+        <p className="text-xs text-muted-foreground">
+          {t.compliance_steps_recipients}:{" "}
+          {merged.recipients_notification
+            ? `${t.compliance_steps_done} · ${merged.recipients_notification.channel ?? ""} · ${day(merged.recipients_notification.at)}`
+            : t.compliance_steps_recipients_hint}
+        </p>
+        {!merged.recipients_notification ? (
+          <div className="flex flex-wrap gap-2">
+            <input
+              aria-label={t.compliance_steps_recipients_note}
+              placeholder={t.compliance_steps_recipients_note}
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2 text-xs"
+              maxLength={2000}
+              value={recipientsNote}
+              onChange={(event) => setRecipientsNote(event.target.value)}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 rounded-lg"
+              disabled={busy}
+              onClick={() => void record("notify_recipients", notifyChannel, recipientsNote.trim())}
+            >
+              {t.compliance_steps_recipients_confirm}
             </Button>
           </div>
         ) : null}

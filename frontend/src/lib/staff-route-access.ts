@@ -481,6 +481,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "main", labelKey: "nav_learning" },
   },
   {
+    id: "incidents",
+    match: "exact",
+    path: "/incidents",
+    roles: ALL_STAFF_ROLES,
+    nav: { section: "main", labelKey: "nav_incident_report" },
+  },
+  {
     id: "privacy",
     match: "exact",
     path: "/privacy",
@@ -507,6 +514,7 @@ const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "invoices", to: "/invoices", labelKey: "nav_my_invoices" },
   { id: "feedback", to: "/feedback", labelKey: "nav_my_feedback" },
   { id: "privacy", to: "/privacy", labelKey: "nav_my_privacy" },
+  { id: "legal", to: "/legal", labelKey: "nav_legal_notice" },
 ] as const;
 
 const STAFF_ROUTE_ROLE_SETS = new Map(

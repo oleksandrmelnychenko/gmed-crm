@@ -352,3 +352,19 @@ export function fetchPatientConsents<TConsent>(patientId: string) {
     cache: "no-store",
   });
 }
+
+export type PatientRecipient = {
+  kind: "provider" | "staff" | "signature_provider" | string;
+  recipient: string;
+  detail: string | null;
+  subject: string | null;
+  contact: string | null;
+  since: string | null;
+  until: string | null;
+};
+
+export function fetchPatientRecipients(patientId: string) {
+  return apiFetch<PatientRecipient[]>(`/admin/compliance/patient/${patientId}/recipients`, {
+    cache: "no-store",
+  });
+}

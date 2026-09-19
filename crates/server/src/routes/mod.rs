@@ -33,6 +33,7 @@ pub mod invoice_imports;
 pub mod invoices;
 pub mod key_rotation;
 pub mod leads;
+pub mod legal;
 pub mod me;
 pub mod medication_evidence_reviews;
 pub mod medication_identity;

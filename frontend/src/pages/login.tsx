@@ -5,7 +5,7 @@ import {
   type FormEvent,
   type SetStateAction,
 } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   AlertCircle,
   ArrowRight,
@@ -312,6 +312,9 @@ export function LoginPage() {
               <ArrowRight aria-hidden="true" />
             </button>
           </form>
+          <p className="gmed-login-legal">
+            <Link to="/legal">{tr.nav_legal_notice}</Link>
+          </p>
 
           <a className="gmed-login-home" href="https://gmed-health.com/">
             <ArrowUpLeft aria-hidden="true" />

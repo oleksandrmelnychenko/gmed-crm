@@ -39,6 +39,10 @@ pub fn router() -> Router<AppState> {
             post(lift_processing_restriction),
         )
         .route(
+            "/admin/compliance/patient/{patient_id}/recipients",
+            get(list_patient_recipients),
+        )
+        .route(
             "/admin/compliance/patient/{patient_id}/consents",
             get(list_patient_consents).post(upsert_patient_consent),
         )
@@ -1061,6 +1065,75 @@ async fn lift_processing_restriction(
     .into_response()
 }
 
+/// Everyone a patient's data went to (Art. 19 DSGVO): providers that received
+/// documents, staff and interpreters with access, and the signature provider.
+/// The list is what the officer works from when a rectification, erasure or
+/// restriction has to be passed on.
+async fn list_patient_recipients(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+        return e;
+    }
+    if let Err(response) = ensure_patient_visible(&state, &auth, patient_id).await {
+        return response;
+    }
+
+    let rows = sqlx::query(
+        r#"SELECT 'provider' AS kind, p.name AS recipient, ds.channel AS detail,
+                  d.auto_name AS subject, ds.shared_at AS since, ds.revoked_at AS until,
+                  p.email AS contact
+           FROM document_shares ds
+           JOIN documents d ON d.id = ds.document_id
+           JOIN providers p ON p.id = ds.shared_with_provider_id
+           WHERE d.patient_id = $1
+           UNION ALL
+           SELECT 'staff', u.name, u.role, NULL, pa.assigned_at, pa.revoked_at, u.email
+           FROM patient_assignments pa
+           JOIN users u ON u.id = pa.user_id
+           WHERE pa.patient_id = $1 AND u.role <> 'patient'
+           UNION ALL
+           SELECT 'signature_provider', 'Skribble (' || r.provider_account || ')', r.status,
+                  d.auto_name, r.created_at, NULL,
+                  (SELECT string_agg(s->>'email', ', ') FROM jsonb_array_elements(r.signers) s)
+           FROM document_signature_requests r
+           JOIN documents d ON d.id = r.source_document_id
+           WHERE d.patient_id = $1
+           ORDER BY since DESC"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await;
+
+    match rows {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(|row| {
+                    json!({
+                        "kind": row.try_get::<String, _>("kind").unwrap_or_default(),
+                        "recipient": row.try_get::<String, _>("recipient").unwrap_or_default(),
+                        "detail": row.try_get::<Option<String>, _>("detail").unwrap_or_default(),
+                        "subject": row.try_get::<Option<String>, _>("subject").unwrap_or_default(),
+                        "contact": row.try_get::<Option<String>, _>("contact").unwrap_or_default(),
+                        "since": row.try_get::<Option<DateTime<Utc>>, _>("since").unwrap_or_default().map(|v| v.to_rfc3339()),
+                        "until": row.try_get::<Option<DateTime<Utc>>, _>("until").unwrap_or_default().map(|v| v.to_rfc3339()),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "list patient recipients");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load recipients",
+            )
+        }
+    }
+}
+
 async fn list_patient_consents(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1697,6 +1770,25 @@ async fn record_privacy_request_step(
                 "deadline_extension",
                 json!({ "reason": reason, "at": now.to_rfc3339(), "by": auth.user_id, "days": 60 }),
                 Some(60_i32),
+            )
+        }
+        // Art. 19: recipients of the data are told about a rectification,
+        // erasure or restriction; the note names who was informed.
+        "notify_recipients" => {
+            let channel = body.method.as_deref().map(str::trim).unwrap_or_default();
+            if !matches!(
+                channel,
+                "email" | "portal" | "postal_mail" | "phone" | "in_person"
+            ) {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown notification channel",
+                );
+            }
+            (
+                "recipients_notification",
+                json!({ "channel": channel, "at": now.to_rfc3339(), "by": auth.user_id, "note": note }),
+                None,
             )
         }
         "notify_subject" => {
@@ -3130,6 +3222,7 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "identity_verification": context.get("identity_verification").cloned(),
         "deadline_extension": context.get("deadline_extension").cloned(),
         "subject_notification": context.get("subject_notification").cloned(),
+        "recipients_notification": context.get("recipients_notification").cloned(),
     })
 }
 

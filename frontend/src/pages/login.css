@@ -359,3 +359,14 @@
     min-height: 2.75rem;
   }
 }
+
+.gmed-login-legal {
+  margin: 1rem 0 0;
+  text-align: center;
+  font-size: 0.78rem;
+}
+
+.gmed-login-legal a {
+  color: #4b5563;
+  text-decoration: underline;
+}

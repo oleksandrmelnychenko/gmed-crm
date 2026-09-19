@@ -288,6 +288,12 @@ const AdminHealthPage = lazy(() =>
   })),
 );
 
+const LegalNoticePage = lazy(() =>
+  import("@/pages/legal").then((module) => ({ default: module.LegalNoticePage })),
+);
+const IncidentReportPage = lazy(() =>
+  import("@/pages/incident-report").then((module) => ({ default: module.IncidentReportPage })),
+);
 const AdminCompliancePage = lazy(() =>
   import("@/pages/admin-compliance").then((module) => ({
     default: module.AdminCompliancePage,
@@ -396,6 +402,7 @@ function AppRoutes() {
       <Suspense fallback={<div className="min-h-screen bg-background" />}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/legal" element={<LegalNoticePage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="notifications" element={<PatientNotificationsPage />} />
@@ -450,6 +457,7 @@ function AppRoutes() {
             <Route path="admin/security" element={<AdminSecurityPage />} />
             <Route path="admin/health" element={<AdminHealthPage />} />
             <Route path="admin/compliance" element={<AdminCompliancePage />} />
+            <Route path="incidents" element={<IncidentReportPage />} />
             <Route path="admin/notifications" element={<AdminNotificationsPage />} />
             <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
             <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />

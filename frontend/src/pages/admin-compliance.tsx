@@ -59,6 +59,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { IncidentRegisterSection } from "@/pages/admin/ui/incident-register-section";
 import { PatientConsentsSection } from "@/pages/admin/ui/patient-consents-section";
+import { PatientRecipientsSection } from "@/pages/admin/ui/patient-recipients-section";
 import {
   PrivacyRequestSteps,
   type PrivacyRequestStepFacts,
@@ -1288,6 +1289,10 @@ function useAdminCompliancePageContent() {
 
       {user?.role === "ceo" || user?.role === "patient_manager" ? (
         <PatientConsentsSection key={activePatientId} patientId={activePatientId} />
+      ) : null}
+
+      {activePatientId ? (
+        <PatientRecipientsSection key={activePatientId} patientId={activePatientId} />
       ) : null}
 
       <IncidentRegisterSection

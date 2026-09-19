@@ -823,6 +823,10 @@ export interface Translations
   compliance_steps_channel_postal_mail: string;
   compliance_steps_channel_phone: string;
   compliance_steps_channel_in_person: string;
+  compliance_steps_recipients: string;
+  compliance_steps_recipients_hint: string;
+  compliance_steps_recipients_note: string;
+  compliance_steps_recipients_confirm: string;
   compliance_request_type_restriction: string;
   compliance_request_type_third_party_revoke: string;
 
@@ -851,6 +855,8 @@ export interface Translations
   nav_security: string;
   nav_health: string;
   nav_compliance: string;
+  nav_incident_report: string;
+  nav_legal_notice: string;
   nav_notifications: string;
   nav_custom_fields: string;
   nav_announcements: string;

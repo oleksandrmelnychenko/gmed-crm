@@ -223,6 +223,7 @@ describe("first-release staff RBAC", () => {
       "/chat",
       "/notes",
       "/patients",
+      "/incidents",
       "/",
     ]);
   });
@@ -281,6 +282,7 @@ describe("patient portal routes", () => {
       "/invoices",
       "/feedback",
       "/privacy",
+      "/legal",
     ]);
   });
 });
