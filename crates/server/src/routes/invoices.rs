@@ -10645,7 +10645,7 @@ mod tests {
         assert!(extracted_text.contains("contact@gmed-health.com"));
         assert!(extracted_text.contains("DE02120300000000202051"));
         assert!(extracted_text.contains("145"));
-        assert!(extracted_text.contains("EUR"));
+        assert!(extracted_text.contains("145,00 €"));
         assert_eq!(invoice_pdf_filename(&context), "RECHNUNG-INV-UNIT-1.pdf");
         context.order_number.clear();
         context.quote_number = None;
@@ -10657,8 +10657,8 @@ mod tests {
         context.currency = "USD".to_string();
         let usd_bytes = build_invoice_pdf(&context).unwrap();
         let usd_text = pdf_extract::extract_text_from_mem(&usd_bytes).unwrap();
-        assert!(usd_text.contains("USD 145"));
-        assert!(!usd_text.contains("EUR"));
+        assert!(usd_text.contains("145,00 USD"));
+        assert!(!usd_text.contains("€"));
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
