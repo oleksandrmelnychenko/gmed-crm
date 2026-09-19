@@ -3241,6 +3241,13 @@ export function LeadWizard({
     setDocuments(nextDocuments);
   }, [leadId, patientReview.refresh]);
 
+  // Files added from the patient card or the documents page while the wizard
+  // was open show up when the documents or commercial step is opened again.
+  useEffect(() => {
+    if (step !== "documents" && step !== "commercial") return;
+    void refreshDocumentsState().catch(() => {});
+  }, [step, refreshDocumentsState]);
+
   const refreshCommercialState = useCallback(async () => {
     if (!leadId) return [];
     const targetLeadId = leadId;
