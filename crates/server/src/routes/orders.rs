@@ -415,6 +415,22 @@ fn is_valid_external_invoice_transition(current: &str, next: &str) -> bool {
 }
 
 #[allow(clippy::result_large_err)]
+/// A supplier invoice is dated when it was issued, never ahead of today; a
+/// future date would let its settlement land before the invoice itself in
+/// period reports.
+fn parse_optional_invoice_date(
+    value: Option<&str>,
+) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
+    let parsed = parse_optional_order_date(value)?;
+    if parsed.is_some_and(|date| date > chrono::Utc::now().date_naive()) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invoice date cannot be in the future",
+        ));
+    }
+    Ok(parsed)
+}
+
 fn parse_optional_order_date(
     value: Option<&str>,
 ) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
@@ -6434,7 +6450,7 @@ async fn create_unassigned_external_invoice(
         return response;
     }
 
-    let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
+    let invoice_date = match parse_optional_invoice_date(body.invoice_date.as_deref()) {
         Ok(value) => value,
         Err(response) => return response,
     };
@@ -6687,7 +6703,7 @@ async fn create_external_invoice(
     if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {
         return resp;
     }
-    let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
+    let invoice_date = match parse_optional_invoice_date(body.invoice_date.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -7041,7 +7057,7 @@ async fn update_external_invoice(
     if let Err(resp) = validate_provider_doctor_context(&state, body.provider_id, None).await {
         return resp;
     }
-    let invoice_date = match parse_optional_order_date(body.invoice_date.as_deref()) {
+    let invoice_date = match parse_optional_invoice_date(body.invoice_date.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
     };

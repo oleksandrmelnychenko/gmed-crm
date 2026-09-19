@@ -830,18 +830,27 @@ function useCreateAppointmentSheetContent({
                       }}
                       onChange={(providerId) => {
                         const provider = providers.find((item) => item.id === providerId);
-                        setForm((current) => ({
-                          ...current,
-                          providerId,
-                          doctorId: "",
-                          skipMedicalProviderBinding: providerId
-                            ? false
-                            : current.skipMedicalProviderBinding,
-                          location:
-                            provider && !current.location.trim()
-                              ? providerLabel(provider)
+                        setForm((current) => {
+                          // Follow the provider while the location is still the
+                          // auto-filled one; keep anything staff typed by hand.
+                          const previous = providers.find((item) => item.id === current.providerId);
+                          const autoFilled =
+                            !current.location.trim() ||
+                            (previous !== undefined && current.location === providerLabel(previous));
+                          return {
+                            ...current,
+                            providerId,
+                            doctorId: "",
+                            skipMedicalProviderBinding: providerId
+                              ? false
+                              : current.skipMedicalProviderBinding,
+                            location: autoFilled
+                              ? provider
+                                ? providerLabel(provider)
+                                : ""
                               : current.location,
-                        }));
+                          };
+                        });
                       }}
                       disabled={form.appointmentType === "internal"}
                     />
