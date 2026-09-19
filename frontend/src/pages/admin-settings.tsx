@@ -165,6 +165,12 @@ const AGENCY_SETTING_FIELDS: SettingFieldMeta[] = [
   { key: "agency_bank_name", labelKey: "settings_agency_bank_name", inputType: "text" },
   { key: "agency_bank_swift", labelKey: "settings_agency_bank_swift", inputType: "text" },
   { key: "agency_bank_iban", labelKey: "settings_agency_bank_iban", inputType: "text" },
+  { key: "agency_street", labelKey: "settings_agency_street", inputType: "text" },
+  { key: "agency_postal_code", labelKey: "settings_agency_postal_code", inputType: "text", maxLength: 16 },
+  { key: "agency_city", labelKey: "settings_agency_city", inputType: "text" },
+  { key: "agency_country", labelKey: "settings_agency_country", inputType: "text", maxLength: 2 },
+  { key: "agency_vat_id", labelKey: "settings_agency_vat_id", inputType: "text", maxLength: 20 },
+  { key: "agency_tax_number", labelKey: "settings_agency_tax_number", inputType: "text", maxLength: 32 },
 ];
 
 const DOCUMENT_REQUIREMENT_SETTING_FIELDS: SettingFieldMeta[] = [

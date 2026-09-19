@@ -1765,7 +1765,7 @@ fn validate_optional_patient_select_update(
     }
 }
 
-fn is_iso_3166_alpha_2_country_code(value: &str) -> bool {
+pub(crate) fn is_iso_3166_alpha_2_country_code(value: &str) -> bool {
     let normalized = value.trim().to_ascii_uppercase();
     ISO_3166_ALPHA_2_COUNTRY_CODES.contains(&normalized.as_str())
 }
@@ -15498,4 +15498,38 @@ mod unicode_pdf_tests {
             "mixed English grouping/decimal separators must be supported",
         );
     }
+}
+
+/// ISO 3166-1 alpha-2 code for a stored patient country, which may be a code
+/// or one of the legacy country names offered by the registry form.
+pub(crate) fn country_alpha2(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if is_iso_3166_alpha_2_country_code(trimmed) {
+        return Some(trimmed.to_ascii_uppercase());
+    }
+    let code = match trimmed {
+        "Germany" | "Deutschland" => "DE",
+        "Ukraine" => "UA",
+        "Austria" | "Österreich" => "AT",
+        "Switzerland" | "Schweiz" => "CH",
+        "Poland" | "Polen" => "PL",
+        "Czech Republic" | "Tschechien" => "CZ",
+        "Denmark" | "Dänemark" => "DK",
+        "Latvia" | "Lettland" => "LV",
+        "Greece" | "Griechenland" => "GR",
+        "Turkey" | "Türkei" => "TR",
+        "United Arab Emirates" => "AE",
+        "Saudi Arabia" => "SA",
+        "Egypt" | "Ägypten" => "EG",
+        "Nigeria" => "NG",
+        "Ghana" => "GH",
+        "Brazil" | "Brasilien" => "BR",
+        "China" => "CN",
+        "Russia" | "Russland" => "RU",
+        "Pakistan" => "PK",
+        "United Kingdom" => "GB",
+        "United States" => "US",
+        _ => return None,
+    };
+    Some(code.to_string())
 }

@@ -569,6 +569,12 @@ export interface Translations
   settings_agency_bank_name: string;
   settings_agency_bank_swift: string;
   settings_agency_bank_iban: string;
+  settings_agency_street: string;
+  settings_agency_postal_code: string;
+  settings_agency_city: string;
+  settings_agency_country: string;
+  settings_agency_vat_id: string;
+  settings_agency_tax_number: string;
   settings_agency_hint: string;
   settings_document_requirements: string;
   settings_document_requirements_hint: string;
@@ -1159,6 +1165,8 @@ export interface Translations
   invoices_workspace_invoice_overview_description: string;
   invoices_workspace_preview_pdf: string;
   invoices_workspace_download_pdf: string;
+  invoices_workspace_download_xml: string;
+  invoices_workspace_xml_download_error: string;
   invoices_workspace_balance_due: string;
   invoices_workspace_linked_context_description: string;
   invoices_workspace_quotes: string;

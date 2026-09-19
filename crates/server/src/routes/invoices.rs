@@ -72,6 +72,7 @@ pub fn router() -> Router<AppState> {
         .route("/invoices", get(list_invoices))
         .route("/invoices/{invoice_id}", get(get_invoice))
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
+        .route("/invoices/{invoice_id}/xml", get(download_invoice_xml))
         .route("/invoices/{invoice_id}/status", post(update_invoice_status))
         .route(
             "/invoices/{invoice_id}/payments",
@@ -412,6 +413,13 @@ struct InvoicePdfAgency {
     name: String,
     care_of: Option<String>,
     address: Option<String>,
+    // Structured seller identity for the machine-readable e-invoice.
+    street: Option<String>,
+    postal_code: Option<String>,
+    city: Option<String>,
+    country: Option<String>,
+    vat_id: Option<String>,
+    tax_number: Option<String>,
     phone: Option<String>,
     email: Option<String>,
     website: Option<String>,
@@ -449,6 +457,8 @@ struct InvoicePdfContext {
     language: String,
     line_items: Vec<InvoicePdfLineItem>,
     agency: InvoicePdfAgency,
+    buyer_address: crate::einvoice::PostalAddress,
+    buyer_email: Option<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -3633,7 +3643,7 @@ async fn load_invoice_pdf_context(
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
                   o.order_number, i.currency, q.quote_number,
                   p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
-                  p.birth_date, p.languages,
+                  p.birth_date, p.languages, p.address_street, p.address_zip, p.address_city, p.address_country, p.email,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
@@ -3644,6 +3654,12 @@ async fn load_invoice_pdf_context(
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban
+                  ,(SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_street') AS agency_street,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_postal_code') AS agency_postal_code,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_city') AS agency_city,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_country') AS agency_country,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
            FROM invoices i
            LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
@@ -3796,7 +3812,21 @@ async fn load_invoice_pdf_context(
                 .try_get::<Option<String>, _>("agency_bank_iban")
                 .unwrap_or_default()
                 .filter(|value| !value.trim().is_empty()),
+            street: optional_setting(&row, "agency_street"),
+            postal_code: optional_setting(&row, "agency_postal_code"),
+            city: optional_setting(&row, "agency_city"),
+            country: optional_setting(&row, "agency_country"),
+            vat_id: optional_setting(&row, "agency_vat_id"),
+            tax_number: optional_setting(&row, "agency_tax_number"),
         },
+        buyer_address: crate::einvoice::PostalAddress {
+            street: optional_setting(&row, "address_street"),
+            postal_code: optional_setting(&row, "address_zip"),
+            city: optional_setting(&row, "address_city"),
+            country: optional_setting(&row, "address_country")
+                .and_then(|value| crate::routes::patients::country_alpha2(&value)),
+        },
+        buyer_email: optional_setting(&row, "email"),
     }))
 }
 
@@ -9796,6 +9826,154 @@ async fn update_invoice_status(
     }
 }
 
+fn optional_setting(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
+    row.try_get::<Option<String>, _>(column)
+        .unwrap_or_default()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Maps the stored invoice onto the EN 16931 model. Drafts and cancelled
+/// invoices are not legal invoices and are refused; the generator itself
+/// rejects totals that do not follow from the lines.
+fn einvoice_from_context(
+    context: &InvoicePdfContext,
+) -> Result<crate::einvoice::EInvoice, crate::einvoice::EInvoiceError> {
+    use crate::einvoice::{EInvoice, EInvoiceError, Line, Party, Payment};
+
+    if matches!(context.status.as_str(), "draft" | "cancelled") {
+        return Err(EInvoiceError::NotIssuable("status"));
+    }
+    let decimal = |value: &str| Decimal::from_str_exact(value.trim()).unwrap_or(Decimal::ZERO);
+    let lines = context
+        .line_items
+        .iter()
+        .map(|item| Line {
+            description: item.description.clone(),
+            quantity: decimal(&item.quantity),
+            unit_code: "C62".to_string(),
+            unit_price_net: decimal(&item.unit_price),
+            vat_rate: decimal(&item.vat_rate),
+            is_cost_passthrough: item.is_cost_passthrough,
+        })
+        .collect();
+    let total_gross = decimal(&context.total_gross);
+    let buyer_name = match &context.patient_title {
+        Some(title) => format!("{title} {}", context.patient_name),
+        None => context.patient_name.clone(),
+    };
+    Ok(EInvoice {
+        number: context.invoice_number.clone(),
+        type_code: if context.invoice_type == "advance" {
+            "386"
+        } else {
+            "380"
+        },
+        issue_date: context
+            .issued_at
+            .with_timezone(&chrono_tz::Europe::Berlin)
+            .date_naive(),
+        due_date: context.due_date,
+        currency: context.currency.clone(),
+        seller: Party {
+            name: context.agency.name.clone(),
+            address: crate::einvoice::PostalAddress {
+                street: context.agency.street.clone(),
+                postal_code: context.agency.postal_code.clone(),
+                city: context.agency.city.clone(),
+                country: context.agency.country.clone(),
+            },
+            vat_id: context.agency.vat_id.clone(),
+            tax_number: context.agency.tax_number.clone(),
+            email: context.agency.email.clone(),
+        },
+        buyer: Party {
+            name: buyer_name,
+            address: context.buyer_address.clone(),
+            vat_id: None,
+            tax_number: None,
+            email: context.buyer_email.clone(),
+        },
+        buyer_reference: Some(context.patient_pid.clone()).filter(|value| !value.is_empty()),
+        order_reference: Some(context.order_number.clone()).filter(|value| !value.is_empty()),
+        lines,
+        total_net: decimal(&context.total_net),
+        total_vat: decimal(&context.total_vat),
+        total_gross,
+        prepaid: (total_gross - decimal(&context.balance_due)).max(Decimal::ZERO),
+        payment: context.agency.bank_iban.clone().map(|iban| Payment {
+            iban,
+            bic: context.agency.bank_swift.clone(),
+            holder: context.agency.bank_holder.clone(),
+        }),
+        payment_terms: context.notes.clone(),
+        note: None,
+    })
+}
+
+async fn download_invoice_xml(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(context) = (match load_invoice_pdf_context(&state, invoice_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    }) else {
+        return err(StatusCode::NOT_FOUND, "Invoice not found");
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, context.patient_id).await {
+        return resp;
+    }
+    let xml = match einvoice_from_context(&context)
+        .and_then(|invoice| crate::einvoice::build_cii(&invoice))
+    {
+        Ok(xml) => xml,
+        Err(error) => {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": error.code(),
+                    "message": format!("E-invoice cannot be issued: {}", error.detail()),
+                    "field": error.detail(),
+                })),
+            )
+                .into_response();
+        }
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        "download_invoice_xml",
+        Some(auth.user_id),
+        "invoice",
+        Some(context.invoice_id),
+        json!({ "invoice_number": context.invoice_number, "profile": crate::einvoice::GUIDELINE_EN16931 }),
+    ));
+    let filename = format!(
+        "{}.xml",
+        context.invoice_number.replace(['"', '/', '\\'], "_")
+    );
+    match axum::response::Response::builder()
+        .header("content-type", "application/xml; charset=utf-8")
+        .header(
+            "content-disposition",
+            format!("attachment; filename=\"{filename}\""),
+        )
+        .body(Body::from(xml))
+    {
+        Ok(response) => response,
+        Err(error) => {
+            tracing::error!(error = %error, "build invoice xml response");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice response",
+            )
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -9855,7 +10033,20 @@ mod tests {
                 bank_name: Some("Test Bank".to_string()),
                 bank_swift: Some("TESTDEFF".to_string()),
                 bank_iban: Some("DE02120300000000202051".to_string()),
+                street: Some("Albert-Schweitzer-Straße 56".to_string()),
+                postal_code: Some("81735".to_string()),
+                city: Some("München".to_string()),
+                country: Some("DE".to_string()),
+                vat_id: None,
+                tax_number: Some("143/123/45678".to_string()),
             },
+            buyer_address: crate::einvoice::PostalAddress {
+                street: Some("Musterweg 1".to_string()),
+                postal_code: Some("10115".to_string()),
+                city: Some("Berlin".to_string()),
+                country: Some("DE".to_string()),
+            },
+            buyer_email: None,
         };
 
         let bytes = build_invoice_pdf(&context).unwrap();
@@ -9887,5 +10078,76 @@ mod tests {
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
+    }
+
+    #[test]
+    fn issued_invoice_maps_to_a_valid_en16931_document_and_drafts_are_refused() {
+        let mut context = InvoicePdfContext {
+            currency: "EUR".to_string(),
+            invoice_id: Uuid::new_v4(),
+            patient_id: Uuid::new_v4(),
+            invoice_number: "INV-UNIT-2".to_string(),
+            invoice_type: "advance".to_string(),
+            status: "sent".to_string(),
+            portal_visible: true,
+            hide_amounts_from_patient: false,
+            pdf_visible_to_patient: true,
+            issued_at: Utc::now(),
+            due_date: Some(NaiveDate::from_ymd_opt(2026, 6, 30).unwrap()),
+            total_net: "245.00".to_string(),
+            total_vat: "19.00".to_string(),
+            total_gross: "264.00".to_string(),
+            credited_amount: "0.00".to_string(),
+            paid_amount: "64.00".to_string(),
+            balance_due: "200.00".to_string(),
+            notes: Some("Zahlbar innerhalb von 14 Tagen.".to_string()),
+            patient_pid: "PT-INV-UNIT".to_string(),
+            patient_name: "Max Mustermann".to_string(),
+            patient_title: None,
+            birth_date: None,
+            order_number: "ORD-UNIT-2".to_string(),
+            quote_number: None,
+            language: "de".to_string(),
+            line_items: super::parse_invoice_pdf_line_items(&serde_json::json!([
+                {"description": "Ärztliche Konsultation", "quantity": "1", "unit_price": "145.00", "vat_rate": "0", "is_cost_passthrough": false, "line_gross": "145.00"},
+                {"description": "Dolmetscher", "quantity": "2", "unit_price": "50.00", "vat_rate": "19", "is_cost_passthrough": false, "line_gross": "119.00"}
+            ])),
+            agency: InvoicePdfAgency {
+                name: "GMED".to_string(),
+                care_of: None,
+                address: None,
+                phone: None,
+                email: Some("office@example.invalid".to_string()),
+                website: None,
+                bank_holder: Some("GMED".to_string()),
+                bank_name: None,
+                bank_swift: None,
+                bank_iban: Some("DE02120300000000202051".to_string()),
+                street: Some("Albert-Schweitzer-Straße 56".to_string()),
+                postal_code: Some("81735".to_string()),
+                city: Some("München".to_string()),
+                country: Some("DE".to_string()),
+                vat_id: Some("DE123456789".to_string()),
+                tax_number: None,
+            },
+            buyer_address: crate::einvoice::PostalAddress {
+                street: None,
+                postal_code: None,
+                city: None,
+                country: Some("DE".to_string()),
+            },
+            buyer_email: None,
+        };
+        let invoice = super::einvoice_from_context(&context).unwrap();
+        assert_eq!(invoice.type_code, "386");
+        assert_eq!(invoice.prepaid.to_string(), "64.00");
+        let xml = crate::einvoice::build_cii(&invoice).unwrap();
+        assert!(xml.contains("<ram:DuePayableAmount>200.00</ram:DuePayableAmount>"));
+        assert!(xml.contains("<ram:BuyerReference>PT-INV-UNIT</ram:BuyerReference>"));
+        context.status = "draft".to_string();
+        assert_eq!(
+            super::einvoice_from_context(&context),
+            Err(crate::einvoice::EInvoiceError::NotIssuable("status"))
+        );
     }
 }

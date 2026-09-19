@@ -96,6 +96,7 @@ import {
   fetchAccountingLedgerExportBlob,
   fetchInvoiceLookups,
   fetchInvoicePdfBlob,
+  fetchInvoiceXmlBlob,
   fetchInvoiceWorkspace,
   fetchInvoices,
   releaseInvoicePrepayment,
@@ -290,6 +291,18 @@ async function downloadInvoicePdf(
   URL.revokeObjectURL(url);
 }
 
+async function downloadInvoiceXml(invoiceId: string, invoiceNumber: string) {
+  const blob = await fetchInvoiceXmlBlob(invoiceId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${invoiceNumber || invoiceId}.xml`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function downloadAccountingLedgerExport(year: string, currency: string) {
   const blob = await fetchAccountingLedgerExportBlob(year, currency);
   const url = URL.createObjectURL(blob);
@@ -467,6 +480,7 @@ function useStaffInvoicesPageContent() {
     invoiceOverviewDescription: t.invoices_workspace_invoice_overview_description,
     previewPdf: t.invoices_workspace_preview_pdf,
     downloadPdf: t.invoices_workspace_download_pdf,
+    downloadXml: t.invoices_workspace_download_xml,
     balanceDue: t.invoices_workspace_balance_due,
     linkedContextDescription: t.invoices_workspace_linked_context_description,
     quotes: t.invoices_workspace_quotes,
@@ -506,6 +520,7 @@ function useStaffInvoicesPageContent() {
     openDocuments: t.invoices_workspace_open_documents,
     pdfOpenError: t.invoices_workspace_pdf_open_error,
     pdfDownloadError: t.invoices_workspace_pdf_download_error,
+    xmlDownloadError: t.invoices_workspace_xml_download_error,
     system: t.invoices_workspace_system,
     statsSentWord: t.invoices_workspace_stats_sent_word,
     statsPaidWord: t.invoices_workspace_stats_paid_word,
@@ -2543,6 +2558,21 @@ function useStaffInvoicesPageContent() {
                           >
                             <Download className="size-3.5" />
                             {text.downloadPdf}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg"
+                            disabled={detail.status === "draft" || detail.status === "cancelled"}
+                            onClick={() =>
+                              void downloadInvoiceXml(detail.id, detail.invoice_number ?? "").catch((error) =>
+                                setDetailError(error instanceof Error ? error.message : text.xmlDownloadError),
+                              )
+                            }
+                          >
+                            <Download className="size-3.5" />
+                            {text.downloadXml}
                           </Button>
                         </div>
                       </div>

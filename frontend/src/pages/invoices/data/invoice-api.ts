@@ -192,6 +192,11 @@ export function fetchInvoicePdfBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
 }
 
+/** EN 16931 e-invoice (CII XML) for the same invoice; the server refuses drafts and inconsistent totals. */
+export function fetchInvoiceXmlBlob(invoiceId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/xml`);
+}
+
 export function fetchAccountingLedgerExportBlob(year: string, currency = "EUR") {
   return fetchProtectedBlob(`/invoices/accounting-ledger/export?year=${encodeURIComponent(year)}&currency=${encodeURIComponent(currency)}`);
 }

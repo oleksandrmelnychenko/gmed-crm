@@ -135,6 +135,12 @@ pub async fn update_setting(
         "agency_bank_name" => validate_string_setting(value, 160, true, "Agency bank name")?,
         "agency_bank_swift" => validate_string_setting(value, 32, true, "Agency SWIFT/BIC")?,
         "agency_bank_iban" => validate_string_setting(value, 64, true, "Agency IBAN")?,
+        "agency_street" => validate_string_setting(value, 160, true, "Agency street")?,
+        "agency_postal_code" => validate_string_setting(value, 16, true, "Agency postal code")?,
+        "agency_city" => validate_string_setting(value, 120, true, "Agency city")?,
+        "agency_country" => validate_country_code_setting(value)?,
+        "agency_vat_id" => validate_vat_id_setting(value)?,
+        "agency_tax_number" => validate_string_setting(value, 32, true, "Agency tax number")?,
         "required_patient_documents" => validate_required_patient_documents_setting(value)?,
         _ => validate_positive_integer_setting(key, value)?,
     };
@@ -467,4 +473,39 @@ mod tests {
             Err(UpdateError::InvalidValue(_))
         ));
     }
+}
+
+fn validate_country_code_setting(value: &str) -> Result<Value, UpdateError> {
+    let trimmed = value.trim().to_ascii_uppercase();
+    if trimmed.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    if trimmed.len() != 2 || !trimmed.bytes().all(|b| b.is_ascii_uppercase()) {
+        return Err(UpdateError::InvalidValue(
+            "Agency country must be an ISO 3166-1 alpha-2 code such as DE".to_string(),
+        ));
+    }
+    Ok(Value::String(trimmed))
+}
+
+/// EU VAT identifiers: two-letter country prefix and 2–13 alphanumerics.
+fn validate_vat_id_setting(value: &str) -> Result<Value, UpdateError> {
+    let compact: String = value
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_uppercase();
+    if compact.is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    let valid = compact.len() >= 4
+        && compact.len() <= 15
+        && compact[..2].bytes().all(|b| b.is_ascii_uppercase())
+        && compact[2..].bytes().all(|b| b.is_ascii_alphanumeric());
+    if !valid {
+        return Err(UpdateError::InvalidValue(
+            "Agency VAT id must look like DE123456789".to_string(),
+        ));
+    }
+    Ok(Value::String(compact))
 }

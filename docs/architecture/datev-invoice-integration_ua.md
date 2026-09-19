@@ -723,3 +723,39 @@ localhost в інтерфейсі не пропонується взагалі.
 Оскільки cookie входу існує тільки на сайті, який почав авторизацію, кнопки
 підключення вимкнені, якщо сторінку відкрито не з origin збереженого Redirect URL,
 і показано адресу, де її відкрити.
+
+## Вихідні e-рахунки (ZUGFeRD / XRechnung), етапи 1–2 — 2026-09-19
+
+Беклог ряд. 85 «E-Rechnungen rechtskonform ausstellen». До цього GMed лише
+приймав e-рахунки; власні рахунки були звичайним PDF без структурованих даних.
+
+**Реалізовано.**
+- `crates/server/src/einvoice.rs`: генерація UN/CEFACT CII у профілі
+  **EN 16931** (`urn:cen.eu:en16931:2017`, той самий профіль у ZUGFeRD 2.x і
+  Factur-X). Усі підсумки перераховуються з позицій (BR-CO-10…17); якщо збережені
+  `total_net/total_vat/total_gross` не збігаються з позиціями, XML не видається.
+- ПДВ: ставка > 0 → категорія `S`; ставка 0 → одна група `E` (BR-E-01) з
+  обґрунтуванням: медичні послуги — `VATEX-EU-132` / § 4 Nr. 14 UStG,
+  durchlaufende Posten — § 10 Abs. 1 Satz 6 UStG. Для оподатковуваних позицій
+  обов'язкова USt-IdNr. продавця (BR-S-02); без неї продавець ідентифікується
+  Steuernummer (BR-CO-26).
+- Тип документа: `380`, для `advance` — `386`. Передоплата/оплачене =
+  `total_gross − balance_due` → `TotalPrepaidAmount`/`DuePayableAmount`.
+  Оплата: SEPA-переказ (код 58) з IBAN/BIC з налаштувань. `BuyerReference` =
+  ID пацієнта, `BuyerOrderReferencedDocument` = номер замовлення.
+- `GET /api/v1/invoices/{id}/xml` (ті ж ролі й доступ до пацієнта, що й PDF);
+  чернетки й скасовані рахунки відхиляються (`einvoice_not_issuable`), брак
+  реквізитів — `einvoice_field_missing` із назвою поля. Кнопка «E-Rechnung (XML)»
+  поруч із PDF у робочому просторі рахунків.
+- Нові реквізити продавця в налаштуваннях (міграція
+  `20260919120000_agency_einvoice_identity.sql`): вулиця, індекс, місто,
+  країна (ISO), USt-IdNr., Steuernummer. Адреса покупця — з профілю пацієнта;
+  країна пацієнта конвертується в ISO-код (`patients::country_alpha2`).
+- CI job `einvoice-validation`: зразки з unit-тестів проходять офіційний
+  валідатор Mustang (ZUGFeRD/Factur-X Schematron EN 16931), jar закріплено
+  версією і SHA-256. Локально обидва зразки — `status="valid"`.
+
+**Не реалізовано (етапи 3–4):** гібридний PDF/A-3 із вбудованим
+`factur-x.xml`, XMP-метадані, перевірка veraPDF; XRechnung-специфічні вимоги
+(Leitweg-ID, електронна адреса покупця) — для B2G/B2B за потреби.
+Для реального застосування треба заповнити USt-IdNr./Steuernummer у налаштуваннях.

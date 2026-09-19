@@ -15,6 +15,7 @@ pub mod config;
 pub mod crypto;
 pub mod datev;
 pub mod document_signatures;
+pub mod einvoice;
 pub mod file_scan;
 pub mod file_sniff;
 pub(crate) mod pdf_logo;
