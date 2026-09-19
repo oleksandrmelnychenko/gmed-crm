@@ -2011,16 +2011,16 @@ async fn load_order_followup_readiness(
     let activity_row = sqlx::query(
         r#"SELECT
                 COUNT(*) FILTER (
-                    WHERE checklist_phase = 'followup'
+                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
                       AND status <> 'cancelled'
                 ) AS followup_appointments_total,
                 COUNT(*) FILTER (
-                    WHERE checklist_phase = 'followup'
+                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
                       AND (followup_milestone = 'doctor' OR title ILIKE 'Doctor-directed:%')
                       AND status <> 'cancelled'
                 ) AS doctor_followup_visits,
                 COUNT(*) FILTER (
-                    WHERE checklist_phase = 'followup'
+                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
                       AND (
                             followup_milestone = 'post_1w'
                          OR title ILIKE '1-week follow-up check-in%'
@@ -2030,7 +2030,7 @@ async fn load_order_followup_readiness(
                       AND status <> 'cancelled'
                 ) AS followup_1w_visits,
                 COUNT(*) FILTER (
-                    WHERE checklist_phase = 'followup'
+                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
                       AND (
                             followup_milestone = 'post_1m'
                          OR title ILIKE '1-month follow-up check-in%'
@@ -2040,7 +2040,7 @@ async fn load_order_followup_readiness(
                       AND status <> 'cancelled'
                 ) AS followup_1m_visits,
                 COUNT(*) FILTER (
-                    WHERE checklist_phase = 'followup'
+                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
                       AND (
                             followup_milestone = 'post_6m'
                          OR title ILIKE '6-month follow-up check-in%'
