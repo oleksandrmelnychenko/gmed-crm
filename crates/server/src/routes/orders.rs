@@ -2016,13 +2016,14 @@ async fn load_order_followup_readiness(
                 ) AS followup_appointments_total,
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
-                      AND title ILIKE 'Doctor-directed:%'
+                      AND (followup_milestone = 'doctor' OR title ILIKE 'Doctor-directed:%')
                       AND status <> 'cancelled'
                 ) AS doctor_followup_visits,
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
                       AND (
-                            title ILIKE '1-week follow-up check-in%'
+                            followup_milestone = 'post_1w'
+                         OR title ILIKE '1-week follow-up check-in%'
                          OR title ILIKE 'Контроль%1 неделю%'
                          OR title ILIKE 'Nachsorge nach 1 Woche%'
                       )
@@ -2031,7 +2032,8 @@ async fn load_order_followup_readiness(
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
                       AND (
-                            title ILIKE '1-month follow-up check-in%'
+                            followup_milestone = 'post_1m'
+                         OR title ILIKE '1-month follow-up check-in%'
                          OR title ILIKE 'Контроль%1 месяц%'
                          OR title ILIKE 'Nachsorge nach 1 Monat%'
                       )
@@ -2040,7 +2042,8 @@ async fn load_order_followup_readiness(
                 COUNT(*) FILTER (
                     WHERE checklist_phase = 'followup'
                       AND (
-                            title ILIKE '6-month follow-up check-in%'
+                            followup_milestone = 'post_6m'
+                         OR title ILIKE '6-month follow-up check-in%'
                          OR title ILIKE 'Контроль%6 месяцев%'
                          OR title ILIKE 'Nachsorge nach 6 Monaten%'
                       )

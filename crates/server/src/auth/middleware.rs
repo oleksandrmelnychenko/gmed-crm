@@ -474,7 +474,9 @@ mod tests {
     #[test]
     fn legacy_staff_sessions_only_reach_identity_and_session_endpoints() {
         assert!(is_empty_workspace_role(Role::ItAdmin));
-        assert!(is_empty_workspace_role(Role::PatientManager));
+        assert!(!is_empty_workspace_role(Role::PatientManager));
+        assert!(!is_empty_workspace_role(Role::Interpreter));
+        assert!(!is_empty_workspace_role(Role::TeamleadInterpreter));
         assert!(!is_empty_workspace_role(Role::Ceo));
         assert!(!is_empty_workspace_role(Role::Concierge));
         assert!(!is_empty_workspace_role(Role::Billing));
@@ -526,7 +528,15 @@ mod tests {
 
     #[test]
     fn release_workspace_transport_policy_matches_http_boundaries() {
-        for role in [Role::Ceo, Role::Concierge, Role::Billing, Role::Patient] {
+        for role in [
+            Role::Ceo,
+            Role::Concierge,
+            Role::Billing,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Patient,
+        ] {
             assert!(release_workspace_allows_path(role, "/messages/ws"));
             assert!(release_workspace_allows_path(role, "/events/ws"));
             assert!(release_workspace_allows_realtime_event(
@@ -535,7 +545,7 @@ mod tests {
             ));
         }
 
-        for role in [Role::CeoAssistant, Role::PatientManager, Role::Interpreter] {
+        for role in [Role::CeoAssistant, Role::Sales] {
             assert!(!release_workspace_allows_path(role, "/messages/ws"));
             assert!(release_workspace_allows_path(role, "/events/ws"));
             assert!(!release_workspace_allows_realtime_event(

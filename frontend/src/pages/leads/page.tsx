@@ -1714,7 +1714,7 @@ function useLeadsPageContent() {
                         {failedOutcomeLabel(detail.failed_outcome.status, t)}
                       </StatusBadge>
                     ) : null}
-                    {detail.converted_patient_id ? (
+                    {detail.converted_patient_id && detail.qualification_status !== "converted" ? (
                       <StatusBadge tone="success">{statusLabel("converted", t)}</StatusBadge>
                     ) : null}
                   </div>

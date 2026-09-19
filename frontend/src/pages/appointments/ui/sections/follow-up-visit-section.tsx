@@ -378,6 +378,7 @@ function useAppointmentFollowUpVisitSectionContent({
           ? followUpPresetTitle(preset.id)
           : current.title,
       reminderAt: nextReminderAt || current.reminderAt,
+      followupMilestone: preset.id,
     }));
   }
 
@@ -410,6 +411,7 @@ function useAppointmentFollowUpVisitSectionContent({
           interpreter_id: form.interpreterId || null,
           order_id: form.linkOrder ? detail.order_id : null,
           appointment_type: form.appointmentType,
+          followup_milestone: form.followupMilestone || null,
           skip_medical_provider_binding:
             form.appointmentType === "medical" && !form.providerId,
           care_path_kind: normalizeCarePathKindForAppointmentType(

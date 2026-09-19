@@ -152,6 +152,7 @@ pub fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct CreateAppointment {
     patient_id: Uuid,
+    followup_milestone: Option<String>,
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
@@ -176,6 +177,9 @@ struct CreateAppointment {
 #[derive(Deserialize)]
 struct UpdateAppointment {
     provider_id: Option<Uuid>,
+    /// Absent keeps the current milestone; an explicit null clears it.
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    followup_milestone: Option<Option<String>>,
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
@@ -221,6 +225,13 @@ where
     D: Deserializer<'de>,
 {
     Ok(Some(Option::<i32>::deserialize(deserializer)?))
+}
+
+fn is_valid_followup_milestone(value: &str) -> bool {
+    matches!(
+        value,
+        "post_1w" | "post_1m" | "post_6m" | "doctor" | "package_end"
+    )
 }
 
 fn deserialize_explicit_nullable_uuid<'de, D>(
@@ -442,6 +453,7 @@ fn build_patient_appointment_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
         "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
         "care_path_kind": row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string()),
+        "followup_milestone": row.try_get::<Option<String>, _>("followup_milestone").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "location": row.try_get::<Option<String>, _>("location").unwrap_or_default(),
         "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
@@ -461,6 +473,7 @@ fn build_appointment_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
         "care_path_kind": row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string()),
+        "followup_milestone": row.try_get::<Option<String>, _>("followup_milestone").unwrap_or_default(),
         "preferred_date_from": row.try_get::<Option<chrono::NaiveDate>, _>("preferred_date_from").unwrap_or_default().map(|value| value.to_string()),
         "preferred_date_to": row.try_get::<Option<chrono::NaiveDate>, _>("preferred_date_to").unwrap_or_default().map(|value| value.to_string()),
         "preferred_time_of_day": row.try_get::<Option<String>, _>("preferred_time_of_day").unwrap_or_default(),
@@ -539,7 +552,7 @@ async fn list_my_appointments(
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type,
-                  a.care_path_kind,
+                  a.care_path_kind, a.followup_milestone,
                   a.status, a.location, a.category, a.created_at,
                   provider.name AS provider_name,
                   doctor.name AS doctor_name
@@ -1597,7 +1610,7 @@ async fn list_appointments(
     );
 
     match sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
@@ -1771,7 +1784,7 @@ async fn list_attention_items(
     );
 
     match sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
@@ -2396,6 +2409,7 @@ async fn create_appointment(
 
     let CreateAppointment {
         patient_id,
+        followup_milestone,
         provider_id,
         doctor_id,
         owner_user_id: _,
@@ -2527,6 +2541,28 @@ async fn create_appointment(
         }
 
         created_appointments.push((appointment_id, occurrence_date));
+    }
+
+    if let Some(milestone) = followup_milestone
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        if !is_valid_followup_milestone(milestone) {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid followup_milestone",
+            );
+        }
+        if let Err(e) = sqlx::query("UPDATE appointments SET followup_milestone = $2 WHERE recurrence_series_id = $1 OR id = $1")
+            .bind(root_appointment_id)
+            .bind(milestone)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(error = %e, "create appointment: followup milestone");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
 
     if let Err(e) = tx.commit().await {
@@ -3622,7 +3658,7 @@ async fn get_appointment(
     match sqlx::query(
         r#"SELECT a.id, a.patient_id, a.provider_id, a.doctor_id, a.order_id, o.order_number, a.interpreter_id,
                   a.owner_user_id,
-                  a.appointment_type, a.care_path_kind, a.title, a.date, a.time_start, a.time_end, a.location,
+                  a.appointment_type, a.care_path_kind, a.followup_milestone, a.title, a.date, a.time_start, a.time_end, a.location,
                   a.category, a.status, a.interpreter_response, a.checklist_phase,
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
@@ -4076,7 +4112,7 @@ async fn update_appointment(
     let current = match sqlx::query(
         r#"SELECT patient_id, appointment_type, care_path_kind, status, checklist_phase, provider_id, doctor_id, owner_user_id,
                   interpreter_id, interpreter_response, title, date, time_start, time_end,
-                  location, order_id, category, notes, recurrence_series_id, recurrence_index,
+                  location, order_id, followup_milestone, category, notes, recurrence_series_id, recurrence_index,
                   recurrence_frequency, recurrence_interval, recurrence_count, recurrence_until,
                   recurrence_end_mode, updated_at
            FROM appointments
@@ -4126,6 +4162,23 @@ async fn update_appointment(
         current.try_get("time_end").unwrap_or_default();
     let current_location: Option<String> = current.try_get("location").unwrap_or_default();
     let current_order_id: Option<Uuid> = current.try_get("order_id").unwrap_or_default();
+    let current_followup_milestone: Option<String> =
+        current.try_get("followup_milestone").unwrap_or_default();
+    let followup_milestone = match body.followup_milestone.clone() {
+        Some(value) => value
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty()),
+        None => current_followup_milestone,
+    };
+    if followup_milestone
+        .as_deref()
+        .is_some_and(|v| !is_valid_followup_milestone(v))
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid followup_milestone",
+        );
+    }
     let order_id = body.order_id.unwrap_or(current_order_id);
     if order_id != current_order_id
         && let Some(order_id) = order_id
@@ -4744,6 +4797,7 @@ async fn update_appointment(
                    category = $20,
                    notes = $21,
                    order_id = $22,
+                   followup_milestone = $23,
                    updated_at = now()
                WHERE id = $1"#,
         )
@@ -4769,6 +4823,7 @@ async fn update_appointment(
         .bind(&category)
         .bind(&notes)
         .bind(order_id)
+        .bind(&followup_milestone)
         .execute(&mut *tx)
         .await
         {
@@ -8790,7 +8845,7 @@ async fn ensure_no_overlapping_appointments_in_tx(
 ) -> Result<(), axum::response::Response> {
     let rows = sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type,
-                  a.care_path_kind, a.status, a.location, a.interpreter_response,
+                  a.care_path_kind, a.followup_milestone, a.status, a.location, a.interpreter_response,
                   a.checklist_phase, a.patient_id, a.interpreter_id, a.provider_id,
                   a.doctor_id, a.owner_user_id, a.recurrence_series_id,
                   a.recurrence_frequency, a.recurrence_interval, a.recurrence_count,
@@ -8962,7 +9017,7 @@ async fn load_conflicts_for_scope(
     }
 
     let rows = sqlx::query(
-        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.status,
+        r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
                   a.location, a.interpreter_response, a.checklist_phase, a.patient_id, a.interpreter_id,
                   a.provider_id, a.doctor_id, a.owner_user_id,
                   p.first_name, p.last_name, p.patient_id AS patient_code,

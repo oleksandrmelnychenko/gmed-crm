@@ -22,7 +22,15 @@ impl Role {
     /// Other staff roles remain valid accounts and may sign in, but their
     /// workspace and business API access stay empty until explicitly enabled.
     pub fn is_release_staff_role(&self) -> bool {
-        matches!(self, Role::Ceo | Role::Concierge | Role::Billing)
+        matches!(
+            self,
+            Role::Ceo
+                | Role::Concierge
+                | Role::Billing
+                | Role::PatientManager
+                | Role::TeamleadInterpreter
+                | Role::Interpreter
+        )
     }
 
     pub fn has_full_access(&self) -> bool {

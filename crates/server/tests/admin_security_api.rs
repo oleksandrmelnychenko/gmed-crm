@@ -205,7 +205,7 @@ async fn release_router_blocks_unconfigured_staff_workspaces() {
     let Some(app) = test_context().await else {
         return;
     };
-    let pm_id = seed_user(&app.suite.pool, "release-gate", "patient_manager").await;
+    let pm_id = seed_user(&app.suite.pool, "release-gate", "ceo_assistant").await;
 
     let (status, _) = json_request(
         &app.suite.release_app,

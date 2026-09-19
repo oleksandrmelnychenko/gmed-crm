@@ -15,7 +15,7 @@ export const ALL_STAFF_ROLES = [
   "it_admin",
 ] as const;
 
-export const RELEASE_STAFF_ROLES = ["ceo", "concierge", "billing"] as const;
+export const RELEASE_STAFF_ROLES = ["ceo", "concierge", "billing", "patient_manager", "teamlead_interpreter", "interpreter"] as const;
 
 type StaffRole = (typeof ALL_STAFF_ROLES)[number];
 

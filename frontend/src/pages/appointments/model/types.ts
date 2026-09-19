@@ -571,6 +571,7 @@ export type AppointmentFormState = {
 
 export type FollowUpVisitFormState = AppointmentFormState & {
   linkOrder: boolean;
+  followupMilestone: string;
   createReminder: boolean;
   reminderUserId: string;
   reminderAt: string;

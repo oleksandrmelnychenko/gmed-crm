@@ -2640,7 +2640,14 @@ function useStaffInvoicesPageContent() {
                           value={formatMoney(detail.adjusted_total_gross ?? detail.total_gross, detail?.currency)}
                         />
                       ) : null}
-                      <SummaryLine label={t.invoices_paid} value={formatMoney(detail.paid_amount, detail?.currency)} />
+                      <SummaryLine
+                        label={t.invoices_paid}
+                        value={
+                          Number(detail.paid_amount) === 0 && Number(detail.prepayment_applied_amount ?? 0) > 0
+                            ? (lang === "de" ? "Durch Vorauszahlung gedeckt" : "Зачтено предоплатой")
+                            : formatMoney(detail.paid_amount, detail?.currency)
+                        }
+                      />
                       <SummaryLine
                         label={text.prepaymentApplied}
                         value={formatMoney(detail.prepayment_applied_amount ?? 0, detail?.currency)}

@@ -212,6 +212,7 @@ export function buildFollowUpVisitForm(
     repeatCount: "4",
     repeatUntil: "",
     linkOrder: Boolean(detail.order_id),
+    followupMilestone: "",
     createReminder: true,
     reminderUserId: defaultReminderUserId,
     reminderAt,

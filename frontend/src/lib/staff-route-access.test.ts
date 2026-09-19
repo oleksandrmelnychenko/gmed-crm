@@ -12,7 +12,7 @@ import {
 
 describe("first-release staff RBAC", () => {
   it("enables exactly CEO, Concierge and Billing as staff roles", () => {
-    expect(RELEASE_STAFF_ROLES).toEqual(["ceo", "concierge", "billing"]);
+    expect(RELEASE_STAFF_ROLES).toEqual(["ceo", "concierge", "billing", "patient_manager", "teamlead_interpreter", "interpreter"]);
     for (const role of ALL_STAFF_ROLES) {
       expect(canAccessStaffRoute(role, "/")).toBe(true);
     }
