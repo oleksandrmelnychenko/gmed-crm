@@ -1216,15 +1216,12 @@ async fn totp_enrolment_adds_a_second_step_to_login_and_refuses_replayed_codes()
         None,
     )
     .await;
-    let staff = ceo_admin_bearer(user_id).replace("ceo", "patient_manager");
-    let staff = {
-        // A token for the seeded user in their own role.
-        let token =
-            jwt::issue_access_token(TEST_SECRET, user_id, "patient_manager", Uuid::new_v4())
-                .expect("issue jwt");
-        let _ = staff;
-        format!("Bearer {token}")
-    };
+    // A token for the seeded user in their own role.
+    let staff = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, user_id, "patient_manager", Uuid::new_v4())
+            .expect("issue jwt")
+    );
 
     let (status, body) = json_request(&app, "GET", "/api/v1/me/totp", Some(&staff), None).await;
     assert_eq!(status, StatusCode::OK);
