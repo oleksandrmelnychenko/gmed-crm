@@ -219,12 +219,12 @@ describe("first-release staff RBAC", () => {
     expect(ceo).toContain("/projects");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([
+      "/security/two-factor",
+      "/incidents",
       "/admin/signatures",
       "/chat",
       "/notes",
       "/patients",
-      "/security/two-factor",
-      "/incidents",
       "/",
     ]);
   });
