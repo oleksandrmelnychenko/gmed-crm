@@ -12,6 +12,7 @@ use printpdf::{
     Rgb, WindingOrder,
 };
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use serde::Deserialize;
 use serde_json::{Number as JsonNumber, Value, json};
 use sqlx::Row;
@@ -2347,9 +2348,32 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
         .collect()
 }
 
+/// German money notation for the printed invoice: two decimals, dot-grouped
+/// thousands, the symbol for euro and the ISO code for anything else.
 fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     let parsed = Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
-    format!("{} {}", currency, decimal_to_string(parsed))
+    let cents = (parsed.abs().round_dp(2) * Decimal::from(100))
+        .to_u128()
+        .unwrap_or(0);
+    let whole = (cents / 100).to_string();
+    let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
+    for (index, digit) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
+            grouped.push('.');
+        }
+        grouped.push(digit);
+    }
+    let sign = if parsed.is_sign_negative() && cents > 0 {
+        "-"
+    } else {
+        ""
+    };
+    let unit = if currency.eq_ignore_ascii_case("EUR") {
+        "€"
+    } else {
+        currency
+    };
+    format!("{sign}{grouped},{:02} {unit}", cents % 100)
 }
 
 fn format_invoice_pdf_date(value: Option<NaiveDate>) -> String {
@@ -10638,5 +10662,22 @@ mod tests {
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod invoice_pdf_money_tests {
+    use super::format_invoice_pdf_money;
+
+    #[test]
+    fn prints_german_money_with_two_decimals_and_grouping() {
+        assert_eq!(format_invoice_pdf_money("428.4", "EUR"), "428,40 €");
+        assert_eq!(format_invoice_pdf_money("38260.6", "EUR"), "38.260,60 €");
+        assert_eq!(format_invoice_pdf_money("1234567", "EUR"), "1.234.567,00 €");
+        assert_eq!(format_invoice_pdf_money("0", "EUR"), "0,00 €");
+        assert_eq!(format_invoice_pdf_money("-0", "EUR"), "0,00 €");
+        assert_eq!(format_invoice_pdf_money("-15.5", "EUR"), "-15,50 €");
+        assert_eq!(format_invoice_pdf_money("99.999", "CHF"), "100,00 CHF");
+        assert_eq!(format_invoice_pdf_money("garbage", "EUR"), "0,00 €");
     }
 }
