@@ -769,6 +769,9 @@ async fn list_providers(
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
+        // Interpreters attend appointments at these clinics and need the names.
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
         Role::Concierge,
         Role::Billing,
         Role::Sales,
@@ -2018,6 +2021,8 @@ async fn list_provider_taxonomy(
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
         Role::Concierge,
         Role::Billing,
         Role::Sales,
