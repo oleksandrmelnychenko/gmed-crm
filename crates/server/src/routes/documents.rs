@@ -24913,7 +24913,7 @@ mod tests {
         assert!(consent_text.contains("[x]"));
         assert!(consent_text.contains("[ ]"));
         // The core consents are ticked even though the fixture leaves one unset.
-        assert!(consent_text.contains("[x]  dass alle meine behandelnden"));
+        assert!(consent_text.contains("[x] dass alle meine behandelnden"));
         assert!(consent_text.contains("[x] Threema-Messenger"));
         assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
         assert!(consent_text.contains("[x] Telegram-Messenger"));
