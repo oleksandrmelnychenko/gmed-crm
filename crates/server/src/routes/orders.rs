@@ -8262,8 +8262,9 @@ async fn update_leistung_planned_cost(
     .into_response()
 }
 
-/// Staff records that a planned service was actually provided; only a delivered
-/// service can be approved and settled.
+/// Staff records that a service was actually provided. A service may already be
+/// invoiced (approval is no longer a step), so only the delivery timestamp gates
+/// this; a planned service also moves to delivered.
 async fn deliver_leistung(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8279,8 +8280,10 @@ async fn deliver_leistung(
     }
 
     match sqlx::query(
-        "UPDATE order_leistungen SET status = 'delivered', delivered_at = now()
-         WHERE id = $2 AND order_id = $1 AND status = 'planned'",
+        "UPDATE order_leistungen
+         SET status = CASE WHEN status = 'planned' THEN 'delivered' ELSE status END,
+             delivered_at = now()
+         WHERE id = $2 AND order_id = $1 AND delivered_at IS NULL",
     )
     .bind(order_id)
     .bind(leistung_id)
@@ -8302,7 +8305,7 @@ async fn deliver_leistung(
         }
         Ok(_) => err(
             StatusCode::NOT_FOUND,
-            "Leistung not found or not in planned status",
+            "Leistung not found or already delivered",
         ),
         Err(e) => {
             tracing::error!(error = %e, "deliver leistung");

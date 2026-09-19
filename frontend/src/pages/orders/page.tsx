@@ -6975,7 +6975,7 @@ function useOrdersPageContent() {
                                       </Button>
                                     ) : null}
                                     {permissions.canApproveLeistung &&
-                                    leistung.status === "planned" ? (
+                                    !leistung.delivered_at ? (
                                       <Button
                                         variant="outline"
                                         className="mt-4 h-8 w-full rounded-lg"
