@@ -87,6 +87,7 @@ async fn main() {
     gmed_server::services::medication_ai_jobs::spawn_medication_ai_worker(app_state.clone());
     spawn_blacklist_purger(app_state.db.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
+    spawn_document_blob_sweeper(app_state.clone());
     spawn_expired_message_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
     spawn_audit_retention_purger(app_state.db.clone());
@@ -209,6 +210,43 @@ async fn main() {
     });
 
     tracing::info!("Server shut down gracefully");
+}
+
+fn spawn_document_blob_sweeper(state: state::AppState) {
+    // Seals legacy plaintext document files and re-seals files on retired keys,
+    // 200 per pass; the first pass starts a minute after boot.
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(600));
+        loop {
+            ticker.tick().await;
+            if std::env::var("GMED_DOCUMENT_ENCRYPTION_DISABLED")
+                .ok()
+                .is_some_and(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
+            {
+                continue;
+            }
+            match gmed_server::routes::key_rotation::rewrap_document_files(
+                &state.message_keys,
+                std::path::Path::new("uploads/documents"),
+                200,
+            )
+            .await
+            {
+                Ok(report) if report.sealed_plaintext + report.rewrapped + report.failed > 0 => {
+                    tracing::info!(
+                        sealed_plaintext = report.sealed_plaintext,
+                        rewrapped = report.rewrapped,
+                        failed = report.failed,
+                        scanned = report.scanned,
+                        "Document blob encryption sweep"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "Document blob sweep failed"),
+            }
+        }
+    });
 }
 
 fn spawn_message_rewrap_sweeper(state: state::AppState) {

@@ -293,3 +293,100 @@ pub async fn collect_key_distribution(
 fn err(code: StatusCode, message: &str) -> axum::response::Response {
     (code, Json(serde_json::json!({ "error": message }))).into_response()
 }
+
+#[derive(Debug, Default)]
+pub struct DocumentRewrapReport {
+    pub sealed_plaintext: u64,
+    pub rewrapped: u64,
+    pub failed: u64,
+    pub scanned: u64,
+}
+
+/// Walks the document store and seals up to `limit` files that are still
+/// plaintext or sit on a retired key. Each file is rewritten through a
+/// temporary sibling and renamed, so a crash leaves either the old or the new
+/// file, never a torn one.
+pub async fn rewrap_document_files(
+    registry: &KeyRegistry,
+    dir: &std::path::Path,
+    limit: usize,
+) -> Result<DocumentRewrapReport, std::io::Error> {
+    use crate::crypto::BlobState;
+    use tokio::io::AsyncReadExt;
+
+    let mut report = DocumentRewrapReport::default();
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(report),
+        Err(error) => return Err(error),
+    };
+    let mut touched = 0usize;
+    while let Some(entry) = entries.next_entry().await? {
+        if touched >= limit {
+            break;
+        }
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.ends_with(".rewrap.tmp") || !entry.file_type().await?.is_file() {
+            continue;
+        }
+        report.scanned += 1;
+
+        // Only the header is needed to decide; whole files are read on demand.
+        let mut head = [0u8; 64];
+        let head_len = {
+            let mut file = tokio::fs::File::open(&path).await?;
+            let mut read = 0usize;
+            loop {
+                let n = file.read(&mut head[read..]).await?;
+                if n == 0 || read + n == head.len() {
+                    read += n;
+                    break;
+                }
+                read += n;
+            }
+            read
+        };
+        let state = registry.blob_state(&head[..head_len]);
+        if state == (BlobState::Sealed { active_key: true }) {
+            continue;
+        }
+
+        touched += 1;
+        let result: Result<(), String> = async {
+            let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
+            let plaintext = registry.open_blob(&bytes).map_err(|e| e.to_string())?;
+            let sealed = registry.seal_blob(&plaintext).map_err(|e| e.to_string())?;
+            let tmp = path.with_file_name(format!("{name}.rewrap.tmp"));
+            tokio::fs::write(&tmp, &sealed)
+                .await
+                .map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                tokio::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            tokio::fs::rename(&tmp, &path)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        .await;
+
+        match result {
+            Ok(()) => {
+                if state == BlobState::Plaintext {
+                    report.sealed_plaintext += 1;
+                } else {
+                    report.rewrapped += 1;
+                }
+            }
+            Err(error) => {
+                report.failed += 1;
+                tracing::warn!(error = %error, file = %name, "document blob rewrap");
+            }
+        }
+    }
+    Ok(report)
+}

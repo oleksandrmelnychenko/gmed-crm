@@ -6928,6 +6928,12 @@ async fn deleting_unshared_document_file_removes_stored_file() {
         .unwrap();
     let stored_path = FsPath::new("uploads/documents").join(&storage_key);
     assert!(stored_path.exists());
+    // At rest the blob is sealed with the key registry, not stored as uploaded.
+    let stored_bytes = std::fs::read(&stored_path).unwrap();
+    assert!(
+        stored_bytes.starts_with(b"GMEDENC1"),
+        "document blob is stored in plaintext"
+    );
 
     let (status, deleted) = json_request(
         &app,

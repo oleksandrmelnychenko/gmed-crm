@@ -47,6 +47,8 @@ impl AppState {
     ) -> Self {
         let (message_events, _) = broadcast::channel(512);
         let (realtime_events, _) = broadcast::channel(1024);
+        let message_keys = Arc::new(message_keys);
+        crate::crypto::install_shared_registry(message_keys.clone());
         Self {
             db,
             jwt_secret: SecretString::from(jwt_secret.into()),
@@ -54,7 +56,7 @@ impl AppState {
             message_events,
             realtime_events,
             websocket_connections: Arc::new(WebSocketConnectionRegistry::default()),
-            message_keys: Arc::new(message_keys),
+            message_keys,
             audit_sender: AuditSender::noop(),
             medication_ai: Arc::new(MedicationAiProvider::new(MedicationAiConfig::default())),
             document_signatures: None,

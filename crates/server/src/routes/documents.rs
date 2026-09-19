@@ -189,6 +189,42 @@ fn build_seed_demo_document_bytes(
     })
 }
 
+/// Seals a blob with the shared key registry before it touches the disk.
+/// `GMED_DOCUMENT_ENCRYPTION_DISABLED=true` keeps the legacy plaintext layout
+/// (only for environments without a key registry; PROD never sets it).
+pub(crate) fn seal_document_bytes(data: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+    if std::env::var("GMED_DOCUMENT_ENCRYPTION_DISABLED")
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+    {
+        return Ok(std::borrow::Cow::Borrowed(data));
+    }
+    let Some(registry) = crate::crypto::shared_registry() else {
+        return Err("document key registry is not installed".to_string());
+    };
+    registry
+        .seal_blob(data)
+        .map(std::borrow::Cow::Owned)
+        .map_err(|error| format!("seal document blob: {error}"))
+}
+
+/// Opens a blob read from disk; legacy plaintext files pass through.
+pub(crate) fn open_document_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, std::io::Error> {
+    if crate::crypto::blob_key_id(&bytes).is_none() {
+        return Ok(bytes);
+    }
+    let registry = crate::crypto::shared_registry()
+        .ok_or_else(|| std::io::Error::other("document key registry is not installed"))?;
+    registry
+        .open_blob(&bytes)
+        .map_err(|error| std::io::Error::other(format!("open document blob: {error}")))
+}
+
 pub(crate) async fn read_document_storage_bytes(
     document_id: Uuid,
     storage_key: &str,
@@ -198,7 +234,7 @@ pub(crate) async fn read_document_storage_bytes(
 ) -> Result<Vec<u8>, std::io::Error> {
     let path = FsPath::new(UPLOAD_DIR).join(storage_key);
     match tokio::fs::read(&path).await {
-        Ok(data) => Ok(data),
+        Ok(data) => open_document_bytes(data),
         Err(error) => {
             if let Some(data) =
                 build_seed_demo_document_bytes(storage_key, mime_type, original_filename, auto_name)
@@ -11417,7 +11453,14 @@ pub(crate) async fn persist_document_file(
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
     }
     let path = FsPath::new(UPLOAD_DIR).join(&storage_key);
-    if let Err(e) = tokio::fs::write(&path, data).await {
+    let sealed = match seal_document_bytes(data) {
+        Ok(sealed) => sealed,
+        Err(error) => {
+            tracing::error!(error = %error, "seal document file");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+        }
+    };
+    if let Err(e) = tokio::fs::write(&path, sealed.as_ref()).await {
         tracing::error!(error = %e, "write document file");
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
     }
@@ -11554,7 +11597,14 @@ pub(crate) async fn store_document_blob(
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
     }
     let path = FsPath::new(UPLOAD_DIR).join(&storage_key);
-    if let Err(error) = tokio::fs::write(&path, data).await {
+    let sealed = match seal_document_bytes(data) {
+        Ok(sealed) => sealed,
+        Err(error) => {
+            tracing::error!(error = %error, "seal document file");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
+        }
+    };
+    if let Err(error) = tokio::fs::write(&path, sealed.as_ref()).await {
         tracing::error!(error = %error, "write document file");
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error"));
     }

@@ -326,3 +326,138 @@ mod tests {
         assert!(matches!(result, Err(KeyRegistryError::Duplicate(_))));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Document blobs at rest
+//
+// Uploaded patient files used to lie in `uploads/documents` as plain bytes,
+// protected only by file permissions. They now share the message key registry.
+// The file itself carries everything needed to open it, so no database column
+// changes: `GMEDENC1` + key-id length + key id + 12-byte nonce + ciphertext.
+// A file without the magic is a legacy plaintext blob and is read as such; the
+// background sweep seals those and re-seals blobs on retired keys.
+// ---------------------------------------------------------------------------
+
+const BLOB_MAGIC: &[u8; 8] = b"GMEDENC1";
+
+static SHARED_REGISTRY: std::sync::OnceLock<std::sync::Arc<KeyRegistry>> =
+    std::sync::OnceLock::new();
+
+/// Makes the registry reachable from code paths that only see file names, such
+/// as the document storage helpers. The first installed registry wins.
+pub fn install_shared_registry(registry: std::sync::Arc<KeyRegistry>) {
+    let _ = SHARED_REGISTRY.set(registry);
+}
+
+pub fn shared_registry() -> Option<std::sync::Arc<KeyRegistry>> {
+    SHARED_REGISTRY.get().cloned()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobState {
+    Plaintext,
+    Sealed { active_key: bool },
+}
+
+pub fn blob_key_id(bytes: &[u8]) -> Option<&str> {
+    let rest = bytes.strip_prefix(BLOB_MAGIC)?;
+    let (len, rest) = rest.split_first()?;
+    let id = rest.get(..usize::from(*len))?;
+    std::str::from_utf8(id).ok()
+}
+
+impl KeyRegistry {
+    pub fn blob_state(&self, bytes: &[u8]) -> BlobState {
+        match blob_key_id(bytes) {
+            Some(id) => BlobState::Sealed {
+                active_key: self.is_active(id),
+            },
+            None => BlobState::Plaintext,
+        }
+    }
+
+    pub fn seal_blob(&self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let (ciphertext, nonce, key_id) = self.encrypt(plaintext)?;
+        let key_id = key_id.as_bytes();
+        let mut out = Vec::with_capacity(
+            BLOB_MAGIC.len() + 1 + key_id.len() + nonce.len() + ciphertext.len(),
+        );
+        out.extend_from_slice(BLOB_MAGIC);
+        out.push(u8::try_from(key_id.len()).map_err(|_| CryptoError::Encrypt)?);
+        out.extend_from_slice(key_id);
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&ciphertext);
+        Ok(out)
+    }
+
+    /// Returns the plaintext of a sealed blob, or the bytes unchanged when the
+    /// file predates encryption.
+    pub fn open_blob(&self, bytes: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        let Some(key_id) = blob_key_id(bytes) else {
+            return Ok(bytes.to_vec());
+        };
+        let body = &bytes[BLOB_MAGIC.len() + 1 + key_id.len()..];
+        if body.len() < NONCE_LEN {
+            return Err(CryptoError::BadNonce);
+        }
+        let (nonce, ciphertext) = body.split_at(NONCE_LEN);
+        self.decrypt(key_id, ciphertext, nonce)
+    }
+}
+
+#[cfg(test)]
+mod blob_tests {
+    use super::*;
+
+    fn registry() -> KeyRegistry {
+        KeyRegistry::from_pairs(
+            vec![("v1".to_string(), [7u8; 32]), ("v2".to_string(), [9u8; 32])],
+            "v2".to_string(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn sealed_blob_round_trips_and_names_its_key() {
+        let registry = registry();
+        let sealed = registry.seal_blob(b"%PDF-1.7 patient file").unwrap();
+        assert_eq!(blob_key_id(&sealed), Some("v2"));
+        assert_eq!(
+            registry.blob_state(&sealed),
+            BlobState::Sealed { active_key: true }
+        );
+        assert_eq!(
+            registry.open_blob(&sealed).unwrap(),
+            b"%PDF-1.7 patient file"
+        );
+    }
+
+    #[test]
+    fn plaintext_blob_is_returned_unchanged() {
+        let registry = registry();
+        assert_eq!(registry.blob_state(b"%PDF-1.7"), BlobState::Plaintext);
+        assert_eq!(registry.open_blob(b"%PDF-1.7").unwrap(), b"%PDF-1.7");
+    }
+
+    #[test]
+    fn blob_on_retired_key_is_reported_and_still_opens() {
+        let old =
+            KeyRegistry::from_pairs(vec![("v1".to_string(), [7u8; 32])], "v1".to_string()).unwrap();
+        let sealed = old.seal_blob(b"scan").unwrap();
+        let registry = registry();
+        assert_eq!(
+            registry.blob_state(&sealed),
+            BlobState::Sealed { active_key: false }
+        );
+        assert_eq!(registry.open_blob(&sealed).unwrap(), b"scan");
+    }
+
+    #[test]
+    fn tampered_blob_is_rejected() {
+        let registry = registry();
+        let mut sealed = registry.seal_blob(b"scan").unwrap();
+        let last = sealed.len() - 1;
+        sealed[last] ^= 0x01;
+        assert!(registry.open_blob(&sealed).is_err());
+    }
+}
