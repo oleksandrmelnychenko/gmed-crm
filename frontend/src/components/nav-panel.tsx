@@ -59,13 +59,23 @@ interface NavItem {
   labelKey: string;
 }
 
-const STAFF_NAV_SECTIONS: StaffNavSection[] = ["main", "crm", "medicine", "accounting", "admin"];
+const STAFF_NAV_SECTIONS: StaffNavSection[] = [
+  "main",
+  "crm",
+  "medicine",
+  "accounting",
+  "security",
+  "dsgvo",
+  "admin",
+];
 
 const SECTION_LABEL_KEYS: Record<StaffNavSection, string> = {
   main: "nav_main",
   crm: "nav_crm",
   medicine: "nav_medicine",
   accounting: "nav_accounting",
+  security: "nav_section_security",
+  dsgvo: "nav_section_dsgvo",
   admin: "nav_admin",
 };
 

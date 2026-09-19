@@ -171,7 +171,14 @@ type RouteRule = {
   };
 };
 
-export type StaffNavSection = "main" | "crm" | "medicine" | "accounting" | "admin";
+export type StaffNavSection =
+  | "main"
+  | "crm"
+  | "medicine"
+  | "accounting"
+  | "security"
+  | "dsgvo"
+  | "admin";
 export type PatientPortalNavItem = {
   id: string;
   to: string;
@@ -216,49 +223,49 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     roles: ROLES_PROJECTS,
     nav: { section: "main", labelKey: "nav_projects", after: "task-manager" },
   },
-  // Administration, grouped by task: people and access, security, DSGVO,
-  // operations, then content. Keep this order in sync with the nav test.
+  // Administration in three groups: access and security, DSGVO, system.
+  // Keep the order in sync with the nav test.
   {
     id: "admin/users",
     match: "prefix",
     path: "/admin/users",
     roles: ROLES_ADMIN_USERS,
-    nav: { section: "admin", labelKey: "nav_users_roles" },
+    nav: { section: "security", labelKey: "nav_users_roles" },
   },
   {
     id: "admin/access",
     match: "prefix",
     path: "/admin/access",
     roles: ROLES_ADMIN,
-    nav: { section: "admin", labelKey: "nav_access_matrix" },
+    nav: { section: "security", labelKey: "nav_access_matrix" },
   },
   {
     id: "admin/security",
     match: "prefix",
     path: "/admin/security",
     roles: ROLES_ADMIN,
-    nav: { section: "admin", labelKey: "nav_security" },
+    nav: { section: "security", labelKey: "nav_security" },
   },
   {
     id: "security/two-factor",
     match: "exact",
     path: "/security/two-factor",
     roles: ALL_STAFF_ROLES,
-    nav: { section: "admin", labelKey: "nav_two_factor" },
+    nav: { section: "security", labelKey: "nav_two_factor" },
   },
   {
     id: "admin/compliance",
     match: "prefix",
     path: "/admin/compliance",
     roles: ROLES_COMPLIANCE,
-    nav: { section: "admin", labelKey: "nav_compliance" },
+    nav: { section: "dsgvo", labelKey: "nav_compliance" },
   },
   {
     id: "incidents",
     match: "exact",
     path: "/incidents",
     roles: ALL_STAFF_ROLES,
-    nav: { section: "admin", labelKey: "nav_incident_report" },
+    nav: { section: "dsgvo", labelKey: "nav_incident_report" },
   },
   {
     id: "admin/activity",
