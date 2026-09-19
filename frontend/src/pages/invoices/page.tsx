@@ -2624,7 +2624,7 @@ function useStaffInvoicesPageContent() {
                       <SummaryLine label={text.createQuoteSection} value={detail.quote_number ?? t.common_not_set} />
                       <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
-                      <SummaryLine label={t.invoices_paid_at} value={formatDateTime(detail.paid_at, locale, t.common_not_set)} />
+                      <SummaryLine label={t.invoices_paid_at} value={formatDate(detail.paid_at, locale, t.common_not_set)} />
                       <SummaryLine label={text.grossTotal} value={formatMoney(detail.total_gross, detail?.currency)} />
                       {Number(detail.credited_amount ?? 0) > 0 ? (
                         <SummaryLine
