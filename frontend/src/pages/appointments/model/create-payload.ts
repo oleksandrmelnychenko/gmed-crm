@@ -86,6 +86,7 @@ export function buildCreateAppointmentPayload(
     owner_user_id: form.ownerUserId || null,
     interpreter_id: form.interpreterId || null,
     appointment_type: form.appointmentType,
+    order_id: form.orderId || null,
     skip_medical_provider_binding:
       form.appointmentType === "medical" &&
       !form.providerId &&

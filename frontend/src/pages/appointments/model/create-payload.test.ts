@@ -232,3 +232,11 @@ describe("buildCreateAppointmentPayload", () => {
     expect(payload.time_end).toBeNull();
   });
 });
+
+describe("buildCreateAppointmentPayload order link", () => {
+  it("links the appointment to the selected order and sends null otherwise", () => {
+    const form = { ...blankAppointmentForm(), patientId: "p1", title: "Visit", date: "2026-10-02" };
+    expect(buildCreateAppointmentPayload(form).order_id).toBeNull();
+    expect(buildCreateAppointmentPayload({ ...form, orderId: "o1" }).order_id).toBe("o1");
+  });
+});

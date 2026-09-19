@@ -24,6 +24,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { usePatientOrderOptions } from "@/pages/appointments/data/use-patient-order-options";
 import { useLang } from "@/lib/i18n";
 import {
   appointmentSelectControlClassName,
@@ -274,6 +275,7 @@ function useEditAppointmentSectionContentContent({
 }: EditAppointmentSectionProps) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
+  const patientOrders = usePatientOrderOptions(detail.patient_id);
   const interpreterFieldLabel = appointmentText("appointments_interpreter");
   const [{ form, recurrenceScope, doctors, conflicts, error, busy }, dispatchEditState] =
     useReducer(
@@ -1176,6 +1178,25 @@ function useEditAppointmentSectionContentContent({
               {ownerOptions.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </Field>
+          <Field compact label={tr.appointments_order}>
+            <NativeComboboxSelect
+              value={form.orderId}
+              onChange={(event) =>
+                setFormFromUser((current) => ({
+                  ...current,
+                  orderId: event.target.value,
+                }))
+              }
+              className={selectClassName}
+            >
+              <option value="">{t.common_not_set}</option>
+              {patientOrders.map((order) => (
+                <option key={order.id} value={order.id}>
+                  {order.order_number}
                 </option>
               ))}
             </NativeComboboxSelect>

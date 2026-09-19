@@ -179,6 +179,9 @@ struct UpdateAppointment {
     doctor_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
+    /// Absent keeps the current order link; an explicit null removes it.
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_uuid")]
+    order_id: Option<Option<Uuid>>,
     appointment_type: Option<String>,
     skip_medical_provider_binding: Option<bool>,
     care_path_kind: Option<String>,
@@ -218,6 +221,15 @@ where
     D: Deserializer<'de>,
 {
     Ok(Some(Option::<i32>::deserialize(deserializer)?))
+}
+
+fn deserialize_explicit_nullable_uuid<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<Uuid>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Some(Option::<Uuid>::deserialize(deserializer)?))
 }
 
 #[derive(Clone)]
@@ -4114,6 +4126,14 @@ async fn update_appointment(
         current.try_get("time_end").unwrap_or_default();
     let current_location: Option<String> = current.try_get("location").unwrap_or_default();
     let current_order_id: Option<Uuid> = current.try_get("order_id").unwrap_or_default();
+    let order_id = body.order_id.unwrap_or(current_order_id);
+    if order_id != current_order_id
+        && let Some(order_id) = order_id
+        && let Err(resp) =
+            ensure_appointment_order_link_allowed(&state, &auth, patient_id, order_id).await
+    {
+        return resp;
+    }
     let current_category: Option<String> = current.try_get("category").unwrap_or_default();
     let current_notes: Option<String> = current.try_get("notes").unwrap_or_default();
     let current_recurrence_series_id: Option<Uuid> =
@@ -4723,6 +4743,7 @@ async fn update_appointment(
                    checklist_phase = $19,
                    category = $20,
                    notes = $21,
+                   order_id = $22,
                    updated_at = now()
                WHERE id = $1"#,
         )
@@ -4747,6 +4768,7 @@ async fn update_appointment(
         .bind(&checklist_phase)
         .bind(&category)
         .bind(&notes)
+        .bind(order_id)
         .execute(&mut *tx)
         .await
         {
@@ -4815,7 +4837,7 @@ async fn update_appointment(
                 body.doctor_id,
                 owner_user_id,
                 body.interpreter_id,
-                current_order_id,
+                order_id,
                 &appointment_type,
                 &title,
                 target_date,

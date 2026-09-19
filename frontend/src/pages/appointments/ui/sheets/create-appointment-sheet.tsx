@@ -34,6 +34,7 @@ import {
 } from "@/pages/appointments/model/constants";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
+import { defaultOrderIdFor, usePatientOrderOptions } from "@/pages/appointments/data/use-patient-order-options";
 import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
 import {
   appointmentText,
@@ -197,6 +198,16 @@ function useCreateAppointmentSheetContent({
     () => hasAppointmentFormChanges(form, baseline),
     [baseline, form],
   );
+  const patientOrders = usePatientOrderOptions(form.patientId);
+  // A new appointment joins the patient's only open order unless staff picks another.
+  useEffect(() => {
+    dispatchSheetState((current) => {
+      const { orderId } = current.form;
+      if (orderId && patientOrders.some((order) => order.id === orderId)) return current;
+      const next = defaultOrderIdFor(patientOrders);
+      return orderId === next ? current : { form: { ...current.form, orderId: next } };
+    });
+  }, [patientOrders]);
 
   useEffect(() => {
     latestDraftRef.current = draft ?? null;
@@ -920,6 +931,25 @@ function useCreateAppointmentSheetContent({
                       {ownerOptions.map((member) => (
                         <option key={member.id} value={member.id}>
                           {staffLabel(member)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field compact label={tr.appointments_order}>
+                    <NativeComboboxSelect
+                      value={form.orderId}
+                      onChange={(event) =>
+                        setForm((current) => ({
+                          ...current,
+                          orderId: event.target.value,
+                        }))
+                      }
+                      className={createSheetSelectClassName}
+                    >
+                      <option value="">{tr.common_not_set}</option>
+                      {patientOrders.map((order) => (
+                        <option key={order.id} value={order.id}>
+                          {order.order_number}
                         </option>
                       ))}
                     </NativeComboboxSelect>

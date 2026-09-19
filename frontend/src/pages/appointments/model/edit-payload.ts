@@ -126,6 +126,7 @@ export function buildEditAppointmentUpdatePayload({
       form.appointmentType,
       form.carePathKind,
     ),
+    order_id: form.orderId || null,
     title: form.title.trim(),
     date: form.date,
     time_start: times.timeStart,

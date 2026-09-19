@@ -548,6 +548,7 @@ export type AppointmentFormState = {
   doctorId: string;
   ownerUserId: string;
   interpreterId: string;
+  orderId: string;
   appointmentType: AppointmentKind;
   carePathKind: AppointmentCarePathKind;
   status: AppointmentStatus;
