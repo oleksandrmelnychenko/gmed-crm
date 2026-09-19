@@ -2358,7 +2358,7 @@ fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     let whole = (cents / 100).to_string();
     let mut grouped = String::with_capacity(whole.len() + whole.len() / 3);
     for (index, digit) in whole.chars().enumerate() {
-        if index > 0 && (whole.len() - index) % 3 == 0 {
+        if index > 0 && (whole.len() - index).is_multiple_of(3) {
             grouped.push('.');
         }
         grouped.push(digit);

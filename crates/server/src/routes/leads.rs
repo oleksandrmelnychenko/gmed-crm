@@ -1194,9 +1194,10 @@ struct LeadConversionReadinessInput {
     quote_accepted: bool,
     cost_estimate_document_generated: bool,
     prepayment_ready: bool,
-    /// Existing customer (2B): a debt-management hold stops a new order.
-    debt_hold: bool,
-    debt_hold_reason: Option<String>,
+    /// Existing customer (2B): overdue invoices are surfaced for attention.
+    /// Since 2026-09 debt never blocks execution, so this does not gate conversion.
+    debt_attention: bool,
+    debt_attention_reason: Option<String>,
     /// Existing customer (2B): a package-covered order needs no separate Kostenvoranschlag.
     package_covered: bool,
 }
@@ -1259,8 +1260,7 @@ fn evaluate_lead_conversion_readiness(
         && input.order_signed_patient
         && input.order_signed_agency
         && (input.package_covered || input.quote_accepted)
-        && (input.package_covered || input.cost_estimate_document_generated)
-        && !input.debt_hold;
+        && (input.package_covered || input.cost_estimate_document_generated);
 
     let checks = vec![
         json!({
@@ -1449,9 +1449,9 @@ fn evaluate_lead_conversion_readiness(
         }),
         json!({
             "key": "debt_clear",
-            "label": "No debt-management hold",
-            "passed": !input.debt_hold,
-            "blocking_for": "conversion",
+            "label": "No overdue invoices",
+            "passed": !input.debt_attention,
+            "blocking_for": null,
             "stage": "commercial",
         }),
         json!({
@@ -1541,9 +1541,6 @@ fn evaluate_lead_conversion_readiness(
     }
     if !input.package_covered && !input.cost_estimate_document_generated {
         conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
-    }
-    if input.debt_hold {
-        conversion_reasons.push("Patient is in debt-management hold".to_string());
     }
     if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
@@ -1638,8 +1635,8 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         // separate readiness checks. A later catalog-price change invalidates
         // the quote, but it must not make money already received disappear.
         prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
-        debt_hold: false,
-        debt_hold_reason: None,
+        debt_attention: false,
+        debt_attention_reason: None,
         package_covered: false,
     }
 }
@@ -1928,7 +1925,7 @@ async fn apply_repeat_patient_readiness(
         input.framework_document_generated = true;
     }
     // Process mapping 2B: an order covered by the running package skips the
-    // separate Kostenvoranschlag, and a debt-management hold blocks a new order.
+    // separate Kostenvoranschlag; overdue invoices are surfaced for attention (debt never blocks).
     input.package_covered = row
         .try_get::<Option<String>, _>("package_coverage_status")
         .ok()
@@ -1937,8 +1934,12 @@ async fn apply_repeat_patient_readiness(
         == Some("covered");
     let debt =
         super::debt_management::load_patient_debt_management_state(state, patient_id).await?;
-    input.debt_hold = debt.blocking;
-    input.debt_hold_reason = debt.blocking_reason;
+    input.debt_attention = debt.overdue_invoice_count > 0;
+    input.debt_attention_reason = debt
+        .payload
+        .get("attention_reason")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     Ok(())
 }
 
@@ -6901,14 +6902,14 @@ mod lead_conversion_readiness_tests {
     use super::*;
 
     #[test]
-    fn debt_management_hold_blocks_conversion_of_an_existing_customer() {
+    fn overdue_invoices_are_surfaced_without_blocking_an_existing_customer() {
         let mut input = ready_input();
-        input.debt_hold = true;
+        input.debt_attention = true;
         let readiness = evaluate_lead_conversion_readiness(&input);
-        assert!(!readiness.conversion_ready);
-        assert_eq!(
-            readiness.conversion_reasons,
-            vec!["Patient is in debt-management hold".to_string()]
+        assert!(
+            readiness.conversion_ready,
+            "{:?}",
+            readiness.conversion_reasons
         );
         let check = readiness.payload["checks"]
             .as_array()
@@ -6971,8 +6972,8 @@ mod lead_conversion_readiness_tests {
             quote_accepted: true,
             cost_estimate_document_generated: true,
             prepayment_ready: true,
-            debt_hold: false,
-            debt_hold_reason: None,
+            debt_attention: false,
+            debt_attention_reason: None,
             package_covered: false,
         }
     }

@@ -58,9 +58,9 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
   const releaseDate = signedOn("confidentiality_release");
   const outstanding = readiness.debt_management?.outstanding_balance ?? readiness.outstanding_balance;
   const rows: ReviewRow[] = [
-    // Process mapping 2B: a debt check comes before any new order.
+    // Process mapping 2B: the debt check comes before a new order. Debt never blocks by itself; it is shown for attention.
     { key: "debt", label: tx("Задолженность", "Forderungen"), ready: !readiness.debt_hold,
-      status: readiness.debt_hold ? tx("Сценарий работы с задолженностью — новый заказ заблокирован", "Forderungsmanagement – neuer Auftrag gesperrt")
+      status: readiness.debt_hold ? tx("Сценарий работы с задолженностью — согласуйте с бухгалтерией", "Forderungsmanagement – mit der Buchhaltung abstimmen")
         : readiness.overdue_invoice_count > 0 ? tx("Есть просроченные счета", "Überfällige Rechnungen vorhanden") : tx("Задолженности нет", "Keine offenen Forderungen"),
       detail: readiness.overdue_invoice_count > 0 || readiness.debt_hold
         ? `${tx("Просрочено счетов", "Überfällige Rechnungen")}: ${readiness.overdue_invoice_count}${outstanding ? ` · ${tx("Остаток", "Offen")}: ${outstanding} EUR` : ""}`
