@@ -11,7 +11,10 @@ use rust_decimal::{Decimal, RoundingStrategy};
 pub(super) const ZUGFERD_XML_FILENAME: &str = "factur-x.xml";
 const EN16931_GUIDELINE: &str = "urn:cen.eu:en16931:2017";
 const PASSTHROUGH_EXEMPTION: &str = "Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG";
-const ZERO_RATE_EXEMPTION: &str = "Umsatzsteuerfreie Leistung";
+/// Medical care is exempt under § 4 Nr. 14 UStG (Art. 132 VAT Directive); the
+/// VATEX code is only written when every exempt line is medical care.
+const ZERO_RATE_EXEMPTION: &str = "Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG";
+const ZERO_RATE_EXEMPTION_CODE: &str = "VATEX-EU-132";
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct EInvoiceParty {
@@ -156,8 +159,18 @@ fn text(value: &Option<String>) -> Option<&str> {
 struct TaxGroup {
     category: &'static str,
     rate: Decimal,
-    exemption: Option<&'static str>,
+    /// Every exemption that applies to lines of this group, in line order.
+    exemptions: Vec<&'static str>,
     basis: Decimal,
+}
+
+impl TaxGroup {
+    fn exemption_reason(&self) -> Option<String> {
+        (!self.exemptions.is_empty()).then(|| self.exemptions.join("; "))
+    }
+    fn exemption_code(&self) -> Option<&'static str> {
+        (self.exemptions == [ZERO_RATE_EXEMPTION]).then_some(ZERO_RATE_EXEMPTION_CODE)
+    }
 }
 
 fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
@@ -170,32 +183,50 @@ fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
     }
 }
 
+/// One breakdown per category and rate. EN 16931 allows exactly one exempt
+/// breakdown (BR-E-01), so medical care and pass-through items share it.
 fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
     let mut groups: Vec<TaxGroup> = Vec::new();
     for line in lines {
         let (category, exemption) = line_tax(line);
-        match groups.iter_mut().find(|group| {
-            group.category == category
-                && group.rate == line.vat_rate
-                && group.exemption == exemption
-        }) {
-            Some(group) => group.basis += line.line_net,
-            None => groups.push(TaxGroup {
-                category,
-                rate: line.vat_rate,
-                exemption,
-                basis: line.line_net,
-            }),
+        let group = match groups
+            .iter_mut()
+            .position(|group| group.category == category && group.rate == line.vat_rate)
+        {
+            Some(index) => &mut groups[index],
+            None => {
+                groups.push(TaxGroup {
+                    category,
+                    rate: line.vat_rate,
+                    exemptions: Vec::new(),
+                    basis: Decimal::ZERO,
+                });
+                groups.last_mut().expect("just pushed")
+            }
+        };
+        group.basis += line.line_net;
+        if let Some(exemption) = exemption {
+            if !group.exemptions.contains(&exemption) {
+                group.exemptions.push(exemption);
+            }
         }
     }
     groups
 }
 
 fn party_xml(tag: &str, party: &EInvoiceParty) -> String {
-    let mut xml = format!(
-        "<ram:{tag}><ram:Name>{}</ram:Name>",
+    let mut xml = format!("<ram:{tag}>");
+    // BR-CO-26: a seller without a VAT id still needs an identifier (BT-29);
+    // the tax number serves as one and is repeated as BT-32 below.
+    if tag == "SellerTradeParty" && text(&party.vat_id).is_none() {
+        if let Some(tax_number) = text(&party.tax_number) {
+            xml.push_str(&format!("<ram:ID>{}</ram:ID>", escape(tax_number)));
+        }
+    }
+    xml.push_str(&format!(
+        "<ram:Name>{}</ram:Name>",
         escape(party.name.trim())
-    );
+    ));
     xml.push_str("<ram:PostalTradeAddress>");
     if let Some(postcode) = text(&party.postcode) {
         xml.push_str(&format!(
@@ -342,16 +373,24 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             "<ram:ApplicableTradeTax><ram:CalculatedAmount>{}</ram:CalculatedAmount><ram:TypeCode>VAT</ram:TypeCode>",
             money(vat_amount(group.basis, group.rate))
         ));
-        if let Some(reason) = group.exemption {
+        if let Some(reason) = group.exemption_reason() {
             xml.push_str(&format!(
                 "<ram:ExemptionReason>{}</ram:ExemptionReason>",
-                escape(reason)
+                escape(&reason)
             ));
         }
         xml.push_str(&format!(
-            "<ram:BasisAmount>{}</ram:BasisAmount><ram:CategoryCode>{}</ram:CategoryCode><ram:RateApplicablePercent>{}</ram:RateApplicablePercent></ram:ApplicableTradeTax>",
+            "<ram:BasisAmount>{}</ram:BasisAmount><ram:CategoryCode>{}</ram:CategoryCode>",
             money(group.basis),
             group.category,
+        ));
+        if let Some(code) = group.exemption_code() {
+            xml.push_str(&format!(
+                "<ram:ExemptionReasonCode>{code}</ram:ExemptionReasonCode>"
+            ));
+        }
+        xml.push_str(&format!(
+            "<ram:RateApplicablePercent>{}</ram:RateApplicablePercent></ram:ApplicableTradeTax>",
             plain(group.rate)
         ));
     }
@@ -555,6 +594,8 @@ mod tests {
         assert!(!xml.contains("RoundingAmount"));
         assert!(xml.contains("<ram:CategoryCode>E</ram:CategoryCode>"));
         assert!(xml.contains(PASSTHROUGH_EXEMPTION));
+        // Pass-through only: no medical exemption code on the exempt breakdown.
+        assert!(!xml.contains("<ram:ExemptionReasonCode>"));
         assert!(xml.contains("<ram:IBANID>DE02120300000000202051</ram:IBANID>"));
         assert!(xml.contains("Danke &amp; bis bald &lt;GMed&gt;"));
         assert!(xml.contains(r#"<udt:DateTimeString format="102">20260917</udt:DateTimeString>"#));
@@ -642,5 +683,72 @@ mod tests {
             .decompressed_content()
             .unwrap_or_else(|_| embedded.content.clone());
         assert_eq!(String::from_utf8(content).unwrap(), xml);
+    }
+
+    /// Exempt-only invoice from a seller without a USt-IdNr., the situation
+    /// of a provider whose turnover is § 4 Nr. 14 UStG medical care.
+    fn sample_exempt_only() -> EInvoice {
+        let mut invoice = sample();
+        invoice.number = "INV-2026-0002".to_string();
+        invoice.seller.vat_id = None;
+        invoice.seller.tax_number = Some("143/123/45678".to_string());
+        invoice.lines = vec![
+            EInvoiceLine {
+                name: "Ärztliche Konsultation".to_string(),
+                quantity: dec("1"),
+                unit_net: dec("145"),
+                line_net: dec("145"),
+                vat_rate: dec("0"),
+                is_cost_passthrough: false,
+            },
+            EInvoiceLine {
+                name: "Klinikanzahlung".to_string(),
+                quantity: dec("1"),
+                unit_net: dec("1000"),
+                line_net: dec("1000"),
+                vat_rate: dec("0"),
+                is_cost_passthrough: true,
+            },
+        ];
+        invoice.total_gross = dec("1145");
+        invoice.prepaid_amount = Decimal::ZERO;
+        invoice
+    }
+
+    #[test]
+    fn exempt_lines_share_one_breakdown_and_a_seller_without_vat_id_is_identified() {
+        let xml = build_cii_xml(&sample_exempt_only());
+        assert_eq!(
+            xml.matches("<ram:CategoryCode>E</ram:CategoryCode>")
+                .count(),
+            3
+        );
+        assert_eq!(xml.matches("<ram:ExemptionReason>").count(), 1);
+        assert!(xml.contains(&format!("{ZERO_RATE_EXEMPTION}; {PASSTHROUGH_EXEMPTION}")));
+        assert!(!xml.contains("<ram:ExemptionReasonCode>"));
+        assert!(xml.contains("<ram:BasisAmount>1145.00</ram:BasisAmount>"));
+        assert!(xml.contains("<ram:SellerTradeParty><ram:ID>143/123/45678</ram:ID>"));
+        assert!(xml.contains(r#"<ram:ID schemeID="FC">143/123/45678</ram:ID>"#));
+        let mut medical_only = sample_exempt_only();
+        medical_only.lines.truncate(1);
+        medical_only.total_gross = dec("145");
+        let xml = build_cii_xml(&medical_only);
+        assert!(xml.contains("<ram:ExemptionReasonCode>VATEX-EU-132</ram:ExemptionReasonCode>"));
+        let with_vat_id = sample();
+        assert!(!build_cii_xml(&with_vat_id).contains("<ram:SellerTradeParty><ram:ID>"));
+    }
+
+    /// CI validates these files with the official EN 16931 rules (Mustang).
+    #[test]
+    fn samples_can_be_exported_for_external_validation() {
+        let Ok(dir) = std::env::var("EINVOICE_SAMPLE_DIR") else {
+            return;
+        };
+        std::fs::create_dir_all(&dir).unwrap();
+        for invoice in [sample(), sample_exempt_only()] {
+            assert!(missing_requirements(&invoice).is_empty());
+            let path = std::path::Path::new(&dir).join(format!("{}.xml", invoice.number));
+            std::fs::write(path, build_cii_xml(&invoice)).unwrap();
+        }
     }
 }

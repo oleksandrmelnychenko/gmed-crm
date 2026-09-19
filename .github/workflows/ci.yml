@@ -331,6 +331,51 @@ jobs:
           -f docker-compose.ghcr.yml
           config > /dev/null
 
+  einvoice-validation:
+    # Outgoing e-invoices must pass the official EN 16931 / ZUGFeRD rules, not
+    # only our own arithmetic. The samples come from the Rust unit tests.
+    runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+      MUSTANG_VERSION: 2.26.0
+      MUSTANG_SHA256: 42d7868cb68264874a7b8cab4c3587b03b23ccc7cd72373da917f66758bb9736
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Export sample e-invoices
+        run: EINVOICE_SAMPLE_DIR="$PWD/target/einvoice-samples" cargo test -p gmed-server --locked --lib zugferd::tests::samples_can_be_exported_for_external_validation
+
+      - name: Download Mustang validator
+        run: |
+          curl -sSL -o Mustang-CLI.jar "https://github.com/ZUGFeRD/mustangproject/releases/download/core-${MUSTANG_VERSION}/Mustang-CLI-${MUSTANG_VERSION}.jar"
+          echo "${MUSTANG_SHA256}  Mustang-CLI.jar" | sha256sum -c -
+
+      - name: Validate against EN 16931 (Schematron)
+        run: |
+          set -euo pipefail
+          status=0
+          for file in target/einvoice-samples/*.xml; do
+            echo "== $file"
+            if ! java -Xmx1G -Dfile.encoding=UTF-8 -jar Mustang-CLI.jar --action validate --source "$file" --no-notices 2>/dev/null | tee "$file.report.xml" | grep -q '<summary status="valid"/>'; then
+              grep -oE '\[BR[^]]*\][^<]{0,240}' "$file.report.xml" | sort -u || true
+              status=1
+            fi
+          done
+          exit "$status"
+
   hygiene:
     runs-on: ubuntu-latest
     steps:
