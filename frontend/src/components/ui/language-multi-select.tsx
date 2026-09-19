@@ -201,3 +201,12 @@ export function LanguageMultiSelect({
     </div>
   );
 }
+
+/** English language name for search text, so "Russian" finds "Русский (ru)". */
+export function englishLanguageName(code: string): string {
+  try {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}

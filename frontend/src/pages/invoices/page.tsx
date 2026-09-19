@@ -579,6 +579,7 @@ function useStaffInvoicesPageContent() {
     reversePayment: lang === "de" ? "Zahlung stornieren" : "Сторнировать платёж",
     reversalReason: lang === "de" ? "Stornogrund" : "Причина сторнирования",
     reversed: lang === "de" ? "Storniert" : "Сторнирован",
+    correctionNotePrefix: lang === "de" ? "Korrektur: " : "Исправление: ",
     refunds: lang === "de" ? "Rückzahlungen" : "Возвраты пациенту",
     refundsDescription:
       lang === "de"
@@ -1677,7 +1678,8 @@ function useStaffInvoicesPageContent() {
       setCreateError(null);
       setReloadToken((current) => current + 1);
       setSelectedInvoiceId(created.id);
-      syncQuery({ invoice: created.id }, { replace: false });
+      // Drop the create flag so a remount never reopens the dialog over the new invoice.
+      syncQuery({ invoice: created.id, create: null }, { replace: false });
     } catch (error) {
       setCreateError(invoiceCreationErrorMessage(error, lang, t.common_error));
     } finally {
@@ -2832,7 +2834,7 @@ function useStaffInvoicesPageContent() {
                                       payment.payment_method === "legacy_import" &&
                                       payment.note === "Imported opening payment balance"
                                         ? text.importedOpeningPaymentNote
-                                        : payment.note}
+                                        : payment.note.replace(/^Correction: /, text.correctionNotePrefix)}
                                     </div>
                                   ) : null}
                                   {payment.created_by_name ? (
