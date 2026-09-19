@@ -1182,7 +1182,7 @@ function useEditAppointmentSectionContentContent({
               ))}
             </NativeComboboxSelect>
           </Field>
-          <Field compact label={tr.appointments_order}>
+          <Field compact label={appointmentText("appointments_order")}>
             <NativeComboboxSelect
               value={form.orderId}
               onChange={(event) =>
