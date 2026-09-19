@@ -370,3 +370,28 @@
   color: #4b5563;
   text-decoration: underline;
 }
+
+.gmed-login-totp {
+  width: 100%;
+  padding: 0 2rem;
+  text-align: center;
+}
+
+.gmed-login-code {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 1.45rem;
+  font-weight: 500;
+  letter-spacing: 0.32em;
+}
+
+.gmed-login-code::placeholder {
+  letter-spacing: 0.32em;
+}
+
+.gmed-login-totp-cancel {
+  margin: 1rem auto 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}

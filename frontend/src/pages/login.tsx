@@ -11,7 +11,6 @@ import {
   ArrowRight,
   ArrowUpLeft,
   Clock,
-  KeyRound,
   Eye,
   EyeOff,
   Globe,
@@ -357,37 +356,44 @@ export function LoginPage() {
 
           {totpChallenge && (
             <div className="gmed-login-mfa" data-testid="login-totp">
-              <form onSubmit={handleTotpSubmit} className="flex flex-col items-center gap-4 px-8 text-center">
-                <div className="flex size-16 items-center justify-center rounded-2xl bg-sky-50">
-                  <KeyRound className="size-8 text-sky-500" />
+              <form onSubmit={handleTotpSubmit} className="gmed-login-form gmed-login-totp" noValidate>
+                <div className="gmed-login-heading">
+                  <h1>{tr.login_totp_title}</h1>
+                  <p>{tr.login_totp_hint}</p>
                 </div>
-                <h3 className="text-lg font-semibold text-slate-950">{tr.login_totp_title}</h3>
-                <p className="max-w-xs text-sm text-slate-500">{tr.login_totp_hint}</p>
-                <label className="gmed-login-sr-only" htmlFor="totp-code">{tr.login_totp_code}</label>
-                <input
-                  id="totp-code"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  autoFocus
-                  maxLength={7}
-                  placeholder="123 456"
-                  className="h-11 w-44 rounded-xl border border-slate-300 text-center font-mono text-lg tracking-widest"
-                  value={totpCode}
-                  onChange={(event) => dispatchLoginState({ totpCode: event.target.value })}
-                />
-                {error ? <span className="gmed-login-field-error">{error}</span> : null}
-                <Button type="submit" className="rounded-xl" disabled={loading || totpCode.replace(/\s/g, "").length < 6}>
-                  {tr.login_totp_submit}
-                </Button>
-                <Button
+                <div className="gmed-login-field">
+                  <label className="gmed-login-sr-only" htmlFor="totp-code">{tr.login_totp_code}</label>
+                  <input
+                    id="totp-code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    autoFocus
+                    maxLength={7}
+                    placeholder="123 456"
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? "totp-code-error" : undefined}
+                    className={`gmed-login-input gmed-login-code${error ? " is-error" : ""}`}
+                    value={totpCode}
+                    onChange={(event) => dispatchLoginState({ totpCode: event.target.value, error: "" })}
+                  />
+                  <FieldError id="totp-code-error" message={error} />
+                </div>
+                <button
+                  className="gmed-login-submit"
+                  type="submit"
+                  disabled={loading || totpCode.replace(/\s/g, "").length < 6}
+                >
+                  <span>{loading ? tr.login_loading : tr.login_totp_submit}</span>
+                  <ArrowRight aria-hidden="true" />
+                </button>
+                <button
                   type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-slate-400"
+                  className="gmed-login-home gmed-login-totp-cancel"
                   onClick={() => dispatchLoginState({ totpChallenge: null, totpCode: "", error: "" })}
                 >
-                  {tr.common_cancel}
-                </Button>
+                  <ArrowUpLeft aria-hidden="true" />
+                  <span>{tr.common_cancel}</span>
+                </button>
               </form>
             </div>
           )}
