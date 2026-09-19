@@ -3590,7 +3590,7 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
 }
 
 #[tokio::test]
-async fn repeat_intake_is_blocked_by_a_debt_management_hold_and_marked_in_the_list() {
+async fn repeat_intake_shows_overdue_debt_and_is_marked_in_the_list() {
     let Some(app) = test_app().await else { return };
     let pm = app.auth_header("patient_manager");
     let patient = seed_repeat_patient(&app, true).await;
@@ -3657,18 +3657,19 @@ async fn repeat_intake_is_blocked_by_a_debt_management_hold_and_marked_in_the_li
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{recheck}");
-    assert_eq!(recheck["debt_hold"], true, "{recheck}");
+    assert_eq!(recheck["overdue_invoice_count"], 1, "{recheck}");
 
     let (status, detail) =
         json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{detail}");
+    // Debt is surfaced for attention; since 2026-09 it never blocks by itself.
     let reasons = detail["readiness"]["blocking_reasons"]
         .as_array()
         .expect("blocking reasons");
     assert!(
-        reasons
+        !reasons
             .iter()
-            .any(|reason| reason == "Patient is in debt-management hold"),
+            .any(|reason| reason.as_str().unwrap_or_default().contains("debt")),
         "{reasons:?}"
     );
     let debt_check = detail["readiness"]["checks"]
@@ -3707,17 +3708,17 @@ async fn returning_patient_is_found_by_email_when_the_lead_has_another_spelling(
         .execute(pool)
         .await
         .unwrap();
-    // Married name, no birth date: only the e-mail still matches.
+    // Married name and a mistyped birth date: only the e-mail still matches.
     let lead_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO leads (
                 first_name, last_name, email, country, primary_language,
-                legal_sex, primary_concern_text, requested_specialties,
+                date_of_birth, legal_sex, primary_concern_text, requested_specialties,
                 qualification_status, compliance_status,
                 consent_healthcare, consent_privacy_practices,
                 intake_source, intake_model, created_by
            ) VALUES (
                 'Olena', 'Schmidt', $1, 'DE', 'de',
-                'female', 'Follow-up concern', '["orthopedics"]'::jsonb,
+                DATE '1979-11-21', 'female', 'Follow-up concern', '["orthopedics"]'::jsonb,
                 'qualified', 'signed', true, true,
                 'staff_wizard', 'patient_first', $2
            ) RETURNING id"#,
