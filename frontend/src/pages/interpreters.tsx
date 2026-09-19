@@ -1158,7 +1158,7 @@ export function InterpretersPage() {
         employmentKind: accountDraft.employmentKind,
         access: {
           level: "appointment_only",
-          autoBlockPolicy: "manual",
+          autoBlockPolicy: "immediate",
         },
       };
 
