@@ -72,7 +72,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
-import { formatUiText, useLang } from "@/lib/i18n";
+import { formatUiText, uiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import type { CreateLeadBody, LeadDetail, LeadsStats } from "@/lib/api/types";
@@ -705,9 +705,14 @@ function useLeadsPageContent() {
         render: (row) => {
           const type = leadTypeFromLead(row);
           return (
-            <StatusBadge tone={leadTypeTone(type)}>
-              {leadTypeLabel(type, t)}
-            </StatusBadge>
+            <span className="flex flex-wrap items-center gap-1">
+              <StatusBadge tone={leadTypeTone(type)}>
+                {leadTypeLabel(type, t)}
+              </StatusBadge>
+              {row.repeat_patient_id ? (
+                <StatusBadge tone="success">{uiText("patients_repeat_intake", lang)}</StatusBadge>
+              ) : null}
+            </span>
           );
         },
       },

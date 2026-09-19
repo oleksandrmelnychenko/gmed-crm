@@ -2032,6 +2032,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
+    "Patient is in debt-management hold": tx("Пациент в сценарии работы с задолженностью — сначала закройте долг", "Patient befindet sich im Forderungsmanagement – zuerst die Forderung klären"),
   };
   return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
 }
@@ -2068,6 +2069,7 @@ function readinessReasonStep(reason: string): StepId {
     "Preliminary cost calculation document is missing": "commercial",
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
+    "Patient is in debt-management hold": "commercial",
   };
   return steps[reason] ?? "release";
 }

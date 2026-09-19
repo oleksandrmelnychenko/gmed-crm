@@ -398,6 +398,7 @@ async fn list_leads(
                   intake_source, flow, qualification_status, compliance_status,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
+                  repeat_patient_id,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR qualification_status != 'archived')
@@ -543,6 +544,8 @@ async fn list_leads(
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
                     "qualification_ready": readiness.qualification_ready,
                     "conversion_ready": readiness.conversion_ready,
+                    // Phase 1 classification: a brand-new lead or an existing customer.
+                    "repeat_patient_id": r.try_get::<Option<Uuid>, _>("repeat_patient_id").unwrap_or_default(),
                     "failed_outcome": {
                         "status": r
                             .try_get::<String, _>("failed_outcome_status")
@@ -1191,6 +1194,11 @@ struct LeadConversionReadinessInput {
     quote_accepted: bool,
     cost_estimate_document_generated: bool,
     prepayment_ready: bool,
+    /// Existing customer (2B): a debt-management hold stops a new order.
+    debt_hold: bool,
+    debt_hold_reason: Option<String>,
+    /// Existing customer (2B): a package-covered order needs no separate Kostenvoranschlag.
+    package_covered: bool,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -1247,11 +1255,12 @@ fn evaluate_lead_conversion_readiness(
         && input.order_exists
         && input.order_service_ready
         && input.order_document_generated
-        && input.order_cost_estimate_document_generated
+        && (input.package_covered || input.order_cost_estimate_document_generated)
         && input.order_signed_patient
         && input.order_signed_agency
-        && input.quote_accepted
-        && input.cost_estimate_document_generated;
+        && (input.package_covered || input.quote_accepted)
+        && (input.package_covered || input.cost_estimate_document_generated)
+        && !input.debt_hold;
 
     let checks = vec![
         json!({
@@ -1439,6 +1448,13 @@ fn evaluate_lead_conversion_readiness(
             "stage": "commercial",
         }),
         json!({
+            "key": "debt_clear",
+            "label": "No debt-management hold",
+            "passed": !input.debt_hold,
+            "blocking_for": "conversion",
+            "stage": "commercial",
+        }),
+        json!({
             "key": "prepayment_ready",
             "label": "Required prepayment received",
             "passed": input.prepayment_ready,
@@ -1511,7 +1527,7 @@ fn evaluate_lead_conversion_readiness(
     if !input.order_document_generated {
         conversion_reasons.push("Order document is missing".to_string());
     }
-    if !input.order_cost_estimate_document_generated {
+    if !input.package_covered && !input.order_cost_estimate_document_generated {
         conversion_reasons.push("Order cost estimate document is missing".to_string());
     }
     if !input.order_signed_patient {
@@ -1520,11 +1536,14 @@ fn evaluate_lead_conversion_readiness(
     if !input.order_signed_agency {
         conversion_reasons.push("Agency order signature is missing".to_string());
     }
-    if !input.quote_accepted {
+    if !input.package_covered && !input.quote_accepted {
         conversion_reasons.push("Quote is not accepted".to_string());
     }
-    if !input.cost_estimate_document_generated {
+    if !input.package_covered && !input.cost_estimate_document_generated {
         conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
+    }
+    if input.debt_hold {
+        conversion_reasons.push("Patient is in debt-management hold".to_string());
     }
     if input.converted_patient_id.is_some() {
         conversion_reasons.push("Lead is already converted".to_string());
@@ -1619,6 +1638,9 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         // separate readiness checks. A later catalog-price change invalidates
         // the quote, but it must not make money already received disappear.
         prepayment_ready: row.try_get("prepayment_ready").unwrap_or(false),
+        debt_hold: false,
+        debt_hold_reason: None,
+        package_covered: false,
     }
 }
 
@@ -1844,7 +1866,8 @@ async fn apply_repeat_patient_readiness(
         r#"SELECT p.id AS patient_id, p.legal_status,
                   fc.patient_id AS contract_patient_id, fc.lead_id AS contract_lead_id,
                   fc.status AS contract_status, fc.signed_at,
-                  fc.valid_from, fc.valid_to, o.date_from, o.date_to
+                  fc.valid_from, fc.valid_to, o.date_from, o.date_to,
+                  o.package_coverage_status
            FROM leads l
            JOIN patients p ON p.id = l.prospect_patient_id
            LEFT JOIN orders o ON o.source_lead_id = l.id
@@ -1904,6 +1927,18 @@ async fn apply_repeat_patient_readiness(
     if inherited && input.contract_signed {
         input.framework_document_generated = true;
     }
+    // Process mapping 2B: an order covered by the running package skips the
+    // separate Kostenvoranschlag, and a debt-management hold blocks a new order.
+    input.package_covered = row
+        .try_get::<Option<String>, _>("package_coverage_status")
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("covered");
+    let debt =
+        super::debt_management::load_patient_debt_management_state(state, patient_id).await?;
+    input.debt_hold = debt.blocking;
+    input.debt_hold_reason = debt.blocking_reason;
     Ok(())
 }
 
@@ -4276,15 +4311,41 @@ async fn create_prospect_patient(
                       lifecycle_status, email, residence_country
                FROM patients
                WHERE lifecycle_status IN ('active', 'inactive')
-                 AND lower(btrim(first_name)) = lower(btrim($1))
-                 AND lower(btrim(last_name)) = lower(btrim($2))
-                 AND birth_date = $3
-               ORDER BY created_at DESC
+                 AND (
+                   (lower(btrim(first_name)) = lower(btrim($1))
+                    AND lower(btrim(last_name)) = lower(btrim($2))
+                    AND birth_date = $3)
+                   -- A returning patient often writes in with a new spelling or no
+                   -- birth date; the same e-mail or phone still identifies them.
+                   OR ($4::text IS NOT NULL AND lower(btrim(email)) = lower(btrim($4)))
+                   OR ($5::text IS NOT NULL AND length($5) >= 6
+                       AND phone_digits(phone_primary) LIKE '%' || $5 || '%')
+                 )
+               ORDER BY (lower(btrim(last_name)) = lower(btrim($2)) AND birth_date = $3) DESC,
+                        created_at DESC
                LIMIT 5"#,
         )
         .bind(&first_name)
         .bind(&last_name)
         .bind(birth_date)
+        .bind(
+            lead.try_get::<Option<String>, _>("email")
+                .ok()
+                .flatten()
+                .filter(|value| !value.trim().is_empty()),
+        )
+        .bind(
+            lead.try_get::<Option<String>, _>("phone")
+                .ok()
+                .flatten()
+                .map(|value| {
+                    value
+                        .chars()
+                        .filter(char::is_ascii_digit)
+                        .collect::<String>()
+                })
+                .filter(|digits| !digits.is_empty()),
+        )
         .fetch_all(&mut *tx)
         .await
         {
@@ -6839,6 +6900,42 @@ mod questionnaire_mapping_tests {
 mod lead_conversion_readiness_tests {
     use super::*;
 
+    #[test]
+    fn debt_management_hold_blocks_conversion_of_an_existing_customer() {
+        let mut input = ready_input();
+        input.debt_hold = true;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec!["Patient is in debt-management hold".to_string()]
+        );
+        let check = readiness.payload["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["key"] == "debt_clear")
+            .unwrap();
+        assert_eq!(check["passed"], false);
+    }
+
+    #[test]
+    fn package_covered_repeat_order_needs_no_separate_cost_estimate() {
+        let mut input = ready_input();
+        input.package_covered = true;
+        input.order_cost_estimate_document_generated = false;
+        input.quote_accepted = false;
+        input.cost_estimate_document_generated = false;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(
+            readiness.conversion_ready,
+            "{:?}",
+            readiness.conversion_reasons
+        );
+        input.package_covered = false;
+        assert!(!evaluate_lead_conversion_readiness(&input).conversion_ready);
+    }
+
     fn ready_input() -> LeadConversionReadinessInput {
         LeadConversionReadinessInput {
             qualification_status: "qualified".to_string(),
@@ -6874,6 +6971,9 @@ mod lead_conversion_readiness_tests {
             quote_accepted: true,
             cost_estimate_document_generated: true,
             prepayment_ready: true,
+            debt_hold: false,
+            debt_hold_reason: None,
+            package_covered: false,
         }
     }
 
