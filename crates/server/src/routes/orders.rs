@@ -87,6 +87,10 @@ pub fn router() -> Router<AppState> {
             post(approve_leistung),
         )
         .route(
+            "/orders/{order_id}/leistungen/{leistung_id}/deliver",
+            post(deliver_leistung),
+        )
+        .route(
             "/orders/{order_id}/leistungen/{leistung_id}/planned-cost",
             post(update_leistung_planned_cost),
         )
@@ -8240,6 +8244,55 @@ async fn update_leistung_planned_cost(
         "idempotent_replay": false,
     }))
     .into_response()
+}
+
+/// Staff records that a planned service was actually provided; only a delivered
+/// service can be approved and settled.
+async fn deliver_leistung(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, leistung_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Concierge]) {
+        return e;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(resp) => return resp,
+    }
+
+    match sqlx::query(
+        "UPDATE order_leistungen SET status = 'delivered', delivered_at = now()
+         WHERE id = $2 AND order_id = $1 AND status = 'planned'",
+    )
+    .bind(order_id)
+    .bind(leistung_id)
+    .execute(&state.db)
+    .await
+    {
+        Ok(r) if r.rows_affected() > 0 => {
+            crate::realtime::publish_order_event(
+                &state,
+                Some(auth.user_id),
+                "order.leistung_delivered",
+                order_id,
+                serde_json::json!({
+                    "leistung_id": leistung_id,
+                }),
+            )
+            .await;
+            Json(serde_json::json!({"ok": true})).into_response()
+        }
+        Ok(_) => err(
+            StatusCode::NOT_FOUND,
+            "Leistung not found or not in planned status",
+        ),
+        Err(e) => {
+            tracing::error!(error = %e, "deliver leistung");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
 }
 
 async fn approve_leistung(

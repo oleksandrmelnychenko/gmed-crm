@@ -117,6 +117,7 @@ import {
 import { mergeOrderDraft } from "./model/order-draft";
 import {
   approveOrderLeistung,
+  deliverOrderLeistung,
   completeWorkflowChecklistItem,
   createExternalInvoice,
   createOrder,
@@ -2944,6 +2945,22 @@ function useOrdersPageContent() {
       setPlannedCostError(error instanceof Error ? error.message : String(error));
     } finally {
       setPlannedCostSaving(false);
+    }
+  }
+
+  async function handleDeliverLeistung(leistungId: string) {
+    if (!selectedOrderId) return;
+
+    setApprovingLeistungId(leistungId);
+    try {
+      await deliverOrderLeistung(selectedOrderId, leistungId);
+      triggerReload();
+    } catch (error) {
+      setDetailError(
+        error instanceof Error ? error.message : l("orders_error_approve_leistung"),
+      );
+    } finally {
+      setApprovingLeistungId(null);
     }
   }
 
@@ -6955,6 +6972,26 @@ function useOrdersPageContent() {
                                         }}
                                       >
                                         {lang === "de" ? "Geplante Partnerkosten bearbeiten" : "Изменить плановые затраты на партнёра"}
+                                      </Button>
+                                    ) : null}
+                                    {permissions.canApproveLeistung &&
+                                    leistung.status === "planned" ? (
+                                      <Button
+                                        variant="outline"
+                                        className="mt-4 h-8 w-full rounded-lg"
+                                        onClick={() =>
+                                          void handleDeliverLeistung(leistung.id)
+                                        }
+                                        disabled={
+                                          approvingLeistungId === leistung.id
+                                        }
+                                      >
+                                        {approvingLeistungId === leistung.id ? (
+                                          <LoaderCircle className="size-4 animate-spin" />
+                                        ) : (
+                                          <CheckCircle2 className="size-4" />
+                                        )}
+                                        {lang === "de" ? "Als erbracht markieren" : "Отметить как оказанную"}
                                       </Button>
                                     ) : null}
                                     {permissions.canApproveLeistung &&

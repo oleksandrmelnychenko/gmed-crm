@@ -375,6 +375,10 @@ export function approveOrderLeistung(orderId: string, leistungId: string) {
   return post(`/orders/${orderId}/leistungen/${leistungId}/approve`);
 }
 
+export function deliverOrderLeistung(orderId: string, leistungId: string) {
+  return post(`/orders/${orderId}/leistungen/${leistungId}/deliver`);
+}
+
 export function createExternalInvoice(orderId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/external-invoices`, payload);
 }
