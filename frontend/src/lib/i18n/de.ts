@@ -75,8 +75,8 @@ export const de = {
   login_mfa_pending_msg:
     "Warten Sie, bis ein Administrator Ihre Anmeldung genehmigt.",
   login_mfa_checking: "Prüfung läuft...",
-  login_totp_title: "Zweiter Faktor",
-  login_totp_hint: "Geben Sie den sechsstelligen Code aus Ihrer Authenticator-App ein.",
+  login_totp_title: "Anmeldung bestätigen",
+  login_totp_hint: "Geben Sie den Code aus der Authenticator-App auf Ihrem Telefon ein.",
   login_totp_code: "Code",
   login_totp_submit: "Anmelden",
   login_totp_error: "Der Code stimmt nicht. Versuchen Sie es erneut oder melden Sie sich neu an.",

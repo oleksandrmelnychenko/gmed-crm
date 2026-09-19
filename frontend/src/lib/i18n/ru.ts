@@ -75,8 +75,8 @@ export const ru = {
   login_mfa_pending_msg:
     "Ожидайте, пока администратор подтвердит ваш вход.",
   login_mfa_checking: "Проверка...",
-  login_totp_title: "Второй фактор",
-  login_totp_hint: "Введите шестизначный код из приложения-аутентификатора.",
+  login_totp_title: "Подтверждение входа",
+  login_totp_hint: "Введите код из приложения-аутентификатора на вашем телефоне.",
   login_totp_code: "Код",
   login_totp_submit: "Войти",
   login_totp_error: "Код не подходит. Попробуйте ещё раз или войдите заново.",
