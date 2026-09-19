@@ -5,6 +5,10 @@ export function invoiceCreationErrorMessage(error: unknown, lang: string, fallba
     return de ? "Für ein abgelehntes oder abgelaufenes Angebot kann keine Rechnung erstellt werden."
       : "Нельзя выставить счёт по отклонённому или просроченному предложению.";
   }
+  if (message === "The order behind this quote is still a draft or was cancelled; confirm the order preparation before invoicing") {
+    return de ? "Der Auftrag hinter diesem Angebot ist noch ein Entwurf oder wurde storniert. Schließen Sie die Auftragsvorbereitung ab, bevor Sie abrechnen."
+      : "Заказ по этому предложению ещё черновик или отменён. Завершите подготовку заказа, прежде чем выставлять счёт.";
+  }
   if (message === "An active invoice already exists for this quote scope") {
     return de ? "Für diesen Angebotsumfang besteht bereits eine aktive Rechnung. Prüfen Sie die vorhandenen Rechnungen."
       : "Для этих позиций предложения уже существует действующий счёт. Проверьте список счетов.";
