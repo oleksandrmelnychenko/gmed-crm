@@ -83,6 +83,7 @@ fn build_app_with_workspace_gate(
             .merge(datev::public_router())
             .merge(routes::leads::public_router())
             .merge(routes::legal::public_router())
+            .merge(routes::totp::public_router())
             .merge(routes::messages::public_router())
             .merge(routes::realtime::public_router())
             .merge(routes::e2e_support::public_router()),

@@ -382,6 +382,53 @@ async fn login(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.chars().take(512).collect::<String>());
 
+    // An enrolled authenticator app is asked for before any session exists.
+    match super::totp::has_confirmed_totp(&state, user.id).await {
+        Ok(true) => {
+            match super::totp::open_challenge(
+                &state,
+                user.id,
+                ip.as_deref(),
+                ua.as_deref(),
+                body.device_info.as_ref(),
+            )
+            .await
+            {
+                Ok(challenge_id) => {
+                    state.audit_sender.try_send(audit::auth_event(
+                        "login_totp_requested",
+                        Some(user.id),
+                        ip_hash_opt(&state, ip.as_deref()),
+                        json!({ "challenge_id": challenge_id }),
+                    ));
+                    return Json(serde_json::json!({
+                        "status": "totp_required",
+                        "challenge_id": challenge_id,
+                        "message": "Enter the code from your authenticator app"
+                    }))
+                    .into_response();
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to open TOTP challenge");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "internal",
+                        "An internal error occurred",
+                    );
+                }
+            }
+        }
+        Ok(false) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to check TOTP enrolment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                "An internal error occurred",
+            );
+        }
+    }
+
     if user.mfa_required {
         let pending = sqlx::query!(
             "INSERT INTO pending_logins (user_id, ip_address, user_agent, device_info)

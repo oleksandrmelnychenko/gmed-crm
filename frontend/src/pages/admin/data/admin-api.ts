@@ -368,3 +368,7 @@ export function fetchPatientRecipients(patientId: string) {
     cache: "no-store",
   });
 }
+
+export function resetUserTotp(userId: string) {
+  return postJson<{ ok: boolean }>(`/users/${userId}/totp/reset`);
+}

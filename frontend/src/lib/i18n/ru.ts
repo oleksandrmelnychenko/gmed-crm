@@ -73,6 +73,11 @@ export const ru = {
   login_mfa_pending_msg:
     "Ожидайте, пока администратор подтвердит ваш вход.",
   login_mfa_checking: "Проверка...",
+  login_totp_title: "Второй фактор",
+  login_totp_hint: "Введите шестизначный код из приложения-аутентификатора.",
+  login_totp_code: "Код",
+  login_totp_submit: "Войти",
+  login_totp_error: "Код не подходит. Попробуйте ещё раз или войдите заново.",
   login_sign_in_subtitle:
     "Продолжить в операционное пространство для клиник, врачей и приёмов.",
   login_brand_tagline: "Медицинское консьерж-агентство",
@@ -979,6 +984,7 @@ export const ru = {
   nav_security: "Безопасность",
   nav_health: "Состояние системы",
   nav_compliance: "DSGVO",
+  nav_two_factor: "Двухфакторный вход",
   nav_incident_report: "Сообщить об инциденте",
   nav_legal_notice: "Impressum и защита данных",
   nav_notifications: "Уведомления",

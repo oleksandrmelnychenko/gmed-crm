@@ -32,6 +32,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  completeTotp: (challengeId: string, code: string) => Promise<void>;
   checkPending: (pendingId: string) => Promise<PendingLoginStatus>;
 }
 
@@ -48,6 +49,20 @@ interface PendingLoginResponse {
   status: "mfa_pending";
   pending_id: string;
   message?: string;
+}
+
+interface TotpRequiredResponse {
+  status: "totp_required";
+  challenge_id: string;
+  message?: string;
+}
+
+export class TotpRequiredError extends Error {
+  challengeId: string;
+  constructor(challengeId: string, message?: string) {
+    super(message ?? uiText("auth_login_requires_totp"));
+    this.challengeId = challengeId;
+  }
 }
 
 export class PendingLoginError extends Error {
@@ -114,9 +129,15 @@ async function clearTokens() {
 }
 
 function isPendingLoginResponse(
-  value: AuthTokens | PendingLoginResponse
+  value: AuthTokens | PendingLoginResponse | TotpRequiredResponse
 ): value is PendingLoginResponse {
   return "status" in value && value.status === "mfa_pending";
+}
+
+function isTotpRequiredResponse(
+  value: AuthTokens | PendingLoginResponse | TotpRequiredResponse
+): value is TotpRequiredResponse {
+  return "status" in value && value.status === "totp_required";
 }
 
 async function parseError(response: Response) {
@@ -336,7 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const login = async (email: string, password: string) => {
-    const result = await fetchJson<AuthTokens | PendingLoginResponse>("/auth/login", {
+    const result = await fetchJson<AuthTokens | PendingLoginResponse | TotpRequiredResponse>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
@@ -344,7 +365,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (isPendingLoginResponse(result)) {
       throw new PendingLoginError(result.pending_id, result.message);
     }
+    if (isTotpRequiredResponse(result)) {
+      throw new TotpRequiredError(result.challenge_id, result.message);
+    }
 
+    await saveTokens(result);
+    const me = await fetchMe(result.access_token);
+    dispatchAuthState({ user: me });
+  };
+
+  // Second step of a sign-in: the authenticator code answers the challenge.
+  const completeTotp = async (challengeId: string, code: string) => {
+    const result = await fetchJson<AuthTokens>("/auth/totp", {
+      method: "POST",
+      body: JSON.stringify({ challenge_id: challengeId, code }),
+    });
     await saveTokens(result);
     const me = await fetchMe(result.access_token);
     dispatchAuthState({ user: me });
@@ -397,7 +432,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, checkPending }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, completeTotp, checkPending }}>
       {children}
     </AuthContext.Provider>
   );

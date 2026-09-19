@@ -291,6 +291,9 @@ const AdminHealthPage = lazy(() =>
 const LegalNoticePage = lazy(() =>
   import("@/pages/legal").then((module) => ({ default: module.LegalNoticePage })),
 );
+const TwoFactorPage = lazy(() =>
+  import("@/pages/two-factor").then((module) => ({ default: module.TwoFactorPage })),
+);
 const IncidentReportPage = lazy(() =>
   import("@/pages/incident-report").then((module) => ({ default: module.IncidentReportPage })),
 );
@@ -458,6 +461,7 @@ function AppRoutes() {
             <Route path="admin/health" element={<AdminHealthPage />} />
             <Route path="admin/compliance" element={<AdminCompliancePage />} />
             <Route path="incidents" element={<IncidentReportPage />} />
+            <Route path="security/two-factor" element={<TwoFactorPage />} />
             <Route path="admin/notifications" element={<AdminNotificationsPage />} />
             <Route path="admin/custom-fields" element={<AdminCustomFieldsPage />} />
             <Route path="admin/announcements" element={<AdminAnnouncementsPage />} />

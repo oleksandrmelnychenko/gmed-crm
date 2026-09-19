@@ -481,6 +481,13 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "main", labelKey: "nav_learning" },
   },
   {
+    id: "security/two-factor",
+    match: "exact",
+    path: "/security/two-factor",
+    roles: ALL_STAFF_ROLES,
+    nav: { section: "main", labelKey: "nav_two_factor" },
+  },
+  {
     id: "incidents",
     match: "exact",
     path: "/incidents",

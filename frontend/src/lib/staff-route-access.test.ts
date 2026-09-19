@@ -223,6 +223,7 @@ describe("first-release staff RBAC", () => {
       "/chat",
       "/notes",
       "/patients",
+      "/security/two-factor",
       "/incidents",
       "/",
     ]);

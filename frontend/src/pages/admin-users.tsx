@@ -47,6 +47,7 @@ import {
   createAdminUser,
   fetchAdminUsers,
   resetAdminUserPassword,
+  resetUserTotp,
   setAdminUserActive,
   unlockAdminUser,
   updateAdminUser,
@@ -910,6 +911,24 @@ function useAdminUsersPageContent() {
                       ))}
                     </NativeComboboxSelect>
                 </div>
+              </DotSection>
+              <DotSection title={t.uiText.twofactor_admin_reset}>
+                <p className="text-xs text-muted-foreground">{t.uiText.twofactor_admin_reset_hint}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 h-9 rounded-lg px-3.5"
+                  disabled={euSaving || !editUser}
+                  onClick={() => {
+                    if (!editUser) return;
+                    setEditError(null);
+                    resetUserTotp(editUser.id)
+                      .then(() => setEditError(t.uiText.twofactor_admin_reset_done))
+                      .catch((e: unknown) => setEditError(e instanceof Error ? e.message : String(e)));
+                  }}
+                >
+                  {t.uiText.twofactor_admin_reset}
+                </Button>
               </DotSection>
               <DotSection title={t.users_reset_password}>
                 <div className="grid grid-cols-2 gap-4">

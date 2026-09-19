@@ -78,6 +78,12 @@ export interface Translations
   login_mfa_rejected_msg: string;
   login_mfa_pending_msg: string;
   login_mfa_checking: string;
+  login_totp_title: string;
+  login_totp_hint: string;
+  login_totp_code: string;
+  login_totp_submit: string;
+  login_totp_error: string;
+  nav_two_factor: string;
   login_sign_in_subtitle: string;
   login_brand_tagline: string;
   login_back_home: string;

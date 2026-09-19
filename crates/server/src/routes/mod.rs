@@ -61,6 +61,7 @@ pub mod staff_access;
 pub mod stats;
 pub mod tasks;
 pub mod tax_profiles;
+pub mod totp;
 pub mod user_notifications;
 pub mod users;
 pub mod workflow_checklists;
@@ -74,6 +75,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(me::router())
         .merge(invoice_imports::router())
         .merge(auth::protected_router())
+        .merge(totp::protected_router())
         .merge(users::router())
         .merge(access_policies::router())
         .merge(patients::router())
