@@ -1844,7 +1844,9 @@ async fn second_advance_invoice_for_same_quote_is_rejected() {
 }
 
 #[tokio::test]
-async fn invoice_creation_requires_billing_release_gate() {
+// Invoices are issued without a separate accounting release: the order gate
+// only steers other order operations.
+async fn invoice_creation_does_not_wait_for_billing_release() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -1874,13 +1876,8 @@ async fn invoice_creation_requires_billing_release_gate() {
         Some(json!({ "invoice_type": "final" })),
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(
-        body["message"]
-            .as_str()
-            .unwrap()
-            .contains("billing release")
-    );
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["invoice_type"], "final");
 }
 
 #[tokio::test]

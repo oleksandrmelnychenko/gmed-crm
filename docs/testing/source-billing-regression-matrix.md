@@ -65,13 +65,13 @@
   Covers:
   invoice is materialized from quote snapshot, remains patient/order bound, and approved order services are moved to `invoiced`.
 
-- `invoice_creation_requires_billing_release_gate`
+- `invoice_creation_does_not_wait_for_billing_release`
   Source:
   `docs/requirements/01_process-mapping_ua.md:81`
   `docs/requirements/03_product-backlog_ua.md:486`
   `docs/diagrams/system-diagrams.md:414`
   Covers:
-  quote-to-invoice conversion is blocked until billing explicitly grants `Freigabe Abrechnung`; PM service approval alone is not enough.
+  quote-to-invoice conversion no longer waits for `Freigabe Abrechnung` (removed 2026-09-19 on request); the order gate still steers other order operations.
 
 - `second_active_non_advance_invoice_for_same_quote_is_rejected`
   Source:

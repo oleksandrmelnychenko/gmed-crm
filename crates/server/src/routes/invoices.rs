@@ -313,8 +313,6 @@ struct QuoteInvoiceContext {
     quote_number: String,
     order_number: String,
     quote_status: String,
-    billing_release_status: String,
-    package_coverage_status: String,
     total_net: Decimal,
     total_vat: Decimal,
     total_gross: Decimal,
@@ -2805,7 +2803,6 @@ async fn load_quote_invoice_context(
     let row = sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.total_net, q.total_vat, q.total_gross,
                   q.line_items, q.notes, o.patient_id, o.order_number, o.contract_id,
-                  o.billing_release_status, o.package_coverage_status,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
@@ -2834,12 +2831,6 @@ async fn load_quote_invoice_context(
         quote_number: row.try_get::<String, _>("quote_number").unwrap_or_default(),
         order_number: row.try_get::<String, _>("order_number").unwrap_or_default(),
         quote_status: row.try_get::<String, _>("status").unwrap_or_default(),
-        billing_release_status: row
-            .try_get::<String, _>("billing_release_status")
-            .unwrap_or_else(|_| "pending".to_string()),
-        package_coverage_status: row
-            .try_get::<String, _>("package_coverage_status")
-            .unwrap_or_else(|_| "unknown".to_string()),
         total_net: row
             .try_get::<Decimal, _>("total_net")
             .unwrap_or(Decimal::ZERO),
@@ -3323,15 +3314,6 @@ async fn validate_invoice_creation_for_quote(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Cannot invoice a rejected or expired quote",
         ));
-    }
-
-    if ctx.billing_release_status != "granted" {
-        let message = if ctx.package_coverage_status == "covered" {
-            "Order is package-covered and has no billing release for invoice creation"
-        } else {
-            "Order requires billing release before invoice creation"
-        };
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
     }
 
     let duplicate_exists: bool = if invoice_type == "advance" {
@@ -5121,7 +5103,7 @@ async fn create_patient_billing_invoice(
         .map(str::to_uppercase);
     if let Some(order_id) = body.order_id {
         let anchor = match sqlx::query(
-            r#"SELECT UPPER(currency) AS currency, status, billing_release_status
+            r#"SELECT UPPER(currency) AS currency, status
                FROM orders WHERE id = $1 AND patient_id = $2 FOR UPDATE"#,
         )
         .bind(order_id)
@@ -5148,16 +5130,6 @@ async fn create_patient_billing_invoice(
             return err(
                 StatusCode::CONFLICT,
                 "Cancelled orders cannot anchor a patient invoice",
-            );
-        }
-        if anchor
-            .try_get::<String, _>("billing_release_status")
-            .unwrap_or_default()
-            != "granted"
-        {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Order requires billing release before invoice creation",
             );
         }
         currency = Some(

@@ -1671,7 +1671,7 @@ function useStaffInvoicesPageContent() {
         due_date: createForm.dueDate || null,
         notes: createForm.notes.trim() || null,
         line_items: selectedLines,
-      }, selectedCreateQuote.order_id);
+      });
       clearApiCache();
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));

@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { AlertCircle, CheckCircle2, FileText, LoaderCircle, RefreshCw } from "lucide-react";
+import { useEffect, type FormEvent, type ReactNode, type SetStateAction } from "react";
+import { AlertCircle, FileText, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -7,12 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { CountBadge, checkboxClass, inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
-import { useAuth } from "@/lib/auth";
-import { clearApiCache } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { fetchInvoiceBillingRelease, grantInvoiceBillingRelease } from "../data/invoice-api";
-import { canGrantInvoiceBillingRelease, hasInvoiceBillingRelease } from "../model/billing-release";
 import {
   INVOICE_TYPES,
   calculateInvoiceSelectionTotals,
@@ -22,14 +18,7 @@ import {
   isInvoiceSelectionValid,
   isQuoteAvailableForInvoice,
 } from "../model/invoice-model";
-import type { CreateForm, InvoiceBillingRelease, InvoiceType, QuoteOption } from "../model/types";
-
-type BillingReleaseState = {
-  orderId: string;
-  loading: boolean;
-  release: InvoiceBillingRelease | null;
-  error: string | null;
-};
+import type { CreateForm, InvoiceType, QuoteOption } from "../model/types";
 
 type Props = {
   open: boolean;
@@ -49,36 +38,14 @@ type Props = {
 
 export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, optionsError, form, quotes, selectedQuote, onOpenChange, onFormChange, onSubmit, onRetry }: Props) {
   const { t, lang } = useLang();
-  const { user } = useAuth();
   const de = lang === "de";
   const money = (value: unknown) => formatCurrency(value, lang, selectedQuote?.currency);
   const orderId = selectedQuote?.order_id ?? "";
-  const canGrant = canGrantInvoiceBillingRelease(user?.role);
-  const [billingState, setBillingState] = useState<BillingReleaseState | null>(null);
-  const [billingReload, setBillingReload] = useState(0);
-  const [grantBusy, setGrantBusy] = useState(false);
-  const billing = billingState?.orderId === orderId ? billingState : null;
-  const billingLoading = Boolean(orderId) && (!billing || billing.loading);
-  const billingGranted = hasInvoiceBillingRelease(billing?.release);
-  const formBusy = busy || grantBusy;
-  const releaseLoadError = de
-    ? "Die Abrechnungsfreigabe konnte nicht geprüft werden. Versuchen Sie es erneut."
-    : "Не удалось проверить разрешение бухгалтерии. Повторите проверку.";
-
-  useEffect(() => {
-    if (!open || !orderId) return;
-    let ignore = false;
-    setBillingState({ orderId, loading: true, release: null, error: null });
-    void fetchInvoiceBillingRelease(orderId).then(
-      (release) => { if (!ignore) setBillingState({ orderId, loading: false, release, error: null }); },
-      () => { if (!ignore) setBillingState({ orderId, loading: false, release: null, error: releaseLoadError }); },
-    );
-    return () => { ignore = true; };
-  }, [open, orderId, billingReload, error, releaseLoadError]);
+  const formBusy = busy;
 
   useEffect(() => {
     if (!open) return;
-    const refresh = () => { setBillingReload((current) => current + 1); onRetry(); };
+    const refresh = () => onRetry();
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [open, onRetry]);
@@ -88,39 +55,17 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     onFormChange((current) => ({ ...current, quoteId: "", selectedLineIndexes: [], lineQuantities: {} }));
   }, [open, optionsBusy, optionsError, selectedQuote, form.invoiceType, onFormChange]);
 
-  async function handleGrantRelease() {
-    if (!canGrant || formBusy || billingLoading || !billing?.release || billingGranted) return;
-    setGrantBusy(true);
-    try {
-      await grantInvoiceBillingRelease(orderId, billing.release.billing_release_note);
-      clearApiCache();
-      const release = await fetchInvoiceBillingRelease(orderId);
-      setBillingState((current) => current?.orderId === orderId
-        ? { orderId, loading: false, release, error: null } : current);
-    } catch {
-      setBillingState((current) => current?.orderId === orderId ? {
-        ...current,
-        error: de ? "Die Freigabe konnte nicht bestätigt werden. Prüfen Sie den Status erneut."
-          : "Не удалось подтвердить разрешение. Проверьте статус ещё раз.",
-      } : current);
-    } finally {
-      setGrantBusy(false);
-    }
-  }
-
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (formBusy || billingLoading || !billingGranted || billing?.error || !orderId || optionsBusy || optionsError || !valid) return;
+    if (formBusy || !orderId || optionsBusy || optionsError || !valid) return;
     onSubmit(event);
   }
   const lines = selectedQuote?.line_items ?? [];
   const totals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
   const valid = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType)) && isInvoiceSelectionValid(lines, form) && totals.gross > 0;
-  const footerMessage = error || optionsError || billing?.error || (!billingLoading && selectedQuote ? (
-    !billingGranted ? (de ? "Für diesen Auftrag ist eine Abrechnungsfreigabe erforderlich." : "Для заказа нужно разрешение бухгалтерии.")
-      : (!valid ? (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.") : null)
-  ) : null);
-  const footerError = Boolean(error || optionsError || billing?.error);
+  const footerMessage = error || optionsError || (selectedQuote && !valid
+    ? (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.") : null);
+  const footerError = Boolean(error || optionsError);
   const final = form.invoiceType === "final";
   const typeLabels = {
     advance: t.revenue_invoice_type_advance,
@@ -186,43 +131,6 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   <p role="status" className="text-sm text-muted-foreground">
                     {de ? "Keine abrechenbaren Angebote für diese Auswahl. Bereits abgerechnete, abgelehnte und abgelaufene Angebote werden nicht angezeigt." : "Для текущего выбора нет доступных предложений. Уже выставленные, отклонённые и просроченные предложения скрыты."}
                   </p>
-                ) : null}
-                {orderId ? (
-                  <section aria-label={de ? "Abrechnungsfreigabe" : "Разрешение бухгалтерии"}
-                    className={cn("space-y-2 rounded-lg border p-3", billingGranted && !billing?.error
-                      ? "border-border bg-muted/25" : "border-amber-300/60 bg-amber-50/40 dark:bg-amber-950/15")}>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="flex items-center gap-2 text-sm font-medium">
-                        {billingLoading ? <LoaderCircle className="size-4 animate-spin" /> : billingGranted ? <CheckCircle2 className="size-4 text-emerald-600" /> : null}
-                        {billingLoading ? (de ? "Abrechnungsfreigabe wird geprüft…" : "Проверяем разрешение бухгалтерии…")
-                          : billingGranted ? (de ? "Abrechnungsfreigabe erteilt" : "Разрешение бухгалтерии получено")
-                          : billing?.release?.billing_release_status === "denied"
-                            ? (de ? "Abrechnungsfreigabe abgelehnt" : "Разрешение бухгалтерии отклонено")
-                            : (de ? "Abrechnungsfreigabe erforderlich" : "Нужно разрешение бухгалтерии")}
-                      </p>
-                      <Button type="button" variant="outline" size="sm" disabled={formBusy || billingLoading}
-                        onClick={() => { setBillingReload((current) => current + 1); onRetry(); }}>
-                        <RefreshCw className="size-3.5" />{de ? "Erneut prüfen" : "Проверить снова"}
-                      </Button>
-                    </div>
-                    {!billingLoading && !billingGranted && billing?.release ? (
-                      <>
-                        <p className="text-xs leading-5 text-muted-foreground">
-                          {de ? "Buchhaltung oder Geschäftsführung müssen die Abrechnung freigeben. Die Freigabe gilt für den gesamten Auftrag."
-                            : "Бухгалтер или директор должен разрешить выставление счетов. Разрешение действует для всего заказа."}
-                          {billing.release.package_coverage_status === "covered"
-                            ? (de ? " Die Paketdeckung ersetzt diese Freigabe nicht." : " Покрытие пакетом не заменяет это разрешение.") : null}
-                        </p>
-                        {billing.release.billing_release_note ? <p className="whitespace-pre-line text-xs leading-5"><strong>{de ? "Anmerkung" : "Комментарий"}: </strong>{billing.release.billing_release_note}</p> : null}
-                        {canGrant ? (
-                          <Button type="button" variant="outline" size="sm" disabled={formBusy || Boolean(billing.error)} onClick={() => void handleGrantRelease()}>
-                            {grantBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                            {de ? "Abrechnung freigeben" : "Разрешить выставление счетов"}
-                          </Button>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </section>
                 ) : null}
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FormField label={t.invoices_type}>
@@ -353,13 +261,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
               <AlertCircle className="mt-0.5 size-4 shrink-0" />
               <div className="min-w-0 flex-1 break-words">{footerMessage}
               </div>
-              <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" disabled={formBusy || billingLoading || optionsBusy} onClick={() => { setBillingReload((current) => current + 1); onRetry(); }}>{de ? "Prüfen" : "Проверить"}</Button>
+              <Button type="button" size="sm" variant="outline" className="h-7 shrink-0" disabled={formBusy || optionsBusy} onClick={onRetry}>{de ? "Prüfen" : "Проверить"}</Button>
             </div> : null}
           <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             <p className="text-sm tabular-nums"><span className="text-muted-foreground">{t.invoices_total}: </span><strong>{money(totals.gross)}</strong></p>
             <div className="flex gap-2">
               <Button type="button" variant="outline" disabled={formBusy} onClick={() => onOpenChange(false)}>{t.common_cancel}</Button>
-              <Button type="submit" requireChanges={false} disabled={formBusy || billingLoading || !billingGranted || Boolean(billing?.error) || optionsBusy || Boolean(optionsError) || !valid}>
+              <Button type="submit" requireChanges={false} disabled={formBusy || optionsBusy || Boolean(optionsError) || !valid}>
                 {formBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                 {de ? "Rechnung erstellen" : "Создать счёт"}
               </Button>

@@ -1,10 +1,4 @@
 export type InvoiceType = "advance" | "interim" | "final";
-export type InvoiceBillingRelease = {
-  billing_release_status: "pending" | "granted" | "denied";
-  billing_release_note: string | null;
-  package_coverage_status: string;
-  services?: Array<{ id: string; status: string }> | null;
-};
 export type InvoiceStatus =
   | "draft"
   | "sent"

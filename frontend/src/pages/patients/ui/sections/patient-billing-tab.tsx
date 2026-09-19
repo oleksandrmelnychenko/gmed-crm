@@ -96,9 +96,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     interim: "Zwischenrechnung", final: "Schlussrechnung", due: "Fällig am", services: "Leistungen", expenses: "Weiterberechenbare Kosten",
     waiting: "Weitere Kosten", amount: "Betrag", source: "Ursprung", payment: "Zahlung", patientInvoice: "Patientenrechnung",
     noServices: "Für diesen Auftrag gibt es keine offenen Angebotspositionen.", noExpenses: "Keine von GMed bezahlten, noch nicht berechneten Kosten.",
-    release: "Für diesen Auftrag fehlt die Abrechnungsfreigabe.",
     create: "Rechnungsentwurf erstellen", creating: "Entwurf wird erstellt…", retry: "Aktualisieren", failed: "Die Abrechnungsdaten konnten nicht geladen werden.",
-    saveFailed: "Der Rechnungsentwurf konnte nicht erstellt werden. Prüfen Sie Freigabe und ausgewählte Positionen.",
+    saveFailed: "Der Rechnungsentwurf konnte nicht erstellt werden. Prüfen Sie die ausgewählten Positionen.",
     success: "Der Rechnungsentwurf wurde erstellt und die gewählten Kosten wurden reserviert.", open: "Entwurf öffnen",
     late: "Kosten können auftragsübergreifend oder ohne Auftrag berechnet werden. Auch später eingehende Belege bleiben verfügbar.",
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMed", unpaid: "Unbezahlt",
@@ -109,9 +108,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     interim: "Промежуточный", final: "Финальный", due: "Срок оплаты", services: "Услуги", expenses: "Расходы для перевыставления",
     waiting: "Остальные расходы", amount: "Сумма", source: "Источник", payment: "Оплата", patientInvoice: "Счёт пациенту",
     noServices: "По этому заказу нет доступных позиций предложения.", noExpenses: "Нет оплаченных GMed расходов, которые ещё не выставлены пациенту.",
-    release: "Для выбранного заказа нет разрешения на выставление счетов.",
     create: "Создать черновик счёта", creating: "Создаём черновик…", retry: "Обновить", failed: "Не удалось загрузить данные для выставления.",
-    saveFailed: "Не удалось создать черновик. Проверьте разрешение и выбранные позиции.",
+    saveFailed: "Не удалось создать черновик. Проверьте выбранные позиции.",
     success: "Черновик создан, выбранные расходы зарезервированы за ним.", open: "Открыть черновик",
     late: "Расходы можно объединить по пациенту из разных заказов или выставить без заказа. Поздние документы также остаются доступными.",
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMed", unpaid: "Не оплачен",
@@ -185,7 +183,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (total <= 0 || saving || (order && order.billing_release_status !== "granted")) return;
+    if (total <= 0 || saving) return;
     setSaving(true);
     setError(null);
     try {
@@ -248,7 +246,6 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
           <Field label={copy.due}><Input type="date" disabled={saving} value={dueDate} onChange={event => setDueDate(event.target.value)} /></Field>
         </div>
-        {order && order.billing_release_status !== "granted" ? <Banner tone="warning">{copy.release}</Banner> : null}
         {error ? <Banner tone="error">{error}</Banner> : null}
         {created ? <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><div className="flex flex-wrap items-center justify-between gap-3"><span className="flex items-center gap-2"><CheckCircle2 className="size-4" />{copy.success}</span><StaffLink className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground" to={`/invoices?invoice=${created.id}`}>{copy.open}</StaffLink></div></div> : null}
 
@@ -272,7 +269,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
         <div className="sticky bottom-0 -mx-4 -mb-4 flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div><p className="text-xs text-muted-foreground">{copy.total}</p><p className="font-mono text-lg font-semibold tabular-nums">{formatMoneyAmount(String(total), activeCurrency)}</p></div>
-          <div className="text-right"><Button type="submit" disabled={!canCreate || saving || (Boolean(order) && order?.billing_release_status !== "granted") || total <= 0}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}{saving ? copy.creating : copy.create}</Button>{total <= 0 ? <p className="mt-1 text-xs text-muted-foreground">{copy.choose}</p> : null}</div>
+          <div className="text-right"><Button type="submit" disabled={!canCreate || saving || total <= 0}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <FilePlus2 className="size-4" />}{saving ? copy.creating : copy.create}</Button>{total <= 0 ? <p className="mt-1 text-xs text-muted-foreground">{copy.choose}</p> : null}</div>
         </div>
       </form>
     </section>
