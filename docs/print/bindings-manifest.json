@@ -105,9 +105,6 @@
         "Einverst\u00e4ndniserkl\u00e4rung zur Daten\u00fcbermittlung"
       ],
       "manual_binding_keys": [
-        "consent_healthcare",
-        "consent_provider_release",
-        "consent_privacy",
         "extra_release_recipients",
         "consent_email",
         "consent_threema",
