@@ -5754,6 +5754,12 @@ async fn create_invoice_from_quote(
             StatusCode::CONFLICT,
             "An active invoice already exists for this quote scope",
         ),
+        // The intake gate in the database: a draft (or cancelled draft) order
+        // cannot be invoiced until its preparation is confirmed.
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23514") => err(
+            StatusCode::CONFLICT,
+            "The order behind this quote is still a draft or was cancelled; confirm the order preparation before invoicing",
+        ),
         Err(e) => {
             tracing::error!(error = %e, quote_id = %quote_id, "create invoice");
             err(
