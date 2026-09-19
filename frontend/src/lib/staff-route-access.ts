@@ -67,8 +67,12 @@ const ROLES_DOCUMENTS = [
 
 const ROLES_SOPS = ["ceo", "billing"] as const satisfies readonly StaffRole[];
 
+/** `crates/server/src/routes/appointments.rs` (`list_appointments`) */
 const ROLES_APPOINTMENTS = [
   "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
   "concierge",
 ] as const satisfies readonly StaffRole[];
 
