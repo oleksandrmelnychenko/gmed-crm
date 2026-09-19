@@ -120,12 +120,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_release_has_three_staff_roles() {
+    fn release_staff_roles_cover_operations_and_interpreting() {
         assert!(Role::Ceo.is_release_staff_role());
         assert!(Role::Concierge.is_release_staff_role());
         assert!(Role::Billing.is_release_staff_role());
+        assert!(Role::PatientManager.is_release_staff_role());
+        assert!(Role::TeamleadInterpreter.is_release_staff_role());
+        assert!(Role::Interpreter.is_release_staff_role());
         assert!(!Role::ItAdmin.is_release_staff_role());
-        assert!(!Role::PatientManager.is_release_staff_role());
+        assert!(!Role::CeoAssistant.is_release_staff_role());
+        assert!(!Role::Sales.is_release_staff_role());
         assert!(!Role::Patient.is_release_staff_role());
     }
 
