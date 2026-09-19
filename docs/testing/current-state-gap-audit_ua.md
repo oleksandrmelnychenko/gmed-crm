@@ -43,7 +43,7 @@
 ### 3.3 Billing / finance
 
 - `DATEV` export не підтверджений як реалізований current-state module.
-- `E-Rechnung`: вихідний ZUGFeRD/Factur-X (EN 16931 CII, вбудований у PDF) реалізовано; XML проходить офіційний валідатор Mustang у CI (2026-09-19). PDF/A-3 відповідність гібридного PDF ще не підтверджена.
+- `E-Rechnung`: вихідний ZUGFeRD/Factur-X (EN 16931 CII, вбудований у PDF) реалізовано; XML проходить офіційний валідатор Mustang у CI (2026-09-19). Гібридний PDF проходить перевірку PDF/A-3 тим самим валідатором.
 - Немає real payment-provider checkout / settlement confirmation beyond payment-proof handoff.
 - Billing slice тепер already має внутрішній cash-based `accounting_entries` ledger / EÜR read model: paid customer invoices матеріалізують `service_revenue` та `cost_passthrough_revenue`, paid `external_invoices` дають `provider_expense`, а `ceo / ceo_assistant / billing` мають read/export доступ до `/invoices/accounting-ledger`; незакритими лишаються зовнішні accounting handoff'и на кшталт `DATEV`, а не сам базовий internal ledger.
 - Billing/order slice тепер already має окремий `external_invoices` registry зі статусами `expected/received/approved/paid/overdue/cancelled`, order-bound UI, deadline scheduler і overdue notifications для billing queue; незакритими лишаються зовнішній accounting/payment handoff і settlement integrations, а не сам inbound external-invoice tracking.

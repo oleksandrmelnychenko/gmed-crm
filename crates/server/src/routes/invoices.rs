@@ -10626,11 +10626,20 @@ mod tests {
         // The ZUGFeRD hybrid keeps the rendered pages readable and carries the XML.
         let hybrid = super::zugferd::embed_xml_in_pdf(
             &bytes,
-            "<rsm:CrossIndustryInvoice/>",
+            &super::zugferd::build_cii_xml(&super::zugferd::test_sample()),
             &context.invoice_number,
             context.issued_at,
         )
         .unwrap();
+        // CI runs the official ZUGFeRD validator (PDF/A-3 + EN 16931) over this file.
+        if let Ok(dir) = std::env::var("EINVOICE_SAMPLE_DIR") {
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                std::path::Path::new(&dir).join("hybrid-invoice.pdf"),
+                &hybrid,
+            )
+            .unwrap();
+        }
         let hybrid_text = pdf_extract::extract_text_from_mem(&hybrid).unwrap();
         assert!(hybrid_text.contains("Медицинская консультация"));
         assert!(hybrid.windows(12).any(|window| window == b"factur-x.xml"));

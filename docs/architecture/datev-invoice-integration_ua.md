@@ -743,8 +743,11 @@ localhost в інтерфейсі не пропонується взагалі.
 закріплений версією і SHA-256. Локально обидва зразки (з USt-IdNr. та без,
 зі змішаними звільненнями) валідні.
 
-Відкрите (етап 3): PDF оголошує `pdfaid:part=3 / conformance=B`, але той самий
-валідатор на гібридному PDF повертає `invalid` за двома правилами ISO 19005-3:
-6.2.4.3 (DeviceRGB без OutputIntent зі вбудованим sRGB ICC-профілем) і
-6.2.11.3.2 (CIDFont без `CIDToGIDMap`). Обидва виправні у генерації PDF; до
-того юридично значущим носієм є XML, а гібридний PDF — зручністю.
+**Гібридний PDF (етап 3).** Той самий валідатор на PDF спершу повертав
+`invalid` за двома правилами ISO 19005-3: 6.2.4.3 (DeviceRGB без OutputIntent)
+і 6.2.11.3.2 (CIDFont без `CIDToGIDMap`). Виправлено в `embed_xml_in_pdf`:
+додано OutputIntent `GTS_PDFA1` зі вбудованим sRGB-профілем
+(`crates/server/assets/icc/sRGB-v2-micro.icc`, CC0) і `CIDToGIDMap /Identity`
+для всіх вбудованих CIDFontType2 (включно з inline у `DescendantFonts`).
+Після цього Mustang повертає `valid` для PDF/A-3 і для XML усередині; CI
+тепер валідує і гібридний PDF (`hybrid-invoice.pdf` з тесту рахунків).

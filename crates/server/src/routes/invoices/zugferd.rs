@@ -9,6 +9,8 @@ use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
 use rust_decimal::{Decimal, RoundingStrategy};
 
 pub(super) const ZUGFERD_XML_FILENAME: &str = "factur-x.xml";
+/// sRGB profile for the PDF/A output intent (CC0, see assets/icc/README.md).
+const SRGB_ICC_PROFILE: &[u8] = include_bytes!("../../../assets/icc/sRGB-v2-micro.icc");
 const EN16931_GUIDELINE: &str = "urn:cen.eu:en16931:2017";
 const PASSTHROUGH_EXEMPTION: &str = "Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG";
 /// Medical care is exempt under § 4 Nr. 14 UStG (Art. 132 VAT Directive); the
@@ -454,6 +456,47 @@ fn pdf_string(value: &str) -> Object {
     Object::String(value.as_bytes().to_vec(), StringFormat::Literal)
 }
 
+fn is_cid_font_type2(dict: &Dictionary) -> bool {
+    dict.get(b"Subtype").and_then(Object::as_name).ok() == Some(b"CIDFontType2".as_slice())
+}
+
+/// PDF/A-3 (ISO 19005-3, 6.2.11.3.2): every embedded Type 2 CIDFont declares
+/// its CID-to-glyph mapping. The renderer writes the descendant font inline in
+/// the Type0 font's `DescendantFonts` array, so both inline and referenced
+/// dictionaries are patched; the TrueType subsets use the identity mapping.
+fn declare_cid_to_gid_maps(document: &mut lopdf::Document) {
+    let ids: Vec<lopdf::ObjectId> = document.objects.keys().copied().collect();
+    let mut referenced = Vec::new();
+    for id in ids {
+        let Some(Object::Dictionary(dict)) = document.objects.get_mut(&id) else {
+            continue;
+        };
+        if is_cid_font_type2(dict) && dict.get(b"CIDToGIDMap").is_err() {
+            dict.set("CIDToGIDMap", "Identity");
+        }
+        if let Ok(Object::Array(descendants)) = dict.get_mut(b"DescendantFonts") {
+            for descendant in descendants.iter_mut() {
+                match descendant {
+                    Object::Dictionary(inline)
+                        if is_cid_font_type2(inline) && inline.get(b"CIDToGIDMap").is_err() =>
+                    {
+                        inline.set("CIDToGIDMap", "Identity");
+                    }
+                    Object::Reference(reference) => referenced.push(*reference),
+                    _ => {}
+                }
+            }
+        }
+    }
+    for id in referenced {
+        if let Some(Object::Dictionary(dict)) = document.objects.get_mut(&id) {
+            if is_cid_font_type2(dict) && dict.get(b"CIDToGIDMap").is_err() {
+                dict.set("CIDToGIDMap", "Identity");
+            }
+        }
+    }
+}
+
 /// Attaches the CII XML to the rendered invoice PDF the way ZUGFeRD readers
 /// expect it: an associated file named `factur-x.xml` plus the Factur-X XMP block.
 pub(super) fn embed_xml_in_pdf(
@@ -498,9 +541,26 @@ pub(super) fn embed_xml_in_pdf(
         .with_compression(false),
     );
 
+    // PDF/A-3 (ISO 19005-3, 6.2.4.3): device colour spaces need an output
+    // intent with an embedded ICC profile; the pages draw in DeviceRGB.
+    let icc_id = document.add_object(Stream::new(
+        dictionary! { "N" => 3, "Alternate" => "DeviceRGB" },
+        SRGB_ICC_PROFILE.to_vec(),
+    ));
+    let intent_id = document.add_object(dictionary! {
+        "Type" => "OutputIntent",
+        "S" => "GTS_PDFA1",
+        "OutputConditionIdentifier" => pdf_string("sRGB"),
+        "Info" => pdf_string("sRGB IEC61966-2.1"),
+        "RegistryName" => pdf_string("http://www.color.org"),
+        "DestOutputProfile" => icc_id,
+    });
+    declare_cid_to_gid_maps(&mut document);
+
     let catalog = document
         .catalog_mut()
         .map_err(|error| format!("read pdf catalog: {error}"))?;
+    catalog.set("OutputIntents", vec![Object::Reference(intent_id)]);
     let mut names = match catalog.get(b"Names") {
         Ok(Object::Dictionary(existing)) => existing.clone(),
         _ => Dictionary::new(),
@@ -522,6 +582,12 @@ pub(super) fn embed_xml_in_pdf(
     Ok(output)
 }
 
+/// Reference invoice for the PDF tests and the CI validator run.
+#[cfg(test)]
+pub(super) fn test_sample() -> EInvoice {
+    tests::sample()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -531,7 +597,7 @@ mod tests {
         Decimal::from_str(value).unwrap()
     }
 
-    fn sample() -> EInvoice {
+    pub(super) fn sample() -> EInvoice {
         EInvoice {
             number: "INV-2026-0001".to_string(),
             invoice_type: "final".to_string(),
@@ -670,6 +736,37 @@ mod tests {
         let catalog = reloaded.catalog().unwrap();
         assert!(catalog.get(b"AF").is_ok());
         assert!(catalog.get(b"Metadata").is_ok());
+        // PDF/A-3 output intent with the embedded sRGB profile.
+        let intents = catalog.get(b"OutputIntents").unwrap().as_array().unwrap();
+        let intent = reloaded
+            .get_object(intents[0].as_reference().unwrap())
+            .unwrap();
+        assert_eq!(
+            intent
+                .as_dict()
+                .unwrap()
+                .get(b"S")
+                .unwrap()
+                .as_name()
+                .unwrap(),
+            b"GTS_PDFA1"
+        );
+        let profile_id = intent
+            .as_dict()
+            .unwrap()
+            .get(b"DestOutputProfile")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        assert_eq!(
+            reloaded
+                .get_object(profile_id)
+                .unwrap()
+                .as_stream()
+                .unwrap()
+                .content,
+            SRGB_ICC_PROFILE
+        );
         let embedded = reloaded
             .objects
             .values()
@@ -736,6 +833,29 @@ mod tests {
         assert!(xml.contains("<ram:ExemptionReasonCode>VATEX-EU-132</ram:ExemptionReasonCode>"));
         let with_vat_id = sample();
         assert!(!build_cii_xml(&with_vat_id).contains("<ram:SellerTradeParty><ram:ID>"));
+    }
+
+    #[test]
+    fn every_cid_font_gets_a_cid_to_gid_map() {
+        let mut document = lopdf::Document::with_version("1.7");
+        let referenced =
+            document.add_object(dictionary! { "Type" => "Font", "Subtype" => "CIDFontType2" });
+        let type0 = document.add_object(dictionary! {
+            "Type" => "Font", "Subtype" => "Type0",
+            "DescendantFonts" => vec![
+                Object::Dictionary(dictionary! { "Type" => "Font", "Subtype" => "CIDFontType2" }),
+                Object::Reference(referenced),
+            ],
+        });
+        declare_cid_to_gid_maps(&mut document);
+        let identity = Object::Name(b"Identity".to_vec());
+        let type0 = document.get_object(type0).unwrap().as_dict().unwrap();
+        let inline = type0.get(b"DescendantFonts").unwrap().as_array().unwrap()[0]
+            .as_dict()
+            .unwrap();
+        assert_eq!(inline.get(b"CIDToGIDMap").unwrap(), &identity);
+        let referenced = document.get_object(referenced).unwrap().as_dict().unwrap();
+        assert_eq!(referenced.get(b"CIDToGIDMap").unwrap(), &identity);
     }
 
     /// CI validates these files with the official EN 16931 rules (Mustang).

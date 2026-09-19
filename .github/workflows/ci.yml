@@ -356,18 +356,18 @@ jobs:
           java-version: "21"
 
       - name: Export sample e-invoices
-        run: EINVOICE_SAMPLE_DIR="$PWD/target/einvoice-samples" cargo test -p gmed-server --locked --lib zugferd::tests::samples_can_be_exported_for_external_validation
+        run: EINVOICE_SAMPLE_DIR="$PWD/target/einvoice-samples" cargo test -p gmed-server --locked --lib -- zugferd::tests::samples_can_be_exported_for_external_validation routes::invoices::tests::invoice_pdf_preserves_cyrillic_text
 
       - name: Download Mustang validator
         run: |
           curl -sSL -o Mustang-CLI.jar "https://github.com/ZUGFeRD/mustangproject/releases/download/core-${MUSTANG_VERSION}/Mustang-CLI-${MUSTANG_VERSION}.jar"
           echo "${MUSTANG_SHA256}  Mustang-CLI.jar" | sha256sum -c -
 
-      - name: Validate against EN 16931 (Schematron)
+      - name: Validate XML (EN 16931 Schematron) and hybrid PDF (PDF/A-3)
         run: |
           set -euo pipefail
           status=0
-          for file in target/einvoice-samples/*.xml; do
+          for file in target/einvoice-samples/*.xml target/einvoice-samples/*.pdf; do
             echo "== $file"
             if ! java -Xmx1G -Dfile.encoding=UTF-8 -jar Mustang-CLI.jar --action validate --source "$file" --no-notices 2>/dev/null | tee "$file.report.xml" | grep -q '<summary status="valid"/>'; then
               grep -oE '\[BR[^]]*\][^<]{0,240}' "$file.report.xml" | sort -u || true
