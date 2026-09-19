@@ -30,6 +30,8 @@ export interface Lead {
   intake_source: string | null;
   flow: string | null;
   lead_type?: string | null;
+  /** Set when the lead is a repeat intake of an existing patient (process phase 2B). */
+  repeat_patient_id?: string | null;
   console_promoted_at?: string | null;
   console_promoted_by?: string | null;
   qualification_status: string;

@@ -3588,3 +3588,162 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         "A converted repeat must not archive an operational order"
     );
 }
+
+#[tokio::test]
+async fn repeat_intake_is_blocked_by_a_debt_management_hold_and_marked_in_the_list() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let patient = seed_repeat_patient(&app, true).await;
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Repeat",
+            "last_name": "Regression",
+            "repeat_patient_id": patient,
+            "creation_key": Uuid::new_v4()
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+
+    // Phase 1 classification: the list tells an existing customer from a new lead.
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let listed = list["items"]
+        .as_array()
+        .or_else(|| list.as_array())
+        .expect("lead list")
+        .iter()
+        .find(|item| item["id"] == lead.to_string())
+        .expect("repeat lead is listed")
+        .clone();
+    assert_eq!(listed["repeat_patient_id"], patient.to_string());
+
+    // An overdue invoice on an earlier order puts the patient into debt management.
+    let earlier_order: Uuid = sqlx::query_scalar(
+        "INSERT INTO orders(order_number,patient_id,phase,status,created_by) VALUES($1,$2,'closure','active',$3) RETURNING id",
+    )
+    .bind(format!("ORD-DEBT-{}", Uuid::new_v4().simple()))
+    .bind(patient)
+    .bind(app.ceo_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status, due_date,
+               total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, $3, 'final', 'overdue', CURRENT_DATE - 30,
+                     100, 19, 119, 0, '[]'::jsonb, $4)"#,
+    )
+    .bind(earlier_order)
+    .bind(patient)
+    .bind(format!("INV-DEBT-{}", Uuid::new_v4().simple()))
+    .bind(app.ceo_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+
+    let (status, recheck) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient}/recheck"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{recheck}");
+    assert_eq!(recheck["debt_hold"], true, "{recheck}");
+
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let reasons = detail["readiness"]["blocking_reasons"]
+        .as_array()
+        .expect("blocking reasons");
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason == "Patient is in debt-management hold"),
+        "{reasons:?}"
+    );
+    let debt_check = detail["readiness"]["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["key"] == "debt_clear")
+        .expect("debt check");
+    assert_eq!(debt_check["passed"], false);
+}
+
+#[tokio::test]
+async fn returning_patient_is_found_by_email_when_the_lead_has_another_spelling() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let email = format!("same-{tag}@example.com");
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+                patient_id, first_name, last_name, birth_date, gender,
+                email, lifecycle_status, is_active, created_by, languages
+           ) VALUES (
+                $1, 'Olena', 'Kovalenko', DATE '1979-11-20', 'female',
+                $2, 'active', true, $3, ARRAY['de']::text[]
+           ) RETURNING id"#,
+    )
+    .bind(format!("P-EMAIL-{tag}"))
+    .bind(&email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$2)")
+        .bind(patient_id)
+        .bind(app.patient_manager_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    // Married name, no birth date: only the e-mail still matches.
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, country, primary_language,
+                legal_sex, primary_concern_text, requested_specialties,
+                qualification_status, compliance_status,
+                consent_healthcare, consent_privacy_practices,
+                intake_source, intake_model, created_by
+           ) VALUES (
+                'Olena', 'Schmidt', $1, 'DE', 'de',
+                'female', 'Follow-up concern', '["orthopedics"]'::jsonb,
+                'qualified', 'signed', true, true,
+                'staff_wizard', 'patient_first', $2
+           ) RETURNING id"#,
+    )
+    .bind(&email)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let pm = app.auth_header("patient_manager");
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &pm,
+        Some(json!({ "hauptanfragegrund": "Follow-up concern" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let candidates = response["duplicate_candidates"]
+        .as_array()
+        .expect("duplicate candidates");
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate["id"] == patient_id.to_string()),
+        "{response}"
+    );
+}

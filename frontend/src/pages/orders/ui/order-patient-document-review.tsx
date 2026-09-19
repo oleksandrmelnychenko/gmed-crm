@@ -56,7 +56,15 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
     .map(doc => doc.signed_at!).sort().at(-1);
   const consentDate = signedOn("dsgvo") ?? signedOn("privacy_consents");
   const releaseDate = signedOn("confidentiality_release");
+  const outstanding = readiness.debt_management?.outstanding_balance ?? readiness.outstanding_balance;
   const rows: ReviewRow[] = [
+    // Process mapping 2B: a debt check comes before any new order.
+    { key: "debt", label: tx("Задолженность", "Forderungen"), ready: !readiness.debt_hold,
+      status: readiness.debt_hold ? tx("Сценарий работы с задолженностью — новый заказ заблокирован", "Forderungsmanagement – neuer Auftrag gesperrt")
+        : readiness.overdue_invoice_count > 0 ? tx("Есть просроченные счета", "Überfällige Rechnungen vorhanden") : tx("Задолженности нет", "Keine offenen Forderungen"),
+      detail: readiness.overdue_invoice_count > 0 || readiness.debt_hold
+        ? `${tx("Просрочено счетов", "Überfällige Rechnungen")}: ${readiness.overdue_invoice_count}${outstanding ? ` · ${tx("Остаток", "Offen")}: ${outstanding} EUR` : ""}`
+        : "—" },
     { key: "passport", label: tx("Паспорт", "Reisepass"), ready: passportStatus === "valid", status: PASSPORT_REVIEW_LABELS[passportStatus][language],
       detail: readiness.passport_expiry ? `${tx("Действует до", "Gültig bis")}: ${formatIntakeDate(readiness.passport_expiry)}` : tx("Дата окончания действия отсутствует", "Ablaufdatum fehlt") },
     ...(["compliance_ready", "confidentiality_release_ready", "identity_ready", "document_pack_ready"] as const).map(key => ({
@@ -77,7 +85,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
   return <OrderWizardSection flush title={tx("Проверка документов пациента", "Patientendokumente prüfen")}
     accessory={<Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onRefresh}><RefreshCw className="size-3.5" />{tx("Проверить снова", "Erneut prüfen")}</Button>}>
     <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: 44 }} mobilePrimaryColumnId="document" className={tableClass}
-      rowActionsWidth={210} rowActions={row => row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
+      rowActionsWidth={210} rowActions={row => row.key === "debt" ? null : row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
     {editing ? <div role="group" aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} className="space-y-3 border-t p-3 sm:p-4">
       <Field label={tx("Паспорт действителен до", "Reisepass gültig bis")}><Input aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} type="date" value={expiry} onChange={event => setExpiry(event.target.value)} className="max-w-xs" /></Field>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy || !expiry || expiry === readiness.passport_expiry} onClick={() => { void onSaveExpiry(expiry).then(saved => { if (saved) setEditing(false); }); }}>{tx("Сохранить срок в карточке пациента", "Gültigkeit in Patientenakte speichern")}</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>{tx("Отмена", "Abbrechen")}</Button></div>
