@@ -2,6 +2,7 @@ import { type ReactNode } from "react";
 
 import { Pencil } from "lucide-react";
 
+import { useReadOnly } from "@/components/read-only-scope";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ export function InfoRow({
   className?: string;
 }) {
   const { t } = useLang();
+  const readOnly = useReadOnly();
   const resolvedEditLabel =
     editLabel ??
     (typeof label === "string"
@@ -31,7 +33,7 @@ export function InfoRow({
     <div className={cn("group relative flex flex-col gap-1", className)}>
       <span className={tokens.text.label}>{label}</span>
       <span className={tokens.text.body}>{value}</span>
-      {onEdit ? (
+      {onEdit && !readOnly ? (
         <button
           type="button"
           onClick={onEdit}

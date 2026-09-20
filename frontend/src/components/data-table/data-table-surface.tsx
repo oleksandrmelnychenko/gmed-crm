@@ -1,5 +1,6 @@
 import { useMemo, useReducer, type ReactNode, type SetStateAction } from "react";
 
+import { WritableScope } from "@/components/read-only-scope";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -289,6 +290,7 @@ export function DataTableSurface<T>({
         )}
       >
         {toolbarStart}
+        <WritableScope>
         <FilterBuilder
           columns={enhancedColumns}
           rows={rows}
@@ -362,6 +364,7 @@ export function DataTableSurface<T>({
             frozenNoteLabel={labels.table_columns_frozen}
           />
         </div>
+        </WritableScope>
       </div>
       {toolbarAfter}
       {pagination ? (

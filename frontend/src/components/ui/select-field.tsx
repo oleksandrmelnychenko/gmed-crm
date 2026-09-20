@@ -4,6 +4,7 @@ import { Select } from "@base-ui/react/select"
 import { CheckIcon, ChevronDownIcon } from "lucide-react"
 import type React from "react"
 
+import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 import { cn } from "@/lib/utils"
 
@@ -17,10 +18,11 @@ export function SelectField({
   value,
   options,
   onValueChange,
-  disabled,
+  disabled: disabledProp,
   className,
   title,
   "aria-label": ariaLabel,
+  "data-readonly": readOnlyExempt,
 }: {
   value: string
   options: SelectFieldOption[]
@@ -29,8 +31,11 @@ export function SelectField({
   className?: string
   title?: string
   "aria-label"?: string
-}) {
+} & ReadOnlyExemptProps) {
   const updateOverlayField = useOverlayDirtyField(value)
+  const readOnly = useReadOnly()
+  const disabled =
+    disabledProp || readOnlyDisables(readOnly, { "data-readonly": readOnlyExempt })
 
   return (
     <Select.Root

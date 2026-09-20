@@ -15,6 +15,8 @@ export interface SharedCoreTranslations {
   topbar_realtime_connecting: string;
   topbar_realtime_reconnecting: string;
   topbar_realtime_disconnected: string;
+  read_only_scope_title: string;
+  read_only_scope_hint: string;
 }
 
 export const sharedCoreRu: SharedCoreTranslations = {
@@ -38,6 +40,8 @@ export const sharedCoreRu: SharedCoreTranslations = {
   topbar_realtime_connecting: "Realtime подключается...",
   topbar_realtime_reconnecting: "Realtime переподключается ({attempt})",
   topbar_realtime_disconnected: "Realtime отключен",
+  read_only_scope_title: "Только просмотр",
+  read_only_scope_hint: "Ваша роль не может вносить изменения на этой странице.",
 };
 
 export const sharedCoreDe: SharedCoreTranslations = {
@@ -61,4 +65,6 @@ export const sharedCoreDe: SharedCoreTranslations = {
   topbar_realtime_connecting: "Realtime verbindet...",
   topbar_realtime_reconnecting: "Realtime verbindet erneut ({attempt})",
   topbar_realtime_disconnected: "Realtime getrennt",
+  read_only_scope_title: "Nur Ansicht",
+  read_only_scope_hint: "Ihre Rolle kann auf dieser Seite keine Änderungen vornehmen.",
 };

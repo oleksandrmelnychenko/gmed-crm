@@ -4,6 +4,7 @@ import * as React from "react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react"
 
+import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 import { useLang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
@@ -48,7 +49,7 @@ type ComboboxSelectProps = {
   onFocus?: React.FocusEventHandler<HTMLButtonElement>
   /** Fires as the user types in the built-in search box (for server-driven lookups). */
   onSearchChange?: (query: string) => void
-}
+} & ReadOnlyExemptProps
 
 type NativeComboboxSelectProps = Omit<
   React.SelectHTMLAttributes<HTMLSelectElement>,
@@ -68,7 +69,7 @@ type NativeComboboxSelectProps = Omit<
   onSearchChange?: (query: string) => void
   selectedLabel?: React.ReactNode
   value?: PrimitiveValue | readonly string[] | null
-}
+} & ReadOnlyExemptProps
 
 const EMPTY_SELECTED_VALUES: readonly PrimitiveValue[] = []
 
@@ -194,7 +195,7 @@ function ComboboxSelect({
   id,
   name,
   required,
-  disabled,
+  disabled: disabledProp,
   className,
   triggerClassName,
   placeholder,
@@ -208,9 +209,13 @@ function ComboboxSelect({
   onBlur,
   onFocus,
   onSearchChange,
+  "data-readonly": readOnlyExempt,
   ...ariaProps
 }: ComboboxSelectProps) {
   const { t } = useLang()
+  const readOnly = useReadOnly()
+  const disabled =
+    disabledProp || readOnlyDisables(readOnly, { "data-readonly": readOnlyExempt })
   const normalizedValue = normalizeValue(value)
   const normalizedDefaultValue = normalizeValue(defaultValue)
   const [uncontrolledValue, setUncontrolledValue] = React.useState(
@@ -411,6 +416,7 @@ function NativeComboboxSelect({
   "aria-label": ariaLabel,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
+  "data-readonly": readOnlyExempt,
 }: NativeComboboxSelectProps) {
   const options = React.useMemo(() => optionsFromChildren(children), [children])
 
@@ -420,6 +426,7 @@ function NativeComboboxSelect({
       name={name}
       required={required}
       disabled={disabled}
+      data-readonly={readOnlyExempt}
       value={normalizeValue(value)}
       defaultValue={normalizeValue(defaultValue)}
       options={options}

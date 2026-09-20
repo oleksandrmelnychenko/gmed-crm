@@ -2,6 +2,7 @@ import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
+import { useReadOnly } from "@/components/read-only-scope"
 import { useOverlaySaveDisabled } from "@/components/ui/dismissal-guard"
 
 const buttonVariants = cva(
@@ -48,14 +49,21 @@ function Button({
   requireChanges,
   disabled,
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants> & { requireChanges?: boolean }) {
+}: ButtonPrimitive.Props &
+  VariantProps<typeof buttonVariants> & {
+    requireChanges?: boolean
+    /** `write` marks a mutation trigger that a read-only scope disables. */
+    "data-action"?: "write" | (string & {})
+  }) {
   const saveDisabled = useOverlaySaveDisabled(requireChanges ?? (props.type === "submit" ? undefined : false))
+  const readOnly = useReadOnly()
+  const readOnlyDisabled = readOnly && (props.type === "submit" || props["data-action"] === "write")
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
-      disabled={disabled || saveDisabled}
+      disabled={disabled || saveDisabled || readOnlyDisabled}
     />
   )
 }

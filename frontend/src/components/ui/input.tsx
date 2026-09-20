@@ -6,6 +6,7 @@ import { TimePicker } from "@mui/x-date-pickers/TimePicker"
 import dayjs, { type Dayjs } from "dayjs"
 
 import { cn } from "@/lib/utils"
+import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
 
 const DATE_FORMAT = "DD.MM.YYYY"
@@ -125,13 +126,17 @@ function Input({
   id,
   name,
   required,
-  disabled,
+  disabled: disabledProp,
   onBlur,
   min,
   max,
   step,
+  "data-readonly": readOnlyExempt,
   ...props
-}: React.ComponentProps<"input">) {
+}: React.ComponentProps<"input"> & ReadOnlyExemptProps) {
+  const readOnlyScope = useReadOnly()
+  const disabled =
+    disabledProp || readOnlyDisables(readOnlyScope, { type, "data-readonly": readOnlyExempt })
   const pickerCurrentValue = typeof value === "string" ? value : null
   const updateOverlayField = useOverlayDirtyField(pickerCurrentValue ?? "")
   const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
