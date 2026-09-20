@@ -2865,6 +2865,35 @@ async fn create_order(
         return response;
     }
 
+    // An order for an existing patient attaches to the patient's current
+    // signed framework contract unless the caller picked one explicitly, so
+    // repeat orders inherit the contract date and per-contract numbering.
+    let contract_id = match (contract_id, patient_id.or(repeat_patient)) {
+        (Some(id), _) => Some(id),
+        (None, Some(owner_patient_id)) => {
+            match sqlx::query_scalar::<_, Uuid>(
+                r#"SELECT id
+                   FROM framework_contracts
+                   WHERE patient_id = $1
+                     AND status = 'signed'
+                     AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+                   ORDER BY COALESCE(signed_at, created_at) DESC, created_at DESC
+                   LIMIT 1"#,
+            )
+            .bind(owner_patient_id)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::error!(error = %error, patient_id = %owner_patient_id, "resolve default framework contract");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+        (None, None) => None,
+    };
+
     let seq: i64 = match sqlx::query_scalar!("SELECT nextval('order_number_seq') AS \"v!\"")
         .fetch_one(&state.db)
         .await

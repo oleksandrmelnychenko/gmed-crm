@@ -3500,6 +3500,23 @@ export function LeadWizard({
     : contracts.find((item) => item.status !== "terminated") ?? null;
   const attachedPatientId = existingPatient?.id ?? lead?.prospect_patient_id;
   const inheritedContract = Boolean(contract?.patient_id && contract.patient_id === attachedPatientId);
+  // Repeat intake: preselect the patient's signed framework contract that
+  // covers the requested period, so the new order attaches to it instead of
+  // silently creating a second contract.
+  const autoContractRef = useRef(false);
+  useEffect(() => {
+    if (!isRepeatIntake || !draft || draft.frameworkContractId || autoContractRef.current) return;
+    if (contracts.length > 0 || patientReview.contracts.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const candidates = patientReview.contracts.filter((item) => (
+      item.status === "signed" && (!item.valid_to || item.valid_to >= today)
+    ));
+    const preferred = candidates.find((item) => contractCoversOrder(item, draft.programDateFrom || null, draft.programDateTo || null))
+      ?? (draft.programDateFrom || draft.programDateTo ? null : candidates[0]);
+    if (!preferred) return;
+    autoContractRef.current = true;
+    setDraft((current) => current ? { ...current, frameworkContractId: preferred.id, contractEffectiveDate: preferred.valid_from ?? "" } : current);
+  }, [contracts.length, draft, isRepeatIntake, patientReview.contracts]);
   const currentPatientEvidence = useMemo(() => patientReview.documents.filter(item => item.is_latest_version && item.status === "active" && !item.file_deleted_at
     && ["identity", "confidentiality_release", "privacy_information", "privacy_consents"].includes(wizardDocumentKind(item) ?? "")), [patientReview.documents]);
   const estimate = useMemo(() => calculateServiceLineEstimate(lines), [lines]);
@@ -5643,7 +5660,7 @@ ${serviceCommentLines.join("\n")}`
   const patientContractReview = repeatPatientId && draft ? <Section title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
     <OrderExistingContractsTable contracts={patientReview.contracts} dateFrom={draft.programDateFrom || null} dateTo={draft.programDateTo || null} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
       onSelect={id => { const selected = patientReview.contracts.find(item => item.id === id); if (selected) setDraft(current => current ? { ...current, frameworkContractId: id, contractEffectiveDate: selected.valid_from ?? "" } : current); }} />
-    {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "", contractEffectiveDate: current.programDateFrom } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
+    {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "", contractEffectiveDate: new Date().toISOString().slice(0, 10) } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
   const stepIndex = STEPS.findIndex((item) => item.id === step);
   const previousStep = STEPS[stepIndex - 1];

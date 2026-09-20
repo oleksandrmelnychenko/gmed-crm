@@ -1663,24 +1663,41 @@ async fn load_lead_conversion_readiness(
                   wizard_state,
                   consent_privacy_practices,
                   consent_healthcare,
+                  -- Repeat intakes (patient_first) reuse the compliance evidence
+                  -- already stored on the patient instead of demanding new copies.
                   EXISTS (
                       SELECT 1 FROM documents d
-                      WHERE d.lead_id = leads.id
+                      WHERE (
+                              d.lead_id = leads.id
+                              OR (leads.prospect_patient_id IS NOT NULL
+                                  AND d.patient_id = leads.prospect_patient_id)
+                            )
                         AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
                         AND d.compliance_kind = 'identity'
                         AND d.signed_at IS NOT NULL
                   ) AS identity_document_verified,
                   EXISTS (
                       SELECT 1 FROM documents d
-                      WHERE d.lead_id = leads.id
+                      WHERE (
+                              d.lead_id = leads.id
+                              OR (leads.prospect_patient_id IS NOT NULL
+                                  AND d.patient_id = leads.prospect_patient_id)
+                            )
                         AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
                         AND d.compliance_kind = 'dsgvo'
                         AND d.signed_at IS NOT NULL
                   ) AS dsgvo_document_signed,
                   EXISTS (
                       SELECT 1 FROM documents d
-                      WHERE d.lead_id = leads.id
+                      WHERE (
+                              d.lead_id = leads.id
+                              OR (leads.prospect_patient_id IS NOT NULL
+                                  AND d.patient_id = leads.prospect_patient_id)
+                            )
                         AND d.status = 'active'
+                        AND d.file_deleted_at IS NULL
                         AND d.compliance_kind = 'confidentiality_release'
                         AND d.signed_at IS NOT NULL
                   ) AS confidentiality_release_signed,
@@ -1700,18 +1717,35 @@ async fn load_lead_conversion_readiness(
                          AND d.compliance_kind = 'enhanced_due_diligence'
                          AND d.signed_at IS NOT NULL
                    ) AS enhanced_due_diligence_document_signed,
+                  -- A repeat intake may inherit the patient's signed framework
+                  -- contract (wizard_state.framework_contract_id); that contract
+                  -- and its already generated document count as done.
                   EXISTS (
                       SELECT 1 FROM framework_contracts fc
-                      WHERE fc.lead_id = leads.id
+                      WHERE (
+                              fc.lead_id = leads.id
+                              OR (leads.prospect_patient_id IS NOT NULL
+                                  AND fc.patient_id = leads.prospect_patient_id
+                                  AND fc.id::text = leads.wizard_state->>'framework_contract_id')
+                            )
                         AND fc.status = 'signed'
                         AND fc.signed_at IS NOT NULL
                   ) AS contract_signed,
-                  EXISTS (
+                  (
+                    EXISTS (
                       SELECT 1 FROM documents d
                       WHERE d.lead_id = leads.id
                         AND d.generated_template_id = 'framework_contract'
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM framework_contracts fc
+                      WHERE leads.prospect_patient_id IS NOT NULL
+                        AND fc.patient_id = leads.prospect_patient_id
+                        AND fc.id::text = leads.wizard_state->>'framework_contract_id'
+                        AND fc.status = 'signed'
+                    )
                   ) AS framework_document_generated,
                   EXISTS (
                       SELECT 1 FROM orders o
