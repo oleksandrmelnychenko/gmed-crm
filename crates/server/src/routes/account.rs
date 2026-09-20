@@ -159,7 +159,9 @@ async fn change_own_password(
         );
     }
 
-    match password_policy::replace_password(&state.db, auth.user_id, &body.new_password).await {
+    match password_policy::replace_password(&state.db, auth.user_id, &body.new_password, false)
+        .await
+    {
         Ok(()) => {}
         Err(password_policy::PasswordChangeError::Rejected(message)) => {
             return err(StatusCode::UNPROCESSABLE_ENTITY, "password_policy", message);

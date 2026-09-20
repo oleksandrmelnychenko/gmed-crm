@@ -37,8 +37,63 @@ struct UserResponse {
     failed_login_attempts: i32,
     locked_until: Option<chrono::DateTime<chrono::Utc>>,
     password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The person must replace the password at the next login (onboarding
+    /// with a one-time password or an administrator reset).
+    password_reset_required: bool,
+    /// An authenticator app is enrolled and confirmed.
+    totp_enrolled: bool,
+    /// Sessions (token families) that are not revoked.
+    active_sessions: i64,
+    /// Start of the most recent session; `None` when the person never signed in.
+    last_login_at: Option<chrono::DateTime<chrono::Utc>>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+    /// Returned exactly once, in the response that generated it. Never
+    /// stored, logged or audited.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    one_time_password: Option<String>,
+}
+
+/// Columns shared by every `users` projection: the account row plus the
+/// second-factor and session summary the administration screen shows.
+const USER_SELECT_COLUMNS: &str = r#"users.id, users.email, users.name, users.role, users.is_active,
+    users.failed_login_attempts, users.locked_until, users.password_changed_at,
+    users.password_reset_required, users.created_at, users.updated_at,
+    EXISTS (
+        SELECT 1 FROM user_totp t
+        WHERE t.user_id = users.id AND t.confirmed_at IS NOT NULL
+    ) AS totp_enrolled,
+    (
+        SELECT count(*) FROM token_families tf
+        WHERE tf.user_id = users.id AND NOT tf.is_revoked
+    ) AS active_sessions,
+    (
+        SELECT max(tf.created_at) FROM token_families tf
+        WHERE tf.user_id = users.id
+    ) AS last_login_at"#;
+
+fn user_response_from_row(r: &sqlx::postgres::PgRow) -> UserResponse {
+    UserResponse {
+        id: r.try_get("id").unwrap_or_else(|_| Uuid::nil()),
+        email: r.try_get("email").unwrap_or_default(),
+        name: r.try_get("name").unwrap_or_default(),
+        role: r.try_get("role").unwrap_or_default(),
+        is_active: r.try_get("is_active").unwrap_or(false),
+        failed_login_attempts: r.try_get("failed_login_attempts").unwrap_or(0),
+        locked_until: r.try_get("locked_until").unwrap_or(None),
+        password_changed_at: r.try_get("password_changed_at").unwrap_or(None),
+        password_reset_required: r.try_get("password_reset_required").unwrap_or(false),
+        totp_enrolled: r.try_get("totp_enrolled").unwrap_or(false),
+        active_sessions: r.try_get("active_sessions").unwrap_or(0),
+        last_login_at: r.try_get("last_login_at").unwrap_or(None),
+        created_at: r
+            .try_get("created_at")
+            .unwrap_or_else(|_| chrono::Utc::now()),
+        updated_at: r
+            .try_get("updated_at")
+            .unwrap_or_else(|_| chrono::Utc::now()),
+        one_time_password: None,
+    }
 }
 
 #[derive(Serialize)]
@@ -53,7 +108,9 @@ struct StaffDirectoryEntry {
 struct CreateUserRequest {
     email: String,
     name: String,
-    password: String,
+    /// Omitted: the server generates a one-time password, returns it once and
+    /// forces a change at the first login.
+    password: Option<String>,
     role: String,
 }
 
@@ -64,9 +121,31 @@ struct UpdateUserRequest {
     email: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct ResetPasswordRequest {
-    new_password: String,
+    /// Omitted (or `generate: true`): the server generates a one-time
+    /// password and returns it once. Either way the person must change the
+    /// password at the next login.
+    new_password: Option<String>,
+    generate: Option<bool>,
+}
+
+#[derive(Serialize)]
+struct ResetPasswordResponse {
+    password_reset_required: bool,
+    sessions_revoked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    one_time_password: Option<String>,
+}
+
+/// Chooses between the administrator-supplied password and a generated one.
+/// Returns the password and whether it was generated.
+fn resolve_reset_password(req: ResetPasswordRequest) -> (String, bool) {
+    let generate = req.generate.unwrap_or(false);
+    match req.new_password {
+        Some(password) if !generate && !password.is_empty() => (password, false),
+        _ => (password_policy::generate_one_time_password(), true),
+    }
 }
 
 #[derive(Deserialize)]
@@ -165,7 +244,9 @@ fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if req.name.is_empty() || req.name.len() > 200 {
         return Err("Name must be 1-200 characters");
     }
-    password_policy::validate_password_policy(&req.password)?;
+    if let Some(password) = req.password.as_deref() {
+        password_policy::validate_password_policy(password)?;
+    }
     if !VALID_ROLES.contains(&req.role.as_str()) {
         return Err("Invalid role");
     }
@@ -189,9 +270,8 @@ async fn list_users(
     let active_only = query.active_only.unwrap_or(false);
     let assignable_only = query.assignable_only.unwrap_or(false);
 
-    match sqlx::query(
-        r#"SELECT id, email, name, role, is_active, failed_login_attempts,
-                  locked_until, password_changed_at, created_at, updated_at
+    let list_sql = format!(
+        r#"SELECT {USER_SELECT_COLUMNS}
            FROM users
            WHERE ($1::text = '%%'
                   OR email ILIKE $1
@@ -249,35 +329,18 @@ async fn list_users(
                       AND COALESCE(sp.profile->>'employmentKind', 'external') = 'external'
                 )
              )
-           ORDER BY is_active DESC, created_at DESC"#,
-    )
-    .bind(search_pattern)
-    .bind(query.role)
-    .bind(active_only)
-    .bind(assignable_only)
-    .fetch_all(&state.db)
-    .await
+           ORDER BY is_active DESC, created_at DESC"#
+    );
+    match sqlx::query(&list_sql)
+        .bind(search_pattern)
+        .bind(query.role)
+        .bind(active_only)
+        .bind(assignable_only)
+        .fetch_all(&state.db)
+        .await
     {
         Ok(rows) => {
-            let mut users = Vec::with_capacity(rows.len());
-            for r in rows {
-                users.push(UserResponse {
-                    id: r.try_get("id").unwrap_or_else(|_| Uuid::nil()),
-                    email: r.try_get("email").unwrap_or_default(),
-                    name: r.try_get("name").unwrap_or_default(),
-                    role: r.try_get("role").unwrap_or_default(),
-                    is_active: r.try_get("is_active").unwrap_or(false),
-                    failed_login_attempts: r.try_get("failed_login_attempts").unwrap_or(0),
-                    locked_until: r.try_get("locked_until").unwrap_or(None),
-                    password_changed_at: r.try_get("password_changed_at").unwrap_or(None),
-                    created_at: r
-                        .try_get("created_at")
-                        .unwrap_or_else(|_| chrono::Utc::now()),
-                    updated_at: r
-                        .try_get("updated_at")
-                        .unwrap_or_else(|_| chrono::Utc::now()),
-                });
-            }
+            let users: Vec<UserResponse> = rows.iter().map(user_response_from_row).collect();
             Ok(Json(users))
         }
         Err(e) => {
@@ -337,25 +400,13 @@ async fn get_user(
 ) -> impl IntoResponse {
     auth.require_capability(Capability::UsersView)?;
 
-    match sqlx::query!(
-        "SELECT id, email, name, role, is_active, created_at, updated_at FROM users WHERE id = $1",
-        user_id
-    )
-    .fetch_optional(&state.db)
-    .await
+    let detail_sql = format!("SELECT {USER_SELECT_COLUMNS} FROM users WHERE users.id = $1");
+    match sqlx::query(&detail_sql)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
     {
-        Ok(Some(r)) => Ok(Json(UserResponse {
-            id: r.id,
-            email: r.email,
-            name: r.name,
-            role: r.role,
-            is_active: r.is_active,
-            failed_login_attempts: 0,
-            locked_until: None,
-            password_changed_at: None,
-            created_at: r.created_at,
-            updated_at: r.updated_at,
-        })),
+        Ok(Some(r)) => Ok(Json(user_response_from_row(&r))),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "User not found")),
         Err(e) => {
             tracing::error!(error = %e, "Failed to get user");
@@ -383,7 +434,14 @@ async fn create_user(
         ));
     }
 
-    let hash = match password::hash_password(&body.password) {
+    // Without a password the account is onboarded with a one-time password:
+    // it is returned once to the administrator, who hands it over out of
+    // band (no SMTP), and the person replaces it at the first login.
+    let (password, one_time) = match body.password {
+        Some(password) => (password, false),
+        None => (password_policy::generate_one_time_password(), true),
+    };
+    let hash = match password::hash_password(&password) {
         Ok(h) => h,
         Err(e) => {
             tracing::error!(error = %e, "Failed to hash password");
@@ -394,56 +452,62 @@ async fn create_user(
         }
     };
 
-    match sqlx::query!(
-        "INSERT INTO users (email, password_hash, name, role)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, email, name, role, is_active, created_at, updated_at",
-        body.email,
-        hash,
-        body.name,
-        body.role
-    )
-    .fetch_one(&state.db)
-    .await
+    let insert_sql = format!(
+        r#"WITH inserted AS (
+               INSERT INTO users (email, password_hash, name, role, password_reset_required)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING *
+           )
+           SELECT {USER_SELECT_COLUMNS} FROM inserted AS users"#
+    );
+    match sqlx::query(&insert_sql)
+        .bind(&body.email)
+        .bind(hash)
+        .bind(&body.name)
+        .bind(&body.role)
+        .bind(one_time)
+        .fetch_one(&state.db)
+        .await
     {
-        Ok(r) => {
-            tracing::info!(created_by = %auth.user_id, new_user = %r.id, role = %body.role, "User created");
+        Ok(row) => {
+            let mut created = user_response_from_row(&row);
+            tracing::info!(
+                created_by = %auth.user_id,
+                new_user = %created.id,
+                role = %body.role,
+                one_time_password = one_time,
+                "User created"
+            );
 
             state.audit_sender.try_send(audit::domain_event(
                 "create_user",
                 Some(auth.user_id),
                 "user",
-                Some(r.id),
-                serde_json::json!({ "role": body.role, "email": body.email }),
+                Some(created.id),
+                serde_json::json!({
+                    "role": body.role,
+                    "email": body.email,
+                    "one_time_password": one_time,
+                    "password_reset_required": created.password_reset_required,
+                }),
             ));
             crate::realtime::publish_admin_event(
                 &state,
                 Some(auth.user_id),
                 "user.created",
                 "user",
-                r.id,
+                created.id,
                 serde_json::json!({
-                    "role": r.role.clone(),
-                    "email": r.email.clone(),
+                    "role": created.role.clone(),
+                    "email": created.email.clone(),
                 }),
             )
             .await;
 
-            Ok((
-                StatusCode::CREATED,
-                Json(UserResponse {
-                    id: r.id,
-                    email: r.email,
-                    name: r.name,
-                    role: r.role,
-                    is_active: r.is_active,
-                    failed_login_attempts: 0,
-                    locked_until: None,
-                    password_changed_at: None,
-                    created_at: r.created_at,
-                    updated_at: r.updated_at,
-                }),
-            ))
+            if one_time {
+                created.one_time_password = Some(password);
+            }
+            Ok((StatusCode::CREATED, Json(created)))
         }
         Err(e) if e.to_string().contains("unique") => {
             Err(err(StatusCode::CONFLICT, "Email already exists"))
@@ -530,7 +594,8 @@ async fn update_user(
                email = $4,
                access_revision = access_revision + CASE WHEN $5 THEN 1 ELSE 0 END
            WHERE id = $1
-           RETURNING id, email, name, role, is_active, created_at, updated_at"#,
+           RETURNING id, email, name, role, is_active, failed_login_attempts, locked_until,
+                     password_changed_at, password_reset_required, created_at, updated_at"#,
     )
     .bind(user_id)
     .bind(new_name)
@@ -594,32 +659,9 @@ async fn update_user(
         .rows_affected();
     }
 
-    let response = UserResponse {
-        id: row
-            .try_get("id")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-        email: row
-            .try_get("email")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-        name: row
-            .try_get("name")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-        role: row
-            .try_get("role")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-        is_active: row
-            .try_get("is_active")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-        failed_login_attempts: 0,
-        locked_until: None,
-        password_changed_at: None,
-        created_at: row
-            .try_get("created_at")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-        updated_at: row
-            .try_get("updated_at")
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user"))?,
-    };
+    // The session and second-factor summary is not part of the RETURNING row;
+    // the list endpoint refreshes it.
+    let response = user_response_from_row(&row);
 
     tx.commit().await.map_err(|e| {
         tracing::error!(error = %e, user_id = %user_id, "Failed to commit user update");
@@ -721,6 +763,13 @@ async fn deactivate_user(
         Ok(r) if r.rows_affected() > 0 => {
             crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_deactivated").await;
             tracing::info!(by = %auth.user_id, target = %user_id, "User deactivated");
+            state.audit_sender.try_send(audit::domain_event(
+                "deactivate_user",
+                Some(auth.user_id),
+                "user",
+                Some(user_id),
+                serde_json::json!({ "sessions_revoked": true }),
+            ));
             crate::realtime::publish_admin_event(
                 &state,
                 Some(auth.user_id),
@@ -763,6 +812,13 @@ async fn activate_user(
     match result {
         Ok(r) if r.rows_affected() > 0 => {
             tracing::info!(by = %auth.user_id, target = %user_id, "User activated");
+            state.audit_sender.try_send(audit::domain_event(
+                "activate_user",
+                Some(auth.user_id),
+                "user",
+                Some(user_id),
+                serde_json::json!({}),
+            ));
             crate::realtime::publish_admin_event(
                 &state,
                 Some(auth.user_id),
@@ -858,7 +914,10 @@ async fn reset_password(
 ) -> impl IntoResponse {
     ensure_can_manage_target(&state, &auth, user_id).await?;
 
-    match password_policy::replace_password(&state.db, user_id, &body.new_password).await {
+    // An administrator reset always hands over a temporary password: the
+    // person must replace it at the next login (Stage 1's forced change).
+    let (new_password, generated) = resolve_reset_password(body);
+    match password_policy::replace_password(&state.db, user_id, &new_password, true).await {
         Ok(()) => {}
         Err(password_policy::PasswordChangeError::Rejected(message)) => {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
@@ -890,9 +949,11 @@ async fn reset_password(
         serde_json::json!({
             "sessions_revoked": true,
             "account_unlocked": true,
+            "one_time_password": generated,
+            "password_reset_required": true,
         }),
     ));
-    tracing::info!(by = %auth.user_id, target = %user_id, "Password reset");
+    tracing::info!(by = %auth.user_id, target = %user_id, one_time_password = generated, "Password reset");
     crate::realtime::publish_admin_event(
         &state,
         Some(auth.user_id),
@@ -902,7 +963,11 @@ async fn reset_password(
         serde_json::json!({ "user_id": user_id }),
     )
     .await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(ResetPasswordResponse {
+        password_reset_required: true,
+        sessions_revoked: true,
+        one_time_password: generated.then_some(new_password),
+    }))
 }
 
 /// Returns true when `email` belongs to a provider-directory staff person whose
@@ -984,7 +1049,8 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::would_remove_last_ceo;
+    use super::{ResetPasswordRequest, resolve_reset_password, would_remove_last_ceo};
+    use crate::auth::password_policy::validate_password_policy;
 
     #[test]
     fn last_ceo_guard_only_fires_for_the_only_active_ceo() {
@@ -992,5 +1058,31 @@ mod tests {
         assert!(!would_remove_last_ceo("ceo", true, 1));
         assert!(!would_remove_last_ceo("ceo", false, 0));
         assert!(!would_remove_last_ceo("billing", true, 0));
+    }
+
+    #[test]
+    fn reset_uses_the_supplied_password_unless_generation_is_requested() {
+        let (password, generated) = resolve_reset_password(ResetPasswordRequest {
+            new_password: Some("Supplied-1!".into()),
+            generate: None,
+        });
+        assert_eq!(password, "Supplied-1!");
+        assert!(!generated);
+
+        for request in [
+            ResetPasswordRequest {
+                new_password: Some("Supplied-1!".into()),
+                generate: Some(true),
+            },
+            ResetPasswordRequest {
+                new_password: Some(String::new()),
+                generate: None,
+            },
+            ResetPasswordRequest::default(),
+        ] {
+            let (password, generated) = resolve_reset_password(request);
+            assert!(generated);
+            assert_eq!(validate_password_policy(&password), Ok(()));
+        }
     }
 }

@@ -353,7 +353,12 @@ async fn reset_password_accepts_password_matching_policy() {
     )
     .await;
 
-    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["password_reset_required"], true);
+    assert!(
+        body.get("one_time_password").is_none(),
+        "a supplied password is never echoed back: {body}"
+    );
 
     let row: (
         String,
@@ -361,12 +366,14 @@ async fn reset_password_accepts_password_matching_policy() {
         Option<chrono::DateTime<chrono::Utc>>,
         chrono::DateTime<chrono::Utc>,
         i64,
+        bool,
     ) = sqlx::query_as(
         r#"SELECT password_hash,
                       failed_login_attempts,
                       locked_until,
                       password_changed_at,
-                      jsonb_array_length(password_history)::bigint
+                      jsonb_array_length(password_history)::bigint,
+                      password_reset_required
                FROM users
                WHERE id = $1"#,
     )
@@ -383,6 +390,244 @@ async fn reset_password_accepts_password_matching_policy() {
         row.4, 1,
         "the previous hash must be retained in password history"
     );
+    assert!(
+        row.5,
+        "an administrator reset hands over a temporary password: change at next login"
+    );
+}
+
+async fn login(app: &axum::Router, email: &str, password: &str) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({ "email": email, "password": password })).unwrap(),
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+#[tokio::test]
+async fn it_admin_onboards_a_user_with_a_one_time_password_that_must_be_changed() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let it_admin_id = seed_user(&pool, "users-api-onboarding", "it_admin").await;
+    let bearer = auth_header_for(it_admin_id, "it_admin");
+    let email = format!("onboarded-{}@example.com", Uuid::new_v4().simple());
+
+    // No password in the request: the server generates one and returns it once.
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/users",
+        &bearer,
+        json!({
+            "email": email,
+            "name": "Onboarded Manager",
+            "role": "patient_manager"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["password_reset_required"], true);
+    assert_eq!(created["totp_enrolled"], false);
+    assert_eq!(created["active_sessions"], 0);
+    assert!(created["last_login_at"].is_null());
+    let one_time_password = created["one_time_password"]
+        .as_str()
+        .expect("one-time password returned once")
+        .to_string();
+    assert_eq!(one_time_password.len(), 16);
+    gmed_server::auth::password_policy::validate_password_policy(&one_time_password)
+        .expect("generated password satisfies the policy");
+    let created_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+
+    // The secret never reaches the audit trail; the event only records that
+    // a one-time password was issued.
+    support::wait_until("create_user audit event", || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM audit_log WHERE action = 'create_user' AND entity_id = $1",
+            )
+            .bind(created_id)
+            .fetch_one(&pool)
+            .await
+            .is_ok_and(|count| count == 1)
+        }
+    })
+    .await;
+    let context: serde_json::Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'create_user' AND entity_id = $1",
+    )
+    .bind(created_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(context["one_time_password"], true, "{context}");
+    assert!(
+        !context.to_string().contains(&one_time_password),
+        "audit context must not carry the secret: {context}"
+    );
+
+    // The list endpoint does not repeat the secret either.
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users?search={email}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let row = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == created_id.to_string())
+        .expect("created user listed");
+    assert!(row.get("one_time_password").is_none(), "{row}");
+    assert_eq!(row["password_reset_required"], true);
+
+    // First login with the one-time password works and demands a change
+    // (Stage 1's forced password change screen takes over).
+    let (status, session) = login(&app, &email, &one_time_password).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(session["password_change_required"], true);
+}
+
+#[tokio::test]
+async fn reset_password_with_generate_returns_a_one_time_password_and_forces_change() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let target_id = seed_user(&pool, "users-api-reset-generate", "billing").await;
+    let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(target_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{target_id}/reset-password"),
+        &bearer,
+        json!({ "generate": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["password_reset_required"], true);
+    assert_eq!(body["sessions_revoked"], true);
+    let one_time_password = body["one_time_password"]
+        .as_str()
+        .expect("generated password returned once")
+        .to_string();
+
+    let (hash, reset_required): (String, bool) =
+        sqlx::query_as("SELECT password_hash, password_reset_required FROM users WHERE id = $1")
+            .bind(target_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(gmed_server::auth::password::verify_password(&one_time_password, &hash).unwrap());
+    assert!(reset_required);
+
+    let (status, session) = login(&app, &email, &one_time_password).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    assert_eq!(session["password_change_required"], true);
+
+    // An empty body behaves like `generate: true`.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{target_id}/reset-password"),
+        &bearer,
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["one_time_password"].is_string(), "{body}");
+}
+
+#[tokio::test]
+async fn users_list_exposes_second_factor_session_and_reset_state() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for(admin_id, "ceo");
+    let target_id = seed_user(&pool, "users-api-summary", "concierge").await;
+    let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(target_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query("UPDATE users SET password_reset_required = true WHERE id = $1")
+        .bind(target_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_totp (user_id, secret_ciphertext, secret_nonce, secret_key_id, confirmed_at)
+           VALUES ($1, '\x00'::bytea, '\x00'::bytea, 'test', now())"#,
+    )
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO token_families (user_id, is_revoked, created_at)
+           VALUES ($1, false, now() - interval '1 hour'),
+                  ($1, true, now() - interval '2 days')"#,
+    )
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users?search={email}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let row = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == target_id.to_string())
+        .expect("seeded user listed");
+    assert_eq!(row["password_reset_required"], true, "{row}");
+    assert_eq!(row["totp_enrolled"], true, "{row}");
+    assert_eq!(row["active_sessions"], 1, "{row}");
+    assert!(row["last_login_at"].is_string(), "{row}");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users/{target_id}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["totp_enrolled"], true);
+    assert_eq!(detail["active_sessions"], 1);
 }
 
 #[tokio::test]
@@ -594,7 +839,8 @@ async fn it_admin_manages_users_but_never_the_ceo() {
         json!({ "new_password": "An0ther!Passw0rd" }),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["password_reset_required"], true);
     let (status, body) = json_request(
         &app,
         "POST",

@@ -3,6 +3,7 @@
 //! (`PUT /me/password`). Both paths must apply exactly the same rules, so the
 //! policy check, the recent-history check and the column update live here.
 
+use rand::RngExt;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -34,6 +35,40 @@ impl PasswordChangeError {
             PasswordChangeError::Internal => "Failed to change password",
         }
     }
+}
+
+/// Length of a server-generated one-time password.
+pub const ONE_TIME_PASSWORD_LENGTH: usize = 16;
+
+/// Character groups for generated passwords: one character from every group is
+/// guaranteed so the result always satisfies [`validate_password_policy`].
+/// Ambiguous glyphs (`0/O`, `1/l/I`) are left out because the password is read
+/// out or copied by hand once.
+const ONE_TIME_PASSWORD_GROUPS: &[&[u8]] = &[
+    b"ABCDEFGHJKLMNPQRSTUVWXYZ",
+    b"abcdefghijkmnopqrstuvwxyz",
+    b"23456789",
+    b"!@#$%&*+-_=",
+];
+
+/// A strong random password for onboarding or an administrator reset. The
+/// caller hands it over out of band and must never log it.
+pub fn generate_one_time_password() -> String {
+    let mut rng = rand::rng();
+    let alphabet: Vec<u8> = ONE_TIME_PASSWORD_GROUPS.concat();
+    let mut chars: Vec<u8> = ONE_TIME_PASSWORD_GROUPS
+        .iter()
+        .map(|group| group[rng.random_range(0..group.len())])
+        .collect();
+    while chars.len() < ONE_TIME_PASSWORD_LENGTH {
+        chars.push(alphabet[rng.random_range(0..alphabet.len())]);
+    }
+    // Fisher-Yates so the guaranteed characters do not sit at fixed positions.
+    for index in (1..chars.len()).rev() {
+        let swap_with = rng.random_range(0..=index);
+        chars.swap(index, swap_with);
+    }
+    String::from_utf8(chars).expect("ASCII alphabet")
 }
 
 pub fn validate_password_policy(password: &str) -> Result<(), &'static str> {
@@ -77,14 +112,17 @@ async fn recent_password_hashes(db: &PgPool, user_id: Uuid) -> Result<Vec<String
 
 /// Validate `new_password` against the policy and the user's recent history,
 /// then store its hash. The previous hash is appended to `password_history`,
-/// `password_changed_at` is refreshed, any forced reset flag is cleared and the
-/// login lockout counters are reset. Session revocation and auditing are left
-/// to the caller because they differ between an admin reset and a self-service
-/// change.
+/// `password_changed_at` is refreshed and the login lockout counters are reset.
+/// `require_change_at_next_login` sets `password_reset_required`: an
+/// administrator reset hands over a temporary password that the person must
+/// replace at the first login, a self-service change clears the flag. Session
+/// revocation and auditing are left to the caller because they differ between
+/// the two paths.
 pub async fn replace_password(
     db: &PgPool,
     user_id: Uuid,
     new_password: &str,
+    require_change_at_next_login: bool,
 ) -> Result<(), PasswordChangeError> {
     validate_password_policy(new_password).map_err(PasswordChangeError::Rejected)?;
 
@@ -112,7 +150,7 @@ pub async fn replace_password(
                                   || jsonb_build_array(password_hash),
                password_hash = $2,
                password_changed_at = now(),
-               password_reset_required = false,
+               password_reset_required = $3,
                failed_login_attempts = 0,
                locked_until = NULL,
                updated_at = now()
@@ -120,6 +158,7 @@ pub async fn replace_password(
     )
     .bind(user_id)
     .bind(hash)
+    .bind(require_change_at_next_login)
     .execute(db)
     .await
     .map_err(|error| {
@@ -161,5 +200,21 @@ mod tests {
             validate_password_policy("NoDigits!!"),
             Err(PASSWORD_POLICY_MESSAGE)
         );
+    }
+
+    #[test]
+    fn generated_one_time_password_satisfies_the_policy() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..50 {
+            let password = generate_one_time_password();
+            assert_eq!(password.len(), ONE_TIME_PASSWORD_LENGTH);
+            assert_eq!(validate_password_policy(&password), Ok(()), "{password}");
+            assert!(
+                !password.contains(['0', 'O', '1', 'l', 'I']),
+                "ambiguous glyphs are excluded: {password}"
+            );
+            seen.insert(password);
+        }
+        assert_eq!(seen.len(), 50, "generated passwords must not repeat");
     }
 }
