@@ -3917,7 +3917,7 @@ async fn concierge_sees_only_the_service_grid_and_cannot_mutate_leads() {
         (
             "POST",
             format!("/api/v1/leads/{lead_id}/failed-flow"),
-            Some(json!({ "resolution": "archive" })),
+            Some(json!({ "resolution": "archive", "reason": "not_our_lead" })),
         ),
     ] {
         let (status, body) = json_request(&app, method, &path, &concierge, body).await;
