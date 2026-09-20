@@ -49,8 +49,8 @@ describe("customer release notes", () => {
     expect(production.title.ru).toBe("Релиз от 11 августа 2026");
     expect(production.title.de).toBe("Release vom 11. August 2026");
     expect(production.notes[0]).toMatchObject({
-      commit: "e3f7a96",
-      title: { ru: "Распознавание и проверка инвойсов" },
+      commit: "26ad6fa",
+      title: { ru: "E-Rechnung: счета в формате ZUGFeRD" },
     });
   });
 
