@@ -355,6 +355,61 @@ describe("staff route access by capability", () => {
     expect(ceo).toContain("/projects");
   });
 
+  it("leads each cabinet's navigation with its primary modules", () => {
+    const leading = (role: string, count: number) =>
+      listStaffNavItems(role)
+        .map((item) => item.id)
+        .slice(0, count);
+    expect(leading("billing", 4)).toEqual(["invoices", "orders", "company-finance", "contracts"]);
+    expect(leading("concierge", 4)).toEqual(["services", "hotels", "appointments", "leads"]);
+    expect(leading("patient_manager", 4)).toEqual(["patients", "leads", "orders", "contracts"]);
+    expect(leading("sales", 4)).toEqual(["leads", "providers", "reports", "chat"]);
+    expect(leading("ceo_assistant", 4)).toEqual([
+      "task-manager",
+      "appointments",
+      "patients",
+      "reports",
+    ]);
+    // `/interpreters` and `/appointments?focus=reports` have no nav entry, so
+    // the teamlead and interpreter cabinets lead with the rest of their list.
+    expect(leading("teamlead_interpreter", 3)).toEqual(["appointments", "documents", "task-manager"]);
+    expect(leading("interpreter", 3)).toEqual(["appointments", "documents", "task-manager"]);
+    expect(leading("it_admin", 8)).toEqual([
+      "admin/users",
+      "admin/security",
+      "admin/settings",
+      "admin/activity",
+      "admin/health",
+      "admin/signatures",
+      "admin/datev",
+      "incidents",
+    ]);
+    // The CEO keeps the rule order of the full navigation.
+    expect(listStaffNavItems("ceo")[0]?.id).toBe("task-manager");
+    // Every role keeps /account and the dashboard.
+    for (const role of ALL_STAFF_ROLES) {
+      expect(nav(role), role).toContain("/account");
+      expect(nav(role), role).toContain("/");
+    }
+  });
+
+  it("leaves whole sections empty for roles outside them", () => {
+    const sections = (role: string) => new Set(listStaffNavItems(role).map((item) => item.section));
+    expect(sections("it_admin").has("crm")).toBe(false);
+    expect(sections("it_admin").has("medicine")).toBe(false);
+    expect(sections("sales").has("accounting")).toBe(false);
+    expect(sections("sales").has("admin")).toBe(false);
+    expect(sections("interpreter").has("accounting")).toBe(false);
+    expect(sections("interpreter").has("admin")).toBe(false);
+  });
+
+  it("opens the interpreters registry to the roles that hold interpreters.view", () => {
+    expect(canAccessStaffRoute("teamlead_interpreter", "/interpreters")).toBe(true);
+    expect(canAccessStaffRoute("patient_manager", "/interpreters/staff-1")).toBe(true);
+    expect(canAccessStaffRoute("interpreter", "/interpreters")).toBe(false);
+    expect(canAccessStaffRoute("concierge", "/interpreters")).toBe(false);
+  });
+
   it("prefers the capabilities reported by /me over the role mirror", () => {
     expect(canAccessStaffRoute("it_admin", "/patients", ["patients.view"])).toBe(true);
     expect(canAccessStaffRoute("ceo", "/patients", [])).toBe(false);

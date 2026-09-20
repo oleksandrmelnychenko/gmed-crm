@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
+import { primaryModulesFor } from "@/lib/role-cabinets";
 import { listStaffNavItems } from "@/lib/staff-route-access";
 import { localizeTimelineTitle } from "@/lib/timeline-labels";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -93,6 +94,14 @@ const METRIC_ROUTES: Record<string, string> = {
   outstanding_receivables_total: "/company-finance",
   overdue_invoice_count: "/company-finance",
   invoices_30d: "/company-finance",
+  active_sessions: "/admin/security",
+  locked_accounts: "/admin/users",
+  pending_logins: "/admin/security",
+  failed_logins_24h: "/admin/activity",
+  blocked_logins_24h: "/admin/activity",
+  active_users: "/admin/users",
+  db_active_connections: "/admin/health",
+  audit_events_24h: "/admin/activity",
 };
 
 function numberValue(value: unknown): number | null {
@@ -197,10 +206,11 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
   const { staffGo } = useStaffNavigate();
   const tr = t as unknown as Record<string, string>;
   const definition = useMemo(() => roleDashboardDefinition(role, lang), [lang, role]);
+  const hasScorecard = definition.metrics.length > 0;
   const [kpi, setKpi] = useState<Record<string, unknown> | null>(
     preview ? definition.preview : null,
   );
-  const [loading, setLoading] = useState(!preview);
+  const [loading, setLoading] = useState(!preview && hasScorecard);
   const [failed, setFailed] = useState(false);
   const [tasks, setTasks] = useState<ConciergeTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(!preview);
@@ -219,23 +229,26 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
     }
 
     let cancelled = false;
-    setLoading(true);
+    setLoading(hasScorecard);
     setFailed(false);
     if (canUseTaskManager) setTasksLoading(true);
 
-    const kpiRequest = apiFetch<RoleKpiResponse>("/stats/my-kpis", { forceFresh: true })
-      .then((response) => {
-        if (!cancelled) setKpi(response.kpi ?? {});
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setKpi({});
-          setFailed(true);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    // A neutral cabinet (role without a preset) has no scorecard to fetch.
+    const kpiRequest = hasScorecard
+      ? apiFetch<RoleKpiResponse>("/stats/my-kpis", { forceFresh: true })
+          .then((response) => {
+            if (!cancelled) setKpi(response.kpi ?? {});
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setKpi({});
+              setFailed(true);
+            }
+          })
+          .finally(() => {
+            if (!cancelled) setLoading(false);
+          })
+      : Promise.resolve();
 
     const taskRequest = user?.id && canUseTaskManager
       ? apiFetch<ConciergeTask[]>(
@@ -263,7 +276,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
     return () => {
       cancelled = true;
     };
-  }, [canUseTaskManager, definition, preview, user?.id]);
+  }, [canUseTaskManager, definition, hasScorecard, preview, user?.id]);
 
   useEffect(() => refreshDashboard(), [refreshDashboard]);
   useDebouncedRealtimeSubscription(ROLE_DASHBOARD_EVENTS, refreshDashboard, 300);
@@ -272,7 +285,13 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
   const roleTitle = tr[`role_${role}`] ?? role;
   const navCapabilities = user?.role === role ? (user.capabilities ?? null) : null;
   const navItems = useMemo(() => listStaffNavItems(role, navCapabilities), [navCapabilities, role]);
-  const quickLinks = navItems.filter((item) => item.to !== "/").slice(0, 4);
+  // Primary cabinet modules the user's capabilities open; a role whose
+  // capability set opens none of them gets no quick link.
+  const quickLinks = useMemo(
+    () => primaryModulesFor(role, navCapabilities),
+    [navCapabilities, role],
+  );
+  const quickLinksUnavailable = definition.primaryModules.length > 0 && quickLinks.length === 0;
   const availableRoutes = useMemo(
     () => new Set(navItems.map((item) => item.to.split("?")[0])),
     [navItems],
@@ -343,11 +362,9 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
           <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-foreground">
             {greeting}
           </h1>
-          {role !== "concierge" ? (
-            <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
-              {definition.subtitle}
-            </p>
-          ) : null}
+          <p className="mt-1 max-w-2xl text-[13px] leading-5 text-muted-foreground">
+            {definition.subtitle}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <OpenTaskQueueLink />
@@ -364,6 +381,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
         </div>
       ) : null}
 
+      {hasScorecard ? (
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {definition.metrics.slice(0, 4).map((metricItem, index) => {
           const route = METRIC_ROUTES[metricItem.key];
@@ -381,8 +399,16 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
           );
         })}
       </section>
+      ) : null}
 
-      <section className="grid gap-3 lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]">
+      {hasScorecard || showLiveFocus || definition.focus.length > 0 ? (
+      <section
+        className={cn(
+          "grid gap-3",
+          hasScorecard && "lg:grid-cols-[minmax(0,1.3fr)_minmax(300px,0.7fr)]",
+        )}
+      >
+        {hasScorecard ? (
         <article className="overflow-hidden rounded-lg border border-border/70 bg-card">
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
@@ -421,6 +447,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
             )}
           </div>
         </article>
+        ) : null}
 
         <article className="overflow-hidden rounded-lg border border-border/70 bg-card">
           <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
@@ -518,20 +545,24 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
           </div>
         </article>
       </section>
+      ) : null}
 
-      {quickLinks.length > 0 ? (
-        <section>
+      {quickLinks.length > 0 || quickLinksUnavailable ? (
+        <section data-testid="role-cabinet-quick-links">
           <div className="mb-2 px-1">
             <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               {copy.quick}
             </h2>
-            <p className="mt-0.5 text-[12.5px] text-foreground">{copy.quickHint}</p>
+            <p className="mt-0.5 text-[12.5px] text-foreground">
+              {quickLinksUnavailable ? tr.cabinet_quick_links_empty : copy.quickHint}
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
             {quickLinks.map((item) => (
               <button
                 key={item.id}
                 type="button"
+                data-testid={`role-cabinet-link-${item.id}`}
                 onClick={() => staffGo(item.to)}
                 className={cn(
                   "flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-left",

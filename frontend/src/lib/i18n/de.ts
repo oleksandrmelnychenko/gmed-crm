@@ -172,6 +172,28 @@ export const de = {
   role_it_admin: "IT-Admin",
   role_patient: "Patient",
 
+  cabinet_eyebrow_default: "Arbeitsplatz",
+  cabinet_subtitle_default:
+    "Für Ihre Rolle ist noch kein Cockpit eingerichtet. Nur allgemeine Bereiche sind verfügbar.",
+  cabinet_subtitle_ceo_assistant:
+    "Assistenz-Cockpit: Aufgaben, Termine der Geschäftsführung und Daten nur zur Ansicht.",
+  cabinet_subtitle_patient_manager:
+    "Cockpit der Patientenbetreuung: eigene Patienten, Leads, Aufträge und Verträge.",
+  cabinet_subtitle_teamlead_interpreter:
+    "Teamlead-Cockpit: Einsatzplanung, Dokumente und Stundenfreigabe.",
+  cabinet_subtitle_interpreter:
+    "Mitarbeiter-Cockpit: eigene Termine, Dokumente, Aufgaben und Stunden.",
+  cabinet_subtitle_concierge:
+    "Concierge-Cockpit: Services, Hotels, Termine und das Service-Raster der Leads.",
+  cabinet_subtitle_billing:
+    "Abrechnungs-Cockpit: Rechnungen, Aufträge, Unternehmensfinanzen und Verträge.",
+  cabinet_subtitle_sales:
+    "Vertriebs-Cockpit: Leads, Partner, Marktanalysen und Chat.",
+  cabinet_subtitle_it_admin:
+    "Technisches Cockpit: Benutzer, Sicherheit, Einstellungen und Systemzustand. Ohne Patientendaten.",
+  cabinet_module_hours: "Stunden & Berichte",
+  cabinet_quick_links_empty: "Für Ihre Rolle sind keine Arbeitsbereiche freigegeben.",
+
   access_title: "Zugriffsmatrix",
   access_subtitle: "Feldzugriff pro Rolle und Entität konfigurieren",
   access_entity: "Entität",

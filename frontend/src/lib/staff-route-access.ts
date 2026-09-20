@@ -5,6 +5,7 @@
  */
 
 import { capabilitiesFor } from "@/lib/permissions";
+import { primaryModuleIds } from "@/lib/role-cabinets";
 
 export const ALL_STAFF_ROLES = [
   "ceo",
@@ -377,6 +378,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/interpreters",
     roles: ROLES_INTERPRETERS,
+    capability: "interpreters.view",
   },
   {
     id: "specializations",
@@ -734,5 +736,22 @@ export function listStaffNavItems(
   for (const deferred of pending.values()) {
     deferred.forEach(append);
   }
-  return ordered;
+  return orderPrimaryModulesFirst(role, ordered);
+}
+
+/**
+ * Puts the role's primary cabinet modules first, in cabinet order (see
+ * `@/lib/role-cabinets`), and keeps everything else in rule order. The nav
+ * panel groups by section, so within each section the primary modules lead.
+ */
+function orderPrimaryModulesFirst(role: string, items: StaffNavItem[]): StaffNavItem[] {
+  const primary = primaryModuleIds(role);
+  if (primary.length === 0) {
+    return items;
+  }
+  const rank = (item: StaffNavItem) => {
+    const index = primary.indexOf(item.id);
+    return index === -1 ? primary.length : index;
+  };
+  return [...items].sort((a, b) => rank(a) - rank(b));
 }

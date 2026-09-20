@@ -1,4 +1,5 @@
-import type { Lang } from "@/lib/i18n";
+import { t as translationsFor, type Lang } from "@/lib/i18n";
+import { ROLE_PRIMARY_MODULES, type RoleCabinetModule } from "@/lib/role-cabinets";
 
 export type RoleDashboardMetricFormat =
   | "number"
@@ -21,11 +22,31 @@ export type RoleDashboardDefinition = {
   metrics: RoleDashboardMetric[];
   focus: string[];
   preview: Record<string, unknown>;
+  /**
+   * The role's primary modules in cabinet order (unfiltered; the page shows
+   * only those the user's capabilities open).
+   */
+  primaryModules: readonly RoleCabinetModule[];
 };
 
 type Localized = { ru: string; de: string };
 
 const l = (lang: Lang, value: Localized) => value[lang];
+
+type CabinetRole =
+  | "ceo_assistant"
+  | "patient_manager"
+  | "teamlead_interpreter"
+  | "interpreter"
+  | "concierge"
+  | "billing"
+  | "sales"
+  | "it_admin";
+
+const subtitle = (lang: Lang, role: CabinetRole): string =>
+  translationsFor(lang)[`cabinet_subtitle_${role}`];
+
+const modules = (role: string): readonly RoleCabinetModule[] => ROLE_PRIMARY_MODULES[role] ?? [];
 
 const metric = (
   lang: Lang,
@@ -40,10 +61,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "ceo_assistant":
       return {
         eyebrow: l(lang, { ru: "Координация руководителя", de: "Geschäftsführungskoordination" }),
-        subtitle: l(lang, {
-          ru: "Задачи, сроки и решения, которые требуют внимания руководства",
-          de: "Aufgaben, Fristen und Entscheidungen für die Geschäftsführung",
-        }),
+        subtitle: subtitle(lang, "ceo_assistant"),
+        primaryModules: modules("ceo_assistant"),
         metrics: [
           metric(lang, "open_tasks", { ru: "Открытые задачи", de: "Offene Aufgaben" }, { ru: "ваша очередь", de: "Ihre Warteschlange" }),
           metric(lang, "overdue_tasks", { ru: "Просрочено", de: "Überfällig" }, { ru: "требует эскалации", de: "Eskalation nötig" }),
@@ -62,7 +81,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "patient_manager":
       return {
         eyebrow: l(lang, { ru: "Пациенты и сопровождение", de: "Patienten & Betreuung" }),
-        subtitle: l(lang, { ru: "Ваши пациенты, незакрытые задачи и контроль готовности", de: "Ihre Patienten, offenen Aufgaben und Bereitschaftsprüfungen" }),
+        subtitle: subtitle(lang, "patient_manager"),
+        primaryModules: modules("patient_manager"),
         metrics: [
           metric(lang, "active_patients", { ru: "Активные пациенты", de: "Aktive Patienten" }, { ru: "в вашем сопровождении", de: "in Ihrer Betreuung" }),
           metric(lang, "active_orders", { ru: "Активные заказы", de: "Aktive Aufträge" }, { ru: "по вашим пациентам", de: "für Ihre Patienten" }),
@@ -81,7 +101,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "teamlead_interpreter":
       return {
         eyebrow: l(lang, { ru: "Команда и покрытие", de: "Team & Abdeckung" }),
-        subtitle: l(lang, { ru: "Загрузка команды, покрытие приёмов и подтверждение часов", de: "Teamauslastung, Terminabdeckung und Stundenfreigabe" }),
+        subtitle: subtitle(lang, "teamlead_interpreter"),
+        primaryModules: modules("teamlead_interpreter"),
         metrics: [
           metric(lang, "team_size", { ru: "Сотрудники", de: "Teammitglieder" }, { ru: "активная команда", de: "aktives Team" }),
           metric(lang, "completed_appointments_30d", { ru: "Завершённые приёмы", de: "Abgeschlossene Termine" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
@@ -100,7 +121,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "interpreter":
       return {
         eyebrow: l(lang, { ru: "Мой рабочий график", de: "Mein Arbeitsplan" }),
-        subtitle: l(lang, { ru: "Ваши приёмы, часы и личная эффективность", de: "Ihre Termine, Stunden und persönliche Leistung" }),
+        subtitle: subtitle(lang, "interpreter"),
+        primaryModules: modules("interpreter"),
         metrics: [
           metric(lang, "completed_appointments_30d", { ru: "Завершённые приёмы", de: "Abgeschlossene Termine" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
           metric(lang, "upcoming_hours_30d", { ru: "Предстоящие часы", de: "Anstehende Stunden" }, { ru: "следующие 30 дней", de: "nächste 30 Tage" }, "hours"),
@@ -119,7 +141,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "concierge":
       return {
         eyebrow: l(lang, { ru: "Сервис и логистика", de: "Service & Logistik" }),
-        subtitle: l(lang, { ru: "Активные запросы, ближайшие действия и передача в бухгалтерию", de: "Aktive Anfragen, nächste Schritte und Übergabe an die Abrechnung" }),
+        subtitle: subtitle(lang, "concierge"),
+        primaryModules: modules("concierge"),
         metrics: [
           metric(lang, "active_services", { ru: "Активные сервисы", de: "Aktive Services" }, { ru: "в вашей очереди", de: "in Ihrer Queue" }),
           metric(lang, "completed_services_30d", { ru: "Выполнено", de: "Abgeschlossen" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
@@ -138,7 +161,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "billing":
       return {
         eyebrow: l(lang, { ru: "Финансы и дебиторка", de: "Finanzen & Forderungen" }),
-        subtitle: l(lang, { ru: "Счета, просрочки и скорость закрытия финансового цикла", de: "Rechnungen, Überfälligkeiten und Geschwindigkeit des Finanzzyklus" }),
+        subtitle: subtitle(lang, "billing"),
+        primaryModules: modules("billing"),
         metrics: [
           metric(lang, "outstanding_receivables_total", { ru: "Дебиторка", de: "Offene Forderungen" }, { ru: "к получению", de: "noch einzuziehen" }, "currency"),
           metric(lang, "overdue_invoice_count", { ru: "Просроченные счета", de: "Überfällige Rechnungen" }, { ru: "требуют действия", de: "Handlungsbedarf" }),
@@ -157,7 +181,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "sales":
       return {
         eyebrow: l(lang, { ru: "Продажи и партнёры", de: "Vertrieb & Partner" }),
-        subtitle: l(lang, { ru: "Новые лиды, квалификация и конверсия в пациентов", de: "Neue Leads, Qualifizierung und Konversion zu Patienten" }),
+        subtitle: subtitle(lang, "sales"),
+        primaryModules: modules("sales"),
         metrics: [
           metric(lang, "new_leads_30d", { ru: "Новые лиды", de: "Neue Leads" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
           metric(lang, "qualified_leads_30d", { ru: "Квалифицировано", de: "Qualifiziert" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
@@ -176,13 +201,16 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
     case "it_admin":
       return {
         eyebrow: l(lang, { ru: "Система и безопасность", de: "System & Sicherheit" }),
-        subtitle: l(lang, { ru: "Состояние доступов, активных сессий и событий безопасности", de: "Status von Zugriffen, Sitzungen und Sicherheitsereignissen" }),
+        subtitle: subtitle(lang, "it_admin"),
+        primaryModules: modules("it_admin"),
         metrics: [
-          metric(lang, "active_users", { ru: "Активные пользователи", de: "Aktive Benutzer" }, { ru: "учётные записи", de: "Konten" }),
           metric(lang, "active_sessions", { ru: "Активные сессии", de: "Aktive Sitzungen" }, { ru: "сейчас в системе", de: "derzeit im System" }),
           metric(lang, "locked_accounts", { ru: "Заблокировано", de: "Gesperrte Konten" }, { ru: "учётные записи", de: "Konten" }),
-          metric(lang, "auth_alerts_24h", { ru: "События входа", de: "Anmeldealarme" }, { ru: "за 24 часа", de: "in 24 Stunden" }),
           metric(lang, "pending_logins", { ru: "Ожидают MFA", de: "Warten auf MFA" }, { ru: "нужно подтвердить", de: "zu bestätigen" }),
+          metric(lang, "failed_logins_24h", { ru: "Неудачные входы", de: "Fehlgeschlagene Logins" }, { ru: "за 24 часа", de: "in 24 Stunden" }),
+          metric(lang, "active_users", { ru: "Активные пользователи", de: "Aktive Benutzer" }, { ru: "учётные записи", de: "Konten" }),
+          metric(lang, "blocked_logins_24h", { ru: "Заблокированные входы", de: "Blockierte Logins" }, { ru: "за 24 часа", de: "in 24 Stunden" }),
+          metric(lang, "db_active_connections", { ru: "Подключения к БД", de: "DB-Verbindungen" }, { ru: "состояние системы", de: "Systemzustand" }),
           metric(lang, "audit_events_24h", { ru: "Audit-события", de: "Audit-Ereignisse" }, { ru: "за 24 часа", de: "in 24 Stunden" }),
         ],
         focus: [
@@ -190,9 +218,34 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
           l(lang, { ru: "Разобрать заблокированные учётные записи", de: "Gesperrte Konten bearbeiten" }),
           l(lang, { ru: "Проверить ожидающие MFA-входы", de: "Ausstehende MFA-Anmeldungen prüfen" }),
         ],
-        preview: { active_users: 12, active_sessions: 5, locked_accounts: 1, auth_alerts_24h: 3, pending_logins: 2, audit_events_24h: 184 },
+        preview: {
+          active_sessions: 5,
+          locked_accounts: 1,
+          pending_logins: 2,
+          failed_logins_24h: 3,
+          active_users: 12,
+          blocked_logins_24h: 0,
+          db_active_connections: 4,
+          audit_events_24h: 184,
+        },
       };
     default:
-      return roleDashboardDefinition("patient_manager", lang);
+      return neutralCabinet(lang);
   }
+}
+
+/**
+ * Landing for a role without a cabinet preset: no KPI scorecard, no focus
+ * list, no quick links. Nothing from another role's preset leaks through.
+ */
+function neutralCabinet(lang: Lang): RoleDashboardDefinition {
+  const t = translationsFor(lang);
+  return {
+    eyebrow: t.cabinet_eyebrow_default,
+    subtitle: t.cabinet_subtitle_default,
+    metrics: [],
+    focus: [],
+    preview: {},
+    primaryModules: [],
+  };
 }

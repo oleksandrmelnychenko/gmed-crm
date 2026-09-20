@@ -167,6 +167,20 @@ export interface Translations
   role_it_admin: string;
   role_patient: string;
 
+  // Role cabinets (landing dashboards), see docs/role-cabinets-plan-2026-09-20_ua.md.
+  cabinet_eyebrow_default: string;
+  cabinet_subtitle_default: string;
+  cabinet_subtitle_ceo_assistant: string;
+  cabinet_subtitle_patient_manager: string;
+  cabinet_subtitle_teamlead_interpreter: string;
+  cabinet_subtitle_interpreter: string;
+  cabinet_subtitle_concierge: string;
+  cabinet_subtitle_billing: string;
+  cabinet_subtitle_sales: string;
+  cabinet_subtitle_it_admin: string;
+  cabinet_module_hours: string;
+  cabinet_quick_links_empty: string;
+
   access_title: string;
   access_subtitle: string;
   access_entity: string;
