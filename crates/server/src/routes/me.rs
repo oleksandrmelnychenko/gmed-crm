@@ -68,6 +68,7 @@ async fn get_me(
                 "email": u.try_get::<String, _>("email").ok(),
                 "name": u.try_get::<String, _>("name").ok(),
                 "role": u.try_get::<String, _>("role").ok(),
+                "capabilities": auth.role.capabilities(),
                 "created_at": u.try_get::<chrono::DateTime<Utc>, _>("created_at").ok(),
                 "phone": u.try_get::<Option<String>, _>("phone").ok().flatten(),
                 "preferred_language": u

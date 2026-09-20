@@ -59,23 +59,18 @@ async fn api_not_found() -> impl IntoResponse {
 ///    response — including 429 responses from the limiters — carries the
 ///    hardened header baseline.
 pub fn build_app(app_state: state::AppState) -> Router {
-    build_app_with_workspace_gate(app_state, true)
+    build_app_inner(app_state)
 }
 
-/// Build the application for integration suites that verify latent role route
-/// contracts independently of the current release-workspace allowlist.
-///
-/// This is deliberately separate from [`build_app`], which always enables the
-/// production gate.
+/// Kept for the integration suites written against the former
+/// release-workspace seam. Role access is now decided per route through
+/// capabilities, so this is the same router as [`build_app`].
 #[doc(hidden)]
 pub fn build_app_for_role_contract_tests(app_state: state::AppState) -> Router {
-    build_app_with_workspace_gate(app_state, false)
+    build_app_inner(app_state)
 }
 
-fn build_app_with_workspace_gate(
-    app_state: state::AppState,
-    enforce_release_workspace_roles: bool,
-) -> Router {
+fn build_app_inner(app_state: state::AppState) -> Router {
     let auth_public = rate_limit::apply_auth_tight(routes::auth::public_router());
 
     let misc_public = rate_limit::apply_general(
@@ -100,17 +95,10 @@ fn build_app_with_workspace_gate(
         app_state.clone(),
         audit::middleware,
     ));
-    let protected_routes = if enforce_release_workspace_roles {
-        protected_routes.layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            auth::middleware::require_auth,
-        ))
-    } else {
-        protected_routes.layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            auth::middleware::require_auth_for_role_contract_tests,
-        ))
-    };
+    let protected_routes = protected_routes.layer(middleware::from_fn_with_state(
+        app_state.clone(),
+        auth::middleware::require_auth,
+    ));
     let protected = rate_limit::apply_general(protected_routes);
 
     let api_router = auth_public

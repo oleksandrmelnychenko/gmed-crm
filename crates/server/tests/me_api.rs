@@ -1285,3 +1285,54 @@ async fn portal_service_notifications_and_staff_queue_stay_assignment_scoped() {
         "unrelated PM must not see portal service row"
     );
 }
+
+#[tokio::test]
+async fn me_reports_the_role_capabilities() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let sales_id = seed_user(&pool, &format!("me-caps-{tag}"), "sales").await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me",
+        &auth_header_for(sales_id, "sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let capabilities = body["capabilities"]
+        .as_array()
+        .expect("capabilities array")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"leads.edit"), "{capabilities:?}");
+    assert!(capabilities.contains(&"chat.use"), "{capabilities:?}");
+    assert!(!capabilities.contains(&"patients.view"), "{capabilities:?}");
+
+    let it_admin_id = seed_user(&pool, &format!("me-caps-{tag}"), "it_admin").await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me",
+        &auth_header_for(it_admin_id, "it_admin"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let capabilities = body["capabilities"]
+        .as_array()
+        .expect("capabilities array")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(capabilities.contains(&"users.manage"), "{capabilities:?}");
+    assert!(
+        !capabilities.contains(&"users.manage_ceo"),
+        "{capabilities:?}"
+    );
+    assert!(!capabilities.contains(&"patients.view"), "{capabilities:?}");
+}

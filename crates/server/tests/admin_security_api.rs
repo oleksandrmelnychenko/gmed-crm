@@ -201,26 +201,41 @@ async fn system_health_exposes_only_aggregate_medication_ai_state() {
 }
 
 #[tokio::test]
-async fn release_router_blocks_unconfigured_staff_workspaces() {
+async fn release_router_limits_security_analytics_to_technical_admins() {
     let Some(app) = test_context().await else {
         return;
     };
     let assistant_id = seed_user(&app.suite.pool, "release-gate", "ceo_assistant").await;
+    let sales_id = seed_user(&app.suite.pool, "release-gate", "sales").await;
 
-    let (status, _) = json_request(
+    for (role, user_id) in [("ceo_assistant", assistant_id), ("sales", sales_id)] {
+        let (status, _) = json_request(
+            &app.suite.release_app,
+            "GET",
+            "/api/v1/admin/audit-analytics",
+            &auth_header_for(role, user_id),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}");
+    }
+
+    // The technical admin owns the security cabinet on the production router.
+    let (status, body) = json_request(
         &app.suite.release_app,
         "GET",
         "/api/v1/admin/audit-analytics",
-        &auth_header_for("ceo_assistant", assistant_id),
+        &auth_header_for("it_admin", app.it_admin_id),
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::OK, "{body}");
 
+    // ...but never the patient workspace.
     let (status, _) = json_request(
         &app.suite.release_app,
         "GET",
-        "/api/v1/admin/audit-analytics",
+        "/api/v1/patients",
         &auth_header_for("it_admin", app.it_admin_id),
         None,
     )

@@ -17,22 +17,6 @@ pub enum Role {
 }
 
 impl Role {
-    /// Staff roles that currently have a configured business workspace.
-    ///
-    /// Other staff roles remain valid accounts and may sign in, but their
-    /// workspace and business API access stay empty until explicitly enabled.
-    pub fn is_release_staff_role(&self) -> bool {
-        matches!(
-            self,
-            Role::Ceo
-                | Role::Concierge
-                | Role::Billing
-                | Role::PatientManager
-                | Role::TeamleadInterpreter
-                | Role::Interpreter
-        )
-    }
-
     pub fn has_full_access(&self) -> bool {
         match self {
             Role::Ceo => true,
@@ -118,20 +102,6 @@ impl std::fmt::Display for Role {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn release_staff_roles_cover_operations_and_interpreting() {
-        assert!(Role::Ceo.is_release_staff_role());
-        assert!(Role::Concierge.is_release_staff_role());
-        assert!(Role::Billing.is_release_staff_role());
-        assert!(Role::PatientManager.is_release_staff_role());
-        assert!(Role::TeamleadInterpreter.is_release_staff_role());
-        assert!(Role::Interpreter.is_release_staff_role());
-        assert!(!Role::ItAdmin.is_release_staff_role());
-        assert!(!Role::CeoAssistant.is_release_staff_role());
-        assert!(!Role::Sales.is_release_staff_role());
-        assert!(!Role::Patient.is_release_staff_role());
-    }
 
     #[test]
     fn only_ceo_has_full_access() {

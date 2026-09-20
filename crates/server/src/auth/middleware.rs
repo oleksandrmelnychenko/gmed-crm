@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use super::{blacklist, jwt};
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 #[derive(Debug, Clone)]
@@ -55,6 +56,37 @@ impl AuthUser {
         }
         if found { Ok(()) } else { Err(forbidden()) }
     }
+
+    /// Whether the signed-in role holds `capability` (see
+    /// `gmed_domain::access::capabilities`). The CEO holds every capability.
+    pub fn can(&self, capability: Capability) -> bool {
+        self.role.can(capability)
+    }
+
+    /// Whether the signed-in role holds at least one of `capabilities`.
+    pub fn can_any(&self, capabilities: &[Capability]) -> bool {
+        self.role.can_any(capabilities)
+    }
+
+    /// 403 unless the role holds `capability`.
+    #[allow(clippy::result_large_err)]
+    pub fn require_capability(&self, capability: Capability) -> Result<(), Response> {
+        if self.can(capability) {
+            Ok(())
+        } else {
+            Err(forbidden())
+        }
+    }
+
+    /// 403 unless the role holds at least one of `capabilities`.
+    #[allow(clippy::result_large_err)]
+    pub fn require_any_capability(&self, capabilities: &[Capability]) -> Result<(), Response> {
+        if self.can_any(capabilities) {
+            Ok(())
+        } else {
+            Err(forbidden())
+        }
+    }
 }
 
 fn parse_role(role_str: &str) -> Option<Role> {
@@ -81,29 +113,13 @@ fn extract_bearer_token(req: &Request) -> Option<&str> {
         .strip_prefix("Bearer ")
 }
 
-pub async fn require_auth(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    require_auth_with_workspace_policy(state, req, next, true).await
-}
-
-/// Test-only router seam for exercising latent role-specific route contracts.
+/// Authenticates the request and leaves an [`AuthUser`] in the extensions.
 ///
-/// Production must always use [`require_auth`], which enforces the current
-/// release workspace allowlist before dispatching business APIs.
-#[doc(hidden)]
-pub async fn require_auth_for_role_contract_tests(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
-    require_auth_with_workspace_policy(state, req, next, false).await
-}
-
-async fn require_auth_with_workspace_policy(
-    state: AppState,
-    mut req: Request,
-    next: Next,
-    enforce_release_workspace_roles: bool,
-) -> Response {
+/// Authorization is decided per route through [`AuthUser::require_capability`]
+/// and the row-level policies; there is no role-wide "empty workspace" gate
+/// any more, every staff role reaches exactly the endpoints its capabilities
+/// allow.
+pub async fn require_auth(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let Some(token) = extract_bearer_token(&req) else {
         return unauthorized();
     };
@@ -120,18 +136,6 @@ async fn require_auth_with_workspace_policy(
     // is the same for every role. Kept separate from the capability model.
     if password_change_required && !is_password_change_allowed_path(req.uri().path()) {
         return password_change_required_response();
-    }
-
-    if enforce_release_workspace_roles
-        && !release_workspace_allows_path(auth_user.role, req.uri().path())
-    {
-        tracing::warn!(
-            role = %auth_user.role,
-            user_id = %auth_user.user_id,
-            path = %req.uri().path(),
-            "Blocked business API access for an unconfigured staff role"
-        );
-        return forbidden();
     }
 
     req.extensions_mut().insert(auth_user);
@@ -329,70 +333,74 @@ pub(crate) async fn authenticate_websocket(
         .map_err(|_| WebSocketAuthError)
 }
 
-fn is_empty_workspace_role(role: Role) -> bool {
-    role != Role::Patient && !role.is_release_staff_role()
-}
-
-/// Shared production workspace decision used by HTTP and WebSocket transports.
-/// Public WebSocket routes authenticate after upgrade, so their handlers must
-/// call this after authentication and after periodic revalidation.
+/// Shared transport decision used by the public WebSocket routes, which
+/// authenticate after the upgrade and must call this after authentication and
+/// after periodic revalidation. The event stream is open to every signed-in
+/// account (events are filtered per class below); the chat socket needs the
+/// chat workspace.
 pub(crate) fn release_workspace_allows_path(role: Role, path: &str) -> bool {
-    !is_empty_workspace_role(role) || is_empty_workspace_allowed_path(role, path)
-}
-
-/// Empty-workspace task roles retain only the realtime event classes matching
-/// their narrow operational HTTP surface. Direct user/role targeting must not
-/// grant them unrelated patient, finance, chat, or administrative events.
-pub(crate) fn release_workspace_allows_realtime_event(role: Role, event_type: &str) -> bool {
-    if !is_empty_workspace_role(role) {
-        return true;
-    }
-    is_task_manager_workspace_role(role)
-        && (event_type.starts_with("notification.")
-            || event_type.starts_with("concierge_operational_item."))
-}
-
-fn is_empty_workspace_allowed_path(role: Role, path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
-    // Account self-service (/account page) is available to every role.
-    let session_path = matches!(
-        path,
-        "/me"
-            | "/me/password"
-            | "/me/profile"
-            | "/auth/logout"
-            | "/auth/logout-all"
-            | "/auth/sessions"
-            | "/stats/my-kpis"
-    ) || path.starts_with("/auth/sessions/")
-        || path == "/me/totp"
-        || path.starts_with("/me/totp/");
-    if session_path {
-        return true;
+    match path {
+        "/messages/ws" => role == Role::Patient || role.can(Capability::ChatUse),
+        _ => true,
     }
-    if !is_task_manager_workspace_role(role) {
-        return false;
-    }
-    path == "/events/ws"
-        || path == "/concierge-operational-items"
-        || path.starts_with("/concierge-operational-items/")
-        || path == "/concierge-operational-attachments"
-        || path == "/notifications"
-        || path.starts_with("/notifications/")
 }
 
-fn is_task_manager_workspace_role(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo
-            | Role::CeoAssistant
-            | Role::Billing
-            | Role::PatientManager
-            | Role::Sales
-            | Role::Concierge
-            | Role::TeamleadInterpreter
-            | Role::Interpreter
-    )
+/// Coarse realtime filter: an event class is delivered only to roles holding
+/// a capability for its module, so a technical admin never receives task,
+/// patient, finance or chat events even when it is targeted directly. Event
+/// classes without a mapping fall through to the per-event authorization.
+pub(crate) fn release_workspace_allows_realtime_event(role: Role, event_type: &str) -> bool {
+    if role == Role::Patient {
+        return true;
+    }
+    match realtime_event_capabilities(event_type) {
+        Some(required) => role.can_any(required),
+        None => true,
+    }
+}
+
+fn realtime_event_capabilities(event_type: &str) -> Option<&'static [Capability]> {
+    use Capability as C;
+    let module = event_type.split('.').next().unwrap_or_default();
+    let required: &'static [Capability] = match module {
+        "concierge_operational_item" | "task" | "crm_project" | "concierge_expense" => {
+            &[C::TasksUse]
+        }
+        "patient"
+        | "recommendation"
+        | "reminder"
+        | "workflow_checklist_item"
+        | "case"
+        | "consent"
+        | "appointment_checklist"
+        | "scan"
+        | "report" => &[C::PatientsView],
+        "lead" => &[C::LeadsView],
+        "order" | "order_intake_documents" | "order_intake_catalog" => &[C::OrdersView],
+        "invoice"
+        | "provider_invoice"
+        | "provider_payment"
+        | "accounting_entry"
+        | "company_financial_account"
+        | "framework_contract" => &[C::InvoicesView, C::AccountingView, C::CompanyFinanceView],
+        "quote" => &[C::ContractsView],
+        "document" | "translation_request" => &[C::DocumentsView],
+        "appointment" | "appointment_request" => &[C::AppointmentsView],
+        "provider" => &[C::ProvidersView],
+        "concierge_service" | "service_package" => &[C::ServicesView],
+        "feedback" => &[C::FeedbackView],
+        "messages" => &[C::ChatUse],
+        "privacy_request" => &[C::AdminCompliance, C::PatientsView],
+        "user" => &[C::UsersView],
+        "security"
+        | "access_policy"
+        | "system_setting"
+        | "notification_channel"
+        | "custom_field" => &[C::AdminSettings, C::AdminSecurity],
+        _ => return None,
+    };
+    Some(required)
 }
 
 fn unauthorized() -> Response {
@@ -550,58 +558,34 @@ mod tests {
     }
 
     #[test]
-    fn legacy_staff_sessions_only_reach_identity_and_session_endpoints() {
-        assert!(is_empty_workspace_role(Role::ItAdmin));
-        assert!(!is_empty_workspace_role(Role::PatientManager));
-        assert!(!is_empty_workspace_role(Role::Interpreter));
-        assert!(!is_empty_workspace_role(Role::TeamleadInterpreter));
-        assert!(!is_empty_workspace_role(Role::Ceo));
-        assert!(!is_empty_workspace_role(Role::Concierge));
-        assert!(!is_empty_workspace_role(Role::Billing));
-        assert!(!is_empty_workspace_role(Role::Patient));
+    fn capability_checks_follow_the_registry() {
+        let u = user(Role::ItAdmin);
+        assert!(u.can(Capability::UsersManage));
+        assert!(!u.can(Capability::UsersManageCeo));
+        assert!(!u.can(Capability::PatientsView));
+        assert!(u.require_capability(Capability::AdminSecurity).is_ok());
+        assert!(u.require_capability(Capability::ChatUse).is_err());
+        assert!(
+            u.require_any_capability(&[Capability::PatientsView, Capability::AdminSettings])
+                .is_ok()
+        );
+        assert!(
+            u.require_any_capability(&[Capability::PatientsView, Capability::ChatUse])
+                .is_err()
+        );
 
-        for path in [
-            "/me",
-            "/api/v1/me",
-            "/auth/logout",
-            "/api/v1/auth/logout-all",
-            "/auth/sessions",
-            "/api/v1/auth/sessions/family-id/revoke",
-            "/api/v1/stats/my-kpis",
-        ] {
-            assert!(
-                is_empty_workspace_allowed_path(Role::ItAdmin, path),
-                "{path}"
-            );
-        }
-        for path in ["/", "/patients", "/api/v1/leads", "/messages/unread-total"] {
-            assert!(
-                !is_empty_workspace_allowed_path(Role::ItAdmin, path),
-                "{path}"
-            );
-        }
+        let ceo = user(Role::Ceo);
+        assert!(ceo.can(Capability::UsersManageCeo));
+        assert!(ceo.require_capability(Capability::IncidentsManage).is_ok());
 
-        for path in [
-            "/api/v1/concierge-operational-items",
-            "/api/v1/concierge-operational-items/assignees",
-            "/api/v1/concierge-operational-items/task-id",
-            "/api/v1/concierge-operational-attachments",
-            "/api/v1/notifications",
-            "/api/v1/notifications/unread-count",
-        ] {
-            assert!(
-                is_empty_workspace_allowed_path(Role::PatientManager, path),
-                "{path}"
-            );
-            assert!(
-                !is_empty_workspace_allowed_path(Role::ItAdmin, path),
-                "{path}"
-            );
-        }
-        assert!(!is_empty_workspace_allowed_path(
-            Role::PatientManager,
-            "/api/v1/patients"
-        ));
+        let assistant = user(Role::CeoAssistant);
+        assert!(assistant.can(Capability::PatientsView));
+        assert!(!assistant.can(Capability::PatientsEdit));
+        assert!(
+            assistant
+                .require_capability(Capability::InvoicesCreate)
+                .is_err()
+        );
     }
 
     #[test]
@@ -641,26 +625,34 @@ mod tests {
     }
 
     #[test]
-    fn account_self_service_paths_stay_open_for_empty_workspace_roles() {
-        for path in [
-            "/api/v1/me/password",
-            "/api/v1/me/profile",
-            "/api/v1/me/totp",
-            "/api/v1/me/totp/setup",
+    fn websocket_transport_policy_follows_capabilities() {
+        for role in [
+            Role::Ceo,
+            Role::CeoAssistant,
+            Role::Concierge,
+            Role::Billing,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Sales,
+            Role::Patient,
         ] {
             assert!(
-                is_empty_workspace_allowed_path(Role::ItAdmin, path),
-                "{path}"
+                release_workspace_allows_path(role, "/messages/ws"),
+                "{role:?}"
             );
+            assert!(release_workspace_allows_path(role, "/api/v1/messages/ws"));
+            assert!(release_workspace_allows_path(role, "/events/ws"));
         }
-        assert!(!is_empty_workspace_allowed_path(
+        assert!(!release_workspace_allows_path(
             Role::ItAdmin,
-            "/api/v1/me/documents"
+            "/messages/ws"
         ));
+        assert!(release_workspace_allows_path(Role::ItAdmin, "/events/ws"));
     }
 
     #[test]
-    fn release_workspace_transport_policy_matches_http_boundaries() {
+    fn realtime_event_classes_follow_capabilities() {
         for role in [
             Role::Ceo,
             Role::Concierge,
@@ -668,23 +660,13 @@ mod tests {
             Role::PatientManager,
             Role::TeamleadInterpreter,
             Role::Interpreter,
+            Role::CeoAssistant,
             Role::Patient,
         ] {
-            assert!(release_workspace_allows_path(role, "/messages/ws"));
-            assert!(release_workspace_allows_path(role, "/events/ws"));
-            assert!(release_workspace_allows_realtime_event(
-                role,
-                "patient.updated"
-            ));
-        }
-
-        for role in [Role::CeoAssistant, Role::Sales] {
-            assert!(!release_workspace_allows_path(role, "/messages/ws"));
-            assert!(release_workspace_allows_path(role, "/events/ws"));
-            assert!(!release_workspace_allows_realtime_event(
-                role,
-                "patient.updated"
-            ));
+            assert!(
+                release_workspace_allows_realtime_event(role, "patient.updated"),
+                "{role:?}"
+            );
             assert!(release_workspace_allows_realtime_event(
                 role,
                 "notification.created"
@@ -695,14 +677,66 @@ mod tests {
             ));
         }
 
-        assert!(!release_workspace_allows_path(
-            Role::ItAdmin,
-            "/messages/ws"
-        ));
-        assert!(!release_workspace_allows_path(Role::ItAdmin, "/events/ws"));
         assert!(!release_workspace_allows_realtime_event(
+            Role::Sales,
+            "patient.updated"
+        ));
+        assert!(release_workspace_allows_realtime_event(
+            Role::Sales,
+            "lead.created"
+        ));
+        assert!(release_workspace_allows_realtime_event(
+            Role::Sales,
+            "notification.created"
+        ));
+        assert!(release_workspace_allows_realtime_event(
+            Role::Sales,
+            "concierge_operational_item.updated"
+        ));
+        assert!(!release_workspace_allows_realtime_event(
+            Role::Sales,
+            "invoice.created"
+        ));
+
+        assert!(!release_workspace_allows_realtime_event(
+            Role::Interpreter,
+            "invoice.created"
+        ));
+        assert!(!release_workspace_allows_realtime_event(
+            Role::Interpreter,
+            "user.created"
+        ));
+
+        for event in [
+            "patient.updated",
+            "concierge_operational_item.updated",
+            "task.created",
+            "invoice.created",
+            "lead.created",
+            "document.updated",
+            "appointment.created",
+            "messages.new",
+        ] {
+            assert!(
+                !release_workspace_allows_realtime_event(Role::ItAdmin, event),
+                "{event}"
+            );
+        }
+        assert!(release_workspace_allows_realtime_event(
             Role::ItAdmin,
-            "admin_security.updated"
+            "user.created"
+        ));
+        assert!(release_workspace_allows_realtime_event(
+            Role::ItAdmin,
+            "system_setting.updated"
+        ));
+        assert!(release_workspace_allows_realtime_event(
+            Role::ItAdmin,
+            "notification.created"
+        ));
+        assert!(release_workspace_allows_realtime_event(
+            Role::ItAdmin,
+            "announcement.created"
         ));
     }
 }

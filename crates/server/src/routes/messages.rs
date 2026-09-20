@@ -25,6 +25,7 @@ use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
 use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 const MAX_FILE_SIZE: usize = 20 * 1024 * 1024; // 20 MB
@@ -3023,32 +3024,11 @@ fn can_have_patient_chat(role: Role) -> bool {
 }
 
 fn can_access_chat_workspace(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo
-            | Role::CeoAssistant
-            | Role::PatientManager
-            | Role::TeamleadInterpreter
-            | Role::Interpreter
-            | Role::Concierge
-            | Role::Billing
-            | Role::ItAdmin
-            | Role::Patient
-    )
+    role == Role::Patient || role.can(Capability::ChatUse)
 }
 
 fn can_message_internal_staff(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo
-            | Role::CeoAssistant
-            | Role::PatientManager
-            | Role::TeamleadInterpreter
-            | Role::Interpreter
-            | Role::Concierge
-            | Role::Billing
-            | Role::ItAdmin
-    )
+    role.can(Capability::ChatUse)
 }
 
 #[allow(clippy::result_large_err)]
