@@ -704,17 +704,28 @@ function useLeadsPageContent() {
         width: 170,
         render: (row) => {
           const type = leadTypeFromLead(row);
-          return (
-            <span className="flex flex-wrap items-center gap-1">
-              <StatusBadge tone={leadTypeTone(type)}>
-                {leadTypeLabel(type, t)}
-              </StatusBadge>
-              {row.repeat_patient_id ? (
-                <StatusBadge tone="success">{uiText("patients_repeat_intake", lang)}</StatusBadge>
-              ) : null}
-            </span>
-          );
+          return <StatusBadge tone={leadTypeTone(type)}>{leadTypeLabel(type, t)}</StatusBadge>;
         },
+      },
+      {
+        // Own column: a second badge inside the type cell overflowed the row.
+        id: "repeat_intake",
+        label: uiText("patients_repeat_intake", lang),
+        accessor: (row) => (row.repeat_patient_id ? "repeat" : "first"),
+        filterType: "enum",
+        filterOptions: [
+          { value: "repeat", label: uiText("patients_repeat_intake", lang) },
+          { value: "first", label: uiText("patients_first_intake", lang) },
+        ],
+        group: "origin",
+        sortable: true,
+        width: 170,
+        render: (row) =>
+          row.repeat_patient_id ? (
+            <StatusBadge tone="success">{uiText("patients_repeat_intake", lang)}</StatusBadge>
+          ) : (
+            <span className="text-xs text-muted-foreground">{uiText("patients_first_intake", lang)}</span>
+          ),
       },
       {
         id: "status",
@@ -869,6 +880,7 @@ function useLeadsPageContent() {
       const conciergeColumns = new Set([
         "lead",
         "lead_type",
+        "repeat_intake",
         "status",
         "days_in_status",
         "received_at",
