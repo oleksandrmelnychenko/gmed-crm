@@ -7417,3 +7417,109 @@ async fn patient_manager_cannot_mark_unassigned_document_signed() {
     .unwrap();
     assert_eq!(dsgvo_signed, None);
 }
+
+/// `GET /documents/{id}/shares` follows `documents.view` plus the document's own
+/// row-level rule; creating or revoking a share stays behind `documents.manage`.
+#[tokio::test]
+async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-share-caps");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &format!("{tag}-med"), "medical").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-arztbrief"),
+    )
+    .await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let unassigned_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let unassigned_bearer = auth_header_for(unassigned_id, "interpreter");
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": "Share trail visible to document viewers.",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let share_id = create_body["id"].as_str().unwrap().to_string();
+
+    // The assigned interpreter can open the document, so the share trail is visible.
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list_body.as_array().unwrap().len(), 1);
+    assert_eq!(list_body[0]["id"], share_id);
+
+    // `documents.manage` is still required to share or revoke.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &interpreter_bearer,
+        Some(json!({
+            "shared_with_provider_id": provider_id,
+            "channel": "email",
+            "message": "Interpreter mutation should stay blocked.",
+            "requires_confirmation": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "Insufficient permissions");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/shares/{share_id}/revoke"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The capability alone is not enough: the row-level document rule still applies.
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &unassigned_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

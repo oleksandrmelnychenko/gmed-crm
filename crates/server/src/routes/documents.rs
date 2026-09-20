@@ -23819,8 +23819,7 @@ async fn list_document_shares(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
-    {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsView) {
         return resp;
     }
 
@@ -23886,7 +23885,7 @@ async fn create_bulk_document_shares(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<BulkCreateShareRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsManage) {
         return resp;
     }
 
@@ -24045,7 +24044,7 @@ async fn create_document_share(
     Path(id): Path<Uuid>,
     Json(body): Json<CreateShareRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsManage) {
         return resp;
     }
 
@@ -24162,7 +24161,7 @@ async fn revoke_document_share(
     Extension(auth): Extension<AuthUser>,
     Path((id, share_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsManage) {
         return resp;
     }
 
