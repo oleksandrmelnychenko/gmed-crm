@@ -4,10 +4,12 @@ import {
   t as translateCatalog,
   type Translations,
 } from "@/lib/i18n";
+import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 import {
   communicationChannelLabel,
   communicationDirectionLabel,
 } from "@/pages/appointments/model/labels";
+import { patientPermissions } from "@/pages/patients/model/list-model";
 import type {
   AppointmentPermissions,
   AppointmentTimelineEvent,
@@ -33,184 +35,51 @@ const LEGACY_CONCIERGE_TRANSFER_COMPLETED_SOURCES = [
   "Completed airport arrival step. Driver waited at hotel lobby and escorted patient to admission desk. Completed concierge-linked transfer.",
 ] as const;
 
-export function appointmentPermissions(
-  role?: string,
-): AppointmentPermissions {
-  switch (role) {
-    case "ceo":
-    case "patient_manager":
-      return {
-        canViewPage: true,
-        canCreate: true,
-        canEditSchedule: true,
-        canDelete: true,
-        canManageStatus: true,
-        canAssignInterpreter: true,
-        canManageChecklist: true,
-        canViewReminders: true,
-        canManageReminders: true,
-        canRespondToAssignment: false,
-        canSubmitReport: false,
-        canViewReport: true,
-        canApproveReport: true,
-        canRejectReport: true,
-        canViewNotes: true,
-        canViewTasks: true,
-        canCreateTasks: true,
-        canViewConciergeServices: true,
-        canManageConciergeServices: true,
-        canManageConciergeBilling: true,
-        canViewCommunications: true,
-        canManageCommunications: true,
-      };
-    case "teamlead_interpreter":
-      return {
-        canViewPage: true,
-        canCreate: true,
-        canEditSchedule: true,
-        canDelete: false,
-        canManageStatus: false,
-        canAssignInterpreter: true,
-        canManageChecklist: false,
-        canViewReminders: true,
-        canManageReminders: false,
-        canRespondToAssignment: true,
-        canSubmitReport: false,
-        canViewReport: true,
-        canApproveReport: true,
-        canRejectReport: true,
-        canViewNotes: true,
-        canViewTasks: true,
-        canCreateTasks: false,
-        canViewConciergeServices: false,
-        canManageConciergeServices: false,
-        canManageConciergeBilling: false,
-        canViewCommunications: true,
-        canManageCommunications: true,
-      };
-    case "interpreter":
-      return {
-        canViewPage: true,
-        canCreate: false,
-        canEditSchedule: false,
-        canDelete: false,
-        canManageStatus: false,
-        canAssignInterpreter: false,
-        canManageChecklist: false,
-        canViewReminders: true,
-        canManageReminders: false,
-        canRespondToAssignment: true,
-        canSubmitReport: true,
-        canViewReport: true,
-        canApproveReport: false,
-        canRejectReport: false,
-        canViewNotes: true,
-        canViewTasks: true,
-        canCreateTasks: false,
-        canViewConciergeServices: false,
-        canManageConciergeServices: false,
-        canManageConciergeBilling: false,
-        canViewCommunications: true,
-        canManageCommunications: false,
-      };
-    case "concierge":
-      return {
-        canViewPage: true,
-        canCreate: true,
-        canEditSchedule: true,
-        canDelete: false,
-        canManageStatus: false,
-        canAssignInterpreter: false,
-        canManageChecklist: true,
-        canViewReminders: true,
-        canManageReminders: false,
-        canRespondToAssignment: false,
-        canSubmitReport: false,
-        canViewReport: false,
-        canApproveReport: false,
-        canRejectReport: false,
-        canViewNotes: false,
-        canViewTasks: true,
-        canCreateTasks: false,
-        canViewConciergeServices: true,
-        canManageConciergeServices: true,
-        canManageConciergeBilling: false,
-        canViewCommunications: true,
-        canManageCommunications: true,
-      };
-    case "it_admin":
-      return {
-        canViewPage: true,
-        canCreate: true,
-        canEditSchedule: true,
-        canDelete: true,
-        canManageStatus: true,
-        canAssignInterpreter: true,
-        canManageChecklist: true,
-        canViewReminders: true,
-        canManageReminders: true,
-        canRespondToAssignment: false,
-        canSubmitReport: false,
-        canViewReport: true,
-        canApproveReport: true,
-        canRejectReport: true,
-        canViewNotes: true,
-        canViewTasks: false,
-        canCreateTasks: false,
-        canViewConciergeServices: false,
-        canManageConciergeServices: false,
-        canManageConciergeBilling: true,
-        canViewCommunications: true,
-        canManageCommunications: true,
-      };
-    default:
-      return {
-        canViewPage: false,
-        canCreate: false,
-        canEditSchedule: false,
-        canDelete: false,
-        canManageStatus: false,
-        canAssignInterpreter: false,
-        canManageChecklist: false,
-        canViewReminders: false,
-        canManageReminders: false,
-        canRespondToAssignment: false,
-        canSubmitReport: false,
-        canViewReport: false,
-        canApproveReport: false,
-        canRejectReport: false,
-        canViewNotes: false,
-        canViewTasks: false,
-        canCreateTasks: false,
-        canViewConciergeServices: false,
-        canManageConciergeServices: false,
-        canManageConciergeBilling: false,
-        canViewCommunications: false,
-        canManageCommunications: false,
-      };
-  }
+/**
+ * Appointment screen permissions from the capability registry. Only the two
+ * assignment-side flags stay role-bound: responding to an interpreter
+ * assignment and submitting the visit report are the assignee's own actions
+ * (the server accepts `submit_report` from `interpreter` only).
+ */
+export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
+  const role = actorRole(actor);
+  const can = (capability: string) => hasCapability(actor, capability);
+  const canView = can("appointments.view");
+  const canEdit = can("appointments.edit");
+  const coordinates = can("appointments.status");
+  const approvesReports = can("appointments.report.approve");
+  const submitsReports = can("appointments.report.submit");
+  return {
+    canViewPage: canView,
+    canCreate: canEdit,
+    canEditSchedule: canEdit,
+    canDelete: can("appointments.delete"),
+    canManageStatus: coordinates,
+    canAssignInterpreter: can("appointments.assign_interpreter"),
+    // The service checklist belongs to the roles that run the service workflow.
+    canManageChecklist: coordinates || (canEdit && can("services.edit")),
+    canViewReminders: canView,
+    canManageReminders: coordinates,
+    canRespondToAssignment:
+      submitsReports && (role === "interpreter" || role === "teamlead_interpreter"),
+    canSubmitReport: submitsReports && role === "interpreter",
+    canViewReport: approvesReports || submitsReports,
+    canApproveReport: approvesReports,
+    canRejectReport: approvesReports,
+    canViewNotes: canView && can("patients.medical.view"),
+    canViewTasks: canView && can("tasks.use"),
+    canCreateTasks: coordinates && can("tasks.use"),
+    canViewConciergeServices: canView && can("services.view"),
+    canManageConciergeServices: canEdit && can("services.edit"),
+    canManageConciergeBilling: coordinates,
+    canViewCommunications: canView,
+    canManageCommunications: canEdit,
+  };
 }
 
-export function linkedPatientPermissions(
-  role?: string,
-): LinkedPatientPermissions {
-  return {
-    canCreateEdit:
-      role === "ceo" || role === "patient_manager" || role === "it_admin",
-    canViewAssignments: [
-      "ceo",
-      "patient_manager",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-      "it_admin",
-    ].includes(role ?? ""),
-    canManageAssignments:
-      role === "ceo" ||
-      role === "patient_manager" ||
-      role === "teamlead_interpreter" ||
-      role === "it_admin",
-  };
+export function linkedPatientPermissions(actor?: Actor): LinkedPatientPermissions {
+  const { canCreateEdit, canViewAssignments, canManageAssignments } = patientPermissions(actor);
+  return { canCreateEdit, canViewAssignments, canManageAssignments };
 }
 
 type TimelineDetail = {

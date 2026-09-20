@@ -295,23 +295,42 @@ export function capabilitiesFor(
   return ROLE_CAPABILITIES[role] ?? [];
 }
 
-/** Whether `user` holds `capability`. */
-export function hasCapability(
-  user: CapabilityHolder | null | undefined,
-  capability: Capability,
-): boolean {
-  if (!user) {
-    return false;
+/**
+ * Who a permission check is about: the signed-in user (with the `/me`
+ * capability list) or a bare role code, which resolves through the mirror.
+ */
+export type Actor = CapabilityHolder | string | null | undefined;
+
+/** The role code behind `actor` (for assignment hierarchies that stay role-based). */
+export function actorRole(actor: Actor): string | undefined {
+  if (!actor) {
+    return undefined;
   }
-  return capabilitiesFor(user.role, user.capabilities).includes(capability);
+  return typeof actor === "string" ? actor : actor.role;
 }
 
-/** Whether `user` holds at least one of `capabilities`. */
+function actorCapabilities(actor: Actor): readonly string[] {
+  if (!actor) {
+    return [];
+  }
+  if (typeof actor === "string") {
+    return capabilitiesFor(actor);
+  }
+  return capabilitiesFor(actor.role, actor.capabilities);
+}
+
+/** Whether `actor` holds `capability`. */
+export function hasCapability(actor: Actor, capability: Capability): boolean {
+  return actorCapabilities(actor).includes(capability);
+}
+
+/** Whether `actor` holds at least one of `capabilities`. */
 export function hasAnyCapability(
-  user: CapabilityHolder | null | undefined,
+  actor: Actor,
   capabilities: readonly Capability[],
 ): boolean {
-  return capabilities.some((capability) => hasCapability(user, capability));
+  const held = actorCapabilities(actor);
+  return capabilities.some((capability) => held.includes(capability));
 }
 
 /** `true` when the signed-in user holds `capability`. */

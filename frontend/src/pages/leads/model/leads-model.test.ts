@@ -13,14 +13,16 @@ import {
 } from "./leads-model";
 
 describe("lead release permissions", () => {
-  it("lets Concierge open leads without mutation rights", () => {
-    expect(leadPermissions("concierge")).toEqual({
-      canViewPage: true,
-      canOpen: true,
-      canEdit: false,
-      canCreate: false,
-      canConvert: false,
-    });
+  it("gives Concierge and the CEO assistant the grid without detail or mutation rights", () => {
+    for (const role of ["concierge", "ceo_assistant"]) {
+      expect(leadPermissions(role)).toEqual({
+        canViewPage: true,
+        canOpen: false,
+        canEdit: false,
+        canCreate: false,
+        canConvert: false,
+      });
+    }
   });
 
   it("keeps full lead operations for CEO", () => {
@@ -31,6 +33,23 @@ describe("lead release permissions", () => {
       canCreate: true,
       canConvert: true,
     });
+  });
+
+  it("lets Sales edit leads without converting them", () => {
+    expect(leadPermissions("sales")).toEqual({
+      canViewPage: true,
+      canOpen: true,
+      canEdit: true,
+      canCreate: true,
+      canConvert: false,
+    });
+  });
+
+  it("prefers the capabilities reported by /me over the role mirror", () => {
+    expect(leadPermissions({ role: "sales", capabilities: ["leads.view"] }).canEdit).toBe(false);
+    expect(
+      leadPermissions({ role: "concierge", capabilities: ["leads.view", "leads.edit"] }).canOpen,
+    ).toBe(true);
   });
 });
 

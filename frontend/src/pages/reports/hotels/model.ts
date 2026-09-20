@@ -1,3 +1,5 @@
+import { hasCapability, type Actor } from "@/lib/permissions";
+
 export const breakfastModes = ["unknown", "included", "hotel_extra", "self", "none"] as const;
 export type BreakfastMode = typeof breakfastModes[number];
 export type BreakfastDetails = {
@@ -33,7 +35,11 @@ export type HotelDirectoryItem = {
 };
 export type HotelFilters = { hotel: string; city: string; currency: string; status: string; search: string; breakfast: string };
 export const initialFilters: HotelFilters = { hotel: "all", city: "all", currency: "EUR", status: "committed", search: "", breakfast: "all" };
-export const hotelStatisticsRoles = ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"];
+export type HotelPermissions = { canViewPage: boolean; canEdit: boolean; canCreate: boolean };
+export function hotelPermissions(actor?: Actor): HotelPermissions {
+  const canEdit = hasCapability(actor, "hotels.edit");
+  return { canViewPage: hasCapability(actor, "hotels.view"), canEdit, canCreate: canEdit };
+}
 
 export function moneyCents(value: string | null): bigint | null {
   if (value === null || !/^\d+(\.\d{1,2})?$/.test(value)) return null;

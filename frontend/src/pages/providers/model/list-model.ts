@@ -16,6 +16,7 @@ import type {
   StaffFormState,
 } from "./types";
 import type { ProviderPeopleRow } from "./people-types";
+import { hasCapability, type Actor } from "@/lib/permissions";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -827,54 +828,25 @@ export const DEFAULT_FILTERS: ProviderFilters = {
   insuranceProvider: "",
 };
 
-export function providerPermissions(role?: string): ProviderPermissions {
-  switch (role) {
-    case "ceo":
-    case "patient_manager":
-      return {
-        canViewPage: true,
-        canCreateProvider: true,
-        canEditProvider: true,
-        canManageRegistry: true,
-        forceNonMedical: false,
-      };
-    case "concierge":
-      return {
-        canViewPage: true,
-        canCreateProvider: true,
-        canEditProvider: true,
-        canManageRegistry: false,
-        forceNonMedical: true,
-      };
-    case "billing":
-    case "sales":
-      return {
-        canViewPage: true,
-        canCreateProvider: false,
-        canEditProvider: false,
-        canManageRegistry: false,
-        forceNonMedical: false,
-      };
-    default:
-      return {
-        canViewPage: false,
-        canCreateProvider: false,
-        canEditProvider: false,
-        canManageRegistry: false,
-        forceNonMedical: false,
-      };
-  }
+/**
+ * `providers.edit` without `providers.registry` (concierge) is limited to
+ * non-medical providers: hotels, transfers, partners.
+ */
+export function providerPermissions(actor?: Actor): ProviderPermissions {
+  const canEdit = hasCapability(actor, "providers.edit");
+  const canManageRegistry = hasCapability(actor, "providers.registry");
+  return {
+    canViewPage: hasCapability(actor, "providers.view"),
+    canCreateProvider: canEdit,
+    canEditProvider: canEdit,
+    canManageRegistry,
+    forceNonMedical: canEdit && !canManageRegistry,
+  };
 }
 
-export function canManageProviderPeople(
-  role: string | undefined,
-  providerType: ProviderType,
-) {
-  return (
-    role === "ceo" ||
-    role === "patient_manager" ||
-    (role === "concierge" && providerType === "non_medical")
-  );
+export function canManageProviderPeople(actor: Actor, providerType: ProviderType) {
+  const { canEditProvider, forceNonMedical } = providerPermissions(actor);
+  return canEditProvider && (!forceNonMedical || providerType === "non_medical");
 }
 
 export function blankProviderForm(providerType: ProviderType = "medical"): ProviderFormState {

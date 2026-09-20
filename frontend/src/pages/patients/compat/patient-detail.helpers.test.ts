@@ -301,9 +301,10 @@ describe("buildPatientLabelPrintHtml", () => {
 });
 
 describe("patient surface access helpers", () => {
-  it("gives Concierge the operational patient card without clinical or financial surfaces", () => {
+  it("gives Concierge the service-side patient card without clinical or financial surfaces", () => {
     expect(canViewPatientOperationalSurface("concierge")).toBe(true);
-    expect(canViewPatientCareHistorySurface("concierge")).toBe(false);
+    // appointments.view: the concierge sees the care history for its services.
+    expect(canViewPatientCareHistorySurface("concierge")).toBe(true);
     expect(canViewPatientDocumentsSurface("concierge")).toBe(true);
     expect(canOpenPatientDocumentsWorkspace("concierge")).toBe(true);
     expect(canViewPatientClinicalProfile("concierge")).toBe(false);
@@ -311,20 +312,31 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientInvoicesSurface("concierge")).toBe(false);
   });
 
-  it("keeps ceo assistant in read-only commercial and document workspace scope", () => {
-    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(false);
-    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(false);
+  it("gives the ceo assistant every patient surface read-only", () => {
+    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(true);
+    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(true);
     expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(true);
+    expect(canViewPatientClinicalProfile("ceo_assistant")).toBe(true);
     expect(canViewPatientContractsSurface("ceo_assistant")).toBe(true);
     expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
+    expect(canManagePatientProfile("ceo_assistant")).toBe(false);
   });
 
-  it("lets IT admin open every patient operational surface", () => {
-    expect(canViewPatientOperationalSurface("it_admin")).toBe(true);
-    expect(canViewPatientDocumentsSurface("it_admin")).toBe(true);
-    expect(canOpenPatientDocumentsWorkspace("it_admin")).toBe(true);
-    expect(canViewPatientContractsSurface("it_admin")).toBe(true);
-    expect(canViewPatientInvoicesSurface("it_admin")).toBe(true);
+  it("keeps IT admin out of every patient surface", () => {
+    expect(canViewPatientOperationalSurface("it_admin")).toBe(false);
+    expect(canViewPatientDocumentsSurface("it_admin")).toBe(false);
+    expect(canOpenPatientDocumentsWorkspace("it_admin")).toBe(false);
+    expect(canViewPatientClinicalProfile("it_admin")).toBe(false);
+    expect(canViewPatientContractsSurface("it_admin")).toBe(false);
+    expect(canViewPatientInvoicesSurface("it_admin")).toBe(false);
+  });
+
+  it("gives Billing the financial surfaces without the clinical profile", () => {
+    expect(canViewPatientOperationalSurface("billing")).toBe(true);
+    expect(canViewPatientClinicalProfile("billing")).toBe(false);
+    expect(canViewPatientContractsSurface("billing")).toBe(true);
+    expect(canViewPatientInvoicesSurface("billing")).toBe(true);
+    expect(canManagePatientProfile("billing")).toBe(false);
   });
 
   it("keeps sales outside patient-bound commercial and document surfaces", () => {

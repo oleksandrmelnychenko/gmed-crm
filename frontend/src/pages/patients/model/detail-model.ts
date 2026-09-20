@@ -4,6 +4,7 @@ import {
   t as translateCatalog,
   type TranslationKey,
 } from "@/lib/i18n";
+import { hasAnyCapability, hasCapability, type Actor } from "@/lib/permissions";
 
 export type PatientTimelineItem = {
   entity_type: string;
@@ -171,44 +172,6 @@ const TIMELINE_RANGE_DAYS: Record<Exclude<PatientTimelineRangeFilter, "all">, nu
   "365d": 365,
 };
 
-const PATIENT_OPERATIONAL_SURFACE_ROLES = new Set([
-  "ceo",
-  "patient_manager",
-  "billing",
-  "teamlead_interpreter",
-  "interpreter",
-  "concierge",
-  "it_admin",
-]);
-
-const PATIENT_DOCUMENT_WORKSPACE_ROLES = new Set([
-  "ceo",
-  "ceo_assistant",
-  "patient_manager",
-  "billing",
-  "teamlead_interpreter",
-  "interpreter",
-  "concierge",
-  "it_admin",
-]);
-
-const PATIENT_CONTRACT_SURFACE_ROLES = new Set([
-  "ceo",
-  "ceo_assistant",
-  "patient_manager",
-  "billing",
-  "it_admin",
-]);
-
-const PATIENT_INVOICE_SURFACE_ROLES = PATIENT_CONTRACT_SURFACE_ROLES;
-const PATIENT_CARE_HISTORY_SURFACE_ROLES = new Set([
-  "ceo",
-  "patient_manager",
-  "billing",
-  "teamlead_interpreter",
-  "interpreter",
-  "it_admin",
-]);
 const PATIENT_CARE_HISTORY_TAB_KEYS = new Set(["orders", "appointments", "timeline"]);
 const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "relations",
@@ -218,12 +181,6 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "curators",
   "timeline",
 ]);
-
-// Clinical profile (diagnoses / medication / Befunde) is restricted to the same
-// roles the backend allows on /patients/{id}/clinical — not the broader
-// operational surface (which also includes billing / interpreter / concierge).
-const PATIENT_CLINICAL_PROFILE_ROLES = new Set(["ceo", "patient_manager", "it_admin"]);
-const PATIENT_PROFILE_MANAGE_ROLES = new Set(["ceo", "patient_manager"]);
 
 const PATIENT_LABEL_BIRTH_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
   day: "2-digit",
@@ -259,40 +216,72 @@ export function patientLabelFormatLabel(format: PatientLabelFormat) {
   return tr.uiText[format.labelKey] ?? format.labelKey;
 }
 
-export function canViewPatientOperationalSurface(role?: string) {
-  return PATIENT_OPERATIONAL_SURFACE_ROLES.has(role ?? "");
+/** Relations, workflow, curators: every role that may open the patient card. */
+export function canViewPatientOperationalSurface(actor?: Actor) {
+  return hasCapability(actor, "patients.view");
 }
 
-export function canViewPatientDocumentsSurface(role?: string) {
-  return canViewPatientOperationalSurface(role);
+export function canViewPatientDocumentsSurface(actor?: Actor) {
+  return hasCapability(actor, "patients.view") && hasCapability(actor, "documents.view");
 }
 
-export function canOpenPatientDocumentsWorkspace(role?: string) {
-  return PATIENT_DOCUMENT_WORKSPACE_ROLES.has(role ?? "");
+export function canOpenPatientDocumentsWorkspace(actor?: Actor) {
+  return canViewPatientDocumentsSurface(actor);
 }
 
-export function canViewPatientContractsSurface(role?: string) {
-  return PATIENT_CONTRACT_SURFACE_ROLES.has(role ?? "");
+export function canViewPatientContractsSurface(actor?: Actor) {
+  return hasCapability(actor, "contracts.view");
 }
 
-export function canViewPatientClinicalProfile(role?: string) {
-  return PATIENT_CLINICAL_PROFILE_ROLES.has(role ?? "");
+/** Diagnoses, medication and Befunde (`/patients/{id}/clinical`). */
+export function canViewPatientClinicalProfile(actor?: Actor) {
+  return hasCapability(actor, "patients.medical.view");
 }
 
-export function canManagePatientProfile(role?: string) {
-  return PATIENT_PROFILE_MANAGE_ROLES.has(role ?? "");
+export function canEditPatientClinicalProfile(actor?: Actor) {
+  return hasCapability(actor, "patients.medical.edit");
 }
 
-export function canViewPatientInvoicesSurface(role?: string) {
-  return PATIENT_INVOICE_SURFACE_ROLES.has(role ?? "");
+export function canManagePatientProfile(actor?: Actor) {
+  return hasCapability(actor, "patients.edit");
 }
 
-export function canViewPatientFinanceSurface(role?: string) {
-  return ["ceo", "ceo_assistant", "patient_manager", "billing"].includes(role ?? "");
+export function canViewPatientInvoicesSurface(actor?: Actor) {
+  return hasCapability(actor, "invoices.view");
 }
 
-export function canViewPatientCareHistorySurface(role?: string) {
-  return PATIENT_CARE_HISTORY_SURFACE_ROLES.has(role ?? "");
+export function canViewPatientFinanceSurface(actor?: Actor) {
+  return hasCapability(actor, "invoices.view");
+}
+
+/** Orders, appointments and the timeline. */
+export function canViewPatientCareHistorySurface(actor?: Actor) {
+  return hasAnyCapability(actor, ["orders.view", "appointments.view"]);
+}
+
+/**
+ * The capabilities that make a patient workspace tab writable. A role with
+ * `*.view` alone gets the tab inside a `ReadOnlyScope`.
+ */
+const PATIENT_TAB_WRITE_CAPABILITIES: Readonly<Record<string, readonly string[]>> = {
+  clinical: ["patients.medical.edit"],
+  "medication-ai": ["patients.medical.edit"],
+  documents: ["documents.upload", "documents.manage"],
+  contracts: ["contracts.edit"],
+  invoices: ["invoices.create", "invoices.finance"],
+  billing: ["invoices.create", "invoices.finance"],
+  finance: ["invoices.create", "invoices.finance"],
+  orders: ["orders.edit"],
+  appointments: ["appointments.edit"],
+  workflow: ["patients.edit", "services.edit"],
+  curators: ["patients.assign"],
+};
+
+export function isPatientDetailTabReadOnly(actor: Actor, tab: string | null | undefined) {
+  const wanted = PATIENT_TAB_WRITE_CAPABILITIES[(tab ?? "profile").trim() || "profile"] ?? [
+    "patients.edit",
+  ];
+  return !hasAnyCapability(actor, wanted);
 }
 
 export function normalizePatientDetailTab(tab: string | null | undefined, access: PatientTabAccess) {

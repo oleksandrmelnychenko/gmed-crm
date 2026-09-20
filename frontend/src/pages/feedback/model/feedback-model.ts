@@ -1,3 +1,5 @@
+import { hasCapability, type Actor } from "@/lib/permissions";
+
 import type { FeedbackFormState, PatientOption } from "./types";
 
 export const scoreOptions = ["1", "2", "3", "4", "5"];
@@ -25,18 +27,12 @@ export function blankFeedbackForm(): FeedbackFormState {
   };
 }
 
-export function roleCanCaptureFeedback(role?: string) {
-  return role === "ceo" || role === "patient_manager";
+export function roleCanCaptureFeedback(actor?: Actor) {
+  return hasCapability(actor, "feedback.capture");
 }
 
-export function canViewStaffFeedback(role?: string) {
-  return (
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "teamlead_interpreter" ||
-    role === "concierge"
-  );
+export function canViewStaffFeedback(actor?: Actor) {
+  return hasCapability(actor, "feedback.view");
 }
 
 export function patientLabel(item: PatientOption) {

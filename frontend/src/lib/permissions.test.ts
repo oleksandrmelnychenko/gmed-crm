@@ -1,44 +1,14 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import {
   ALL_CAPABILITIES,
   ROLE_CAPABILITIES,
+  actorRole,
   capabilitiesFor,
   hasAnyCapability,
   hasCapability,
 } from "./permissions";
-
-/** Parses the generated `role x capability` Markdown table into role -> set. */
-function readServerSnapshot(): Map<string, string[]> {
-  const path = resolve(__dirname, "../../../docs/backlog/02_rbac-capability-snapshot.md");
-  const lines = readFileSync(path, "utf8").split(/\r?\n/);
-  const header = lines.find((line) => line.startsWith("| Capability |"));
-  if (!header) {
-    throw new Error("snapshot header not found");
-  }
-  const roles = header
-    .split("|")
-    .map((cell) => cell.trim())
-    .filter(Boolean)
-    .slice(1);
-  const byRole = new Map<string, string[]>(roles.map((role) => [role, []]));
-  for (const line of lines) {
-    const match = /^\| `([a-z_.]+)` \|(.*)\|$/.exec(line);
-    if (!match) {
-      continue;
-    }
-    const cells = match[2].split("|").map((cell) => cell.trim());
-    cells.forEach((cell, index) => {
-      if (cell === "x") {
-        byRole.get(roles[index])?.push(match[1]);
-      }
-    });
-  }
-  return byRole;
-}
+import { readServerSnapshot } from "./rbac-snapshot.test-fixture";
 
 describe("capability mirror", () => {
   it("matches the server snapshot for every staff role", () => {
@@ -84,6 +54,16 @@ describe("capability mirror", () => {
     expect(hasCapability(null, "patients.view")).toBe(false);
     expect(hasAnyCapability({ role: "billing" }, ["datev.admin", "datev.read"])).toBe(true);
     expect(hasAnyCapability({ role: "it_admin" }, ["patients.view", "chat.use"])).toBe(false);
+  });
+
+  it("accepts a bare role code and resolves it through the mirror", () => {
+    expect(hasCapability("sales", "leads.edit")).toBe(true);
+    expect(hasCapability("sales", "patients.view")).toBe(false);
+    expect(hasCapability(undefined, "patients.view")).toBe(false);
+    expect(hasAnyCapability("concierge", ["hotels.edit", "invoices.finance"])).toBe(true);
+    expect(actorRole("billing")).toBe("billing");
+    expect(actorRole({ role: "ceo", capabilities: [] })).toBe("ceo");
+    expect(actorRole(null)).toBeUndefined();
   });
 
   it("keeps the cabinet decisions: CEO-only powers and read-only assistant", () => {

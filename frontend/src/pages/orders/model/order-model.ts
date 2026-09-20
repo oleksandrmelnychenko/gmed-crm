@@ -1,4 +1,5 @@
 import { formatMoneyAmount } from "@/lib/money";
+import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
   CreateOrderFormState,
@@ -92,40 +93,18 @@ export const DEFAULT_FILTERS: OrdersFilters = {
   doctorId: "",
 };
 
-export function orderPermissions(role?: string): OrdersPermissions {
-  switch (role) {
-    case "ceo":
-    case "patient_manager":
-      return {
-        canViewPage: true,
-        canCreate: true,
-        canManagePhase: true,
-        canAddLeistung: true,
-        canApproveLeistung: true,
-        canManageExternalInvoices: true,
-        canManageEconomics: role === "ceo",
-      };
-    case "billing":
-      return {
-        canViewPage: true,
-        canCreate: false,
-        canManagePhase: false,
-        canAddLeistung: false,
-        canApproveLeistung: false,
-        canManageExternalInvoices: true,
-        canManageEconomics: true,
-      };
-    default:
-      return {
-        canViewPage: false,
-        canCreate: false,
-        canManagePhase: false,
-        canAddLeistung: false,
-        canApproveLeistung: false,
-        canManageExternalInvoices: false,
-        canManageEconomics: false,
-      };
-  }
+export function orderPermissions(actor?: Actor): OrdersPermissions {
+  const canEdit = hasCapability(actor, "orders.edit");
+  return {
+    canViewPage: hasCapability(actor, "orders.view"),
+    canCreate: canEdit,
+    canManagePhase: canEdit,
+    canAddLeistung: canEdit,
+    canApproveLeistung: canEdit,
+    // Provider (external) invoices: the order owner or finance.
+    canManageExternalInvoices: canEdit || hasCapability(actor, "invoices.finance"),
+    canManageEconomics: hasCapability(actor, "orders.economics"),
+  };
 }
 
 export function blankCreateOrderForm(): CreateOrderFormState {

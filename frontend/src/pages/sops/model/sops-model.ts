@@ -2,6 +2,7 @@ import {
   type Lang,
   type Translations,
 } from "@/lib/i18n";
+import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type { SopFormState } from "./types";
 
@@ -34,16 +35,16 @@ export function emptyForm(): SopFormState {
   };
 }
 
-export function roleCanOpenLearning(role?: string) {
-  return role !== undefined && role !== "patient";
+export function roleCanOpenLearning(actor?: Actor) {
+  return hasCapability(actor, "sops.view");
 }
 
-export function roleCanCreate(role?: string) {
-  return role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter";
+export function roleCanCreate(actor?: Actor) {
+  return hasCapability(actor, "sops.create");
 }
 
-export function roleCanReview(role?: string) {
-  return role === "ceo" || role === "patient_manager";
+export function roleCanReview(actor?: Actor) {
+  return hasCapability(actor, "sops.review");
 }
 
 export function formatDate(value: string | null | undefined, lang: Lang, translations: Translations) {

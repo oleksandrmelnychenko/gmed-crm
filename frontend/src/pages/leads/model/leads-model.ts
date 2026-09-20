@@ -6,6 +6,7 @@ import {
   type TranslationKey,
   type Translations,
 } from "@/lib/i18n";
+import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
   FailedLeadResolutionForm,
@@ -552,15 +553,19 @@ function leadDateTimeFormatter(locale: string) {
   return LEAD_DATE_TIME_FORMATTERS[locale] ?? LEAD_DATE_TIME_FORMATTERS["ru-RU"];
 }
 
-export function leadPermissions(role?: string): LeadPermissions {
+/**
+ * Lead screen permissions from the capability registry. `leads.view` alone
+ * (concierge, CEO assistant) gets the read-only service grid: no detail
+ * sheet, wizard or mutation control until the role also holds `leads.edit`.
+ */
+export function leadPermissions(actor?: Actor): LeadPermissions {
+  const canEdit = hasCapability(actor, "leads.edit");
   return {
-    canViewPage:
-      role === "ceo" || role === "patient_manager" || role === "sales" || role === "concierge",
-    canOpen:
-      role === "ceo" || role === "patient_manager" || role === "sales" || role === "concierge",
-    canEdit: role === "ceo" || role === "patient_manager" || role === "sales",
-    canCreate: role === "ceo" || role === "patient_manager" || role === "sales",
-    canConvert: role === "ceo" || role === "patient_manager",
+    canViewPage: hasCapability(actor, "leads.view"),
+    canOpen: canEdit,
+    canEdit,
+    canCreate: canEdit,
+    canConvert: hasCapability(actor, "leads.convert"),
   };
 }
 

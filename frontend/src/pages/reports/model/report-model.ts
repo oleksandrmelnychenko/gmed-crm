@@ -1,4 +1,5 @@
 import { formatMoneyAmount } from "@/lib/money";
+import { hasCapability, type Actor } from "@/lib/permissions";
 
 const DATE_FORMATTERS = {
   "de-DE": new Intl.DateTimeFormat("de-DE"),
@@ -61,12 +62,6 @@ export function serviceTypeLabel(value: string, labels: Record<string, string> |
   return unknownLabel;
 }
 
-export function roleCanOpenReports(role?: string) {
-  return (
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "billing" ||
-    role === "sales"
-  );
+export function roleCanOpenReports(actor?: Actor) {
+  return hasCapability(actor, "reports.view");
 }

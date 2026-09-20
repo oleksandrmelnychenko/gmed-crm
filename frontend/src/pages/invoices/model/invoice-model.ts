@@ -1,4 +1,5 @@
 import { formatMoneyAmount } from "@/lib/money";
+import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
   AccountingLedgerPayload,
@@ -97,16 +98,12 @@ export const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
   provider_expense_gross: "0.00",
 };
 
-export function invoicesPermissions(role?: string): InvoicesPermissions {
+export function invoicesPermissions(actor?: Actor): InvoicesPermissions {
   return {
-    canView:
-      role === "ceo" ||
-      role === "ceo_assistant" ||
-      role === "patient_manager" ||
-      role === "billing",
-    canCreate: role === "ceo" || role === "patient_manager" || role === "billing",
-    canManage: role === "ceo" || role === "billing",
-    canAccounting: role === "ceo" || role === "ceo_assistant" || role === "billing",
+    canView: hasCapability(actor, "invoices.view"),
+    canCreate: hasCapability(actor, "invoices.create"),
+    canManage: hasCapability(actor, "invoices.finance"),
+    canAccounting: hasCapability(actor, "accounting.view"),
   };
 }
 

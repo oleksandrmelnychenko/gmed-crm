@@ -1,3 +1,5 @@
+import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
+
 export type PatientSummary = {
   id: string;
   patient_id: string;
@@ -195,34 +197,30 @@ export function filterPatientsByInsuranceType<
   );
 }
 
-export function patientPermissions(role?: string): PatientPermissions {
+/**
+ * Roles that take part in the patient assignment hierarchy (see
+ * `canAssignTarget`); assignment stays role-based on top of `patients.view`.
+ */
+const ASSIGNMENT_PARTICIPANT_ROLES = new Set([
+  "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
+export function patientPermissions(actor?: Actor): PatientPermissions {
+  const role = actorRole(actor);
+  const canView = hasCapability(actor, "patients.view");
+  const canEdit = hasCapability(actor, "patients.edit");
   return {
-    canViewPage: [
-      "ceo",
-      "ceo_assistant",
-      "patient_manager",
-      "billing",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-      "it_admin",
-    ].includes(role ?? ""),
-    canCreateEdit: role === "ceo" || role === "patient_manager",
-    canFilterLifecycle:
-      role === "ceo" || role === "patient_manager" || role === "it_admin",
-    canViewAssignments: [
-      "ceo",
-      "patient_manager",
-      "teamlead_interpreter",
-      "interpreter",
-      "concierge",
-      "it_admin",
-    ].includes(role ?? ""),
+    canViewPage: canView,
+    canCreateEdit: canEdit,
+    canFilterLifecycle: canEdit,
+    canViewAssignments: canView && ASSIGNMENT_PARTICIPANT_ROLES.has(role ?? ""),
     canManageAssignments:
-      role === "ceo" || role === "patient_manager" || role === "teamlead_interpreter",
-    canViewFinancialBalance: ["ceo", "ceo_assistant", "patient_manager", "billing"].includes(
-      role ?? "",
-    ),
+      hasCapability(actor, "patients.assign") || (canView && role === "teamlead_interpreter"),
+    canViewFinancialBalance: hasCapability(actor, "invoices.view"),
   };
 }
 
@@ -536,7 +534,6 @@ export function buildPatientsPath(filters: PatientFilters) {
 export function canAssignTarget(managerRole: string | undefined, targetRole: string) {
   switch (managerRole) {
     case "ceo":
-    case "it_admin":
       return ["patient_manager", "teamlead_interpreter", "interpreter", "concierge"].includes(
         targetRole
       );

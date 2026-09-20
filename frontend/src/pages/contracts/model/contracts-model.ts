@@ -1,5 +1,6 @@
 import { serviceDescriptionItems } from "@/lib/service-description";
 import { hasFormChanges } from "@/lib/form-changes";
+import { hasCapability, type Actor } from "@/lib/permissions";
 import type {
   AgencyServiceFilters,
   AgencyServiceFormState,
@@ -69,15 +70,10 @@ export const DEFAULT_AGENCY_SERVICE_FILTERS: AgencyServiceFilters = {
   activeOnly: "true",
 };
 
-export function contractsPermissions(role?: string): ContractsPermissions {
-  const canView =
-    role === "ceo" ||
-    role === "ceo_assistant" ||
-    role === "patient_manager" ||
-    role === "billing";
-  const canManage = role === "ceo" || role === "patient_manager" || role === "billing";
+export function contractsPermissions(actor?: Actor): ContractsPermissions {
+  const canManage = hasCapability(actor, "contracts.edit");
   return {
-    canViewPage: canView,
+    canViewPage: hasCapability(actor, "contracts.view"),
     canCreateContract: canManage,
     canManageContract: canManage,
     canCreateQuote: canManage,

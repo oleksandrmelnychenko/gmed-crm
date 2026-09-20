@@ -13,6 +13,7 @@ import type {
   UploadFormState,
 } from "./types";
 import { formatUnknownValue, type Lang, type Translations } from "@/lib/i18n";
+import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
@@ -73,61 +74,37 @@ export function formatBusinessDocumentNumber(documentNumber?: string | null) {
   return documentNumber?.trim().replace(/-V\d+$/i, "") ?? "";
 }
 
-export function canManageDocuments(role?: string) {
-  return role === "ceo" || role === "patient_manager" || role === "it_admin";
+export function canManageDocuments(actor?: Actor) {
+  return hasCapability(actor, "documents.manage");
 }
 
-export function canUploadDocuments(role?: string) {
-  return [
-    "ceo",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "it_admin",
-  ].includes(role ?? "");
+export function canUploadDocuments(actor?: Actor) {
+  return hasCapability(actor, "documents.upload");
 }
 
-export function canManageDocumentIntake(role?: string) {
-  return ["ceo", "patient_manager", "teamlead_interpreter", "it_admin"].includes(
-    role ?? "",
+export function canManageDocumentIntake(actor?: Actor) {
+  return hasCapability(actor, "documents.intake");
+}
+
+export function canViewDocuments(actor?: Actor) {
+  return hasCapability(actor, "documents.view");
+}
+
+/** Translation requests are open to every role that may upload (server: create/update gates). */
+export function canRequestTranslations(actor?: Actor) {
+  return hasCapability(actor, "documents.upload");
+}
+
+export function canUpdateTranslations(actor?: Actor) {
+  return hasCapability(actor, "documents.upload");
+}
+
+/** `GET /documents/shares` admits document managers plus the read-only CEO assistant. */
+export function canViewDocumentShares(actor?: Actor) {
+  return (
+    hasCapability(actor, "documents.manage") ||
+    (hasCapability(actor, "documents.view") && actorRole(actor) === "ceo_assistant")
   );
-}
-
-export function canViewDocuments(role?: string) {
-  return [
-    "ceo",
-    "ceo_assistant",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "concierge",
-    "billing",
-    "it_admin",
-  ].includes(role ?? "");
-}
-
-export function canRequestTranslations(role?: string) {
-  return [
-    "ceo",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "concierge",
-  ].includes(role ?? "");
-}
-
-export function canUpdateTranslations(role?: string) {
-  return [
-    "ceo",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "concierge",
-  ].includes(role ?? "");
-}
-
-export function canViewDocumentShares(role?: string) {
-  return ["ceo", "ceo_assistant", "patient_manager", "it_admin"].includes(role ?? "");
 }
 
 export function buildDocumentsPath(filters: FiltersState) {
@@ -1110,16 +1087,7 @@ export function detailToEditForm(detail: DocumentItem): EditFormState {
   };
 }
 
-/** Roles the backend lets read the translation request queue (read-only for some). */
-export function canViewTranslationQueue(role?: string) {
-  return [
-    "ceo",
-    "ceo_assistant",
-    "patient_manager",
-    "teamlead_interpreter",
-    "interpreter",
-    "concierge",
-    "billing",
-    "it_admin",
-  ].includes(role ?? "");
+/** The translation request queue is readable by every document viewer (read-only for some). */
+export function canViewTranslationQueue(actor?: Actor) {
+  return hasCapability(actor, "documents.view");
 }

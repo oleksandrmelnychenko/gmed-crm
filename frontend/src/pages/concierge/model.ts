@@ -1,3 +1,4 @@
+import { hasCapability } from "@/lib/permissions";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
 export const CONCIERGE_SERVICE_STATUSES = [
@@ -187,6 +188,7 @@ export type ConciergeAssignee = {
   is_active: boolean;
 };
 
+/** Roles holding `tasks.use` (the registry mirror); the hierarchy below stays role-based. */
 export const TASK_MANAGER_ROLES = [
   "ceo",
   "ceo_assistant",
@@ -198,7 +200,9 @@ export const TASK_MANAGER_ROLES = [
   "interpreter",
 ] as const;
 
-const TASK_MANAGER_ROLE_SET = new Set<string>(TASK_MANAGER_ROLES);
+function participatesInTaskManager(role: string | null | undefined) {
+  return hasCapability(role, "tasks.use");
+}
 
 const MANAGEMENT_ROLES = new Set(["ceo_assistant", "billing", "patient_manager", "sales"]);
 
@@ -216,12 +220,12 @@ function canManageConciergeTaskCreatorRole(
 /** Task manager assignees include every active role participating in the task hierarchy. */
 export function filterConciergeTaskAssignees(users: ConciergeAssignee[]) {
   return users
-    .filter((user) => user.is_active && TASK_MANAGER_ROLE_SET.has(user.role))
+    .filter((user) => user.is_active && participatesInTaskManager(user.role))
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
 export function canAssignConciergeTaskToRole(actorRole: string | null | undefined, targetRole: string) {
-  if (!actorRole || !TASK_MANAGER_ROLE_SET.has(actorRole) || !TASK_MANAGER_ROLE_SET.has(targetRole)) {
+  if (!actorRole || !participatesInTaskManager(actorRole) || !participatesInTaskManager(targetRole)) {
     return false;
   }
   if (actorRole === targetRole) return true;
