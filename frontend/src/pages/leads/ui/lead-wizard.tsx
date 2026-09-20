@@ -2020,6 +2020,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
     "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
+    "Framework contract does not cover the order period": tx("Договор не покрывает период заказа: измените дату начала договора или даты программы", "Der Rahmenvertrag deckt den Auftragszeitraum nicht ab: Vertragsbeginn oder Programmdaten anpassen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
     "Onboarding order is missing": tx("Создайте заказ", "Auftrag erstellen"),
     "Order needs at least one valid service": tx("Добавьте в заказ хотя бы одну услугу", "Mindestens eine Leistung zum Auftrag hinzufügen"),
@@ -2056,6 +2057,7 @@ function readinessReasonStep(reason: string): StepId {
     "Enhanced due diligence document is not signed": "documents",
     "Anamnesis intake is incomplete": "medical",
     "Framework contract is not signed": "commercial",
+    "Framework contract does not cover the order period": "commercial",
     "Framework contract document is missing": "commercial",
     "Onboarding order is missing": "commercial",
     "Order needs at least one valid service": "commercial",
@@ -2086,6 +2088,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
     "Anamnesis intake is incomplete": SERVICE_CONCERN_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
+    "Framework contract does not cover the order period": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
     "Order document is missing": ORDER_DOCUMENT_ID,
     "Order cost estimate document is missing": ORDER_COST_ESTIMATE_DOCUMENT_ID,
@@ -2593,8 +2596,11 @@ export function LeadWizard({
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
-  // A linked active patient does not change the wizard opened from the leads registry.
-  const isRepeatIntake = entryPoint === "repeat-patient";
+  // A repeat intake (patient_first lead linked to an existing patient) keeps
+  // its patient review even when reopened from the leads registry, so the
+  // patient's valid documents and contracts are reused instead of recreated.
+  const isRepeatIntake = entryPoint === "repeat-patient"
+    || (lead?.intake_model === "patient_first" && Boolean(lead?.prospect_patient_id));
   const repeatPatientId = open && isRepeatIntake ? existingPatient?.id ?? lead?.prospect_patient_id ?? null : null;
   const patientReview = useRepeatPatientReview(repeatPatientId);
   const [draft, setDraft] = useState<Draft | null>(null);
