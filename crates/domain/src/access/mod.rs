@@ -5,6 +5,7 @@
 //!
 //! Every data access in the system is checked against all 4 dimensions.
 
+pub mod capabilities;
 pub mod data_sensitivity;
 pub mod policy;
 pub mod resource_access;
