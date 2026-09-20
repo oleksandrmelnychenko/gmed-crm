@@ -758,7 +758,9 @@ async fn forced_password_reset_revokes_sessions_and_gates_new_logins_until_passw
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["password_change_required"], false);
+    // An admin reset always hands over a temporary password: the next login
+    // must replace it (Stage 5 onboarding rule).
+    assert_eq!(body["password_change_required"], true);
 }
 
 #[tokio::test]

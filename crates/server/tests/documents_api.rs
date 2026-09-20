@@ -7446,7 +7446,7 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let unassigned_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
-    let unassigned_bearer = auth_header_for(unassigned_id, "interpreter");
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
 
     let (status, create_body) = json_request(
         &app,
@@ -7454,9 +7454,8 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
         &format!("/api/v1/documents/{document_id}/shares"),
         &admin_bearer,
         Some(json!({
-            "shared_with_provider_id": provider_id,
+            "shared_with_user_id": billing_id,
             "channel": "email",
-            "message": "Share trail visible to document viewers.",
             "requires_confirmation": true
         })),
     )
