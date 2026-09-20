@@ -7446,6 +7446,7 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let unassigned_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let unassigned_bearer = auth_header_for(unassigned_id, "interpreter");
     let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
 
     let (status, create_body) = json_request(
