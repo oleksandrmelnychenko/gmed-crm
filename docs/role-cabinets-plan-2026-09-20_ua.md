@@ -206,7 +206,7 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
 7. **CEO** — без змін по доступу; додати керування правами (`/admin/users`
    показує capabilities ролі та індивідуальні винятки з `/staff-access`).
 
-### Етап 5 — Керування користувачами і правами (2 дні)
+### Етап 5 — Керування користувачами і правами (виконано 2026-09-20)
 - `/admin/users` доступний IT Admin (крім ролі `ceo`), CEO — повністю.
 - Онбординг: створення акаунта з одноразовим паролем і `password_reset_required`;
   лист/посилання — опційно (потребує SMTP, якого зараз немає).
@@ -214,6 +214,38 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
   CEO/IT Admin (`/admin/activity` вже існує; додати фільтр «зміни доступу»).
 - Матриця полів `/admin/access`: додати колонку `it_admin` з жорстким `hidden`
   для медичних/фінансових полів (сьогодні роль відсутня в матриці).
+
+**Зроблено:**
+- `POST /users` приймає `password` опційно: без нього сервер генерує стійкий
+  випадковий пароль (16 символів, усі класи), ставить
+  `password_reset_required = true` і повертає його один раз як
+  `one_time_password`; в аудит потрапляє лише факт видачі, не секрет.
+  `POST /users/{id}/reset-password` має той самий режим (`generate: true` або
+  порожнє тіло) і завжди вимагає зміни пароля при наступному вході — далі
+  працює екран примусової зміни з етапу 1. **Листи-запрошення не реалізовано
+  (SMTP немає): одноразовий пароль адміністратор передає вручну** — UI показує
+  його один раз із кнопкою копіювання (діалог створення і скидання).
+- Список користувачів віддає `password_reset_required`, `totp_enrolled`,
+  `active_sessions`, `last_login_at`; на `/admin/users` є розблокування,
+  завершення сесій (`/admin/sessions/user/{id}/revoke`), скидання TOTP,
+  (де)активація; для IT Admin рядки CEO read-only, роль `ceo` у списку
+  відсутня без `users.manage_ceo`; `last_ceo_protected` та інші відмови
+  сервера показуються зрозумілим текстом RU/DE.
+- `GET /admin/activity?category=access` (без параметра поведінка без змін) і
+  вкладка «Доступ и роли / Zugriff und Rollen» на `/admin/activity`: лише
+  `create_user`, `update_user`, `deactivate_user`, `activate_user`,
+  `reset_password`, `totp_reset`, `update_access_policy`, події
+  `*_staff_access_*`; доступно власникам `admin.activity` (CEO, IT Admin).
+- Матриця `/admin/access` і `DEFAULT_PATIENT_POLICIES`: колонка `it_admin` з
+  системно заблокованим `hidden` для всіх полів пацієнта (міграція
+  `20260920150000_it_admin_patient_field_policies.sql`); `ceo` лишається
+  неявно «повним» і в матриці не показується. Скидання матриці тепер бере
+  дефолти з того самого списку, а не з другої копії.
+- Тести: `users_api.rs` (онбординг → перший вхід повертає
+  `password_change_required`, `generate` при скиданні, зведення по сесіях/2FA,
+  IT Admin не створює CEO), `admin_security_api.rs` (`category=access`,
+  заблокована колонка `it_admin`), vitest для моделі сторінки користувачів і
+  вкладки активності, Playwright `tests/e2e/admin-users.spec.ts` (mock API).
 
 ### Етап 6 — Перевірка (2 дні)
 - Backend: тест «роль × capability» проти матриці; інтеграційні тести на
