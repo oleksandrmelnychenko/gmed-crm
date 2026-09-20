@@ -665,7 +665,7 @@ async fn refresh_validation_rejects_empty_token() {
 }
 
 #[tokio::test]
-async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_is_replaced() {
+async fn forced_password_reset_revokes_sessions_and_gates_new_logins_until_password_is_replaced() {
     let Some((app, pool)) = test_context().await else {
         return;
     };
@@ -722,7 +722,9 @@ async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_i
         json_request(&app, "GET", "/api/v1/auth/sessions", Some(&access), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"], "unauthorized");
-    let (status, blocked) = json_request(
+    // Sign-in succeeds but the new session is flagged and confined to the
+    // password-change endpoints (see `account_api::forced_password_change_*`).
+    let (status, gated) = json_request(
         &app,
         "POST",
         "/api/v1/auth/login",
@@ -730,8 +732,13 @@ async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_i
         Some(json!({ "email": email, "password": "original-password-1!" })),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{gated}");
+    assert_eq!(gated["password_change_required"], true);
+    let gated_access = bearer(gated["access_token"].as_str().unwrap());
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/patients", Some(&gated_access), None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(blocked["error"], "password_change_required");
+    assert_eq!(body["error"], "password_change_required");
 
     let (status, _) = json_request(
         &app,
@@ -742,7 +749,7 @@ async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_i
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let (status, _) = json_request(
+    let (status, body) = json_request(
         &app,
         "POST",
         "/api/v1/auth/login",
@@ -751,6 +758,7 @@ async fn forced_password_reset_revokes_refresh_and_blocks_login_until_password_i
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["password_change_required"], false);
 }
 
 #[tokio::test]
@@ -793,7 +801,7 @@ async fn legacy_account_without_password_changed_at_can_sign_in() {
 }
 
 #[tokio::test]
-async fn expired_password_cannot_start_a_new_session() {
+async fn expired_password_starts_a_gated_session() {
     let Some((app, pool)) = test_context().await else {
         return;
     };
@@ -823,6 +831,13 @@ async fn expired_password_cannot_start_a_new_session() {
         Some(json!({ "email": email, "password": "expired-password-1!" })),
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["password_change_required"], true);
+    let access = bearer(body["access_token"].as_str().unwrap());
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/auth/sessions", Some(&access), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(&app, "GET", "/api/v1/patients", Some(&access), None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["error"], "password_change_required");
 }

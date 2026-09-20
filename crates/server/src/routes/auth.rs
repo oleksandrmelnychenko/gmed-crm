@@ -55,7 +55,6 @@ struct LoginUserRow {
     failed_login_attempts: i32,
     locked_until: Option<chrono::DateTime<chrono::Utc>>,
     password_changed_at: Option<chrono::DateTime<chrono::Utc>>,
-    password_reset_required: bool,
 }
 
 #[derive(Deserialize)]
@@ -69,11 +68,14 @@ struct AuthResponse {
     refresh_token: String,
     token_type: &'static str,
     expires_in: i64,
+    /// The account must replace its password before using the workspace.
+    password_change_required: bool,
 }
 
 #[derive(Serialize)]
 struct SessionInfo {
     family_id: Uuid,
+    is_current: bool,
     device_fingerprint: Option<String>,
     ip_address: Option<String>,
     user_agent: Option<String>,
@@ -164,7 +166,7 @@ async fn login(
 
     let user = match sqlx::query_as::<_, LoginUserRow>(
         "SELECT id, password_hash, role, is_active, mfa_required, failed_login_attempts, locked_until,
-                password_changed_at, password_reset_required
+                password_changed_at
          FROM users WHERE email = $1",
     )
     .bind(&body.email)
@@ -351,24 +353,11 @@ async fn login(
         );
     }
 
+    // A forced reset (`password_reset_required`) or an expired password no
+    // longer blocks sign-in: the session is created, flagged
+    // (`TokenPair::password_change_required`) and confined by the middleware
+    // to the password-change endpoints until the password is replaced.
     let settings = state.settings.get().await;
-    let password_expired = settings.password_expire_days > 0
-        && user.password_changed_at.is_some_and(|changed_at| {
-            changed_at + chrono::Duration::days(settings.password_expire_days) <= chrono::Utc::now()
-        });
-    if user.password_reset_required || password_expired {
-        state.audit_sender.try_send(audit::auth_event(
-            "login_blocked",
-            Some(user.id),
-            ip_hash_opt(&state, ip.as_deref()),
-            json!({ "reason": "password_change_required", "expired": password_expired }),
-        ));
-        return err(
-            StatusCode::FORBIDDEN,
-            "password_change_required",
-            "Password must be reset by an administrator before sign-in",
-        );
-    }
 
     let _ = sqlx::query!(
         "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
@@ -510,7 +499,7 @@ async fn login(
         "login_success",
         Some(user.id),
         ip_hash_opt(&state, ip.as_deref()),
-        json!({ "role": user.role }),
+        json!({ "role": user.role, "password_change_required": pair.password_change_required }),
     ));
     metrics::counter!(
         LOGIN_ATTEMPTS_TOTAL,
@@ -524,6 +513,7 @@ async fn login(
         refresh_token: pair.refresh_token,
         token_type: "Bearer",
         expires_in: pair.expires_in,
+        password_change_required: pair.password_change_required,
     })
     .into_response()
 }
@@ -556,6 +546,7 @@ async fn refresh(
             refresh_token: pair.refresh_token,
             token_type: "Bearer",
             expires_in: pair.expires_in,
+            password_change_required: pair.password_change_required,
         })
         .into_response(),
 
@@ -656,6 +647,7 @@ async fn list_sessions(
             for r in rows {
                 sessions.push(SessionInfo {
                     family_id: r.id,
+                    is_current: r.id == auth.family_id,
                     device_fingerprint: r.device_fingerprint,
                     ip_address: r.ip_address,
                     user_agent: r.user_agent,
@@ -729,7 +721,7 @@ async fn check_pending(
     let row = match sqlx::query(
         r#"SELECT pl.status, pl.user_id, pl.ip_address, pl.user_agent, pl.created_at,
                   pl.expires_at, pl.consumed_at,
-                  u.role, u.is_active, u.password_reset_required, u.password_changed_at
+                  u.role, u.is_active, u.password_changed_at
            FROM pending_logins pl
            JOIN users u ON u.id = pl.user_id
            WHERE pl.id = $1
@@ -778,25 +770,18 @@ async fn check_pending(
         return Json(serde_json::json!({ "status": "pending" })).into_response();
     }
     let is_active: bool = row.try_get("is_active").unwrap_or(false);
-    let password_reset_required: bool = row.try_get("password_reset_required").unwrap_or(true);
     let password_changed_at: Option<chrono::DateTime<chrono::Utc>> =
         row.try_get("password_changed_at").unwrap_or_default();
     let pending_created_at: chrono::DateTime<chrono::Utc> = match row.try_get("created_at") {
         Ok(value) => value,
         Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed"),
     };
-    let password_expired = settings.password_expire_days > 0
-        && password_changed_at.is_some_and(|changed_at| {
-            changed_at + chrono::Duration::days(settings.password_expire_days) <= chrono::Utc::now()
-        });
     let credentials_changed =
         password_changed_at.is_some_and(|changed_at| changed_at > pending_created_at);
 
     if consumed_at.is_some()
         || expires_at <= chrono::Utc::now()
         || !is_active
-        || password_reset_required
-        || password_expired
         || credentials_changed
     {
         let _ = sqlx::query(
@@ -862,6 +847,7 @@ async fn check_pending(
         "refresh_token": pair.refresh_token,
         "token_type": "Bearer",
         "expires_in": pair.expires_in,
+        "password_change_required": pair.password_change_required,
     }))
     .into_response()
 }

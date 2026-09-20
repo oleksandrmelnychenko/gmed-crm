@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::audit;
-use crate::auth::{middleware::AuthUser, password};
+use crate::auth::{middleware::AuthUser, password, password_policy};
 use crate::state::AppState;
 use gmed_domain::role::Role;
 use sqlx::Row;
@@ -89,24 +89,35 @@ const VALID_ROLES: &[&str] = &[
     "patient",
 ];
 
-const PASSWORD_POLICY_MESSAGE: &str =
-    "Password must contain uppercase and lowercase letters, a number, and a symbol";
+/// Whether changing `target` (deactivating it or moving it off the `ceo`
+/// role) would leave the company without any active CEO account.
+pub(crate) fn would_remove_last_ceo(
+    target_role: &str,
+    target_is_active: bool,
+    other_active_ceos: i64,
+) -> bool {
+    target_role == "ceo" && target_is_active && other_active_ceos == 0
+}
 
-pub(crate) fn validate_password_policy(password: &str) -> Result<(), &'static str> {
-    if password.len() < 8 || password.len() > 256 {
-        return Err("Password must be 8-256 characters");
-    }
+async fn count_other_active_ceos<'e, E>(executor: E, target: Uuid) -> Result<i64, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar("SELECT count(*) FROM users WHERE role = 'ceo' AND is_active AND id <> $1")
+        .bind(target)
+        .fetch_one(executor)
+        .await
+}
 
-    let has_lowercase = password.chars().any(|ch| ch.is_ascii_lowercase());
-    let has_uppercase = password.chars().any(|ch| ch.is_ascii_uppercase());
-    let has_digit = password.chars().any(|ch| ch.is_ascii_digit());
-    let has_symbol = password.chars().any(|ch| !ch.is_ascii_alphanumeric());
-
-    if !(has_lowercase && has_uppercase && has_digit && has_symbol) {
-        return Err(PASSWORD_POLICY_MESSAGE);
-    }
-
-    Ok(())
+fn last_ceo_protected() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(serde_json::json!({
+            "error": "last_ceo_protected",
+            "message": "The last active CEO account cannot be deactivated or demoted",
+        })),
+    )
+        .into_response()
 }
 
 fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
@@ -116,7 +127,7 @@ fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if req.name.is_empty() || req.name.len() > 200 {
         return Err("Name must be 1-200 characters");
     }
-    validate_password_policy(&req.password)?;
+    password_policy::validate_password_policy(&req.password)?;
     if !VALID_ROLES.contains(&req.role.as_str()) {
         return Err("Invalid role");
     }
@@ -432,15 +443,16 @@ async fn update_user(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
     })?;
 
-    let current = sqlx::query("SELECT name, role, email FROM users WHERE id = $1 FOR UPDATE")
-        .bind(user_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "DB error");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
-        })?
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
+    let current =
+        sqlx::query("SELECT name, role, email, is_active FROM users WHERE id = $1 FOR UPDATE")
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "DB error");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+            })?
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "User not found"))?;
 
     let current_name: String = current
         .try_get("name")
@@ -455,6 +467,19 @@ async fn update_user(
     let new_role = body.role.as_deref().unwrap_or(&current_role);
     let new_email = body.email.as_deref().unwrap_or(&current_email);
     let role_changed = new_role != current_role.as_str();
+
+    if role_changed && current_role == "ceo" {
+        let current_is_active: bool = current.try_get("is_active").unwrap_or(false);
+        let other_active_ceos = count_other_active_ceos(&mut *tx, user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, user_id = %user_id, "Failed to count active CEO accounts");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user")
+            })?;
+        if would_remove_last_ceo(&current_role, current_is_active, other_active_ceos) {
+            return Err(last_ceo_protected());
+        }
+    }
 
     let row = sqlx::query(
         r#"UPDATE users
@@ -615,6 +640,34 @@ async fn deactivate_user(
         ));
     }
 
+    let target = sqlx::query("SELECT role, is_active FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load user before deactivation");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to deactivate user",
+            )
+        })?;
+    if let Some(target) = target {
+        let target_role: String = target.try_get("role").unwrap_or_default();
+        let target_is_active: bool = target.try_get("is_active").unwrap_or(false);
+        let other_active_ceos = count_other_active_ceos(&state.db, user_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "Failed to count active CEO accounts");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to deactivate user",
+                )
+            })?;
+        if would_remove_last_ceo(&target_role, target_is_active, other_active_ceos) {
+            return Err(last_ceo_protected());
+        }
+    }
+
     let result = sqlx::query!(
         "UPDATE users SET is_active = false WHERE id = $1 AND is_active = true",
         user_id
@@ -763,115 +816,51 @@ async fn reset_password(
 ) -> impl IntoResponse {
     auth.require_exact_role(&[Role::Ceo])?;
 
-    if let Err(msg) = validate_password_policy(&body.new_password) {
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
-    }
-
-    // The history was recorded on every reset but never consulted, so the 90-day
-    // expiry could be satisfied by setting the same password again.
-    let previous_hashes: Vec<String> = sqlx::query_scalar(
-        r#"SELECT hash FROM (
-               SELECT password_hash AS hash, 2147483647 AS age FROM users WHERE id = $1
-               UNION ALL
-               SELECT entry.value #>> '{}', entry.ordinality::int
-               FROM users u,
-                    jsonb_array_elements(COALESCE(u.password_history, '[]'::jsonb))
-                        WITH ORDINALITY AS entry(value, ordinality)
-               WHERE u.id = $1
-               ORDER BY age DESC
-               LIMIT 5
-           ) recent
-           WHERE hash IS NOT NULL"#,
-    )
-    .bind(user_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load password history");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to reset password",
-        )
-    })?;
-    if previous_hashes
-        .iter()
-        .any(|hash| password::verify_password(&body.new_password, hash).unwrap_or(false))
-    {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Password was used recently; choose a new one",
-        ));
-    }
-
-    let hash = match password::hash_password(&body.new_password) {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to hash password");
+    match password_policy::replace_password(&state.db, user_id, &body.new_password).await {
+        Ok(()) => {}
+        Err(password_policy::PasswordChangeError::Rejected(message)) => {
+            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
+        }
+        Err(password_policy::PasswordChangeError::NotFound) => {
+            return Err(err(StatusCode::NOT_FOUND, "User not found"));
+        }
+        Err(password_policy::PasswordChangeError::Internal) => {
             return Err(err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to reset password",
             ));
         }
-    };
+    }
 
-    let result = sqlx::query(
-        r#"UPDATE users
-           SET password_history = COALESCE(password_history, '[]'::jsonb)
-                                  || jsonb_build_array(password_hash),
-               password_hash = $2,
-               password_changed_at = now(),
-               password_reset_required = false,
-               failed_login_attempts = 0,
-               locked_until = NULL,
-               updated_at = now()
-           WHERE id = $1"#,
+    let _ = sqlx::query(
+        "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+         WHERE user_id = $1 AND status IN ('pending', 'approved')",
     )
     .bind(user_id)
-    .bind(hash)
     .execute(&state.db)
     .await;
-
-    match result {
-        Ok(r) if r.rows_affected() > 0 => {
-            let _ = sqlx::query(
-                "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
-                 WHERE user_id = $1 AND status IN ('pending', 'approved')",
-            )
-            .bind(user_id)
-            .execute(&state.db)
-            .await;
-            crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
-            state.audit_sender.try_send(audit::domain_event(
-                "reset_password",
-                Some(auth.user_id),
-                "user",
-                Some(user_id),
-                serde_json::json!({
-                    "sessions_revoked": true,
-                    "account_unlocked": true,
-                }),
-            ));
-            tracing::info!(by = %auth.user_id, target = %user_id, "Password reset");
-            crate::realtime::publish_admin_event(
-                &state,
-                Some(auth.user_id),
-                "user.password_reset",
-                "user",
-                user_id,
-                serde_json::json!({ "user_id": user_id }),
-            )
-            .await;
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Ok(_) => Err(err(StatusCode::NOT_FOUND, "User not found")),
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to reset password");
-            Err(err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to reset password",
-            ))
-        }
-    }
+    crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
+    state.audit_sender.try_send(audit::domain_event(
+        "reset_password",
+        Some(auth.user_id),
+        "user",
+        Some(user_id),
+        serde_json::json!({
+            "sessions_revoked": true,
+            "account_unlocked": true,
+        }),
+    ));
+    tracing::info!(by = %auth.user_id, target = %user_id, "Password reset");
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "user.password_reset",
+        "user",
+        user_id,
+        serde_json::json!({ "user_id": user_id }),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Returns true when `email` belongs to a provider-directory staff person whose
@@ -949,4 +938,17 @@ pub(crate) async fn email_is_blocked_external_staff(db: &sqlx::PgPool, email: &s
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::would_remove_last_ceo;
+
+    #[test]
+    fn last_ceo_guard_only_fires_for_the_only_active_ceo() {
+        assert!(would_remove_last_ceo("ceo", true, 0));
+        assert!(!would_remove_last_ceo("ceo", true, 1));
+        assert!(!would_remove_last_ceo("ceo", false, 0));
+        assert!(!would_remove_last_ceo("billing", true, 0));
+    }
 }

@@ -25,6 +25,8 @@ pub struct TokenPair {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: i64,
+    /// The account must replace its password before using the workspace.
+    pub password_change_required: bool,
 }
 
 struct CreatedSession {
@@ -78,20 +80,19 @@ async fn create_session_record(
         TokenError::Internal
     })?
     .ok_or(TokenError::FamilyRevoked)?;
-    let password_expired = settings.password_expire_days > 0
-        && account.password_changed_at.is_some_and(|changed_at| {
-            changed_at + Duration::days(settings.password_expire_days) <= Utc::now()
-        });
+    // A pending forced password change (`password_reset_required`) or an
+    // expired password no longer blocks the session: the middleware confines
+    // such a session to the self-service password endpoints instead.
     let credentials_changed = expected_password_changed_at
         .is_some_and(|expected| account.password_changed_at != Some(expected));
-    if !account.is_active
-        || account.password_reset_required
-        || password_expired
-        || credentials_changed
-        || account.role != role
-    {
+    if !account.is_active || credentials_changed || account.role != role {
         return Err(TokenError::FamilyRevoked);
     }
+    let password_change_required = super::middleware::password_change_required(
+        account.password_reset_required,
+        account.password_changed_at,
+        settings.password_expire_days,
+    );
 
     let family = sqlx::query!(
         "INSERT INTO token_families (user_id, device_fingerprint, ip_address, user_agent)
@@ -141,6 +142,7 @@ async fn create_session_record(
             access_token,
             refresh_token: raw_refresh,
             expires_in: settings.access_token_minutes * 60,
+            password_change_required,
         },
     })
 }
@@ -302,11 +304,9 @@ pub async fn rotate_refresh_token(
         return Err(TokenError::TheftDetected);
     }
 
-    let password_expired = settings.password_expire_days > 0
-        && row.password_changed_at.is_some_and(|changed_at| {
-            changed_at + Duration::days(settings.password_expire_days) <= Utc::now()
-        });
-    if !row.is_active || row.password_reset_required || password_expired {
+    // Forced or expired passwords keep refreshing: the session is confined to
+    // the password-change endpoints by the middleware until it is replaced.
+    if !row.is_active {
         sqlx::query(
             "UPDATE token_families SET is_revoked = true, revoked_reason = 'account_restricted'
              WHERE id = $1",
@@ -392,6 +392,11 @@ pub async fn rotate_refresh_token(
         access_token,
         refresh_token: new_raw,
         expires_in: settings.access_token_minutes * 60,
+        password_change_required: super::middleware::password_change_required(
+            row.password_reset_required,
+            row.password_changed_at,
+            settings.password_expire_days,
+        ),
     })
 }
 
@@ -449,6 +454,37 @@ pub async fn revoke_all_families(pool: &PgPool, user_id: Uuid, reason: &str) {
     {
         tracing::warn!(error = %e, "Failed to write revoke-all audit log");
     }
+}
+
+/// Revoke every active session of `user_id` except `keep_family_id` (the one
+/// the caller is using right now). Returns how many families were revoked.
+pub async fn revoke_other_families(
+    pool: &PgPool,
+    user_id: Uuid,
+    keep_family_id: Uuid,
+    reason: &str,
+) -> u64 {
+    let families: Vec<Uuid> = sqlx::query_scalar::<_, Uuid>(
+        "UPDATE token_families SET is_revoked = true, revoked_reason = $3
+         WHERE user_id = $1 AND id <> $2 AND NOT is_revoked
+         RETURNING id",
+    )
+    .bind(user_id)
+    .bind(keep_family_id)
+    .bind(reason)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_else(|e| {
+        tracing::error!(user_id = %user_id, error = %e, "Failed to revoke other families");
+        Vec::new()
+    });
+
+    for family_id in &families {
+        if let Err(e) = blacklist::blacklist_family(pool, *family_id, reason).await {
+            tracing::error!(family_id = %family_id, error = %e, "Failed to add family to access-token blacklist");
+        }
+    }
+    families.len() as u64
 }
 
 /// Revoke all sessions for ALL users (admin force-logout-all).

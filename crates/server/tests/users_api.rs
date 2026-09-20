@@ -419,3 +419,95 @@ async fn ceo_can_unlock_user_without_changing_password() {
     assert_eq!(state.0, 0);
     assert!(state.1.is_none());
 }
+
+#[tokio::test]
+async fn last_active_ceo_cannot_be_deactivated_or_demoted() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    // Each test owns its database, so it is safe to make `admin` the only CEO.
+    let second_ceo = seed_user(&pool, "users-api-last-ceo", "ceo").await;
+    sqlx::query("UPDATE users SET is_active = false WHERE role = 'ceo' AND id NOT IN ($1, $2)")
+        .bind(admin_id)
+        .bind(second_ceo)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let admin = auth_header_for(admin_id, "ceo");
+    let second = auth_header_for(second_ceo, "ceo");
+
+    // Two active CEOs: deactivating one of them is allowed.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{second_ceo}/deactivate"),
+        &admin,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    // `admin` is now the only active CEO: demotion is refused and rolled back.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{admin_id}/update"),
+        &admin,
+        json!({ "role": "billing" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "last_ceo_protected");
+    let role: String = sqlx::query_scalar("SELECT role FROM users WHERE id = $1")
+        .bind(admin_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(role, "ceo", "the transaction rolled back");
+
+    // Re-activate the second CEO: with two active CEOs the admin may be
+    // deactivated, after which the second CEO is protected in turn.
+    sqlx::query("UPDATE users SET is_active = true WHERE id = $1")
+        .bind(second_ceo)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{admin_id}/deactivate"),
+        &second,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let third_ceo = seed_user(&pool, "users-api-third-ceo", "ceo").await;
+    sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
+        .bind(third_ceo)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{second_ceo}/update"),
+        &second,
+        json!({ "role": "it_admin" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "last_ceo_protected");
+
+    // Renaming without touching the role is still fine for the last CEO.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{second_ceo}/update"),
+        &second,
+        json!({ "name": "Only CEO" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["role"], "ceo");
+}

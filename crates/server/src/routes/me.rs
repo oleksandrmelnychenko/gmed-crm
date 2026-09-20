@@ -43,21 +43,41 @@ async fn get_me(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> impl IntoResponse {
-    match sqlx::query!(
-        "SELECT id, email, name, role, created_at FROM users WHERE id = $1 AND is_active = true",
-        auth.user_id
+    let settings = state.settings.get().await;
+    match sqlx::query(
+        "SELECT id, email, name, role, created_at, phone, preferred_language,
+                password_reset_required, password_changed_at
+         FROM users WHERE id = $1 AND is_active = true",
     )
+    .bind(auth.user_id)
     .fetch_optional(&state.db)
     .await
     {
-        Ok(Some(u)) => Json(serde_json::json!({
-            "id": u.id,
-            "email": u.email,
-            "name": u.name,
-            "role": u.role,
-            "created_at": u.created_at,
-        }))
-        .into_response(),
+        Ok(Some(u)) => {
+            let password_reset_required: bool =
+                u.try_get("password_reset_required").unwrap_or(false);
+            let password_changed_at: Option<chrono::DateTime<Utc>> =
+                u.try_get("password_changed_at").unwrap_or_default();
+            let password_change_required = crate::auth::middleware::password_change_required(
+                password_reset_required,
+                password_changed_at,
+                settings.password_expire_days,
+            );
+            Json(serde_json::json!({
+                "id": u.try_get::<Uuid, _>("id").ok(),
+                "email": u.try_get::<String, _>("email").ok(),
+                "name": u.try_get::<String, _>("name").ok(),
+                "role": u.try_get::<String, _>("role").ok(),
+                "created_at": u.try_get::<chrono::DateTime<Utc>, _>("created_at").ok(),
+                "phone": u.try_get::<Option<String>, _>("phone").ok().flatten(),
+                "preferred_language": u
+                    .try_get::<Option<String>, _>("preferred_language")
+                    .ok()
+                    .flatten(),
+                "password_change_required": password_change_required,
+            }))
+            .into_response()
+        }
 
         Ok(None) => {
             tracing::warn!(user_id = %auth.user_id, "JWT valid but user not found or deactivated");

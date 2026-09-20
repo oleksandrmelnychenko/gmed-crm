@@ -108,10 +108,19 @@ async fn require_auth_with_workspace_policy(
         return unauthorized();
     };
 
-    let auth_user = match auth_user_from_access_token(&state, token).await {
-        Ok(value) => value,
-        Err(response) => return response,
-    };
+    let (auth_user, password_change_required) =
+        match auth_user_status_from_access_token(&state, token).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+
+    // Forced password change (Stage 1 of the role cabinets plan): the session
+    // is valid but confined to the self-service password endpoints until the
+    // password is replaced. Checked before the workspace policy so the answer
+    // is the same for every role. Kept separate from the capability model.
+    if password_change_required && !is_password_change_allowed_path(req.uri().path()) {
+        return password_change_required_response();
+    }
 
     if enforce_release_workspace_roles
         && !release_workspace_allows_path(auth_user.role, req.uri().path())
@@ -135,6 +144,21 @@ pub async fn auth_user_from_access_token(
     state: &AppState,
     token: &str,
 ) -> Result<AuthUser, Response> {
+    let (auth, password_change_required) = auth_user_status_from_access_token(state, token).await?;
+    if password_change_required {
+        return Err(unauthorized());
+    }
+    Ok(auth)
+}
+
+/// Like [`auth_user_from_access_token`], but a pending forced password change
+/// is reported as a flag instead of rejecting the token. Only the HTTP
+/// middleware uses this; WebSocket transports keep rejecting such sessions.
+#[allow(clippy::result_large_err)]
+async fn auth_user_status_from_access_token(
+    state: &AppState,
+    token: &str,
+) -> Result<(AuthUser, bool), Response> {
     let Ok(data) = jwt::verify_access_token(state.jwt_secret(), token) else {
         return Err(unauthorized());
     };
@@ -154,7 +178,7 @@ pub async fn auth_user_from_access_token(
         return Err(unauthorized());
     };
 
-    revalidate_auth_user(
+    revalidate_auth_user_status(
         state,
         &AuthUser {
             user_id: data.claims.sub,
@@ -167,8 +191,58 @@ pub async fn auth_user_from_access_token(
     .await
 }
 
+/// Whether the account must replace its password before using the workspace:
+/// an administrator forced a reset, or the password is older than the expiry
+/// configured in the system settings (0 disables expiry).
+pub fn password_change_required(
+    password_reset_required: bool,
+    password_changed_at: Option<DateTime<Utc>>,
+    password_expire_days: i64,
+) -> bool {
+    let password_expired = password_expire_days > 0
+        && password_changed_at.is_some_and(|changed_at| {
+            changed_at + chrono::Duration::days(password_expire_days) <= Utc::now()
+        });
+    password_reset_required || password_expired
+}
+
+/// Endpoints a session may still call while a password change is pending:
+/// identity, the change itself, and leaving.
+pub(crate) fn is_password_change_allowed_path(path: &str) -> bool {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    matches!(
+        path,
+        "/me" | "/me/password" | "/auth/logout" | "/auth/logout-all" | "/auth/sessions"
+    ) || path.starts_with("/auth/sessions/")
+}
+
+fn password_change_required_response() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": "password_change_required",
+            "message": "Password must be changed before continuing"
+        })),
+    )
+        .into_response()
+}
+
 #[allow(clippy::result_large_err)]
 pub async fn revalidate_auth_user(state: &AppState, auth: &AuthUser) -> Result<AuthUser, Response> {
+    let (auth, password_change_required) = revalidate_auth_user_status(state, auth).await?;
+    if password_change_required {
+        return Err(unauthorized());
+    }
+    Ok(auth)
+}
+
+/// Revalidate the token against the database and report whether a password
+/// change is pending instead of treating it as an invalid session.
+#[allow(clippy::result_large_err)]
+async fn revalidate_auth_user_status(
+    state: &AppState,
+    auth: &AuthUser,
+) -> Result<(AuthUser, bool), Response> {
     if auth.access_token_expires_at <= Utc::now() {
         return Err(unauthorized());
     }
@@ -196,23 +270,18 @@ pub async fn revalidate_auth_user(state: &AppState, auth: &AuthUser) -> Result<A
         return Err(unauthorized());
     };
     use sqlx::Row as _;
-    if !row.try_get::<bool, _>("is_active").unwrap_or(false)
-        || row
-            .try_get::<bool, _>("password_reset_required")
-            .unwrap_or(true)
-    {
+    if !row.try_get::<bool, _>("is_active").unwrap_or(false) {
         return Err(unauthorized());
     }
     let settings = state.settings.get().await;
     let password_changed_at: Option<DateTime<Utc>> =
         row.try_get("password_changed_at").unwrap_or_default();
-    if settings.password_expire_days > 0
-        && password_changed_at.is_some_and(|changed_at| {
-            changed_at + chrono::Duration::days(settings.password_expire_days) <= Utc::now()
-        })
-    {
-        return Err(unauthorized());
-    }
+    let change_required = password_change_required(
+        row.try_get::<bool, _>("password_reset_required")
+            .unwrap_or(true),
+        password_changed_at,
+        settings.password_expire_days,
+    );
     let role_name: String = row.try_get("role").unwrap_or_default();
     let Some(role) = parse_role(&role_name) else {
         return Err(unauthorized());
@@ -221,7 +290,7 @@ pub async fn revalidate_auth_user(state: &AppState, auth: &AuthUser) -> Result<A
         return Err(unauthorized());
     }
 
-    Ok(auth.clone())
+    Ok((auth.clone(), change_required))
 }
 
 #[derive(Deserialize)]
@@ -285,10 +354,19 @@ pub(crate) fn release_workspace_allows_realtime_event(role: Role, event_type: &s
 
 fn is_empty_workspace_allowed_path(role: Role, path: &str) -> bool {
     let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    // Account self-service (/account page) is available to every role.
     let session_path = matches!(
         path,
-        "/me" | "/auth/logout" | "/auth/logout-all" | "/auth/sessions" | "/stats/my-kpis"
-    ) || path.starts_with("/auth/sessions/");
+        "/me"
+            | "/me/password"
+            | "/me/profile"
+            | "/auth/logout"
+            | "/auth/logout-all"
+            | "/auth/sessions"
+            | "/stats/my-kpis"
+    ) || path.starts_with("/auth/sessions/")
+        || path == "/me/totp"
+        || path.starts_with("/me/totp/");
     if session_path {
         return true;
     }
@@ -523,6 +601,61 @@ mod tests {
         assert!(!is_empty_workspace_allowed_path(
             Role::PatientManager,
             "/api/v1/patients"
+        ));
+    }
+
+    #[test]
+    fn forced_password_change_only_reaches_identity_password_and_logout() {
+        for path in [
+            "/me",
+            "/api/v1/me",
+            "/api/v1/me/password",
+            "/auth/logout",
+            "/api/v1/auth/logout-all",
+            "/api/v1/auth/sessions",
+            "/api/v1/auth/sessions/family-id/revoke",
+        ] {
+            assert!(is_password_change_allowed_path(path), "{path}");
+        }
+        for path in [
+            "/",
+            "/api/v1/me/profile",
+            "/api/v1/me/totp",
+            "/api/v1/patients",
+            "/api/v1/stats/my-kpis",
+            "/api/v1/messages/ws",
+        ] {
+            assert!(!is_password_change_allowed_path(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn password_change_required_combines_forced_reset_and_expiry() {
+        let fresh = Some(Utc::now() - chrono::Duration::days(10));
+        let stale = Some(Utc::now() - chrono::Duration::days(91));
+        assert!(password_change_required(true, fresh, 90));
+        assert!(!password_change_required(false, fresh, 90));
+        assert!(password_change_required(false, stale, 90));
+        assert!(!password_change_required(false, stale, 0));
+        assert!(!password_change_required(false, None, 90));
+    }
+
+    #[test]
+    fn account_self_service_paths_stay_open_for_empty_workspace_roles() {
+        for path in [
+            "/api/v1/me/password",
+            "/api/v1/me/profile",
+            "/api/v1/me/totp",
+            "/api/v1/me/totp/setup",
+        ] {
+            assert!(
+                is_empty_workspace_allowed_path(Role::ItAdmin, path),
+                "{path}"
+            );
+        }
+        assert!(!is_empty_workspace_allowed_path(
+            Role::ItAdmin,
+            "/api/v1/me/documents"
         ));
     }
 

@@ -6203,7 +6203,7 @@ async fn activate_patient_portal_account(
     if email.is_empty() || email.len() > 320 || !email.contains('@') {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid email"));
     }
-    if let Err(message) = crate::routes::users::validate_password_policy(&body.password) {
+    if let Err(message) = crate::auth::password_policy::validate_password_policy(&body.password) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
     }
 

@@ -495,6 +495,7 @@ async fn complete_totp_login(
         "refresh_token": pair.refresh_token,
         "token_type": "Bearer",
         "expires_in": pair.expires_in,
+        "password_change_required": pair.password_change_required,
     }))
     .into_response()
 }

@@ -1,4 +1,5 @@
 pub mod access_policies;
+pub mod account;
 pub mod admin_compliance;
 pub mod admin_security;
 pub mod admin_settings;
@@ -74,6 +75,7 @@ use axum::Router;
 pub fn protected_router() -> Router<AppState> {
     Router::new()
         .merge(me::router())
+        .merge(account::router())
         .merge(invoice_imports::router())
         .merge(auth::protected_router())
         .merge(totp::protected_router())
