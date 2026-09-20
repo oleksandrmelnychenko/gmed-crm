@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::{middleware::AuthUser, password, password_policy};
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
@@ -120,6 +121,43 @@ fn last_ceo_protected() -> axum::response::Response {
         .into_response()
 }
 
+/// Assigning the `ceo` role is reserved to the CEO (`users.manage_ceo`); a
+/// technical admin manages every other role.
+#[allow(clippy::result_large_err)]
+pub(crate) fn ensure_can_assign_role(
+    auth: &AuthUser,
+    role: &str,
+) -> Result<(), axum::response::Response> {
+    if role == "ceo" {
+        auth.require_capability(Capability::UsersManageCeo)
+    } else {
+        Ok(())
+    }
+}
+
+/// Any operation that targets an existing CEO account needs
+/// `users.manage_ceo`; other accounts need only `users.manage`.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn ensure_can_manage_target(
+    state: &AppState,
+    auth: &AuthUser,
+    user_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    auth.require_capability(Capability::UsersManage)?;
+    let target_role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, target = %user_id, "Failed to load target user role");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load user")
+        })?;
+    match target_role {
+        None => Err(err(StatusCode::NOT_FOUND, "User not found")),
+        Some(role) => ensure_can_assign_role(auth, &role),
+    }
+}
+
 fn validate_create(req: &CreateUserRequest) -> Result<(), &'static str> {
     if req.email.is_empty() || req.email.len() > 320 || !req.email.contains('@') {
         return Err("Invalid email");
@@ -139,7 +177,7 @@ async fn list_users(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListUsersQuery>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    auth.require_capability(Capability::UsersView)?;
 
     if let Some(ref role) = query.role
         && !VALID_ROLES.contains(&role.as_str())
@@ -297,7 +335,7 @@ async fn get_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    auth.require_capability(Capability::UsersView)?;
 
     match sqlx::query!(
         "SELECT id, email, name, role, is_active, created_at, updated_at FROM users WHERE id = $1",
@@ -331,7 +369,8 @@ async fn create_user(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateUserRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    auth.require_capability(Capability::UsersManage)?;
+    ensure_can_assign_role(&auth, &body.role)?;
 
     if let Err(msg) = validate_create(&body) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
@@ -425,7 +464,10 @@ async fn update_user(
     Path(user_id): Path<Uuid>,
     Json(body): Json<UpdateUserRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    ensure_can_manage_target(&state, &auth, user_id).await?;
+    if let Some(ref role) = body.role {
+        ensure_can_assign_role(&auth, role)?;
+    }
 
     if let Some(ref role) = body.role
         && !VALID_ROLES.contains(&role.as_str())
@@ -631,7 +673,7 @@ async fn deactivate_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    ensure_can_manage_target(&state, &auth, user_id).await?;
 
     if user_id == auth.user_id {
         return Err(err(
@@ -709,7 +751,7 @@ async fn activate_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    ensure_can_manage_target(&state, &auth, user_id).await?;
 
     let result = sqlx::query!(
         "UPDATE users SET is_active = true WHERE id = $1 AND is_active = false",
@@ -751,7 +793,7 @@ async fn unlock_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    ensure_can_manage_target(&state, &auth, user_id).await?;
 
     let result = sqlx::query(
         r#"UPDATE users
@@ -814,7 +856,7 @@ async fn reset_password(
     Path(user_id): Path<Uuid>,
     Json(body): Json<ResetPasswordRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo])?;
+    ensure_can_manage_target(&state, &auth, user_id).await?;
 
     match password_policy::replace_password(&state.db, user_id, &body.new_password).await {
         Ok(()) => {}

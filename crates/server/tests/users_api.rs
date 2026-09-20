@@ -511,3 +511,152 @@ async fn last_active_ceo_cannot_be_deactivated_or_demoted() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["role"], "ceo");
 }
+
+#[tokio::test]
+async fn it_admin_manages_users_but_never_the_ceo() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let it_admin_id = seed_user(&pool, "users-api-it-admin", "it_admin").await;
+    let bearer = auth_header_for(it_admin_id, "it_admin");
+    let suffix = Uuid::new_v4().simple().to_string();
+
+    // Listing and reading accounts is part of the technical cabinet.
+    let (status, body) = json_request(&app, "GET", "/api/v1/users", &bearer, json!(null)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users/{admin_id}"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Creating a regular staff account works...
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/users",
+        &bearer,
+        json!({
+            "email": format!("it-admin-created-{suffix}@example.com"),
+            "name": "Created by IT admin",
+            "password": "Str0ng!Passw0rd",
+            "role": "concierge"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let created_id = created["id"].as_str().expect("created id").to_string();
+
+    // ...but a CEO account can only be created by the CEO.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/users",
+        &bearer,
+        json!({
+            "email": format!("it-admin-ceo-{suffix}@example.com"),
+            "name": "Would-be CEO",
+            "password": "Str0ng!Passw0rd",
+            "role": "ceo"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Regular accounts may be updated, locked, unlocked and reset.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{created_id}/update"),
+        &bearer,
+        json!({ "name": "Renamed by IT admin" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{created_id}/update"),
+        &bearer,
+        json!({ "role": "ceo" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{created_id}/reset-password"),
+        &bearer,
+        json!({ "new_password": "An0ther!Passw0rd" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{created_id}/deactivate"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{created_id}/activate"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{created_id}/totp/reset"),
+        &bearer,
+        json!(null),
+    )
+    .await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Every operation that targets an existing CEO account is refused.
+    for path in [
+        format!("/api/v1/users/{admin_id}/update"),
+        format!("/api/v1/users/{admin_id}/deactivate"),
+        format!("/api/v1/users/{admin_id}/unlock"),
+        format!("/api/v1/users/{admin_id}/reset-password"),
+        format!("/api/v1/users/{admin_id}/totp/reset"),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &path,
+            &bearer,
+            json!({ "name": "Tampered", "new_password": "An0ther!Passw0rd" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+    let ceo_name: String = sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
+        .bind(admin_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_ne!(ceo_name, "Tampered");
+
+    // Other roles never reach user administration.
+    let billing_id = seed_user(&pool, "users-api-it-admin", "billing").await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/users",
+        &auth_header_for(billing_id, "billing"),
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}

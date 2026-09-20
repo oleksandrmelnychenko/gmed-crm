@@ -319,14 +319,15 @@ async fn disable_totp(
     Json(json!({ "enrolled": false })).into_response()
 }
 
-/// Lost device: CEO removes the factor so the person can enrol again. Every
-/// session of that user ends, since the account is briefly password-only.
+/// Lost device: a user administrator removes the factor so the person can
+/// enrol again (a CEO account only by the CEO). Every session of that user
+/// ends, since the account is briefly password-only.
 async fn reset_user_totp(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo]) {
+    if let Err(e) = super::users::ensure_can_manage_target(&state, &auth, user_id).await {
         return e;
     }
     let removed = sqlx::query("DELETE FROM user_totp WHERE user_id = $1")
