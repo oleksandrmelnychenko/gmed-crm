@@ -206,6 +206,44 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
 7. **CEO** — без змін по доступу; додати керування правами (`/admin/users`
    показує capabilities ролі та індивідуальні винятки з `/staff-access`).
 
+**Виконано 2026-09-20 (лендинги, меню, KPI, сервісна сітка лідів):**
+- Реєстр кабінетів `frontend/src/lib/role-cabinets.ts`: явний список
+  первинних модулів для кожної ролі (Billing: рахунки, замовлення, фінанси
+  компанії, контракти; Concierge: сервіси, готелі, записи, ліди-сітка;
+  Patient Manager: пацієнти, ліди, замовлення, контракти; Sales: ліди,
+  провайдери, звіти, чат; CEO Assistant: task-manager, записи, пацієнти (R),
+  звіти; Teamlead: записи, перекладачі, документи, task-manager; Interpreter:
+  записи, документи, task-manager, години; IT Admin: користувачі, безпека,
+  налаштування, активність, health, підписи, DATEV, інциденти — без
+  пацієнтів). Швидкі посилання дашборду беруться з цього списку і
+  фільтруються за `capabilities` з `/me`; роль без відповідної capability
+  не отримує посилання. Невідома роль отримує нейтральний кабінет (без KPI,
+  фокусу й посилань) замість пресету PM.
+- `listStaffNavItems` ставить первинні модулі ролі першими (у межах секцій
+  меню), порожні секції ховаються, `/account` є у всіх.
+- Підзаголовки кабінетів — i18n-ключі `cabinet_subtitle_<role>` (RU/DE).
+- `GET /stats/my-kpis`: кожна гілка додатково гейтиться capability
+  (`reports.finance` для billing, `reports.market` для sales, `admin.health`
+  для it_admin тощо); пресет IT Admin розширено технічними лічильниками
+  (`failed_logins_24h`, `blocked_logins_24h`, `db_active_connections`,
+  `health_status`, `last_audit_event_at`). Інтеграційний тест
+  `assistant_sales_and_it_admin_scorecards_stay_within_their_capabilities`
+  перевіряє, що фінансові й медичні ключі не потрапляють у ці картки.
+- Ліди для ролі з `leads.view` без `leads.edit` (Concierge): серверна
+  проєкція `lead_service_grid_projection` у `routes/leads.rs` для `GET /leads`
+  і `GET /leads/{id}` — лише ім'я, статус, тип ліда, дати, країна, канал
+  контакту й сервісні потреби; без медичних нотаток, страховки, адреси,
+  compliance, wizard/raw даних, вкладень і readiness. Мутації → 403
+  (`concierge_sees_only_the_service_grid_and_cannot_mutate_leads`).
+- Тести: vitest `role-cabinets.test.ts`, `role-dashboard-config.test.ts`,
+  `staff-route-access.test.ts` (порядок меню); Playwright
+  `tests/e2e/role-cabinets.spec.ts` (billing, concierge, sales, it_admin з
+  capabilities зі знімка).
+- Не зроблено в цьому етапі: read-only режим сторінок (етап 3), права CEO на
+  `/admin/users` (п. 7, етап 5), окрема сторінка годин перекладача (посилання
+  «Години» веде на `/appointments?focus=reports`, сторінка записів параметр
+  поки ігнорує).
+
 ### Етап 5 — Керування користувачами і правами (виконано 2026-09-20)
 - `/admin/users` доступний IT Admin (крім ролі `ceo`), CEO — повністю.
 - Онбординг: створення акаунта з одноразовим паролем і `password_reset_required`;
