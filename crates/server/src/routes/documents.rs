@@ -11037,6 +11037,95 @@ fn can_view_general_provider_document(role: Role, general: bool, hotel: bool) ->
             || (role == Role::Concierge && hotel))
 }
 
+/// Allowed status transitions for translation requests. Saving without a
+/// status change is always fine; reopening a completed request is reserved
+/// for the CEO and the interpreter team lead.
+fn translation_status_transition_allowed(current: &str, next: &str, role: Role) -> bool {
+    if current == next {
+        return true;
+    }
+    match (current, next) {
+        ("pending", "in_progress" | "completed" | "cancelled") => true,
+        ("in_progress", "completed" | "cancelled" | "pending") => true,
+        ("completed", "in_progress") => matches!(role, Role::Ceo | Role::TeamleadInterpreter),
+        ("cancelled", "pending") => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod translation_status_transition_tests {
+    use super::*;
+
+    #[test]
+    fn open_requests_follow_the_workflow() {
+        assert!(translation_status_transition_allowed(
+            "pending",
+            "pending",
+            Role::Interpreter
+        ));
+        assert!(translation_status_transition_allowed(
+            "pending",
+            "in_progress",
+            Role::Interpreter
+        ));
+        assert!(translation_status_transition_allowed(
+            "pending",
+            "completed",
+            Role::Concierge
+        ));
+        assert!(translation_status_transition_allowed(
+            "in_progress",
+            "completed",
+            Role::Interpreter
+        ));
+        assert!(translation_status_transition_allowed(
+            "in_progress",
+            "pending",
+            Role::PatientManager
+        ));
+        assert!(translation_status_transition_allowed(
+            "cancelled",
+            "pending",
+            Role::PatientManager
+        ));
+    }
+
+    #[test]
+    fn finished_requests_are_protected() {
+        assert!(!translation_status_transition_allowed(
+            "cancelled",
+            "completed",
+            Role::Ceo
+        ));
+        assert!(!translation_status_transition_allowed(
+            "completed",
+            "pending",
+            Role::Ceo
+        ));
+        assert!(!translation_status_transition_allowed(
+            "completed",
+            "cancelled",
+            Role::Ceo
+        ));
+        assert!(!translation_status_transition_allowed(
+            "completed",
+            "in_progress",
+            Role::Interpreter
+        ));
+        assert!(translation_status_transition_allowed(
+            "completed",
+            "in_progress",
+            Role::TeamleadInterpreter
+        ));
+        assert!(translation_status_transition_allowed(
+            "completed",
+            "in_progress",
+            Role::Ceo
+        ));
+    }
+}
+
 #[cfg(test)]
 mod hotel_access_tests {
     use super::*;
@@ -20356,6 +20445,12 @@ async fn update_document_translation_request(
     let current_status = request_row
         .try_get::<String, _>("status")
         .unwrap_or_else(|_| "pending".to_string());
+    if !translation_status_transition_allowed(&current_status, next_status, auth.role) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("Translation request cannot move from {current_status} to {next_status}"),
+        );
+    }
     if next_status == "completed"
         && next_translated_text
             .as_deref()
@@ -20419,9 +20514,19 @@ async fn update_document_translation_request(
         .unwrap_or_default();
     let translated_document_id =
         if body.create_translated_document.unwrap_or(false) && next_status == "completed" {
+            // A changed translation after the first completion produces a new
+            // version of the translated document instead of leaving the stale
+            // file linked to the request.
+            let translated_text_changed = translated_text_update.as_ref().is_some_and(|next| {
+                next.as_deref().map(str::trim).unwrap_or_default()
+                    != current_translated_text
+                        .as_deref()
+                        .map(str::trim)
+                        .unwrap_or_default()
+            });
             match current_translated_document_id {
-                Some(id) => Some(id),
-                None => {
+                Some(id) if !translated_text_changed => Some(id),
+                previous_version => {
                     let translated_body = next_translated_text.clone().unwrap_or_default();
                     match create_translated_document_from_request(
                         &state,
@@ -20432,6 +20537,7 @@ async fn update_document_translation_request(
                         translated_body.as_str(),
                         body.translated_document_auto_name.as_deref(),
                         request_source.as_str(),
+                        previous_version,
                     )
                     .await
                     {
@@ -20604,6 +20710,7 @@ async fn create_translated_document_from_request(
     translated_text: &str,
     auto_name_override: Option<&str>,
     request_source: &str,
+    previous_version_id: Option<Uuid>,
 ) -> Result<Uuid, axum::response::Response> {
     let translated_text = translated_text.trim();
     if translated_text.is_empty() {
@@ -20612,6 +20719,45 @@ async fn create_translated_document_from_request(
             "Translated document creation requires translated text",
         ));
     }
+    let (version_root_document_id, replaces_document_id, version_number) = match previous_version_id
+    {
+        Some(previous_id) => {
+            let previous = sqlx::query(
+                    r#"SELECT COALESCE(version_root_document_id, id) AS root_id,
+                              COALESCE(
+                                  (SELECT max(dv.version_number)
+                                   FROM documents dv
+                                   WHERE dv.version_root_document_id = COALESCE(documents.version_root_document_id, documents.id)),
+                                  version_number
+                              ) AS latest_version
+                       FROM documents
+                       WHERE id = $1"#,
+                )
+                .bind(previous_id)
+                .fetch_optional(&state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, document_id = %previous_id, "load previous translated document version");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to load previous translated document",
+                    )
+                })?;
+            match previous {
+                Some(row) => (
+                    row.try_get::<Option<Uuid>, _>("root_id")
+                        .unwrap_or_default(),
+                    Some(previous_id),
+                    row.try_get::<Option<i32>, _>("latest_version")
+                        .unwrap_or_default()
+                        .unwrap_or(1)
+                        + 1,
+                ),
+                None => (None, None, 1),
+            }
+        }
+        None => (None, None, 1),
+    };
 
     let source_document_id = source_document_row
         .try_get::<Uuid, _>("id")
@@ -20688,9 +20834,9 @@ async fn create_translated_document_from_request(
         generated_template_id: None,
         generated_bindings: None,
         generated_manual_text: None,
-        version_root_document_id: None,
-        replaces_document_id: None,
-        version_number: 1,
+        version_root_document_id,
+        replaces_document_id,
+        version_number,
         uploaded_by: actor_user_id,
     };
 

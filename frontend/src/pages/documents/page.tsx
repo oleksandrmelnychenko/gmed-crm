@@ -8193,10 +8193,13 @@ function DocumentTranslationRequestsTable({
         return "bg-amber-500";
       }}
       footer={({ filteredCount, totalCount }) => (
+        <span className="flex flex-wrap items-center gap-2">
         <span className="tabular-nums">
           {filteredCount === totalCount
             ? `${totalCount}`
             : `${filteredCount} / ${totalCount}`}
+        </span>
+          {rows.length >= 100 ? <span className="text-amber-700">{t.documents_translation_queue_truncated}</span> : null}
         </span>
       )}
     />

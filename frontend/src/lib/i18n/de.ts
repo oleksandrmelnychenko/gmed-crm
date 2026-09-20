@@ -1421,6 +1421,7 @@ export const de = {
     "Für dieses Dokument sind noch keine Übersetzungsanfragen erfasst.",
   documents_translation_queue_open: "Offen",
   documents_translation_queue_all: "Alle Status",
+  documents_translation_queue_truncated: "Die ersten 100 Anfragen werden angezeigt, bitte Filter eingrenzen.",
   documents_translation_queue_empty:
     "Derzeit gibt es keine offenen Übersetzungsanfragen. Neue Anfragen erscheinen hier, sobald sie aus einer Dokumentakte erstellt werden oder ein Patient im Portal eine Übersetzung anfordert.",
   documents_source_language: "Ausgangssprache",

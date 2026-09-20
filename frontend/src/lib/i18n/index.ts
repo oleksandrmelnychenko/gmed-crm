@@ -1341,6 +1341,7 @@ export interface Translations
   documents_no_translation_requests: string;
   documents_translation_queue_open: string;
   documents_translation_queue_all: string;
+  documents_translation_queue_truncated: string;
   documents_translation_queue_empty: string;
   documents_source_language: string;
   documents_use_extracted_text: string;

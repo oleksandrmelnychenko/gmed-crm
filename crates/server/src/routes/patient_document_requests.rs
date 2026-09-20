@@ -66,13 +66,21 @@ async fn list_my_translation_requests(
            WHERE dtr.patient_id = $1
              AND dtr.requested_by = $2
              AND dtr.request_source = 'patient_portal'
-             AND d.visibility = 'patient_visible'
-             AND EXISTS (
-                SELECT 1
-                FROM document_shares ds
-                WHERE ds.document_id = d.id
-                  AND ds.shared_with_user_id = $2
-                  AND ds.revoked_at IS NULL
+             AND (
+                -- Open requests stay visible to the patient who made them even
+                -- if the original document was un-shared meanwhile; the file
+                -- itself is still guarded by the document endpoints.
+                dtr.status IN ('pending', 'in_progress')
+                OR (
+                    d.visibility = 'patient_visible'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM document_shares ds
+                        WHERE ds.document_id = d.id
+                          AND ds.shared_with_user_id = $2
+                          AND ds.revoked_at IS NULL
+                    )
+                )
              )
            ORDER BY dtr.requested_at DESC"#,
     )
@@ -357,13 +365,22 @@ async fn notify_assigned_staff(
 ) {
     if let Ok(rows) = sqlx::query(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, $2, $3, $4, 'translation_request', $5
-           FROM patient_assignments pa
-           JOIN users u ON u.id = pa.user_id
-           WHERE pa.patient_id = $1
-             AND pa.revoked_at IS NULL
-             AND u.is_active = true
-             AND u.role IN ('patient_manager', 'ceo')
+           SELECT recipients.user_id, $2, $3, $4, 'translation_request', $5
+           FROM (
+               SELECT pa.user_id
+               FROM patient_assignments pa
+               JOIN users u ON u.id = pa.user_id
+               WHERE pa.patient_id = $1
+                 AND pa.revoked_at IS NULL
+                 AND u.is_active = true
+                 AND u.role IN ('patient_manager', 'ceo', 'teamlead_interpreter')
+               UNION
+               SELECT dtr.assigned_to
+               FROM document_translation_requests dtr
+               JOIN users u ON u.id = dtr.assigned_to
+               WHERE dtr.id = $5
+                 AND u.is_active = true
+           ) AS recipients
            RETURNING id, user_id"#,
     )
     .bind(patient_id)

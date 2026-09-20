@@ -1418,6 +1418,7 @@ export const ru = {
     "Для этого документа ещё нет запросов на перевод.",
   documents_translation_queue_open: "Открытые",
   documents_translation_queue_all: "Все статусы",
+  documents_translation_queue_truncated: "Показаны первые 100 запросов, уточните фильтр.",
   documents_translation_queue_empty:
     "Открытых запросов на перевод пока нет. Новые запросы появятся здесь, как только их создадут из карточки документа или пациент запросит перевод в портале.",
   documents_source_language: "Исходный язык",
