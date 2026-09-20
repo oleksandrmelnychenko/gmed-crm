@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -29,7 +29,7 @@ async fn list_channels(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminNotifications) {
         return e;
     }
 
@@ -60,7 +60,7 @@ async fn create_channel(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<UpsertChannel>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminNotifications) {
         return e;
     }
 
@@ -91,7 +91,7 @@ async fn get_channel(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminNotifications) {
         return e;
     }
 
@@ -114,7 +114,7 @@ async fn update_channel(
     Path(id): Path<Uuid>,
     Json(body): Json<UpsertChannel>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminNotifications) {
         return e;
     }
 
@@ -146,7 +146,7 @@ async fn delete_channel(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminNotifications) {
         return e;
     }
 
@@ -177,7 +177,7 @@ async fn test_channel(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminNotifications) {
         return e;
     }
 

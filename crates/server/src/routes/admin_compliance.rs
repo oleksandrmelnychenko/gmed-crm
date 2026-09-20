@@ -20,6 +20,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 const CHAT_UPLOAD_DIR: &str = "uploads/chat";
@@ -963,7 +964,7 @@ async fn anonymize_patient(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminCompliance) {
         return e;
     }
 
@@ -998,7 +999,7 @@ async fn lift_processing_restriction(
     Path(patient_id): Path<Uuid>,
     Json(body): Json<LiftProcessingRestrictionRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminCompliance) {
         return e;
     }
     if let Err(response) = ensure_patient_visible(&state, &auth, patient_id).await {
@@ -1074,7 +1075,9 @@ async fn list_patient_recipients(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
     if let Err(response) = ensure_patient_visible(&state, &auth, patient_id).await {
@@ -1349,7 +1352,9 @@ async fn create_patient_privacy_request(
     Path(patient_id): Path<Uuid>,
     Json(body): Json<CreatePrivacyRequestRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
 
@@ -1462,7 +1467,9 @@ async fn list_patient_privacy_requests(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
 
@@ -1511,7 +1518,9 @@ async fn list_privacy_requests(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
 
@@ -1589,7 +1598,9 @@ async fn review_privacy_request(
     Path(request_id): Path<Uuid>,
     Json(body): Json<ReviewPrivacyRequestRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
 
@@ -1718,7 +1729,9 @@ async fn record_privacy_request_step(
     Path(request_id): Path<Uuid>,
     Json(body): Json<PrivacyRequestStepRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
     let request = match fetch_privacy_request_meta(&state, request_id).await {
@@ -1867,7 +1880,9 @@ async fn execute_privacy_request(
     Extension(auth): Extension<AuthUser>,
     Path(request_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin, Role::PatientManager]) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
+    {
         return e;
     }
 

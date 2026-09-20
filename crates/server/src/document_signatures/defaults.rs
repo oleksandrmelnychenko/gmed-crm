@@ -6,6 +6,7 @@ use axum::{
     routing::get,
 };
 use chrono::{Datelike, NaiveDate};
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -61,7 +62,7 @@ async fn get_defaults(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<Value>, Response> {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_capability(Capability::AdminSignatures)?;
     Ok(Json(json!({"signers":load(&state).await?})))
 }
 
@@ -70,7 +71,7 @@ async fn save_defaults(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<Defaults>,
 ) -> Result<Json<Value>, Response> {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_capability(Capability::AdminSignatures)?;
     let signers = normalize_defaults(body.signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
     sqlx::query("INSERT INTO signature_signer_defaults(singleton,signers,updated_by) VALUES(true,$1,$2) ON CONFLICT(singleton) DO UPDATE SET signers=EXCLUDED.signers,updated_by=EXCLUDED.updated_by,updated_at=now()")

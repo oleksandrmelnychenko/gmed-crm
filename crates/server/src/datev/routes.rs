@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, Utc};
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use sqlx::{Row, postgres::PgRow};
@@ -76,7 +76,7 @@ fn db(_: sqlx::Error) -> Response {
     err("datev_storage_unavailable")
 }
 fn admin(auth: &AuthUser) -> Result<()> {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])
+    auth.require_capability(Capability::DatevAdmin)
 }
 fn output(value: Value) -> Response {
     ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response()
@@ -720,7 +720,7 @@ async fn read(
     request: std::result::Result<Json<Read>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Response> {
     // Technical administration does not grant access to financial records.
-    auth.require_exact_role(&[Role::Ceo])?;
+    auth.require_capability(Capability::DatevRead)?;
     let Json(request) = request.map_err(|_| err("datev_confirmation_required"))?;
     provider::data_path(
         &request.kind,

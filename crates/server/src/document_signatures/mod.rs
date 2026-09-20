@@ -233,7 +233,7 @@ async fn list(
         json!([])
     };
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
-        "can_configure":matches!(auth.role,gmed_domain::role::Role::Ceo|gmed_domain::role::Role::ItAdmin),
+        "can_configure":auth.can(gmed_domain::access::capabilities::Capability::AdminSignatures),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
         "signer_policy":signer_policy.as_str(),
         "suggested_signers":suggested_signers,

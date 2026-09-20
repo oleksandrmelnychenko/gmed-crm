@@ -8,6 +8,7 @@ use axum::{
     routing::get,
 };
 use chrono::Utc;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -325,7 +326,7 @@ async fn get_medication_intelligence_sources(
     Extension(auth): Extension<AuthUser>,
     Extension(audit_context): Extension<audit::AuditContext>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin]) {
+    if let Err(response) = auth.require_capability(Capability::AdminSettings) {
         return response;
     }
     audit_context.set_action("read_medication_intelligence_source_status");

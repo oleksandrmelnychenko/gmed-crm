@@ -14,7 +14,7 @@ use crate::auth::middleware::AuthUser;
 use crate::services::medication_ai_jobs::LEGACY_GOVERNANCE_REVIEW_ID;
 use crate::services::medication_ai_provider::MedicationAiCapability;
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -35,7 +35,7 @@ async fn list_ips(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -64,7 +64,7 @@ async fn add_ip(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<AddIpReq>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -112,7 +112,7 @@ async fn delete_ip(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -143,7 +143,7 @@ async fn unlock_user(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -180,7 +180,7 @@ async fn force_password_reset(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -241,7 +241,7 @@ async fn toggle_maintenance(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<MaintenanceReq>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -286,7 +286,7 @@ async fn system_health(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -553,7 +553,7 @@ async fn login_geo_history(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -599,7 +599,7 @@ async fn audit_analytics(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 

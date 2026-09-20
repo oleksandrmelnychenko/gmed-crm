@@ -5,7 +5,7 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -95,7 +95,7 @@ struct Credentials {
 }
 
 fn require_admin(auth: &AuthUser) -> Result<(), Response> {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])
+    auth.require_capability(Capability::AdminSignatures)
 }
 
 async fn info(state: &AppState) -> Result<Value, Response> {

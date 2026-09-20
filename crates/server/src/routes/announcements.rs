@@ -12,7 +12,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -131,7 +131,7 @@ async fn list_all(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminAnnouncements) {
         return e;
     }
 
@@ -200,7 +200,7 @@ async fn create_announcement(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<UpsertAnnouncement>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminAnnouncements) {
         return e;
     }
 
@@ -249,7 +249,7 @@ async fn update_announcement(
     Path(id): Path<Uuid>,
     Json(body): Json<UpsertAnnouncement>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminAnnouncements) {
         return e;
     }
 
@@ -284,7 +284,7 @@ async fn delete_announcement(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminAnnouncements) {
         return e;
     }
 

@@ -22,7 +22,7 @@ use sqlx::{PgPool, Row};
 use crate::auth::middleware::AuthUser;
 use crate::crypto::{KeyRegistry, LEGACY_KEY_ID};
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -47,7 +47,7 @@ async fn key_rotation_status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -68,7 +68,7 @@ async fn rewrap_messages_handler(
     Extension(auth): Extension<AuthUser>,
     Query(q): Query<RewrapQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 

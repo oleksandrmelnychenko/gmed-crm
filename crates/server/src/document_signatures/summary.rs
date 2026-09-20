@@ -13,10 +13,9 @@ pub(super) async fn list(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<SummaryQuery>,
 ) -> Result<Json<Value>, Response> {
-    auth.require_exact_role(&[
-        gmed_domain::role::Role::Ceo,
-        gmed_domain::role::Role::PatientManager,
-        gmed_domain::role::Role::ItAdmin,
+    auth.require_any_capability(&[
+        gmed_domain::access::capabilities::Capability::AdminSignatures,
+        gmed_domain::access::capabilities::Capability::DocumentsManage,
     ])?;
     let ids = query
         .ids

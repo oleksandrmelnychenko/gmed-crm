@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 const AUTHORITY_DEADLINE_HOURS: i64 = 72;
@@ -199,7 +200,7 @@ async fn list_incidents(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::IncidentsManage) {
         return e;
     }
 
@@ -230,7 +231,7 @@ async fn update_incident(
     Path(incident_id): Path<Uuid>,
     Json(body): Json<UpdateIncidentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::IncidentsManage) {
         return e;
     }
 

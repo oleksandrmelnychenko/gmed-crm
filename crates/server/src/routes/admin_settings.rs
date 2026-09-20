@@ -15,7 +15,7 @@ use crate::auth::middleware::AuthUser;
 use crate::auth::tokens;
 use crate::settings;
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -46,7 +46,7 @@ async fn list_settings(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSettings) {
         return e;
     }
 
@@ -70,7 +70,7 @@ async fn update_setting(
     Path(key): Path<String>,
     Json(body): Json<UpdateSettingRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSettings) {
         return e;
     }
 
@@ -110,7 +110,7 @@ async fn list_all_sessions(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSessions) {
         return e;
     }
 
@@ -159,7 +159,7 @@ async fn revoke_user_sessions(
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSessions) {
         return e;
     }
 
@@ -196,7 +196,7 @@ async fn revoke_all_sessions(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSessions) {
         return e;
     }
 
@@ -292,7 +292,7 @@ async fn list_activity(
     Extension(auth): Extension<AuthUser>,
     axum::extract::Query(q): axum::extract::Query<ActivityQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminActivity) {
         return e;
     }
 
@@ -542,7 +542,7 @@ async fn list_pending_logins(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -588,7 +588,7 @@ async fn approve_pending(
     Extension(auth): Extension<AuthUser>,
     Path(pending_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -639,7 +639,7 @@ async fn reject_pending(
     Extension(auth): Extension<AuthUser>,
     Path(pending_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 
@@ -686,7 +686,7 @@ async fn toggle_mfa(
     Path(user_id): Path<Uuid>,
     Json(body): Json<ToggleMfaReq>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 

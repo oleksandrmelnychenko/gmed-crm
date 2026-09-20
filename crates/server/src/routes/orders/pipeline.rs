@@ -22,7 +22,7 @@ pub(super) fn router() -> Router<AppState> {
 
 /// Clinical facts stay with the roles that may open the case itself.
 fn can_view_order_medical(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::PatientManager | Role::ItAdmin)
+    matches!(role, Role::Ceo | Role::PatientManager)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

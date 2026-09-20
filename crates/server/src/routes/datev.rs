@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -138,7 +138,7 @@ async fn load(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<Value>, Response> {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_capability(Capability::DatevAdmin)?;
     let row = sqlx::query(
         "SELECT profile, revision, updated_at FROM datev_integration_setup WHERE singleton",
     )
@@ -160,7 +160,7 @@ async fn save(
     Extension(auth): Extension<AuthUser>,
     Json(mut body): Json<SaveRequest>,
 ) -> Result<Json<Value>, Response> {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_capability(Capability::DatevAdmin)?;
     body.profile
         .validate()
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;

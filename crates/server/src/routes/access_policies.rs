@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -327,7 +327,7 @@ async fn list_policies(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListQuery>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::ItAdmin])?;
+    auth.require_capability(Capability::AdminSecurity)?;
 
     let entity_filter = query.entity_type.as_deref();
     let role_filter = query.role.as_deref();
@@ -391,7 +391,7 @@ async fn update_policy(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<UpdatePolicyRequest>,
 ) -> impl IntoResponse {
-    auth.require_exact_role(&[Role::Ceo, Role::ItAdmin])?;
+    auth.require_capability(Capability::AdminSecurity)?;
 
     if !VALID_ACCESS_LEVELS.contains(&body.access_level.as_str()) {
         return Err(err(
@@ -518,7 +518,7 @@ async fn reset_entity(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<ResetRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_exact_role(&[Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
 

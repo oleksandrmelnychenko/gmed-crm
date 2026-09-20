@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
-use gmed_domain::role::Role;
+use gmed_domain::access::capabilities::Capability;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -34,7 +34,11 @@ async fn list_fields(
     Extension(auth): Extension<AuthUser>,
     Query(q): Query<ListQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin, Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_any_capability(&[
+        Capability::AdminCustomFields,
+        Capability::PatientsEdit,
+        Capability::LeadsEdit,
+    ]) {
         return e;
     }
 
@@ -74,7 +78,7 @@ async fn create_field(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<UpsertField>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminCustomFields) {
         return e;
     }
 
@@ -127,7 +131,7 @@ async fn update_field(
     Path(id): Path<Uuid>,
     Json(body): Json<UpsertField>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminCustomFields) {
         return e;
     }
 
@@ -159,7 +163,7 @@ async fn delete_field(
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::ItAdmin]) {
+    if let Err(e) = auth.require_capability(Capability::AdminCustomFields) {
         return e;
     }
 
@@ -202,7 +206,11 @@ async fn get_values(
     Extension(auth): Extension<AuthUser>,
     Path(entity_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_capability(&[
+        Capability::AdminCustomFields,
+        Capability::PatientsEdit,
+        Capability::LeadsEdit,
+    ]) {
         return e;
     }
 
@@ -252,7 +260,11 @@ async fn set_values(
     Path(entity_id): Path<Uuid>,
     Json(body): Json<SetValuesReq>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_capability(&[
+        Capability::AdminCustomFields,
+        Capability::PatientsEdit,
+        Capability::LeadsEdit,
+    ]) {
         return e;
     }
 
