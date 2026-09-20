@@ -5307,3 +5307,158 @@ async fn patient_medication_pdf_exports_only_current_prescriptions() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["message"], "medication_plan_empty");
 }
+
+/// The clinical routes are gated by `patients.medical.view` / `patients.medical.edit`
+/// plus the patient assignment: an assigned patient manager reads and writes, an
+/// assigned interpreter only reads, an unassigned patient manager and billing see 403.
+#[tokio::test]
+async fn clinical_routes_follow_medical_capabilities_and_patient_assignment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("clinical-caps");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let other_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+
+    let manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-bill"), "billing").await;
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let manager_bearer = auth_header_for(manager_id, "patient_manager");
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
+
+    let vital_payload = json!({
+        "measured_at": "2026-04-14T09:45:00Z",
+        "heart_rate": 70,
+    });
+    let read_paths = |patient: Uuid| {
+        vec![
+            format!("/api/v1/patients/{patient}/clinical"),
+            format!("/api/v1/patients/{patient}/vitals"),
+            format!("/api/v1/patients/{patient}/lab-results"),
+        ]
+    };
+
+    // Assigned patient manager: full read and write.
+    for path in read_paths(patient_id) {
+        let (status, _) = json_request(&app, "GET", &path, &manager_bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "patient_manager GET {path}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/vitals"),
+        &manager_bearer,
+        Some(vital_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &manager_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(&app, "GET", "/api/v1/doctors", &manager_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Same patient manager, a patient they are not assigned to: 403 everywhere.
+    for path in read_paths(other_patient_id) {
+        let (status, _) = json_request(&app, "GET", &path, &manager_bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "unassigned GET {path}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{other_patient_id}/vitals"),
+        &manager_bearer,
+        Some(vital_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{other_patient_id}/diagnoses"),
+        &manager_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Assigned interpreter: view only.
+    for path in read_paths(patient_id) {
+        let (status, _) = json_request(&app, "GET", &path, &interpreter_bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "interpreter GET {path}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/vitals"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["count"], 1);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/vitals"),
+        &interpreter_bearer,
+        Some(vital_payload.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/diagnoses"),
+        &interpreter_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/medications"),
+        &interpreter_bearer,
+        Some(json!({ "items": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Billing holds neither capability, assignment or not.
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    for path in read_paths(patient_id) {
+        let (status, _) = json_request(&app, "GET", &path, &billing_bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "billing GET {path}");
+    }
+    let (status, _) = json_request(&app, "GET", "/api/v1/doctors", &billing_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // CEO stays unaffected, including on patients nobody assigned to them.
+    for path in read_paths(other_patient_id) {
+        let (status, _) = json_request(&app, "GET", &path, &ceo_bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "ceo GET {path}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{other_patient_id}/vitals"),
+        &ceo_bearer,
+        Some(vital_payload),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}

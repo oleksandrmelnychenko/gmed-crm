@@ -3667,7 +3667,7 @@ async fn list_patient_lab_results(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+    auth.require_capability(Capability::PatientsMedicalView)?;
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
@@ -3748,7 +3748,7 @@ async fn update_patient_lab_result(
     Path((patient_uuid, lab_result_id)): Path<(Uuid, Uuid)>,
     Json(raw_body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(response) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return response;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -4005,7 +4005,7 @@ async fn delete_patient_lab_result(
     Path((patient_uuid, lab_result_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<DeletePatientLabResultRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(response) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return response;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -4177,7 +4177,7 @@ async fn create_patient_lab_result(
     Path(patient_uuid): Path<Uuid>,
     Json(raw_body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(response) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return response;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -4391,7 +4391,7 @@ async fn list_patient_vitals(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+    auth.require_capability(Capability::PatientsMedicalView)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -4480,7 +4480,7 @@ async fn create_patient_vital_measurement(
     Path(patient_uuid): Path<Uuid>,
     Json(raw_body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
 
@@ -10974,10 +10974,6 @@ async fn delete_patient(
 // See migration 20260604100000_patient_clinical_master.sql.
 // ---------------------------------------------------------------------------
 
-// The first-release workspace exposes patient clinical data to the CEO only.
-// Add future clinical roles here only when their workspace is enabled globally.
-const PATIENT_CLINICAL_ROLES: &[Role] = &[Role::Ceo];
-
 #[derive(Deserialize, serde::Serialize)]
 struct PatientClinicalItems<T> {
     items: Vec<T>,
@@ -11444,7 +11440,7 @@ async fn get_patient_clinical(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+    auth.require_capability(Capability::PatientsMedicalView)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -11889,7 +11885,7 @@ async fn list_all_doctors(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> impl IntoResponse {
-    auth.require_any_role(PATIENT_CLINICAL_ROLES)?;
+    auth.require_capability(Capability::PatientsMedicalView)?;
 
     let rows = sqlx::query(
         r#"SELECT d.id, d.name, d.title, d.fachbereich,
@@ -12166,7 +12162,7 @@ async fn save_patient_diagnoses(
     Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientClinicalItems<PatientDiagnosisInput>>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -12579,7 +12575,7 @@ async fn save_patient_medications(
     Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientClinicalItems<PatientMedicationInput>>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -12888,7 +12884,7 @@ async fn save_patient_examinations(
     Path(patient_uuid): Path<Uuid>,
     Json(body): Json<PatientClinicalItems<PatientExaminationInput>>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -13148,7 +13144,7 @@ async fn save_patient_narrative(
     Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientNarrativeInput>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -13490,7 +13486,7 @@ async fn list_patient_narrative_history(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -13538,7 +13534,7 @@ async fn delete_patient_narrative(
     Extension(auth): Extension<AuthUser>,
     Path((patient_uuid, narrative_uuid)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -13758,7 +13754,7 @@ async fn save_patient_verlauf(
     Path(patient_uuid): Path<Uuid>,
     Json(body): Json<PatientVerlaufSave>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -13987,7 +13983,7 @@ async fn save_patient_procedures(
     Path(patient_uuid): Path<Uuid>,
     Json(body): Json<PatientClinicalItems<PatientProcedureInput>>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -14128,7 +14124,7 @@ async fn save_patient_clinical_warnings(
     Query(query): Query<PatientClinicalSaveQuery>,
     Json(body): Json<PatientClinicalWarningsBody>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -14321,7 +14317,7 @@ async fn get_patient_impfstatus(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14359,7 +14355,7 @@ async fn save_patient_impfstatus(
     Path(patient_uuid): Path<Uuid>,
     Json(body): Json<PatientImpfstatusInput>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalEdit) {
         return e;
     }
     match has_patient_edit_access(&state, &auth, patient_uuid).await {
@@ -14580,7 +14576,7 @@ async fn get_patient_clinical_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14749,7 +14745,7 @@ async fn get_patient_lab_results_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
         return response;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14990,7 +14986,7 @@ async fn get_patient_medikationsplan_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(PATIENT_CLINICAL_ROLES) {
+    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
