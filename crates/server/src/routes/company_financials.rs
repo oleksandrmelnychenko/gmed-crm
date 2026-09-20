@@ -630,7 +630,8 @@ async fn get_company_financial_position(
                           WHEN entry.direction = 'income' THEN entry.amount_gross
                           ELSE -entry.amount_gross
                       END AS signed_amount,
-                      invoice.invoice_number,
+                      invoice.id AS invoice_id, invoice.invoice_number,
+                       external.id AS external_invoice_id,
                        external.external_invoice_number,
                        orders.id AS order_id, orders.order_number,
                        patient.id AS patient_id, patient.patient_id AS patient_pid,
@@ -715,7 +716,9 @@ async fn get_company_financial_position(
                 "amount_vat": decimal_to_string(row.try_get::<Decimal, _>("amount_vat").unwrap_or(Decimal::ZERO).abs()),
                 "amount_gross": decimal_to_string(signed_amount.abs()),
                 "signed_amount": decimal_to_string(signed_amount),
+                "invoice_id": row.try_get::<Option<Uuid>, _>("invoice_id").unwrap_or_default(),
                 "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+                "external_invoice_id": row.try_get::<Option<Uuid>, _>("external_invoice_id").unwrap_or_default(),
                 "external_invoice_number": row.try_get::<Option<String>, _>("external_invoice_number").unwrap_or_default(),
                 "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
                 "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),

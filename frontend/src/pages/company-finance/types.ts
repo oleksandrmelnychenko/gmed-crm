@@ -159,7 +159,9 @@ export type CompanyCashMovement = {
   amount_vat: string;
   amount_gross: string;
   signed_amount: string;
+  invoice_id: string | null;
   invoice_number: string | null;
+  external_invoice_id: string | null;
   external_invoice_number: string | null;
   order_id: string | null;
   order_number: string | null;

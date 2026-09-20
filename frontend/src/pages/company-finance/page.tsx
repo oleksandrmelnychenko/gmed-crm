@@ -106,6 +106,8 @@ const textByLanguage = {
     balance: "Сальдо",
     status: "Статус",
     document: "Документ",
+    openInvoice: "Открыть счет",
+    openProviderInvoice: "Открыть счет поставщика",
     openOriginal: "Открыть оригинал документа",
     previewOriginal: "Просмотр документа",
     documentOpenError: "Не удалось открыть оригинал документа. Повторите попытку.",
@@ -193,6 +195,8 @@ const textByLanguage = {
     balance: "Saldo",
     status: "Status",
     document: "Beleg",
+    openInvoice: "Rechnung öffnen",
+    openProviderInvoice: "Lieferantenrechnung öffnen",
     openOriginal: "Originaldokument öffnen",
     previewOriginal: "Dokument ansehen",
     documentOpenError: "Das Originaldokument konnte nicht geöffnet werden. Bitte erneut versuchen.",
@@ -646,10 +650,52 @@ export function CompanyFinancePage() {
     { id: "order", label: text.order, accessor: (row) => row.order_number ?? (row.patient_id ? text.noOrder : ""), filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => row.order_id ? <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number || "—"}</StaffLink> : row.patient_id ? <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">{text.noOrder}</Badge> : "—" },
   ], [locale, money, openProviderDocument, openingDocumentId, text]);
 
+  const openExternalInvoice = useCallback((externalInvoiceId: string) => {
+    const liability = position?.provider_liabilities.find((item) => item.id === externalInvoiceId);
+    if (!liability) return;
+    setActiveTab("providers");
+    setProviderView("documents");
+    setSelectedProviderId(providerGroupKey(liability));
+    setProviderFilter("all");
+    setSelectedProviderLiability(liability);
+  }, [position?.provider_liabilities]);
+
   const cashColumns = useMemo<ColumnDef<CompanyCashMovement>[]>(() => [
     { id: "date", label: text.date, accessor: (row) => row.entry_date, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.entry_date, locale) },
     { id: "operation", label: text.operation, accessor: (row) => `${row.description} ${row.category}`, filterType: "text", searchable: true, sortable: true, required: true, width: 280, render: (row) => <div className="truncate font-medium" title={row.description}>{row.description}</div> },
-    { id: "document", label: text.document, accessor: (row) => `${row.invoice_number ?? ""} ${row.external_invoice_number ?? ""} ${row.order_number ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 180, render: (row) => <div><div>{row.invoice_number || row.external_invoice_number || "—"}</div>{row.order_id ? <StaffLink className="text-[10px] text-muted-foreground hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> : null}</div> },
+    {
+      id: "document",
+      label: text.document,
+      accessor: (row) => `${row.invoice_number ?? ""} ${row.external_invoice_number ?? ""} ${row.order_number ?? ""}`,
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      width: 180,
+      render: (row) => {
+        const documentNode = row.invoice_id && row.invoice_number ? (
+          <StaffLink className="font-medium text-foreground hover:text-primary hover:underline" to={`/invoices?invoice=${row.invoice_id}`} title={text.openInvoice} onClick={(event) => event.stopPropagation()}>
+            {row.invoice_number}
+          </StaffLink>
+        ) : row.external_invoice_id && row.external_invoice_number ? (
+          <button
+            type="button"
+            className="truncate text-left font-medium text-foreground hover:text-primary hover:underline"
+            title={text.openProviderInvoice}
+            onClick={(event) => { event.stopPropagation(); openExternalInvoice(row.external_invoice_id!); }}
+          >
+            {row.external_invoice_number}
+          </button>
+        ) : (
+          <div>{row.invoice_number || row.external_invoice_number || "—"}</div>
+        );
+        return (
+          <div className="min-w-0">
+            {documentNode}
+            {row.order_id ? <StaffLink className="block text-[10px] text-muted-foreground hover:text-primary hover:underline" to={`/orders/${row.order_id}`} onClick={(event) => event.stopPropagation()}>{row.order_number}</StaffLink> : null}
+          </div>
+        );
+      },
+    },
     { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name ?? ""} ${row.patient_pid ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—" },
     {
       id: "account",
@@ -676,7 +722,7 @@ export function CompanyFinancePage() {
     { id: "net", label: text.net, accessor: (row) => parseAmount(row.amount_net), filterType: "number", sortable: true, width: 130, render: (row) => money(row.amount_net) },
     { id: "vat", label: text.vat, accessor: (row) => parseAmount(row.amount_vat), filterType: "number", sortable: true, width: 120, render: (row) => money(row.amount_vat) },
     { id: "gross", label: text.gross, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className={cn("font-semibold", row.movement === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}</span> },
-  ], [accounts?.items, assignmentBusyId, locale, money, text]);
+  ], [accounts?.items, assignmentBusyId, locale, money, openExternalInvoice, text]);
 
   async function handleAssignMovement(entryId: string, financialAccountId: string) {
     setAssignmentBusyId(entryId);
