@@ -7447,7 +7447,9 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let unassigned_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
     let unassigned_bearer = auth_header_for(unassigned_id, "interpreter");
-    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    // A medical document can only be shared with a colleague who may see it.
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
 
     let (status, create_body) = json_request(
         &app,
@@ -7455,7 +7457,7 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
         &format!("/api/v1/documents/{document_id}/shares"),
         &admin_bearer,
         Some(json!({
-            "shared_with_user_id": billing_id,
+            "shared_with_user_id": pm_id,
             "channel": "email",
             "requires_confirmation": true
         })),
