@@ -36,6 +36,8 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { statusTone } from "./appearance/status-appearance";
@@ -435,9 +437,9 @@ function useSopsPageContent() {
   const setQueueSearch = (nextValue: SetStateAction<string>) =>
     dispatchSopsState((current) => ({ queueSearch: resolveSopsStateAction(nextValue, current.queueSearch) }));
 
-  const canCreate = roleCanCreate(user?.role);
-  const canReviewQueue = roleCanReview(user?.role);
-  const canOpenPage = roleCanOpenLearning(user?.role);
+  const canCreate = roleCanCreate(user);
+  const canReviewQueue = roleCanReview(user);
+  const canOpenPage = roleCanOpenLearning(user);
   const roleLabel = useCallback(
     (role: string) => formatEnumLabelFromKeys(role, SOP_ROLE_LABEL_KEYS, t),
     [t],
@@ -1421,5 +1423,7 @@ function useSopsPageContent() {
 }
 
 export function SopsPage(...args: Parameters<typeof useSopsPageContent>) {
-  return useSopsPageContent(...args);
+  const { user } = useAuth();
+  const content = useSopsPageContent(...args);
+  return <ReadOnlyScope active={!hasCapability(user, "sops.create")}>{content}</ReadOnlyScope>;
 }

@@ -29,14 +29,14 @@ export function PatientWorkspaceNav() {
   const { user } = useAuth();
   const { t, lang } = useLang();
 
-  const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
-  const canViewCareHistory = canViewPatientCareHistorySurface(user?.role);
-  const canViewClinical = canViewPatientClinicalProfile(user?.role);
+  const canViewOperationalSurface = canViewPatientOperationalSurface(user);
+  const canViewCareHistory = canViewPatientCareHistorySurface(user);
+  const canViewClinical = canViewPatientClinicalProfile(user);
   const canUseMedicationAi = user?.role === "ceo";
-  const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
-  const canViewContracts = canViewPatientContractsSurface(user?.role);
-  const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
-  const canViewFinance = canViewPatientFinanceSurface(user?.role);
+  const canViewDocuments = canViewPatientDocumentsSurface(user);
+  const canViewContracts = canViewPatientContractsSurface(user);
+  const canViewInvoices = canViewPatientInvoicesSurface(user);
+  const canViewFinance = canViewPatientFinanceSurface(user);
   const contextualTab = location.pathname.startsWith("/orders/")
     ? "orders"
     : searchParams.get("tab");
@@ -53,7 +53,7 @@ export function PatientWorkspaceNav() {
       })
     : null;
 
-  const items = patientWorkspaceNavigation(user?.role, lang, t);
+  const items = patientWorkspaceNavigation(user, lang, t);
   const groups = [...new Map(items.map(item => [item.group, item.groupLabel])).entries()];
 
   if (!id) return null;

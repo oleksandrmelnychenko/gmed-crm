@@ -59,6 +59,8 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -312,7 +314,7 @@ function useContractsPageContent() {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [searchParams, setSearchParams] = useSearchParams();
-  const permissions = contractsPermissions(user?.role);
+  const permissions = contractsPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const text = useMemo(
     () => ({
@@ -3250,7 +3252,9 @@ function useContractsPageContent() {
 }
 
 export function ContractsPage(...args: Parameters<typeof useContractsPageContent>) {
-  return useContractsPageContent(...args);
+  const { user } = useAuth();
+  const content = useContractsPageContent(...args);
+  return <ReadOnlyScope active={!hasCapability(user, "contracts.edit")}>{content}</ReadOnlyScope>;
 }
 
 function ContractsPager({

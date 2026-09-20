@@ -22,6 +22,8 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
@@ -280,12 +282,9 @@ function useStaffAppointmentsPageContent() {
   const detailTab = normalizeAppointmentWorkspaceTab(
     searchParams.get("detailTab"),
   );
-  const permissions = appointmentPermissions(user?.role);
-  const patientSheetPermissions = linkedPatientPermissions(user?.role);
-  const canReviewAppointmentRequests =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "it_admin";
+  const permissions = appointmentPermissions(user);
+  const patientSheetPermissions = linkedPatientPermissions(user);
+  const canReviewAppointmentRequests = permissions.canManageStatus;
   const isMobile = useIsMobile();
   const calendarRef = useRef<FullCalendar | null>(null);
   const [pageState, dispatchPageState] = useReducer(
@@ -1999,7 +1998,9 @@ function useStaffAppointmentsPageContent() {
 }
 
 function StaffAppointmentsPage(...args: Parameters<typeof useStaffAppointmentsPageContent>) {
-  return useStaffAppointmentsPageContent(...args);
+  const { user } = useAuth();
+  const content = useStaffAppointmentsPageContent(...args);
+  return <ReadOnlyScope active={!hasCapability(user, "appointments.edit")}>{content}</ReadOnlyScope>;
 }
 
 export function AppointmentsPage() {

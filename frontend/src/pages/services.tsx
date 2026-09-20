@@ -52,6 +52,9 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
+import { servicesPermissions } from "@/pages/services.model";
 import {
   formatEnumLabelFromKeys,
   useLang,
@@ -1060,15 +1063,8 @@ function useStaffServicesPageContent() {
   const [editProviderServicesLoading, setEditProviderServicesLoading] = useState(false);
   const [editProviderServicesError, setEditProviderServicesError] = useState("");
 
-  const isConciergeUser = user?.role === "concierge";
-  const isFullAccessUser = user?.role === "ceo" || user?.role === "it_admin";
-  const canCreateService =
-    isFullAccessUser ||
-    user?.role === "patient_manager" ||
-    isConciergeUser;
-  const canEditService = canCreateService;
-  const canEditProtectedServiceFields =
-    isFullAccessUser || user?.role === "patient_manager";
+  const { canCreateService, canEditService, canEditProtectedServiceFields } =
+    servicesPermissions(user);
 
   useDebouncedRealtimeSubscription(STAFF_SERVICES_REALTIME_EVENTS, () => {
     clearApiCache("/concierge-services");
@@ -2780,5 +2776,9 @@ export function ServicesPage() {
     );
   }
 
-  return <StaffServicesPage />;
+  return (
+    <ReadOnlyScope active={!hasCapability(user, "services.edit")}>
+      <StaffServicesPage />
+    </ReadOnlyScope>
+  );
 }

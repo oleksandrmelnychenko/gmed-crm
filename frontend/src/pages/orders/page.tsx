@@ -73,6 +73,8 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
   formatEnumLabel,
   formatEnumLabelFromKeys,
@@ -619,7 +621,7 @@ function useOrdersPageContent() {
   const isOrderRouteDetail = routeOrderId !== "";
   const patientContextId = searchParams.get("patient") ?? "";
   const activeOrderSection = normalizeOrderSectionKey(searchParams.get("section"));
-  const permissions = orderPermissions(user?.role);
+  const permissions = orderPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const l = useCallback(
     (key: string, values?: UiTextValues) =>
@@ -1569,10 +1571,7 @@ function useOrdersPageContent() {
     orderDetail?.process_gates?.debt_management?.owner_name,
     orderDetail?.process_gates?.debt_management?.owner_user_id,
   ]);
-  const canManageDebt =
-    user?.role === "patient_manager" ||
-    user?.role === "billing" ||
-    user?.role === "ceo";
+  const canManageDebt = hasCapability(user, "orders.economics");
   const orderSectionAnchorRef = useRef<HTMLDivElement>(null);
   const shouldRenderOrderSection = (section: OrderSectionKey) =>
     !isOrderRouteDetail || activeOrderSection === normalizeOrderSectionKey(section);
@@ -4837,7 +4836,7 @@ function useOrdersPageContent() {
                           ) : null}
                         </div>
 
-                        {user?.role === "billing" || user?.role === "ceo" ? (
+                        {hasCapability(user, "invoices.finance") ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
                               {titleWithDot(l("orders_billing_release"))}
@@ -4889,8 +4888,7 @@ function useOrdersPageContent() {
                           </div>
                         ) : null}
 
-                        {user?.role === "patient_manager" ||
-                        user?.role === "ceo" ? (
+                        {permissions.canManagePhase ? (
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
                               {titleWithDot(l("orders_paketdeckung"))}
@@ -5121,8 +5119,7 @@ function useOrdersPageContent() {
                         </div>
                       ) : null}
 
-                      {user?.role === "patient_manager" ||
-                      user?.role === "ceo" ? (
+                      {permissions.canManagePhase ? (
                         <div className="grid gap-4">
                           <div className="rounded-2xl border border-border p-4">
                             <div className="text-sm font-semibold text-foreground">
@@ -9081,5 +9078,9 @@ function useOrdersPageContent() {
 }
 
 export function OrdersPage(...args: Parameters<typeof useOrdersPageContent>) {
-  return useOrdersPageContent(...args);
+  const { user } = useAuth();
+  const content = useOrdersPageContent(...args);
+  // Billing keeps its provider-invoice and economics controls; pure viewers get read-only.
+  const readOnly = !hasCapability(user, "orders.edit") && !hasCapability(user, "orders.economics");
+  return <ReadOnlyScope active={readOnly}>{content}</ReadOnlyScope>;
 }

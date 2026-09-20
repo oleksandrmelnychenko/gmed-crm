@@ -72,6 +72,8 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatUiText, uiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -410,8 +412,9 @@ function useLeadsPageContent() {
   const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
-  const permissions = useMemo(() => leadPermissions(user?.role), [user?.role]);
-  const isConciergeReadOnly = user?.role === "concierge";
+  const permissions = useMemo(() => leadPermissions(user), [user]);
+  // `leads.view` without `leads.edit` (concierge, CEO assistant): the service grid only.
+  const isConciergeReadOnly = permissions.canViewPage && !permissions.canEdit;
   const conciergeTabsRef = useRef<HTMLDivElement | null>(null);
   const conciergeTabPillRef = useRef<HTMLSpanElement | null>(null);
   const conciergeTabPillReadyRef = useRef(false);
@@ -3115,7 +3118,9 @@ function useLeadsPageContent() {
 }
 
 export function LeadsPage(...args: Parameters<typeof useLeadsPageContent>) {
-  return useLeadsPageContent(...args);
+  const { user } = useAuth();
+  const content = useLeadsPageContent(...args);
+  return <ReadOnlyScope active={!hasCapability(user, "leads.edit")}>{content}</ReadOnlyScope>;
 }
 
 function LeadField({

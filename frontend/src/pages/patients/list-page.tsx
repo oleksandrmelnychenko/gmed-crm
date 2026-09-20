@@ -21,6 +21,8 @@ import { Button } from "@/components/ui/button";
 import { Banner, PageHeader, tokens } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -196,12 +198,12 @@ function PatientsPageSheets({
   );
 }
 
-export function PatientsPage() {
+function PatientsPageContent() {
   const { user } = useAuth();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string> & { uiText?: Record<string, string> };
   const { staffGo } = useStaffNavigate();
-  const permissions = useMemo(() => patientPermissions(user?.role), [user?.role]);
+  const permissions = useMemo(() => patientPermissions(user), [user]);
   const groupLabels = useMemo(() => patientColumnGroupLabels(tr), [tr]);
   const taxonomyNodes = useProviderTaxonomyNodes();
   const {
@@ -526,5 +528,14 @@ export function PatientsPage() {
         onPatientCreated={handlePatientCreated}
       />
     </>
+  );
+}
+
+export function PatientsPage() {
+  const { user } = useAuth();
+  return (
+    <ReadOnlyScope active={!hasCapability(user, "patients.edit")}>
+      <PatientsPageContent />
+    </ReadOnlyScope>
   );
 }

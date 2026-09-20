@@ -27,6 +27,8 @@ import {
 } from "@/lib/workflow-labels";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
   formatEnumLabel,
   getLang,
@@ -59,10 +61,12 @@ import {
   type PatientLabelPayload,
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
+  isPatientDetailTabReadOnly,
 } from "./model/detail-model";
-import type {
-  PatientAssignment,
-  PatientDetail,
+import {
+  patientPermissions,
+  type PatientAssignment,
+  type PatientDetail,
 } from "./model/list-model";
 import { patientWorkspaceNavigation } from "./model/patient-navigation";
 import { usePatientDetailCoreData } from "./data/use-patient-detail-core-data";
@@ -1159,42 +1163,29 @@ function usePatientDetailPageContent() {
     setPageField("timelineOffset", value);
   const timelineLimit = 50;
 
-  const canManage = user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "teamlead_interpreter";
-  const canCreateOrders = user?.role === "ceo" || user?.role === "patient_manager";
+  const canManage = patientPermissions(user).canManageAssignments;
+  const canCreateOrders = hasCapability(user, "orders.edit");
+  // Task creation follows the task-manager hierarchy (who may assign to concierge).
   const canCreateTasks = user?.role === "ceo" || user?.role === "concierge" || user?.role === "billing";
-  const canManageRelations = user?.role === "ceo" || user?.role === "patient_manager";
-  const canViewOperationalSurface = canViewPatientOperationalSurface(user?.role);
-  const canViewCareHistory = canViewPatientCareHistorySurface(user?.role);
-  const canViewClinical = canViewPatientClinicalProfile(user?.role);
+  const canManageRelations = hasCapability(user, "patients.edit");
+  const canViewOperationalSurface = canViewPatientOperationalSurface(user);
+  const canViewCareHistory = canViewPatientCareHistorySurface(user);
+  const canViewClinical = canViewPatientClinicalProfile(user);
   const canUseMedicationAi = user?.role === "ceo";
-  const canViewDocuments = canViewPatientDocumentsSurface(user?.role);
-  const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user?.role);
-  const canManageDocuments =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "it_admin";
-  const canViewContracts = canViewPatientContractsSurface(user?.role);
-  const canManageContracts =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "billing" ||
-    user?.role === "it_admin";
-  const canViewInvoices = canViewPatientInvoicesSurface(user?.role);
-  const canViewFinance = canViewPatientFinanceSurface(user?.role);
-  const canManageInvoices =
-    user?.role === "ceo" || user?.role === "billing" || user?.role === "it_admin";
-  const canEditPatientProfile = canManagePatientProfile(user?.role);
-  const canExportPatientCompliance = canManagePatientProfile(user?.role);
-  const canOpenComplianceWorkspace = canManagePatientProfile(user?.role);
-  const canPrintPatientLabel =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "it_admin";
+  const canViewDocuments = canViewPatientDocumentsSurface(user);
+  const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user);
+  const canManageDocuments = hasCapability(user, "documents.manage");
+  const canViewContracts = canViewPatientContractsSurface(user);
+  const canManageContracts = hasCapability(user, "contracts.edit");
+  const canViewInvoices = canViewPatientInvoicesSurface(user);
+  const canViewFinance = canViewPatientFinanceSurface(user);
+  const canManageInvoices = hasCapability(user, "invoices.finance");
+  const canEditPatientProfile = canManagePatientProfile(user);
+  const canExportPatientCompliance = canManagePatientProfile(user);
+  const canOpenComplianceWorkspace = canManagePatientProfile(user);
+  const canPrintPatientLabel = hasCapability(user, "patients.edit");
   const canManageWorkflowChecklist =
-    user?.role === "ceo" ||
-    user?.role === "patient_manager" ||
-    user?.role === "concierge" ||
-    user?.role === "it_admin";
+    hasCapability(user, "patients.edit") || hasCapability(user, "services.edit");
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
   const {
     assignments,
@@ -1247,7 +1238,7 @@ function usePatientDetailPageContent() {
     usePatientInvoiceDunningEvents(invoiceManageId);
   const error =
     (actionErrorState.patientId === (id ?? "") ? actionErrorState.message : "") || coreError;
-  const workspaceTabs = patientWorkspaceNavigation(user?.role, lang, t);
+  const workspaceTabs = patientWorkspaceNavigation(user, lang, t);
   const activeWorkflowAssignees = useMemo(
     () =>
       assignments.filter(
@@ -2266,5 +2257,12 @@ function usePatientDetailPageContent() {
 }
 
 export function PatientDetailPage(...args: Parameters<typeof usePatientDetailPageContent>) {
-  return usePatientDetailPageContent(...args);
+  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const content = usePatientDetailPageContent(...args);
+  return (
+    <ReadOnlyScope active={isPatientDetailTabReadOnly(user, searchParams.get("tab"))}>
+      {content}
+    </ReadOnlyScope>
+  );
 }

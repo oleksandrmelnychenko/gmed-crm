@@ -23,7 +23,10 @@ import {
   PageHeader,
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { cn } from "@/lib/utils";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 
@@ -297,7 +300,7 @@ function SummaryCard({
   );
 }
 
-export function CompanyFinancePage() {
+function CompanyFinancePageContent() {
   const { lang } = useLang();
   const text = textByLanguage[lang];
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -1065,5 +1068,14 @@ export function CompanyFinancePage() {
         }}
       />
     </div>
+  );
+}
+
+export function CompanyFinancePage() {
+  const { user } = useAuth();
+  return (
+    <ReadOnlyScope active={!hasCapability(user, "company_finance.edit")}>
+      <CompanyFinancePageContent />
+    </ReadOnlyScope>
   );
 }

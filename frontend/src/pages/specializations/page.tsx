@@ -223,7 +223,7 @@ export function SpecializationsPage() {
   const { user } = useAuth();
   const { lang } = useLang();
   const tx: Translate = (ru, de) => (lang === "ru" ? ru : de);
-  const canManage = providerPermissions(user?.role).canManageRegistry;
+  const canManage = providerPermissions(user).canManageRegistry;
   const [specializations, setSpecializations] = useState<SpecializationItem[]>([]);
   const [specializationsLoading, setSpecializationsLoading] = useState(true);
   const [specializationsError, setSpecializationsError] = useState("");

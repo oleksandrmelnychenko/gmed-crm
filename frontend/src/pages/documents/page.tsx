@@ -92,6 +92,8 @@ import {
 } from "@/components/ui/sheet";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatUnknownValue, getLang, t as translateCatalog, uiText, useLang } from "@/lib/i18n";
 import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -868,19 +870,24 @@ export function DocumentsPage() {
     return <PatientDocumentsPage />;
   }
 
+  const readOnly =
+    !hasCapability(user, "documents.upload") && !hasCapability(user, "documents.manage");
+
   return (
-    <StaffDocumentsPage
-      routeDocumentId={
-        isIntakePath || isTranslationRequestsPath ? undefined : documentId
-      }
-      routeMode={
-        isIntakePath
-          ? "intake"
-          : isTranslationRequestsPath
-            ? "translation-requests"
-            : "documents"
-      }
-    />
+    <ReadOnlyScope active={readOnly}>
+      <StaffDocumentsPage
+        routeDocumentId={
+          isIntakePath || isTranslationRequestsPath ? undefined : documentId
+        }
+        routeMode={
+          isIntakePath
+            ? "intake"
+            : isTranslationRequestsPath
+              ? "translation-requests"
+              : "documents"
+        }
+      />
+    </ReadOnlyScope>
   );
 }
 
@@ -1031,14 +1038,14 @@ function StaffDocumentsPage({
   const documentsFailedLoadDocumentsText = t.documents_failed_load_documents;
   const documentsFailedLoadIntakeQueueText = t.documents_failed_load_intake_queue;
   const documentsFailedLoadDocumentText = t.documents_failed_load_document;
-  const canView = canViewDocuments(user?.role);
-  const canManage = canManageDocuments(user?.role);
-  const canUpload = canUploadDocuments(user?.role);
-  const canManageIntake = canManageDocumentIntake(user?.role);
-  const canRequestTranslation = canRequestTranslations(user?.role);
-  const canUpdateTranslation = canUpdateTranslations(user?.role);
-  const canViewQueue = canViewTranslationQueue(user?.role);
-  const canViewShares = canViewDocumentShares(user?.role);
+  const canView = canViewDocuments(user);
+  const canManage = canManageDocuments(user);
+  const canUpload = canUploadDocuments(user);
+  const canManageIntake = canManageDocumentIntake(user);
+  const canRequestTranslation = canRequestTranslations(user);
+  const canUpdateTranslation = canUpdateTranslations(user);
+  const canViewQueue = canViewTranslationQueue(user);
+  const canViewShares = canViewDocumentShares(user);
 
   const [filters, setFilters] = useState<FiltersState>(() => ({
     search: searchParams.get("search") ?? "",

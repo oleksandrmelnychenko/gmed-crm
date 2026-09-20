@@ -1308,8 +1308,8 @@ function useStaffFeedbackWorkspaceContent() {
   const { user } = useAuth();
   const { t } = useLang();
   const feedbackSelectPatientError = t.feedback_select_patient_error;
-  const canViewWorkspace = canViewStaffFeedback(user?.role);
-  const canCapture = roleCanCaptureFeedback(user?.role);
+  const canViewWorkspace = canViewStaffFeedback(user);
+  const canCapture = roleCanCaptureFeedback(user);
 
   const [staffState, dispatchStaffState] = useReducer(
     (

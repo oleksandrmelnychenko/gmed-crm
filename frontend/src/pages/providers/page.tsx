@@ -61,6 +61,8 @@ import {
 } from "@/components/ui/sheet";
 import { formatUiText, uiText, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -1707,7 +1709,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     providerDetailReturnTo.startsWith("/") && !providerDetailReturnTo.startsWith("//")
       ? providerDetailReturnTo
       : "/providers";
-  const permissions = useMemo(() => providerPermissions(user?.role), [user?.role]);
+  const permissions = useMemo(() => providerPermissions(user), [user]);
   const providerPageCopy = useMemo(() => {
     if (!permissions.forceNonMedical) {
       return {
@@ -3453,7 +3455,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     busy={doctorBusy}
                     relationshipBusy={relationshipBusy}
-                    canManage={canManageProviderPeople(user?.role, detail.provider_type)}
+                    canManage={canManageProviderPeople(user, detail.provider_type)}
                     onOpenProvider={openProvider}
                     onNew={() => {
                       setDoctorError("");
@@ -3483,7 +3485,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     detail={detail}
                     busy={staffBusy}
                     staffRoles={staffRoles}
-                    canManage={canManageProviderPeople(user?.role, detail.provider_type)}
+                    canManage={canManageProviderPeople(user, detail.provider_type)}
                     onManageRoles={permissions.canManageRegistry ? openStaffRoleManager : undefined}
                     onNew={() => {
                       setStaffError("");
@@ -4206,7 +4208,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   detail={detail}
                   busy={doctorBusy}
                   relationshipBusy={relationshipBusy}
-                  canManage={canManageProviderPeople(user?.role, detail.provider_type)}
+                  canManage={canManageProviderPeople(user, detail.provider_type)}
                   onOpenProvider={openProvider}
                   onNew={() => {
                     setDoctorError("");
@@ -4236,7 +4238,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   detail={detail}
                   busy={staffBusy}
                   staffRoles={staffRoles}
-                  canManage={canManageProviderPeople(user?.role, detail.provider_type)}
+                  canManage={canManageProviderPeople(user, detail.provider_type)}
                   onManageRoles={permissions.canManageRegistry ? openStaffRoleManager : undefined}
                   onNew={() => {
                     setStaffError("");
@@ -6296,7 +6298,9 @@ function StaffRoleManagerSheet({
 }
 
 function ProvidersPage(...args: Parameters<typeof useProvidersPageContent>) {
-  return useProvidersPageContent(...args);
+  const { user } = useAuth();
+  const content = useProvidersPageContent(...args);
+  return <ReadOnlyScope active={!hasCapability(user, "providers.edit")}>{content}</ReadOnlyScope>;
 }
 
 function ProviderOverviewSection({

@@ -63,6 +63,8 @@ import {
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
@@ -430,7 +432,7 @@ function useStaffInvoicesPageContent() {
   const datevActive = searchParams.get("source") === "datev";
   const incomingActive = searchParams.get("source") === "incoming";
   const datevDemo = searchParams.get("datev_mode") === "demo";
-  const access = invoicesPermissions(user?.role);
+  const access = invoicesPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const [accountingCurrency, setAccountingCurrency] = useState("EUR");
   const formatMoney = (value: unknown, currency = "EUR") => formatCurrency(value, locale, currency);
@@ -641,14 +643,9 @@ function useStaffInvoicesPageContent() {
     if (source?.trim()) return vatSourceLabel(source);
     return text.vatSource;
   };
-  const canLoadOrderOptions =
-    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "billing";
+  const canLoadOrderOptions = hasCapability(user, "orders.view") && access.canCreate;
   const currentYear = String(new Date().getFullYear());
-  const canLoadQuoteOptions =
-    user?.role === "ceo" ||
-    user?.role === "ceo_assistant" ||
-    user?.role === "patient_manager" ||
-    user?.role === "billing";
+  const canLoadQuoteOptions = hasCapability(user, "contracts.view");
 
   const initialPatientId = searchParams.get("patient") ?? "";
   const initialOrderId = searchParams.get("order") ?? "";
@@ -4329,7 +4326,11 @@ function useStaffInvoicesPageContent() {
 }
 
 function StaffInvoicesPage(...args: Parameters<typeof useStaffInvoicesPageContent>) {
-  return useStaffInvoicesPageContent(...args);
+  const { user } = useAuth();
+  const content = useStaffInvoicesPageContent(...args);
+  const readOnly =
+    !hasCapability(user, "invoices.create") && !hasCapability(user, "invoices.finance");
+  return <ReadOnlyScope active={readOnly}>{content}</ReadOnlyScope>;
 }
 
 export function InvoicesPage() {

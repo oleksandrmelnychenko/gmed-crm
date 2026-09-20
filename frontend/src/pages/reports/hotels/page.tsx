@@ -10,6 +10,8 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import { type Lang, useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { hotelCopy, createHotelCopy } from "./copy";
@@ -19,7 +21,7 @@ import { HotelDocuments } from "./hotel-documents";
 import { CreateHotelSheet } from "./create-hotel-sheet";
 import { HotelTable } from "./hotel-table";
 import { HotelBreakfastTermsEditor } from "./hotel-breakfast-terms";
-import { breakfastModes, decimal, emptyHotelGroup, filterHotelStays, groupHotels, hotelKey, hotelsCsv, hotelStatisticsRoles, initialFilters, matchesStaySearch, monthlyCosts, stayCost, stayNights, summarizeStays, type HotelDirectoryItem, type HotelFilters, type HotelStay, type HotelWorkspace } from "./model";
+import { breakfastModes, decimal, emptyHotelGroup, filterHotelStays, groupHotels, hotelKey, hotelPermissions, hotelsCsv, initialFilters, matchesStaySearch, monthlyCosts, stayCost, stayNights, summarizeStays, type HotelDirectoryItem, type HotelFilters, type HotelStay, type HotelWorkspace } from "./model";
 
 const panelClass = "rounded-xl border border-border/70 bg-card shadow-sm";
 const statusOptions = ["committed", "completed", "in_service", "future", "confirmed", "booked", "planned", "cancelled", "all"] as const;
@@ -58,7 +60,7 @@ function RoomEditor({ stay, lang, editable, onSaved, onDirty }: { stay: HotelSta
   </div>;
 }
 
-export default function HotelStatisticsPage() {
+function HotelStatisticsPageContent() {
   const { lang } = useLang(), { user } = useAuth();
   const labels = hotelCopy[lang];
   const breakfastLabels = breakfastCopy[lang];
@@ -75,9 +77,7 @@ export default function HotelStatisticsPage() {
     if (current.has(id) === dirty) return current;
     const next = new Set(current); if (dirty) next.add(id); else next.delete(id); return next;
   }), []);
-  const allowed = hotelStatisticsRoles.includes(user?.role ?? "");
-  const editable = allowed && user?.role !== "ceo_assistant";
-  const canCreate = ["ceo", "patient_manager", "concierge"].includes(user?.role ?? "");
+  const { canViewPage: allowed, canEdit: editable, canCreate } = hotelPermissions(user);
   const today = berlinToday();
   useEffect(() => {
     if (!allowed) return;
@@ -217,4 +217,13 @@ export default function HotelStatisticsPage() {
 
 function Metric({ label, value, detail, title }: { label: string; value: string; detail: string; title?: string }) {
   return <div className={`${panelClass} min-w-0 border-l-[3px] border-l-primary/60 p-4`} title={title}><p className="text-xs font-medium text-muted-foreground">{label}{title ? <Info className="ml-1 inline size-3" /> : null}</p><p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums">{value}</p><p className="mt-2 text-xs leading-relaxed text-muted-foreground">{detail}</p></div>;
+}
+
+export default function HotelStatisticsPage() {
+  const { user } = useAuth();
+  return (
+    <ReadOnlyScope active={!hasCapability(user, "hotels.edit")}>
+      <HotelStatisticsPageContent />
+    </ReadOnlyScope>
+  );
 }

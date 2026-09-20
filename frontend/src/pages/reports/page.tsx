@@ -771,13 +771,13 @@ function useReportsPageContent() {
   );
 
   useDebouncedRealtimeSubscription(REPORTS_REALTIME_EVENTS, () => {
-    if (!roleCanOpenReports(user?.role)) return;
+    if (!roleCanOpenReports(user)) return;
     clearReportsStatsCache();
     dispatchReportsState({ type: "bump-version" });
   }, 300);
 
   useEffect(() => {
-    if (!roleCanOpenReports(user?.role)) {
+    if (!roleCanOpenReports(user)) {
       dispatchReportsState({ type: "restricted" });
       return;
     }
@@ -816,7 +816,7 @@ function useReportsPageContent() {
   }, [selectedTaxonomyNodeId, text.loadError, user?.role, version]);
 
   useEffect(() => {
-    if (!roleCanOpenReports(user?.role)) return;
+    if (!roleCanOpenReports(user)) return;
 
     let cancelled = false;
     dispatchReportsState({ type: "taxonomy-load-start" });
@@ -1634,7 +1634,7 @@ function useReportsPageContent() {
     }
   }
 
-  if (!roleCanOpenReports(user?.role)) {
+  if (!roleCanOpenReports(user)) {
     return (
       <ShellBanner tone="warning">{text.accessDescription}</ShellBanner>
     );

@@ -64,6 +64,8 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
+import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
@@ -685,7 +687,7 @@ function useFinanceCatalogPageContent() {
     () => createBlankPackageForm(t.finance_catalog_unit_default),
     [t.finance_catalog_unit_default],
   );
-  const canManageTaxProfiles = user?.role === "ceo" || user?.role === "billing";
+  const canManageTaxProfiles = hasCapability(user, "company_finance.edit");
 
   const [financeCatalogState, dispatchFinanceCatalogState] = useReducer(
     financeCatalogReducer,
@@ -4125,5 +4127,7 @@ function useFinanceCatalogPageContent() {
 }
 
 export function FinanceCatalogPage(...args: Parameters<typeof useFinanceCatalogPageContent>) {
-  return useFinanceCatalogPageContent(...args);
+  const { user } = useAuth();
+  const content = useFinanceCatalogPageContent(...args);
+  return <ReadOnlyScope active={!hasCapability(user, "company_finance.edit")}>{content}</ReadOnlyScope>;
 }
