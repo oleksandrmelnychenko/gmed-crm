@@ -47,3 +47,60 @@ export function filterProviderPositions(rows: readonly CompanyProviderPosition[]
     return matchesSearch(search, row.provider_name) || matchingGroups.has(providerGroupKey(row));
   });
 }
+
+export type CashMovementOperation = {
+  label: string;
+  reference: string | null;
+};
+
+const cashOperationLabels = {
+  ru: {
+    invoicePayment: "Оплата счета",
+    invoicePaymentReversal: "Отмена оплаты счета",
+    invoiceRefund: "Возврат по счету",
+    invoiceRefundReversal: "Отмена возврата по счету",
+    providerPayment: "Оплата поставщику",
+    providerPaymentReversal: "Отмена оплаты поставщику",
+    conciergePayment: "Оплата партнеру Concierge",
+    conciergePaymentReversal: "Отмена оплаты партнеру Concierge",
+    externalInvoicePayment: "Оплата счета поставщика",
+  },
+  de: {
+    invoicePayment: "Rechnungszahlung",
+    invoicePaymentReversal: "Storno der Rechnungszahlung",
+    invoiceRefund: "Rückerstattung zur Rechnung",
+    invoiceRefundReversal: "Storno der Rückerstattung",
+    providerPayment: "Zahlung an Lieferanten",
+    providerPaymentReversal: "Storno der Lieferantenzahlung",
+    conciergePayment: "Zahlung an Concierge-Partner",
+    conciergePaymentReversal: "Storno der Concierge-Partnerzahlung",
+    externalInvoicePayment: "Zahlung der Lieferantenrechnung",
+  },
+} as const;
+
+type CashOperationKey = keyof (typeof cashOperationLabels)["ru"];
+
+const cashOperationPatterns: ReadonlyArray<[RegExp, CashOperationKey]> = [
+  [/^invoice_payment payment\s*(.*)$/i, "invoicePayment"],
+  [/^invoice_payment reversal\s*(.*)$/i, "invoicePaymentReversal"],
+  [/^invoice_refund refund\s*(.*)$/i, "invoiceRefund"],
+  [/^invoice_refund reversal\s*(.*)$/i, "invoiceRefundReversal"],
+  [/^Provider payment reversal\s*(.*)$/i, "providerPaymentReversal"],
+  [/^Provider payment\s*(.*)$/i, "providerPayment"],
+  [/^Concierge partner payment reversal\s*(.*)$/i, "conciergePaymentReversal"],
+  [/^Concierge partner payment\s*(.*)$/i, "conciergePayment"],
+  [/^External invoice payment\s*(.*)$/i, "externalInvoicePayment"],
+];
+
+/** Turns the technical accounting-entry description into a readable operation label. */
+export function describeCashMovement(description: string, lang: "ru" | "de"): CashMovementOperation {
+  const trimmed = description.trim();
+  for (const [pattern, key] of cashOperationPatterns) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      const reference = match[1]?.trim() ?? "";
+      return { label: cashOperationLabels[lang][key], reference: reference || null };
+    }
+  }
+  return { label: trimmed || "—", reference: null };
+}

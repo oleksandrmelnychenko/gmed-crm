@@ -32,7 +32,7 @@ import { ConciergeExpenseReviewPanel } from "./concierge-expense-review-panel";
 import { ProviderSettlementDialog } from "./provider-settlement-dialog";
 import { ProviderStatementDialog } from "./provider-statement-dialog";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
-import { filterPatientPositions, filterProviderDocuments, filterProviderPositions, providerDisplayName, providerGroupKey, type PatientSideFilter, type ProviderSettlementFilter } from "./table-model";
+import { describeCashMovement, filterPatientPositions, filterProviderDocuments, filterProviderPositions, providerDisplayName, providerGroupKey, type PatientSideFilter, type ProviderSettlementFilter } from "./table-model";
 import {
   assignAccountingEntryFinancialAccount,
   fetchCompanyFinancialAccounts,
@@ -662,7 +662,27 @@ export function CompanyFinancePage() {
 
   const cashColumns = useMemo<ColumnDef<CompanyCashMovement>[]>(() => [
     { id: "date", label: text.date, accessor: (row) => row.entry_date, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.entry_date, locale) },
-    { id: "operation", label: text.operation, accessor: (row) => `${row.description} ${row.category}`, filterType: "text", searchable: true, sortable: true, required: true, width: 280, render: (row) => <div className="truncate font-medium" title={row.description}>{row.description}</div> },
+    {
+      id: "operation",
+      label: text.operation,
+      accessor: (row) => `${describeCashMovement(row.description, lang).label} ${row.description} ${row.category}`,
+      filterType: "text",
+      searchable: true,
+      sortable: true,
+      required: true,
+      width: 280,
+      render: (row) => {
+        const operation = describeCashMovement(row.description, lang);
+        const documentNumber = row.invoice_number || row.external_invoice_number || null;
+        const showReference = operation.reference && operation.reference !== documentNumber;
+        return (
+          <div className="min-w-0" title={row.description}>
+            <div className="truncate font-medium">{operation.label}</div>
+            {showReference ? <div className="truncate text-[10px] text-muted-foreground">{operation.reference}</div> : null}
+          </div>
+        );
+      },
+    },
     {
       id: "document",
       label: text.document,
@@ -722,7 +742,7 @@ export function CompanyFinancePage() {
     { id: "net", label: text.net, accessor: (row) => parseAmount(row.amount_net), filterType: "number", sortable: true, width: 130, render: (row) => money(row.amount_net) },
     { id: "vat", label: text.vat, accessor: (row) => parseAmount(row.amount_vat), filterType: "number", sortable: true, width: 120, render: (row) => money(row.amount_vat) },
     { id: "gross", label: text.gross, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className={cn("font-semibold", row.movement === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}</span> },
-  ], [accounts?.items, assignmentBusyId, locale, money, openExternalInvoice, text]);
+  ], [accounts?.items, assignmentBusyId, lang, locale, money, openExternalInvoice, text]);
 
   async function handleAssignMovement(entryId: string, financialAccountId: string) {
     setAssignmentBusyId(entryId);

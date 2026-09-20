@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterPatientPositions, filterProviderDocuments, filterProviderPositions, providerDisplayName, providerGroupKey } from "./table-model";
+import { describeCashMovement, filterPatientPositions, filterProviderDocuments, filterProviderPositions, providerDisplayName, providerGroupKey } from "./table-model";
 import type { CompanyPatientPosition, CompanyProviderLiability, CompanyProviderPosition } from "./types";
 
 const supplier: CompanyProviderPosition = { provider_id: null, provider_name: "Telekom Deutschland GmbH", invoice_total_gross: "300", company_paid_gross: "150", payable_remaining_gross: "100", expected_remaining_gross: "50", invoice_count: 4, open_invoice_count: 2, partial_invoice_count: 1, settled_invoice_count: 1, latest_payment_on: null };
@@ -39,5 +39,22 @@ describe("company finance table identity and filters", () => {
     expect(filterPatientPositions([patient], "reconciliation", "P-001")).toEqual([patient]);
     expect(filterPatientPositions([patient], "credit", "Toni")).toEqual([]);
     expect(filterPatientPositions([patient], "all", "missing")).toEqual([]);
+  });
+});
+
+describe("describeCashMovement", () => {
+  it("maps technical ledger descriptions to readable labels with the document reference", () => {
+    expect(describeCashMovement("invoice_payment payment INV-20260919-0002", "ru")).toEqual({ label: "Оплата счета", reference: "INV-20260919-0002" });
+    expect(describeCashMovement("invoice_payment reversal INV-20260919-0003", "ru")).toEqual({ label: "Отмена оплаты счета", reference: "INV-20260919-0003" });
+    expect(describeCashMovement("invoice_refund refund INV-20260919-0002", "de")).toEqual({ label: "Rückerstattung zur Rechnung", reference: "INV-20260919-0002" });
+    expect(describeCashMovement("Provider payment 088001138842", "ru")).toEqual({ label: "Оплата поставщику", reference: "088001138842" });
+    expect(describeCashMovement("Provider payment reversal FZKNO-2026-1013-77", "de")).toEqual({ label: "Storno der Lieferantenzahlung", reference: "FZKNO-2026-1013-77" });
+    expect(describeCashMovement("Concierge partner payment reversal X-1", "ru")).toEqual({ label: "Отмена оплаты партнеру Concierge", reference: "X-1" });
+    expect(describeCashMovement("External invoice payment R-7", "ru")).toEqual({ label: "Оплата счета поставщика", reference: "R-7" });
+  });
+
+  it("keeps unknown descriptions as they are", () => {
+    expect(describeCashMovement("Manual correction after audit", "ru")).toEqual({ label: "Manual correction after audit", reference: null });
+    expect(describeCashMovement("  ", "de")).toEqual({ label: "—", reference: null });
   });
 });
