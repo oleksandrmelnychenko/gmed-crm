@@ -343,3 +343,179 @@ async fn audit_analytics_surfaces_summary_recent_events_and_top_readers() {
                 && item["event_count"] == 2)
     );
 }
+
+#[tokio::test]
+async fn activity_access_category_returns_only_account_and_permission_events() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let actor = app.it_admin_id;
+    let target = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, created_at)
+           VALUES
+                ($1, 'create_user', 'user', $2, '{"role":"billing","one_time_password":true}'::jsonb, now() - interval '1 minute'),
+                ($1, 'update_user', 'user', $2, '{}'::jsonb, now() - interval '2 minute'),
+                ($1, 'reset_password', 'user', $2, '{"one_time_password":true}'::jsonb, now() - interval '3 minute'),
+                ($1, 'totp_reset', 'user', $2, '{}'::jsonb, now() - interval '4 minute'),
+                ($1, 'update_access_policy', 'field_access_policy', $2, '{}'::jsonb, now() - interval '5 minute'),
+                ($1, 'login_success', 'auth', NULL, '{}'::jsonb, now() - interval '6 minute'),
+                ($1, 'read_patient', 'patient', $2, '{}'::jsonb, now() - interval '7 minute'),
+                ($1, 'http_request', 'http', NULL, '{"method":"GET"}'::jsonb, now() - interval '8 minute')"#,
+    )
+    .bind(actor)
+    .bind(target)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let bearer = auth_header_for("it_admin", actor);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?category=access&user_id={actor}&limit=100"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let actions: Vec<&str> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter_map(|item| item["action"].as_str())
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            "create_user",
+            "update_user",
+            "reset_password",
+            "totp_reset",
+            "update_access_policy"
+        ],
+        "{body}"
+    );
+    assert_eq!(body["total"], 5);
+
+    // Without the parameter the stream keeps its previous shape: every
+    // meaningful action, technical requests excluded.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?user_id={actor}&limit=100"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let actions: Vec<&str> = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .filter_map(|item| item["action"].as_str())
+        .collect();
+    assert!(actions.contains(&"login_success"), "{actions:?}");
+    assert!(actions.contains(&"read_patient"), "{actions:?}");
+    assert!(!actions.contains(&"http_request"), "{actions:?}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/activity?category=noise",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The stream is limited to `admin.activity` holders.
+    let billing_id = seed_user(&pool, "admin_security_api", "billing").await;
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/activity?category=access",
+        &auth_header_for("billing", billing_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn access_policy_matrix_exposes_it_admin_as_locked_hidden() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let bearer = auth_header_for("it_admin", app.it_admin_id);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/access-policies?entity_type=patient",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let policies = body.as_array().expect("policies");
+    let it_admin: Vec<&Value> = policies
+        .iter()
+        .filter(|policy| policy["role"] == "it_admin")
+        .collect();
+    assert_eq!(it_admin.len(), 14, "one locked row per patient field");
+    for policy in &it_admin {
+        assert_eq!(policy["access_level"], "hidden", "{policy}");
+        assert_eq!(policy["is_system_locked"], true, "{policy}");
+        assert!(policy["condition_type"].is_null(), "{policy}");
+    }
+    assert!(
+        !policies.iter().any(|policy| policy["role"] == "ceo"),
+        "ceo stays implicit full and is not a matrix row"
+    );
+
+    // The column is not editable, not even by the CEO.
+    let ceo_id = seed_user(&app.suite.pool, "admin_security_api", "ceo").await;
+    for bearer in [bearer, auth_header_for("ceo", ceo_id)] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/access-policies/update",
+            &bearer,
+            Some(json!({
+                "role": "it_admin",
+                "entity_type": "patient",
+                "field_name": "name",
+                "access_level": "full"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    }
+    let level: String = sqlx::query_scalar(
+        "SELECT access_level FROM field_access_policies WHERE role = 'it_admin' AND entity_type = 'patient' AND field_name = 'name'",
+    )
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(level, "hidden");
+
+    // A reset restores the locked column together with the editable defaults.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/access-policies/reset",
+        &auth_header_for("it_admin", app.it_admin_id),
+        Some(json!({ "entity_type": "patient" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let locked_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM field_access_policies WHERE role = 'it_admin' AND entity_type = 'patient' AND is_system_locked AND access_level = 'hidden'",
+    )
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(locked_rows, 14);
+}

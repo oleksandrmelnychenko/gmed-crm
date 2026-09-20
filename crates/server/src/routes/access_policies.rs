@@ -177,6 +177,20 @@ const DEFAULT_PATIENT_POLICIES: &[DefaultPatientPolicy] = &[
     ("sales", "internal_notes", "hidden", None, false),
     ("sales", "travel_data", "hidden", None, false),
     ("sales", "functional_labels", "hidden", None, false),
+    ("it_admin", "name", "hidden", None, true),
+    ("it_admin", "birth_date", "hidden", None, true),
+    ("it_admin", "phone", "hidden", None, true),
+    ("it_admin", "email", "hidden", None, true),
+    ("it_admin", "nationality", "hidden", None, true),
+    ("it_admin", "languages", "hidden", None, true),
+    ("it_admin", "insurance", "hidden", None, true),
+    ("it_admin", "diagnosis", "hidden", None, true),
+    ("it_admin", "medications", "hidden", None, true),
+    ("it_admin", "allergies", "hidden", None, true),
+    ("it_admin", "vitals", "hidden", None, true),
+    ("it_admin", "internal_notes", "hidden", None, true),
+    ("it_admin", "travel_data", "hidden", None, true),
+    ("it_admin", "functional_labels", "hidden", None, true),
     ("patient", "name", "conditional", Some("freigegeben"), false),
     (
         "patient",
@@ -273,11 +287,17 @@ const DEFAULT_PATIENT_POLICIES: &[DefaultPatientPolicy] = &[
     ("ceo_assistant", "functional_labels", "hidden", None, false),
 ];
 
-async fn ensure_patient_policy_defaults(
-    state: &AppState,
-    updated_by: Uuid,
-) -> Result<u64, sqlx::Error> {
-    // One batched round-trip: per-row INSERTs took ~16s through the DEV tunnel.
+type DefaultPolicyColumns = (
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<Option<String>>,
+    Vec<bool>,
+);
+
+/// `DEFAULT_PATIENT_POLICIES` as parallel columns for a single `UNNEST`
+/// round-trip: per-row INSERTs took ~16s through the DEV tunnel.
+fn default_patient_policy_columns() -> DefaultPolicyColumns {
     let mut roles: Vec<String> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
     let mut fields: Vec<String> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
     let mut levels: Vec<String> = Vec::with_capacity(DEFAULT_PATIENT_POLICIES.len());
@@ -292,6 +312,14 @@ async fn ensure_patient_policy_defaults(
         conditions.push(condition_type.map(str::to_string));
         locks.push(is_system_locked);
     }
+    (roles, fields, levels, conditions, locks)
+}
+
+async fn ensure_patient_policy_defaults(
+    state: &AppState,
+    updated_by: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let (roles, fields, levels, conditions, locks) = default_patient_policy_columns();
 
     let result = sqlx::query(
         r#"
@@ -529,134 +557,13 @@ async fn reset_entity(
         );
     }
 
+    let (roles, fields, levels, conditions, locks) = default_patient_policy_columns();
     let result = sqlx::query(
         r#"
         WITH deleted AS (
             DELETE FROM field_access_policies
             WHERE entity_type = $1 AND NOT is_system_locked
             RETURNING 1
-        ),
-        defaults(role, entity_type, field_name, access_level, condition_type, is_system_locked) AS (
-            VALUES
-                ('patient_manager', 'patient', 'name', 'full', NULL, false),
-                ('patient_manager', 'patient', 'birth_date', 'full', NULL, false),
-                ('patient_manager', 'patient', 'phone', 'full', NULL, false),
-                ('patient_manager', 'patient', 'email', 'full', NULL, false),
-                ('patient_manager', 'patient', 'nationality', 'full', NULL, false),
-                ('patient_manager', 'patient', 'languages', 'full', NULL, false),
-                ('patient_manager', 'patient', 'insurance', 'full', NULL, false),
-                ('patient_manager', 'patient', 'diagnosis', 'full', NULL, false),
-                ('patient_manager', 'patient', 'medications', 'full', NULL, false),
-                ('patient_manager', 'patient', 'allergies', 'full', NULL, false),
-                ('patient_manager', 'patient', 'vitals', 'full', NULL, false),
-                ('patient_manager', 'patient', 'internal_notes', 'full', NULL, false),
-                ('patient_manager', 'patient', 'travel_data', 'full', NULL, false),
-                ('patient_manager', 'patient', 'functional_labels', 'full', NULL, false),
-
-                ('teamlead_interpreter', 'patient', 'name', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'birth_date', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'phone', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'email', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'nationality', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'languages', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'insurance', 'hidden', NULL, false),
-                ('teamlead_interpreter', 'patient', 'diagnosis', 'hidden', NULL, false),
-                ('teamlead_interpreter', 'patient', 'medications', 'hidden', NULL, false),
-                ('teamlead_interpreter', 'patient', 'allergies', 'hidden', NULL, false),
-                ('teamlead_interpreter', 'patient', 'vitals', 'hidden', NULL, false),
-                ('teamlead_interpreter', 'patient', 'internal_notes', 'hidden', NULL, false),
-                ('teamlead_interpreter', 'patient', 'travel_data', 'full', NULL, false),
-                ('teamlead_interpreter', 'patient', 'functional_labels', 'full', NULL, false),
-
-                ('interpreter', 'patient', 'name', 'full', NULL, false),
-                ('interpreter', 'patient', 'birth_date', 'full', NULL, false),
-                ('interpreter', 'patient', 'phone', 'full', NULL, false),
-                ('interpreter', 'patient', 'email', 'masked', NULL, false),
-                ('interpreter', 'patient', 'nationality', 'full', NULL, false),
-                ('interpreter', 'patient', 'languages', 'full', NULL, false),
-                ('interpreter', 'patient', 'insurance', 'hidden', NULL, false),
-                ('interpreter', 'patient', 'diagnosis', 'conditional', 'assigned_appointment', false),
-                ('interpreter', 'patient', 'medications', 'conditional', 'assigned_appointment', false),
-                ('interpreter', 'patient', 'allergies', 'conditional', 'assigned_appointment', false),
-                ('interpreter', 'patient', 'vitals', 'hidden', NULL, false),
-                ('interpreter', 'patient', 'internal_notes', 'hidden', NULL, false),
-                ('interpreter', 'patient', 'travel_data', 'hidden', NULL, false),
-                ('interpreter', 'patient', 'functional_labels', 'full', NULL, false),
-
-                ('concierge', 'patient', 'name', 'full', NULL, false),
-                ('concierge', 'patient', 'birth_date', 'full', NULL, false),
-                ('concierge', 'patient', 'phone', 'full', NULL, false),
-                ('concierge', 'patient', 'email', 'full', NULL, false),
-                ('concierge', 'patient', 'nationality', 'full', NULL, false),
-                ('concierge', 'patient', 'languages', 'full', NULL, false),
-                ('concierge', 'patient', 'insurance', 'hidden', NULL, false),
-                ('concierge', 'patient', 'diagnosis', 'hidden', NULL, true),
-                ('concierge', 'patient', 'medications', 'hidden', NULL, true),
-                ('concierge', 'patient', 'allergies', 'hidden', NULL, true),
-                ('concierge', 'patient', 'vitals', 'hidden', NULL, true),
-                ('concierge', 'patient', 'internal_notes', 'hidden', NULL, false),
-                ('concierge', 'patient', 'travel_data', 'full', NULL, false),
-                ('concierge', 'patient', 'functional_labels', 'full', NULL, false),
-
-                ('billing', 'patient', 'name', 'full', NULL, false),
-                ('billing', 'patient', 'birth_date', 'full', NULL, false),
-                ('billing', 'patient', 'phone', 'full', NULL, false),
-                ('billing', 'patient', 'email', 'full', NULL, false),
-                ('billing', 'patient', 'nationality', 'full', NULL, false),
-                ('billing', 'patient', 'languages', 'hidden', NULL, false),
-                ('billing', 'patient', 'insurance', 'full', NULL, false),
-                ('billing', 'patient', 'diagnosis', 'hidden', NULL, true),
-                ('billing', 'patient', 'medications', 'hidden', NULL, true),
-                ('billing', 'patient', 'allergies', 'hidden', NULL, true),
-                ('billing', 'patient', 'vitals', 'hidden', NULL, true),
-                ('billing', 'patient', 'internal_notes', 'hidden', NULL, false),
-                ('billing', 'patient', 'travel_data', 'hidden', NULL, false),
-                ('billing', 'patient', 'functional_labels', 'hidden', NULL, false),
-
-                ('sales', 'patient', 'name', 'hidden', NULL, false),
-                ('sales', 'patient', 'birth_date', 'hidden', NULL, false),
-                ('sales', 'patient', 'phone', 'hidden', NULL, false),
-                ('sales', 'patient', 'email', 'hidden', NULL, false),
-                ('sales', 'patient', 'nationality', 'hidden', NULL, false),
-                ('sales', 'patient', 'languages', 'hidden', NULL, false),
-                ('sales', 'patient', 'insurance', 'hidden', NULL, false),
-                ('sales', 'patient', 'diagnosis', 'hidden', NULL, true),
-                ('sales', 'patient', 'medications', 'hidden', NULL, true),
-                ('sales', 'patient', 'allergies', 'hidden', NULL, true),
-                ('sales', 'patient', 'vitals', 'hidden', NULL, true),
-                ('sales', 'patient', 'internal_notes', 'hidden', NULL, false),
-                ('sales', 'patient', 'travel_data', 'hidden', NULL, false),
-                ('sales', 'patient', 'functional_labels', 'hidden', NULL, false),
-
-                ('patient', 'patient', 'name', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'birth_date', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'phone', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'email', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'nationality', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'languages', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'insurance', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'diagnosis', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'medications', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'allergies', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'vitals', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'internal_notes', 'hidden', NULL, true),
-                ('patient', 'patient', 'travel_data', 'conditional', 'freigegeben', false),
-                ('patient', 'patient', 'functional_labels', 'hidden', NULL, false),
-
-                ('ceo_assistant', 'patient', 'name', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'birth_date', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'phone', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'email', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'nationality', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'languages', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'insurance', 'hidden', NULL, false),
-                ('ceo_assistant', 'patient', 'diagnosis', 'hidden', NULL, true),
-                ('ceo_assistant', 'patient', 'medications', 'hidden', NULL, true),
-                ('ceo_assistant', 'patient', 'allergies', 'hidden', NULL, true),
-                ('ceo_assistant', 'patient', 'vitals', 'hidden', NULL, true),
-                ('ceo_assistant', 'patient', 'internal_notes', 'hidden', NULL, false),
-                ('ceo_assistant', 'patient', 'travel_data', 'full', NULL, false),
-                ('ceo_assistant', 'patient', 'functional_labels', 'hidden', NULL, false)
         )
         INSERT INTO field_access_policies (
             role,
@@ -668,9 +575,9 @@ async fn reset_entity(
             updated_by,
             updated_at
         )
-        SELECT role, entity_type, field_name, access_level, condition_type, is_system_locked, $2, now()
-        FROM defaults
-        WHERE entity_type = $1
+        SELECT t.role, $1, t.field_name, t.access_level, t.condition_type, t.is_system_locked, $2, now()
+        FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::bool[])
+            AS t(role, field_name, access_level, condition_type, is_system_locked)
         ON CONFLICT (role, entity_type, field_name) DO UPDATE
         SET access_level = EXCLUDED.access_level,
             condition_type = EXCLUDED.condition_type,
@@ -681,6 +588,11 @@ async fn reset_entity(
     )
     .bind(&body.entity_type)
     .bind(auth.user_id)
+    .bind(&roles)
+    .bind(&fields)
+    .bind(&levels)
+    .bind(&conditions)
+    .bind(&locks)
     .execute(&state.db)
     .await;
 
@@ -713,4 +625,67 @@ async fn reset_entity(
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_PATIENT_POLICIES;
+    use std::collections::{BTreeSet, HashSet};
+
+    const PATIENT_FIELDS: &[&str] = &[
+        "name",
+        "birth_date",
+        "phone",
+        "email",
+        "nationality",
+        "languages",
+        "insurance",
+        "diagnosis",
+        "medications",
+        "allergies",
+        "vitals",
+        "internal_notes",
+        "travel_data",
+        "functional_labels",
+    ];
+
+    #[test]
+    fn every_matrix_role_covers_every_patient_field_exactly_once() {
+        let roles: BTreeSet<&str> = DEFAULT_PATIENT_POLICIES.iter().map(|p| p.0).collect();
+        assert_eq!(
+            roles.iter().copied().collect::<Vec<_>>(),
+            [
+                "billing",
+                "ceo_assistant",
+                "concierge",
+                "interpreter",
+                "it_admin",
+                "patient",
+                "patient_manager",
+                "sales",
+                "teamlead_interpreter",
+            ],
+            "ceo stays implicit full and is never a matrix row"
+        );
+        let mut seen = HashSet::new();
+        for policy in DEFAULT_PATIENT_POLICIES {
+            assert!(PATIENT_FIELDS.contains(&policy.1), "{policy:?}");
+            assert!(seen.insert((policy.0, policy.1)), "duplicate {policy:?}");
+        }
+        assert_eq!(seen.len(), roles.len() * PATIENT_FIELDS.len());
+    }
+
+    #[test]
+    fn it_admin_column_is_hidden_and_system_locked_for_every_field() {
+        let it_admin: Vec<_> = DEFAULT_PATIENT_POLICIES
+            .iter()
+            .filter(|p| p.0 == "it_admin")
+            .collect();
+        assert_eq!(it_admin.len(), PATIENT_FIELDS.len());
+        for policy in it_admin {
+            assert_eq!(policy.2, "hidden", "{policy:?}");
+            assert_eq!(policy.3, None, "{policy:?}");
+            assert!(policy.4, "it_admin must not be editable: {policy:?}");
+        }
+    }
 }

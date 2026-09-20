@@ -228,6 +228,9 @@ struct ActivityQuery {
     user_id: Option<Uuid>,
     action: Option<String>,
     view: Option<String>,
+    /// `access`: only account, role and permission changes (see
+    /// [`ACCESS_AUDIT_ACTIONS`]). Absent: no extra restriction.
+    category: Option<String>,
     search: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
@@ -235,11 +238,45 @@ struct ActivityQuery {
     date_to: Option<String>,
 }
 
+/// Audit actions that change who can sign in and what they may do: the
+/// "access and roles" stream CEO and IT Admin review.
+pub const ACCESS_AUDIT_ACTIONS: &[&str] = &[
+    "create_user",
+    "update_user",
+    "revoke_user_resource_access_on_role_change",
+    "deactivate_user",
+    "activate_user",
+    "unlock_user",
+    "reset_password",
+    "totp_reset",
+    "toggle_mfa",
+    "update_access_policy",
+    "create_staff_access_profile",
+    "update_staff_access_profile",
+    "clone_staff_access_profile",
+    "update_staff_user_access",
+];
+
 fn normalize_activity_view(value: Option<String>) -> Result<String, &'static str> {
     let view = value.unwrap_or_else(|| "activity".to_string());
     match view.as_str() {
         "activity" | "security" | "technical" | "all" => Ok(view),
         _ => Err("Invalid activity view"),
+    }
+}
+
+/// Maps the optional `category` parameter to the action allow-list it stands
+/// for; `None` keeps the unrestricted behaviour.
+fn activity_category_actions(value: Option<&str>) -> Result<Option<Vec<String>>, &'static str> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(None),
+        Some("access") => Ok(Some(
+            ACCESS_AUDIT_ACTIONS
+                .iter()
+                .map(|action| action.to_string())
+                .collect(),
+        )),
+        Some(_) => Err("Invalid activity category"),
     }
 }
 
@@ -300,6 +337,7 @@ async fn list_activity(
         user_id,
         action,
         view,
+        category,
         search,
         limit,
         offset,
@@ -311,6 +349,10 @@ async fn list_activity(
         .map(str::trim)
         .filter(|value| !value.is_empty());
     let view = match normalize_activity_view(view) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let category_actions = match activity_category_actions(category.as_deref()) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
@@ -372,7 +414,8 @@ async fn list_activity(
                  OR al.entity_type ILIKE '%' || $6 || '%'
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
                  OR COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
-             )"#,
+             )
+             AND ($7::TEXT[] IS NULL OR al.action = ANY($7))"#,
     )
     .bind(user_id)
     .bind(action)
@@ -380,6 +423,7 @@ async fn list_activity(
     .bind(date_to_exclusive)
     .bind(&view)
     .bind(search)
+    .bind(&category_actions)
     .fetch_one(&state.db)
     .await
     {
@@ -427,6 +471,7 @@ async fn list_activity(
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
                  OR COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
              )
+             AND ($9::TEXT[] IS NULL OR al.action = ANY($9))
            ORDER BY al.created_at DESC LIMIT $7 OFFSET $8"#,
     )
     .bind(user_id)
@@ -437,6 +482,7 @@ async fn list_activity(
     .bind(search)
     .bind(limit)
     .bind(offset)
+    .bind(&category_actions)
     .fetch_all(&state.db)
     .await
     {
@@ -736,7 +782,7 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_activity_view;
+    use super::{activity_category_actions, normalize_activity_view};
 
     #[test]
     fn activity_view_defaults_to_meaningful_activity() {
@@ -752,5 +798,29 @@ mod tests {
             );
         }
         assert!(normalize_activity_view(Some("noise".to_string())).is_err());
+    }
+
+    #[test]
+    fn access_category_maps_to_the_account_and_permission_actions_only() {
+        assert_eq!(activity_category_actions(None).unwrap(), None);
+        assert_eq!(activity_category_actions(Some("  ")).unwrap(), None);
+        let actions = activity_category_actions(Some("access"))
+            .unwrap()
+            .expect("access allow-list");
+        for expected in [
+            "create_user",
+            "update_user",
+            "deactivate_user",
+            "activate_user",
+            "reset_password",
+            "totp_reset",
+            "update_access_policy",
+            "update_staff_user_access",
+        ] {
+            assert!(actions.iter().any(|a| a == expected), "{expected}");
+        }
+        assert!(!actions.iter().any(|a| a == "login_success"));
+        assert!(!actions.iter().any(|a| a == "http_request"));
+        assert!(activity_category_actions(Some("billing")).is_err());
     }
 }
