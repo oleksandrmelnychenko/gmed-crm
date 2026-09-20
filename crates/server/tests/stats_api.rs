@@ -3491,3 +3491,143 @@ async fn risk_analysis_returns_role_scoped_patient_manager_and_billing_signals()
     assert!(ceo_body["patient_manager"].is_object());
     assert!(ceo_body["billing"].is_object());
 }
+
+#[tokio::test]
+async fn assistant_sales_and_it_admin_scorecards_stay_within_their_capabilities() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("cabinet-kpis");
+    let assistant_id = seed_user(&pool, &format!("{tag}-assistant"), "ceo_assistant").await;
+    let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
+    let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+
+    let patient_id = seed_patient(&pool, admin_id, &tag, "UA").await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+    seed_task(
+        &pool,
+        assistant_id,
+        admin_id,
+        patient_id,
+        order_id,
+        &format!("Assistant task {tag}"),
+        "now() - interval '1 day'",
+    )
+    .await;
+    seed_lead(
+        &pool,
+        admin_id,
+        &format!("{tag}-qualified"),
+        "DE",
+        "qualified",
+        "now() - interval '2 days'",
+        "now() - interval '1 day'",
+    )
+    .await;
+
+    // Finance keys of the billing preset and care keys of the clinical presets
+    // must never appear on the assistant, sales or IT admin scorecards.
+    let finance_keys = [
+        "outstanding_receivables_total",
+        "overdue_invoice_count",
+        "invoices_30d",
+        "paid_within_14d_rate_pct",
+        "avg_invoice_gross",
+        "tracked_invoice_count",
+    ];
+    let care_keys = [
+        "active_patients",
+        "checklist_completion_rate_pct",
+        "completed_appointments_30d",
+        "approved_hours_30d",
+        "active_services",
+    ];
+    let assert_absent = |body: &Value, keys: &[&str], section: &str| {
+        for key in keys {
+            assert!(
+                body["kpi"].get(*key).is_none(),
+                "{section} scorecard exposes {key}: {body}"
+            );
+        }
+    };
+
+    let (status, assistant) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(assistant_id, "ceo_assistant"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{assistant}");
+    assert_eq!(assistant["section"], "ceo_assistant");
+    assert_eq!(assistant["kpi"]["open_tasks"], 1);
+    assert_eq!(assistant["kpi"]["overdue_tasks"], 1);
+    assert!(assistant["kpi"]["appointments_next_7d"].is_number());
+    assert!(json_i64(&assistant["kpi"]["active_orders"]) >= 1);
+    assert!(json_i64(&assistant["kpi"]["qualified_leads"]) >= 1);
+    assert_absent(&assistant, &finance_keys, "ceo_assistant");
+    assert_absent(&assistant, &care_keys, "ceo_assistant");
+
+    let (status, sales) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(sales_id, "sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sales}");
+    assert_eq!(sales["section"], "sales");
+    assert!(json_i64(&sales["kpi"]["new_leads_30d"]) >= 1);
+    assert!(json_i64(&sales["kpi"]["qualified_leads_30d"]) >= 1);
+    assert!(sales["kpi"]["lead_to_patient_conversion_rate_pct"].is_number());
+    assert!(sales["kpi"]["top_countries"].is_array());
+    assert_absent(&sales, &finance_keys, "sales");
+    assert_absent(&sales, &care_keys, "sales");
+    assert!(sales["kpi"].get("open_tasks").is_none());
+
+    let (status, it_admin) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &auth_header_for(it_admin_id, "it_admin"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{it_admin}");
+    assert_eq!(it_admin["section"], "it_admin");
+    for key in [
+        "active_users",
+        "active_sessions",
+        "locked_accounts",
+        "pending_logins",
+        "failed_logins_24h",
+        "blocked_logins_24h",
+        "auth_alerts_24h",
+        "audit_events_24h",
+        "db_active_connections",
+    ] {
+        assert!(
+            it_admin["kpi"][key].is_number(),
+            "it_admin scorecard lacks {key}: {it_admin}"
+        );
+    }
+    assert!(json_i64(&it_admin["kpi"]["active_users"]) >= 3);
+    assert_eq!(it_admin["kpi"]["health_status"], "ok");
+    assert_absent(&it_admin, &finance_keys, "it_admin");
+    assert_absent(&it_admin, &care_keys, "it_admin");
+    for key in [
+        "active_orders",
+        "qualified_leads",
+        "new_leads_30d",
+        "open_tasks",
+        "active_patients",
+    ] {
+        assert!(
+            it_admin["kpi"].get(key).is_none(),
+            "it_admin scorecard exposes business data {key}"
+        );
+    }
+}

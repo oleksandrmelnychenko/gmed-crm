@@ -385,47 +385,57 @@ async fn ceo_dashboard(
     .into_response()
 }
 
+/// The `/stats/my-kpis` scorecard a caller may load: its role's preset, but
+/// only when the role still holds the capability behind that preset's data.
+fn my_kpis_section(auth: &AuthUser) -> Option<&'static str> {
+    let (section, capability) = match auth.role {
+        Role::Ceo => ("ceo", Capability::ReportsView),
+        Role::CeoAssistant => ("ceo_assistant", Capability::TasksUse),
+        Role::PatientManager => ("patient_manager", Capability::PatientsView),
+        Role::TeamleadInterpreter => ("teamlead_interpreter", Capability::InterpretersManage),
+        Role::Interpreter => ("interpreter", Capability::InterpretersHoursSubmit),
+        Role::Concierge => ("concierge", Capability::ServicesView),
+        Role::Billing => ("billing", Capability::ReportsFinance),
+        Role::Sales => ("sales", Capability::ReportsMarket),
+        Role::ItAdmin => ("it_admin", Capability::AdminHealth),
+        _ => return None,
+    };
+    auth.can(capability).then_some(section)
+}
+
 async fn my_kpis(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
     let user_id = auth.user_id.to_string();
-    let (section, kpi_result) = match auth.role {
-        Role::Ceo => ("ceo", load_ceo_summary(&state).await.map(Some)),
-        Role::CeoAssistant => (
-            "ceo_assistant",
-            load_ceo_assistant_kpis(&state, auth.user_id)
-                .await
-                .map(Some),
-        ),
-        Role::PatientManager => (
-            "patient_manager",
-            load_patient_manager_kpis(&state).await.map(|rows| {
-                rows.into_iter()
-                    .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
-            }),
-        ),
-        Role::TeamleadInterpreter => (
-            "teamlead_interpreter",
-            load_interpreter_team_kpis(&state).await.map(Some),
-        ),
-        Role::Interpreter => (
-            "interpreter",
-            load_interpreter_kpis(&state).await.map(|rows| {
-                rows.into_iter()
-                    .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
-            }),
-        ),
-        Role::Concierge => (
-            "concierge",
-            load_concierge_kpis(&state).await.map(|rows| {
-                rows.into_iter()
-                    .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
-            }),
-        ),
-        Role::Billing => ("billing", load_billing_kpis(&state).await.map(Some)),
-        Role::Sales => ("sales", load_sales_kpis(&state).await.map(Some)),
-        Role::ItAdmin => ("it_admin", load_it_admin_kpis(&state).await.map(Some)),
+    // Each scorecard is gated by the capability that opens the data it
+    // aggregates, so a preset can never surface numbers the cabinet may not
+    // see (finance stays with billing, medical with the care roles, and the
+    // IT admin sees only technical counters).
+    let Some(section) = my_kpis_section(&auth) else {
+        return err(StatusCode::FORBIDDEN, "Forbidden");
+    };
+    let kpi_result = match section {
+        "ceo" => load_ceo_summary(&state).await.map(Some),
+        "ceo_assistant" => load_ceo_assistant_kpis(&state, auth.user_id)
+            .await
+            .map(Some),
+        "patient_manager" => load_patient_manager_kpis(&state).await.map(|rows| {
+            rows.into_iter()
+                .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
+        }),
+        "teamlead_interpreter" => load_interpreter_team_kpis(&state).await.map(Some),
+        "interpreter" => load_interpreter_kpis(&state).await.map(|rows| {
+            rows.into_iter()
+                .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
+        }),
+        "concierge" => load_concierge_kpis(&state).await.map(|rows| {
+            rows.into_iter()
+                .find(|item| item["user_id"].as_str() == Some(user_id.as_str()))
+        }),
+        "billing" => load_billing_kpis(&state).await.map(Some),
+        "sales" => load_sales_kpis(&state).await.map(Some),
+        "it_admin" => load_it_admin_kpis(&state).await.map(Some),
         _ => return err(StatusCode::FORBIDDEN, "Forbidden"),
     };
 
@@ -1542,11 +1552,22 @@ async fn load_it_admin_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                  WHERE created_at >= now() - interval '24 hours') AS audit_events_24h,
                 (SELECT COUNT(*)::bigint FROM audit_log
                  WHERE created_at >= now() - interval '24 hours'
-                   AND action IN ('login_failure', 'login_blocked')) AS auth_alerts_24h"#,
+                   AND action IN ('login_failure', 'login_blocked')) AS auth_alerts_24h,
+                (SELECT COUNT(*)::bigint FROM audit_log
+                 WHERE created_at >= now() - interval '24 hours'
+                   AND action = 'login_failure') AS failed_logins_24h,
+                (SELECT COUNT(*)::bigint FROM audit_log
+                 WHERE created_at >= now() - interval '24 hours'
+                   AND action = 'login_blocked') AS blocked_logins_24h,
+                (SELECT COUNT(*)::bigint FROM pg_stat_activity
+                 WHERE datname = current_database()) AS db_active_connections,
+                (SELECT MAX(created_at) FROM audit_log) AS last_audit_event_at"#,
     )
     .fetch_one(&state.db)
     .await?;
 
+    // Technical counters only: the IT admin cabinet never aggregates patient,
+    // lead, order or finance data (see docs/role-cabinets-plan-2026-09-20_ua.md).
     Ok(json!({
         "active_users": row.try_get::<i64, _>("active_users").unwrap_or(0),
         "locked_accounts": row.try_get::<i64, _>("locked_accounts").unwrap_or(0),
@@ -1554,6 +1575,14 @@ async fn load_it_admin_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
         "active_sessions": row.try_get::<i64, _>("active_sessions").unwrap_or(0),
         "audit_events_24h": row.try_get::<i64, _>("audit_events_24h").unwrap_or(0),
         "auth_alerts_24h": row.try_get::<i64, _>("auth_alerts_24h").unwrap_or(0),
+        "failed_logins_24h": row.try_get::<i64, _>("failed_logins_24h").unwrap_or(0),
+        "blocked_logins_24h": row.try_get::<i64, _>("blocked_logins_24h").unwrap_or(0),
+        "db_active_connections": row.try_get::<i64, _>("db_active_connections").unwrap_or(0),
+        "health_status": "ok",
+        "last_audit_event_at": row
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_audit_event_at")
+            .unwrap_or_default()
+            .map(|value| value.to_rfc3339()),
     }))
 }
 
