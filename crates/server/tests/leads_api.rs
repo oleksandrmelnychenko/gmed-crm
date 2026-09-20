@@ -41,6 +41,7 @@ struct TestApp {
     billing_id: Uuid,
     interpreter_id: Uuid,
     ceo_id: Uuid,
+    concierge_id: Uuid,
 }
 
 impl std::ops::Deref for TestApp {
@@ -63,6 +64,7 @@ impl TestApp {
             "billing" => self.billing_id,
             "interpreter" => self.interpreter_id,
             "ceo" => self.ceo_id,
+            "concierge" => self.concierge_id,
             other => panic!("unexpected test role: {other}"),
         };
         let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
@@ -92,6 +94,7 @@ async fn test_app() -> Option<TestApp> {
     let billing_id = seed_user(&suite.pool, "leads-api", "billing").await;
     let interpreter_id = seed_user(&suite.pool, "leads-api", "interpreter").await;
     let ceo_id = seed_user(&suite.pool, "leads-api", "ceo").await;
+    let concierge_id = seed_user(&suite.pool, "leads-api", "concierge").await;
     Some(TestApp {
         suite,
         sales_id,
@@ -99,6 +102,7 @@ async fn test_app() -> Option<TestApp> {
         billing_id,
         interpreter_id,
         ceo_id,
+        concierge_id,
     })
 }
 
@@ -3747,4 +3751,182 @@ async fn returning_patient_is_found_by_email_when_the_lead_has_another_spelling(
             .any(|candidate| candidate["id"] == patient_id.to_string()),
         "{response}"
     );
+}
+
+#[tokio::test]
+async fn concierge_sees_only_the_service_grid_and_cannot_mutate_leads() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+    let concierge = app.auth_header("concierge");
+
+    // A lead carrying medical, financial and wizard data.
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Grid",
+            "last_name": "Projection",
+            "email": "grid-projection@example.com",
+            "phone": "+49 151 7654321",
+            "source": "Website",
+            "country": "DE",
+            "notes": "internal note about the case"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "primary_concern_text": "Oncology second opinion",
+            "additional_concerns": "Diabetes",
+            "services": ["driver", "concierge"],
+            "needs_interpreter": true,
+            "has_insurance": true,
+            "insurance_covers_germany": "yes",
+            "insurance_provider": "Test Versicherung",
+            "insurance_number": "POL-999",
+            "street_address": "Hauptstr. 1",
+            "zip_code": "10115",
+            "wizard_state": { "step": 3, "quote_total": "1200.00" }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let excluded = [
+        "notes",
+        "message",
+        "primary_concern_text",
+        "additional_concerns",
+        "has_insurance",
+        "insurance_covers_germany",
+        "insurance_provider",
+        "insurance_number",
+        "street_address",
+        "zip_code",
+        "compliance_status",
+        "raw_payload",
+        "lifecycle",
+        "failed_outcome",
+        "console_promoted_by",
+        "prospect_patient_id",
+    ];
+    let assert_projected = |lead: &Value, context: &str| {
+        assert_eq!(lead["id"], lead_id, "{context}");
+        assert_eq!(lead["first_name"], "Grid", "{context}");
+        assert_eq!(lead["last_name"], "Projection", "{context}");
+        assert_eq!(lead["qualification_status"], "new", "{context}");
+        assert_eq!(lead["lead_type"], "console", "{context}");
+        assert_eq!(lead["country"], "DE", "{context}");
+        assert_eq!(lead["email"], "grid-projection@example.com", "{context}");
+        assert!(lead["created_at"].is_string(), "{context}");
+        for key in excluded {
+            let value = &lead[key];
+            assert!(
+                value.is_null(),
+                "{context}: {key} leaked to the concierge grid: {value}"
+            );
+        }
+        assert_eq!(lead["wizard_state"], json!({}), "{context}");
+        assert_eq!(lead["attachments"], json!([]), "{context}");
+        assert_eq!(lead["readiness"]["checks"], json!([]), "{context}");
+    };
+
+    // The full payload still reaches an editor.
+    let (status, full) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(full["primary_concern_text"], "Oncology second opinion");
+    assert_eq!(full["insurance_provider"], "Test Versicherung");
+    assert_eq!(full["wizard_state"]["quote_total"], "1200.00");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_projected(&detail, "detail");
+    assert_eq!(detail["services"], json!(["driver", "concierge"]));
+    assert_eq!(detail["needs_interpreter"], true);
+
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads", &concierge, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["id"] == lead_id))
+        .cloned()
+        .expect("concierge grid lists the lead");
+    assert_projected(&row, "list");
+
+    // Searching medical notes must not work for the grid either.
+    let (status, hits) = json_request(
+        &app,
+        "GET",
+        "/api/v1/leads?search=Oncology%20second",
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        hits.as_array()
+            .is_some_and(|items| items.iter().all(|item| item["id"] != lead_id)),
+        "notes text must not be searchable from the service grid"
+    );
+
+    // Read-only: every mutation is refused before it is validated.
+    for (method, path, body) in [
+        (
+            "POST",
+            "/api/v1/leads".to_string(),
+            Some(json!({ "first_name": "No", "last_name": "Way" })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/leads/{lead_id}/update"),
+            Some(json!({ "notes": "concierge edit" })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/leads/{lead_id}/qualify"),
+            Some(json!({ "status": "in_progress" })),
+        ),
+        (
+            "POST",
+            format!("/api/v1/leads/{lead_id}/prospect"),
+            Some(json!({})),
+        ),
+        (
+            "POST",
+            format!("/api/v1/leads/{lead_id}/convert"),
+            Some(json!({})),
+        ),
+        (
+            "POST",
+            format!("/api/v1/leads/{lead_id}/failed-flow"),
+            Some(json!({ "resolution": "archive" })),
+        ),
+    ] {
+        let (status, body) = json_request(&app, method, &path, &concierge, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {body}");
+    }
+
+    // Nothing changed under the concierge's requests.
+    let (_, after) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(after["notes"], "internal note about the case");
+    assert_eq!(after["qualification_status"], "new");
 }

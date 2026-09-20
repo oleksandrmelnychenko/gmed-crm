@@ -392,7 +392,7 @@ async fn list_leads(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let source_pattern = format!("%{}%", query.source.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
-    let concierge_grid_only = auth.role == Role::Concierge;
+    let concierge_grid_only = lead_service_grid_only(&auth);
 
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
@@ -474,47 +474,20 @@ async fn list_leads(
                 // stays on the detail endpoint — we only lift the single
                 // boolean here to keep the list payload light.
                 let lead_id = r.try_get::<Uuid, _>("id").unwrap_or_default();
-                if concierge_grid_only {
-                    leads.push(json!({
-                        "id": lead_id,
-                        "first_name": r.try_get::<String, _>("first_name").unwrap_or_default(),
-                        "last_name": r.try_get::<String, _>("last_name").unwrap_or_default(),
-                        "email": r.try_get::<Option<String>, _>("email").unwrap_or_default(),
-                        "phone": r.try_get::<Option<String>, _>("phone").unwrap_or_default(),
-                        "source": r.try_get::<Option<String>, _>("source").unwrap_or_default(),
-                        "country": r.try_get::<Option<String>, _>("country").unwrap_or_default(),
-                        "intake_source": Value::Null,
-                        "flow": Value::Null,
-                        "lead_type": lead_type_from_origin(
-                            r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("console_promoted_at")
-                                .unwrap_or_default()
-                                .is_some(),
-                            r.try_get::<Option<String>, _>("intake_source").unwrap_or_default().as_deref(),
-                            r.try_get::<Option<String>, _>("source").unwrap_or_default().as_deref(),
-                            r.try_get::<Option<String>, _>("flow").unwrap_or_default().as_deref(),
-                        ),
-                        "qualification_status": r.try_get::<String, _>("qualification_status").unwrap_or_default(),
-                        "status_changed_at": r
-                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("status_changed_at")
-                            .unwrap_or_default()
-                            .map(|value| value.to_rfc3339()),
-                        "submitted_at": r
-                            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("submitted_at")
-                            .unwrap_or_default()
-                            .map(|value| value.to_rfc3339()),
-                        "created_at": r
-                            .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
-                            .map(|value| value.to_rfc3339())
-                            .unwrap_or_default(),
-                    }));
-                    continue;
-                }
-                let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
-                    Ok(Some(readiness)) => readiness,
-                    Ok(None) => continue,
-                    Err(resp) => return resp,
+                // The service grid never evaluates conversion readiness: it is
+                // commercial/medical data the projection drops anyway.
+                let (qualification_ready, conversion_ready) = if concierge_grid_only {
+                    (false, false)
+                } else {
+                    match load_lead_conversion_readiness(&state, lead_id).await {
+                        Ok(Some(readiness)) => {
+                            (readiness.qualification_ready, readiness.conversion_ready)
+                        }
+                        Ok(None) => continue,
+                        Err(resp) => return resp,
+                    }
                 };
-                leads.push(json!({
+                let lead = json!({
                     "id": lead_id,
                     "first_name": r.try_get::<String, _>("first_name").unwrap_or_default(),
                     "last_name": r.try_get::<String, _>("last_name").unwrap_or_default(),
@@ -543,8 +516,8 @@ async fn list_leads(
                         .unwrap_or_default()
                         .map(|value| value.to_rfc3339()),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
-                    "qualification_ready": readiness.qualification_ready,
-                    "conversion_ready": readiness.conversion_ready,
+                    "qualification_ready": qualification_ready,
+                    "conversion_ready": conversion_ready,
                     // Phase 1 classification: a brand-new lead or an existing customer.
                     "repeat_patient_id": r.try_get::<Option<Uuid>, _>("repeat_patient_id").unwrap_or_default(),
                     "failed_outcome": {
@@ -566,7 +539,12 @@ async fn list_leads(
                         .map(|v| v.to_rfc3339())
                         .unwrap_or_default(),
                     "attachment_count": r.try_get::<i64, _>("attachment_count").unwrap_or(0),
-                }));
+                });
+                leads.push(if concierge_grid_only {
+                    lead_service_grid_projection(&lead)
+                } else {
+                    lead
+                });
             }
             Json(leads).into_response()
         }
@@ -2816,7 +2794,239 @@ async fn get_lead(
     obj.insert("failed_outcome".into(), failed_outcome_payload(&row));
     obj.insert("lifecycle".into(), lifecycle);
 
-    Json(Value::Object(obj)).into_response()
+    let lead = Value::Object(obj);
+    if lead_service_grid_only(&auth) {
+        return Json(lead_service_grid_projection(&lead)).into_response();
+    }
+    Json(lead).into_response()
+}
+
+/// Whether the caller sees leads only as the service grid: `leads.view`
+/// without `leads.edit` (the concierge). Editors, and roles that may convert,
+/// get the full lead.
+fn lead_service_grid_only(auth: &AuthUser) -> bool {
+    auth.can(Capability::LeadsView) && !auth.can(Capability::LeadsEdit)
+}
+
+/// Fields of a lead the service grid may show: who the lead is, where it
+/// stands, when it moved, where it comes from, how to reach it and what
+/// service it needs. Everything else (medical notes and concerns, insurance
+/// and other finance, compliance, address, wizard and raw payloads,
+/// attachments, readiness, lifecycle) stays on the server.
+const LEAD_SERVICE_GRID_FIELDS: &[&str] = &[
+    "id",
+    "first_name",
+    "last_name",
+    "qualification_status",
+    "status_changed_at",
+    "submitted_at",
+    "created_at",
+    "updated_at",
+    "lead_type",
+    "source",
+    "country",
+    "city",
+    "email",
+    "phone",
+    "primary_phone_type",
+    "whatsapp_number",
+    "whatsapp_consent",
+    "primary_language",
+    "locale",
+    "needs_interpreter",
+    "services",
+    "preferred_location",
+    "visit_timing",
+    "location",
+    "can_travel",
+    "wants_membership",
+    "repeat_patient_id",
+    "attachment_count",
+];
+
+/// Projects a full lead payload (list row or detail) onto the service grid
+/// fields. Dropped keys are absent, except a few the lead screens read
+/// without a null check, which come back empty so the read-only grid renders.
+fn lead_service_grid_projection(lead: &Value) -> Value {
+    let Some(source) = lead.as_object() else {
+        return Value::Null;
+    };
+    let mut projected = serde_json::Map::with_capacity(LEAD_SERVICE_GRID_FIELDS.len() + 8);
+    for key in LEAD_SERVICE_GRID_FIELDS {
+        if let Some(value) = source.get(*key) {
+            projected.insert((*key).to_string(), value.clone());
+        }
+    }
+    projected.insert("intake_source".into(), Value::Null);
+    projected.insert("flow".into(), Value::Null);
+    projected.insert("notes".into(), Value::Null);
+    projected.insert("message".into(), Value::Null);
+    projected.insert("attachments".into(), json!([]));
+    projected.insert("trusted_contacts".into(), json!([]));
+    projected.insert("requested_specialties".into(), json!([]));
+    projected.insert("wizard_state".into(), json!({}));
+    projected.insert("qualification_ready".into(), Value::Bool(false));
+    projected.insert("conversion_ready".into(), Value::Bool(false));
+    projected.insert(
+        "readiness".into(),
+        json!({
+            "qualification_ready": false,
+            "conversion_ready": false,
+            "qualification_reasons": [],
+            "blocking_reasons": [],
+            "checks": [],
+            "steps": [],
+        }),
+    );
+    Value::Object(projected)
+}
+
+#[cfg(test)]
+mod lead_service_grid_projection_tests {
+    use super::*;
+
+    fn full_lead() -> Value {
+        json!({
+            "id": "0b6a2a44-3a0f-4a67-9b5d-2ec4c4a1f9c1",
+            "first_name": "Olena",
+            "last_name": "Koval",
+            "email": "olena@example.com",
+            "phone": "+380501234567",
+            "primary_phone_type": "mobile",
+            "whatsapp_number": "+380501234567",
+            "whatsapp_consent": true,
+            "source": "Website",
+            "country": "UA",
+            "city": "Kyiv",
+            "street_address": "Khreshchatyk 1",
+            "zip_code": "01001",
+            "date_of_birth": "1980-01-01",
+            "legal_sex": "female",
+            "primary_language": "uk",
+            "locale": "ru",
+            "needs_interpreter": true,
+            "services": ["driver", "concierge"],
+            "preferred_location": "Munich",
+            "visit_timing": "asap",
+            "location": "Germany",
+            "can_travel": true,
+            "wants_membership": false,
+            "lead_type": "questionnaire",
+            "intake_source": "website_wizard",
+            "flow": "wizard",
+            "qualification_status": "qualified",
+            "compliance_status": "signed",
+            "status_changed_at": "2026-09-01T10:00:00+00:00",
+            "submitted_at": "2026-08-30T10:00:00+00:00",
+            "created_at": "2026-08-30T10:00:00+00:00",
+            "updated_at": "2026-09-01T10:00:00+00:00",
+            "repeat_patient_id": null,
+            "attachment_count": 2,
+            "notes": "internal note",
+            "message": "free text",
+            "primary_concern_text": "oncology second opinion",
+            "additional_concerns": "diabetes",
+            "requested_specialties": ["oncology"],
+            "has_medical_records": true,
+            "currently_in_treatment": true,
+            "has_health_risk_for_travel": false,
+            "has_insurance": true,
+            "insurance_covers_germany": false,
+            "insurance_provider": "ACME",
+            "insurance_number": "123",
+            "insurance_type": "private",
+            "trusted_contacts": [{ "name": "Ivan" }],
+            "trusted_contact_name": "Ivan",
+            "raw_payload": { "secret": true },
+            "wizard_state": { "quote_total": "1200.00" },
+            "readiness": { "qualification_ready": true, "conversion_ready": true, "checks": [{ "key": "quote" }] },
+            "qualification_ready": true,
+            "conversion_ready": true,
+            "lifecycle": { "history": [] },
+            "attachments": [{ "id": "a1" }],
+            "failed_outcome": { "status": "none", "reason": "n/a" },
+            "converted_patient_id": null,
+            "prospect_patient_id": "p1",
+            "referrer_patient_id": "p2",
+            "console_promoted_by": "u1",
+            "user_agent": "Mozilla"
+        })
+    }
+
+    #[test]
+    fn keeps_only_service_grid_fields() {
+        let projected = lead_service_grid_projection(&full_lead());
+        let projected = projected.as_object().expect("object");
+
+        for key in LEAD_SERVICE_GRID_FIELDS {
+            assert!(projected.contains_key(*key), "missing service field {key}");
+        }
+        assert_eq!(projected["first_name"], "Olena");
+        assert_eq!(projected["qualification_status"], "qualified");
+        assert_eq!(projected["lead_type"], "questionnaire");
+        assert_eq!(projected["country"], "UA");
+        assert_eq!(projected["services"], json!(["driver", "concierge"]));
+        assert_eq!(projected["needs_interpreter"], true);
+
+        for key in [
+            "notes",
+            "message",
+            "primary_concern_text",
+            "additional_concerns",
+            "has_medical_records",
+            "currently_in_treatment",
+            "has_health_risk_for_travel",
+            "has_insurance",
+            "insurance_covers_germany",
+            "insurance_provider",
+            "insurance_number",
+            "insurance_type",
+            "street_address",
+            "zip_code",
+            "date_of_birth",
+            "legal_sex",
+            "compliance_status",
+            "trusted_contact_name",
+            "raw_payload",
+            "lifecycle",
+            "failed_outcome",
+            "prospect_patient_id",
+            "referrer_patient_id",
+            "console_promoted_by",
+            "user_agent",
+            "intake_source",
+            "flow",
+        ] {
+            let value = projected.get(key);
+            assert!(
+                value.is_none() || value == Some(&Value::Null),
+                "{key} leaked into the service grid: {value:?}"
+            );
+        }
+        assert_eq!(projected["wizard_state"], json!({}));
+        assert_eq!(projected["requested_specialties"], json!([]));
+        assert_eq!(projected["trusted_contacts"], json!([]));
+        assert_eq!(projected["attachments"], json!([]));
+        assert_eq!(projected["readiness"]["checks"], json!([]));
+        assert_eq!(projected["readiness"]["qualification_ready"], false);
+        assert_eq!(projected["conversion_ready"], false);
+        assert_eq!(projected["qualification_ready"], false);
+    }
+
+    #[test]
+    fn projection_of_a_non_object_is_null() {
+        assert_eq!(lead_service_grid_projection(&json!([])), Value::Null);
+        assert_eq!(lead_service_grid_projection(&Value::Null), Value::Null);
+    }
+
+    #[test]
+    fn missing_fields_are_not_invented() {
+        let projected = lead_service_grid_projection(&json!({ "id": "x", "first_name": "A" }));
+        let projected = projected.as_object().expect("object");
+        assert_eq!(projected["id"], "x");
+        assert!(!projected.contains_key("email"));
+        assert!(!projected.contains_key("services"));
+    }
 }
 
 async fn update_lead(
