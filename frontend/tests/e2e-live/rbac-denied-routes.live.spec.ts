@@ -119,17 +119,15 @@ test.describe("live RBAC denied route normalization", () => {
     await expectForbiddenRouteRedirect(page, "/cases");
   });
 
-  test("it_admin can open patients workspace", async ({
+  // IT Admin runs a technical cabinet only and never sees patient data
+  // (capability registry, 2026-09-20).
+  test("it_admin is redirected away from patients workspace", async ({
     page,
     request,
   }) => {
     await setGermanLanguage(page);
     await bootstrapAndLogin(page, request, "it_admin");
-    await page.goto("/patients");
-    await expect(page).toHaveURL(/\/patients$/);
-    await expect(
-      page.getByRole("heading", { level: 1, name: /Patient/i }),
-    ).toBeVisible();
+    await expectForbiddenRouteRedirect(page, "/patients");
   });
 
   test("it_admin is redirected away from cases workspace", async ({

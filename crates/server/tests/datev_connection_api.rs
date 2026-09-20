@@ -121,6 +121,14 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
         } else {
             Value::Null
         };
+        // Billing may read published DATEV data (datev.read) but never administer
+        // the connection; the read attempt passes authorization and fails on
+        // the missing confirmation instead.
+        let expected = if path == "read" {
+            StatusCode::UNPROCESSABLE_ENTITY
+        } else {
+            StatusCode::FORBIDDEN
+        };
         assert_eq!(
             call(
                 &app,
@@ -132,7 +140,8 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
             )
             .await
             .0,
-            StatusCode::FORBIDDEN
+            expected,
+            "{method} {path}"
         );
     }
     denied.role = gmed_domain::role::Role::ItAdmin;

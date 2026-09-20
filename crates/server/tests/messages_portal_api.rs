@@ -1493,14 +1493,15 @@ async fn patient_cannot_message_unassigned_staff() {
 }
 
 #[tokio::test]
-async fn sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peers() {
+async fn sales_use_the_internal_chat_workspace_but_never_patient_conversations() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
     };
 
-    let tag = unique_tag("staff-chat-sales-deny");
+    // Sales holds chat.use since the capability registry (2026-09-20): partner
+    // coordination with staff is part of the role, patient chat is not.
+    let tag = unique_tag("staff-chat-sales-allow");
     let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
-    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
     let sales_id = seed_user(&pool, &format!("{tag}-sales"), "sales").await;
 
     let pm_auth = auth_header_for(patient_manager_id, "patient_manager");
@@ -1515,21 +1516,16 @@ async fn sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peer
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let peer_rows = peers.as_array().unwrap();
     assert!(
-        peer_rows
+        peers
+            .as_array()
+            .unwrap()
             .iter()
-            .any(|item| item["id"] == billing_id.to_string()),
-        "billing peer should remain visible to patient manager"
-    );
-    assert!(
-        peer_rows
-            .iter()
-            .all(|item| item["id"] != sales_id.to_string()),
-        "sales must not appear in internal allowed-peer list"
+            .any(|item| item["id"] == sales_id.to_string()),
+        "sales must be reachable as an internal peer"
     );
 
-    let (status, body) = json_request(
+    let (status, _) = json_request(
         &app,
         "GET",
         "/api/v1/messages/allowed-peers",
@@ -1537,13 +1533,8 @@ async fn sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peer
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        body["message"],
-        "Your role cannot access the chat workspace"
-    );
-
-    let (status, body) = json_request(
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
         &app,
         "GET",
         "/api/v1/messages/conversations",
@@ -1551,11 +1542,7 @@ async fn sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peer
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        body["message"],
-        "Your role cannot access the chat workspace"
-    );
+    assert_eq!(status, StatusCode::OK);
 
     let (status, body) = json_request(
         &app,
@@ -1565,11 +1552,7 @@ async fn sales_cannot_use_internal_chat_workspace_and_are_hidden_from_staff_peer
         Some(json!({ "message": "Can we coordinate a partner offer?" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(
-        body["message"],
-        "Your role cannot access the chat workspace"
-    );
+    assert!(status.is_success(), "{status}: {body}");
 }
 
 #[tokio::test]
