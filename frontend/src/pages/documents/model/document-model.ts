@@ -113,7 +113,6 @@ export function canRequestTranslations(role?: string) {
     "teamlead_interpreter",
     "interpreter",
     "concierge",
-    "it_admin",
   ].includes(role ?? "");
 }
 
@@ -122,8 +121,8 @@ export function canUpdateTranslations(role?: string) {
     "ceo",
     "patient_manager",
     "teamlead_interpreter",
+    "interpreter",
     "concierge",
-    "it_admin",
   ].includes(role ?? "");
 }
 
@@ -1109,4 +1108,18 @@ export function detailToEditForm(detail: DocumentItem): EditFormState {
     paymentMethod: detail.payment_method ?? "",
     notes: detail.notes ?? "",
   };
+}
+
+/** Roles the backend lets read the translation request queue (read-only for some). */
+export function canViewTranslationQueue(role?: string) {
+  return [
+    "ceo",
+    "ceo_assistant",
+    "patient_manager",
+    "teamlead_interpreter",
+    "interpreter",
+    "concierge",
+    "billing",
+    "it_admin",
+  ].includes(role ?? "");
 }

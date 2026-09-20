@@ -361,9 +361,18 @@ export function fetchTranslationRequests(documentId: string) {
   );
 }
 
-export function fetchTranslationRequestQueue() {
+export type TranslationQueueStatusFilter = "open" | "completed" | "cancelled" | "all";
+
+const translationQueueStatusParams: Record<TranslationQueueStatusFilter, string> = {
+  open: "pending,in_progress",
+  completed: "completed",
+  cancelled: "cancelled",
+  all: "pending,in_progress,completed,cancelled",
+};
+
+export function fetchTranslationRequestQueue(status: TranslationQueueStatusFilter = "open") {
   return apiFetch<TranslationRequest[]>(
-    "/documents/translation-requests?status=pending,in_progress",
+    `/documents/translation-requests?status=${translationQueueStatusParams[status]}`,
   );
 }
 

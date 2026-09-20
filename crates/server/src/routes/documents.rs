@@ -10215,6 +10215,12 @@ async fn fetch_document_row(
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $2
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
                   (d.patient_id IS NULL AND d.lead_id IS NULL AND d.order_id IS NULL
                    AND d.appointment_id IS NULL AND NOT d.is_medical AND d.art = 'provider_document'
                    AND EXISTS (SELECT 1 FROM provider_document_links link WHERE link.document_id = d.id))
@@ -10976,7 +10982,12 @@ pub(crate) fn can_view_document_row(
         return false;
     };
 
-    let explicit_share = row.try_get::<bool, _>("shared_to_current").unwrap_or(false);
+    // An active translation assignment grants the same baseline as an explicit
+    // share: interpreters must be able to open the documents they translate.
+    let explicit_share = row.try_get::<bool, _>("shared_to_current").unwrap_or(false)
+        || row
+            .try_get::<bool, _>("translation_assigned_to_current")
+            .unwrap_or(false);
     // Match the provider-document view contract for general commercial files.
     // There is no patient to assign, and Billing must be able to read contracts
     // stored as internal documents. Explicit document ACLs are checked by callers.
@@ -19152,6 +19163,12 @@ async fn list_documents(
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
                   EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $13
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
+                  EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
                     JOIN users portal_user ON portal_user.id = pa.user_id
@@ -19343,6 +19360,12 @@ async fn list_document_intake_queue(
                       AND ds.shared_with_user_id = $1
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $1
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -19706,6 +19729,12 @@ async fn list_document_versions(
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
                   EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $2
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
+                  EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
                     JOIN users portal_user ON portal_user.id = pa.user_id
@@ -19849,6 +19878,12 @@ async fn list_document_translation_request_queue(
                       AND ds.shared_with_user_id = $4
                       AND ds.revoked_at IS NULL
                   ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $4
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
            FROM document_translation_requests dtr
@@ -19872,6 +19907,7 @@ async fn list_document_translation_request_queue(
                 )
                 OR $5::boolean = true
                 OR d.id = ANY($6::uuid[])
+                OR dtr.assigned_to = $4
              )
            ORDER BY dtr.requested_at DESC, dtr.created_at DESC
            LIMIT 1000"#
@@ -20194,6 +20230,7 @@ async fn update_document_translation_request(
         Role::Ceo,
         Role::PatientManager,
         Role::TeamleadInterpreter,
+        Role::Interpreter,
         Role::Concierge,
     ]) {
         return resp;
@@ -20228,6 +20265,24 @@ async fn update_document_translation_request(
         }
     };
 
+    if auth.role == Role::Interpreter {
+        // Interpreters only work on requests assigned to them, or pick up an
+        // unassigned request by assigning it to themselves.
+        let current_assignee = request_row
+            .try_get::<Option<Uuid>, _>("assigned_to")
+            .unwrap_or_default();
+        let assigns_self = matches!(
+            &body.assigned_to,
+            NullableJsonField::Value(serde_json::Value::String(raw))
+                if Uuid::parse_str(raw.trim()).ok() == Some(auth.user_id)
+        );
+        if current_assignee != Some(auth.user_id) && !(current_assignee.is_none() && assigns_self) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Interpreters can only work on translation requests assigned to them",
+            );
+        }
+    }
     let document_id = request_row
         .try_get::<Uuid, _>("document_id")
         .unwrap_or_else(|_| Uuid::nil());
@@ -20404,16 +20459,20 @@ async fn update_document_translation_request(
                    ELSE assigned_at
                END,
                translated_by = CASE
-                   WHEN $12 OR $13 OR $14 OR $2 = 'completed'
+                   WHEN $12 OR $13 OR $14 OR ($2 = 'completed' AND $15 <> 'completed')
                        THEN $7
                    ELSE translated_by
                END,
                translated_at = CASE
-                   WHEN $12 OR $13 OR $14 OR $2 = 'completed'
+                   WHEN $12 OR $13 OR $14 OR ($2 = 'completed' AND $15 <> 'completed')
                        THEN now()
                    ELSE translated_at
                END,
-               completed_at = CASE WHEN $2 = 'completed' THEN now() ELSE NULL END
+               completed_at = CASE
+                   WHEN $2 <> 'completed' THEN NULL
+                   WHEN $15 = 'completed' THEN COALESCE(completed_at, now())
+                   ELSE now()
+               END
            WHERE id = $1"#,
     )
     .bind(request_id)
@@ -20430,6 +20489,7 @@ async fn update_document_translation_request(
     .bind(source_language_update.is_some())
     .bind(source_text_update.is_some())
     .bind(translated_text_update.is_some())
+    .bind(&current_status)
     .execute(&state.db)
     .await
     {

@@ -18,7 +18,11 @@ type WorkspaceItem = {
   icon: LucideIcon;
 };
 
-export function DocumentWorkspaceNav() {
+export function DocumentWorkspaceNav({
+  showTranslationQueue = true,
+}: {
+  showTranslationQueue?: boolean;
+}) {
   const { pathname } = useLocation();
   const { t } = useLang();
 
@@ -35,12 +39,16 @@ export function DocumentWorkspaceNav() {
       to: "/documents",
       icon: FileText,
     },
-    {
-      key: "translation-requests",
-      label: t.documents_translation_requests,
-      to: "/documents/translation-requests",
-      icon: Languages,
-    },
+    ...(showTranslationQueue
+      ? [
+          {
+            key: "translation-requests",
+            label: t.documents_translation_requests,
+            to: "/documents/translation-requests",
+            icon: Languages,
+          },
+        ]
+      : []),
   ];
 
   const currentKey = matchPath("/documents/intake", pathname)

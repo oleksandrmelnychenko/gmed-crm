@@ -1419,6 +1419,10 @@ export const de = {
   documents_request_translation: "Übersetzung anfordern",
   documents_no_translation_requests:
     "Für dieses Dokument sind noch keine Übersetzungsanfragen erfasst.",
+  documents_translation_queue_open: "Offen",
+  documents_translation_queue_all: "Alle Status",
+  documents_translation_queue_empty:
+    "Derzeit gibt es keine offenen Übersetzungsanfragen. Neue Anfragen erscheinen hier, sobald sie aus einer Dokumentakte erstellt werden oder ein Patient im Portal eine Übersetzung anfordert.",
   documents_source_language: "Ausgangssprache",
   documents_use_extracted_text: "Extrahierten Text übernehmen",
   documents_save_workspace: "Workspace speichern",
@@ -1478,7 +1482,7 @@ export const de = {
   documents_unknown_requester: "Unbekannter Anforderer",
   documents_translation_start: "Starten",
   documents_translation_complete: "Abschließen",
-  documents_translation_cancel: "Abbrechen",
+  documents_translation_cancel: "Anfrage abbrechen",
   documents_classification_category: "Dokumentkategorie",
   documents_choose_category: "Kategorie wählen",
   documents_review_notes: "Review-Notizen",

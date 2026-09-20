@@ -1416,6 +1416,10 @@ export const ru = {
   documents_request_translation: "Запросить перевод",
   documents_no_translation_requests:
     "Для этого документа ещё нет запросов на перевод.",
+  documents_translation_queue_open: "Открытые",
+  documents_translation_queue_all: "Все статусы",
+  documents_translation_queue_empty:
+    "Открытых запросов на перевод пока нет. Новые запросы появятся здесь, как только их создадут из карточки документа или пациент запросит перевод в портале.",
   documents_source_language: "Исходный язык",
   documents_use_extracted_text: "Подставить извлечённый текст",
   documents_save_workspace: "Сохранить рабочую область",
@@ -1476,7 +1480,7 @@ export const ru = {
   documents_unknown_requester: "Неизвестный запросивший",
   documents_translation_start: "Начать",
   documents_translation_complete: "Завершить",
-  documents_translation_cancel: "Отмена",
+  documents_translation_cancel: "Отменить запрос",
   documents_classification_category: "Категория документа",
   documents_choose_category: "Выберите категорию",
   documents_review_notes: "Заметки проверки",

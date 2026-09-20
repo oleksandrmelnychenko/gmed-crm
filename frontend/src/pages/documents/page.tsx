@@ -123,6 +123,7 @@ import {
   fetchDocuments,
   fetchPatientDocumentContext,
   fetchTranslationRequestQueue,
+  type TranslationQueueStatusFilter,
   fetchTranslationRequests,
   generateDocument,
   releaseDocumentToPortal,
@@ -145,6 +146,7 @@ import {
   canManageDocumentIntake,
   canManageDocuments,
   canRequestTranslations,
+  canViewTranslationQueue,
   canUpdateTranslations,
   canUploadDocuments,
   canViewDocumentShares,
@@ -1035,6 +1037,7 @@ function StaffDocumentsPage({
   const canManageIntake = canManageDocumentIntake(user?.role);
   const canRequestTranslation = canRequestTranslations(user?.role);
   const canUpdateTranslation = canUpdateTranslations(user?.role);
+  const canViewQueue = canViewTranslationQueue(user?.role);
   const canViewShares = canViewDocumentShares(user?.role);
 
   const [filters, setFilters] = useState<FiltersState>(() => ({
@@ -1131,6 +1134,7 @@ function StaffDocumentsPage({
   const [translationQueue, setTranslationQueue] = useState<TranslationRequest[]>([]);
   const [translationQueueBusy, setTranslationQueueBusy] = useState(false);
   const [translationQueueError, setTranslationQueueError] = useState("");
+  const [translationQueueStatus, setTranslationQueueStatus] = useState<TranslationQueueStatusFilter>("open");
   const [translationDrafts, setTranslationDrafts] = useState<
     Record<string, TranslationWorkspaceDraft>
   >({});
@@ -1670,7 +1674,7 @@ function StaffDocumentsPage({
   }, [canManageIntake, documentsFailedLoadIntakeQueueText, version]);
 
   useEffect(() => {
-    if (!canRequestTranslation && !canUpdateTranslation) {
+    if (!canViewQueue) {
       setTranslationQueue([]);
       setTranslationQueueBusy(false);
       setTranslationQueueError("");
@@ -1681,7 +1685,7 @@ function StaffDocumentsPage({
       setTranslationQueueBusy(true);
       setTranslationQueueError("");
       try {
-        const rows = await fetchTranslationRequestQueue();
+        const rows = await fetchTranslationRequestQueue(translationQueueStatus);
         if (!active) return;
         startTransition(() => setTranslationQueue(rows));
       } catch (nextError) {
@@ -1701,8 +1705,8 @@ function StaffDocumentsPage({
       active = false;
     };
   }, [
-    canRequestTranslation,
-    canUpdateTranslation,
+    canViewQueue,
+    translationQueueStatus,
     t.documents_failed_load_document,
     version,
   ]);
@@ -2746,7 +2750,7 @@ function StaffDocumentsPage({
         successMessage ??
           t.documents_translation_marked.replace(
             "{status}",
-            formatTranslationStatusLabel(status, t),
+            formatTranslationStatusLabel(status, t).toLocaleLowerCase(),
           ),
       );
     } catch (nextError) {
@@ -2784,7 +2788,7 @@ function StaffDocumentsPage({
       setNotice(
         t.documents_translation_marked.replace(
           "{status}",
-          formatTranslationStatusLabel(status, t),
+          formatTranslationStatusLabel(status, t).toLocaleLowerCase(),
         ),
       );
     } catch (nextError) {
@@ -3157,7 +3161,7 @@ function StaffDocumentsPage({
 
   return (
     <div className="space-y-4">
-      <DocumentWorkspaceNav />
+      <DocumentWorkspaceNav showTranslationQueue={canViewQueue} />
       {!embedDetailOnly ? (
         <>
       <PageHeader
@@ -3266,14 +3270,29 @@ function StaffDocumentsPage({
       ) : null}
 
       {isTranslationRequestsRoute &&
-      (canRequestTranslation || canUpdateTranslation) &&
+      canViewQueue &&
       (isTranslationRequestsRoute || translationQueueBusy || translationQueueError || translationQueue.length > 0) ? (
         <DocumentSection className={documentSectionClassName}>
           {translationQueueError ? <Banner tone="error">{translationQueueError}</Banner> : null}
+          <div className="mb-2 flex items-center justify-end">
+            <NativeComboboxSelect
+              aria-label={t.users_status}
+              value={translationQueueStatus}
+              onChange={(event) =>
+                setTranslationQueueStatus(event.target.value as TranslationQueueStatusFilter)
+              }
+              className={cn(selectClassName, "h-8 w-auto bg-background text-[13px]")}
+            >
+              <option value="open">{t.documents_translation_queue_open}</option>
+              <option value="completed">{t.documents_translation_completed}</option>
+              <option value="cancelled">{t.documents_translation_cancelled}</option>
+              <option value="all">{t.documents_translation_queue_all}</option>
+            </NativeComboboxSelect>
+          </div>
           <DocumentTranslationRequestsTable
             canUpdateTranslation={canUpdateTranslation}
             currentUserId={user?.id ?? null}
-            emptyText={t.documents_no_translation_requests}
+            emptyText={t.documents_translation_queue_empty}
             l={l}
             loading={translationQueueBusy}
             onOpenDocument={openDocument}
@@ -6630,7 +6649,7 @@ function StaffDocumentsPage({
                         </span>
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                           <span className="font-semibold tabular-nums text-amber-700">
-                            {translationRequests.filter((request) => request.status === "requested").length}
+                            {translationRequests.filter((request) => request.status === "pending").length}
                           </span>
                           {formatTranslationStatusLabel("requested", t)}
                         </span>
@@ -6989,7 +7008,7 @@ function StaffDocumentsPage({
                                               });
                                               void handleUpdateTranslationRequest(
                                                 request.id,
-                                                request.status === "pending" ? "in_progress" : request.status,
+                                                request.status === "pending" && assignedTo ? "in_progress" : request.status,
                                                 { assignedTo },
                                                 t.documents_assignee_updated,
                                                 { assignedTo },
@@ -7910,8 +7929,7 @@ function DocumentIntakeQueueTable({
         <span className="tabular-nums">
           {filteredCount === totalCount
             ? `${totalCount}`
-            : `${filteredCount} / ${totalCount}`}{" "}
-          {t.documents_pending}
+            : `${filteredCount} / ${totalCount}`}
         </span>
       )}
     />
@@ -8178,8 +8196,7 @@ function DocumentTranslationRequestsTable({
         <span className="tabular-nums">
           {filteredCount === totalCount
             ? `${totalCount}`
-            : `${filteredCount} / ${totalCount}`}{" "}
-          {t.documents_pending}
+            : `${filteredCount} / ${totalCount}`}
         </span>
       )}
     />
