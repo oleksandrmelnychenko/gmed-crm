@@ -33,6 +33,12 @@ export function AuthenticatedAppShell() {
     );
   }
 
+  // A forced password change confines the session to the gate page; every
+  // other API call would answer 403 `password_change_required` anyway.
+  if (user.password_change_required) {
+    return <Navigate to="/account/password-required" replace />;
+  }
+
   if (user.role === "patient" && !canAccessPatientPortalRoute(location.pathname)) {
     return <Navigate to="/" replace />;
   }

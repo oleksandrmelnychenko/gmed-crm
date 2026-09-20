@@ -13,6 +13,9 @@ const CLIENT_API_ORIGIN =
 const API_PREFIX = "/api/v1";
 const AUTH_REFRESH_LOCK_NAME = "gmed-auth-refresh";
 export const AUTH_SESSION_EXPIRED_EVENT = "gmed:auth-session-expired";
+// Raised when the API answers 403 `password_change_required`: the session is
+// valid but confined to the password-change endpoints (see auth middleware).
+export const AUTH_PASSWORD_CHANGE_REQUIRED_EVENT = "gmed:auth-password-change-required";
 export const DEFAULT_API_TIMEOUT_MS = 20_000;
 
 type ApiErrorBody = {
@@ -105,6 +108,13 @@ export function getAccessTokenExpiresAtMs(token = getAccessToken()) {
     return null;
   }
   return exp * 1000;
+}
+
+function dispatchPasswordChangeRequired() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+  window.dispatchEvent(new Event(AUTH_PASSWORD_CHANGE_REQUIRED_EVENT));
 }
 
 function dispatchAuthSessionExpired() {
@@ -489,6 +499,9 @@ async function readApiJsonResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await readApiErrorBody(res);
     const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
+    if (res.status === 403 && body?.error === "password_change_required") {
+      dispatchPasswordChangeRequired();
+    }
     if (res.status === 429) {
       throw new ApiRequestError(
         message || uiText("api_rate_limited"),

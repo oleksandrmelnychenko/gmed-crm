@@ -14,10 +14,24 @@ export function fetchTotpStatus() {
 }
 
 /**
+ * Standalone page kept as an alias of the "Two-factor" section on /account.
+ */
+export function TwoFactorPage() {
+  const { t } = useLang();
+  const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
+  return (
+    <div className="space-y-4">
+      <PageHeader title={l("twofactor_title")} description={l("twofactor_subtitle")} />
+      <TwoFactorSection />
+    </div>
+  );
+}
+
+/**
  * Self-service enrolment of an authenticator app. No QR library is bundled;
  * the otpauth link opens the app directly and the manual key covers the rest.
  */
-export function TwoFactorPage() {
+export function TwoFactorSection() {
   const { t } = useLang();
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
   const [status, setStatus] = useState<TotpStatus | null>(null);
@@ -90,8 +104,7 @@ export function TwoFactorPage() {
   );
 
   return (
-    <div className="space-y-4">
-      <PageHeader title={l("twofactor_title")} description={l("twofactor_subtitle")} />
+    <div className="space-y-4" data-testid="twofactor-section">
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}
       {status?.required && !status.enrolled ? (

@@ -167,8 +167,8 @@ export function LoginPage() {
 
     dispatchLoginState({ loading: true });
     try {
-      await login(email.trim(), password);
-      navigate(redirectTo, { replace: true });
+      const me = await login(email.trim(), password);
+      navigate(me.password_change_required ? "/account/password-required" : redirectTo, { replace: true });
     } catch (err) {
       if (err instanceof TotpRequiredError) {
         dispatchLoginState({ totpChallenge: err.challengeId, totpCode: "" });
@@ -203,8 +203,8 @@ export function LoginPage() {
     if (!totpChallenge) return;
     dispatchLoginState({ loading: true, error: "" });
     try {
-      await completeTotp(totpChallenge, totpCode);
-      navigate(redirectTo, { replace: true });
+      const me = await completeTotp(totpChallenge, totpCode);
+      navigate(me.password_change_required ? "/account/password-required" : redirectTo, { replace: true });
     } catch (err) {
       // An expired or exhausted challenge sends the person back to the password.
       if (err instanceof AuthLoginError && err.code === "unauthorized" && err.message !== "The code does not match") {

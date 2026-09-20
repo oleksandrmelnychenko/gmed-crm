@@ -47,6 +47,7 @@ export const de = {
   nav_my_subscriptions: "Meine Abonnements",
   nav_my_invoices: "Meine Rechnungen",
   nav_my_privacy: "Datenschutz",
+  nav_account: "Konto",
   nav_my_feedback: "Mein Feedback",
   nav_feedback: "Feedback",
   nav_reports: "Berichte",

@@ -47,6 +47,7 @@ export const ru = {
   nav_my_subscriptions: "Мои подписки",
   nav_my_invoices: "Мои счета",
   nav_my_privacy: "Конфиденциальность",
+  nav_account: "Аккаунт",
   nav_my_feedback: "Мои отзывы",
   nav_feedback: "Отзывы",
   nav_reports: "Отчеты",

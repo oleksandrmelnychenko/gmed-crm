@@ -219,7 +219,7 @@ describe("first-release staff RBAC", () => {
     expect(ceo).toContain("/projects");
 
     expect(listStaffNavItems("it_admin").map((item) => item.to)).toEqual([
-      "/security/two-factor",
+      "/account",
       "/incidents",
       "/admin/signatures",
       "/chat",
@@ -283,6 +283,7 @@ describe("patient portal routes", () => {
       "/invoices",
       "/feedback",
       "/privacy",
+      "/account",
       "/legal",
     ]);
   });

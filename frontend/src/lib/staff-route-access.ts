@@ -251,11 +251,18 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     nav: { section: "security", labelKey: "nav_security" },
   },
   {
+    id: "account",
+    match: "exact",
+    path: "/account",
+    roles: ALL_STAFF_ROLES,
+    nav: { section: "security", labelKey: "nav_account" },
+  },
+  // Alias of the two-factor section on /account; kept for old links, no nav item.
+  {
     id: "security/two-factor",
     match: "exact",
     path: "/security/two-factor",
     roles: ALL_STAFF_ROLES,
-    nav: { section: "security", labelKey: "nav_two_factor" },
   },
   {
     id: "admin/compliance",
@@ -534,6 +541,7 @@ const PATIENT_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
   { id: "invoices", to: "/invoices", labelKey: "nav_my_invoices" },
   { id: "feedback", to: "/feedback", labelKey: "nav_my_feedback" },
   { id: "privacy", to: "/privacy", labelKey: "nav_my_privacy" },
+  { id: "account", to: "/account", labelKey: "nav_account" },
   { id: "legal", to: "/legal", labelKey: "nav_legal_notice" },
 ] as const;
 

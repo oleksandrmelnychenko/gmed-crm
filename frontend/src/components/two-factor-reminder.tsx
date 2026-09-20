@@ -35,7 +35,7 @@ export function TwoFactorReminder() {
     };
   }, [user, location.pathname]);
 
-  if (!missing || location.pathname === "/security/two-factor") return null;
+  if (!missing || location.pathname === "/account" || location.pathname === "/security/two-factor") return null;
 
   return (
     <div
@@ -44,7 +44,7 @@ export function TwoFactorReminder() {
       className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900"
     >
       <span>{t.uiText.twofactor_required_banner}</span>
-      <StaffLink to="/security/two-factor" className="font-medium underline">
+      <StaffLink to="/account" className="font-medium underline">
         {t.uiText.twofactor_required_link}
       </StaffLink>
     </div>

@@ -108,6 +108,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   subscriptions: PackageCheck,
   privacy: Shield,
   incidents: ShieldAlert,
+  account: UserCog,
   "security/two-factor": KeyRound,
   cases: FileHeart,
   appointments: CalendarClock,

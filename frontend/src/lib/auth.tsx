@@ -1,6 +1,7 @@
-import { createContext, use, useEffect, useReducer, type ReactNode } from "react";
+import { createContext, use, useCallback, useEffect, useReducer, type ReactNode } from "react";
 
 import {
+  AUTH_PASSWORD_CHANGE_REQUIRED_EVENT,
   AUTH_SESSION_EXPIRED_EVENT,
   buildApiUrl,
   clearApiCache,
@@ -16,7 +17,7 @@ import {
   persistAuthTokens,
 } from "@/lib/auth-storage";
 import { resolveIdleLogoutMinutes, useIdleLogout } from "@/lib/idle-logout";
-import { uiText } from "@/lib/i18n";
+import { getLang, uiText, useLang, type Lang } from "@/lib/i18n";
 import { clearSecurePersistedState } from "@/lib/secure-persist";
 
 export interface User {
@@ -25,14 +26,20 @@ export interface User {
   name: string;
   role: string;
   created_at: string;
+  phone?: string | null;
+  preferred_language?: Lang | null;
+  /// Set after an admin-forced reset or password expiry: only /account/password-required is usable.
+  password_change_required?: boolean;
 }
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
-  completeTotp: (challengeId: string, code: string) => Promise<void>;
+  completeTotp: (challengeId: string, code: string) => Promise<User>;
+  /** Re-read /me (after a profile or password change). */
+  refreshUser: () => Promise<User | null>;
   checkPending: (pendingId: string) => Promise<PendingLoginStatus>;
 }
 
@@ -203,6 +210,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     createAuthState,
   );
   const { user, loading } = authState;
+  const { setLang } = useLang();
+
+  // The language saved on the profile wins over the browser default once the
+  // account is known; a later manual toggle is kept until the next sign-in.
+  const applyPreferredLanguage = useCallback(
+    (me: User | null) => {
+      const preferred = me?.preferred_language;
+      if ((preferred === "ru" || preferred === "de") && preferred !== getLang()) {
+        setLang(preferred);
+      }
+    },
+    [setLang],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -235,6 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!cancelled) {
+        applyPreferredLanguage(nextUser);
         dispatchAuthState({ user: nextUser, loading: false });
       }
     }
@@ -243,6 +264,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true;
+    };
+  }, [applyPreferredLanguage]);
+
+  useEffect(() => {
+    const handlePasswordChangeRequired = () => {
+      dispatchAuthState((current) =>
+        current.user && !current.user.password_change_required
+          ? { user: { ...current.user, password_change_required: true } }
+          : {},
+      );
+    };
+
+    window.addEventListener(AUTH_PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
+    return () => {
+      window.removeEventListener(AUTH_PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
     };
   }, []);
 
@@ -371,7 +407,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     await saveTokens(result);
     const me = await fetchMe(result.access_token);
+    applyPreferredLanguage(me);
     dispatchAuthState({ user: me });
+    return me;
   };
 
   // Second step of a sign-in: the authenticator code answers the challenge.
@@ -382,7 +420,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     await saveTokens(result);
     const me = await fetchMe(result.access_token);
+    applyPreferredLanguage(me);
     dispatchAuthState({ user: me });
+    return me;
+  };
+
+  const refreshUser = async () => {
+    const accessToken = getAccessToken();
+    if (!accessToken) return null;
+    clearApiCache("/me");
+    const me = await fetchMe(accessToken);
+    dispatchAuthState({ user: me });
+    return me;
   };
 
   const checkPending = async (pendingId: string): Promise<PendingLoginStatus> => {
@@ -394,6 +443,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (result.status === "approved" && result.access_token && result.refresh_token) {
         await saveTokens({ access_token: result.access_token, refresh_token: result.refresh_token, token_type: "Bearer", expires_in: 900 });
         const me = await fetchMe(result.access_token);
+        applyPreferredLanguage(me);
         dispatchAuthState({ user: me });
         return "approved";
       }
@@ -432,7 +482,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, completeTotp, checkPending }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, completeTotp, checkPending, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

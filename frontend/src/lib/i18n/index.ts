@@ -56,6 +56,7 @@ export interface Translations
   nav_my_subscriptions: string;
   nav_my_invoices: string;
   nav_my_privacy: string;
+  nav_account: string;
   nav_my_feedback: string;
   nav_feedback: string;
   nav_reports: string;
