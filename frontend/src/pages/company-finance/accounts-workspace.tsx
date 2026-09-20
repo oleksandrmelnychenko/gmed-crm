@@ -611,27 +611,27 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
               <p className="mt-2 text-[11px] text-muted-foreground">
                 {formatDate(account.opening_balance_on, locale)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
               </p>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-3">
                 <Button type="button" size="xs" variant="outline" disabled={!account.is_active} onClick={() => {
                   setAdjustError(null);
                   setAdjustAccount(account);
                 }}>
                   {text.addAdjustment}
                 </Button>
-                {!account.is_default && account.is_active ? (
-                  <Button type="button" size="xs" variant="ghost" disabled={defaultBusyId === account.id} onClick={() => void handleMakeDefault(account)}>
-                    {defaultBusyId === account.id ? <RefreshCw className="animate-spin" /> : null}
-                    {text.makeDefault}
+                <div className="flex shrink-0 items-center gap-0.5">
+                  {!account.is_default && account.is_active ? (
+                    <Button type="button" size="xs" variant="ghost" className="mr-1" disabled={defaultBusyId === account.id} onClick={() => void handleMakeDefault(account)}>
+                      {defaultBusyId === account.id ? <RefreshCw className="animate-spin" /> : null}
+                      {text.makeDefault}
+                    </Button>
+                  ) : null}
+                  <Button type="button" size="icon-xs" variant="ghost" aria-label={text.edit} title={text.edit} onClick={() => openEditDialog(account)}>
+                    <Pencil />
                   </Button>
-                ) : null}
-                <Button type="button" size="xs" variant="ghost" onClick={() => openEditDialog(account)}>
-                  <Pencil />
-                  {text.edit}
-                </Button>
-                <Button type="button" size="xs" variant="ghost" className="text-destructive" onClick={() => { setDeleteError(null); setDeleteAccount(account); }}>
-                  <Trash2 />
-                  {text.delete}
-                </Button>
+                  <Button type="button" size="icon-xs" variant="ghost" className="text-destructive hover:text-destructive" aria-label={text.delete} title={text.delete} onClick={() => { setDeleteError(null); setDeleteAccount(account); }}>
+                    <Trash2 />
+                  </Button>
+                </div>
               </div>
             </article>
           );
