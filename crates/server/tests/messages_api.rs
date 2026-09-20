@@ -265,7 +265,7 @@ async fn any_role_can_list_conversations() {
         "interpreter",
         "billing",
         "concierge",
-        "it_admin",
+        "sales",
     ] {
         let (status, body) = json_request(
             &app,
@@ -282,6 +282,17 @@ async fn any_role_can_list_conversations() {
         );
         assert!(body.is_array(), "role {role} should get array");
     }
+
+    // The technical admin has no chat workspace (no `chat.use` capability).
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/messages/conversations",
+        &app.auth_header("it_admin"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

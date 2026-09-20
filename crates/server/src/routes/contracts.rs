@@ -16,6 +16,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -731,14 +732,11 @@ async fn audit(
 }
 
 fn can_read_contracts(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    )
+    role.can(Capability::ContractsView)
 }
 
 fn can_manage_contracts(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::PatientManager | Role::Billing)
+    role.can(Capability::ContractsEdit)
 }
 
 async fn list_agency_services(

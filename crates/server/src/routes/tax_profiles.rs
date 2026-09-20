@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -52,14 +53,11 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 fn can_read_tax_profiles(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    )
+    role.can(Capability::InvoicesView)
 }
 
 fn can_manage_tax_profiles(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::CompanyFinanceEdit)
 }
 
 fn decimal_to_string(value: Decimal) -> String {

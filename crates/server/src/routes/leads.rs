@@ -19,6 +19,7 @@ use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
 use crate::file_sniff::validate_upload_magic_bytes;
 use crate::routes::documents::{NewStoredDocument, persist_document_file};
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
@@ -320,7 +321,7 @@ async fn list_lead_referrer_patients(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ReferrerPatientsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
     }
 
@@ -372,7 +373,7 @@ async fn list_leads(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListLeadsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsView) {
         return e;
     }
 
@@ -2007,7 +2008,7 @@ async fn list_repeat_intakes(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
-    auth.require_any_role(&[Role::PatientManager])?;
+    auth.require_capability(Capability::LeadsConvert)?;
     require_repeat_patient_access(&state, &auth, patient_id).await?;
     let rows = sqlx::query("SELECT id,created_at,updated_at,primary_concern_text FROM leads WHERE repeat_patient_id=$1 AND converted_patient_id IS NULL AND failed_outcome_status='none' ORDER BY updated_at DESC,id")
         .bind(patient_id).fetch_all(&state.db).await.map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load repeat intakes"))?;
@@ -2020,7 +2021,7 @@ async fn create_repeat_intake(
     patient: Uuid,
     key: Option<Uuid>,
 ) -> Result<Uuid, axum::response::Response> {
-    auth.require_any_role(&[Role::PatientManager])?;
+    auth.require_capability(Capability::LeadsConvert)?;
     require_repeat_patient_access(state, auth, patient).await?;
     let key =
         key.ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "Creation key is required"))?;
@@ -2123,7 +2124,7 @@ async fn create_lead(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateLeadRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
     }
 
@@ -2285,7 +2286,7 @@ async fn get_lead(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsView) {
         return e;
     }
 
@@ -2779,7 +2780,7 @@ async fn update_lead(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<UpdateLeadRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
     }
 
@@ -3246,7 +3247,7 @@ async fn promote_lead_to_console(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
     }
 
@@ -3389,7 +3390,7 @@ async fn qualify_lead(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<QualifyRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
     }
 
@@ -3852,7 +3853,7 @@ async fn import_lead_attachments(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Sales]) {
+    if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
 
@@ -4004,7 +4005,7 @@ async fn create_prospect_patient(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<ProspectRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsConvert) {
         return e;
     }
 
@@ -4588,7 +4589,7 @@ async fn convert_lead(
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsConvert) {
         return e;
     }
 
@@ -5688,7 +5689,7 @@ async fn resolve_failed_lead(
     Path(lead_id): Path<Uuid>,
     Json(body): Json<FailedLeadResolutionRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Ceo]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
     }
 
@@ -5959,7 +5960,7 @@ async fn download_attachment(
     Extension(auth): Extension<AuthUser>,
     Path((lead_id, attachment_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]) {
+    if let Err(e) = auth.require_capability(Capability::LeadsView) {
         return e;
     }
 

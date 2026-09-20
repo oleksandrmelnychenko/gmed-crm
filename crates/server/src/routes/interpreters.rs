@@ -23,6 +23,7 @@ use crate::routes::documents::{
 use crate::services::interpreter_suggestions::load_appointment_interpreter_suggestions;
 use crate::state::AppState;
 use crate::{access, audit};
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -99,12 +100,7 @@ async fn list_interpreter_profiles(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListInterpreterProfilesQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::InterpretersView) {
         return resp;
     }
 
@@ -275,12 +271,7 @@ async fn create_standalone_interpreter_profile(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateStandaloneInterpreterProfile>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::InterpretersView) {
         return resp;
     }
 
@@ -1384,16 +1375,12 @@ async fn ensure_interpreter_profile_access(
     let allowed = if write {
         matches!(
             auth.role,
-            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter | Role::ItAdmin
+            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter
         )
     } else {
         matches!(
             auth.role,
-            Role::Ceo
-                | Role::PatientManager
-                | Role::TeamleadInterpreter
-                | Role::ItAdmin
-                | Role::Interpreter
+            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter | Role::Interpreter
         ) && (auth.role != Role::Interpreter || auth.user_id == interpreter_id)
     };
 

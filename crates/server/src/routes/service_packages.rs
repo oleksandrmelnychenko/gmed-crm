@@ -19,6 +19,7 @@ use crate::access;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -146,18 +147,15 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 fn can_read_packages(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    )
+    role.can(Capability::InvoicesView)
 }
 
 fn can_manage_package_catalog(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::CompanyFinanceEdit)
 }
 
 fn can_manage_patient_packages(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::PatientManager | Role::Billing)
+    role.can(Capability::InvoicesCreate)
 }
 
 fn is_valid_patient_package_status(value: &str) -> bool {

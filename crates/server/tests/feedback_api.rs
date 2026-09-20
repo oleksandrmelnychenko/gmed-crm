@@ -314,20 +314,20 @@ async fn billing_sales_and_interpreter_cannot_open_feedback_workspace() {
 }
 
 #[tokio::test]
-async fn it_admin_can_open_feedback_workspace() {
+async fn it_admin_cannot_open_feedback_workspace() {
     let Some(ctx) = test_context().await else {
         return;
     };
     let app = ctx.router();
     let pool = ctx.pool();
-    let user_id = seed_user(pool, &unique_tag("feedback-it-admin-full"), "it_admin").await;
+    let user_id = seed_user(pool, &unique_tag("feedback-it-admin-denied"), "it_admin").await;
     let bearer = auth_header_for(user_id, "it_admin");
 
     let (status, _) = json_request(&app, "GET", "/api/v1/feedback", &bearer, None).await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::FORBIDDEN);
 
     let (status, _) = json_request(&app, "GET", "/api/v1/feedback/summary", &bearer, None).await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

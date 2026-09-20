@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -99,7 +100,7 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 fn can_manage_company_accounts(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::CompanyFinanceEdit)
 }
 
 fn decimal_to_string(value: Decimal) -> String {

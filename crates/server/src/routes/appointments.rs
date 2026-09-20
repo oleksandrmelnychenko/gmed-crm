@@ -16,6 +16,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
@@ -1562,14 +1563,7 @@ async fn list_appointments(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListAppointmentsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_capability(Capability::AppointmentsView) {
         return e;
     }
 
@@ -1734,14 +1728,7 @@ async fn list_attention_items(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListAppointmentsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_capability(Capability::AppointmentsView) {
         return e;
     }
 
@@ -2131,7 +2118,6 @@ async fn list_interpreters(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ])?;
 
     match sqlx::query(
@@ -2175,7 +2161,6 @@ async fn list_staff(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ])?;
 
     match sqlx::query(
@@ -2228,13 +2213,12 @@ async fn get_conflicts(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
 
     if let Err(resp) = ensure_patient_access(&state, &auth, query.patient_id).await
-        && !matches!(auth.role, Role::Ceo | Role::ItAdmin)
+        && !matches!(auth.role, Role::Ceo)
     {
         return resp;
     }
@@ -2289,7 +2273,6 @@ async fn create_appointment(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -3650,7 +3633,6 @@ async fn get_appointment(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -3772,7 +3754,7 @@ async fn delete_appointment(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
 
@@ -4104,7 +4086,6 @@ async fn update_appointment(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -5217,7 +5198,7 @@ async fn update_status(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<StatusUpdate>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -5607,12 +5588,9 @@ async fn assign_interpreter(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<AssignInterpreter>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
+    {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -5877,12 +5855,7 @@ async fn list_checklist(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -5910,12 +5883,7 @@ async fn add_checklist_item(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<ChecklistItem>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -6023,12 +5991,7 @@ async fn complete_checklist(
     Extension(auth): Extension<AuthUser>,
     Path((apt_id, item_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge]) {
         return e;
     }
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
@@ -6117,7 +6080,6 @@ async fn list_reminders(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6168,7 +6130,7 @@ async fn add_reminder(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<CreateReminder>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -6248,7 +6210,6 @@ async fn complete_reminder(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6306,7 +6267,6 @@ async fn list_communications(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6385,7 +6345,6 @@ async fn create_communication(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -6545,7 +6504,6 @@ async fn update_communication_status(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -7230,7 +7188,6 @@ async fn get_report(
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
-        Role::ItAdmin,
     ]) {
         return e;
     }
@@ -7332,12 +7289,9 @@ async fn approve_report(
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::TeamleadInterpreter,
-        Role::PatientManager,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) =
+        auth.require_any_role(&[Role::Ceo, Role::TeamleadInterpreter, Role::PatientManager])
+    {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -7454,12 +7408,9 @@ async fn reject_report(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<RejectReport>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::TeamleadInterpreter,
-        Role::PatientManager,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) =
+        auth.require_any_role(&[Role::Ceo, Role::TeamleadInterpreter, Role::PatientManager])
+    {
         return e;
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
@@ -7650,11 +7601,7 @@ async fn ensure_appointment_communication_access(
     if manage
         && !matches!(
             auth.role,
-            Role::Ceo
-                | Role::PatientManager
-                | Role::TeamleadInterpreter
-                | Role::Concierge
-                | Role::ItAdmin
+            Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
         )
     {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -8639,7 +8586,7 @@ fn validate_owner_assignment_rules(
     owner_role: &str,
 ) -> Result<(), axum::response::Response> {
     match auth.role {
-        Role::Ceo | Role::PatientManager | Role::ItAdmin => Ok(()),
+        Role::Ceo | Role::PatientManager => Ok(()),
         Role::TeamleadInterpreter => {
             if owner_user_id == auth.user_id
                 || matches!(owner_role, "interpreter" | "teamlead_interpreter")
@@ -8668,7 +8615,7 @@ fn validate_owner_assignment_rules(
 
 fn resolve_owner_user_id_for_write(auth: &AuthUser, owner_user_id: Option<Uuid>) -> Option<Uuid> {
     owner_user_id.or(match auth.role {
-        Role::TeamleadInterpreter | Role::Concierge | Role::ItAdmin => Some(auth.user_id),
+        Role::TeamleadInterpreter | Role::Concierge => Some(auth.user_id),
         _ => None,
     })
 }
@@ -9395,7 +9342,7 @@ async fn ensure_patient_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::ItAdmin) {
+    if matches!(auth.role, Role::Ceo) {
         return Ok(());
     }
 
@@ -9542,9 +9489,7 @@ async fn ensure_appointment_order_link_allowed(
                 "Order does not belong to patient",
             ));
         }
-    } else if !matches!(auth.role, Role::Ceo | Role::ItAdmin)
-        && access::requires_patient_assignment(auth.role)
-    {
+    } else if !matches!(auth.role, Role::Ceo) && access::requires_patient_assignment(auth.role) {
         let assigned = access::has_active_patient_assignment(&state.db, order_patient_id, auth.user_id)
             .await
             .map_err(|e| {

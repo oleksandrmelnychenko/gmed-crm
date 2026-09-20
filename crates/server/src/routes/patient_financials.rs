@@ -16,6 +16,7 @@ use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use crate::{access, audit};
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -90,18 +91,15 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 fn can_read_patient_financials(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    )
+    role.can(Capability::InvoicesView)
 }
 
 fn can_read_profit_margin(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::InvoicesFinance)
 }
 
 fn can_manage_patient_balance(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::InvoicesFinance)
 }
 
 async fn ensure_patient_access(

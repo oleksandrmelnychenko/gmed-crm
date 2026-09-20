@@ -13,6 +13,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
@@ -466,7 +467,7 @@ async fn list_orders(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListOrdersQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+    if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
 

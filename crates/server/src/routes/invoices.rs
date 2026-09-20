@@ -27,6 +27,7 @@ use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show
 use crate::routes::me::resolve_self_patient_id;
 use crate::services::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 mod zugferd;
@@ -507,26 +508,23 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 }
 
 fn can_read_invoices(role: Role) -> bool {
-    matches!(
-        role,
-        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
-    )
+    role.can(Capability::InvoicesView)
 }
 
 fn can_create_invoices(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::PatientManager | Role::Billing)
+    role.can(Capability::InvoicesCreate)
 }
 
 fn can_manage_invoice_finance(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::InvoicesFinance)
 }
 
 fn can_manage_invoice_visibility(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::Billing)
+    role.can(Capability::InvoicesVisibility)
 }
 
 fn can_read_accounting_ledger(role: Role) -> bool {
-    matches!(role, Role::Ceo | Role::CeoAssistant | Role::Billing)
+    role.can(Capability::AccountingView)
 }
 
 fn normalize_invoice_list_page(page: Option<usize>) -> Result<usize, &'static str> {

@@ -15,6 +15,7 @@ use sqlx::Row;
 
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -249,13 +250,7 @@ async fn overview(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = auth.require_capability(Capability::ReportsView) {
         return e;
     }
 
@@ -451,14 +446,7 @@ async fn reports_workspace(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ReportsWorkspaceQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::Billing,
-        Role::Sales,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::ReportsView) {
         return resp;
     }
 
@@ -695,14 +683,7 @@ async fn reports_export(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ReportsExportQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::Billing,
-        Role::Sales,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::ReportsView) {
         return resp;
     }
 

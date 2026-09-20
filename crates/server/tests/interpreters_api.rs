@@ -433,7 +433,7 @@ async fn interpreter_profile_rejects_invalid_structured_values() {
 }
 
 #[tokio::test]
-async fn it_admin_can_manage_interpreter_profiles() {
+async fn it_admin_cannot_manage_interpreter_profiles() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
     };
@@ -451,13 +451,7 @@ async fn it_admin_can_manage_interpreter_profiles() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body:?}");
-    assert!(
-        body.as_array()
-            .unwrap()
-            .iter()
-            .any(|item| item["id"] == interpreter_id.to_string())
-    );
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
 
     let (status, body) = json_request(
         &app,
@@ -475,21 +469,7 @@ async fn it_admin_can_manage_interpreter_profiles() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body:?}");
-    assert_eq!(body["profile"]["status"], "training");
-    assert_eq!(body["profile"]["contractType"], "hourly");
-    assert_eq!(body["profile"]["access"]["autoBlockPolicy"], "immediate");
-
-    let (status, body) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/interpreters/{interpreter_id}/profile"),
-        &it_admin_bearer,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body:?}");
-    assert_eq!(body["profile"]["status"], "training");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
 }
 
 #[tokio::test]

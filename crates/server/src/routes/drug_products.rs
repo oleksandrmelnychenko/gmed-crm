@@ -673,7 +673,7 @@ fn require_staff_drug_access(auth: &AuthUser) -> Result<(), axum::response::Resp
 }
 
 fn require_patient_drug_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
-    auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
+    auth.require_any_role(&[Role::PatientManager, Role::Ceo])
 }
 
 async fn ensure_patient_access(

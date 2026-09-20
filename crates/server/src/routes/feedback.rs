@@ -18,6 +18,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -218,14 +219,7 @@ async fn list_feedback(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<FeedbackListQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::FeedbackView) {
         return resp;
     }
 
@@ -248,7 +242,7 @@ async fn create_staff_feedback(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateFeedbackRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(resp) = auth.require_capability(Capability::FeedbackCapture) {
         return resp;
     }
 
@@ -291,14 +285,7 @@ async fn get_feedback_summary(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<FeedbackListQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::FeedbackView) {
         return resp;
     }
 
@@ -595,14 +582,7 @@ async fn review_feedback(
     Path(feedback_id): Path<Uuid>,
     Json(body): Json<ReviewFeedbackRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::FeedbackView) {
         return resp;
     }
 

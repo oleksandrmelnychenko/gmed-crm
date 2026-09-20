@@ -334,7 +334,7 @@ async fn list_cases(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListCasesQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -464,7 +464,7 @@ async fn list_case_text_snippets(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -514,7 +514,7 @@ async fn create_case_text_snippet(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CaseTextSnippetRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -588,7 +588,7 @@ async fn update_case_text_snippet(
     Path(snippet_id): Path<Uuid>,
     Json(body): Json<CaseTextSnippetRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -663,7 +663,7 @@ async fn create_case(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<CreateCaseRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -871,7 +871,7 @@ async fn get_case_full(
     Extension(auth): Extension<AuthUser>,
     Path(case_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -1185,7 +1185,7 @@ async fn list_case_doctors(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
 
@@ -1262,7 +1262,7 @@ async fn update_anamnesis(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<UpdateAnamnesisRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -1332,8 +1332,7 @@ async fn update_intake_completion(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<UpdateIntakeCompletionRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
-    {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return response;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -1458,8 +1457,7 @@ async fn update_case_status(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<UpdateCaseStatusRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])
-    {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return response;
     }
     if !is_valid_case_status(&body.status) {
@@ -1582,7 +1580,7 @@ async fn require_patient_clinical_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin])?;
+    auth.require_any_role(&[Role::PatientManager, Role::Ceo])?;
     let exists =
         sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
             .bind(patient_id)
@@ -1920,7 +1918,7 @@ async fn save_pain_records(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<ItemsWrapper<PainItem>>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2018,7 +2016,7 @@ async fn save_symptome(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<ItemsWrapper<SymptomItem>>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2092,7 +2090,7 @@ async fn save_cardiology(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<CardiologyAssessmentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2180,7 +2178,7 @@ async fn save_gastroenterology(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<GastroenterologyAssessmentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2282,7 +2280,7 @@ async fn save_orthopedics(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<OrthopedicsAssessmentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2366,7 +2364,7 @@ async fn save_neurology(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<NeurologyAssessmentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2452,7 +2450,7 @@ async fn save_pulmonology(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<PulmonologyAssessmentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2538,7 +2536,7 @@ async fn save_urology(
     Path(case_uuid): Path<Uuid>,
     Json(body): Json<UrologyAssessmentRequest>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {
@@ -2624,7 +2622,7 @@ async fn get_case_history(
     Path(case_uuid): Path<Uuid>,
     Query(query): Query<CaseHistoryQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo, Role::ItAdmin]) {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
         return e;
     }
     match can_access_case(&state, &auth, case_uuid, None).await {

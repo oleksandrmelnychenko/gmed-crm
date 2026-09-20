@@ -19,6 +19,7 @@ use crate::routes::documents::{
     load_document_acl_candidates,
 };
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::access::resource_access::{
     AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
 };
@@ -2182,16 +2183,7 @@ async fn list_patients(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListQuery>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::Billing,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ])?;
+    auth.require_capability(Capability::PatientsView)?;
 
     let active_only = query.active_only.unwrap_or(true);
     let search = query.search.unwrap_or_default();
@@ -2251,7 +2243,7 @@ async fn list_patients(
             }
         }
         match auth.role {
-            Role::PatientManager | Role::Ceo | Role::ItAdmin => {}
+            Role::PatientManager | Role::Ceo => {}
             _ => {
                 return Err(err(
                     StatusCode::FORBIDDEN,
@@ -2541,16 +2533,7 @@ async fn get_patient(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::Billing,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::ItAdmin,
-    ])?;
+    auth.require_capability(Capability::PatientsView)?;
 
     match sqlx::query(
         r#"SELECT id, patient_id, title, first_name, last_name,
@@ -6193,7 +6176,7 @@ async fn activate_patient_portal_account(
     Path(patient_uuid): Path<Uuid>,
     Json(body): Json<ActivatePatientPortalAccountRequest>,
 ) -> Result<(StatusCode, Json<Value>), axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin])?;
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
 
     if !has_patient_edit_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -6548,7 +6531,6 @@ async fn list_assignments(
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
-        Role::ItAdmin,
     ])?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? && auth.role != Role::Ceo {
@@ -9106,11 +9088,8 @@ async fn get_patient_timeline(
     // Clinical-record activity (from the audit log) is only woven into the timeline
     // for the roles that can actually open the clinical profile, so it is never
     // surfaced to billing / interpreter / concierge who cannot see clinical data.
-    let can_view_clinical = matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin);
-    let can_view_financial = matches!(
-        auth.role,
-        Role::Ceo | Role::PatientManager | Role::Billing | Role::ItAdmin
-    );
+    let can_view_clinical = matches!(auth.role, Role::Ceo | Role::PatientManager);
+    let can_view_financial = matches!(auth.role, Role::Ceo | Role::PatientManager | Role::Billing);
     const CLINICAL_TIMELINE_BRANCH: &str = r#"
             UNION ALL
 
@@ -10656,7 +10635,7 @@ fn insert_clinical_warnings_field(
     policies: &HashMap<String, FieldPolicy>,
     clinical_warnings: Option<String>,
 ) {
-    if !matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin) {
+    if !matches!(auth.role, Role::Ceo | Role::PatientManager) {
         return;
     }
 

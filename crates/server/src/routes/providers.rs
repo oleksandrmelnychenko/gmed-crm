@@ -16,6 +16,7 @@ use crate::access::{resolve_explicit_resource_access, role_db_name};
 use crate::audit::{self as audit_mod};
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::access::resource_access::{
     AccessCapability, ResourceAccessDecision, ResourceAccessRequest, ResourceType,
 };
@@ -766,17 +767,7 @@ async fn list_providers(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListProvidersQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        // Interpreters attend appointments at these clinics and need the names.
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_capability(Capability::ProvidersView) {
         return e;
     }
 
@@ -1811,14 +1802,7 @@ async fn list_providers_by_specializations(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListProvidersBySpecializationsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = auth.require_capability(Capability::ProvidersView) {
         return e;
     }
 

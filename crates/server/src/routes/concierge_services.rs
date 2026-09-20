@@ -14,6 +14,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub fn router() -> Router<AppState> {
@@ -815,12 +816,7 @@ async fn list_concierge_services(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListConciergeServicesQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-    ]) {
+    if let Err(e) = auth.require_capability(Capability::ServicesView) {
         return e;
     }
 

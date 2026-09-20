@@ -44,6 +44,7 @@ use crate::{
 };
 use gmed_domain::{
     access::{
+        capabilities::Capability,
         data_sensitivity::DataSensitivity,
         policy::{self, AccessContext},
         resource_access::{
@@ -1665,7 +1666,7 @@ async fn mark_document_signed(
     Path(document_id): Path<Uuid>,
     Json(body): Json<MarkDocumentSignedRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
 
@@ -10141,7 +10142,7 @@ pub(crate) async fn signature_document_access(
     id: Uuid,
     write: bool,
 ) -> Result<sqlx::postgres::PgRow, axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin])?;
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
     let assignments = load_assignment_set(state, auth).await?;
     let row = fetch_document_row(state, id, auth.user_id)
         .await?
@@ -11800,12 +11801,8 @@ async fn list_document_templates(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
+    {
         return resp;
     }
 
@@ -12424,7 +12421,7 @@ async fn generate_document(
     Extension(auth): Extension<AuthUser>,
     Json(body): Json<GenerateDocumentRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return resp;
     }
 
@@ -19117,16 +19114,7 @@ async fn list_documents(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<DocumentListQuery>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::CeoAssistant,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::Billing,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsView) {
         return resp;
     }
 
@@ -19389,12 +19377,9 @@ async fn list_document_intake_queue(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::TeamleadInterpreter])
+    {
         return resp;
     }
 
@@ -19534,7 +19519,6 @@ async fn get_document(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -19587,7 +19571,6 @@ async fn get_document_text_extraction(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -19740,7 +19723,6 @@ async fn list_document_versions(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -19892,7 +19874,6 @@ async fn list_document_translation_request_queue(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -20056,7 +20037,6 @@ async fn list_document_translation_requests(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -20955,7 +20935,6 @@ async fn download_document(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -21632,7 +21611,6 @@ async fn upload_document_with_mode(
             Role::TeamleadInterpreter,
             Role::Interpreter,
             Role::Concierge,
-            Role::ItAdmin,
         ][..]
     };
     if let Err(resp) = auth.require_any_role(allowed) {
@@ -21924,7 +21902,7 @@ async fn upload_document_with_mode(
             .unwrap_or_else(|| "Uploaded document".to_string());
     }
     if manual_intake {
-        if !matches!(auth.role, Role::Ceo | Role::PatientManager | Role::ItAdmin) {
+        if !matches!(auth.role, Role::Ceo | Role::PatientManager) {
             return err(
                 StatusCode::FORBIDDEN,
                 "Manual document intake requires document management access",
@@ -21993,7 +21971,7 @@ async fn upload_document_with_mode(
         return resp;
     }
 
-    if lead_id.is_some() && !matches!(auth.role, Role::PatientManager | Role::Ceo | Role::ItAdmin) {
+    if lead_id.is_some() && !matches!(auth.role, Role::PatientManager | Role::Ceo) {
         return err(
             StatusCode::FORBIDDEN,
             "Insufficient permissions for lead documents",
@@ -22373,7 +22351,6 @@ async fn update_document(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -22412,7 +22389,7 @@ async fn update_document(
     }
 
     let baseline_edit = match auth.role {
-        Role::Ceo | Role::PatientManager | Role::ItAdmin => true,
+        Role::Ceo | Role::PatientManager => true,
         Role::TeamleadInterpreter => teamlead_review,
         _ => false,
     };
@@ -22845,12 +22822,7 @@ async fn delete_document_file(
     Path(id): Path<Uuid>,
     Json(body): Json<DeleteDocumentFileRequest>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Billing,
-        Role::ItAdmin,
-    ]) {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing]) {
         return resp;
     }
 
@@ -24343,7 +24315,6 @@ async fn list_document_staff(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
@@ -24390,7 +24361,6 @@ async fn list_document_categories(
         Role::Interpreter,
         Role::Concierge,
         Role::Billing,
-        Role::ItAdmin,
     ]) {
         return resp;
     }
