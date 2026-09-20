@@ -775,6 +775,7 @@ function CompanyFinancePageContent() {
             type="date"
             className="h-8 rounded-md bg-field text-xs"
             value={filters.from}
+            data-readonly="exempt"
             onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
           />
         </ToolbarField>
@@ -783,6 +784,7 @@ function CompanyFinancePageContent() {
             type="date"
             className="h-8 rounded-md bg-field text-xs"
             value={filters.to}
+            data-readonly="exempt"
             onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))}
           />
         </ToolbarField>
@@ -805,6 +807,7 @@ function CompanyFinancePageContent() {
               className="h-8 rounded-md bg-field pl-8 text-xs"
               placeholder={text.search}
               value={filters.search}
+              data-readonly="exempt"
               onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
             />
           </span>
@@ -1029,6 +1032,7 @@ function CompanyFinancePageContent() {
                   <select
                     className={cn(shellSelectClassName, "h-8 rounded-md bg-field text-xs")}
                     value={filters.movement}
+                    data-readonly="exempt"
                     onChange={(event) => setFilters((current) => ({
                       ...current,
                       movement: event.target.value as CompanyFinancialFilters["movement"],

@@ -3764,6 +3764,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
+                data-readonly="exempt"
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") {
@@ -3779,6 +3780,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <ToolbarField label={t.providers_type} className="w-full sm:w-auto">
               <NativeComboboxSelect
                 value={filters.providerType}
+                data-readonly="exempt"
                 onChange={(event) => {
                   const nextType = event.target.value;
                   setFilters((current) => ({
@@ -3812,6 +3814,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <div>
                 <ProviderTaxonomyCascadeSelect
                   value={filters.taxonomyNodeId}
+                  data-readonly="exempt"
                   nodes={taxonomyNodes}
                   providerType={
                     permissions.forceNonMedical
@@ -3863,6 +3866,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                   <ToolbarField label={t.table_filter}>
                   <NativeComboboxSelect
                     value={filters.taxonomyAttributeKey}
+                    data-readonly="exempt"
                     onChange={(event) => {
                       const nextKey = event.target.value;
                       setFilters((current) => ({
@@ -3889,6 +3893,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     <ToolbarField label={t.common_value}>
                     <NativeComboboxSelect
                       value={filters.taxonomyAttributeValue}
+                      data-readonly="exempt"
                       onChange={(event) =>
                         setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
                       }
@@ -3907,6 +3912,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
                     <ToolbarField label={t.common_value}>
                     <Input
                       value={filters.taxonomyAttributeValue}
+                      data-readonly="exempt"
                       onChange={(event) =>
                         setServerFilter("taxonomyAttributeValue", event.target.value, "attr_value")
                       }
@@ -3922,6 +3928,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <ToolbarField label={t.users_status}>
               <NativeComboboxSelect
                 value={filters.activeOnly}
+                data-readonly="exempt"
                 onChange={(event) => setServerFilter("activeOnly", event.target.value, "active")}
                 className={cn(selectClassName, "h-8 rounded-md w-[140px] bg-field text-xs")}
               >
@@ -3934,6 +3941,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <ToolbarField label={t.providers_contract}>
               <NativeComboboxSelect
                 value={filters.hasContract}
+                data-readonly="exempt"
                 onChange={(event) => setServerFilter("hasContract", event.target.value, "contract")}
                 className={cn(selectClassName, "h-8 rounded-md w-[160px] bg-field text-xs")}
               >
@@ -3946,6 +3954,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <ToolbarField label={t.providers_internal_rating}>
               <NativeComboboxSelect
                 value={filters.internalRatingGte}
+                data-readonly="exempt"
                 onChange={(event) => setServerFilter("internalRatingGte", event.target.value, "internal_rating")}
                 className={cn(selectClassName, "h-8 rounded-md w-[148px] bg-field text-xs")}
               >
@@ -3961,6 +3970,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <div>
                 <SpecializationMultiSelect
                   value={filters.specializations}
+                  data-readonly="exempt"
                   items={specializations}
                   placeholder={t.providers_fachbereich}
                   compact
@@ -3973,6 +3983,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
               <div>
                 <InsuranceProviderMultiSelect
                   value={filters.insuranceProvider}
+                  data-readonly="exempt"
                   items={insuranceProviders}
                   compact
                   disabled={permissions.forceNonMedical || filters.providerType === "non_medical"}

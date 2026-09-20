@@ -788,7 +788,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       <Tabs value={activeTab} onValueChange={handleWorkspaceTabChange}>
         <div className="rounded-xl border border-border/70 bg-card p-3 shadow-sm lg:hidden">
           <label htmlFor="patient-workspace-section" className="mb-2 block text-xs font-medium text-muted-foreground">{lang === "de" ? "Patientenbereich" : "Раздел пациента"}</label>
-          <NativeComboboxSelect id="patient-workspace-section" value={activeTab} onChange={event => handleWorkspaceTabChange(event.target.value)}>
+          <NativeComboboxSelect id="patient-workspace-section" data-readonly="exempt" value={activeTab} onChange={event => handleWorkspaceTabChange(event.target.value)}>
             {[...new Map(workspaceTabs.map(tab => [tab.group, tab.groupLabel])).entries()].map(([group, label]) => (
               <optgroup key={group} label={label}>
                 {workspaceTabs.filter(tab => tab.group === group).map(tab => <option key={tab.key} value={tab.key}>{tab.label}</option>)}

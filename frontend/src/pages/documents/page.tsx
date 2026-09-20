@@ -3323,6 +3323,7 @@ function StaffDocumentsPage({
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={filters.search}
+                data-readonly="exempt"
                 onChange={(event) =>
                   setFilters((current) => ({
                     ...current,
@@ -3335,6 +3336,7 @@ function StaffDocumentsPage({
             </div>
             <NativeComboboxSelect
               value={filters.patientId}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3354,6 +3356,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <NativeComboboxSelect
               value={filters.status}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3371,6 +3374,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <NativeComboboxSelect
               value={filters.visibility}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3388,6 +3392,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <Input
               value={filters.art}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({ ...current, art: event.target.value }))
               }
@@ -3410,6 +3415,7 @@ function StaffDocumentsPage({
           <div className="grid grid-cols-2 gap-2 md:grid-cols-2 md:gap-1.5 xl:grid-cols-4">
             <Input
               value={filters.orderId}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3421,6 +3427,7 @@ function StaffDocumentsPage({
             />
             <Input
               value={filters.appointmentId}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3433,6 +3440,7 @@ function StaffDocumentsPage({
             <Input
               type="date"
               value={filters.dateFrom}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3445,6 +3453,7 @@ function StaffDocumentsPage({
             <Input
               type="date"
               value={filters.dateTo}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3458,6 +3467,7 @@ function StaffDocumentsPage({
           <div className="grid grid-cols-2 gap-2 md:grid-cols-2 md:gap-1.5 xl:grid-cols-4">
             <NativeComboboxSelect
               value={filters.category}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3475,6 +3485,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <Input
               value={filters.klinik}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3486,6 +3497,7 @@ function StaffDocumentsPage({
             />
             <Input
               value={filters.ursprung}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3497,6 +3509,7 @@ function StaffDocumentsPage({
             />
             <NativeComboboxSelect
               value={filters.documentDirection}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3514,6 +3527,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <NativeComboboxSelect
               value={filters.documentVariant}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3531,6 +3545,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <NativeComboboxSelect
               value={filters.accessCategory}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,
@@ -3548,6 +3563,7 @@ function StaffDocumentsPage({
             </NativeComboboxSelect>
             <NativeComboboxSelect
               value={filters.financialStatus}
+              data-readonly="exempt"
               onChange={(event) =>
                 setFilters((current) => ({
                   ...current,

@@ -189,6 +189,38 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
 - Усунути мертві гілки з розділу 1.3 (документи, контракти, звіти, SOP, ліди,
   сервіси) — тепер вони стають досяжними або прибираються свідомо.
 
+**Виконано 2026-09-20 (фронтенд):**
+- `frontend/src/components/read-only-scope.tsx`: React-контекст `ReadOnlyScope`
+  + `useReadOnly()`. Усередині спільні `Input` (разом із date/time-пікерами),
+  `SelectField`, `NativeComboboxSelect`, `Button[type=submit]` і
+  `Button[data-action="write"]` рендеряться `disabled`, `InfoRow` ховає олівець
+  редагування; зовнішній активний scope показує один банер «Только просмотр /
+  Nur Ansicht» (`read_only_scope_title/hint`). Фільтри лишаються робочими:
+  `Input[type=search]`, контроли з `data-readonly="exempt"`, `ToolbarField` і
+  панель фільтрів `DataTableSurface` (`WritableScope`).
+- Моделі сторінок (`pages/*/model/*.ts`, `services.model.ts`,
+  `reports/hotels/model.ts`, `concierge/model.ts`) відповідають через
+  `hasCapability(user, …)` замість списків ролей; `hasCapability` приймає
+  користувача з `/me` або код ролі (дзеркало). Мертві гілки §1.3 прибрано:
+  `it_admin` без пацієнтів/документів/записів, concierge та CEO Assistant
+  отримують сітку лідів без деталей і майстра, intake документів — лише
+  `documents.intake`. Ієрархії призначень (куратори, task-manager) лишилися
+  ролевими поверх capability-гейта.
+- `ReadOnlyScope` увімкнено в: пацієнти (список — `patients.edit`; картка — по
+  вкладці: `patients.medical.edit`, `documents.upload/manage`, `contracts.edit`,
+  `invoices.create/finance`, `orders.edit`, `appointments.edit`,
+  `patients.assign`), ліди, замовлення (`orders.edit`/`orders.economics`),
+  контракти, рахунки, документи, записи, провайдери, сервіси, готелі, SOP,
+  фінанси компанії та каталог (`company_finance.edit`).
+- Тести: `read-only-scope.test.tsx`; `pages/permission-models.test.ts` — табличний
+  прохід по 9 ролях зі знімка `02_rbac-capability-snapshot.md`
+  (`lib/rbac-snapshot.test-fixture.ts`); e2e `tests/e2e/read-only-cabinet.spec.ts`
+  (`ceo_assistant` на пацієнтах/замовленнях/рахунках, `billing` на рахунках).
+- Не зроблено: `staff-route-access.ts` уже керується capabilities (етап 2);
+  сирі `<textarea>`/`<input type="checkbox">` поза спільними компонентами не
+  блокуються — їх вимикає лише відсутність кнопки збереження; серверна
+  проєкція лідів для concierge — етап 4.
+
 ### Етап 4 — Кабінети ролей (4 дні, по ролі)
 Для кожної ролі: лендинг-дашборд із власними KPI і швидкими діями, меню лише зі
 своїх модулів, read-only там, де матриця каже R.

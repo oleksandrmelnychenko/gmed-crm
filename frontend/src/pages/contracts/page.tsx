@@ -2041,6 +2041,7 @@ function useContractsPageContent() {
                     type="search"
                     aria-label={text.agencyServiceSearchPlaceholder}
                     value={agencyServiceFilters.search}
+                    data-readonly="exempt"
                     onChange={(event) =>
                       setAgencyServiceFilters((current) => ({
                         ...current,
@@ -2139,6 +2140,7 @@ function useContractsPageContent() {
                         type="search"
                         aria-label={`${text.contractsTab} ${t.common_search}`}
                         value={contractFilters.search}
+                        data-readonly="exempt"
                         onChange={(event) =>
                           setContractFilters((current) => ({ ...current, search: event.target.value }))
                         }
@@ -2269,6 +2271,7 @@ function useContractsPageContent() {
                       type="search"
                       aria-label={`${text.quotesTab} ${t.common_search}`}
                       value={quoteFilters.search}
+                      data-readonly="exempt"
                       onChange={(event) =>
                         setQuoteFilters((current) => ({ ...current, search: event.target.value }))
                       }

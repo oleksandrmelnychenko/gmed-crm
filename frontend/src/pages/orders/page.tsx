@@ -3503,6 +3503,7 @@ function useOrdersPageContent() {
                   <Input
                     id="orders-search"
                     value={filters.search}
+                    data-readonly="exempt"
                     onChange={(event) =>
                       startTransition(() =>
                         setFilters((current) => ({
@@ -3594,6 +3595,7 @@ function useOrdersPageContent() {
               >
                 <ProviderSelectWithTaxonomyFilter
                   value={filters.providerId}
+                  data-readonly="exempt"
                   providers={providers}
                   taxonomyNodes={taxonomyNodes}
                   taxonomyValue={filters.providerTaxonomyNodeId}

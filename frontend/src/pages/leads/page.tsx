@@ -2732,6 +2732,7 @@ function useLeadsPageContent() {
                 className={cn(shellInputClassName, "h-8 rounded-md bg-field pl-8 text-xs")}
                 placeholder={t.common_search}
                 value={filters.search}
+                data-readonly="exempt"
                 onChange={(event) =>
                   setFilters((current) => ({ ...current, search: event.target.value }))
                 }
