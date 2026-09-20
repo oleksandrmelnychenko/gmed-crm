@@ -748,7 +748,7 @@ async fn forced_password_reset_revokes_sessions_and_gates_new_logins_until_passw
         Some(json!({ "new_password": "Replacement-password-2!" })),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(status, StatusCode::OK);
     let (status, body) = json_request(
         &app,
         "POST",
