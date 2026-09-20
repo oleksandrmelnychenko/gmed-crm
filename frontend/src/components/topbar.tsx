@@ -162,7 +162,7 @@ export function Topbar() {
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
   const showLeadShortcut = Boolean(
-    user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads"),
+    user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities),
   );
   const newLeads = useNewLeadCounter(showLeadShortcut);
   const [leadShortcutBusy, setLeadShortcutBusy] = useState(false);
@@ -572,6 +572,7 @@ export function Topbar() {
           onClose={() => setNotifOpen(false)}
           onUnreadChange={setUnread}
           staffRole={user?.role ?? ""}
+          staffCapabilities={user?.capabilities ?? null}
         />
       )}
 
@@ -698,10 +699,12 @@ function NotificationPanel({
   onClose,
   onUnreadChange,
   staffRole,
+  staffCapabilities,
 }: {
   onClose: () => void;
   onUnreadChange: (n: number) => void;
   staffRole: string;
+  staffCapabilities: readonly string[] | null;
 }) {
   const navigate = useNavigate();
   const { lang, t } = useLang();
@@ -768,7 +771,7 @@ function NotificationPanel({
     }
     const href = notificationHrefForRole(item, staffRole);
     if (href) {
-      navigate(staffHrefIfAllowed(staffRole, href));
+      navigate(staffHrefIfAllowed(staffRole, href, staffCapabilities));
       onClose();
     }
   };

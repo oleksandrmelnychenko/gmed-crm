@@ -17,6 +17,7 @@ export function useStaffNavigate() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const staffRole = user?.role ?? "";
+  const staffCapabilities = user?.capabilities ?? null;
 
   const staffGo = useCallback(
     (href: string, options?: NavigateOptions) => {
@@ -24,22 +25,22 @@ export function useStaffNavigate() {
         options?.state && typeof options.state === "object"
           ? { ...options.state, __gmedNavigationUserId: user?.id ?? null }
           : options?.state;
-      navigate(staffHrefIfAllowed(staffRole, href), { ...options, state });
+      navigate(staffHrefIfAllowed(staffRole, href, staffCapabilities), { ...options, state });
     },
-    [navigate, staffRole, user?.id],
+    [navigate, staffCapabilities, staffRole, user?.id],
   );
 
   const staffTo = useCallback(
-    (href: string) => staffHrefIfAllowed(staffRole, href),
-    [staffRole],
+    (href: string) => staffHrefIfAllowed(staffRole, href, staffCapabilities),
+    [staffCapabilities, staffRole],
   );
 
   const canStaffPath = useCallback(
     (pathname: string) =>
       staffRole === "patient"
         ? canAccessPatientPortalRoute(pathname)
-        : canAccessStaffRoute(staffRole, pathname),
-    [staffRole],
+        : canAccessStaffRoute(staffRole, pathname, staffCapabilities),
+    [staffCapabilities, staffRole],
   );
 
   return { staffGo, staffTo, staffRole, canStaffPath };

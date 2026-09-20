@@ -25,6 +25,8 @@ export interface User {
   email: string;
   name: string;
   role: string;
+  /** Capability wire names from `GET /me` (see `@/lib/permissions`). */
+  capabilities?: string[];
   created_at: string;
   phone?: string | null;
   preferred_language?: Lang | null;

@@ -1,7 +1,10 @@
 /**
- * Single source of truth for staff route access (pathname + role).
- * See docs/testing/ui-rbac-route-guard-plan_ua.md.
+ * Single source of truth for staff route access (pathname + role/capabilities).
+ * See docs/testing/ui-rbac-route-guard-plan_ua.md and
+ * docs/role-cabinets-plan-2026-09-20_ua.md (stage 2).
  */
+
+import { capabilitiesFor } from "@/lib/permissions";
 
 export const ALL_STAFF_ROLES = [
   "ceo",
@@ -14,8 +17,6 @@ export const ALL_STAFF_ROLES = [
   "sales",
   "it_admin",
 ] as const;
-
-export const RELEASE_STAFF_ROLES = ["ceo", "concierge", "billing", "patient_manager", "teamlead_interpreter", "interpreter"] as const;
 
 type StaffRole = (typeof ALL_STAFF_ROLES)[number];
 
@@ -167,7 +168,13 @@ type RouteRule = {
   id: string;
   match: "exact" | "prefix";
   path: string;
+  /** Fallback when the rule carries no capability. */
   roles: readonly string[];
+  /**
+   * Capability (or any-of list) that opens the route; evaluated against the
+   * user's capabilities from `/me`, or the role mirror in `@/lib/permissions`.
+   */
+  capability?: string | readonly string[];
   nav?: {
     section: StaffNavSection;
     labelKey: string;
@@ -212,12 +219,14 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/concierge",
     roles: ROLES_TASK_MANAGER,
+    capability: "tasks.use",
   },
   {
     id: "task-manager",
     match: "exact",
     path: "/task-manager",
     roles: ROLES_TASK_MANAGER,
+    capability: "tasks.use",
     nav: { section: "main", labelKey: "nav_task_manager" },
   },
   {
@@ -225,6 +234,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/projects",
     roles: ROLES_PROJECTS,
+    capability: "tasks.use",
     nav: { section: "main", labelKey: "nav_projects", after: "task-manager" },
   },
   // Administration in three groups: access and security, DSGVO, system.
@@ -234,6 +244,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/users",
     roles: ROLES_ADMIN_USERS,
+    capability: "users.view",
     nav: { section: "security", labelKey: "nav_users_roles" },
   },
   {
@@ -241,6 +252,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/access",
     roles: ROLES_ADMIN,
+    capability: "admin.security",
     nav: { section: "security", labelKey: "nav_access_matrix" },
   },
   {
@@ -248,6 +260,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/security",
     roles: ROLES_ADMIN,
+    capability: "admin.security",
     nav: { section: "security", labelKey: "nav_security" },
   },
   {
@@ -269,6 +282,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/compliance",
     roles: ROLES_COMPLIANCE,
+    capability: "admin.compliance",
     nav: { section: "dsgvo", labelKey: "nav_compliance" },
   },
   {
@@ -283,6 +297,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/activity",
     roles: ROLES_ADMIN,
+    capability: "admin.activity",
     nav: { section: "admin", labelKey: "nav_activity" },
   },
   {
@@ -290,6 +305,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/health",
     roles: ROLES_ADMIN,
+    capability: "admin.health",
     nav: { section: "admin", labelKey: "nav_health" },
   },
   {
@@ -297,6 +313,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/settings",
     roles: ROLES_ADMIN,
+    capability: "admin.settings",
     nav: { section: "admin", labelKey: "settings_title" },
   },
   {
@@ -304,6 +321,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/signatures",
     roles: ["ceo", "it_admin"],
+    capability: "admin.signatures",
     nav: { section: "admin", labelKey: "nav_signatures" },
   },
   {
@@ -311,6 +329,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/notifications",
     roles: ROLES_ADMIN,
+    capability: "admin.notifications",
     nav: { section: "admin", labelKey: "nav_notifications" },
   },
   {
@@ -318,6 +337,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/announcements",
     roles: ROLES_ADMIN,
+    capability: "admin.announcements",
     nav: { section: "admin", labelKey: "nav_announcements" },
   },
   {
@@ -325,6 +345,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/custom-fields",
     roles: ROLES_ADMIN_CUSTOM_FIELDS,
+    capability: "admin.custom_fields",
     nav: { section: "admin", labelKey: "nav_custom_fields" },
   },
   {
@@ -332,6 +353,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/datev",
     roles: ROLES_ADMIN,
+    capability: ["datev.admin", "datev.read"],
     nav: { section: "accounting", labelKey: "nav_datev", after: "finance-catalog" },
   },
   { id: "admin", match: "prefix", path: "/admin", roles: ROLES_ADMIN },
@@ -340,6 +362,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/appointments",
     roles: ROLES_APPOINTMENTS,
+    capability: "appointments.view",
     nav: { section: "medicine", labelKey: "appointments_title" },
   },
   {
@@ -378,6 +401,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/chat",
     roles: ROLES_CHAT,
+    capability: "chat.use",
     nav: { section: "main", labelKey: "nav_chat" },
   },
   {
@@ -399,6 +423,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/reports",
     roles: ROLES_REPORTS,
+    capability: "reports.view",
     nav: { section: "main", labelKey: "nav_reports" },
   },
   {
@@ -406,12 +431,14 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/reports/hotels",
     roles: ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"],
+    capability: "hotels.view",
   },
   {
     id: "hotels",
     match: "exact",
     path: "/hotels",
     roles: ["ceo", "ceo_assistant", "billing", "patient_manager", "concierge"],
+    capability: "hotels.view",
     nav: { section: "crm", labelKey: "nav_hotels", after: "providers" },
   },
   {
@@ -425,6 +452,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/leads",
     roles: ROLES_LEADS,
+    capability: "leads.view",
     nav: { section: "crm", labelKey: "leads_title" },
   },
   {
@@ -432,6 +460,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/patients",
     roles: ROLES_PATIENTS,
+    capability: "patients.view",
     nav: { section: "crm", labelKey: "patients_title" },
   },
   {
@@ -439,6 +468,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/orders",
     roles: ROLES_ORDERS,
+    capability: "orders.view",
     nav: { section: "crm", labelKey: "orders_title" },
   },
   {
@@ -446,6 +476,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/contracts",
     roles: ROLES_CONTRACTS_INVOICES,
+    capability: "contracts.view",
     nav: { section: "crm", labelKey: "nav_contracts" },
   },
   {
@@ -453,6 +484,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/providers",
     roles: ROLES_PROVIDERS,
+    capability: "providers.view",
     nav: { section: "crm", labelKey: "nav_providers" },
   },
   {
@@ -460,6 +492,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/services",
     roles: ROLES_SERVICES,
+    capability: "services.view",
     nav: { section: "crm", labelKey: "nav_my_services" },
   },
   {
@@ -467,6 +500,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/documents",
     roles: ROLES_DOCUMENTS,
+    capability: "documents.view",
     nav: { section: "crm", labelKey: "nav_documents" },
   },
   {
@@ -474,6 +508,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/files",
     roles: ROLES_FILES,
+    capability: "tasks.use",
     nav: { section: "crm", labelKey: "nav_files", after: "documents" },
   },
   {
@@ -481,6 +516,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/invoices",
     roles: ROLES_INVOICES,
+    capability: "invoices.view",
     nav: { section: "accounting", labelKey: "nav_invoices" },
   },
   {
@@ -488,6 +524,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/company-finance",
     roles: ROLES_REPORTS,
+    capability: "company_finance.view",
     nav: {
       section: "accounting",
       labelKey: "nav_company_finance",
@@ -499,6 +536,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/finance-catalog",
     roles: ROLES_FINANCE_CATALOG,
+    capability: "company_finance.view",
     nav: { section: "accounting", labelKey: "nav_finance_catalog" },
   },
   {
@@ -512,6 +550,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/sops",
     roles: ROLES_SOPS,
+    capability: "sops.view",
     nav: { section: "main", labelKey: "nav_learning" },
   },
   {
@@ -549,6 +588,24 @@ const STAFF_ROUTE_ROLE_SETS = new Map(
   STAFF_ROUTE_RULES.map((rule) => [rule.id, new Set(rule.roles)]),
 );
 
+/**
+ * Whether `role` (with `capabilities` from `/me`, or the role mirror when
+ * absent) may use `rule`: the capability decides when the rule has one, the
+ * role list otherwise.
+ */
+function ruleAllows(
+  rule: RouteRule,
+  role: string,
+  capabilities: readonly string[] | null | undefined,
+): boolean {
+  if (rule.capability === undefined) {
+    return STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role) ?? false;
+  }
+  const held = capabilitiesFor(role, capabilities);
+  const wanted = typeof rule.capability === "string" ? [rule.capability] : rule.capability;
+  return wanted.some((capability) => held.includes(capability));
+}
+
 function normalizePathname(pathname: string): string {
   const base = pathname.split("?")[0] ?? "/";
   if (base === "") {
@@ -571,9 +628,15 @@ export function listPatientPortalNavItems(): PatientPortalNavItem[] {
 }
 
 /**
- * Whether a logged-in staff user may open this pathname.
+ * Whether a logged-in staff user may open this pathname. Pass the user's
+ * `capabilities` from `/me` when available; otherwise the role mirror in
+ * `@/lib/permissions` is used.
  */
-export function canAccessStaffRoute(role: string, pathname: string): boolean {
+export function canAccessStaffRoute(
+  role: string,
+  pathname: string,
+  capabilities?: readonly string[] | null,
+): boolean {
   if (role === "patient") {
     return false;
   }
@@ -585,7 +648,7 @@ export function canAccessStaffRoute(role: string, pathname: string): boolean {
     if (!pathMatches(p, rule)) {
       continue;
     }
-    return STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role) ?? false;
+    return ruleAllows(rule, role, capabilities);
   }
   return false;
 }
@@ -612,18 +675,25 @@ export function peekStaffRouteRule(pathname: string): StaffRouteRulePeek | null 
 /**
  * Returns `href` when the current role may open that path; otherwise `/`.
  */
-export function staffHrefIfAllowed(role: string, href: string): string {
+export function staffHrefIfAllowed(
+  role: string,
+  href: string,
+  capabilities?: readonly string[] | null,
+): string {
   const pathname = normalizePathname(href);
   if (role === "patient") {
     return canAccessPatientPortalRoute(pathname) ? href : "/";
   }
-  if (!canAccessStaffRoute(role, pathname)) {
+  if (!canAccessStaffRoute(role, pathname, capabilities)) {
     return "/";
   }
   return href;
 }
 
-export function listStaffNavItems(role: string): StaffNavItem[] {
+export function listStaffNavItems(
+  role: string,
+  capabilities?: readonly string[] | null,
+): StaffNavItem[] {
   if (role === "patient") {
     return [];
   }
@@ -632,7 +702,7 @@ export function listStaffNavItems(role: string): StaffNavItem[] {
   }
   const items: StaffNavItem[] = [];
   for (const rule of STAFF_ROUTE_RULES) {
-    if (!rule.nav || !STAFF_ROUTE_ROLE_SETS.get(rule.id)?.has(role)) {
+    if (!rule.nav || !ruleAllows(rule, role, capabilities)) {
       continue;
     }
     items.push({

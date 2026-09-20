@@ -145,7 +145,7 @@ export function NavPanel() {
   const patientPortalNav = isPatientPortal ? listPatientPortalNavItems().map(toPatientNavItem) : [];
   const staffNavBySection =
     user && user.role !== "patient"
-      ? groupStaffNavItems(listStaffNavItems(user.role))
+      ? groupStaffNavItems(listStaffNavItems(user.role, user.capabilities))
       : new Map<StaffNavSection, NavItem[]>();
   const closeOnCompactViewport = () => {
     if (

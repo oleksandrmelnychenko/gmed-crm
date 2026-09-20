@@ -270,7 +270,8 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
 
   const greeting = greetingFor(user?.name ?? "", tr);
   const roleTitle = tr[`role_${role}`] ?? role;
-  const navItems = useMemo(() => listStaffNavItems(role), [role]);
+  const navCapabilities = user?.role === role ? (user.capabilities ?? null) : null;
+  const navItems = useMemo(() => listStaffNavItems(role, navCapabilities), [navCapabilities, role]);
   const quickLinks = navItems.filter((item) => item.to !== "/").slice(0, 4);
   const availableRoutes = useMemo(
     () => new Set(navItems.map((item) => item.to.split("?")[0])),

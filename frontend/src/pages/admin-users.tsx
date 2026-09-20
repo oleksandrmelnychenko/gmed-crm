@@ -32,7 +32,9 @@ import {
 } from "@/components/ui-shell";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -330,6 +332,18 @@ function useAdminUsersPageContent() {
     (role: string) => tr[`role_${role}`] ?? formatUnknownValue(role, t),
     [t, tr],
   );
+  // Only the CEO (`users.manage_ceo`) may assign the CEO role or touch an
+  // existing CEO account; the technical admin manages every other account.
+  const { user: currentUser } = useAuth();
+  const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
+  const canEditUser = useCallback(
+    (u: User) => canManageCeo || u.role !== "ceo",
+    [canManageCeo],
+  );
+  const assignableRoles = useMemo(
+    () => ROLE_KEYS.filter((key) => canManageCeo || key !== "ceo"),
+    [canManageCeo],
+  );
   const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
   const newPasswordError = newPassword
     ? getRequiredAdminPasswordError(newPassword, t)
@@ -540,6 +554,9 @@ function useAdminUsersPageContent() {
   };
 
   const openEdit = (u: User) => {
+    if (!canEditUser(u)) {
+      return;
+    }
     setEditError(null);
     setEuName(u.name);
     setEuEmail(u.email);
@@ -777,7 +794,7 @@ function useAdminUsersPageContent() {
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
                   <NativeComboboxSelect value={newRole}
                     onChange={(event) => setNewRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field">
-                      {ROLE_KEYS.map((key) => (
+                      {assignableRoles.map((key) => (
                         <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
                     </NativeComboboxSelect>
@@ -906,7 +923,7 @@ function useAdminUsersPageContent() {
                   <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
                   <NativeComboboxSelect value={euRole}
                     onChange={(event) => setEuRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field">
-                      {ROLE_KEYS.map((key) => (
+                      {assignableRoles.map((key) => (
                         <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
                     </NativeComboboxSelect>
@@ -1076,7 +1093,7 @@ function useAdminUsersPageContent() {
                     variant="ghost"
                     size="icon-sm"
                     className="size-7 rounded-full text-muted-foreground hover:bg-amber-50 hover:text-amber-700"
-                    disabled={unlockingUserId === user.id}
+                    disabled={unlockingUserId === user.id || !canEditUser(user)}
                     onClick={() => void unlockUser(user.id)}
                     aria-label={t.users_unlock}
                     title={t.users_unlock}
@@ -1089,6 +1106,7 @@ function useAdminUsersPageContent() {
                   variant="ghost"
                   size="icon-sm"
                   className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                  disabled={!canEditUser(user)}
                   onClick={() => openEdit(user)}
                   aria-label={t.patients_edit}
                   title={t.patients_edit}
@@ -1105,6 +1123,7 @@ function useAdminUsersPageContent() {
                       ? "hover:bg-rose-50 hover:text-rose-600"
                       : "hover:bg-emerald-50 hover:text-emerald-700",
                   )}
+                  disabled={!canEditUser(user)}
                   onClick={() => void toggleActive(user.id, user.is_active)}
                   aria-label={user.is_active ? t.users_deactivate : t.users_activate}
                   title={user.is_active ? t.users_deactivate : t.users_activate}

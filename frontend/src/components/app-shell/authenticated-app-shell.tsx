@@ -58,7 +58,7 @@ function AuthenticatedAppShellContent() {
   if (
     user &&
     user.role !== "patient" &&
-    !canAccessStaffRoute(user.role, location.pathname)
+    !canAccessStaffRoute(user.role, location.pathname, user.capabilities)
   ) {
     return <Navigate to="/" replace />;
   }
