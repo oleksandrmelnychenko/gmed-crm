@@ -125,11 +125,41 @@ export const de = {
   users_reset_button: "Zurücksetzen",
   users_generate_password: "Generieren",
   users_password_reset_success:
-    "Passwort geändert. Die Sperre wurde aufgehoben und aktive Sitzungen wurden beendet.",
+    "Passwort geändert. Die Sperre wurde aufgehoben, aktive Sitzungen wurden beendet; beim nächsten Login muss der Benutzer ein eigenes Passwort setzen.",
   users_password_reset_confirm:
-    "Das neue Passwort gilt sofort. Der Benutzer wird auf allen Geräten abgemeldet und eine Anmeldesperre wird aufgehoben.",
+    "Das neue Passwort gilt sofort. Der Benutzer wird auf allen Geräten abgemeldet, eine Anmeldesperre wird aufgehoben und beim nächsten Login muss er ein eigenes Passwort setzen.",
   users_empty_no_results: "Keine Ergebnisse",
   users_empty_no_users: "Keine Benutzer",
+  users_one_time_password_mode: "Einmalpasswort (vom Server generiert)",
+  users_one_time_password_mode_hint:
+    "Das Passwort wird nur einmal angezeigt – übergeben Sie es persönlich. Beim ersten Login muss der Benutzer ein eigenes Passwort setzen. Es wird keine E-Mail versendet.",
+  users_manual_password_mode: "Passwort manuell festlegen",
+  users_one_time_password_title: "Einmalpasswort",
+  users_one_time_password_shown_once:
+    "Wird nur jetzt angezeigt. Kopieren Sie es und übergeben Sie es persönlich – nach dem Schließen ist es nicht mehr abrufbar.",
+  users_copy_password: "Kopieren",
+  users_copied: "Kopiert",
+  users_created_title: "Benutzer angelegt",
+  users_done: "Fertig",
+  users_generate_one_time_password: "Einmalpasswort generieren",
+  users_generate_one_time_password_confirm:
+    "Der Server erzeugt ein neues Einmalpasswort und zeigt es einmal an. Der Benutzer wird auf allen Geräten abgemeldet, eine Anmeldesperre wird aufgehoben und beim nächsten Login muss er ein eigenes Passwort setzen.",
+  users_password_reset_required_badge: "Passwortwechsel beim Login",
+  users_totp: "Authenticator",
+  users_totp_enrolled: "Eingerichtet",
+  users_totp_missing: "Nicht eingerichtet",
+  users_last_login: "Letzter Login",
+  users_never_logged_in: "Noch nie angemeldet",
+  users_sessions: "Sitzungen",
+  users_revoke_sessions: "Sitzungen beenden",
+  users_revoke_sessions_confirm:
+    "Alle aktiven Sitzungen des Benutzers werden beendet; er muss sich neu anmelden.",
+  users_sessions_revoked: "Sitzungen beendet",
+  users_locked_until: "Gesperrt bis",
+  users_last_ceo_protected:
+    "Das letzte aktive CEO-Konto kann nicht deaktiviert oder herabgestuft werden.",
+  users_ceo_managed_by_ceo_only: "CEO-Konten kann nur der CEO ändern.",
+  users_cannot_deactivate_self: "Das eigene Konto kann nicht deaktiviert werden.",
 
   role_ceo: "CEO",
   role_ceo_assistant: "CEO-Assistent",
@@ -741,6 +771,8 @@ export const de = {
   activity_view_activity_hint: "Nur echte Benutzeraktionen und Datenänderungen – ohne Hintergrundanfragen.",
   activity_view_security_hint: "Anmeldungen, Sitzungsverwaltung, MFA und weitere Sicherheitsereignisse.",
   activity_view_technical_hint: "Rohe HTTP-Anfragen zur Diagnose. Sie werden nach der kurzen Aufbewahrungsfrist automatisch gelöscht.",
+  activity_view_access: "Zugriff und Rollen",
+  activity_view_access_hint: "Anlegen und Sperren von Konten, Rollenwechsel, Zurücksetzen von Passwörtern und 2FA, Änderungen der Zugriffsmatrix und individueller Rechte.",
   activity_metric_events_24h: "Aktivitäten in 24 Stunden",
   activity_metric_users_24h: "Aktive Benutzer",
   activity_metric_changes_24h: "Datenänderungen",

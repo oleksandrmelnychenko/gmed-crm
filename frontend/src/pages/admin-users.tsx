@@ -1,7 +1,20 @@
-import { useCallback, useEffect, useMemo, useReducer, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useState,
+  type FormEvent,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
+import {
+  Check,
+  Copy,
   Eye,
   EyeOff,
+  KeyRound,
+  LogOut,
   Mail,
   Pencil,
   Plus,
@@ -50,15 +63,21 @@ import {
   fetchAdminUsers,
   resetAdminUserPassword,
   resetUserTotp,
+  revokeAdminUserSessions,
   setAdminUserActive,
   unlockAdminUser,
   updateAdminUser,
 } from "@/pages/admin/data/admin-api";
 import {
+  ADMIN_USER_ROLE_KEYS,
   canSaveAdminUserEdit,
+  describeAdminUserError,
+  getAdminUserActions,
+  getAssignableAdminUserRoles,
   getOptionalAdminPasswordError,
   getRequiredAdminPasswordError,
   generateAdminPassword,
+  isAdminUserLocked,
   isPasswordConfirmationMismatch,
 } from "@/pages/admin-users.helpers";
 
@@ -71,21 +90,20 @@ interface User {
   failed_login_attempts: number;
   locked_until: string | null;
   password_changed_at: string | null;
+  password_reset_required: boolean;
+  totp_enrolled: boolean;
+  active_sessions: number;
+  last_login_at: string | null;
   created_at: string;
+  /** Present only in the response that generated it. */
+  one_time_password?: string;
 }
 
-const ROLE_KEYS = [
-  "ceo",
-  "ceo_assistant",
-  "patient_manager",
-  "teamlead_interpreter",
-  "interpreter",
-  "concierge",
-  "billing",
-  "sales",
-  "it_admin",
-  "patient",
-] as const;
+type ResetPasswordResult = {
+  password_reset_required: boolean;
+  sessions_revoked: boolean;
+  one_time_password?: string;
+};
 
 const ROLE_COLORS: Record<string, string> = {
   ceo: "bg-purple-100 text-purple-700",
@@ -109,6 +127,7 @@ const ADMIN_USER_REALTIME_EVENTS = [
   "user.unlocked",
   "user.force_password_reset",
   "user.mfa_toggled",
+  "session.revoked",
 ] as const;
 
 const ADMIN_USER_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
@@ -116,6 +135,16 @@ const ADMIN_USER_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   month: "short",
   year: "numeric",
 });
+
+const ADMIN_USER_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+type PasswordMode = "one_time" | "manual";
 
 function initials(name: string) {
   return name
@@ -133,10 +162,12 @@ function formatDate(value: string) {
   }
 }
 
-function isUserLocked(user: User) {
-  if (!user.locked_until) return false;
-  const lockedUntil = new Date(user.locked_until).getTime();
-  return Number.isFinite(lockedUntil) && lockedUntil > Date.now();
+function formatDateTime(value: string) {
+  try {
+    return ADMIN_USER_DATE_TIME_FORMATTER.format(new Date(value));
+  } catch {
+    return value.replace("T", " ").slice(0, 16);
+  }
 }
 
 function DotTitle({ children }: { children: ReactNode }) {
@@ -159,6 +190,74 @@ function DotSection({ title, children }: { title: ReactNode; children: ReactNode
   );
 }
 
+/**
+ * The one-time password, shown exactly once with a copy button. The value
+ * lives only in component state and disappears when the sheet closes.
+ */
+function OneTimePasswordReveal({
+  password,
+  title,
+  hint,
+  copyLabel,
+  copiedLabel,
+}: {
+  password: string;
+  title: string;
+  hint: string;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(password);
+      setCopied(true);
+    } catch {
+      // Clipboard access can be denied (insecure context, permissions); the
+      // password stays visible so it can still be copied by hand.
+      setCopied(false);
+    }
+  };
+
+  return (
+    <section
+      className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3.5"
+      role="status"
+      data-testid="one-time-password-panel"
+    >
+      <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-amber-900">
+        <KeyRound className="size-4" />
+        {title}
+      </h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <code
+          className="select-all rounded-lg border border-amber-200 bg-white px-3 py-2 font-mono text-base tracking-wide text-foreground"
+          data-testid="one-time-password"
+        >
+          {password}
+        </code>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-9 gap-1.5 rounded-lg bg-white px-3.5"
+          onClick={() => void copy()}
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          {copied ? copiedLabel : copyLabel}
+        </Button>
+      </div>
+      <p className="text-xs text-amber-900/80">{hint}</p>
+    </section>
+  );
+}
+
 type AdminUsersState = {
   users: User[];
   loading: boolean;
@@ -169,12 +268,16 @@ type AdminUsersState = {
   createError: string | null;
   newName: string;
   newEmail: string;
+  newPasswordMode: PasswordMode;
   newPassword: string;
   newPasswordConfirm: string;
   newPasswordVisible: boolean;
   newRole: string;
+  /** Filled after a successful creation with a generated password. */
+  createdUser: { name: string; email: string; oneTimePassword: string } | null;
   editUser: User | null;
   editError: string | null;
+  editNotice: string | null;
   euName: string;
   euEmail: string;
   euRole: string;
@@ -182,8 +285,12 @@ type AdminUsersState = {
   euPasswordConfirm: string;
   euPasswordVisible: boolean;
   passwordResetSuccess: boolean;
+  generatedResetPassword: string | null;
   confirmPasswordReset: boolean;
+  confirmGenerateReset: boolean;
+  confirmRevokeSessions: User | null;
   unlockingUserId: string | null;
+  revokingUserId: string | null;
   euSaving: boolean;
 };
 
@@ -211,6 +318,36 @@ function createAdminUsersFieldPatch<K extends keyof AdminUsersState>(
   };
 }
 
+const INITIAL_CREATE_FIELDS = {
+  showCreate: false,
+  creating: false,
+  createError: null,
+  newName: "",
+  newEmail: "",
+  newPasswordMode: "one_time" as PasswordMode,
+  newPassword: "",
+  newPasswordConfirm: "",
+  newPasswordVisible: false,
+  newRole: "patient_manager",
+  createdUser: null,
+} satisfies Partial<AdminUsersState>;
+
+const INITIAL_EDIT_FIELDS = {
+  editUser: null,
+  editError: null,
+  editNotice: null,
+  euName: "",
+  euEmail: "",
+  euRole: "",
+  euPassword: "",
+  euPasswordConfirm: "",
+  euPasswordVisible: false,
+  passwordResetSuccess: false,
+  generatedResetPassword: null,
+  confirmPasswordReset: false,
+  confirmGenerateReset: false,
+} satisfies Partial<AdminUsersState>;
+
 function useAdminUsersPageContent() {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -223,26 +360,11 @@ function useAdminUsersPageContent() {
       loading: true,
       error: null,
       search: "",
-      showCreate: false,
-      creating: false,
-      createError: null,
-      newName: "",
-      newEmail: "",
-      newPassword: "",
-      newPasswordConfirm: "",
-      newPasswordVisible: false,
-      newRole: "patient_manager",
-      editUser: null,
-      editError: null,
-      euName: "",
-      euEmail: "",
-      euRole: "",
-      euPassword: "",
-      euPasswordConfirm: "",
-      euPasswordVisible: false,
-      passwordResetSuccess: false,
-      confirmPasswordReset: false,
+      ...INITIAL_CREATE_FIELDS,
+      ...INITIAL_EDIT_FIELDS,
+      confirmRevokeSessions: null,
       unlockingUserId: null,
+      revokingUserId: null,
       euSaving: false,
     }),
   );
@@ -256,12 +378,15 @@ function useAdminUsersPageContent() {
     createError,
     newName,
     newEmail,
+    newPasswordMode,
     newPassword,
     newPasswordConfirm,
     newPasswordVisible,
     newRole,
+    createdUser,
     editUser,
     editError,
+    editNotice,
     euName,
     euEmail,
     euRole,
@@ -269,8 +394,12 @@ function useAdminUsersPageContent() {
     euPasswordConfirm,
     euPasswordVisible,
     passwordResetSuccess,
+    generatedResetPassword,
     confirmPasswordReset,
+    confirmGenerateReset,
+    confirmRevokeSessions,
     unlockingUserId,
+    revokingUserId,
     euSaving,
   } = adminUsersState;
   const setAdminUsersField = <K extends keyof AdminUsersState>(
@@ -295,6 +424,8 @@ function useAdminUsersPageContent() {
     setAdminUsersField("newName", value);
   const setNewEmail = (value: SetStateAction<string>) =>
     setAdminUsersField("newEmail", value);
+  const setNewPasswordMode = (value: SetStateAction<PasswordMode>) =>
+    setAdminUsersField("newPasswordMode", value);
   const setNewPassword = (value: SetStateAction<string>) =>
     setAdminUsersField("newPassword", value);
   const setNewPasswordConfirm = (value: SetStateAction<string>) =>
@@ -303,10 +434,10 @@ function useAdminUsersPageContent() {
     setAdminUsersField("newPasswordVisible", value);
   const setNewRole = (value: SetStateAction<string>) =>
     setAdminUsersField("newRole", value);
-  const setEditUser = (value: SetStateAction<User | null>) =>
-    setAdminUsersField("editUser", value);
   const setEditError = (value: SetStateAction<string | null>) =>
     setAdminUsersField("editError", value);
+  const setEditNotice = (value: SetStateAction<string | null>) =>
+    setAdminUsersField("editNotice", value);
   const setEuName = (value: SetStateAction<string>) =>
     setAdminUsersField("euName", value);
   const setEuEmail = (value: SetStateAction<string>) =>
@@ -323,8 +454,14 @@ function useAdminUsersPageContent() {
     setAdminUsersField("passwordResetSuccess", value);
   const setConfirmPasswordReset = (value: SetStateAction<boolean>) =>
     setAdminUsersField("confirmPasswordReset", value);
+  const setConfirmGenerateReset = (value: SetStateAction<boolean>) =>
+    setAdminUsersField("confirmGenerateReset", value);
+  const setConfirmRevokeSessions = (value: SetStateAction<User | null>) =>
+    setAdminUsersField("confirmRevokeSessions", value);
   const setUnlockingUserId = (value: SetStateAction<string | null>) =>
     setAdminUsersField("unlockingUserId", value);
+  const setRevokingUserId = (value: SetStateAction<string | null>) =>
+    setAdminUsersField("revokingUserId", value);
   const setEuSaving = (value: SetStateAction<boolean>) =>
     setAdminUsersField("euSaving", value);
 
@@ -336,22 +473,28 @@ function useAdminUsersPageContent() {
   // existing CEO account; the technical admin manages every other account.
   const { user: currentUser } = useAuth();
   const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
-  const canEditUser = useCallback(
-    (u: User) => canManageCeo || u.role !== "ceo",
-    [canManageCeo],
+  const currentUserId = currentUser?.id ?? null;
+  const actionsFor = useCallback(
+    (u: User) => getAdminUserActions(u, { canManageCeo, currentUserId }),
+    [canManageCeo, currentUserId],
   );
   const assignableRoles = useMemo(
-    () => ROLE_KEYS.filter((key) => canManageCeo || key !== "ceo"),
+    () => getAssignableAdminUserRoles(canManageCeo),
     [canManageCeo],
   );
-  const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
-  const newPasswordError = newPassword
-    ? getRequiredAdminPasswordError(newPassword, t)
-    : null;
-  const newPasswordMismatch = isPasswordConfirmationMismatch(
-    newPassword,
-    newPasswordConfirm,
+  const describeError = useCallback(
+    (e: unknown, targetRole?: string) => describeAdminUserError(e, t, targetRole),
+    [t],
   );
+  const closeUnsavedConfirmMessage = t.common_discard_unsaved_confirm;
+  const manualPassword = newPasswordMode === "manual";
+  const newPasswordError =
+    manualPassword && newPassword
+      ? getRequiredAdminPasswordError(newPassword, t)
+      : null;
+  const newPasswordMismatch =
+    manualPassword &&
+    isPasswordConfirmationMismatch(newPassword, newPasswordConfirm);
   const euPasswordError = getOptionalAdminPasswordError(euPassword, t);
   const euPasswordMismatch = isPasswordConfirmationMismatch(
     euPassword,
@@ -372,6 +515,7 @@ function useAdminUsersPageContent() {
     passwordError: euPasswordError,
     saving: euSaving,
   });
+  const editActions = editUser ? actionsFor(editUser) : null;
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -448,7 +592,7 @@ function useAdminUsersPageContent() {
         label: t.users_role,
         accessor: (user) => roleLabel(user.role),
         filterType: "enum",
-        filterOptions: ROLE_KEYS.map((role) => ({
+        filterOptions: ADMIN_USER_ROLE_KEYS.map((role) => ({
           value: roleLabel(role),
           label: roleLabel(role),
         })),
@@ -472,40 +616,103 @@ function useAdminUsersPageContent() {
         accessor: (user) => user.is_active,
         filterType: "boolean",
         sortable: true,
-        width: 150,
+        width: 210,
         render: (user) => {
-          const locked = isUserLocked(user);
+          const locked = isAdminUserLocked(user);
           return (
-            <Badge
-              variant="outline"
-              className={cn(
-                "rounded-full",
-                locked
-                  ? "border-red-300 bg-red-50 text-red-700"
-                  : user.is_active
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                    : "border-border/60 bg-muted/25 text-muted-foreground",
-              )}
-            >
-              <span
-                aria-hidden
+            <div className="flex flex-wrap items-center gap-1">
+              <Badge
+                variant="outline"
+                title={
+                  locked && user.locked_until
+                    ? `${t.users_locked_until} ${formatDateTime(user.locked_until)}`
+                    : undefined
+                }
                 className={cn(
-                  "size-1.5 rounded-full",
+                  "rounded-full",
                   locked
-                    ? "bg-red-600"
+                    ? "border-red-300 bg-red-50 text-red-700"
                     : user.is_active
-                      ? "bg-emerald-500"
-                      : "bg-muted-foreground/45",
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-border/60 bg-muted/25 text-muted-foreground",
                 )}
-              />
-              {locked
-                ? t.users_locked
-                : user.is_active
-                  ? t.users_active
-                  : t.users_inactive}
-            </Badge>
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    locked
+                      ? "bg-red-600"
+                      : user.is_active
+                        ? "bg-emerald-500"
+                        : "bg-muted-foreground/45",
+                  )}
+                />
+                {locked
+                  ? t.users_locked
+                  : user.is_active
+                    ? t.users_active
+                    : t.users_inactive}
+              </Badge>
+              {user.password_reset_required ? (
+                <Badge
+                  variant="outline"
+                  className="rounded-full border-amber-300 bg-amber-50 text-amber-800"
+                  data-testid="password-reset-required"
+                >
+                  <KeyRound className="size-3" />
+                  {t.users_password_reset_required_badge}
+                </Badge>
+              ) : null}
+            </div>
           );
         },
+      },
+      {
+        id: "totp",
+        label: t.users_totp,
+        accessor: (user) => user.totp_enrolled,
+        filterType: "boolean",
+        sortable: true,
+        width: 150,
+        render: (user) => (
+          <span
+            className={cn(
+              "text-xs",
+              user.totp_enrolled ? "text-emerald-700" : "text-muted-foreground",
+            )}
+          >
+            {user.totp_enrolled ? t.users_totp_enrolled : t.users_totp_missing}
+          </span>
+        ),
+      },
+      {
+        id: "last_login_at",
+        label: t.users_last_login,
+        accessor: (user) => user.last_login_at ?? "",
+        filterType: "date",
+        sortable: true,
+        width: 170,
+        render: (user) => (
+          <span className="text-xs tabular-nums text-foreground">
+            {user.last_login_at
+              ? formatDateTime(user.last_login_at)
+              : <span className="text-muted-foreground">{t.users_never_logged_in}</span>}
+          </span>
+        ),
+      },
+      {
+        id: "active_sessions",
+        label: t.users_sessions,
+        accessor: (user) => user.active_sessions,
+        filterType: "number",
+        sortable: true,
+        width: 110,
+        render: (user) => (
+          <span className="text-xs tabular-nums text-foreground">
+            {user.active_sessions}
+          </span>
+        ),
       },
       {
         id: "created_at",
@@ -526,79 +733,78 @@ function useAdminUsersPageContent() {
 
   const onSubmitCreate = async (ev: FormEvent) => {
     ev.preventDefault();
-    const passwordError = getRequiredAdminPasswordError(newPassword, t);
-    if (passwordError) {
-      setCreateError(passwordError);
-      return;
-    }
-    if (isPasswordConfirmationMismatch(newPassword, newPasswordConfirm)) {
-      setCreateError(t.users_password_mismatch);
-      return;
+    if (manualPassword) {
+      const passwordError = getRequiredAdminPasswordError(newPassword, t);
+      if (passwordError) {
+        setCreateError(passwordError);
+        return;
+      }
+      if (isPasswordConfirmationMismatch(newPassword, newPasswordConfirm)) {
+        setCreateError(t.users_password_mismatch);
+        return;
+      }
     }
     setCreating(true);
     setCreateError(null);
     try {
-      await createAdminUser<User>({
+      const created = await createAdminUser<User>({
         email: newEmail,
         name: newName,
-        password: newPassword,
         role: newRole,
+        ...(manualPassword ? { password: newPassword } : {}),
       });
-      closeCreateSheet();
+      clearApiCache("/users");
+      if (created.one_time_password) {
+        // Keep the sheet open: the password is shown exactly once.
+        dispatchAdminUsersState({
+          createError: null,
+          newPassword: "",
+          newPasswordConfirm: "",
+          createdUser: {
+            name: created.name,
+            email: created.email,
+            oneTimePassword: created.one_time_password,
+          },
+        });
+      } else {
+        closeCreateSheet();
+      }
       void loadUsers();
     } catch (e) {
-      setCreateError(e instanceof Error ? e.message : String(e));
+      setCreateError(describeError(e, newRole));
     } finally {
       setCreating(false);
     }
   };
 
   const openEdit = (u: User) => {
-    if (!canEditUser(u)) {
+    if (!actionsFor(u).canEdit) {
       return;
     }
-    setEditError(null);
-    setEuName(u.name);
-    setEuEmail(u.email);
-    setEuRole(u.role);
-    setEuPassword("");
-    setEuPasswordConfirm("");
-    setEuPasswordVisible(false);
-    setPasswordResetSuccess(false);
-    setConfirmPasswordReset(false);
-    setEditUser(u);
+    dispatchAdminUsersState({
+      ...INITIAL_EDIT_FIELDS,
+      editUser: u,
+      euName: u.name,
+      euEmail: u.email,
+      euRole: u.role,
+    });
   };
 
   const closeCreateSheet = useCallback(() => {
-    setShowCreate(false);
-    setCreateError(null);
-    setNewName("");
-    setNewEmail("");
-    setNewPassword("");
-    setNewPasswordConfirm("");
-    setNewPasswordVisible(false);
-    setNewRole("patient_manager");
+    dispatchAdminUsersState({ ...INITIAL_CREATE_FIELDS });
   }, []);
 
   const closeEditSheet = useCallback(() => {
-    setEditUser(null);
-    setEditError(null);
-    setEuName("");
-    setEuEmail("");
-    setEuRole("");
-    setEuPassword("");
-    setEuPasswordConfirm("");
-    setEuPasswordVisible(false);
-    setPasswordResetSuccess(false);
-    setConfirmPasswordReset(false);
+    dispatchAdminUsersState({ ...INITIAL_EDIT_FIELDS });
   }, []);
 
   const createDirty =
-    newName.trim().length > 0 ||
-    newEmail.trim().length > 0 ||
-    newPassword.length > 0 ||
-    newPasswordConfirm.length > 0 ||
-    newRole !== "patient_manager";
+    createdUser === null &&
+    (newName.trim().length > 0 ||
+      newEmail.trim().length > 0 ||
+      newPassword.length > 0 ||
+      newPasswordConfirm.length > 0 ||
+      newRole !== "patient_manager");
 
   const editDirty =
     editProfileDirty ||
@@ -652,7 +858,7 @@ function useAdminUsersPageContent() {
       closeEditSheet();
       void loadUsers();
     } catch (e) {
-      setEditError(e instanceof Error ? e.message : String(e));
+      setEditError(describeError(e, editUser.role));
     } finally {
       setEuSaving(false);
     }
@@ -674,14 +880,42 @@ function useAdminUsersPageContent() {
     setEditError(null);
     try {
       await resetAdminUserPassword(editUser.id, { new_password: euPassword });
-      setEuPassword("");
-      setEuPasswordConfirm("");
-      setEuPasswordVisible(false);
-      setPasswordResetSuccess(true);
+      dispatchAdminUsersState({
+        euPassword: "",
+        euPasswordConfirm: "",
+        euPasswordVisible: false,
+        passwordResetSuccess: true,
+        generatedResetPassword: null,
+      });
       clearApiCache("/users");
       void loadUsers();
     } catch (e) {
-      setEditError(e instanceof Error ? e.message : String(e));
+      setEditError(describeError(e, editUser.role));
+    } finally {
+      setEuSaving(false);
+    }
+  };
+
+  const generateOneTimeResetPassword = async () => {
+    if (!editUser) return;
+    setEuSaving(true);
+    setConfirmGenerateReset(false);
+    setEditError(null);
+    try {
+      const result = await resetAdminUserPassword(editUser.id, {
+        generate: true,
+      }) as ResetPasswordResult;
+      dispatchAdminUsersState({
+        euPassword: "",
+        euPasswordConfirm: "",
+        euPasswordVisible: false,
+        passwordResetSuccess: true,
+        generatedResetPassword: result.one_time_password ?? null,
+      });
+      clearApiCache("/users");
+      void loadUsers();
+    } catch (e) {
+      setEditError(describeError(e, editUser.role));
     } finally {
       setEuSaving(false);
     }
@@ -689,11 +923,14 @@ function useAdminUsersPageContent() {
 
   const generatePassword = () => {
     const password = generateAdminPassword();
-    setEuPassword(password);
-    setEuPasswordConfirm(password);
-    setEuPasswordVisible(true);
-    setPasswordResetSuccess(false);
-    setEditError(null);
+    dispatchAdminUsersState({
+      euPassword: password,
+      euPasswordConfirm: password,
+      euPasswordVisible: true,
+      passwordResetSuccess: false,
+      generatedResetPassword: null,
+      editError: null,
+    });
   };
 
   const generateNewPassword = () => {
@@ -704,29 +941,68 @@ function useAdminUsersPageContent() {
     setCreateError(null);
   };
 
-  const unlockUser = async (userId: string) => {
-    setUnlockingUserId(userId);
+  const unlockUser = async (user: User) => {
+    setUnlockingUserId(user.id);
     setError(null);
     try {
-      await unlockAdminUser(userId);
+      await unlockAdminUser(user.id);
       clearApiCache("/users");
       void loadUsers();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(describeError(e, user.role));
     } finally {
       setUnlockingUserId(null);
     }
   };
 
-  const toggleActive = async (userId: string, currentlyActive: boolean) => {
+  const revokeSessions = async (user: User) => {
+    setRevokingUserId(user.id);
+    setConfirmRevokeSessions(null);
     setError(null);
     try {
-      await setAdminUserActive(userId, !currentlyActive);
+      await revokeAdminUserSessions(user.id);
+      clearApiCache("/users");
+      if (editUser?.id === user.id) {
+        setEditNotice(t.users_sessions_revoked);
+      }
       void loadUsers();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      const message = describeError(e, user.role);
+      if (editUser?.id === user.id) {
+        setEditError(message);
+      } else {
+        setError(message);
+      }
+    } finally {
+      setRevokingUserId(null);
     }
   };
+
+  const toggleActive = async (user: User) => {
+    setError(null);
+    try {
+      await setAdminUserActive(user.id, !user.is_active);
+      clearApiCache("/users");
+      void loadUsers();
+    } catch (e) {
+      setError(describeError(e, user.role));
+    }
+  };
+
+  const resetTotp = () => {
+    if (!editUser) return;
+    setEditError(null);
+    setEditNotice(null);
+    resetUserTotp(editUser.id)
+      .then(() => {
+        setEditNotice(t.uiText.twofactor_admin_reset_done);
+        clearApiCache("/users");
+        void loadUsers();
+      })
+      .catch((e: unknown) => setEditError(describeError(e, editUser.role)));
+  };
+
+  const fieldLabelClass = "text-[11.5px] font-medium text-muted-foreground leading-tight";
 
   return (
     <div className="space-y-4">
@@ -763,116 +1039,193 @@ function useAdminUsersPageContent() {
         dirty={createDirty}
       >
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
-          <form onSubmit={onSubmitCreate} className="flex min-h-0 flex-1 flex-col">
-            <AdminSheetScaffold
-              title={t.users_create_title}
-              description={t.users_subtitle}
-              footer={(
-                <SheetFormFooter
-                  cancelLabel={t.users_cancel}
-                  submitLabel={t.users_create_btn}
-                  submittingLabel={t.users_creating}
-                  submitting={creating}
-                  submitDisabled={Boolean(newPasswordError || newPasswordMismatch)}
-                  onCancel={closeCreateSheet}
+          {createdUser ? (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <AdminSheetScaffold
+                title={t.users_created_title}
+                description={`${createdUser.name} · ${createdUser.email}`}
+                footer={(
+                  <SheetFormFooter
+                    cancelLabel={t.users_done}
+                    submitLabel={t.users_done}
+                    onCancel={closeCreateSheet}
+                    onSubmit={closeCreateSheet}
+                  />
+                )}
+              >
+                <OneTimePasswordReveal
+                  password={createdUser.oneTimePassword}
+                  title={t.users_one_time_password_title}
+                  hint={t.users_one_time_password_shown_once}
+                  copyLabel={t.users_copy_password}
+                  copiedLabel={t.users_copied}
                 />
-              )}
-            >
-              {createError ? <Banner tone="error">{createError}</Banner> : null}
-              <DotSection title={t.users_create_title}>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
-                    <Input required placeholder={t.users_name_placeholder} value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-field" />
+              </AdminSheetScaffold>
+            </div>
+          ) : (
+            <form onSubmit={onSubmitCreate} className="flex min-h-0 flex-1 flex-col">
+              <AdminSheetScaffold
+                title={t.users_create_title}
+                description={t.users_subtitle}
+                footer={(
+                  <SheetFormFooter
+                    cancelLabel={t.users_cancel}
+                    submitLabel={t.users_create_btn}
+                    submittingLabel={t.users_creating}
+                    submitting={creating}
+                    submitDisabled={Boolean(newPasswordError || newPasswordMismatch)}
+                    onCancel={closeCreateSheet}
+                  />
+                )}
+              >
+                {createError ? <Banner tone="error">{createError}</Banner> : null}
+                <DotSection title={t.users_create_title}>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className={fieldLabelClass}>{t.users_name}</Label>
+                      <Input required placeholder={t.users_name_placeholder} value={newName} onChange={(e) => setNewName(e.target.value)} className="h-9 rounded-lg bg-field" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className={fieldLabelClass}>{t.users_email}</Label>
+                      <Input type="email" required placeholder={t.users_email_placeholder} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
+                    </div>
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
-                    <Input type="email" required placeholder={t.users_email_placeholder} value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
-                  <NativeComboboxSelect value={newRole}
-                    onChange={(event) => setNewRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field">
+                    <Label className={fieldLabelClass}>{t.users_role}</Label>
+                    <NativeComboboxSelect
+                      value={newRole}
+                      aria-label={t.users_role}
+                      onChange={(event) => setNewRole(event.target.value ?? "")}
+                      className="h-9 w-full rounded-lg bg-field"
+                    >
                       {assignableRoles.map((key) => (
                         <option key={key} value={key}>{roleLabel(key)}</option>
                       ))}
                     </NativeComboboxSelect>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_password}</Label>
-                    <div className="relative">
-                      <Input
-                        type={newPasswordVisible ? "text" : "password"}
-                        required
-                        minLength={8}
-                        maxLength={256}
-                        placeholder={t.users_password_policy_hint}
-                        value={newPassword}
-                        onChange={(e) => {
-                          setNewPassword(e.target.value);
+                  </div>
+                </DotSection>
+                <DotSection title={t.users_password}>
+                  <div
+                    role="radiogroup"
+                    aria-label={t.users_password}
+                    className="grid gap-2 sm:grid-cols-2"
+                  >
+                    {(
+                      [
+                        ["one_time", t.users_one_time_password_mode],
+                        ["manual", t.users_manual_password_mode],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="radio"
+                        aria-checked={newPasswordMode === mode}
+                        onClick={() => {
+                          setNewPasswordMode(mode);
                           setCreateError(null);
                         }}
-                        className={cn("h-9 rounded-lg bg-field pr-10", newPasswordError && "border-rose-400 ring-2 ring-rose-100")}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                        aria-label={newPasswordVisible ? t.login_hide_password : t.login_show_password}
-                        onClick={() => setNewPasswordVisible((visible) => !visible)}
+                        className={cn(
+                          "flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors",
+                          newPasswordMode === mode
+                            ? "border-[var(--brand)] bg-[var(--brand)]/5 text-foreground"
+                            : "border-border/70 bg-card text-muted-foreground hover:text-foreground",
+                        )}
                       >
-                        {newPasswordVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                        <span
+                          aria-hidden
+                          className={cn(
+                            "size-2 rounded-full",
+                            newPasswordMode === mode ? "bg-[var(--brand)]" : "bg-border",
+                          )}
+                        />
+                        {label}
                       </button>
-                    </div>
-                    {newPasswordError ? (
-                      <p className="text-xs text-rose-600">
-                        {newPasswordError}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        {t.users_password_policy_hint}
-                      </p>
-                    )}
+                    ))}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
-                      {t.users_confirm_password}
-                    </Label>
-                    <Input
-                      type={newPasswordVisible ? "text" : "password"}
-                      required
-                      minLength={8}
-                      maxLength={256}
-                      placeholder={t.users_password_policy_hint}
-                      value={newPasswordConfirm}
-                      onChange={(e) => {
-                        setNewPasswordConfirm(e.target.value);
-                        setCreateError(null);
-                      }}
-                      className={cn("h-9 rounded-lg bg-field", newPasswordMismatch && "border-rose-400 ring-2 ring-rose-100")}
-                    />
-                    {newPasswordMismatch ? (
-                      <p className="text-xs text-rose-600">
-                        {t.users_password_mismatch}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg px-3.5"
-                    disabled={creating}
-                    onClick={generateNewPassword}
-                  >
-                    {t.users_generate_password}
-                  </Button>
-                </div>
-              </DotSection>
-            </AdminSheetScaffold>
-          </form>
+                  {manualPassword ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <Label className={fieldLabelClass}>{t.users_password}</Label>
+                          <div className="relative">
+                            <Input
+                              type={newPasswordVisible ? "text" : "password"}
+                              required
+                              minLength={8}
+                              maxLength={256}
+                              placeholder={t.users_password_policy_hint}
+                              value={newPassword}
+                              onChange={(e) => {
+                                setNewPassword(e.target.value);
+                                setCreateError(null);
+                              }}
+                              className={cn("h-9 rounded-lg bg-field pr-10", newPasswordError && "border-rose-400 ring-2 ring-rose-100")}
+                            />
+                            <button
+                              type="button"
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              aria-label={newPasswordVisible ? t.login_hide_password : t.login_show_password}
+                              onClick={() => setNewPasswordVisible((visible) => !visible)}
+                            >
+                              {newPasswordVisible ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                            </button>
+                          </div>
+                          {newPasswordError ? (
+                            <p className="text-xs text-rose-600">
+                              {newPasswordError}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">
+                              {t.users_password_policy_hint}
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className={fieldLabelClass}>
+                            {t.users_confirm_password}
+                          </Label>
+                          <Input
+                            type={newPasswordVisible ? "text" : "password"}
+                            required
+                            minLength={8}
+                            maxLength={256}
+                            placeholder={t.users_password_policy_hint}
+                            value={newPasswordConfirm}
+                            onChange={(e) => {
+                              setNewPasswordConfirm(e.target.value);
+                              setCreateError(null);
+                            }}
+                            className={cn("h-9 rounded-lg bg-field", newPasswordMismatch && "border-rose-400 ring-2 ring-rose-100")}
+                          />
+                          {newPasswordMismatch ? (
+                            <p className="text-xs text-rose-600">
+                              {t.users_password_mismatch}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg px-3.5"
+                          disabled={creating}
+                          onClick={generateNewPassword}
+                        >
+                          {t.users_generate_password}
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {t.users_one_time_password_mode_hint}
+                    </p>
+                  )}
+                </DotSection>
+              </AdminSheetScaffold>
+            </form>
+          )}
         </SheetContent>
       </Sheet>
 
@@ -900,6 +1253,14 @@ function useAdminUsersPageContent() {
               )}
             >
               {editError ? <Banner tone="error">{editError}</Banner> : null}
+              {editNotice ? (
+                <div
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+                  role="status"
+                >
+                  {editNotice}
+                </div>
+              ) : null}
               {passwordResetSuccess ? (
                 <div
                   className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
@@ -908,25 +1269,84 @@ function useAdminUsersPageContent() {
                   {t.users_password_reset_success}
                 </div>
               ) : null}
+              {generatedResetPassword ? (
+                <OneTimePasswordReveal
+                  password={generatedResetPassword}
+                  title={t.users_one_time_password_title}
+                  hint={t.users_one_time_password_shown_once}
+                  copyLabel={t.users_copy_password}
+                  copiedLabel={t.users_copied}
+                />
+              ) : null}
               <DotSection title={t.users_title}>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_name}</Label>
+                    <Label className={fieldLabelClass}>{t.users_name}</Label>
                     <Input value={euName} onChange={(e) => setEuName(e.target.value)} className="h-9 rounded-lg bg-field" />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_email}</Label>
+                    <Label className={fieldLabelClass}>{t.users_email}</Label>
                     <Input type="email" value={euEmail} onChange={(e) => setEuEmail(e.target.value)} className="h-9 rounded-lg bg-field" />
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">{t.users_role}</Label>
-                  <NativeComboboxSelect value={euRole}
-                    onChange={(event) => setEuRole(event.target.value ?? "")} className="h-9 w-full rounded-lg bg-field">
-                      {assignableRoles.map((key) => (
-                        <option key={key} value={key}>{roleLabel(key)}</option>
-                      ))}
-                    </NativeComboboxSelect>
+                  <Label className={fieldLabelClass}>{t.users_role}</Label>
+                  <NativeComboboxSelect
+                    value={euRole}
+                    aria-label={t.users_role}
+                    onChange={(event) => setEuRole(event.target.value ?? "")}
+                    className="h-9 w-full rounded-lg bg-field"
+                  >
+                    {assignableRoles.map((key) => (
+                      <option key={key} value={key}>{roleLabel(key)}</option>
+                    ))}
+                  </NativeComboboxSelect>
+                </div>
+              </DotSection>
+              <DotSection title={t.users_sessions}>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                  <dt className="text-muted-foreground">{t.users_last_login}</dt>
+                  <dd className="tabular-nums text-foreground">
+                    {editUser?.last_login_at
+                      ? formatDateTime(editUser.last_login_at)
+                      : t.users_never_logged_in}
+                  </dd>
+                  <dt className="text-muted-foreground">{t.users_sessions}</dt>
+                  <dd className="tabular-nums text-foreground">{editUser?.active_sessions ?? 0}</dd>
+                  <dt className="text-muted-foreground">{t.users_totp}</dt>
+                  <dd className="text-foreground">
+                    {editUser?.totp_enrolled ? t.users_totp_enrolled : t.users_totp_missing}
+                  </dd>
+                  {editUser?.locked_until && isAdminUserLocked(editUser) ? (
+                    <>
+                      <dt className="text-muted-foreground">{t.users_locked_until}</dt>
+                      <dd className="tabular-nums text-red-700">{formatDateTime(editUser.locked_until)}</dd>
+                    </>
+                  ) : null}
+                </dl>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {editActions?.canUnlock ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 gap-1.5 rounded-lg px-3.5"
+                      disabled={euSaving || unlockingUserId === editUser?.id}
+                      onClick={() => editUser && void unlockUser(editUser)}
+                    >
+                      <Unlock className="size-3.5" />
+                      {t.users_unlock}
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 gap-1.5 rounded-lg px-3.5"
+                    disabled={euSaving || !editActions?.canRevokeSessions || revokingUserId === editUser?.id}
+                    onClick={() => setConfirmRevokeSessions(editUser)}
+                  >
+                    <LogOut className="size-3.5" />
+                    {t.users_revoke_sessions}
+                  </Button>
                 </div>
               </DotSection>
               <DotSection title={t.uiText.twofactor_admin_reset}>
@@ -935,22 +1355,28 @@ function useAdminUsersPageContent() {
                   type="button"
                   variant="outline"
                   className="mt-2 h-9 rounded-lg px-3.5"
-                  disabled={euSaving || !editUser}
-                  onClick={() => {
-                    if (!editUser) return;
-                    setEditError(null);
-                    resetUserTotp(editUser.id)
-                      .then(() => setEditError(t.uiText.twofactor_admin_reset_done))
-                      .catch((e: unknown) => setEditError(e instanceof Error ? e.message : String(e)));
-                  }}
+                  disabled={euSaving || !editActions?.canResetTotp}
+                  onClick={resetTotp}
                 >
                   {t.uiText.twofactor_admin_reset}
                 </Button>
               </DotSection>
               <DotSection title={t.users_reset_password}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">{t.users_one_time_password_mode_hint}</p>
+                  <Button
+                    type="button"
+                    className="h-9 gap-1.5 rounded-lg px-3.5"
+                    disabled={euSaving}
+                    onClick={() => setConfirmGenerateReset(true)}
+                  >
+                    <KeyRound className="size-3.5" />
+                    {t.users_generate_one_time_password}
+                  </Button>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                  <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                  <Label className={fieldLabelClass}>
                     {t.users_password}
                   </Label>
                   <div className="relative">
@@ -987,7 +1413,7 @@ function useAdminUsersPageContent() {
                   )}
                 </div>
                   <div className="space-y-1.5">
-                    <Label className="text-[11.5px] font-medium text-muted-foreground leading-tight">
+                    <Label className={fieldLabelClass}>
                       {t.users_confirm_password}
                     </Label>
                     <Input
@@ -1023,6 +1449,7 @@ function useAdminUsersPageContent() {
                   </Button>
                   <Button
                     type="button"
+                    variant="outline"
                     className="h-9 rounded-lg px-3.5"
                     disabled={Boolean(euPasswordError) || !euPasswordConfirmed || euSaving}
                     onClick={() => setConfirmPasswordReset(true)}
@@ -1085,58 +1512,75 @@ function useAdminUsersPageContent() {
             rowId={(user) => user.id}
             activeRowId={editUser?.id ?? null}
             onRowClick={openEdit}
-            rowActions={(user) => (
-              <>
-                {isUserLocked(user) ? (
+            rowActions={(user) => {
+              const actions = actionsFor(user);
+              return (
+                <>
+                  {actions.isLocked ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:bg-amber-50 hover:text-amber-700"
+                      disabled={unlockingUserId === user.id || !actions.canUnlock}
+                      onClick={() => void unlockUser(user)}
+                      aria-label={t.users_unlock}
+                      title={t.users_unlock}
+                    >
+                      <Unlock className="size-3.5" />
+                    </Button>
+                  ) : null}
+                  {user.active_sessions > 0 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-7 rounded-full text-muted-foreground hover:bg-amber-50 hover:text-amber-700"
+                      disabled={revokingUserId === user.id || !actions.canRevokeSessions}
+                      onClick={() => setConfirmRevokeSessions(user)}
+                      aria-label={t.users_revoke_sessions}
+                      title={t.users_revoke_sessions}
+                    >
+                      <LogOut className="size-3.5" />
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
-                    className="size-7 rounded-full text-muted-foreground hover:bg-amber-50 hover:text-amber-700"
-                    disabled={unlockingUserId === user.id || !canEditUser(user)}
-                    onClick={() => void unlockUser(user.id)}
-                    aria-label={t.users_unlock}
-                    title={t.users_unlock}
+                    className="size-7 rounded-full text-muted-foreground hover:text-foreground"
+                    disabled={!actions.canEdit}
+                    onClick={() => openEdit(user)}
+                    aria-label={t.patients_edit}
+                    title={actions.canEdit ? t.patients_edit : t.users_ceo_managed_by_ceo_only}
                   >
-                    <Unlock className="size-3.5" />
+                    <Pencil className="size-3.5" />
                   </Button>
-                ) : null}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="size-7 rounded-full text-muted-foreground hover:text-foreground"
-                  disabled={!canEditUser(user)}
-                  onClick={() => openEdit(user)}
-                  aria-label={t.patients_edit}
-                  title={t.patients_edit}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className={cn(
-                    "size-7 rounded-full text-muted-foreground",
-                    user.is_active
-                      ? "hover:bg-rose-50 hover:text-rose-600"
-                      : "hover:bg-emerald-50 hover:text-emerald-700",
-                  )}
-                  disabled={!canEditUser(user)}
-                  onClick={() => void toggleActive(user.id, user.is_active)}
-                  aria-label={user.is_active ? t.users_deactivate : t.users_activate}
-                  title={user.is_active ? t.users_deactivate : t.users_activate}
-                >
-                  {user.is_active ? (
-                    <UserRoundX className="size-3.5" />
-                  ) : (
-                    <UserRoundCheck className="size-3.5" />
-                  )}
-                </Button>
-              </>
-            )}
-            rowActionsWidth={104}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className={cn(
+                      "size-7 rounded-full text-muted-foreground",
+                      user.is_active
+                        ? "hover:bg-rose-50 hover:text-rose-600"
+                        : "hover:bg-emerald-50 hover:text-emerald-700",
+                    )}
+                    disabled={user.is_active ? !actions.canDeactivate : !actions.canActivate}
+                    onClick={() => void toggleActive(user)}
+                    aria-label={user.is_active ? t.users_deactivate : t.users_activate}
+                    title={user.is_active ? t.users_deactivate : t.users_activate}
+                  >
+                    {user.is_active ? (
+                      <UserRoundX className="size-3.5" />
+                    ) : (
+                      <UserRoundCheck className="size-3.5" />
+                    )}
+                  </Button>
+                </>
+              );
+            }}
+            rowActionsWidth={136}
             tableClassName="min-h-[420px]"
             footer={({ filteredCount, totalCount }) => (
               <span className="tabular-nums">
@@ -1159,6 +1603,26 @@ function useAdminUsersPageContent() {
         confirmDisabled={euSaving}
         onCancel={() => setConfirmPasswordReset(false)}
         onConfirm={() => void resetPassword()}
+      />
+      <DirtyDismissConfirmDialog
+        open={confirmGenerateReset}
+        title={t.users_generate_one_time_password}
+        message={t.users_generate_one_time_password_confirm}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.users_generate_one_time_password}
+        confirmDisabled={euSaving}
+        onCancel={() => setConfirmGenerateReset(false)}
+        onConfirm={() => void generateOneTimeResetPassword()}
+      />
+      <DirtyDismissConfirmDialog
+        open={confirmRevokeSessions !== null}
+        title={t.users_revoke_sessions}
+        message={t.users_revoke_sessions_confirm}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.users_revoke_sessions}
+        confirmDisabled={revokingUserId !== null}
+        onCancel={() => setConfirmRevokeSessions(null)}
+        onConfirm={() => confirmRevokeSessions && void revokeSessions(confirmRevokeSessions)}
       />
     </div>
   );

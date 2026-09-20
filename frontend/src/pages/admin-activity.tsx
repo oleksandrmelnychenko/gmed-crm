@@ -9,6 +9,7 @@ import {
 import {
   Activity,
   Database,
+  KeyRound,
   RefreshCcw,
   Search,
   Settings2,
@@ -251,7 +252,43 @@ const EXACT_ACTION_LABEL_KEYS = {
   medication_ai_analysis_failed: "activity_action_medication_ai_analysis_failed",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-type ActivityView = "activity" | "security" | "technical";
+type ActivityView = "activity" | "security" | "technical" | "access";
+
+/**
+ * Account, role and permission changes: the "access and roles" stream CEO
+ * and IT Admin review. Mirrors `ACCESS_AUDIT_ACTIONS` on the server, which
+ * applies it through `GET /admin/activity?category=access`.
+ */
+export const ACCESS_ACTIONS = new Set([
+  "create_user",
+  "update_user",
+  "revoke_user_resource_access_on_role_change",
+  "deactivate_user",
+  "activate_user",
+  "unlock_user",
+  "reset_password",
+  "totp_reset",
+  "toggle_mfa",
+  "update_access_policy",
+  "create_staff_access_profile",
+  "update_staff_access_profile",
+  "clone_staff_access_profile",
+  "update_staff_user_access",
+]);
+
+export function isAccessActivity(activity: Pick<ActivityRow, "action">): boolean {
+  return ACCESS_ACTIONS.has(activity.action);
+}
+
+/** Query parameters the API expects for a view of the activity stream. */
+export function activityViewQuery(view: ActivityView): {
+  view: "activity" | "security" | "technical";
+  category?: "access";
+} {
+  return view === "access"
+    ? { view: "activity", category: "access" }
+    : { view };
+}
 
 const SECURITY_ACTIONS = new Set([
   "login",
@@ -286,6 +323,7 @@ function isSecurityActivity(activity: ActivityRow): boolean {
 function filterLegacyActivity(items: ActivityRow[], view: ActivityView): ActivityRow[] {
   if (view === "technical") return items.filter((item) => item.action === "http_request");
   if (view === "security") return items.filter(isSecurityActivity);
+  if (view === "access") return items.filter(isAccessActivity);
   return items.filter((item) => item.action !== "http_request");
 }
 
@@ -810,13 +848,16 @@ function AdminActivityViewSelector({
   }> = [
     { icon: Activity, label: t.activity_view_activity, value: "activity" },
     { icon: ShieldAlert, label: t.activity_view_security, value: "security" },
+    { icon: KeyRound, label: t.activity_view_access, value: "access" },
     { icon: Settings2, label: t.activity_view_technical, value: "technical" },
   ];
   const hint = view === "technical"
     ? t.activity_view_technical_hint
     : view === "security"
       ? t.activity_view_security_hint
-      : t.activity_view_activity_hint;
+      : view === "access"
+        ? t.activity_view_access_hint
+        : t.activity_view_activity_hint;
 
   return (
     <section className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1019,7 +1060,7 @@ export function AdminActivityPage() {
         limit: params.limit,
         offset: params.offset,
         search: params.search,
-        view: params.view,
+        ...activityViewQuery(params.view),
       });
       const legacyResponse = data.view === undefined;
       const visibleItems = legacyResponse

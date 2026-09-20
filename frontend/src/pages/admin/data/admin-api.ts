@@ -169,6 +169,8 @@ export type AdminActivityQuery = {
   offset?: number;
   search?: string;
   view?: "activity" | "security" | "technical" | "all";
+  /** `access`: only account, role and permission changes. */
+  category?: "access";
 };
 
 export type AdminActivityResponse<TActivity> = {
@@ -203,6 +205,7 @@ export function fetchAdminActivity<TActivity>(
   if (input.dateTo) query.set("date_to", input.dateTo);
   if (input.search) query.set("search", input.search);
   if (input.view) query.set("view", input.view);
+  if (input.category) query.set("category", input.category);
   return apiFetch<AdminActivityResponse<TActivity>>(`/admin/activity?${query.toString()}`, {
     cacheTtlMs: ADMIN_FAST_CACHE_TTL_MS,
   });

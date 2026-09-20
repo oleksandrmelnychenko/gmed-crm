@@ -75,6 +75,127 @@ export function canSaveAdminUserEdit({
   );
 }
 
+export const ADMIN_USER_ROLE_KEYS = [
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+  "billing",
+  "sales",
+  "it_admin",
+  "patient",
+] as const;
+
+export type AdminUserRoleKey = (typeof ADMIN_USER_ROLE_KEYS)[number];
+
+/**
+ * Roles the signed-in administrator may assign. Only `users.manage_ceo`
+ * (the CEO) may hand out the `ceo` role; the technical admin sees every
+ * other role.
+ */
+export function getAssignableAdminUserRoles(
+  canManageCeo: boolean,
+): AdminUserRoleKey[] {
+  return ADMIN_USER_ROLE_KEYS.filter((role) => canManageCeo || role !== "ceo");
+}
+
+export type AdminUserActionTarget = {
+  id: string;
+  role: string;
+  is_active: boolean;
+  locked_until: string | null;
+  active_sessions?: number;
+  totp_enrolled?: boolean;
+};
+
+export type AdminUserActionContext = {
+  canManageCeo: boolean;
+  currentUserId: string | null;
+  now?: number;
+};
+
+export type AdminUserActions = {
+  /** The row may be changed at all (CEO rows are read-only for IT Admin). */
+  canManage: boolean;
+  isLocked: boolean;
+  canEdit: boolean;
+  canUnlock: boolean;
+  canRevokeSessions: boolean;
+  canResetTotp: boolean;
+  canDeactivate: boolean;
+  canActivate: boolean;
+};
+
+export function isAdminUserLocked(
+  user: Pick<AdminUserActionTarget, "locked_until">,
+  now = Date.now(),
+) {
+  if (!user.locked_until) return false;
+  const lockedUntil = new Date(user.locked_until).getTime();
+  return Number.isFinite(lockedUntil) && lockedUntil > now;
+}
+
+/**
+ * Which actions the users table offers for a row. Mirrors the server: every
+ * operation on a CEO account needs `users.manage_ceo`, nobody deactivates
+ * themselves, and unlock / revoke / TOTP reset only make sense when there
+ * is something to unlock, revoke or reset.
+ */
+export function getAdminUserActions(
+  user: AdminUserActionTarget,
+  context: AdminUserActionContext,
+): AdminUserActions {
+  const canManage = context.canManageCeo || user.role !== "ceo";
+  const isLocked = isAdminUserLocked(user, context.now);
+  return {
+    canManage,
+    isLocked,
+    canEdit: canManage,
+    canUnlock: canManage && isLocked,
+    canRevokeSessions: canManage && (user.active_sessions ?? 0) > 0,
+    canResetTotp: canManage && user.totp_enrolled === true,
+    canDeactivate: canManage && user.is_active && user.id !== context.currentUserId,
+    canActivate: canManage && !user.is_active,
+  };
+}
+
+type AdminUserErrorMessages = {
+  users_last_ceo_protected: string;
+  users_ceo_managed_by_ceo_only: string;
+  users_cannot_deactivate_self: string;
+};
+
+/**
+ * Readable text for the server's guard responses: the last-CEO protection
+ * (`409 last_ceo_protected`), the CEO-only rule (`403` on a CEO target) and
+ * the self-deactivation refusal. Anything else keeps the server message.
+ */
+export function describeAdminUserError(
+  error: unknown,
+  messages: AdminUserErrorMessages,
+  targetRole?: string,
+): string {
+  const details = (error ?? {}) as {
+    code?: unknown;
+    status?: unknown;
+    message?: unknown;
+  };
+  if (details.code === "last_ceo_protected") {
+    return messages.users_last_ceo_protected;
+  }
+  if (details.status === 403 && targetRole === "ceo") {
+    return messages.users_ceo_managed_by_ceo_only;
+  }
+  const message =
+    typeof details.message === "string" ? details.message : String(error);
+  if (message === "Cannot deactivate yourself") {
+    return messages.users_cannot_deactivate_self;
+  }
+  return message;
+}
+
 const PASSWORD_CHARACTER_GROUPS = [
   "ABCDEFGHJKLMNPQRSTUVWXYZ",
   "abcdefghijkmnopqrstuvwxyz",

@@ -3,7 +3,44 @@ import { describe, expect, it } from "vitest";
 import { de } from "@/lib/i18n/de";
 import { ru } from "@/lib/i18n/ru";
 
-import { actionLabel, actionTone, isAiActivityAction } from "./admin-activity";
+import {
+  actionLabel,
+  actionTone,
+  activityViewQuery,
+  isAccessActivity,
+  isAiActivityAction,
+} from "./admin-activity";
+
+describe("Access and roles activity view", () => {
+  it("sends the access category on top of the meaningful-activity view", () => {
+    expect(activityViewQuery("access")).toEqual({ view: "activity", category: "access" });
+    expect(activityViewQuery("security")).toEqual({ view: "security" });
+    expect(activityViewQuery("activity")).toEqual({ view: "activity" });
+  });
+
+  it("keeps only account, role and permission changes when filtering locally", () => {
+    for (const action of [
+      "create_user",
+      "update_user",
+      "deactivate_user",
+      "activate_user",
+      "reset_password",
+      "totp_reset",
+      "update_access_policy",
+      "update_staff_user_access",
+    ]) {
+      expect(isAccessActivity({ action })).toBe(true);
+    }
+    expect(isAccessActivity({ action: "login_success" })).toBe(false);
+    expect(isAccessActivity({ action: "read_patient" })).toBe(false);
+    expect(isAccessActivity({ action: "http_request" })).toBe(false);
+  });
+
+  it("labels the view in Russian and German", () => {
+    expect(ru.activity_view_access).toBe("Доступ и роли");
+    expect(de.activity_view_access).toBe("Zugriff und Rollen");
+  });
+});
 
 describe("Medication AI activity localization", () => {
   it("uses exact Russian and German labels for every AI lifecycle action", () => {

@@ -62,6 +62,9 @@ interface Policy {
   is_system_locked: boolean;
 }
 
+// `ceo` is implicit full and never a matrix row; `it_admin` is shown so the
+// matrix stops pretending the technical administrator sees patient data —
+// its cells are system locked `hidden` on the server.
 const ROLE_KEYS = [
   "ceo_assistant",
   "patient_manager",
@@ -70,6 +73,7 @@ const ROLE_KEYS = [
   "concierge",
   "billing",
   "sales",
+  "it_admin",
   "patient",
 ] as const;
 
