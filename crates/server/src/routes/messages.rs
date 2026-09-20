@@ -3230,26 +3230,27 @@ async fn load_allowed_peer_rows(
         });
     }
 
+    // Internal peers are the staff roles holding chat.use (capability registry),
+    // so the list follows the matrix instead of a hard-coded role set.
+    let chat_roles: Vec<String> = gmed_domain::access::capabilities::STAFF_ROLES
+        .iter()
+        .copied()
+        .filter(|role| role.can(Capability::ChatUse))
+        .filter_map(crate::access::role_db_name)
+        .map(str::to_string)
+        .collect();
     let mut rows = sqlx::query(
         r#"SELECT id, name, email, role
            FROM users
            WHERE is_active = true
              AND id <> $1
-             AND role IN (
-                'ceo',
-                'ceo_assistant',
-                'patient_manager',
-                'teamlead_interpreter',
-                'interpreter',
-                'concierge',
-                'billing',
-                'it_admin'
-             )
+             AND role = ANY($3)
              AND ($2::text = '%%' OR name ILIKE $2 OR email ILIKE $2)
             ORDER BY role, name"#,
     )
     .bind(auth.user_id)
     .bind(search_pattern)
+    .bind(&chat_roles)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
