@@ -24,6 +24,38 @@ type ReleaseEnvironment = {
 
 const RELEASE_NOTES: CustomerReleaseNote[] = [
   {
+    commit: "26ad6fa",
+    title: { ru: "E-Rechnung: счета в формате ZUGFeRD", de: "E-Rechnung: Rechnungen im ZUGFeRD-Format" },
+    description: {
+      ru: "PDF исходящих счетов теперь гибридный ZUGFeRD/Factur-X (EN 16931): внутри лежит машиночитаемый XML, а сам PDF соответствует PDF/A-3. Кнопка «E-Rechnung XML» отдаёт XML отдельно. Формат проверяется официальным валидатором при каждой сборке. Для реальных счетов заполните USt-IdNr. или Steuernummer в настройках.",
+      de: "Das PDF ausgehender Rechnungen ist jetzt ein hybrides ZUGFeRD/Factur-X (EN 16931): Es enthält das maschinenlesbare XML und erfüllt PDF/A-3. Die Schaltfläche „E-Rechnung XML“ liefert das XML separat. Das Format wird bei jedem Build mit dem offiziellen Validator geprüft. Für echte Rechnungen bitte USt-IdNr. oder Steuernummer in den Einstellungen hinterlegen.",
+    },
+  },
+  {
+    commit: "e99858e",
+    title: { ru: "DATEV: долгосрочный доступ и надёжное отключение", de: "DATEV: Langzeitzugriff und sicheres Trennen" },
+    description: {
+      ru: "Обычный вход DATEV действует до 11 часов; теперь виден срок сессии, а после проверки компании можно подключиться на длительный срок (до 2 лет) для этой компании. Если DATEV не подтвердил отзыв токенов, доступ можно отключить принудительно и настроить заново. Redirect URL выбирается только из консолей GMed.",
+      de: "Die normale DATEV-Anmeldung gilt bis zu 11 Stunden; die Sitzungsdauer ist jetzt sichtbar, und nach der Unternehmensprüfung ist eine langfristige Verbindung (bis zu 2 Jahre) für dieses Unternehmen möglich. Bestätigt DATEV den Token-Widerruf nicht, lässt sich der Zugriff dennoch trennen und neu einrichten. Die Redirect URL wird nur aus den GMed-Konsolen gewählt.",
+    },
+  },
+  {
+    commit: "c7aadd3",
+    title: { ru: "Счета без разрешения бухгалтерии", de: "Rechnungen ohne Abrechnungsfreigabe" },
+    description: {
+      ru: "Новый счёт по предложению или счёт пациенту создаётся сразу, без предварительного разрешения бухгалтерии на заказе. Разрешение на заказе по-прежнему влияет только на его выполнение.",
+      de: "Eine neue Rechnung zum Angebot oder an den Patienten wird sofort erstellt, ohne vorherige Abrechnungsfreigabe am Auftrag. Die Freigabe am Auftrag betrifft weiterhin nur dessen Ausführung.",
+    },
+  },
+  {
+    commit: "286398c",
+    title: { ru: "Лиды: отдельная колонка «Повторное обращение»", de: "Leads: eigene Spalte „Erneute Anfrage“" },
+    description: {
+      ru: "Признак повторного обращения вынесен из колонки «Тип лида» в отдельную колонку с сортировкой и фильтром; строки больше не накладываются.",
+      de: "Das Merkmal „Erneute Anfrage“ steht nun in einer eigenen Spalte mit Sortierung und Filter statt in „Lead-Typ“; die Zeilen überlagern sich nicht mehr.",
+    },
+  },
+  {
     commit: "e3f7a96",
     title: { ru: "Распознавание и проверка инвойсов", de: "Rechnungserkennung und Prüfung" },
     description: {
