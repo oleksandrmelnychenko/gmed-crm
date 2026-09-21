@@ -6,11 +6,11 @@ import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { conciergeTaskInterval, type ConciergeTask, type ConciergeTaskStatus } from "./model";
-import { addTaskCalendarDays, orderedTaskHierarchy, taskCalendarDays, taskOccursOnDay } from "./task-calendar";
+import { addTaskCalendarDays, orderedTaskHierarchy, taskCalendarDays, taskTimelineColumns, taskTimelineSpan } from "./task-calendar";
 
 const copy = {
-  ru: { today: "Сегодня", previous: "Предыдущая неделя", next: "Следующая неделя", start: "Начало", end: "Окончание", unplanned: "Без дат", open: "Открыто", in_progress: "В работе", on_hold: "На паузе", review: "На проверке", completed: "Выполнено", cancelled: "Отменено", pause: "На паузу", resume: "Продолжить", launch: "Начать", outside: "Вне этой недели", task: "Задача" },
-  de: { today: "Heute", previous: "Vorherige Woche", next: "Nächste Woche", start: "Beginn", end: "Ende", unplanned: "Ohne Datum", open: "Offen", in_progress: "In Arbeit", on_hold: "Pausiert", review: "Zur Prüfung", completed: "Erledigt", cancelled: "Storniert", pause: "Pausieren", resume: "Fortsetzen", launch: "Starten", outside: "Außerhalb dieser Woche", task: "Aufgabe" },
+  ru: { today: "Сегодня", previous: "Предыдущая неделя", next: "Следующая неделя", start: "Начало", end: "Окончание", unplanned: "Без дат", open: "Открыто", in_progress: "В работе", on_hold: "На паузе", review: "На проверке", completed: "Выполнено", cancelled: "Отменено", pause: "На паузу", resume: "Продолжить", launch: "Начать", outside: "Вне этой недели", task: "Задача", running: "продолжается", sinceCreated: "с момента создания" },
+  de: { today: "Heute", previous: "Vorherige Woche", next: "Nächste Woche", start: "Beginn", end: "Ende", unplanned: "Ohne Datum", open: "Offen", in_progress: "In Arbeit", on_hold: "Pausiert", review: "Zur Prüfung", completed: "Erledigt", cancelled: "Storniert", pause: "Pausieren", resume: "Fortsetzen", launch: "Starten", outside: "Außerhalb dieser Woche", task: "Aufgabe", running: "läuft weiter", sinceCreated: "seit Anlage" },
 };
 
 export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availableStatusesForTask, updatingTaskId }: {
@@ -49,7 +49,10 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
           {rows.map(({ task, depth }) => {
             const { start, end } = conciergeTaskInterval(task);
             const statusLabel = task.archived_at ? (lang === "ru" ? "В архиве" : "Archiviert") : labels[task.status];
-            const occupied = days.flatMap((day, index) => taskOccursOnDay(task, day) ? [index] : []);
+            // The bar runs from the planned start (or creation) to the deadline,
+            // completion, or today while the task is still open.
+            const span = taskTimelineSpan(task, now);
+            const columns = span ? taskTimelineColumns(span, days) : null;
             const target = task.status === "in_progress" ? "on_hold" : "in_progress";
             const actionable = !task.archived_at && ["open", "in_progress", "on_hold"].includes(task.status) && availableStatusesForTask(task).includes(target);
             return <div key={task.id} data-testid={`timeline-row-${task.id}`} className="grid grid-cols-[230px_minmax(0,1fr)] border-b last:border-0 sm:grid-cols-[360px_minmax(0,1fr)]">
@@ -64,7 +67,7 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
               </div>
               <div className="relative grid grid-cols-7 items-center">
                 <div className="pointer-events-none absolute inset-0 grid grid-cols-7">{days.map((day) => <div key={day.toISOString()} className={cn("border-l", day.toDateString() === now.toDateString() && "bg-orange-50/40")} />)}</div>
-                {occupied.length ? <button onClick={() => onOpen(task)} title={`${task.title}: ${format(start)} — ${format(end)}`} className={cn("relative mx-1 rounded-md border px-2 py-2 text-left text-xs font-medium", task.archived_at ? "border-border bg-muted text-muted-foreground" : task.status === "on_hold" ? "border-dashed border-amber-400 bg-amber-50 text-amber-800" : task.status === "completed" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : task.status === "cancelled" ? "border-border bg-muted text-muted-foreground line-through" : "border-orange-200 bg-orange-100 text-orange-900")} style={{ gridColumn: `${occupied[0] + 1} / ${occupied[occupied.length - 1] + 2}` }}><span className="block truncate">{statusLabel}</span></button> : <span className="relative col-span-7 px-3 text-center text-xs text-muted-foreground">{start || end ? labels.outside : labels.unplanned}</span>}
+                {span && columns ? <button onClick={() => onOpen(task)} title={`${task.title}: ${format(span.start)} — ${span.running ? labels.running : format(span.end)}`} className={cn("relative mx-1 flex items-center gap-1 rounded-md border px-2 py-2 text-left text-xs font-medium", columns.continuesBefore && "ml-0 rounded-l-none border-l-0", columns.continuesAfter && "mr-0 rounded-r-none border-r-0", task.archived_at ? "border-border bg-muted text-muted-foreground" : task.status === "on_hold" ? "border-dashed border-amber-400 bg-amber-50 text-amber-800" : task.status === "completed" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : task.status === "cancelled" ? "border-border bg-muted text-muted-foreground line-through" : span.running && task.status !== "in_progress" ? "border-red-200 bg-red-50 text-red-800" : "border-orange-200 bg-orange-100 text-orange-900")} style={{ gridColumn: `${columns.from + 1} / ${columns.to + 2}` }}>{columns.continuesBefore ? <ChevronLeft className="size-3 shrink-0 opacity-60" aria-hidden /> : null}<span className="block min-w-0 truncate">{statusLabel}{span.impliedStart ? ` · ${labels.sinceCreated}` : ""}{span.running ? ` · ${labels.running}` : ""}</span>{columns.continuesAfter || span.running ? <ChevronRight className="size-3 shrink-0 opacity-60" aria-hidden /> : null}</button> : <span className="relative col-span-7 px-3 text-center text-xs text-muted-foreground">{span ? labels.outside : labels.unplanned}</span>}
               </div>
             </div>;
           })}
