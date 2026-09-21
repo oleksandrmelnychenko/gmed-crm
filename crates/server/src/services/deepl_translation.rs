@@ -318,7 +318,13 @@ impl DeeplTranslator {
         }
         let safe_filename: String = filename
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
         body.extend_from_slice(
@@ -345,10 +351,9 @@ impl DeeplTranslator {
         if !upload.status().is_success() {
             return Err(DeeplError::UpstreamStatus(upload.status().as_u16()));
         }
-        let handle: DeeplDocumentHandle = serde_json::from_slice(
-            &upload.bytes().await.map_err(|_| DeeplError::Request)?,
-        )
-        .map_err(|_| DeeplError::InvalidOutput)?;
+        let handle: DeeplDocumentHandle =
+            serde_json::from_slice(&upload.bytes().await.map_err(|_| DeeplError::Request)?)
+                .map_err(|_| DeeplError::InvalidOutput)?;
         if handle.document_id.is_empty()
             || !handle
                 .document_id
@@ -372,10 +377,15 @@ impl DeeplTranslator {
                 .await
                 .map_err(|_| DeeplError::Request)?;
             if !status_response.status().is_success() {
-                return Err(DeeplError::UpstreamStatus(status_response.status().as_u16()));
+                return Err(DeeplError::UpstreamStatus(
+                    status_response.status().as_u16(),
+                ));
             }
             let status: DeeplDocumentStatus = serde_json::from_slice(
-                &status_response.bytes().await.map_err(|_| DeeplError::Request)?,
+                &status_response
+                    .bytes()
+                    .await
+                    .map_err(|_| DeeplError::Request)?,
             )
             .map_err(|_| DeeplError::InvalidOutput)?;
             billed_characters = status.billed_characters.or(billed_characters);
@@ -391,7 +401,10 @@ impl DeeplTranslator {
         }
 
         let mut result = client
-            .post(format!("{base_url}/v2/document/{}/result", handle.document_id))
+            .post(format!(
+                "{base_url}/v2/document/{}/result",
+                handle.document_id
+            ))
             .header(AUTHORIZATION, authorization)
             .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
             .body(key_body)

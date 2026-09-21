@@ -4444,12 +4444,18 @@ fn render_translation_markup(layout: &mut TreatmentPlanPdfLayout, text: &str) {
             .or_else(|| trimmed.strip_prefix("* "))
             .or_else(|| trimmed.strip_prefix("• "))
         {
-            layout.text_block_rich(&format!("• {item}"), 11.0, 4.0, TreatmentPlanPdfColor::Body, 0.6);
+            layout.text_block_rich(
+                &format!("• {item}"),
+                11.0,
+                4.0,
+                TreatmentPlanPdfColor::Body,
+                0.6,
+            );
             continue;
         }
-        let numbered = trimmed
-            .split_once(". ")
-            .filter(|(number, _)| !number.is_empty() && number.len() <= 3 && number.bytes().all(|b| b.is_ascii_digit()));
+        let numbered = trimmed.split_once(". ").filter(|(number, _)| {
+            !number.is_empty() && number.len() <= 3 && number.bytes().all(|b| b.is_ascii_digit())
+        });
         if numbered.is_some() {
             layout.text_block_rich(trimmed, 11.0, 4.0, TreatmentPlanPdfColor::Body, 0.6);
             continue;
@@ -5094,11 +5100,17 @@ impl TreatmentPlanPdfLayout {
             } else {
                 char_width_mm
             };
-            if used_mm + space + width > available && !lines.last().is_some_and(|line| line.is_empty()) {
+            if used_mm + space + width > available
+                && !lines.last().is_some_and(|line| line.is_empty())
+            {
                 lines.push(Vec::new());
                 used_mm = 0.0;
             }
-            used_mm += if lines.last().is_some_and(|line| line.is_empty()) { 0.0 } else { char_width_mm };
+            used_mm += if lines.last().is_some_and(|line| line.is_empty()) {
+                0.0
+            } else {
+                char_width_mm
+            };
             used_mm += width;
             lines.last_mut().expect("line exists").push((word, bold));
         }
@@ -5109,26 +5121,50 @@ impl TreatmentPlanPdfLayout {
             // Merge consecutive words of the same style into one text op.
             let mut segment = String::new();
             let mut segment_bold = false;
-            let flush = |segment: &mut String, bold: bool, x_mm: &mut f32, ops: &mut Vec<Op>, y_mm: f32, regular: &PdfFontHandle, bold_font: &PdfFontHandle| {
+            let flush = |segment: &mut String,
+                         bold: bool,
+                         x_mm: &mut f32,
+                         ops: &mut Vec<Op>,
+                         y_mm: f32,
+                         regular: &PdfFontHandle,
+                         bold_font: &PdfFontHandle| {
                 if segment.is_empty() {
                     return;
                 }
                 let font = if bold { bold_font } else { regular };
                 append_pdf_text_line(ops, segment, *x_mm, y_mm, size_pt, font, color);
-                *x_mm += segment.chars().count() as f32 * char_width_mm * if bold { 1.14 } else { 1.0 } + char_width_mm * 0.35;
+                *x_mm +=
+                    segment.chars().count() as f32 * char_width_mm * if bold { 1.14 } else { 1.0 }
+                        + char_width_mm * 0.35;
                 segment.clear();
             };
             for (index, (word, bold)) in line.iter().enumerate() {
                 if index > 0 && *bold != segment_bold {
                     segment.push(' ');
-                    flush(&mut segment, segment_bold, &mut x_mm, &mut self.page_ops, self.y_mm, &self.regular_font, &self.bold_font);
+                    flush(
+                        &mut segment,
+                        segment_bold,
+                        &mut x_mm,
+                        &mut self.page_ops,
+                        self.y_mm,
+                        &self.regular_font,
+                        &self.bold_font,
+                    );
                 } else if index > 0 {
                     segment.push(' ');
                 }
                 segment_bold = *bold;
                 segment.push_str(word);
             }
-            flush(&mut segment, segment_bold, &mut x_mm, &mut self.page_ops, self.y_mm, &self.regular_font, &self.bold_font);
+            flush(
+                &mut segment,
+                segment_bold,
+                &mut x_mm,
+                &mut self.page_ops,
+                self.y_mm,
+                &self.regular_font,
+                &self.bold_font,
+            );
             self.y_mm -= line_height_mm;
         }
         if after_mm > 0.0 {
@@ -21254,9 +21290,7 @@ async fn document_translation_source_text(
     {
         return Ok(text);
     }
-    let document_id = row
-        .try_get::<Uuid, _>("id")
-        .unwrap_or_else(|_| Uuid::nil());
+    let document_id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
     let Some(storage_key) = row
         .try_get::<Option<String>, _>("storage_key")
         .unwrap_or_default()
@@ -21432,9 +21466,8 @@ async fn create_document_translation(
         Ok(row) => row,
         Err(resp) => return resp,
     };
-    let Some(target_language) =
-        normalize_translation_source_language(Some(&body.target_language))
-            .filter(|language| *language != "de-ru")
+    let Some(target_language) = normalize_translation_source_language(Some(&body.target_language))
+        .filter(|language| *language != "de-ru")
     else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -21481,10 +21514,7 @@ async fn create_document_translation(
         .as_ref()
         .is_some_and(|value| value.chars().count() > MAX_DOCUMENT_TRANSLATION_TEXT_CHARS)
     {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Source text is too long",
-        );
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Source text is too long");
     }
     let provider = match body.provider.as_deref().map(str::trim) {
         None | Some("") | Some("manual") => "manual",
@@ -21550,13 +21580,12 @@ async fn create_document_translation(
         Ok(document_id) => document_id,
         Err(resp) => return resp,
     };
-    if let Err(e) = sqlx::query(
-        "UPDATE document_translations SET translated_document_id = $2 WHERE id = $1",
-    )
-    .bind(translation_id)
-    .bind(translated_document_id)
-    .execute(&state.db)
-    .await
+    if let Err(e) =
+        sqlx::query("UPDATE document_translations SET translated_document_id = $2 WHERE id = $1")
+            .bind(translation_id)
+            .bind(translated_document_id)
+            .execute(&state.db)
+            .await
     {
         tracing::error!(error = %e, translation_id = %translation_id, "link translated document");
         return err(
@@ -21672,14 +21701,30 @@ struct TranslationPdfContent<'a> {
 
 fn translation_note(target_language: &str, provider: &str) -> &'static str {
     match (target_language, provider) {
-        ("ru", "deepl") => "Машинный перевод (DeepL), проверенный сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже.",
-        ("ru", _) => "Перевод выполнен сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже.",
-        ("uk", "deepl") => "Машинний переклад (DeepL), перевірений співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче.",
-        ("uk", _) => "Переклад виконано співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче.",
-        ("en", "deepl") => "Machine translation (DeepL) reviewed by a staff member. In case of discrepancies the original document below prevails.",
-        ("en", _) => "Translation prepared by a staff member. In case of discrepancies the original document below prevails.",
-        (_, "deepl") => "Maschinelle Übersetzung (DeepL), von einem Mitarbeiter geprüft. Bei Abweichungen gilt das nachstehende Originaldokument.",
-        (_, _) => "Übersetzung durch einen Mitarbeiter. Bei Abweichungen gilt das nachstehende Originaldokument.",
+        ("ru", "deepl") => {
+            "Машинный перевод (DeepL), проверенный сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже."
+        }
+        ("ru", _) => {
+            "Перевод выполнен сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже."
+        }
+        ("uk", "deepl") => {
+            "Машинний переклад (DeepL), перевірений співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче."
+        }
+        ("uk", _) => {
+            "Переклад виконано співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче."
+        }
+        ("en", "deepl") => {
+            "Machine translation (DeepL) reviewed by a staff member. In case of discrepancies the original document below prevails."
+        }
+        ("en", _) => {
+            "Translation prepared by a staff member. In case of discrepancies the original document below prevails."
+        }
+        (_, "deepl") => {
+            "Maschinelle Übersetzung (DeepL), von einem Mitarbeiter geprüft. Bei Abweichungen gilt das nachstehende Originaldokument."
+        }
+        (_, _) => {
+            "Übersetzung durch einen Mitarbeiter. Bei Abweichungen gilt das nachstehende Originaldokument."
+        }
     }
 }
 
@@ -21788,7 +21833,9 @@ async fn load_source_pdf_bytes(row: &sqlx::postgres::PgRow) -> Option<Vec<u8>> {
     let original_filename = row
         .try_get::<Option<String>, _>("original_filename")
         .unwrap_or_default();
-    let auto_name = row.try_get::<Option<String>, _>("auto_name").unwrap_or_default();
+    let auto_name = row
+        .try_get::<Option<String>, _>("auto_name")
+        .unwrap_or_default();
     read_document_storage_bytes(
         document_id,
         &storage_key,
@@ -21810,14 +21857,15 @@ fn attach_original_pdf(
     let Some(original) = original_pdf else {
         return Ok(translation_pdf);
     };
-    crate::document_signatures::package::merge_signing_pdfs(&translation_pdf, &[original])
-        .map_err(|_| {
+    crate::document_signatures::package::merge_signing_pdfs(&translation_pdf, &[original]).map_err(
+        |_| {
             tracing::error!(translation_id = %translation_id, "append original PDF to translation");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to append the original document to the translation",
             )
-        })
+        },
+    )
 }
 
 async fn build_translation_pdf(
@@ -21909,8 +21957,7 @@ async fn render_document_translation_pdf(
         .unwrap_or_else(|_| "manual".to_string());
 
     // Access is checked on the source document, like every translation action.
-    let source_row = match authorize_document_translation(&state, &auth, source_document_id).await
-    {
+    let source_row = match authorize_document_translation(&state, &auth, source_document_id).await {
         Ok(row) => row,
         Err(resp) => return resp,
     };
@@ -22247,7 +22294,11 @@ async fn create_document_layout_translation(
     .bind(source_language)
     .bind(target_language)
     .bind(source_text.as_deref())
-    .bind(if translated_text.trim().is_empty() { "(PDF)" } else { translated_text.as_str() })
+    .bind(if translated_text.trim().is_empty() {
+        "(PDF)"
+    } else {
+        translated_text.as_str()
+    })
     .bind(i32::try_from(translated.billed_characters.unwrap_or(0)).unwrap_or(i32::MAX))
     .bind(auth.user_id)
     .fetch_one(&state.db)
@@ -22314,13 +22365,12 @@ async fn create_document_layout_translation(
         Ok(document_id) => document_id,
         Err(resp) => return resp,
     };
-    if let Err(e) = sqlx::query(
-        "UPDATE document_translations SET translated_document_id = $2 WHERE id = $1",
-    )
-    .bind(translation_id)
-    .bind(translated_document_id)
-    .execute(&state.db)
-    .await
+    if let Err(e) =
+        sqlx::query("UPDATE document_translations SET translated_document_id = $2 WHERE id = $1")
+            .bind(translation_id)
+            .bind(translated_document_id)
+            .execute(&state.db)
+            .await
     {
         tracing::error!(error = %e, translation_id = %translation_id, "link translated document");
         return err(
