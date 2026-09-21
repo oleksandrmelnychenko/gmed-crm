@@ -64,6 +64,8 @@ export type PatientLookupItem = {
 export type DocumentItem = {
   id: string;
   document_number?: string | null;
+  /** Source document when this row is a saved translation (tree view). */
+  translation_source_document_id?: string | null;
   generated_template_id?: string | null;
   order_id?: string | null;
   version_root_document_id?: string | null;

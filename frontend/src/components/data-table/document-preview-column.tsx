@@ -1,4 +1,4 @@
-import { Eye } from "lucide-react";
+import { Eye, Languages } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
@@ -11,6 +11,9 @@ type DocumentPreviewColumnOptions<T> = {
   label: string;
   onPreview: (row: T) => void;
   onSigned?: () => void;
+  /** Optional third action: open the document translation dialog. */
+  onTranslate?: (row: T) => void;
+  translateLabel?: string;
 };
 
 export function createDocumentPreviewColumn<T>({
@@ -19,6 +22,8 @@ export function createDocumentPreviewColumn<T>({
   label,
   onPreview,
   onSigned,
+  onTranslate,
+  translateLabel,
 }: DocumentPreviewColumnOptions<T>): ColumnDef<T> {
   return {
     id: "preview",
@@ -27,7 +32,7 @@ export function createDocumentPreviewColumn<T>({
     sortable: false,
     required: true,
     pinned: "left",
-    width: 96,
+    width: onTranslate ? 128 : 96,
     cellClassName: "flex items-center justify-center gap-1",
     render: (row) => {
       const title = getTitle(row) || label;
@@ -49,6 +54,23 @@ export function createDocumentPreviewColumn<T>({
           <Eye className="size-4" />
         </Button>
         <DocumentSignatureAction documentId={getId(row)} title={title} iconOnly onDone={onSigned} />
+        {onTranslate ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            title={translateLabel ?? label}
+            aria-label={`${translateLabel ?? label}: ${title}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onTranslate(row);
+            }}
+            onKeyDown={(event) => event.stopPropagation()}
+            data-document-translate-id={getId(row)}
+          >
+            <Languages className="size-4" />
+          </Button>
+        ) : null}
         </>
       );
     },

@@ -38,6 +38,8 @@ type DocumentClassificationSuggestion = {
 export type DocumentItem = {
   id: string;
   document_number?: string;
+  /** Source document when this row is a saved translation (tree view). */
+  translation_source_document_id?: string | null;
   patient_id: string | null;
   lead_id?: string | null;
   lead_name?: string | null;
@@ -148,6 +150,47 @@ export type TranslationRequest = {
   document_category?: string | null;
   patient_pid?: string | null;
   patient_name?: string | null;
+};
+
+export type MachineTranslationCapability = {
+  provider: string;
+  status: "ready" | "blocked" | "not_configured";
+  external_calls_enabled: boolean;
+  reason_code: string;
+};
+
+export type DocumentTranslation = {
+  id: string;
+  document_id: string;
+  source_language: string | null;
+  target_language: string;
+  provider: "deepl" | "manual" | string;
+  translated_text: string;
+  characters: number;
+  translated_document_id: string | null;
+  translated_document_name: string | null;
+  created_by: string;
+  created_by_name: string | null;
+  created_at: string;
+};
+
+export type DocumentTranslationPreview = {
+  provider: string;
+  source_language: string | null;
+  detected_source_language: string | null;
+  target_language: string;
+  characters: number;
+  source_text: string;
+  translated_text: string;
+};
+
+export type MachineTranslationDraft = {
+  provider: string;
+  source_language: string | null;
+  detected_source_language: string | null;
+  target_language: string;
+  characters: number;
+  translated_text: string;
 };
 
 export type TranslationWorkspaceDraft = {

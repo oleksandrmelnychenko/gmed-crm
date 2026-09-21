@@ -5,6 +5,11 @@ import { DataTablePager } from "@/components/data-table/data-table-pager";
 import { DataTable } from "@/components/data-table/data-table";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
+import {
+  splitTranslationTree,
+  translationIndent,
+  withTranslationChildren,
+} from "@/components/data-table/document-translation-tree";
 import { applyFilters } from "@/components/data-table/filter-logic";
 import { FilterBuilder } from "@/components/data-table/filter-builder";
 import { applySort } from "@/components/data-table/sort-logic";
@@ -28,6 +33,8 @@ type DocumentsGridItem = {
   id: string;
   auto_name: string;
   original_filename: string | null;
+  document_language?: string | null;
+  translation_source_document_id?: string | null;
   version_number: number;
   is_latest_version: boolean;
   patient_name: string | null;
@@ -72,6 +79,8 @@ type DocumentsGridProps = {
   onOpenDocument: (id: string) => void;
   onPreviewDocument?: (id: string, title: string) => void;
   onSigned?: () => void;
+  onTranslateDocument?: (id: string, title: string, language: string | null) => void;
+  translateLabel?: string;
   statusBadge: (value: string) => string;
   visibilityBadge: (value: string) => string;
   sensitivityBadge: (value: string) => string;
@@ -178,16 +187,25 @@ function PaginatedDocumentsTable({
       ),
     [enhancedColumns],
   );
+  // Saved translations follow their source document; only roots are sorted,
+  // filtered and paginated so the tree never splits across pages.
+  const tree = useMemo(() => splitTranslationTree(documents), [documents]);
   const visibleRows = useMemo(
     () =>
-      applySort(applyFilters(documents, filters, { accessors }), sortStack, {
+      applySort(applyFilters(tree.roots, filters, { accessors }), sortStack, {
         accessors,
       }),
-    [accessors, documents, filters, sortStack],
+    [accessors, tree.roots, filters, sortStack],
   );
   const page = useMemo(
-    () => buildDocumentPage(visibleRows, pageIndex, pageSize),
-    [pageIndex, pageSize, visibleRows],
+    () => {
+      const roots = buildDocumentPage(visibleRows, pageIndex, pageSize);
+      return {
+        ...roots,
+        rows: withTranslationChildren(roots.rows, tree.childrenByParent),
+      };
+    },
+    [pageIndex, pageSize, tree.childrenByParent, visibleRows],
   );
   const pageIdSet = useMemo(
     () => new Set(page.rows.map((document) => document.id)),
@@ -314,6 +332,8 @@ export function DocumentsGrid({
   onOpenDocument,
   onPreviewDocument,
   onSigned,
+  onTranslateDocument,
+  translateLabel,
   statusBadge,
   visibilityBadge,
   sensitivityBadge,
@@ -340,6 +360,7 @@ export function DocumentsGrid({
     needsCategorization,
   } = labels;
 
+  const tree = useMemo(() => splitTranslationTree(documents), [documents]);
   const columns = useMemo<ColumnDef<DocumentsGridItem>[]>(() => [
     ...(onPreviewDocument && previewLabel
       ? [
@@ -354,6 +375,15 @@ export function DocumentsGrid({
                 item.id,
                 item.original_filename ?? localizeCode(item.auto_name),
               ),
+            translateLabel,
+            onTranslate: onTranslateDocument
+              ? (item) =>
+                  onTranslateDocument(
+                    item.id,
+                    item.original_filename ?? localizeCode(item.auto_name),
+                    item.document_language ?? null,
+                  )
+              : undefined,
           }),
         ]
       : []),
@@ -369,11 +399,23 @@ export function DocumentsGrid({
       render: (item) => (
         <div
           className="flex min-w-0 items-center gap-2"
+          style={{ paddingLeft: translationIndent(tree.depthById.get(item.id)) }}
           title={`${item.original_filename ?? unclassifiedLabel} · ${uiText("common_version_prefix")}${item.version_number}${item.is_latest_version ? ` · ${currentVersionLabel}` : ""}`}
         >
+          {tree.depthById.get(item.id) ? (
+            <span aria-hidden className="shrink-0 font-mono text-xs text-muted-foreground">└</span>
+          ) : null}
           <span className="truncate text-xs font-medium text-foreground">
             {localizeCode(item.auto_name)}
           </span>
+          {item.translation_source_document_id ? (
+            <Badge
+              variant="outline"
+              className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] uppercase text-sky-700"
+            >
+              {item.document_language ?? "translation"}
+            </Badge>
+          ) : null}
           {item.needs_categorization ? (
             <Badge
               variant="outline"
@@ -503,6 +545,8 @@ export function DocumentsGrid({
     notSet,
     onPreviewDocument,
     onSigned,
+    onTranslateDocument,
+    translateLabel,
     patientLabel,
     pidFallback,
     previewLabel,
@@ -514,6 +558,7 @@ export function DocumentsGrid({
     uploadedByLabel,
     visibilityBadge,
     visibilityLabel,
+    tree.depthById,
   ]);
 
   if (paginated) {
@@ -534,7 +579,8 @@ export function DocumentsGrid({
 
   return (
     <DataTableSurface
-      rows={documents}
+      rows={tree.roots}
+      expandRow={(item) => tree.childrenByParent.get(item.id) ?? null}
       columns={columns}
       defaultHiddenColumns={["updated_at"]}
       defaultSort={[{ field: "updated_at", dir: "desc" }]}

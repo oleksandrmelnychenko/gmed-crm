@@ -1,7 +1,7 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
 pub mod connection;
 mod defaults;
-mod package;
+pub(crate) mod package;
 pub mod provider;
 mod review;
 mod summary;

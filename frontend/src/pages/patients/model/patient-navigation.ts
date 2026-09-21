@@ -1,11 +1,10 @@
 import type { Lang, Translations } from "@/lib/i18n";
-import { actorRole, type Actor } from "@/lib/permissions";
+import { type Actor } from "@/lib/permissions";
 import { canViewPatientCareHistorySurface, canViewPatientClinicalProfile, canViewPatientContractsSurface, canViewPatientDocumentsSurface, canViewPatientFinanceSurface, canViewPatientInvoicesSurface, canViewPatientOperationalSurface } from "./detail-model";
 
 export type PatientNavigationItem = { key: string; label: string; group: string; groupLabel: string };
 
 export function patientWorkspaceNavigation(actor: Actor, lang: Lang, t: Translations): PatientNavigationItem[] {
-  const role = actorRole(actor);
   const operational = canViewPatientOperationalSurface(actor);
   const care = canViewPatientCareHistorySurface(actor);
   const de = lang === "de";
@@ -17,7 +16,9 @@ export function patientWorkspaceNavigation(actor: Actor, lang: Lang, t: Translat
     ] },
     { key: "medicine", label: de ? "Medizin" : "Медицина", items: [
       ["clinical", t.uiText.patients_diagnoses_medications ?? (de ? "Medizinisches Profil" : "Медицинская карта"), canViewPatientClinicalProfile(actor)],
-      ["medication-ai", de ? "KI-Medikationsanalyse" : "AI-анализ медикаментов", role === "ceo"],
+      // Temporarily hidden from the patient menu (2026-09-21); the tab itself
+      // stays reachable by URL for the CEO until the feature is re-enabled.
+      // ["medication-ai", de ? "KI-Medikationsanalyse" : "AI-анализ медикаментов", actorRole(actor) === "ceo"],
       ["appointments", t.appointments_title, care],
     ] },
     { key: "coordination", label: de ? "Betreuung" : "Сопровождение", items: [

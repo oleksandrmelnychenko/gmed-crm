@@ -25,6 +25,7 @@ import {
   Download,
   FileText,
   FolderPlus,
+  Languages,
   LoaderCircle,
   MoreHorizontal,
   RefreshCw,
@@ -124,6 +125,10 @@ import {
   fetchDocumentVersions,
   fetchDocuments,
   fetchPatientDocumentContext,
+  fetchMachineTranslationCapability,
+  createMachineTranslationDraft,
+  fetchDocumentBlob,
+  renderDocumentTranslationPdf,
   fetchTranslationRequestQueue,
   type TranslationQueueStatusFilter,
   fetchTranslationRequests,
@@ -190,6 +195,7 @@ import type {
   FiltersState,
   FrameworkContractOption,
   GenerateFormState,
+  MachineTranslationCapability,
   OrderOption,
   PatientOption,
   ProviderOption,
@@ -202,6 +208,11 @@ import type {
 } from "./model/types";
 import { MarkComplianceSignedControl } from "./ui/mark-compliance-signed-control";
 import { DocumentSignatureAction } from "./ui/document-signature-action";
+import {
+  DocumentTranslationDialog,
+  type DocumentTranslationEditTarget,
+  documentTranslationActionLabel,
+} from "./ui/document-translation-dialog";
 import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fields";
 import { DocumentWorkspaceNav } from "./ui/document-workspace-nav";
 
@@ -305,7 +316,7 @@ function labelFromOptions<T extends string>(
   return option ? optionLabel(option) : formatUnknownValue(value, runtimeTranslations());
 }
 
-const TRANSLATION_LANGUAGE_OPTIONS = ["de"] as const;
+const TRANSLATION_LANGUAGE_OPTIONS = ["de", "ru", "uk", "en"] as const;
 const DOCUMENT_DIRECTION_OPTIONS: Array<{
   value: DocumentDirection;
   labelRu: string;
@@ -1172,6 +1183,14 @@ function StaffDocumentsPage({
   const editPreviewUrlRef = useRef<string | null>(null);
   const [translationBusy, setTranslationBusy] = useState(false);
   const [translationError, setTranslationError] = useState("");
+  const [machineTranslationCapability, setMachineTranslationCapability] =
+    useState<MachineTranslationCapability | null>(null);
+  const [translationDialog, setTranslationDialog] = useState<{
+    id: string;
+    title: string;
+    language: string | null;
+    editing?: DocumentTranslationEditTarget | null;
+  } | null>(null);
   const [translationActionMenuOpen, setTranslationActionMenuOpen] = useState<string | null>(null);
   const [translationActionMenuPosition, setTranslationActionMenuPosition] =
     useState<{ left: number; top: number } | null>(null);
@@ -1261,6 +1280,21 @@ function StaffDocumentsPage({
     setDocumentPreview(null);
     setDocumentPreviewError("");
   }, [activeDocumentDetailId]);
+
+  useEffect(() => {
+    if (!canUpdateTranslation) return;
+    let active = true;
+    fetchMachineTranslationCapability()
+      .then((capability) => {
+        if (active) setMachineTranslationCapability(capability);
+      })
+      .catch(() => {
+        if (active) setMachineTranslationCapability(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [canUpdateTranslation]);
 
   useEffect(() => {
     if (!metadataEditOpen || !detail?.has_stored_file) {
@@ -2568,6 +2602,30 @@ function StaffDocumentsPage({
     setDocumentPreviewError("");
     setError("");
     try {
+      // A saved translation opens in the translation editor: the original
+      // document on the left, the editable translated text on the right.
+      const translatedItem = documents.find((item) => item.id === id) ?? (detail?.id === id ? detail : null);
+      if (canUpdateTranslation && translatedItem?.translation_source_document_id) {
+        let initialText = translatedItem.generated_manual_text ?? "";
+        if (!initialText.trim()) {
+          const { blob, contentType } = await fetchDocumentBlob(id, true);
+          if (contentType.split(";", 1)[0]?.trim().toLowerCase() === "text/plain") {
+            initialText = await blob.text();
+          }
+        }
+        setTranslationDialog({
+          id: translatedItem.translation_source_document_id,
+          title,
+          language: null,
+          editing: {
+            translatedDocumentId: id,
+            initialText,
+            targetLanguage: translatedItem.document_language ?? "ru",
+            sourceLanguage: null,
+          },
+        });
+        return;
+      }
       const preview = await createDocumentPreviewObjectUrl(id);
       replaceDocumentPreview({
         ...preview,
@@ -2580,6 +2638,26 @@ function StaffDocumentsPage({
         nextError instanceof Error
           ? nextError.message
           : t.documents_failed_open_preview;
+      setDocumentPreviewError(message);
+      setError(message);
+    } finally {
+      setDocumentPreviewBusy(false);
+    }
+  }
+
+  // Older plain-text translations become a branded PDF (next version of the
+  // same translated document); the preview then switches to the PDF.
+  async function handleRenderTranslationPdf(documentId: string) {
+    setDocumentPreviewBusy(true);
+    setDocumentPreviewError("");
+    try {
+      const rendered = await renderDocumentTranslationPdf(documentId);
+      clearApiCache("/documents");
+      setVersion((current) => current + 1);
+      await handleGridDocumentPreview(rendered.id, rendered.original_filename);
+    } catch (nextError) {
+      const message =
+        nextError instanceof Error ? nextError.message : t.documents_failed_open_preview;
       setDocumentPreviewError(message);
       setError(message);
     } finally {
@@ -2826,6 +2904,46 @@ function StaffDocumentsPage({
     updateTranslationDraft(requestId, {
       sourceText: textExtraction.extracted_text,
     });
+  }
+
+  async function handleMachineTranslationDraft(requestId: string) {
+    const draft = translationDraftsRef.current[requestId];
+    const sourceText = draft?.sourceText.trim() ?? "";
+    if (!sourceText) {
+      setTranslationError(t.documents_machine_translation_source_required);
+      return;
+    }
+    if (
+      draft?.translatedText.trim() &&
+      !window.confirm(t.documents_machine_translation_replace_confirm)
+    ) {
+      return;
+    }
+    setTranslationBusy(true);
+    setTranslationError("");
+    try {
+      const result = await createMachineTranslationDraft(requestId, {
+        source_text: sourceText,
+        source_language: draft?.sourceLanguage || null,
+      });
+      // The draft only fills the editable field. Responsibility for the
+      // translated text is recorded when the interpreter saves the workspace.
+      updateTranslationDraft(requestId, {
+        translatedText: result.translated_text,
+        ...(!draft?.sourceLanguage && result.detected_source_language
+          ? { sourceLanguage: result.detected_source_language }
+          : {}),
+      });
+      setNotice(t.documents_machine_translation_inserted);
+    } catch (nextError) {
+      setTranslationError(
+        nextError instanceof Error
+          ? nextError.message
+          : t.documents_machine_translation_failed,
+      );
+    } finally {
+      setTranslationBusy(false);
+    }
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -3649,6 +3767,12 @@ function StaffDocumentsPage({
         ) : (
           <DocumentsGrid
             onSigned={refresh}
+            onTranslateDocument={
+              canUpdateTranslation
+                ? (id, title, language) => setTranslationDialog({ id, title, language })
+                : undefined
+            }
+            translateLabel={documentTranslationActionLabel(lang)}
             documents={documents}
             paginated
             showSelection={false}
@@ -5933,6 +6057,49 @@ function StaffDocumentsPage({
                   </div>
                   {detail?.has_stored_file ? (
                     <div className="flex flex-wrap items-center gap-2">
+                    {canUpdateTranslation ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0 gap-1.5 rounded-lg"
+                        onClick={() =>
+                          setTranslationDialog({
+                            id: detail.id,
+                            title: detail.original_filename || detail.auto_name,
+                            language: detail.document_language ?? null,
+                          })
+                        }
+                      >
+                        <Languages className="size-3.5" />
+                        {documentTranslationActionLabel(lang)}
+                      </Button>
+                    ) : null}
+                    {canUpdateTranslation && detail.translation_source_document_id ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0 gap-1.5 rounded-lg"
+                        onClick={() =>
+                          setTranslationDialog({
+                            id: detail.translation_source_document_id as string,
+                            title: detail.original_filename || detail.auto_name,
+                            language: null,
+                            editing: {
+                              translatedDocumentId: detail.id,
+                              initialText:
+                                detail.generated_manual_text ?? textExtraction?.extracted_text ?? "",
+                              targetLanguage: detail.document_language ?? "ru",
+                              sourceLanguage: null,
+                            },
+                          })
+                        }
+                      >
+                        <FileText className="size-3.5" />
+                        {lang === "de" ? "Übersetzung bearbeiten" : "Редактировать перевод"}
+                      </Button>
+                    ) : null}
                     <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} />
                     <Button
                       type="button"
@@ -6071,6 +6238,37 @@ function StaffDocumentsPage({
               </div>
               {documentPreview ? (
                 <div className="flex flex-wrap items-center gap-2">
+                {canUpdateTranslation && documentPreview.contentType.toLowerCase().startsWith("text/plain") ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5 rounded-lg"
+                    disabled={documentPreviewBusy}
+                    onClick={() => void handleRenderTranslationPdf(documentPreview.id)}
+                  >
+                    <FileText className="size-3.5" />
+                    {lang === "de" ? "PDF erstellen" : "Сформировать PDF"}
+                  </Button>
+                ) : null}
+                {canUpdateTranslation ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1.5 rounded-lg"
+                    onClick={() =>
+                      setTranslationDialog({
+                        id: documentPreview.id,
+                        title: documentPreview.title,
+                        language: null,
+                      })
+                    }
+                  >
+                    <Languages className="size-3.5" />
+                    {documentTranslationActionLabel(lang)}
+                  </Button>
+                ) : null}
                 <DocumentSignatureAction documentId={documentPreview.id} title={documentPreview.title} onDone={() => refresh()} />
                 <Button
                   type="button"
@@ -6099,6 +6297,18 @@ function StaffDocumentsPage({
           </div>
         </DialogContent>
       </Dialog>
+
+      <DocumentTranslationDialog
+        documentId={translationDialog?.id ?? null}
+        title={translationDialog?.title ?? ""}
+        documentLanguage={translationDialog?.language ?? null}
+        editing={translationDialog?.editing ?? null}
+        open={Boolean(translationDialog)}
+        onOpenChange={(open) => {
+          if (!open) setTranslationDialog(null);
+        }}
+        onSaved={() => refresh()}
+      />
 
       {(() => {
         const detailContent = (
@@ -6154,6 +6364,49 @@ function StaffDocumentsPage({
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-[44%] sm:justify-end">
+                      {canUpdateTranslation && detail.translation_source_document_id ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 gap-1.5 rounded-lg"
+                          onClick={() =>
+                            setTranslationDialog({
+                              id: detail.translation_source_document_id as string,
+                              title: detail.original_filename || detail.auto_name,
+                              language: null,
+                              editing: {
+                                translatedDocumentId: detail.id,
+                                initialText:
+                                  detail.generated_manual_text ?? textExtraction?.extracted_text ?? "",
+                                targetLanguage: detail.document_language ?? "ru",
+                                sourceLanguage: null,
+                              },
+                            })
+                          }
+                        >
+                          <FileText className="size-3.5" />
+                          {lang === "de" ? "Übersetzung bearbeiten" : "Редактировать перевод"}
+                        </Button>
+                      ) : null}
+                      {canUpdateTranslation && detail.has_stored_file ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 shrink-0 gap-1.5 rounded-lg"
+                          onClick={() =>
+                            setTranslationDialog({
+                              id: detail.id,
+                              title: detail.original_filename || detail.auto_name,
+                              language: detail.document_language ?? null,
+                            })
+                          }
+                        >
+                          <Languages className="size-3.5" />
+                          {documentTranslationActionLabel(lang)}
+                        </Button>
+                      ) : null}
                       <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
                       {canManage && currentDetailTemplate ? (
                         <Button
@@ -7071,6 +7324,30 @@ function StaffDocumentsPage({
                                             }
                                           >
                                             {t.documents_use_extracted_text}
+                                          </Button>
+                                        ) : null}
+                                        {canActOnTranslation ? (
+                                          <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-8 rounded-lg bg-white"
+                                            disabled={
+                                              translationBusy ||
+                                              !machineTranslationCapability?.external_calls_enabled ||
+                                              !draft.sourceText.trim()
+                                            }
+                                            title={
+                                              machineTranslationCapability?.status === "blocked"
+                                                ? t.documents_machine_translation_blocked
+                                                : machineTranslationCapability?.external_calls_enabled
+                                                  ? undefined
+                                                  : t.documents_machine_translation_unavailable
+                                            }
+                                            onClick={() =>
+                                              void handleMachineTranslationDraft(request.id)
+                                            }
+                                          >
+                                            {t.documents_machine_translation_draft}
                                           </Button>
                                         ) : null}
                                         <Button

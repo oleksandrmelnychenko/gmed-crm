@@ -11,6 +11,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
 import {
+  splitTranslationTree,
+  translationIndent,
+  withTranslationChildren,
+} from "@/components/data-table/document-translation-tree";
+import {
   DataTablePager,
   useDataTablePagination,
 } from "@/components/data-table/data-table-pager";
@@ -28,6 +33,7 @@ import {
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { EmptyCell, TabLoader } from "@/components/ui-shell";
+import { apiFetch } from "@/lib/api";
 import {
   localizeDocumentCode,
   localizeRequiredDocumentLabel,
@@ -53,6 +59,12 @@ import type {
 import { PatientDocumentGenerateDialog } from "../sheets/patient-document-generate-dialog";
 import { PatientDocumentEditSheet } from "../sheets/patient-document-edit-sheet";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import {
+  DocumentTranslationDialog,
+  type DocumentTranslationEditTarget,
+  documentTranslationActionLabel,
+} from "@/pages/documents/ui/document-translation-dialog";
+import { fetchDocumentBlob } from "@/pages/documents/data/document-api";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -229,11 +241,50 @@ export function PatientDocumentsTab({
   const [documentPreviewBusy, setDocumentPreviewBusy] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
   const [recognizingDocumentId, setRecognizingDocumentId] = useState<string | null>(null);
+  const [translationDocument, setTranslationDocument] = useState<DocumentItem | null>(null);
+  const [translationEditing, setTranslationEditing] = useState<DocumentTranslationEditTarget | null>(null);
+
+  // A saved translation opens in the translation editor (original on the
+  // left, editable text on the right) instead of the read-only preview.
+  async function openTranslationEditor(doc: DocumentItem) {
+    const sourceId = doc.translation_source_document_id;
+    if (!sourceId) return;
+    let initialText = "";
+    try {
+      const detail = await apiFetch<{ generated_manual_text?: string | null; mime_type?: string | null }>(
+        `/documents/${doc.id}`,
+        { cache: "no-store" },
+      );
+      initialText = detail.generated_manual_text ?? "";
+      if (!initialText.trim() && (detail.mime_type ?? "").startsWith("text/plain")) {
+        const { blob } = await fetchDocumentBlob(doc.id, true);
+        initialText = await blob.text();
+      }
+    } catch {
+      initialText = "";
+    }
+    setTranslationEditing({
+      translatedDocumentId: doc.id,
+      initialText,
+      targetLanguage: doc.document_language ?? "ru",
+      sourceLanguage: null,
+    });
+    setTranslationDocument({ ...doc, id: sourceId });
+  }
   const documentPreviewUrlRef = useRef<string | null>(null);
   const documentPreviewRequestRef = useRef(0);
+  // Saved translations render as children of their source document.
+  const documentTree = useMemo(
+    () => splitTranslationTree(filteredDocuments),
+    [filteredDocuments],
+  );
   const documentPagination = useDataTablePagination(
-    filteredDocuments,
+    documentTree.roots,
     `${patientId ?? ""}:${documentStatusFilter}:${documentCategoryFilter}`,
+  );
+  const pagedDocumentRows = useMemo(
+    () => withTranslationChildren(documentPagination.pagedRows, documentTree.childrenByParent),
+    [documentPagination.pagedRows, documentTree.childrenByParent],
   );
   const generatePatient = useMemo<DocumentPatientOption | undefined>(
     () =>
@@ -277,6 +328,10 @@ export function PatientDocumentsTab({
   }
 
   async function openPatientDocumentPreview(doc: DocumentItem) {
+    if (canManageDocuments && doc.translation_source_document_id) {
+      await openTranslationEditor(doc);
+      return;
+    }
     const requestId = documentPreviewRequestRef.current + 1;
     documentPreviewRequestRef.current = requestId;
     if (documentPreviewUrlRef.current) {
@@ -358,6 +413,13 @@ export function PatientDocumentsTab({
         label: t.documents_preview,
         onPreview: (doc) => void openPatientDocumentPreview(doc),
         onSigned: onDocumentGenerated,
+        translateLabel: documentTranslationActionLabel(lang),
+        onTranslate: canManageDocuments
+          ? (doc) => {
+              setTranslationEditing(null);
+              setTranslationDocument(doc);
+            }
+          : undefined,
       }),
       {
         id: "filename",
@@ -369,10 +431,22 @@ export function PatientDocumentsTab({
         width: 280,
         render: (doc) => (
           <span
-            className="block truncate font-mono text-xs text-foreground"
+            className="flex min-w-0 items-center gap-2"
+            style={{ paddingLeft: translationIndent(documentTree.depthById.get(doc.id)) }}
             title={doc.filename ?? undefined}
           >
-            {doc.filename}
+            {documentTree.depthById.get(doc.id) ? (
+              <span aria-hidden className="shrink-0 font-mono text-xs text-muted-foreground">└</span>
+            ) : null}
+            <span className="truncate font-mono text-xs text-foreground">{doc.filename}</span>
+            {doc.translation_source_document_id ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 rounded-full border-sky-200 bg-sky-50 text-[10px] uppercase text-sky-700"
+              >
+                {doc.document_language ?? (lang === "de" ? "Übersetzung" : "перевод")}
+              </Badge>
+            ) : null}
           </span>
         ),
       },
@@ -490,6 +564,8 @@ export function PatientDocumentsTab({
     ],
     [
       appointmentsTypeLabel,
+      canManageDocuments,
+      documentTree.depthById,
       commonNotSet,
       commonUnknown,
       documentCategoryOptions,
@@ -564,7 +640,7 @@ export function PatientDocumentsTab({
         <TabLoader />
       ) : (
         <DataTableSurface
-          rows={documentPagination.pagedRows}
+          rows={pagedDocumentRows}
           columns={documentColumns}
           rowId={(doc) => doc.id}
           defaultDensity="comfortable"
@@ -806,6 +882,21 @@ export function PatientDocumentsTab({
           </div>
         </DialogContent>
       </Dialog>
+      {canManageDocuments ? (
+        <DocumentTranslationDialog
+          documentId={translationDocument?.id ?? null}
+          title={translationDocument?.filename ?? "document"}
+          editing={translationEditing}
+          open={Boolean(translationDocument)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTranslationDocument(null);
+              setTranslationEditing(null);
+            }
+          }}
+          onSaved={onDocumentGenerated}
+        />
+      ) : null}
       {canManageDocuments ? (
         <>
           <PatientDocumentGenerateDialog

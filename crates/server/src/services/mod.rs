@@ -1,5 +1,6 @@
 pub mod bfarm_rote_hand;
 pub mod bmp_import;
+pub mod deepl_translation;
 pub mod drug_matching;
 pub mod gba_ais;
 pub mod interpreter_suggestions;

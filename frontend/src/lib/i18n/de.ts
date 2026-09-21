@@ -1481,6 +1481,19 @@ export const de = {
     "Derzeit gibt es keine offenen Übersetzungsanfragen. Neue Anfragen erscheinen hier, sobald sie aus einer Dokumentakte erstellt werden oder ein Patient im Portal eine Übersetzung anfordert.",
   documents_source_language: "Ausgangssprache",
   documents_use_extracted_text: "Extrahierten Text übernehmen",
+  documents_machine_translation_draft: "Übersetzungsentwurf (DeepL)",
+  documents_machine_translation_unavailable:
+    "Die maschinelle Übersetzung ist auf diesem Server nicht eingerichtet.",
+  documents_machine_translation_blocked:
+    "Die maschinelle Übersetzung ist deaktiviert: Die Datenübermittlung an den externen Anbieter ist für diese Umgebung nicht freigegeben.",
+  documents_machine_translation_source_required:
+    "Bitte zuerst den Ausgangstext eintragen.",
+  documents_machine_translation_replace_confirm:
+    "Das Übersetzungsfeld enthält bereits Text. Durch den maschinellen Entwurf ersetzen?",
+  documents_machine_translation_inserted:
+    "Maschineller Entwurf eingefügt. Begriffe, Verneinungen, Dosierungen und Daten am Original prüfen und den Workspace speichern.",
+  documents_machine_translation_failed:
+    "Der maschinelle Entwurf konnte nicht erstellt werden.",
   documents_save_workspace: "Workspace speichern",
   documents_translation_note_placeholder: "Umfang, Frist oder Lieferhinweise…",
   documents_source_text: "Ausgangstext",

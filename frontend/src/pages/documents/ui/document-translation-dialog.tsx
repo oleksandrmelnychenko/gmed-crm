@@ -1,0 +1,526 @@
+import { useEffect, useRef, useState } from "react";
+import { Download, Languages, LoaderCircle } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
+import {
+  createDocumentLayoutTranslation,
+  createDocumentPreviewObjectUrl,
+  createDocumentTranslation,
+  downloadDocumentFile,
+  fetchDocumentTranslations,
+  fetchMachineTranslationCapability,
+  previewDocumentTranslation,
+  renderDocumentTranslationPdf,
+  revokeDocumentPreviewObjectUrl,
+} from "../data/document-api";
+import type {
+  DocumentTranslation,
+  MachineTranslationCapability,
+} from "../model/types";
+
+const TARGET_LANGUAGES = ["de", "ru", "uk", "en"] as const;
+const SOURCE_LANGUAGES = ["de", "ru", "uk", "en"] as const;
+
+const LANGUAGE_LABELS: Record<string, { ru: string; de: string }> = {
+  de: { ru: "Немецкий", de: "Deutsch" },
+  ru: { ru: "Русский", de: "Russisch" },
+  uk: { ru: "Украинский", de: "Ukrainisch" },
+  en: { ru: "Английский", de: "Englisch" },
+};
+
+export function documentTranslationLanguageLabel(language: string | null | undefined, lang: string) {
+  if (!language) return lang === "de" ? "automatisch" : "автоматически";
+  const entry = LANGUAGE_LABELS[language];
+  return entry ? (lang === "de" ? entry.de : entry.ru) : language.toUpperCase();
+}
+
+export function documentTranslationActionLabel(lang: string) {
+  return lang === "de" ? "Übersetzen" : "Перевести";
+}
+
+export type DocumentTranslationEditTarget = {
+  /** The saved translation document that receives a new PDF version. */
+  translatedDocumentId: string;
+  initialText: string;
+  targetLanguage: string;
+  sourceLanguage: string | null;
+};
+
+type Props = {
+  /** Source document: shown on the left and used for machine translation. */
+  documentId: string | null;
+  title: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Fires after a translation was saved (new child document or new version). */
+  onSaved?: (translation?: DocumentTranslation) => void;
+  /** Document language as stored on the record, used to preselect the source. */
+  documentLanguage?: string | null;
+  /** Edit an existing translation instead of creating a new child. */
+  editing?: DocumentTranslationEditTarget | null;
+};
+
+const textareaClass =
+  "w-full flex-1 resize-none rounded-lg border border-border bg-white p-3 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+// The dialog is read-only until the reviewer saves: machine drafts are shown,
+// edited and persisted explicitly. The backend owns ACLs and the translated
+// document creation.
+export function DocumentTranslationDialog({ documentId, title, open, onOpenChange, onSaved, documentLanguage, editing }: Props) {
+  const { lang } = useLang();
+  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
+  const [preview, setPreview] = useState<{ url: string; contentType: string } | null>(null);
+  const [previewError, setPreviewError] = useState("");
+  const previewUrlRef = useRef<string | null>(null);
+  const [capability, setCapability] = useState<MachineTranslationCapability | null>(null);
+  const [translations, setTranslations] = useState<DocumentTranslation[]>([]);
+  const [sourceLanguage, setSourceLanguage] = useState("");
+  const [targetLanguage, setTargetLanguage] = useState<string>("ru");
+  const [sourceText, setSourceText] = useState("");
+  const [translatedText, setTranslatedText] = useState("");
+  const [savedText, setSavedText] = useState("");
+  const [draftProvider, setDraftProvider] = useState<"deepl" | "manual">("manual");
+  const [detected, setDetected] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"translate" | "save" | "layout" | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Lightweight markup understood by the PDF renderer: `**bold**`, `## `
+  // headings, `- ` bullets, `1. ` numbered items, blank line = paragraph.
+  function applyMarkup(kind: "bold" | "heading" | "bullet" | "numbered" | "paragraph") {
+    const element = textareaRef.current;
+    if (!element) return;
+    const start = element.selectionStart ?? translatedText.length;
+    const end = element.selectionEnd ?? start;
+    const before = translatedText.slice(0, start);
+    const selected = translatedText.slice(start, end);
+    const after = translatedText.slice(end);
+    let next = translatedText;
+    let cursor = end;
+    if (kind === "bold") {
+      const inner = selected || tx("текст", "Text");
+      next = `${before}**${inner}**${after}`;
+      cursor = start + inner.length + 4;
+    } else if (kind === "paragraph") {
+      next = `${before}\n\n${after}`;
+      cursor = start + 2;
+    } else {
+      const lineStart = before.lastIndexOf("\n") + 1;
+      const block = translatedText.slice(lineStart, end || start);
+      const lines = block.split("\n");
+      const prefixed = lines
+        .map((line, index) => {
+          const clean = line.replace(/^(#{1,2} |- |• |\d+\. )/, "");
+          if (kind === "heading") return `## ${clean}`;
+          if (kind === "bullet") return `- ${clean}`;
+          return `${index + 1}. ${clean}`;
+        })
+        .join("\n");
+      next = `${translatedText.slice(0, lineStart)}${prefixed}${translatedText.slice(end || start)}`;
+      cursor = lineStart + prefixed.length;
+    }
+    setTranslatedText(next);
+    requestAnimationFrame(() => {
+      element.focus();
+      element.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  async function handleLayoutTranslate() {
+    if (!documentId) return;
+    if (sourceLanguage && sourceLanguage === targetLanguage) {
+      setError(tx("Исходный и целевой языки должны отличаться.", "Ausgangs- und Zielsprache müssen sich unterscheiden."));
+      return;
+    }
+    setBusy("layout");
+    setError("");
+    setNotice("");
+    try {
+      const saved = await createDocumentLayoutTranslation(documentId, {
+        source_language: sourceLanguage || null,
+        target_language: targetLanguage,
+      });
+      setTranslations((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      onSaved?.(saved);
+      onOpenChange(false);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("Не удалось перевести PDF.", "Die PDF-Übersetzung ist fehlgeschlagen."),
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    if (!open || !documentId) return;
+    let active = true;
+    setError("");
+    setNotice("");
+    setSourceText("");
+    setTranslatedText(editing?.initialText ?? "");
+    setSavedText(editing?.initialText ?? "");
+    setDraftProvider("manual");
+    setDetected(null);
+    const preselected = documentLanguage && LANGUAGE_LABELS[documentLanguage] ? documentLanguage : "";
+    setSourceLanguage(editing?.sourceLanguage ?? preselected);
+    setTargetLanguage(editing?.targetLanguage ?? (preselected === "ru" ? "de" : "ru"));
+    setPreviewError("");
+    createDocumentPreviewObjectUrl(documentId)
+      .then((next) => {
+        if (!active) {
+          revokeDocumentPreviewObjectUrl(next.url);
+          return;
+        }
+        previewUrlRef.current = next.url;
+        setPreview(next);
+      })
+      .catch((nextError: unknown) => {
+        if (active) {
+          setPreviewError(
+            nextError instanceof Error
+              ? nextError.message
+              : tx("Не удалось открыть документ.", "Das Dokument konnte nicht geöffnet werden."),
+          );
+        }
+      });
+    fetchMachineTranslationCapability()
+      .then((next) => {
+        if (active) setCapability(next);
+      })
+      .catch(() => {
+        if (active) setCapability(null);
+      });
+    fetchDocumentTranslations(documentId)
+      .then((rows) => {
+        if (active) setTranslations(rows);
+      })
+      .catch(() => {
+        if (active) setTranslations([]);
+      });
+    return () => {
+      active = false;
+      if (previewUrlRef.current) {
+        revokeDocumentPreviewObjectUrl(previewUrlRef.current);
+        previewUrlRef.current = null;
+      }
+      setPreview(null);
+    };
+    // The dialog resets whenever it opens for a document; the language prop
+    // and the edit target only seed the initial state.
+  }, [open, documentId, documentLanguage, editing]);
+
+  const machineReady = capability?.external_calls_enabled === true;
+  const machineHint =
+    capability?.status === "blocked"
+      ? tx(
+          "Машинный перевод отключён: передача данных внешнему провайдеру для этой среды не согласована.",
+          "Die maschinelle Übersetzung ist deaktiviert: Die Datenübermittlung an den externen Anbieter ist für diese Umgebung nicht freigegeben.",
+        )
+      : capability && !machineReady
+        ? tx(
+            "Машинный перевод на этом сервере не настроен. Текст перевода можно ввести вручную.",
+            "Die maschinelle Übersetzung ist auf diesem Server nicht eingerichtet. Der Übersetzungstext kann manuell eingetragen werden.",
+          )
+        : "";
+
+  async function handleTranslate() {
+    if (!documentId) return;
+    if (sourceLanguage && sourceLanguage === targetLanguage) {
+      setError(tx("Исходный и целевой языки должны отличаться.", "Ausgangs- und Zielsprache müssen sich unterscheiden."));
+      return;
+    }
+    setBusy("translate");
+    setError("");
+    setNotice("");
+    try {
+      const result = await previewDocumentTranslation(documentId, {
+        source_language: sourceLanguage || null,
+        target_language: targetLanguage,
+      });
+      setSourceText(result.source_text);
+      setTranslatedText(result.translated_text);
+      setDraftProvider("deepl");
+      setDetected(result.detected_source_language);
+      if (!sourceLanguage && result.detected_source_language && LANGUAGE_LABELS[result.detected_source_language]) {
+        setSourceLanguage(result.detected_source_language);
+      }
+      setNotice(
+        tx(
+          "Машинный черновик готов. Проверьте термины, отрицания, дозировки и даты по оригиналу перед сохранением.",
+          "Maschineller Entwurf erstellt. Begriffe, Verneinungen, Dosierungen und Daten vor dem Speichern am Original prüfen.",
+        ),
+      );
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("Не удалось получить перевод.", "Die Übersetzung konnte nicht erstellt werden."),
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleSave() {
+    if (!documentId || !translatedText.trim()) return;
+    setBusy("save");
+    setError("");
+    setNotice("");
+    try {
+      if (editing) {
+        await renderDocumentTranslationPdf(editing.translatedDocumentId, {
+          translated_text: translatedText.trim(),
+        });
+        setSavedText(translatedText.trim());
+        onSaved?.();
+        onOpenChange(false);
+        return;
+      }
+      const saved = await createDocumentTranslation(documentId, {
+        source_language: sourceLanguage || null,
+        target_language: targetLanguage,
+        source_text: sourceText.trim() || null,
+        translated_text: translatedText.trim(),
+        provider: draftProvider,
+      });
+      setTranslations((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      setSavedText(translatedText.trim());
+      onSaved?.(saved);
+      // The saved translation now appears as a child row in the list, so the
+      // dialog closes right away.
+      onOpenChange(false);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : tx("Не удалось сохранить перевод.", "Die Übersetzung konnte nicht gespeichert werden."),
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      dirty={Boolean(translatedText.trim()) && translatedText.trim() !== savedText && busy === null}
+    >
+      <DialogContent
+        className="flex h-[92vh] w-[96vw] max-w-none flex-col overflow-hidden rounded-xl p-0 sm:max-w-[1600px]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <DialogHeader className="border-b border-border/70 px-5 py-4">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 pr-14">
+            <div className="min-w-0">
+              <DialogTitle className="flex items-center gap-2 truncate text-base">
+                <Languages className="size-4 shrink-0" />
+                {editing ? tx("Редактировать перевод", "Übersetzung bearbeiten") : tx("Перевод документа", "Dokument übersetzen")}
+              </DialogTitle>
+              <DialogDescription className="truncate">{title}</DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          <div className="min-h-[320px] border-b border-border/70 bg-slate-50 p-3 lg:border-b-0 lg:border-r">
+            {preview ? (
+              <iframe
+                title={title}
+                src={preview.url}
+                className="h-full min-h-[320px] w-full rounded-lg border border-border bg-white"
+              />
+            ) : previewError ? (
+              <p className="p-3 text-sm text-destructive">{previewError}</p>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                <LoaderCircle className="mr-2 size-4 animate-spin" />
+                {tx("Загрузка документа…", "Dokument wird geladen…")}
+              </div>
+            )}
+          </div>
+          <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1 text-xs font-medium">
+                <span>{tx("С языка", "Von")}</span>
+                <NativeComboboxSelect
+                  value={sourceLanguage}
+                  onChange={(event) => setSourceLanguage(event.target.value)}
+                  className="h-9 w-full rounded-lg border border-border bg-white px-2 text-sm"
+                >
+                  <option value="">{documentTranslationLanguageLabel(null, lang)}</option>
+                  {SOURCE_LANGUAGES.map((language) => (
+                    <option key={language} value={language}>
+                      {documentTranslationLanguageLabel(language, lang)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </label>
+              <label className="space-y-1 text-xs font-medium">
+                <span>{tx("На язык", "Nach")}</span>
+                <NativeComboboxSelect
+                  value={targetLanguage}
+                  onChange={(event) => setTargetLanguage(event.target.value)}
+                  className="h-9 w-full rounded-lg border border-border bg-white px-2 text-sm"
+                >
+                  {TARGET_LANGUAGES.map((language) => (
+                    <option key={language} value={language}>
+                      {documentTranslationLanguageLabel(language, lang)}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg"
+                disabled={busy !== null || !machineReady}
+                title={machineHint || undefined}
+                onClick={() => void handleTranslate()}
+              >
+                {busy === "translate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Languages className="size-3.5" />}
+                {tx("Перевести через DeepL", "Mit DeepL übersetzen")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg"
+                disabled={busy !== null || !translatedText.trim()}
+                onClick={() => void handleSave()}
+              >
+                {busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                {editing
+                  ? tx("Сохранить новую версию PDF", "Neue PDF-Version speichern")
+                  : tx("Сохранить как PDF-документ", "Als PDF-Dokument speichern")}
+              </Button>
+              {!editing ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 rounded-lg"
+                  disabled={busy !== null || !machineReady}
+                  title={tx(
+                    "DeepL переводит сам PDF, сохраняя заголовки, списки и оформление. Результат нельзя редактировать как текст.",
+                    "DeepL übersetzt die PDF selbst und behält Überschriften, Listen und Layout bei. Das Ergebnis ist nicht als Text editierbar.",
+                  )}
+                  onClick={() => void handleLayoutTranslate()}
+                >
+                  {busy === "layout" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+                  {tx("Перевести PDF с сохранением вёрстки", "PDF mit Layout übersetzen")}
+                </Button>
+              ) : null}
+              {detected ? (
+                <span className="text-xs text-muted-foreground">
+                  {tx("Определён язык:", "Erkannte Sprache:")} {documentTranslationLanguageLabel(detected, lang)}
+                </span>
+              ) : null}
+            </div>
+            {machineHint ? <p className="text-xs text-muted-foreground">{machineHint}</p> : null}
+            {error ? (
+              <p role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+                {error}
+              </p>
+            ) : null}
+            {notice ? (
+              <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                {notice}
+              </p>
+            ) : null}
+            <label className="flex min-h-[200px] flex-1 flex-col gap-1 text-xs font-medium">
+              <span>{tx("Перевод (можно редактировать)", "Übersetzung (bearbeitbar)")}</span>
+              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-slate-50 p-1" role="toolbar" aria-label={tx("Форматирование", "Formatierung")}>
+                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2 font-bold" title={tx("Жирный (**текст**)", "Fett (**Text**)")} onClick={() => applyMarkup("bold")}>B</Button>
+                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Заголовок (## )", "Überschrift (## )")} onClick={() => applyMarkup("heading")}>H</Button>
+                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Маркированный список (- )", "Aufzählung (- )")} onClick={() => applyMarkup("bullet")}>• —</Button>
+                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Нумерованный список (1. )", "Nummerierung (1. )")} onClick={() => applyMarkup("numbered")}>1.</Button>
+                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Разрыв абзаца", "Absatz")} onClick={() => applyMarkup("paragraph")}>¶</Button>
+                <span className="ml-auto pr-1 text-[11px] font-normal text-muted-foreground">
+                  {tx("Разметка: **жирный**, ## заголовок, - список, 1. нумерация", "Markup: **fett**, ## Überschrift, - Liste, 1. Nummerierung")}
+                </span>
+              </div>
+              <textarea
+                ref={textareaRef}
+                value={translatedText}
+                onChange={(event) => {
+                  setTranslatedText(event.target.value);
+                }}
+                lang={targetLanguage}
+                className={cn(textareaClass, "min-h-[360px] text-[15px] leading-7")}
+                placeholder={tx(
+                  "Нажмите «Перевести через DeepL» или введите перевод вручную.",
+                  "„Mit DeepL übersetzen“ wählen oder die Übersetzung manuell eintragen.",
+                )}
+              />
+            </label>
+            {sourceText ? (
+              <details className="text-xs">
+                <summary className="cursor-pointer font-medium">{tx("Распознанный исходный текст", "Erkannter Ausgangstext")}</summary>
+                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-slate-50 p-3 font-sans text-xs leading-5">{sourceText}</pre>
+              </details>
+            ) : null}
+            <section className="space-y-2 border-t border-border/70 pt-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {tx("Переводы этого документа", "Übersetzungen dieses Dokuments")}
+              </h4>
+              {translations.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{tx("Переводов пока нет.", "Noch keine Übersetzungen.")}</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {translations.map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 py-2 text-xs">
+                      <span className="min-w-0">
+                        <span className="font-medium">
+                          {documentTranslationLanguageLabel(item.source_language, lang)} → {documentTranslationLanguageLabel(item.target_language, lang)}
+                        </span>
+                        <span className="ml-2 text-muted-foreground">
+                          {item.provider === "deepl" ? "DeepL" : tx("вручную", "manuell")}
+                          {item.created_by_name ? ` · ${item.created_by_name}` : ""}
+                          {" · "}
+                          {new Date(item.created_at).toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU")}
+                        </span>
+                      </span>
+                      {item.translated_document_id ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 rounded-lg"
+                          onClick={() =>
+                            void downloadDocumentFile(
+                              item.translated_document_id as string,
+                              item.translated_document_name ?? `translation-${item.target_language}.pdf`,
+                            )
+                          }
+                        >
+                          <Download className="size-3.5" />
+                          {item.translated_document_name ?? tx("Скачать", "Herunterladen")}
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

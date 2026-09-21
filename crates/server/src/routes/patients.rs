@@ -6793,6 +6793,16 @@ async fn list_patient_documents(
                   d.document_direction,
                   d.document_variant,
                   d.document_language,
+                  (SELECT COALESCE(
+                       (SELECT latest.id FROM documents latest
+                         WHERE COALESCE(latest.version_root_document_id, latest.id)
+                               = COALESCE(src.version_root_document_id, src.id)
+                         ORDER BY latest.version_number DESC LIMIT 1),
+                       dt.document_id)
+                    FROM document_translations dt
+                    JOIN documents src ON src.id = dt.document_id
+                    WHERE dt.translated_document_id = d.id
+                    ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.access_category,
                   d.document_date,
                   d.source_person,
@@ -6869,6 +6879,7 @@ async fn list_patient_documents(
                 "document_direction": row.try_get::<Option<String>, _>("document_direction").unwrap_or_default(),
                 "document_variant": row.try_get::<Option<String>, _>("document_variant").unwrap_or_default(),
                 "document_language": row.try_get::<Option<String>, _>("document_language").unwrap_or_default(),
+                "translation_source_document_id": row.try_get::<Option<Uuid>, _>("translation_source_document_id").unwrap_or_default(),
                 "access_category": row.try_get::<Option<String>, _>("access_category").unwrap_or_default(),
                 "document_date": row.try_get::<Option<chrono::NaiveDate>, _>("document_date").unwrap_or_default(),
                 "source_person": row.try_get::<Option<String>, _>("source_person").unwrap_or_default(),

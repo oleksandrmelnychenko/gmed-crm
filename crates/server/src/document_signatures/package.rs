@@ -197,7 +197,7 @@ pub(super) async fn prepare_signing_members(
 /// embedded fonts are copied untouched: re-parsing and re-saving a generated PDF
 /// through printpdf drops the text's font mapping and the recipient sees glyph
 /// indices instead of letters.
-pub(super) fn merge_signing_pdfs(
+pub(crate) fn merge_signing_pdfs(
     primary: &[u8],
     members: &[&[u8]],
 ) -> Result<Vec<u8>, &'static str> {

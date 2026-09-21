@@ -1387,6 +1387,13 @@ export interface Translations
   documents_translation_queue_empty: string;
   documents_source_language: string;
   documents_use_extracted_text: string;
+  documents_machine_translation_draft: string;
+  documents_machine_translation_unavailable: string;
+  documents_machine_translation_blocked: string;
+  documents_machine_translation_source_required: string;
+  documents_machine_translation_replace_confirm: string;
+  documents_machine_translation_inserted: string;
+  documents_machine_translation_failed: string;
   documents_save_workspace: string;
   documents_translation_note_placeholder: string;
   documents_source_text: string;

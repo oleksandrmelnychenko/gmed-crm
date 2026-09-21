@@ -7,7 +7,11 @@ import type {
   DocumentShare,
   DocumentTextExtraction,
   FrameworkContractOption,
+  DocumentTranslation,
+  DocumentTranslationPreview,
   GenerateDocumentResponse,
+  MachineTranslationCapability,
+  MachineTranslationDraft,
   OrderOption,
   PatientOption,
   ProviderOption,
@@ -84,7 +88,7 @@ function post(path: string) {
   return apiFetch<{ ok: boolean }>(path, { method: "POST" });
 }
 
-async function fetchDocumentBlob(id: string, noStore = false) {
+export async function fetchDocumentBlob(id: string, noStore = false) {
   return apiFetchFile(
     `/documents/${id}/download`,
     noStore ? { cache: "no-store" } : {},
@@ -104,9 +108,13 @@ function isActivePreviewType(contentType: string) {
 }
 
 async function safePreviewBlob(blob: Blob, contentType: string, filename?: string | null) {
-  const invoiceXmlDownload = contentType.split(";", 1)[0]?.trim().toLowerCase() === "application/octet-stream"
+  const mime = contentType.split(";", 1)[0]?.trim().toLowerCase();
+  const invoiceXmlDownload = mime === "application/octet-stream"
     && filename?.toLowerCase().endsWith(".xml");
-  if (!isActivePreviewType(contentType) && !invoiceXmlDownload) return blob;
+  // Plain-text files (e.g. saved translations) are UTF-8; without an explicit
+  // charset the browser iframe would decode Cyrillic as Latin-1.
+  const plainTextWithoutCharset = mime === "text/plain" && !/charset=/i.test(contentType);
+  if (!isActivePreviewType(contentType) && !invoiceXmlDownload && !plainTextWithoutCharset) return blob;
   return new Blob([await blob.text()], { type: "text/plain;charset=utf-8" });
 }
 
@@ -399,6 +407,76 @@ export function updateTranslationRequest(
 ) {
   return postJson<TranslationRequest>(
     `/documents/translation-requests/${requestId}/update`,
+    payload,
+  );
+}
+
+export function fetchDocumentTranslations(documentId: string) {
+  return apiFetch<DocumentTranslation[]>(`/documents/${documentId}/translations`, {
+    cache: "no-store",
+  });
+}
+
+export function previewDocumentTranslation(
+  documentId: string,
+  payload: { source_language: string | null; target_language: string },
+) {
+  return postJson<DocumentTranslationPreview>(
+    `/documents/${documentId}/translations/preview`,
+    payload,
+  );
+}
+
+export function createDocumentTranslation(
+  documentId: string,
+  payload: {
+    source_language: string | null;
+    target_language: string;
+    source_text: string | null;
+    translated_text: string;
+    provider: "deepl" | "manual";
+    auto_name?: string | null;
+  },
+) {
+  return postJson<DocumentTranslation>(
+    `/documents/${documentId}/translations`,
+    payload,
+  );
+}
+
+/** Layout-preserving PDF translation through the DeepL document API. */
+export function createDocumentLayoutTranslation(
+  documentId: string,
+  payload: { source_language: string | null; target_language: string },
+) {
+  return postJson<DocumentTranslation>(
+    `/documents/${documentId}/translations/document`,
+    payload,
+  );
+}
+
+export function renderDocumentTranslationPdf(
+  documentId: string,
+  payload: { translated_text?: string } = {},
+) {
+  return postJson<{ id: string; translation_id: string; replaces_document_id: string; auto_name: string; original_filename: string }>(
+    `/documents/${documentId}/translations/render-pdf`,
+    payload,
+  );
+}
+
+export function fetchMachineTranslationCapability() {
+  return apiFetch<MachineTranslationCapability>(
+    "/documents/translation-requests/machine-translation",
+  );
+}
+
+export function createMachineTranslationDraft(
+  requestId: string,
+  payload: { source_text: string | null; source_language: string | null },
+) {
+  return postJson<MachineTranslationDraft>(
+    `/documents/translation-requests/${requestId}/machine-draft`,
     payload,
   );
 }

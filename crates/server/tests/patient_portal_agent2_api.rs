@@ -385,14 +385,11 @@ async fn patient_translation_request_requires_own_visible_document() {
         "POST",
         &format!("/api/v1/me/documents/{visible_doc}/translation-requests"),
         &patient_auth,
-        Some(json!({ "requested_language": "en", "note": "Need English copy" })),
+        Some(json!({ "requested_language": "xx", "note": "Unknown language" })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{created}");
-    assert_eq!(
-        created["message"],
-        "Only German translation target language is supported"
-    );
+    assert_eq!(created["message"], "Unknown translation target language");
 
     let (status, created) = json_request(
         &app,

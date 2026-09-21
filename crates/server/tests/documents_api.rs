@@ -2932,15 +2932,32 @@ async fn document_translation_requests_can_be_created_and_completed() {
         &format!("/api/v1/documents/{document_id}/translation-requests"),
         &admin_bearer,
         Some(json!({
-            "requested_language": "en",
-            "note": "Prepare a patient-facing English summary."
+            "requested_language": "xx",
+            "note": "Prepare a patient-facing summary."
         })),
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(
         create_body["message"],
-        "Only German translation target language is supported"
+        "Unknown translation target language"
+    );
+
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "de-ru",
+            "note": "Bilingual marker is not a target language."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        create_body["message"],
+        "Unknown translation target language"
     );
 
     let (status, create_body) = json_request(
@@ -7524,4 +7541,216 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn machine_translation_draft_requires_configured_provider_and_open_request() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-machine-draft");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &tag,
+    )
+    .await;
+
+    // Without a server-only key and transfer approval no external call is possible.
+    let (status, capability) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/translation-requests/machine-translation",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(capability["provider"], "deepl");
+    assert_eq!(capability["status"], "not_configured");
+    assert_eq!(capability["external_calls_enabled"], false);
+
+    // German -> Russian requests are accepted alongside the existing German target.
+    let (status, create_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translation-requests"),
+        &admin_bearer,
+        Some(json!({
+            "requested_language": "ru",
+            "note": "Patient-facing Russian copy."
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{create_body}");
+    assert_eq!(create_body["requested_language"], "ru");
+    let request_id = create_body["id"].as_str().unwrap().to_string();
+
+    let (status, draft_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/machine-draft"),
+        &admin_bearer,
+        Some(json!({
+            "source_text": "Diagnosen\nArterielle Hypertonie",
+            "source_language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{draft_body}");
+    assert_eq!(
+        draft_body["message"],
+        "Machine translation is not configured on this server"
+    );
+
+    let (status, update_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "status": "completed",
+            "translated_text": "Диагнозы\nАртериальная гипертензия"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{update_body}");
+
+    // Completed requests never trigger an external call, configured or not.
+    let (status, draft_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/translation-requests/{request_id}/machine-draft"),
+        &admin_bearer,
+        Some(json!({ "source_text": "Diagnosen", "source_language": "de" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{draft_body}");
+}
+
+#[tokio::test]
+async fn document_translations_are_saved_as_children_with_a_translated_document() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("doc-translations");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let appointment_id =
+        seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
+    let document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &tag,
+    )
+    .await;
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/translations"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list_body}");
+    assert_eq!(list_body.as_array().map(Vec::len), Some(0));
+
+    // Without DeepL configuration the preview never leaves the host.
+    let (status, preview_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translations/preview"),
+        &admin_bearer,
+        Some(json!({ "source_language": "de", "target_language": "ru" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{preview_body}");
+
+    let (status, invalid_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translations"),
+        &admin_bearer,
+        Some(json!({
+            "source_language": "de",
+            "target_language": "de-ru",
+            "translated_text": "Диагнозы",
+            "provider": "manual"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_body}");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/translations"),
+        &admin_bearer,
+        Some(json!({
+            "source_language": "de",
+            "target_language": "ru",
+            "source_text": "Diagnosen\nArterielle Hypertonie",
+            "translated_text": "Диагнозы\nАртериальная гипертензия",
+            "provider": "deepl"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["document_id"], document_id.to_string());
+    assert_eq!(created["source_language"], "de");
+    assert_eq!(created["target_language"], "ru");
+    assert_eq!(created["provider"], "deepl");
+    assert_eq!(created["characters"], 31);
+    let translated_document_id =
+        Uuid::parse_str(created["translated_document_id"].as_str().unwrap()).unwrap();
+
+    let (status, translated_document) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{translated_document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{translated_document}");
+    assert_eq!(translated_document["art"], "translated_document");
+    assert_eq!(translated_document["category"], "translation");
+    assert_eq!(translated_document["patient_id"], patient_id.to_string());
+    assert_eq!(translated_document["document_language"], "ru");
+
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/translations"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list_body}");
+    let items = list_body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], created["id"]);
+    assert_eq!(
+        items[0]["translated_document_id"],
+        translated_document_id.to_string()
+    );
 }

@@ -1570,8 +1570,16 @@ pub fn router() -> Router<AppState> {
             get(list_document_translation_request_queue),
         )
         .route(
+            "/documents/translation-requests/machine-translation",
+            get(get_document_machine_translation_capability),
+        )
+        .route(
             "/documents/translation-requests/{request_id}/update",
             post(update_document_translation_request),
+        )
+        .route(
+            "/documents/translation-requests/{request_id}/machine-draft",
+            post(create_document_translation_machine_draft),
         )
         .route("/documents/{id}", get(get_document))
         .route(
@@ -1590,6 +1598,22 @@ pub fn router() -> Router<AppState> {
         .route(
             "/documents/{id}/translation-requests",
             get(list_document_translation_requests).post(create_document_translation_request),
+        )
+        .route(
+            "/documents/{id}/translations",
+            get(list_document_translations).post(create_document_translation),
+        )
+        .route(
+            "/documents/{id}/translations/preview",
+            post(preview_document_translation),
+        )
+        .route(
+            "/documents/{id}/translations/render-pdf",
+            post(render_document_translation_pdf),
+        )
+        .route(
+            "/documents/{id}/translations/document",
+            post(create_document_layout_translation),
         )
         .route(
             "/documents/{id}/portal-release",
@@ -2090,6 +2114,31 @@ struct PortalReleaseRequest {
 struct CreateDocumentTranslationRequest {
     requested_language: String,
     note: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PreviewDocumentTranslation {
+    source_language: Option<String>,
+    target_language: String,
+}
+
+#[derive(Deserialize)]
+struct CreateDocumentTranslation {
+    source_language: Option<String>,
+    target_language: String,
+    source_text: Option<String>,
+    translated_text: String,
+    /// `deepl` when the text started as a machine draft, `manual` otherwise.
+    provider: Option<String>,
+    auto_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateDocumentTranslationMachineDraft {
+    /// Unsaved workspace text takes precedence over the stored source text so
+    /// the interpreter can draft from what they currently see.
+    source_text: Option<String>,
+    source_language: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -4339,6 +4388,76 @@ fn pdf_line_height_mm(size_pt: f32, multiplier: f32) -> f32 {
     pt_to_mm(size_pt * multiplier)
 }
 
+/// Split `**bold**` markup into (text, bold) runs; unmatched markers stay literal.
+fn parse_inline_bold_runs(text: &str) -> Vec<(String, bool)> {
+    let mut runs = Vec::new();
+    let mut rest = text;
+    let mut bold = false;
+    while let Some(index) = rest.find("**") {
+        let (head, tail) = rest.split_at(index);
+        if !head.is_empty() {
+            runs.push((head.to_string(), bold));
+        }
+        let after = &tail[2..];
+        if !bold && !after.contains("**") {
+            // No closing marker: keep the rest literally.
+            runs.push((tail.to_string(), false));
+            return runs;
+        }
+        bold = !bold;
+        rest = after;
+    }
+    if !rest.is_empty() {
+        runs.push((rest.to_string(), bold));
+    }
+    runs
+}
+
+/// Render the translation editor markup: `# `/`## ` headings, `- `/`• `
+/// bullets, `1. ` numbered items, blank lines as paragraph breaks and
+/// inline `**bold**` runs. Everything else is a plain paragraph.
+fn render_translation_markup(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    for raw in text.replace("\r\n", "\n").lines() {
+        let line = raw.trim_end();
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            layout.spacer(3.0);
+            continue;
+        }
+        if let Some(heading) = trimmed
+            .strip_prefix("## ")
+            .or_else(|| trimmed.strip_prefix("# "))
+        {
+            layout.text_block(
+                &heading.replace("**", ""),
+                13.0,
+                true,
+                0.0,
+                TreatmentPlanPdfColor::Body,
+                3.0,
+                1.5,
+            );
+            continue;
+        }
+        if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+            .or_else(|| trimmed.strip_prefix("• "))
+        {
+            layout.text_block_rich(&format!("• {item}"), 11.0, 4.0, TreatmentPlanPdfColor::Body, 0.6);
+            continue;
+        }
+        let numbered = trimmed
+            .split_once(". ")
+            .filter(|(number, _)| !number.is_empty() && number.len() <= 3 && number.bytes().all(|b| b.is_ascii_digit()));
+        if numbered.is_some() {
+            layout.text_block_rich(trimmed, 11.0, 4.0, TreatmentPlanPdfColor::Body, 0.6);
+            continue;
+        }
+        layout.text_block_rich(trimmed, 11.0, 0.0, TreatmentPlanPdfColor::Body, 1.0);
+    }
+}
+
 fn wrap_text_to_width(text: &str, font_size_pt: f32, available_width_mm: f32) -> Vec<String> {
     let normalized = text.trim();
     if normalized.is_empty() {
@@ -4935,6 +5054,83 @@ impl TreatmentPlanPdfLayout {
             self.y_mm -= line_height_mm;
         }
 
+        if after_mm > 0.0 {
+            self.spacer(after_mm);
+        }
+    }
+
+    /// Paragraph with inline `**bold**` runs (translation editor markup).
+    /// Widths use the same average-glyph estimate as `wrap_text_to_width`.
+    fn text_block_rich(
+        &mut self,
+        text: &str,
+        size_pt: f32,
+        indent_mm: f32,
+        color: TreatmentPlanPdfColor,
+        after_mm: f32,
+    ) {
+        let runs = parse_inline_bold_runs(text);
+        if runs.iter().all(|(value, _)| value.trim().is_empty()) {
+            return;
+        }
+        let char_width_mm = pt_to_mm(size_pt) * 0.54;
+        let available = self.available_width(indent_mm);
+        let line_height_mm = pdf_line_height_mm(size_pt, 1.45);
+        let x_start = PDF_LEFT_MARGIN_MM + indent_mm;
+
+        // Break into words that keep their bold flag, then fill lines.
+        let mut words: Vec<(String, bool)> = Vec::new();
+        for (value, bold) in runs {
+            for word in value.split_whitespace() {
+                words.push((word.to_string(), bold));
+            }
+        }
+        let mut lines: Vec<Vec<(String, bool)>> = vec![Vec::new()];
+        let mut used_mm = 0.0f32;
+        for (word, bold) in words {
+            let width = word.chars().count() as f32 * char_width_mm * if bold { 1.14 } else { 1.0 };
+            let space = if lines.last().is_some_and(|line| line.is_empty()) {
+                0.0
+            } else {
+                char_width_mm
+            };
+            if used_mm + space + width > available && !lines.last().is_some_and(|line| line.is_empty()) {
+                lines.push(Vec::new());
+                used_mm = 0.0;
+            }
+            used_mm += if lines.last().is_some_and(|line| line.is_empty()) { 0.0 } else { char_width_mm };
+            used_mm += width;
+            lines.last_mut().expect("line exists").push((word, bold));
+        }
+
+        for line in lines {
+            self.ensure_space(line_height_mm);
+            let mut x_mm = x_start;
+            // Merge consecutive words of the same style into one text op.
+            let mut segment = String::new();
+            let mut segment_bold = false;
+            let flush = |segment: &mut String, bold: bool, x_mm: &mut f32, ops: &mut Vec<Op>, y_mm: f32, regular: &PdfFontHandle, bold_font: &PdfFontHandle| {
+                if segment.is_empty() {
+                    return;
+                }
+                let font = if bold { bold_font } else { regular };
+                append_pdf_text_line(ops, segment, *x_mm, y_mm, size_pt, font, color);
+                *x_mm += segment.chars().count() as f32 * char_width_mm * if bold { 1.14 } else { 1.0 } + char_width_mm * 0.35;
+                segment.clear();
+            };
+            for (index, (word, bold)) in line.iter().enumerate() {
+                if index > 0 && *bold != segment_bold {
+                    segment.push(' ');
+                    flush(&mut segment, segment_bold, &mut x_mm, &mut self.page_ops, self.y_mm, &self.regular_font, &self.bold_font);
+                } else if index > 0 {
+                    segment.push(' ');
+                }
+                segment_bold = *bold;
+                segment.push_str(word);
+            }
+            flush(&mut segment, segment_bold, &mut x_mm, &mut self.page_ops, self.y_mm, &self.regular_font, &self.bold_font);
+            self.y_mm -= line_height_mm;
+        }
         if after_mm > 0.0 {
             self.spacer(after_mm);
         }
@@ -9958,6 +10154,8 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "document_direction": row.try_get::<Option<String>, _>("document_direction").unwrap_or_default(),
         "document_variant": row.try_get::<Option<String>, _>("document_variant").unwrap_or_default(),
         "document_language": row.try_get::<Option<String>, _>("document_language").unwrap_or_default(),
+        // Source document when this row is a saved translation (tree view in lists).
+        "translation_source_document_id": row.try_get::<Option<Uuid>, _>("translation_source_document_id").unwrap_or_default(),
         "access_category": row.try_get::<Option<String>, _>("access_category").unwrap_or_default(),
         "document_date": row.try_get::<Option<NaiveDate>, _>("document_date").unwrap_or_default(),
         "source_person": row.try_get::<Option<String>, _>("source_person").unwrap_or_default(),
@@ -10175,6 +10373,16 @@ async fn fetch_document_row(
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  (SELECT COALESCE(
+                       (SELECT latest.id FROM documents latest
+                         WHERE COALESCE(latest.version_root_document_id, latest.id)
+                               = COALESCE(src.version_root_document_id, src.id)
+                         ORDER BY latest.version_number DESC LIMIT 1),
+                       dt.document_id)
+                    FROM document_translations dt
+                    JOIN documents src ON src.id = dt.document_id
+                    WHERE dt.translated_document_id = d.id
+                    ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id, d.generated_bindings,
@@ -19202,6 +19410,16 @@ async fn list_documents(
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  (SELECT COALESCE(
+                       (SELECT latest.id FROM documents latest
+                         WHERE COALESCE(latest.version_root_document_id, latest.id)
+                               = COALESCE(src.version_root_document_id, src.id)
+                         ORDER BY latest.version_number DESC LIMIT 1),
+                       dt.document_id)
+                    FROM document_translations dt
+                    JOIN documents src ON src.id = dt.document_id
+                    WHERE dt.translated_document_id = d.id
+                    ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id, d.generated_bindings,
@@ -19397,6 +19615,16 @@ async fn list_document_intake_queue(
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  (SELECT COALESCE(
+                       (SELECT latest.id FROM documents latest
+                         WHERE COALESCE(latest.version_root_document_id, latest.id)
+                               = COALESCE(src.version_root_document_id, src.id)
+                         ORDER BY latest.version_number DESC LIMIT 1),
+                       dt.document_id)
+                    FROM document_translations dt
+                    JOIN documents src ON src.id = dt.document_id
+                    WHERE dt.translated_document_id = d.id
+                    ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id, d.generated_bindings,
@@ -19763,6 +19991,16 @@ async fn list_document_versions(
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
                   d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
                   d.document_direction, d.document_variant, d.document_language, d.access_category,
+                  (SELECT COALESCE(
+                       (SELECT latest.id FROM documents latest
+                         WHERE COALESCE(latest.version_root_document_id, latest.id)
+                               = COALESCE(src.version_root_document_id, src.id)
+                         ORDER BY latest.version_number DESC LIMIT 1),
+                       dt.document_id)
+                    FROM document_translations dt
+                    JOIN documents src ON src.id = dt.document_id
+                    WHERE dt.translated_document_id = d.id
+                    ORDER BY dt.created_at DESC LIMIT 1) AS translation_source_document_id,
                   d.document_date, d.source_person, d.source_institution, d.addressee_person,
                   d.addressee_institution, d.financial_status, d.payment_due_date, d.payment_date,
                   d.payment_method, d.generated_template_id, d.generated_bindings,
@@ -20173,19 +20411,18 @@ async fn create_document_translation_request(
         );
     };
 
-    let Some(requested_language) = normalize_document_language(Some(&body.requested_language))
+    // Interpreters translate into German for providers and from German into
+    // the patient's language (Russian, Ukrainian, English, ...). Bilingual
+    // markers such as `de-ru` describe a document, not a target language.
+    let Some(requested_language) =
+        normalize_translation_source_language(Some(&body.requested_language))
+            .filter(|language| *language != "de-ru")
     else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Unknown translation target language",
         );
     };
-    if requested_language != "de" {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Only German translation target language is supported",
-        );
-    }
     let note = body
         .note
         .as_deref()
@@ -20645,6 +20882,1643 @@ async fn update_document_translation_request(
     };
 
     Json(document_translation_request_json(&response_row)).into_response()
+}
+
+async fn get_document_machine_translation_capability(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ]) {
+        return resp;
+    }
+    Json(json!(state.deepl.capability())).into_response()
+}
+
+/// Produce a machine-translation draft for a translation request. The draft
+/// is returned to the workspace and never stored by this endpoint: the
+/// interpreter reviews it and saves through the regular update flow, which
+/// records who is responsible for the translated text.
+async fn create_document_translation_machine_draft(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(request_id): Path<Uuid>,
+    Json(body): Json<CreateDocumentTranslationMachineDraft>,
+) -> axum::response::Response {
+    use crate::services::deepl_translation::{DeeplError, MAX_SOURCE_CHARS, normalize_language};
+
+    if let Err(resp) = auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ]) {
+        return resp;
+    }
+
+    let request_row = match sqlx::query(
+        r#"SELECT dtr.id, dtr.document_id, dtr.status, dtr.requested_language,
+                  dtr.source_language, dtr.source_text, dtr.assigned_to
+           FROM document_translation_requests dtr
+           WHERE dtr.id = $1"#,
+    )
+    .bind(request_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Translation request not found"),
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "load document translation request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load translation request",
+            );
+        }
+    };
+
+    if auth.role == Role::Interpreter
+        && request_row
+            .try_get::<Option<Uuid>, _>("assigned_to")
+            .unwrap_or_default()
+            != Some(auth.user_id)
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Interpreters can only work on translation requests assigned to them",
+        );
+    }
+
+    let document_id = request_row
+        .try_get::<Uuid, _>("document_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let assignment_set = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let document_row = match fetch_document_row(&state, document_id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+    let baseline_view = can_view_document_row(&auth, &document_row, &assignment_set);
+    for capability in [AccessCapability::View, AccessCapability::Edit] {
+        match document_row_capability_allowed(
+            &state,
+            &auth,
+            &document_row,
+            capability,
+            baseline_view,
+        )
+        .await
+        {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(response) => return response,
+        }
+    }
+
+    let status = request_row
+        .try_get::<String, _>("status")
+        .unwrap_or_else(|_| "pending".to_string());
+    if status != "pending" && status != "in_progress" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Machine translation drafts are only available for open translation requests",
+        );
+    }
+
+    let capability = state.deepl.capability();
+    if !capability.external_calls_enabled {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Machine translation is not configured on this server",
+        );
+    }
+
+    let source_text = body
+        .source_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            request_row
+                .try_get::<Option<String>, _>("source_text")
+                .unwrap_or_default()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        });
+    let Some(source_text) = source_text else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Add the source text before requesting a machine translation draft",
+        );
+    };
+    if source_text.chars().count() > MAX_SOURCE_CHARS {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source text is too long for a machine translation draft",
+        );
+    }
+
+    let source_language = body
+        .source_language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            request_row
+                .try_get::<Option<String>, _>("source_language")
+                .unwrap_or_default()
+        });
+    let source_language = match source_language.as_deref().map(normalize_language) {
+        None => None,
+        Some(Ok(language)) => Some(language),
+        Some(Err(_)) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Machine translation does not support the selected source language",
+            );
+        }
+    };
+    let requested_language = request_row
+        .try_get::<String, _>("requested_language")
+        .unwrap_or_default();
+    let target_language = match normalize_language(&requested_language) {
+        Ok(language) => language,
+        Err(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Machine translation does not support the requested language",
+            );
+        }
+    };
+    if source_language == Some(target_language) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source and requested language must differ",
+        );
+    }
+
+    let translation = match state
+        .deepl
+        .translate(&source_text, source_language, target_language)
+        .await
+    {
+        Ok(translation) => translation,
+        Err(error) => {
+            // Provider errors are logged by code only; the source text is
+            // patient data and never reaches the log.
+            tracing::warn!(
+                request_id = %request_id,
+                error_code = error.code(),
+                "machine translation draft failed"
+            );
+            let (status, message) = match error {
+                DeeplError::Unavailable => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Machine translation is not configured on this server",
+                ),
+                DeeplError::UnsupportedLanguage => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Machine translation does not support this language pair",
+                ),
+                DeeplError::EmptyText => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Add the source text before requesting a machine translation draft",
+                ),
+                DeeplError::TooLarge => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Source text is too long for a machine translation draft",
+                ),
+                DeeplError::UpstreamStatus(429) | DeeplError::UpstreamStatus(456) => (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "The machine translation quota is exhausted; try again later",
+                ),
+                _ => (
+                    StatusCode::BAD_GATEWAY,
+                    "The machine translation provider did not return a draft",
+                ),
+            };
+            return err(status, message);
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_document_translation_machine_draft",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "request_id": request_id,
+            "provider": capability.provider,
+            "source_language": source_language,
+            "detected_source_language": translation.detected_source_language.clone(),
+            "target_language": target_language,
+            "characters": translation.characters,
+        }),
+    ));
+
+    Json(json!({
+        "provider": capability.provider,
+        "source_language": source_language,
+        "detected_source_language": translation.detected_source_language,
+        "target_language": target_language,
+        "characters": translation.characters,
+        "translated_text": translation.text,
+    }))
+    .into_response()
+}
+
+const MAX_DOCUMENT_TRANSLATION_TEXT_CHARS: usize = 300_000;
+
+/// Shared authorization for the document translation tree: the actor needs
+/// a translation role plus view and use rights on the source document.
+async fn authorize_document_translation(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+) -> Result<sqlx::postgres::PgRow, axum::response::Response> {
+    auth.require_any_role(&[
+        Role::Ceo,
+        Role::PatientManager,
+        Role::TeamleadInterpreter,
+        Role::Interpreter,
+        Role::Concierge,
+    ])?;
+    let assignment_set = load_assignment_set(state, auth).await?;
+    let row = fetch_document_row(state, document_id, auth.user_id)
+        .await?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Document not found"))?;
+    let baseline_view = can_view_document_row(auth, &row, &assignment_set);
+    for capability in [AccessCapability::View, AccessCapability::Use] {
+        if !document_row_capability_allowed(state, auth, &row, capability, baseline_view).await? {
+            return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
+        }
+    }
+    Ok(row)
+}
+
+fn document_translation_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
+        "document_id": row.try_get::<Uuid, _>("document_id").unwrap_or_else(|_| Uuid::nil()),
+        "source_language": row.try_get::<Option<String>, _>("source_language").unwrap_or_default(),
+        "target_language": row.try_get::<String, _>("target_language").unwrap_or_default(),
+        "provider": row.try_get::<String, _>("provider").unwrap_or_default(),
+        "translated_text": row.try_get::<String, _>("translated_text").unwrap_or_default(),
+        "characters": row.try_get::<i32, _>("characters").unwrap_or_default(),
+        "translated_document_id": row.try_get::<Option<Uuid>, _>("translated_document_id").unwrap_or_default(),
+        "translated_document_name": row.try_get::<Option<String>, _>("translated_document_name").unwrap_or_default(),
+        "created_by": row.try_get::<Uuid, _>("created_by").unwrap_or_else(|_| Uuid::nil()),
+        "created_by_name": row.try_get::<Option<String>, _>("created_by_name").unwrap_or_default(),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").unwrap_or_else(|_| chrono::Utc::now()),
+    })
+}
+
+const DOCUMENT_TRANSLATION_SELECT: &str = r#"SELECT dt.id, dt.document_id, dt.source_language, dt.target_language, dt.provider,
+              dt.translated_text, dt.characters, dt.translated_document_id, dt.created_by, dt.created_at,
+              translated_document.auto_name AS translated_document_name,
+              creator.name AS created_by_name
+       FROM document_translations dt
+       LEFT JOIN documents translated_document ON translated_document.id = dt.translated_document_id
+       LEFT JOIN users creator ON creator.id = dt.created_by"#;
+
+async fn list_document_translations(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = authorize_document_translation(&state, &auth, id).await {
+        return resp;
+    }
+    let rows = match sqlx::query(&format!(
+        "{DOCUMENT_TRANSLATION_SELECT}\n       WHERE dt.document_id = $1\n       ORDER BY dt.created_at DESC\n       LIMIT 200"
+    ))
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "list document translations");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document translations",
+            );
+        }
+    };
+    Json(
+        rows.iter()
+            .map(document_translation_json)
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
+}
+
+/// Resolve the text of a document for translation: the stored extraction
+/// result when available, otherwise a fresh extraction (OCR for scans).
+async fn document_translation_source_text(
+    state: &AppState,
+    auth: &AuthUser,
+    row: &sqlx::postgres::PgRow,
+) -> Result<String, axum::response::Response> {
+    // Generated documents (including saved translations) keep their exact
+    // text; translating them again must not depend on PDF text extraction.
+    if let Some(text) = row
+        .try_get::<Option<String>, _>("generated_manual_text")
+        .unwrap_or_default()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(text);
+    }
+    let stored = row
+        .try_get::<Option<String>, _>("extracted_text")
+        .unwrap_or_default()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let status = row
+        .try_get::<String, _>("text_extraction_status")
+        .unwrap_or_else(|_| "not_started".to_string());
+    if status == "completed"
+        && let Some(text) = stored
+    {
+        return Ok(text);
+    }
+    let document_id = row
+        .try_get::<Uuid, _>("id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let Some(storage_key) = row
+        .try_get::<Option<String>, _>("storage_key")
+        .unwrap_or_default()
+    else {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Document file is not available for text extraction",
+        ));
+    };
+    let result = extract_document_text_and_store(
+        state,
+        document_id,
+        row.try_get::<Option<String>, _>("original_filename")
+            .unwrap_or_default()
+            .as_deref(),
+        row.try_get::<Option<String>, _>("mime_type")
+            .unwrap_or_default()
+            .as_deref(),
+        storage_key.as_str(),
+        auth.user_id,
+    )
+    .await?;
+    match result {
+        DocumentTextExtractionResult::Completed { extracted_text, .. }
+            if !extracted_text.trim().is_empty() =>
+        {
+            Ok(extracted_text.trim().to_string())
+        }
+        DocumentTextExtractionResult::Completed { .. } => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The document contains no recognizable text to translate",
+        )),
+        DocumentTextExtractionResult::Unsupported { message, .. }
+        | DocumentTextExtractionResult::Failed { message, .. } => {
+            Err(err(StatusCode::UNPROCESSABLE_ENTITY, message))
+        }
+    }
+}
+
+/// Machine-translate the document text without persisting anything. The
+/// reviewer edits the draft and saves it explicitly.
+async fn preview_document_translation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PreviewDocumentTranslation>,
+) -> axum::response::Response {
+    use crate::services::deepl_translation::{DeeplError, MAX_SOURCE_CHARS, normalize_language};
+
+    let row = match authorize_document_translation(&state, &auth, id).await {
+        Ok(row) => row,
+        Err(resp) => return resp,
+    };
+    let capability = state.deepl.capability();
+    if !capability.external_calls_enabled {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Machine translation is not configured on this server",
+        );
+    }
+    let Ok(target_language) = normalize_language(&body.target_language) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Machine translation does not support the requested language",
+        );
+    };
+    let source_language = match body
+        .source_language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_language)
+    {
+        None => None,
+        Some(Ok(language)) => Some(language),
+        Some(Err(_)) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Machine translation does not support the selected source language",
+            );
+        }
+    };
+    if source_language == Some(target_language) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source and target language must differ",
+        );
+    }
+    let source_text = match document_translation_source_text(&state, &auth, &row).await {
+        Ok(text) => text,
+        Err(resp) => return resp,
+    };
+    if source_text.chars().count() > MAX_SOURCE_CHARS {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source text is too long for a machine translation draft",
+        );
+    }
+
+    let translation = match state
+        .deepl
+        .translate(&source_text, source_language, target_language)
+        .await
+    {
+        Ok(translation) => translation,
+        Err(error) => {
+            tracing::warn!(
+                document_id = %id,
+                error_code = error.code(),
+                "document machine translation failed"
+            );
+            let (status, message) = match error {
+                DeeplError::UnsupportedLanguage => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Machine translation does not support this language pair",
+                ),
+                DeeplError::EmptyText | DeeplError::TooLarge => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The document text cannot be sent for machine translation",
+                ),
+                DeeplError::UpstreamStatus(429) | DeeplError::UpstreamStatus(456) => (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "The machine translation quota is exhausted; try again later",
+                ),
+                DeeplError::Unavailable => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Machine translation is not configured on this server",
+                ),
+                _ => (
+                    StatusCode::BAD_GATEWAY,
+                    "The machine translation provider did not return a draft",
+                ),
+            };
+            return err(status, message);
+        }
+    };
+
+    state.audit_sender.try_send(audit::domain_event(
+        "preview_document_translation",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "provider": capability.provider,
+            "source_language": source_language,
+            "detected_source_language": translation.detected_source_language.clone(),
+            "target_language": target_language,
+            "characters": translation.characters,
+        }),
+    ));
+
+    Json(json!({
+        "provider": capability.provider,
+        "source_language": source_language,
+        "detected_source_language": translation.detected_source_language,
+        "target_language": target_language,
+        "characters": translation.characters,
+        "source_text": source_text,
+        "translated_text": translation.text,
+    }))
+    .into_response()
+}
+
+/// Save a reviewed translation as a child of the source document and create
+/// the translated document file next to it.
+async fn create_document_translation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CreateDocumentTranslation>,
+) -> axum::response::Response {
+    let row = match authorize_document_translation(&state, &auth, id).await {
+        Ok(row) => row,
+        Err(resp) => return resp,
+    };
+    let Some(target_language) =
+        normalize_translation_source_language(Some(&body.target_language))
+            .filter(|language| *language != "de-ru")
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Unknown translation target language",
+        );
+    };
+    let source_language = match body
+        .source_language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        None => None,
+        Some(value) => match normalize_translation_source_language(Some(value)) {
+            Some(language) => Some(language),
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Unknown translation source language",
+                );
+            }
+        },
+    };
+    let translated_text = body.translated_text.trim().to_string();
+    if translated_text.is_empty() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Translated text is required",
+        );
+    }
+    if translated_text.chars().count() > MAX_DOCUMENT_TRANSLATION_TEXT_CHARS {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Translated text is too long",
+        );
+    }
+    let source_text = body
+        .source_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if source_text
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > MAX_DOCUMENT_TRANSLATION_TEXT_CHARS)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source text is too long",
+        );
+    }
+    let provider = match body.provider.as_deref().map(str::trim) {
+        None | Some("") | Some("manual") => "manual",
+        Some("deepl") => "deepl",
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Unknown translation provider",
+            );
+        }
+    };
+    let characters = i32::try_from(
+        source_text
+            .as_deref()
+            .map(|value| value.chars().count())
+            .unwrap_or(0),
+    )
+    .unwrap_or(i32::MAX);
+
+    let translation_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO document_translations (
+                document_id, source_language, target_language, provider,
+                source_text, translated_text, characters, created_by
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           RETURNING id"#,
+    )
+    .bind(id)
+    .bind(source_language)
+    .bind(target_language)
+    .bind(provider)
+    .bind(source_text.as_deref())
+    .bind(translated_text.as_str())
+    .bind(characters)
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(translation_id) => translation_id,
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "create document translation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save document translation",
+            );
+        }
+    };
+
+    let translated_document_id = match create_translated_document_from_translation(
+        &state,
+        auth.user_id,
+        translation_id,
+        &row,
+        source_language,
+        target_language,
+        provider,
+        translated_text.as_str(),
+        source_text.as_deref(),
+        body.auto_name.as_deref(),
+        None,
+    )
+    .await
+    {
+        Ok(document_id) => document_id,
+        Err(resp) => return resp,
+    };
+    if let Err(e) = sqlx::query(
+        "UPDATE document_translations SET translated_document_id = $2 WHERE id = $1",
+    )
+    .bind(translation_id)
+    .bind(translated_document_id)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, translation_id = %translation_id, "link translated document");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to link the translated document",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_document_translation",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "translation_id": translation_id,
+            "provider": provider,
+            "source_language": source_language,
+            "target_language": target_language,
+            "translated_document_id": translated_document_id,
+        }),
+    ));
+
+    let response_row = match sqlx::query(&format!(
+        "{DOCUMENT_TRANSLATION_SELECT}\n       WHERE dt.id = $1"
+    ))
+    .bind(translation_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, translation_id = %translation_id, "reload document translation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document translation",
+            );
+        }
+    };
+    Json(document_translation_json(&response_row)).into_response()
+}
+
+fn translation_language_name(language: Option<&str>, in_language: &str) -> &'static str {
+    match (in_language, language) {
+        ("ru", Some("de")) => "немецкого",
+        ("ru", Some("ru")) => "русского",
+        ("ru", Some("uk")) => "украинского",
+        ("ru", Some("en")) => "английского",
+        ("ru", _) => "исходного языка",
+        ("uk", Some("de")) => "німецької",
+        ("uk", Some("ru")) => "російської",
+        ("uk", Some("uk")) => "української",
+        ("uk", Some("en")) => "англійської",
+        ("uk", _) => "мови оригіналу",
+        ("en", Some("de")) => "German",
+        ("en", Some("ru")) => "Russian",
+        ("en", Some("uk")) => "Ukrainian",
+        ("en", Some("en")) => "English",
+        ("en", _) => "the source language",
+        (_, Some("de")) => "Deutsch",
+        (_, Some("ru")) => "Russisch",
+        (_, Some("uk")) => "Ukrainisch",
+        (_, Some("en")) => "Englisch",
+        (_, _) => "Ausgangssprache",
+    }
+}
+
+/// Heading of a translated document in the target language, naming the pair.
+fn translation_pdf_heading(source_language: Option<&str>, target_language: &str) -> String {
+    match target_language {
+        "ru" => format!(
+            "Перевод с {} на русский",
+            translation_language_name(source_language, "ru")
+        ),
+        "uk" => format!(
+            "Переклад з {} на українську",
+            translation_language_name(source_language, "uk")
+        ),
+        "en" => format!(
+            "Translation from {} into English",
+            translation_language_name(source_language, "en")
+        ),
+        _ => format!(
+            "Übersetzung aus {} ins Deutsche",
+            match translation_language_name(source_language, "de") {
+                "Deutsch" => "dem Deutschen",
+                "Russisch" => "dem Russischen",
+                "Ukrainisch" => "dem Ukrainischen",
+                "Englisch" => "dem Englischen",
+                _ => "der Ausgangssprache",
+            }
+        ),
+    }
+}
+
+fn translation_source_label(target_language: &str) -> &'static str {
+    match target_language {
+        "ru" => "Исходный документ",
+        "uk" => "Вихідний документ",
+        "en" => "Source document",
+        _ => "Quelldokument",
+    }
+}
+
+struct TranslationPdfContent<'a> {
+    source_language: Option<&'a str>,
+    target_language: &'a str,
+    source_name: &'a str,
+    translated_text: &'a str,
+    /// Original wording, appended after the translation as an annex.
+    original_text: Option<&'a str>,
+    provider: &'a str,
+}
+
+fn translation_note(target_language: &str, provider: &str) -> &'static str {
+    match (target_language, provider) {
+        ("ru", "deepl") => "Машинный перевод (DeepL), проверенный сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже.",
+        ("ru", _) => "Перевод выполнен сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже.",
+        ("uk", "deepl") => "Машинний переклад (DeepL), перевірений співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче.",
+        ("uk", _) => "Переклад виконано співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче.",
+        ("en", "deepl") => "Machine translation (DeepL) reviewed by a staff member. In case of discrepancies the original document below prevails.",
+        ("en", _) => "Translation prepared by a staff member. In case of discrepancies the original document below prevails.",
+        (_, "deepl") => "Maschinelle Übersetzung (DeepL), von einem Mitarbeiter geprüft. Bei Abweichungen gilt das nachstehende Originaldokument.",
+        (_, _) => "Übersetzung durch einen Mitarbeiter. Bei Abweichungen gilt das nachstehende Originaldokument.",
+    }
+}
+
+fn translation_original_heading(target_language: &str, source_language: Option<&str>) -> String {
+    let label = match target_language {
+        "ru" => "Оригинал документа",
+        "uk" => "Оригінал документа",
+        "en" => "Original document",
+        _ => "Originaldokument",
+    };
+    match source_language {
+        Some(code) => format!("{label} ({})", code.to_uppercase()),
+        None => label.to_string(),
+    }
+}
+
+/// Thin separator across the content width.
+fn translation_rule(layout: &mut TreatmentPlanPdfLayout) {
+    layout.ensure_space(1.0);
+    append_pdf_filled_rect(
+        &mut layout.page_ops,
+        PDF_LEFT_MARGIN_MM,
+        layout.y_mm,
+        PDF_CONTENT_WIDTH_MM,
+        0.3,
+        treatment_plan_pdf_color(TreatmentPlanPdfColor::Muted),
+    );
+    layout.y_mm -= 1.0;
+}
+
+/// Branded bilingual translation: heading with the language pair, the
+/// translation itself, a review note, then the original text as an annex on a
+/// new page. This mirrors how certified translations are assembled.
+fn build_translation_document_pdf(
+    agency: &AgencyContractSettings,
+    content: &TranslationPdfContent<'_>,
+    document_reference: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    let heading = translation_pdf_heading(content.source_language, content.target_language);
+    layout.text_block_centered(&heading, 16.0, true, TreatmentPlanPdfColor::Body, 0.0, 4.0);
+    admin_block(
+        &mut layout,
+        &format!(
+            "{}: {}",
+            translation_source_label(content.target_language),
+            content.source_name
+        ),
+        0.0,
+        1.0,
+    );
+    // The review note sits in the header block, above the text, so the reader
+    // sees where the service part ends and the translation begins.
+    layout.text_block(
+        translation_note(content.target_language, content.provider),
+        9.5,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Muted,
+        1.0,
+        0.0,
+    );
+    layout.spacer(2.0);
+    translation_rule(&mut layout);
+    layout.spacer(4.0);
+    render_translation_markup(&mut layout, content.translated_text);
+    if let Some(original) = content
+        .original_text
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        layout.page_break();
+        layout.text_block_centered(
+            &translation_original_heading(content.target_language, content.source_language),
+            14.0,
+            true,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            4.0,
+        );
+        for line in generated_manual_text_paragraphs(original) {
+            if line.trim().is_empty() {
+                layout.spacer(3.0);
+            } else {
+                admin_block(&mut layout, line.trim(), 0.0, 1.0);
+            }
+        }
+    }
+    Ok(finalize_admin_pdf(document, layout))
+}
+
+/// Bytes of the source document when it is a PDF; `None` for other formats
+/// (the plain-text annex is used instead) or when the file cannot be read.
+async fn load_source_pdf_bytes(row: &sqlx::postgres::PgRow) -> Option<Vec<u8>> {
+    let mime = row
+        .try_get::<Option<String>, _>("mime_type")
+        .unwrap_or_default()?;
+    if mime.split(';').next().unwrap_or_default().trim() != "application/pdf" {
+        return None;
+    }
+    let storage_key = row
+        .try_get::<Option<String>, _>("storage_key")
+        .unwrap_or_default()?;
+    let document_id = row.try_get::<Uuid, _>("id").ok()?;
+    let original_filename = row
+        .try_get::<Option<String>, _>("original_filename")
+        .unwrap_or_default();
+    let auto_name = row.try_get::<Option<String>, _>("auto_name").unwrap_or_default();
+    read_document_storage_bytes(
+        document_id,
+        &storage_key,
+        Some(mime.as_str()),
+        original_filename.as_deref(),
+        auto_name.as_deref(),
+    )
+    .await
+    .ok()
+    .filter(|bytes| bytes.starts_with(b"%PDF"))
+}
+
+/// Append the original PDF pages after the branded translation pages.
+fn attach_original_pdf(
+    translation_pdf: Vec<u8>,
+    original_pdf: Option<&[u8]>,
+    translation_id: Uuid,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let Some(original) = original_pdf else {
+        return Ok(translation_pdf);
+    };
+    crate::document_signatures::package::merge_signing_pdfs(&translation_pdf, &[original])
+        .map_err(|_| {
+            tracing::error!(translation_id = %translation_id, "append original PDF to translation");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to append the original document to the translation",
+            )
+        })
+}
+
+async fn build_translation_pdf(
+    state: &AppState,
+    translation_id: Uuid,
+    content: &TranslationPdfContent<'_>,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let agency = load_agency_contract_settings(state).await?;
+    let document_reference = format!("TR-{}", translation_id.simple());
+    build_translation_document_pdf(&agency, content, &document_reference).map_err(|message| {
+        tracing::error!(translation_id = %translation_id, "build translated document PDF");
+        err(StatusCode::INTERNAL_SERVER_ERROR, message)
+    })
+}
+
+#[derive(Deserialize, Default)]
+struct RenderDocumentTranslationPdf {
+    /// Edited translation wording; omitted to re-render the stored text.
+    #[serde(default)]
+    translated_text: Option<String>,
+}
+
+/// Render a saved translation as a branded PDF (optionally with edited
+/// wording), stored as the next version of the same translated document and
+/// re-linked to the translation.
+async fn render_document_translation_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<RenderDocumentTranslationPdf>,
+) -> axum::response::Response {
+    let edited_text = body
+        .translated_text
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    if edited_text
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > MAX_DOCUMENT_TRANSLATION_TEXT_CHARS)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Translated text is too long",
+        );
+    }
+    let translation_row = match sqlx::query(
+        r#"SELECT dt.id, dt.document_id, dt.source_language, dt.target_language,
+                  dt.source_text, dt.provider
+           FROM document_translations dt
+           WHERE dt.translated_document_id = $1"#,
+    )
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "This document is not a saved translation",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "load document translation for PDF");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document translation",
+            );
+        }
+    };
+    let translation_id = translation_row
+        .try_get::<Uuid, _>("id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let source_document_id = translation_row
+        .try_get::<Uuid, _>("document_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let source_language = translation_row
+        .try_get::<Option<String>, _>("source_language")
+        .unwrap_or_default();
+    let target_language = translation_row
+        .try_get::<String, _>("target_language")
+        .unwrap_or_else(|_| "de".to_string());
+    let stored_source_text = translation_row
+        .try_get::<Option<String>, _>("source_text")
+        .unwrap_or_default();
+    let provider = translation_row
+        .try_get::<String, _>("provider")
+        .unwrap_or_else(|_| "manual".to_string());
+
+    // Access is checked on the source document, like every translation action.
+    let source_row = match authorize_document_translation(&state, &auth, source_document_id).await
+    {
+        Ok(row) => row,
+        Err(resp) => return resp,
+    };
+    let translated_row = match fetch_document_row(&state, id, auth.user_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
+        Err(resp) => return resp,
+    };
+    if edited_text.is_none()
+        && translated_row
+            .try_get::<Option<String>, _>("mime_type")
+            .unwrap_or_default()
+            .as_deref()
+            == Some("application/pdf")
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "This translation is already a PDF document",
+        );
+    }
+    let text = match edited_text {
+        Some(text) => text,
+        None => match document_translation_source_text(&state, &auth, &translated_row).await {
+            Ok(text) => text,
+            Err(resp) => return resp,
+        },
+    };
+    let source_auto_name = source_row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "Document".to_string());
+    // Older translations may lack a stored source text; fall back to the
+    // source document's own extracted text so the annex is still present.
+    let original_text = match stored_source_text {
+        Some(value) if !value.trim().is_empty() => Some(value),
+        _ => source_row
+            .try_get::<Option<String>, _>("extracted_text")
+            .unwrap_or_default()
+            .filter(|value| !value.trim().is_empty()),
+    };
+    let title = translation_pdf_heading(source_language.as_deref(), &target_language);
+    let original_pdf = load_source_pdf_bytes(&source_row).await;
+    let cover = match build_translation_pdf(
+        &state,
+        translation_id,
+        &TranslationPdfContent {
+            source_language: source_language.as_deref(),
+            target_language: &target_language,
+            source_name: &source_auto_name,
+            translated_text: &text,
+            original_text: if original_pdf.is_some() {
+                None
+            } else {
+                original_text.as_deref()
+            },
+            provider: &provider,
+        },
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(resp) => return resp,
+    };
+    let data = match attach_original_pdf(cover, original_pdf.as_deref(), translation_id) {
+        Ok(bytes) => bytes,
+        Err(resp) => return resp,
+    };
+
+    let version_root_document_id = translated_row
+        .try_get::<Option<Uuid>, _>("version_root_document_id")
+        .unwrap_or_default()
+        .or(Some(id));
+    let version_number = translated_row
+        .try_get::<i32, _>("version_number")
+        .unwrap_or(1)
+        + 1;
+    let patient_id = translated_row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let is_medical = translated_row
+        .try_get::<bool, _>("is_medical")
+        .unwrap_or(false);
+    let auto_name = translated_row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| title.clone());
+    let original_filename = format!(
+        "translation-{}-{}.pdf",
+        translation_id.simple(),
+        target_language.to_lowercase()
+    );
+    let notes = format!(
+        "Translation {} -> {} of document {} (PDF rendered from text)",
+        source_language.as_deref().unwrap_or("auto"),
+        target_language,
+        source_document_id
+    );
+    let persist_input = NewStoredDocument {
+        document_id: None,
+        document_number: None,
+        patient_id,
+        lead_id: None,
+        order_id: translated_row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        appointment_id: translated_row
+            .try_get::<Option<Uuid>, _>("appointment_id")
+            .unwrap_or_default(),
+        auto_name: auto_name.as_str(),
+        original_filename: original_filename.as_str(),
+        art: "translated_document",
+        category: Some("translation"),
+        status: "active",
+        visibility: "internal",
+        is_medical,
+        mime_type: "application/pdf",
+        klinik: None,
+        ursprung: Some("document_translation"),
+        notes: Some(notes.as_str()),
+        document_direction: Some("outgoing"),
+        document_variant: Some("translation"),
+        document_language: Some(target_language.as_str()),
+        access_category: Some(infer_document_access_category(
+            Some("translation"),
+            "translated_document",
+            is_medical,
+            "internal",
+        )),
+        document_date: Some(chrono::Utc::now().date_naive()),
+        source_person: Some("document_translation"),
+        source_institution: None,
+        addressee_person: None,
+        addressee_institution: None,
+        financial_status: None,
+        payment_due_date: None,
+        payment_date: None,
+        payment_method: None,
+        generated_template_id: None,
+        generated_bindings: None,
+        generated_manual_text: Some(text.as_str()),
+        version_root_document_id,
+        replaces_document_id: Some(id),
+        version_number,
+        uploaded_by: auth.user_id,
+    };
+    let (document_id, _file_size, stored_filename, storage_key) =
+        match persist_document_file(&state, &data, &persist_input).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    best_effort_extract_document_text_and_store(
+        &state,
+        document_id,
+        Some(stored_filename.as_str()),
+        Some("application/pdf"),
+        storage_key.as_str(),
+        auth.user_id,
+    )
+    .await;
+    if let Err(e) = sqlx::query(
+        "UPDATE document_translations SET translated_document_id = $2, translated_text = $3 WHERE id = $1",
+    )
+    .bind(translation_id)
+    .bind(document_id)
+    .bind(text.as_str())
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, translation_id = %translation_id, "relink translated PDF document");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to link the translated document",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "render_document_translation_pdf",
+        Some(auth.user_id),
+        "document",
+        Some(document_id),
+        json!({
+            "translation_id": translation_id,
+            "source_document_id": source_document_id,
+            "replaces_document_id": id,
+            "target_language": target_language,
+        }),
+    ));
+    crate::realtime::publish_document_event(
+        &state,
+        Some(auth.user_id),
+        "document.translation_document_created",
+        document_id,
+        json!({
+            "translation_id": translation_id,
+            "source_document_id": source_document_id,
+            "patient_id": patient_id,
+            "category": "translation",
+        }),
+    )
+    .await;
+
+    Json(json!({
+        "id": document_id,
+        "translation_id": translation_id,
+        "replaces_document_id": id,
+        "auto_name": auto_name,
+        "original_filename": original_filename,
+    }))
+    .into_response()
+}
+
+/// Layout-preserving translation: the source PDF goes through the DeepL
+/// document API, and the result is assembled as branded cover page +
+/// translated pages + original pages, saved as a child translation.
+async fn create_document_layout_translation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PreviewDocumentTranslation>,
+) -> axum::response::Response {
+    use crate::services::deepl_translation::{DeeplError, MAX_DOCUMENT_BYTES, normalize_language};
+
+    let row = match authorize_document_translation(&state, &auth, id).await {
+        Ok(row) => row,
+        Err(resp) => return resp,
+    };
+    let capability = state.deepl.capability();
+    if !capability.external_calls_enabled {
+        return err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Machine translation is not configured on this server",
+        );
+    }
+    let Ok(target_language) = normalize_language(&body.target_language) else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Machine translation does not support the requested language",
+        );
+    };
+    let source_language = match body
+        .source_language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(normalize_language)
+    {
+        None => None,
+        Some(Ok(language)) => Some(language),
+        Some(Err(_)) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Machine translation does not support the selected source language",
+            );
+        }
+    };
+    if source_language == Some(target_language) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Source and target language must differ",
+        );
+    }
+    let Some(original_pdf) = load_source_pdf_bytes(&row).await else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Layout-preserving translation needs a PDF source document",
+        );
+    };
+    if original_pdf.len() > MAX_DOCUMENT_BYTES {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The PDF is too large for layout-preserving translation",
+        );
+    }
+    let source_filename = row
+        .try_get::<Option<String>, _>("original_filename")
+        .unwrap_or_default()
+        .unwrap_or_else(|| "document.pdf".to_string());
+    let translated = match state
+        .deepl
+        .translate_document(
+            &original_pdf,
+            &source_filename,
+            source_language,
+            target_language,
+        )
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::warn!(document_id = %id, error_code = error.code(), "document layout translation failed");
+            let (status, message) = match error {
+                DeeplError::UpstreamStatus(429) | DeeplError::UpstreamStatus(456) => (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "The machine translation quota is exhausted; try again later",
+                ),
+                DeeplError::TooLarge => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The PDF is too large for layout-preserving translation",
+                ),
+                _ => (
+                    StatusCode::BAD_GATEWAY,
+                    "The machine translation provider did not return a translated document",
+                ),
+            };
+            return err(status, message);
+        }
+    };
+
+    // Text of the translated PDF is kept for search, editing and the record.
+    let translated_text = match extract_document_text_from_bytes(
+        Some("application/pdf"),
+        Some("translation.pdf"),
+        &translated.bytes,
+    )
+    .await
+    {
+        DocumentTextExtractionResult::Completed { extracted_text, .. } => extracted_text,
+        _ => String::new(),
+    };
+    let source_text = row
+        .try_get::<Option<String>, _>("extracted_text")
+        .unwrap_or_default()
+        .filter(|value| !value.trim().is_empty());
+    let source_auto_name = row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "Document".to_string());
+
+    let translation_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO document_translations (
+                document_id, source_language, target_language, provider,
+                source_text, translated_text, characters, created_by
+           ) VALUES ($1, $2, $3, 'deepl', $4, $5, $6, $7)
+           RETURNING id"#,
+    )
+    .bind(id)
+    .bind(source_language)
+    .bind(target_language)
+    .bind(source_text.as_deref())
+    .bind(if translated_text.trim().is_empty() { "(PDF)" } else { translated_text.as_str() })
+    .bind(i32::try_from(translated.billed_characters.unwrap_or(0)).unwrap_or(i32::MAX))
+    .bind(auth.user_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(translation_id) => translation_id,
+        Err(e) => {
+            tracing::error!(error = %e, document_id = %id, "create document layout translation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to save document translation",
+            );
+        }
+    };
+
+    // Cover page: heading, source name and the review note; then the
+    // translated pages with the original layout, then the original itself.
+    let cover = match build_translation_pdf(
+        &state,
+        translation_id,
+        &TranslationPdfContent {
+            source_language,
+            target_language,
+            source_name: source_auto_name.as_str(),
+            translated_text: "",
+            original_text: None,
+            provider: "deepl",
+        },
+    )
+    .await
+    {
+        Ok(bytes) => bytes,
+        Err(resp) => return resp,
+    };
+    let assembled = match crate::document_signatures::package::merge_signing_pdfs(
+        &cover,
+        &[translated.bytes.as_slice(), original_pdf.as_slice()],
+    ) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            tracing::error!(translation_id = %translation_id, "assemble layout translation PDF");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to assemble the translated document",
+            );
+        }
+    };
+
+    let translated_document_id = match create_translated_document_from_translation(
+        &state,
+        auth.user_id,
+        translation_id,
+        &row,
+        source_language,
+        target_language,
+        "deepl",
+        translated_text.as_str(),
+        source_text.as_deref(),
+        None,
+        Some(assembled),
+    )
+    .await
+    {
+        Ok(document_id) => document_id,
+        Err(resp) => return resp,
+    };
+    if let Err(e) = sqlx::query(
+        "UPDATE document_translations SET translated_document_id = $2 WHERE id = $1",
+    )
+    .bind(translation_id)
+    .bind(translated_document_id)
+    .execute(&state.db)
+    .await
+    {
+        tracing::error!(error = %e, translation_id = %translation_id, "link translated document");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to link the translated document",
+        );
+    }
+    state.audit_sender.try_send(audit::domain_event(
+        "create_document_layout_translation",
+        Some(auth.user_id),
+        "document",
+        Some(id),
+        json!({
+            "translation_id": translation_id,
+            "provider": "deepl",
+            "source_language": source_language,
+            "target_language": target_language,
+            "billed_characters": translated.billed_characters,
+            "translated_document_id": translated_document_id,
+        }),
+    ));
+
+    let response_row = match sqlx::query(&format!(
+        "{DOCUMENT_TRANSLATION_SELECT}\n       WHERE dt.id = $1"
+    ))
+    .bind(translation_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = %e, translation_id = %translation_id, "reload document translation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load document translation",
+            );
+        }
+    };
+    Json(document_translation_json(&response_row)).into_response()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create_translated_document_from_translation(
+    state: &AppState,
+    actor_user_id: Uuid,
+    translation_id: Uuid,
+    source_document_row: &sqlx::postgres::PgRow,
+    source_language: Option<&str>,
+    target_language: &str,
+    provider: &str,
+    translated_text: &str,
+    source_text: Option<&str>,
+    auto_name_override: Option<&str>,
+    // Already assembled PDF (layout-preserving DeepL document translation).
+    prebuilt_pdf: Option<Vec<u8>>,
+) -> Result<Uuid, axum::response::Response> {
+    let source_document_id = source_document_row
+        .try_get::<Uuid, _>("id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let patient_id = source_document_row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let order_id = source_document_row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default();
+    let appointment_id = source_document_row
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default();
+    let source_auto_name = source_document_row
+        .try_get::<String, _>("auto_name")
+        .unwrap_or_else(|_| "Document".to_string());
+    let is_medical = source_document_row
+        .try_get::<bool, _>("is_medical")
+        .unwrap_or(false);
+    let auto_name = auto_name_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            format!(
+                "Translation {} - {}",
+                target_language.to_uppercase(),
+                source_auto_name
+            )
+        });
+    let original_filename = format!(
+        "translation-{}-{}.pdf",
+        translation_id.simple(),
+        target_language.trim().to_lowercase()
+    );
+    // The translation is rendered as a branded PDF with the agency letterhead
+    // (same layout as the free-text document template). The heading states the
+    // language pair in the target language; the source document is named first.
+    // When the source is a PDF its pages are appended as they are, so the
+    // original keeps its own layout instead of a plain-text annex.
+    let data = match prebuilt_pdf {
+        Some(bytes) => bytes,
+        None => {
+            let original_pdf = load_source_pdf_bytes(source_document_row).await;
+            let cover = build_translation_pdf(
+                state,
+                translation_id,
+                &TranslationPdfContent {
+                    source_language,
+                    target_language,
+                    source_name: source_auto_name.as_str(),
+                    translated_text,
+                    original_text: if original_pdf.is_some() {
+                        None
+                    } else {
+                        source_text
+                    },
+                    provider,
+                },
+            )
+            .await?;
+            attach_original_pdf(cover, original_pdf.as_deref(), translation_id)?
+        }
+    };
+    let notes = format!(
+        "Translation {} -> {} of document {} ({})",
+        source_language.unwrap_or("auto"),
+        target_language,
+        source_document_id,
+        provider
+    );
+    let persist_input = NewStoredDocument {
+        document_id: None,
+        document_number: None,
+        patient_id,
+        lead_id: None,
+        order_id,
+        appointment_id,
+        auto_name: auto_name.as_str(),
+        original_filename: original_filename.as_str(),
+        art: "translated_document",
+        category: Some("translation"),
+        status: "active",
+        visibility: "internal",
+        is_medical,
+        mime_type: "application/pdf",
+        klinik: None,
+        ursprung: Some("document_translation"),
+        notes: Some(notes.as_str()),
+        document_direction: Some("outgoing"),
+        document_variant: Some("translation"),
+        document_language: Some(target_language),
+        access_category: Some(infer_document_access_category(
+            Some("translation"),
+            "translated_document",
+            is_medical,
+            "internal",
+        )),
+        document_date: Some(chrono::Utc::now().date_naive()),
+        source_person: Some("document_translation"),
+        source_institution: None,
+        addressee_person: None,
+        addressee_institution: None,
+        financial_status: None,
+        payment_due_date: None,
+        payment_date: None,
+        payment_method: None,
+        generated_template_id: None,
+        generated_bindings: None,
+        generated_manual_text: Some(translated_text),
+        version_root_document_id: None,
+        replaces_document_id: None,
+        version_number: 1,
+        uploaded_by: actor_user_id,
+    };
+
+    let (document_id, _file_size, stored_filename, storage_key) =
+        persist_document_file(state, &data, &persist_input).await?;
+    best_effort_extract_document_text_and_store(
+        state,
+        document_id,
+        Some(stored_filename.as_str()),
+        Some("application/pdf"),
+        storage_key.as_str(),
+        actor_user_id,
+    )
+    .await;
+
+    crate::realtime::publish_document_event(
+        state,
+        Some(actor_user_id),
+        "document.translation_document_created",
+        document_id,
+        json!({
+            "translation_id": translation_id,
+            "source_document_id": source_document_id,
+            "patient_id": patient_id,
+            "category": "translation",
+        }),
+    )
+    .await;
+
+    Ok(document_id)
 }
 
 async fn validate_translation_assignee(

@@ -29,6 +29,18 @@ pub struct Config {
     /// evidence summary. External calls are possible only when both explicit
     /// gates and a bounded environment governance-review identifier are present.
     pub medication_ai: MedicationAiConfig,
+    /// Optional DeepL machine-translation draft for the document translation
+    /// workspace. External calls happen only with a server-only key and an
+    /// explicit data-transfer approval for this environment.
+    pub deepl: DeeplConfig,
+}
+
+#[derive(Clone, Default)]
+pub struct DeeplConfig {
+    pub api_key: Option<SecretString>,
+    /// Optional endpoint override (for example a DeepL Free key or an EU proxy).
+    pub api_url: Option<String>,
+    pub patient_data_transfer_approved: bool,
 }
 
 #[derive(Clone, Default)]
@@ -125,6 +137,21 @@ impl Config {
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        let deepl_api_key = std::env::var("GMED_DEEPL_API_KEY")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(SecretString::from);
+        let deepl_api_url = std::env::var("GMED_DEEPL_API_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if let Some(url) = &deepl_api_url
+            && !url.starts_with("https://")
+        {
+            panic!("GMED_DEEPL_API_URL must be an https:// URL");
+        }
+        let (deepl_data_transfer_approved, _) = env_flag("GMED_DEEPL_DATA_TRANSFER_APPROVED");
         if let Some(model) = &openai_model
             && (model.len() > 96
                 || !model
@@ -151,6 +178,11 @@ impl Config {
                 governance_review_id,
                 openai_api_key,
                 openai_model,
+            },
+            deepl: DeeplConfig {
+                api_key: deepl_api_key,
+                api_url: deepl_api_url,
+                patient_data_transfer_approved: deepl_data_transfer_approved,
             },
         }
     }

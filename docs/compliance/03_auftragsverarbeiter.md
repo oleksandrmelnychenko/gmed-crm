@@ -12,6 +12,7 @@ Weitergabe nicht privilegiert.
 | Steuerberater | eigener Verantwortlicher (Berufsgeheimnisträger) | Rechnungsdaten | DE | entfällt | Rechtsgrundlage Art. 6 Abs. 1 lit. c |
 | Let's Encrypt (ISRG) | kein Personenbezug | Domain, Admin-E-Mail | US | entfällt | nur Zertifikatsausstellung |
 | OpenAI | **gesperrt** | — | US | — | nur nach dokumentierter Freigabe (`GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED`), SCC und DSFA; Standard ist aus |
+| DeepL SE | Auftragsverarbeiter (maschineller Übersetzungsentwurf), **standardmäßig gesperrt** | Ausgangstext der Übersetzungsanfrage (medizinische Dokumente, Gesundheitsdaten) | DE | [ ] | nur DeepL Pro API mit AVV; Freigabe je Umgebung über `GMED_DEEPL_DATA_TRANSFER_APPROVED`; DeepL Free ist für Patientendaten ungeeignet (keine AVV, Texte werden zum Training genutzt) |
 | BfArM, G-BA | kein Personenbezug | nur Abruf öffentlicher Arzneimitteldaten | DE | entfällt | — |
 
 Selbst betrieben, daher keine Weitergabe: OCR und Dokumentenanalyse,
