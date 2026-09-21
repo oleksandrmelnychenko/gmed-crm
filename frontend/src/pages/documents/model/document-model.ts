@@ -13,7 +13,7 @@ import type {
   UploadFormState,
 } from "./types";
 import { formatUnknownValue, type Lang, type Translations } from "@/lib/i18n";
-import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
+import { hasCapability, type Actor } from "@/lib/permissions";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
