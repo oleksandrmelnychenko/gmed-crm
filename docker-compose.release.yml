@@ -63,6 +63,8 @@ services:
     environment:
       DATABASE_URL: "${GMED_DATABASE_URL:-postgres://gmed:gmed@postgres:5432/gmed}"
       GMED_UPLOAD_DIR: "/app/uploads/documents"
+      # Uploads are sealed at rest by the backend; the worker opens them read-only.
+      MESSAGE_ENCRYPTION_KEYS: "${GMED_MESSAGE_ENCRYPTION_KEYS:?Set GMED_MESSAGE_ENCRYPTION_KEYS in your environment or release env file}"
       PARSER_POLL_SECONDS: "${GMED_PARSER_POLL_SECONDS:-2}"
       PARSER_MAX_FILE_BYTES: "${GMED_PARSER_MAX_FILE_BYTES:-26214400}"
       PARSER_MAX_PDF_PAGES: "${GMED_PARSER_MAX_PDF_PAGES:-80}"

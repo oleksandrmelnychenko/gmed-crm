@@ -14,7 +14,9 @@ uv run uvicorn app.api:app --host 127.0.0.1 --port 8090
 
 ## Run the queue worker
 
-Set `DATABASE_URL` and `GMED_UPLOAD_DIR`, then:
+Set `DATABASE_URL`, `GMED_UPLOAD_DIR` and `MESSAGE_ENCRYPTION_KEYS` (the same
+`id:base64key,...` registry as the backend — uploads are sealed at rest as
+`GMEDENC1` AES-256-GCM envelopes and the worker opens them read-only), then:
 
 ```bash
 uv run python -m app.worker

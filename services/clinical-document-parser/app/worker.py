@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .blob_envelope import open_blob
 from .extraction import (
     MAX_FILE_BYTES,
     OCR_LOW_CONFIDENCE_THRESHOLD,
@@ -818,7 +819,8 @@ def run() -> None:
                         raise RuntimeError("Invalid source document storage path")
                     if path.stat().st_size > MAX_FILE_BYTES:
                         raise ValueError("Document exceeds the parser size limit")
-                    data = path.read_bytes()
+                    # Uploads are sealed at rest; the parser opens them with the shared keys.
+                    data = open_blob(path.read_bytes())
                     extraction_started = time.monotonic()
                     extracted = extract_document(
                         data,
@@ -860,7 +862,7 @@ def run() -> None:
                     raise RuntimeError("Invalid source document storage path")
                 if path.stat().st_size > MAX_FILE_BYTES:
                     raise ValueError("Document exceeds the parser size limit")
-                data = path.read_bytes()
+                data = open_blob(path.read_bytes())
                 extraction_started = time.monotonic()
                 extraction = extract_document(
                     data,
