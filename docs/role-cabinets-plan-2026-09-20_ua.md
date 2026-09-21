@@ -340,3 +340,29 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
   повний лід із приховуванням у UI.
 - Зміна гейта `is_release_staff_role` торкнеться інтеграційних тестів на ролі
   (як 2026-09-19); оновлювати їх у тому самому коміті.
+
+### Етап 6 — Перевірка (виконано частково 2026-09-21)
+
+Автоматично, на кожен пуш у `main`:
+- `crates/domain`: таблиця «роль × capability» закріплена тестами і знімком
+  `docs/backlog/02_rbac-capability-snapshot.md`; фронтенд-дзеркало перевіряє той
+  самий знімок (`lib/permissions.test.ts`, `pages/permission-models.test.ts`).
+- Інтеграційні тести з базою: 403 на write-операції з read-only ролей для
+  лідів (concierge), клінічних маршрутів (interpreter/billing/PM без
+  призначення), користувачів (it_admin ↛ CEO), обміну документами, чату (sales),
+  DATEV (billing лише читання), `/stats/my-kpis` без витоку фінансів/медицини.
+- Playwright з mock API: `read-only-cabinet`, `role-cabinets`, `admin-users`,
+  `account`.
+- Live-набір `operations-live-e2e` (реальний бекенд + база в CI):
+  `rbac-denied-routes.live.spec.ts` — заборонені маршрути для кожної ролі та
+  позитивні перевірки кабінетів (sales відкриває ліди/чат, ceo_assistant бачить
+  read-only банер на пацієнтах/замовленнях, it_admin відкриває користувачів,
+  billing — рахунки без банера, interpreter не відкриває рахунки).
+
+Задеплоєно: DEV і PROD на `4e97a7ea` (реліз `v2026.09.21-4e97a7ea`).
+
+Лишається вручну (потрібен вхід власника на DEV і тестові акаунти ролей):
+чек-лист розділу 2 по кожній ролі зі скріншотами в
+`docs/audits/role-cabinets-2026-09-*/`; окремо перевірити raw `<textarea>` /
+`<input type="checkbox">` поза спільними компонентами в read-only режимі (кнопки
+збереження там уже заблоковані).

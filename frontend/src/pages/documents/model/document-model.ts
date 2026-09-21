@@ -99,12 +99,9 @@ export function canUpdateTranslations(actor?: Actor) {
   return hasCapability(actor, "documents.upload");
 }
 
-/** `GET /documents/shares` admits document managers plus the read-only CEO assistant. */
+/** `GET /documents/{id}/shares` follows `documents.view`; the server still applies the row-level rule. */
 export function canViewDocumentShares(actor?: Actor) {
-  return (
-    hasCapability(actor, "documents.manage") ||
-    (hasCapability(actor, "documents.view") && actorRole(actor) === "ceo_assistant")
-  );
+  return hasCapability(actor, "documents.view");
 }
 
 export function buildDocumentsPath(filters: FiltersState) {

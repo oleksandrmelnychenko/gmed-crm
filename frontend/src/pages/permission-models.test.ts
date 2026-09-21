@@ -216,9 +216,7 @@ describe("documents model", () => {
       expect(canRequestTranslations(actor)).toBe(has("documents.upload"));
       expect(canUpdateTranslations(actor)).toBe(has("documents.upload"));
       expect(canViewTranslationQueue(actor)).toBe(has("documents.view"));
-      expect(canViewDocumentShares(actor)).toBe(
-        has("documents.manage") || (has("documents.view") && role === "ceo_assistant"),
-      );
+      expect(canViewDocumentShares(actor)).toBe(has("documents.view"));
     });
   });
 });

@@ -178,4 +178,46 @@ test.describe("live RBAC denied route normalization", () => {
     await bootstrapAndLogin(page, request, "patient");
     await expectForbiddenRouteRedirect(page, "/patients");
   });
+
+  // Capability registry (2026-09-20): positive cabinet checks per role.
+  test("sales opens the leads and chat workspaces", async ({ page, request }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "sales");
+    await page.goto("/leads");
+    await expect(page).toHaveURL(/\/leads$/);
+    await page.goto("/chat");
+    await expect(page).toHaveURL(/\/chat$/);
+  });
+
+  test("ceo assistant opens patients and orders read-only", async ({ page, request }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "assistant");
+    await page.goto("/patients");
+    await expect(page).toHaveURL(/\/patients$/);
+    await expect(page.getByTestId("read-only-banner").first()).toBeVisible();
+    await page.goto("/orders");
+    await expect(page).toHaveURL(/\/orders$/);
+    await expect(page.getByTestId("read-only-banner").first()).toBeVisible();
+  });
+
+  test("it_admin opens the users administration", async ({ page, request }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "it_admin");
+    await page.goto("/admin/users");
+    await expect(page).toHaveURL(/\/admin\/users$/);
+  });
+
+  test("billing opens invoices without a read-only banner", async ({ page, request }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "billing");
+    await page.goto("/invoices");
+    await expect(page).toHaveURL(/\/invoices$/);
+    await expect(page.getByTestId("read-only-banner")).toHaveCount(0);
+  });
+
+  test("interpreter is redirected away from invoices", async ({ page, request }) => {
+    await setGermanLanguage(page);
+    await bootstrapAndLogin(page, request, "interpreter");
+    await expectForbiddenRouteRedirect(page, "/invoices");
+  });
 });
