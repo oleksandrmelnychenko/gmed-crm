@@ -234,6 +234,9 @@ impl DeeplTranslator {
             if use_tags {
                 body["tag_handling"] = json!("xml");
                 body["ignore_tags"] = json!(["keep"]);
+                // A kept name sits inside a sentence; without this DeepL cuts
+                // the sentence at the tag and the rest starts with ", ...".
+                body["non_splitting_tags"] = json!(["keep"]);
             }
             let mut response = client
                 .post(&url)

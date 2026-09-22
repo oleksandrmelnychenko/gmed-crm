@@ -13,6 +13,9 @@ type DirtyDismissConfirmDialogProps = {
   onConfirm: () => void
   open: boolean
   title: string
+  /** Optional third action: save the pending changes, then close. */
+  saveLabel?: string
+  onSave?: () => void
 }
 
 export function DirtyDismissConfirmDialog({
@@ -25,9 +28,12 @@ export function DirtyDismissConfirmDialog({
   onConfirm,
   open,
   title,
+  saveLabel,
+  onSave,
 }: DirtyDismissConfirmDialogProps) {
   const cancelButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const confirmButtonRef = React.useRef<HTMLButtonElement | null>(null)
+  const saveButtonRef = React.useRef<HTMLButtonElement | null>(null)
   const previouslyFocusedRef = React.useRef<HTMLElement | null>(null)
 
   React.useEffect(() => {
@@ -56,7 +62,7 @@ export function DirtyDismissConfirmDialog({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Tab") {
         const first = cancelButtonRef.current
-        const last = confirmButtonRef.current
+        const last = saveButtonRef.current ?? confirmButtonRef.current
         if (!first || !last) return
         if (event.shiftKey && document.activeElement === first) {
           event.preventDefault()
@@ -120,7 +126,7 @@ export function DirtyDismissConfirmDialog({
             {message}
           </p>
         </div>
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button
             ref={cancelButtonRef}
             type="button"
@@ -133,13 +139,23 @@ export function DirtyDismissConfirmDialog({
           <Button
             ref={confirmButtonRef}
             type="button"
-            variant={destructive ? "destructive" : "default"}
+            variant={destructive ? "destructive" : onSave ? "outline" : "default"}
             className="h-9 rounded-lg"
             disabled={confirmDisabled}
             onClick={onConfirm}
           >
             {confirmLabel}
           </Button>
+          {onSave && saveLabel ? (
+            <Button
+              ref={saveButtonRef}
+              type="button"
+              className="h-9 rounded-lg"
+              onClick={onSave}
+            >
+              {saveLabel}
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>,

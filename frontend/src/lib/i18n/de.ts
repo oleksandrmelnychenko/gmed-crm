@@ -241,6 +241,7 @@ export const de = {
   common_last_updated: "Zuletzt aktualisiert",
   common_discard_unsaved_confirm: "Ohne Speichern schließen?",
   common_discard_unsaved_action: "Ohne Speichern schließen",
+  common_save_and_close: "Speichern und schließen",
   common_overlay_dismiss_blocked:
     "Nicht gespeicherte Daten gehen verloren, wenn Sie das Fenster ohne Speichern schließen.",
   table_filter: "Filter",

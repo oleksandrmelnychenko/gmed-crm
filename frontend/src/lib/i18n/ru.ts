@@ -239,6 +239,7 @@ export const ru = {
   common_last_updated: "Последнее обновление",
   common_discard_unsaved_confirm: "Закрыть без сохранения?",
   common_discard_unsaved_action: "Закрыть без сохранения",
+  common_save_and_close: "Сохранить и закрыть",
   common_overlay_dismiss_blocked:
     "Несохраненные данные будут потеряны, если закрыть окно без сохранения.",
   table_filter: "Фильтр",

@@ -24,12 +24,18 @@ type DialogRootProps = DialogPrimitive.Root.Props & {
   allowImplicitDismissal?: boolean
   dirty?: boolean
   requireChanges?: boolean
+  /**
+   * Offered as "save and close" in the unsaved-changes prompt. The handler
+   * saves and closes the dialog itself; on failure it keeps the dialog open.
+   */
+  onSaveBeforeDismiss?: () => void
 }
 
 function Dialog({
   allowImplicitDismissal = false,
   requireChanges = false,
   dirty,
+  onSaveBeforeDismiss,
   onOpenChange,
   open,
   ...props
@@ -196,6 +202,16 @@ function Dialog({
         confirmLabel={t.common_discard_unsaved_action}
         onCancel={handleCancelDismiss}
         onConfirm={handleConfirmDismiss}
+        saveLabel={onSaveBeforeDismiss ? t.common_save_and_close : undefined}
+        onSave={
+          onSaveBeforeDismiss
+            ? () => {
+                pendingConfirmActionRef.current = null
+                setConfirmOpen(false)
+                onSaveBeforeDismiss()
+              }
+            : undefined
+        }
       />
     </>
   )

@@ -274,6 +274,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
       open={open}
       onOpenChange={onOpenChange}
       dirty={Boolean(translatedText.trim()) && translatedText.trim() !== savedText && busy === null}
+      onSaveBeforeDismiss={() => void handleSave()}
     >
       <DialogContent
         className="flex h-[92vh] w-[96vw] max-w-none flex-col overflow-hidden rounded-xl p-0 sm:max-w-[1600px]"

@@ -228,6 +228,7 @@ export interface Translations
   common_last_updated: string;
   common_discard_unsaved_confirm: string;
   common_discard_unsaved_action: string;
+  common_save_and_close: string;
   common_overlay_dismiss_blocked: string;
   table_filter: string;
   table_filter_search_fields: string;
