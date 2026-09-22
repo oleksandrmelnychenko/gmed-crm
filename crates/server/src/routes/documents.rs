@@ -22383,13 +22383,15 @@ async fn create_document_layout_translation(
         .try_get::<Option<String>, _>("original_filename")
         .unwrap_or_default()
         .unwrap_or_else(|| "document.pdf".to_string());
+    let protected = document_translation_protected_terms(&state, id).await;
     let translated = match state
         .deepl
-        .translate_document(
+        .translate_document_protected(
             &original_pdf,
             &source_filename,
             source_language,
             target_language,
+            &protected,
         )
         .await
     {

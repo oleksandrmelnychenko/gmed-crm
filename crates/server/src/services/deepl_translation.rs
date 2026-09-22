@@ -315,6 +315,140 @@ impl DeeplTranslator {
         source_language: Option<&str>,
         target_language: &str,
     ) -> Result<DeeplDocumentTranslation, DeeplError> {
+        self.translate_document_protected(bytes, filename, source_language, target_language, &[])
+            .await
+    }
+
+    /// Like `translate_document`, but `protected` strings (names, addresses)
+    /// are kept verbatim. The document API has no ignore tags, so a temporary
+    /// glossary maps every term onto itself for this one request and is
+    /// deleted afterwards. Glossaries need a known source language; without
+    /// one, or if DeepL refuses the glossary, the PDF is translated as before.
+    pub async fn translate_document_protected(
+        &self,
+        bytes: &[u8],
+        filename: &str,
+        source_language: Option<&str>,
+        target_language: &str,
+        protected: &[String],
+    ) -> Result<DeeplDocumentTranslation, DeeplError> {
+        let glossary_id = match source_language {
+            Some(source) if !protected.is_empty() => {
+                self.create_identity_glossary(source, target_language, protected)
+                    .await
+            }
+            _ => None,
+        };
+        let result = self
+            .translate_document_with_glossary(
+                bytes,
+                filename,
+                source_language,
+                target_language,
+                glossary_id.as_deref(),
+            )
+            .await;
+        if let Some(glossary_id) = glossary_id {
+            self.delete_glossary(&glossary_id).await;
+        }
+        result
+    }
+
+    async fn create_identity_glossary(
+        &self,
+        source_language: &str,
+        target_language: &str,
+        protected: &[String],
+    ) -> Option<String> {
+        let TranslatorState::Ready {
+            api_key,
+            base_url,
+            client,
+        } = &self.state
+        else {
+            return None;
+        };
+        let entries = protected
+            .iter()
+            .filter(|term| !term.contains(['\t', '\n', '\r']))
+            .map(|term| format!("{term}\t{term}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if entries.is_empty() {
+            return None;
+        }
+        let body = serde_json::to_vec(&json!({
+            "name": format!("gmed-keep-{}", uuid::Uuid::new_v4().simple()),
+            "source_lang": normalize_language(source_language).ok()?,
+            "target_lang": normalize_language(target_language).ok()?,
+            "entries": entries,
+            "entries_format": "tsv",
+        }))
+        .ok()?;
+        let response = client
+            .post(format!("{base_url}/v2/glossaries"))
+            .header(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("DeepL-Auth-Key {}", api_key.expose_secret()))
+                    .ok()?,
+            )
+            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+            .header(USER_AGENT, "gmed-document-translation/1")
+            .body(body)
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            tracing::warn!(
+                status = response.status().as_u16(),
+                "DeepL glossary creation refused"
+            );
+            return None;
+        }
+        #[derive(Deserialize)]
+        struct Created {
+            glossary_id: String,
+        }
+        let created: Created = serde_json::from_slice(&response.bytes().await.ok()?).ok()?;
+        created
+            .glossary_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            .then_some(created.glossary_id)
+    }
+
+    async fn delete_glossary(&self, glossary_id: &str) {
+        let TranslatorState::Ready {
+            api_key,
+            base_url,
+            client,
+        } = &self.state
+        else {
+            return;
+        };
+        let Ok(authorization) =
+            HeaderValue::from_str(&format!("DeepL-Auth-Key {}", api_key.expose_secret()))
+        else {
+            return;
+        };
+        let deleted = client
+            .delete(format!("{base_url}/v2/glossaries/{glossary_id}"))
+            .header(AUTHORIZATION, authorization)
+            .send()
+            .await;
+        if !deleted.is_ok_and(|response| response.status().is_success()) {
+            tracing::warn!(glossary_id, "DeepL glossary could not be deleted");
+        }
+    }
+
+    async fn translate_document_with_glossary(
+        &self,
+        bytes: &[u8],
+        filename: &str,
+        source_language: Option<&str>,
+        target_language: &str,
+        glossary_id: Option<&str>,
+    ) -> Result<DeeplDocumentTranslation, DeeplError> {
         let TranslatorState::Ready {
             api_key,
             base_url,
@@ -349,6 +483,9 @@ impl DeeplTranslator {
         push_field("target_lang", &target);
         if let Some(source) = &source {
             push_field("source_lang", source);
+        }
+        if let Some(glossary_id) = glossary_id {
+            push_field("glossary_id", glossary_id);
         }
         let safe_filename: String = filename
             .chars()
