@@ -167,6 +167,19 @@ impl DeeplTranslator {
         source_language: Option<&str>,
         target_language: &str,
     ) -> Result<DeeplTranslation, DeeplError> {
+        self.translate_protected(text, source_language, target_language, &[])
+            .await
+    }
+
+    /// Like `translate`, but `protected` strings (names, addresses) are sent
+    /// as XML ignore tags and come back exactly as written.
+    pub async fn translate_protected(
+        &self,
+        text: &str,
+        source_language: Option<&str>,
+        target_language: &str,
+        protected: &[String],
+    ) -> Result<DeeplTranslation, DeeplError> {
         let TranslatorState::Ready {
             api_key,
             base_url,
@@ -199,7 +212,16 @@ impl DeeplTranslator {
 
         let mut translated_paragraphs = Vec::new();
         let mut detected_source_language = None;
+        let use_tags = !protected.is_empty();
         for batch in batch_paragraphs(text) {
+            let batch: Vec<String> = if use_tags {
+                batch
+                    .iter()
+                    .map(|item| protect_terms(item, protected))
+                    .collect()
+            } else {
+                batch
+            };
             let mut body = json!({
                 "text": batch,
                 "target_lang": target,
@@ -208,6 +230,10 @@ impl DeeplTranslator {
             });
             if let Some(source) = &source {
                 body["source_lang"] = json!(source);
+            }
+            if use_tags {
+                body["tag_handling"] = json!("xml");
+                body["ignore_tags"] = json!(["keep"]);
             }
             let mut response = client
                 .post(&url)
@@ -236,7 +262,11 @@ impl DeeplTranslator {
             if detected_source_language.is_none() {
                 detected_source_language = parsed.detected_source_language;
             }
-            translated_paragraphs.extend(parsed.texts);
+            if use_tags {
+                translated_paragraphs.extend(parsed.texts.iter().map(|item| unprotect_terms(item)));
+            } else {
+                translated_paragraphs.extend(parsed.texts);
+            }
         }
 
         Ok(DeeplTranslation {
@@ -560,9 +590,106 @@ fn parse_response(bytes: &[u8], expected: usize) -> Result<ParsedResponse, Deepl
     })
 }
 
+/// Marks names, addresses and similar fixed strings so DeepL leaves them
+/// untouched (`<keep>` is sent as an ignore tag). Line breaks become `<lb/>`
+/// because XML tag handling would otherwise treat them as plain whitespace.
+fn protect_terms(text: &str, terms: &[String]) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut index = 0;
+    while index < text.len() {
+        let rest = &text[index..];
+        let at_boundary = text[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|previous| !previous.is_alphanumeric());
+        let matched = at_boundary
+            .then(|| {
+                terms.iter().find(|term| {
+                    rest.starts_with(term.as_str())
+                        && rest[term.len()..]
+                            .chars()
+                            .next()
+                            .is_none_or(|next| !next.is_alphanumeric())
+                })
+            })
+            .flatten();
+        if let Some(term) = matched {
+            out.push_str("<keep>");
+            push_escaped(&mut out, term);
+            out.push_str("</keep>");
+            index += term.len();
+            continue;
+        }
+        let Some(ch) = rest.chars().next() else { break };
+        if ch == '\n' {
+            out.push_str("<lb/>");
+        } else {
+            push_escaped(&mut out, ch.encode_utf8(&mut [0u8; 4]));
+        }
+        index += ch.len_utf8();
+    }
+    out
+}
+
+fn push_escaped(out: &mut String, value: &str) {
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            other => out.push(other),
+        }
+    }
+}
+
+fn unprotect_terms(text: &str) -> String {
+    text.replace("<lb/>", "\n")
+        .replace("<lb />", "\n")
+        .replace("<keep>", "")
+        .replace("</keep>", "")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+/// Longest first, so "Anna Beispiel" wins over "Anna"; very short or empty
+/// strings are dropped because they would match inside ordinary words.
+pub fn normalize_protected_terms(terms: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut terms: Vec<String> = terms
+        .into_iter()
+        .map(|term| term.trim().to_string())
+        .filter(|term| term.chars().count() >= 3)
+        .collect();
+    terms.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    terms.dedup();
+    terms
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protected_terms_are_tagged_escaped_and_restored() {
+        let terms = normalize_protected_terms(vec![
+            "Anna".to_string(),
+            "Anna Beispiel".to_string(),
+            "Main & Co".to_string(),
+            "ab".to_string(),
+        ]);
+        assert_eq!(terms, vec!["Anna Beispiel", "Main & Co", "Anna"]);
+        let protected = protect_terms("Ich, Anna Beispiel, bei Main & Co\nAnnahme <1>", &terms);
+        assert_eq!(
+            protected,
+            "Ich, <keep>Anna Beispiel</keep>, bei <keep>Main &amp; Co</keep><lb/>Annahme &lt;1&gt;"
+        );
+        assert_eq!(
+            unprotect_terms(&protected),
+            "Ich, Anna Beispiel, bei Main & Co\nAnnahme <1>"
+        );
+    }
 
     #[test]
     fn language_codes_follow_deepl_conventions() {

@@ -21216,9 +21216,13 @@ async fn create_document_translation_machine_draft(
         );
     }
 
+    let request_document_id = request_row
+        .try_get::<Uuid, _>("document_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let protected = document_translation_protected_terms(&state, request_document_id).await;
     let translation = match state
         .deepl
-        .translate(&source_text, source_language, target_language)
+        .translate_protected(&source_text, source_language, target_language, &protected)
         .await
     {
         Ok(translation) => translation,
@@ -21442,6 +21446,39 @@ async fn document_translation_source_text(
     }
 }
 
+/// Names and addresses that must stay exactly as written in a translation:
+/// the patient's or lead's identity and the agency's own name and address.
+/// A failure to load them only means nothing is protected.
+async fn document_translation_protected_terms(state: &AppState, document_id: Uuid) -> Vec<String> {
+    let rows = sqlx::query_scalar::<_, Option<String>>(
+        r#"WITH d AS (SELECT patient_id, lead_id FROM documents WHERE id = $1)
+           SELECT unnest(ARRAY[
+                      p.first_name, p.last_name, concat_ws(' ', p.first_name, p.last_name),
+                      p.address_street, p.address_city, concat_ws(' ', p.address_zip, p.address_city),
+                      p.email
+                  ])
+           FROM d JOIN patients p ON p.id = d.patient_id
+           UNION ALL
+           SELECT unnest(ARRAY[
+                      l.first_name, l.last_name, concat_ws(' ', l.first_name, l.last_name),
+                      l.street_address, l.city, concat_ws(' ', l.zip_code, l.city), l.email
+                  ])
+           FROM d JOIN leads l ON l.id = d.lead_id
+           UNION ALL
+           SELECT value #>> '{}'
+           FROM system_settings
+           WHERE key IN ('agency_name', 'agency_care_of', 'agency_address')"#,
+    )
+    .bind(document_id)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error, document_id = %document_id, "load protected translation terms");
+        Vec::new()
+    });
+    crate::services::deepl_translation::normalize_protected_terms(rows.into_iter().flatten())
+}
+
 /// Machine-translate the document text without persisting anything. The
 /// reviewer edits the draft and saves it explicitly.
 async fn preview_document_translation(
@@ -21502,9 +21539,10 @@ async fn preview_document_translation(
         );
     }
 
+    let protected = document_translation_protected_terms(&state, id).await;
     let translation = match state
         .deepl
-        .translate(&source_text, source_language, target_language)
+        .translate_protected(&source_text, source_language, target_language, &protected)
         .await
     {
         Ok(translation) => translation,
