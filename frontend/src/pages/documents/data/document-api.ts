@@ -77,12 +77,17 @@ export function documentPreviewSandbox(contentType?: string) {
   return mime === "application/pdf" ? undefined : "";
 }
 
-function postJson<T>(path: string, payload: JsonPayload) {
+function postJson<T>(path: string, payload: JsonPayload, timeoutMs?: number) {
   return apiFetch<T>(path, {
     method: "POST",
     body: JSON.stringify(payload),
+    ...(timeoutMs ? { timeoutMs } : {}),
   });
 }
+
+// Machine translation may OCR a scanned PDF before calling DeepL; the default
+// 20 s API timeout would abort a request the server is still completing.
+const MACHINE_TRANSLATION_TIMEOUT_MS = 180_000;
 
 function post(path: string) {
   return apiFetch<{ ok: boolean }>(path, { method: "POST" });
@@ -424,6 +429,7 @@ export function previewDocumentTranslation(
   return postJson<DocumentTranslationPreview>(
     `/documents/${documentId}/translations/preview`,
     payload,
+    MACHINE_TRANSLATION_TIMEOUT_MS,
   );
 }
 
@@ -478,6 +484,7 @@ export function createMachineTranslationDraft(
   return postJson<MachineTranslationDraft>(
     `/documents/translation-requests/${requestId}/machine-draft`,
     payload,
+    MACHINE_TRANSLATION_TIMEOUT_MS,
   );
 }
 

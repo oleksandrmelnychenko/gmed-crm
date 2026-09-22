@@ -3225,6 +3225,102 @@ async fn extract_text_from_image_bytes_tesseract(
     result
 }
 
+/// Scanned PDFs carry no text layer; OCR is bounded to the first pages so a
+/// long scan cannot pin the OCR workers.
+const MAX_SCANNED_PDF_OCR_PAGES: u32 = 15;
+
+/// Rasterize a scanned PDF with `pdftoppm` (poppler-utils) and OCR each page
+/// with tesseract. `Ok(None)` means no readable text; the rasterizer being
+/// absent reports `IMAGE_OCR_UNAVAILABLE_MESSAGE`.
+async fn extract_text_from_scanned_pdf_bytes(bytes: &[u8]) -> Result<Option<String>, &'static str> {
+    let mut work_dir = std::env::temp_dir();
+    work_dir.push(format!("gmed-pdf-ocr-{}", Uuid::new_v4()));
+    {
+        #[cfg_attr(not(unix), allow(unused_mut))]
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder
+            .create(&work_dir)
+            .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+    }
+
+    let result = async {
+        let pdf_path = work_dir.join("source.pdf");
+        create_private_ocr_temp_file(&pdf_path).map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+        tokio::fs::write(&pdf_path, bytes)
+            .await
+            .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+
+        let timeout = document_ocr_timeout();
+        let mut command = tokio::process::Command::new("pdftoppm");
+        command
+            .arg("-r")
+            .arg("300")
+            .arg("-gray")
+            .arg("-png")
+            .arg("-f")
+            .arg("1")
+            .arg("-l")
+            .arg(MAX_SCANNED_PDF_OCR_PAGES.to_string())
+            .arg(&pdf_path)
+            .arg(work_dir.join("page"))
+            .kill_on_drop(true);
+        match tokio::time::timeout(timeout, command.output()).await {
+            Ok(Ok(output)) if output.status.success() => {}
+            Ok(Ok(_)) => return Err(IMAGE_OCR_FAILED_MESSAGE),
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(IMAGE_OCR_UNAVAILABLE_MESSAGE);
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(error = %error, "pdftoppm process failed");
+                return Err(IMAGE_OCR_FAILED_MESSAGE);
+            }
+            Err(_) => {
+                tracing::warn!(timeout_secs = timeout.as_secs(), "pdftoppm timed out");
+                return Err(IMAGE_OCR_FAILED_MESSAGE);
+            }
+        }
+
+        // pdftoppm zero-pads page numbers, so the name order is the page order.
+        let mut pages = Vec::new();
+        let mut entries = tokio::fs::read_dir(&work_dir)
+            .await
+            .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?
+        {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("page") && name.ends_with(".png") {
+                pages.push(entry.path());
+            }
+        }
+        pages.sort();
+
+        let mut page_texts = Vec::new();
+        for page in pages {
+            let image = tokio::fs::read(&page)
+                .await
+                .map_err(|_| IMAGE_OCR_FAILED_MESSAGE)?;
+            if let Some(text) =
+                extract_text_from_image_bytes_tesseract(&image, Some("page.png")).await?
+            {
+                page_texts.push(text);
+            }
+        }
+        Ok(normalize_extracted_text(&page_texts.join("\n\n")))
+    }
+    .await;
+
+    let _ = tokio::fs::remove_dir_all(&work_dir).await;
+    result
+}
+
 async fn extract_text_from_image_bytes(
     bytes: &[u8],
     original_filename: Option<&str>,
@@ -3328,9 +3424,25 @@ async fn extract_document_text_from_bytes(
                     method: "pdf_text",
                     extracted_text,
                 },
-                None => DocumentTextExtractionResult::Unsupported {
-                    method: "pdf_text",
-                    message: PDF_TEXT_NO_TEXT_MESSAGE,
+                // No text layer: a scan. OCR it when the rasterizer exists.
+                None => match extract_text_from_scanned_pdf_bytes(bytes).await {
+                    Ok(Some(extracted_text)) => DocumentTextExtractionResult::Completed {
+                        method: "tesseract_cli",
+                        extracted_text,
+                    },
+                    Ok(None) => DocumentTextExtractionResult::Unsupported {
+                        method: "pdf_text",
+                        message: PDF_TEXT_NO_TEXT_MESSAGE,
+                    },
+                    Err(message) => {
+                        if message != IMAGE_OCR_UNAVAILABLE_MESSAGE {
+                            tracing::warn!("scanned PDF OCR failed");
+                        }
+                        DocumentTextExtractionResult::Unsupported {
+                            method: "pdf_text",
+                            message: PDF_TEXT_NO_TEXT_MESSAGE,
+                        }
+                    }
                 },
             },
             Ok(Err(_)) => DocumentTextExtractionResult::Failed {

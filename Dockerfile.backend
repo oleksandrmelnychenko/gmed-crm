@@ -51,6 +51,7 @@ RUN echo "security-refresh=${DEBIAN_SECURITY_REFRESH}" >/dev/null \
         clamav-freshclam \
         curl \
         openssl \
+        poppler-utils \
         tesseract-ocr \
         tesseract-ocr-deu \
         tesseract-ocr-eng \
