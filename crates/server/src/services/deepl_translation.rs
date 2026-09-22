@@ -234,9 +234,10 @@ impl DeeplTranslator {
             if use_tags {
                 body["tag_handling"] = json!("xml");
                 body["ignore_tags"] = json!(["keep"]);
-                // A kept name sits inside a sentence; without this DeepL cuts
-                // the sentence at the tag and the rest starts with ", ...".
-                body["non_splitting_tags"] = json!(["keep"]);
+                // Tag handling v2 puts a line break after every kept name, and
+                // non_splitting_tags would switch the ignore tag off; v1 keeps the
+                // names inside the sentence and the original line breaks.
+                body["tag_handling_version"] = json!("v1");
             }
             let mut response = client
                 .post(&url)
