@@ -11,7 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 import {
   createDocumentLayoutTranslation,
   createDocumentPreviewObjectUrl,
@@ -27,6 +26,7 @@ import type {
   DocumentTranslation,
   MachineTranslationCapability,
 } from "../model/types";
+import { RichMarkupEditor } from "./rich-markup-editor";
 
 const TARGET_LANGUAGES = ["de", "ru", "uk", "en"] as const;
 const SOURCE_LANGUAGES = ["de", "ru", "uk", "en"] as const;
@@ -70,9 +70,6 @@ type Props = {
   editing?: DocumentTranslationEditTarget | null;
 };
 
-const textareaClass =
-  "w-full flex-1 resize-none rounded-lg border border-border bg-white p-3 text-sm leading-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-
 // The dialog is read-only until the reviewer saves: machine drafts are shown,
 // edited and persisted explicitly. The backend owns ACLs and the translated
 // document creation.
@@ -92,48 +89,6 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
   const [draftProvider, setDraftProvider] = useState<"deepl" | "manual">("manual");
   const [detected, setDetected] = useState<string | null>(null);
   const [busy, setBusy] = useState<"translate" | "save" | "layout" | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  // Lightweight markup understood by the PDF renderer: `**bold**`, `## `
-  // headings, `- ` bullets, `1. ` numbered items, blank line = paragraph.
-  function applyMarkup(kind: "bold" | "heading" | "bullet" | "numbered" | "paragraph") {
-    const element = textareaRef.current;
-    if (!element) return;
-    const start = element.selectionStart ?? translatedText.length;
-    const end = element.selectionEnd ?? start;
-    const before = translatedText.slice(0, start);
-    const selected = translatedText.slice(start, end);
-    const after = translatedText.slice(end);
-    let next = translatedText;
-    let cursor = end;
-    if (kind === "bold") {
-      const inner = selected || tx("текст", "Text");
-      next = `${before}**${inner}**${after}`;
-      cursor = start + inner.length + 4;
-    } else if (kind === "paragraph") {
-      next = `${before}\n\n${after}`;
-      cursor = start + 2;
-    } else {
-      const lineStart = before.lastIndexOf("\n") + 1;
-      const block = translatedText.slice(lineStart, end || start);
-      const lines = block.split("\n");
-      const prefixed = lines
-        .map((line, index) => {
-          const clean = line.replace(/^(#{1,2} |- |• |\d+\. )/, "");
-          if (kind === "heading") return `## ${clean}`;
-          if (kind === "bullet") return `- ${clean}`;
-          return `${index + 1}. ${clean}`;
-        })
-        .join("\n");
-      next = `${translatedText.slice(0, lineStart)}${prefixed}${translatedText.slice(end || start)}`;
-      cursor = lineStart + prefixed.length;
-    }
-    setTranslatedText(next);
-    requestAnimationFrame(() => {
-      element.focus();
-      element.setSelectionRange(cursor, cursor);
-    });
-  }
 
   async function handleLayoutTranslate() {
     if (!documentId) return;
@@ -443,32 +398,29 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 {notice}
               </p>
             ) : null}
-            <label className="flex min-h-[200px] flex-1 flex-col gap-1 text-xs font-medium">
+            <div className="flex min-h-[200px] flex-1 flex-col gap-1 text-xs font-medium">
               <span>{tx("Перевод (можно редактировать)", "Übersetzung (bearbeitbar)")}</span>
-              <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-slate-50 p-1" role="toolbar" aria-label={tx("Форматирование", "Formatierung")}>
-                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2 font-bold" title={tx("Жирный (**текст**)", "Fett (**Text**)")} onClick={() => applyMarkup("bold")}>B</Button>
-                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Заголовок (## )", "Überschrift (## )")} onClick={() => applyMarkup("heading")}>H</Button>
-                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Маркированный список (- )", "Aufzählung (- )")} onClick={() => applyMarkup("bullet")}>• —</Button>
-                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Нумерованный список (1. )", "Nummerierung (1. )")} onClick={() => applyMarkup("numbered")}>1.</Button>
-                <Button type="button" variant="ghost" size="sm" className="h-7 rounded-md px-2" title={tx("Разрыв абзаца", "Absatz")} onClick={() => applyMarkup("paragraph")}>¶</Button>
-                <span className="ml-auto pr-1 text-[11px] font-normal text-muted-foreground">
-                  {tx("Разметка: **жирный**, ## заголовок, - список, 1. нумерация", "Markup: **fett**, ## Überschrift, - Liste, 1. Nummerierung")}
-                </span>
-              </div>
-              <textarea
-                ref={textareaRef}
+              <RichMarkupEditor
                 value={translatedText}
-                onChange={(event) => {
-                  setTranslatedText(event.target.value);
-                }}
+                onChange={setTranslatedText}
                 lang={targetLanguage}
-                className={cn(textareaClass, "min-h-[360px] text-[15px] leading-7")}
                 placeholder={tx(
                   "Нажмите «Перевести через DeepL» или введите перевод вручную.",
                   "„Mit DeepL übersetzen“ wählen oder die Übersetzung manuell eintragen.",
                 )}
+                labels={{
+                  toolbar: tx("Форматирование перевода", "Formatierung der Übersetzung"),
+                  bold: tx("Жирный (Ctrl+B)", "Fett (Strg+B)"),
+                  heading: tx("Заголовок", "Überschrift"),
+                  bullet: tx("Маркированный список", "Aufzählung"),
+                  numbered: tx("Нумерованный список", "Nummerierung"),
+                  paragraph: tx("Обычный абзац", "Normaler Absatz"),
+                  clear: tx("Убрать форматирование", "Formatierung entfernen"),
+                  undo: tx("Отменить (Ctrl+Z)", "Rückgängig (Strg+Z)"),
+                  redo: tx("Повторить (Ctrl+Y)", "Wiederholen (Strg+Y)"),
+                }}
               />
-            </label>
+            </div>
             {sourceText ? (
               <details className="text-xs">
                 <summary className="cursor-pointer font-medium">{tx("Распознанный исходный текст", "Erkannter Ausgangstext")}</summary>

@@ -591,8 +591,9 @@ fn parse_response(bytes: &[u8], expected: usize) -> Result<ParsedResponse, Deepl
 }
 
 /// Marks names, addresses and similar fixed strings so DeepL leaves them
-/// untouched (`<keep>` is sent as an ignore tag). Line breaks become `<lb/>`
-/// because XML tag handling would otherwise treat them as plain whitespace.
+/// untouched (`<keep>` is sent as an ignore tag). Line breaks stay plain
+/// newlines: with `split_sentences=1` DeepL keeps them as boundaries, while a
+/// break tag would be moved around inside the sentence.
 fn protect_terms(text: &str, terms: &[String]) -> String {
     let mut out = String::with_capacity(text.len() + 16);
     let mut index = 0;
@@ -621,11 +622,7 @@ fn protect_terms(text: &str, terms: &[String]) -> String {
             continue;
         }
         let Some(ch) = rest.chars().next() else { break };
-        if ch == '\n' {
-            out.push_str("<lb/>");
-        } else {
-            push_escaped(&mut out, ch.encode_utf8(&mut [0u8; 4]));
-        }
+        push_escaped(&mut out, ch.encode_utf8(&mut [0u8; 4]));
         index += ch.len_utf8();
     }
     out
@@ -643,9 +640,7 @@ fn push_escaped(out: &mut String, value: &str) {
 }
 
 fn unprotect_terms(text: &str) -> String {
-    text.replace("<lb/>", "\n")
-        .replace("<lb />", "\n")
-        .replace("<keep>", "")
+    text.replace("<keep>", "")
         .replace("</keep>", "")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
@@ -683,7 +678,8 @@ mod tests {
         let protected = protect_terms("Ich, Anna Beispiel, bei Main & Co\nAnnahme <1>", &terms);
         assert_eq!(
             protected,
-            "Ich, <keep>Anna Beispiel</keep>, bei <keep>Main &amp; Co</keep><lb/>Annahme &lt;1&gt;"
+            "Ich, <keep>Anna Beispiel</keep>, bei <keep>Main &amp; Co</keep>
+Annahme &lt;1&gt;"
         );
         assert_eq!(
             unprotect_terms(&protected),
