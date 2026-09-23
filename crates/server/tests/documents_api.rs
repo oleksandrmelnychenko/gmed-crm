@@ -7567,7 +7567,7 @@ async fn machine_translation_draft_requires_configured_provider_and_open_request
     )
     .await;
 
-    // Without a server-only key and transfer approval no external call is possible.
+    // Without the internal translation service no draft can be produced.
     let (status, capability) = json_request(
         &app,
         "GET",
@@ -7577,7 +7577,7 @@ async fn machine_translation_draft_requires_configured_provider_and_open_request
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(capability["provider"], "deepl");
+    assert_eq!(capability["provider"], "local");
     assert_eq!(capability["status"], "not_configured");
     assert_eq!(capability["external_calls_enabled"], false);
 
@@ -7627,7 +7627,7 @@ async fn machine_translation_draft_requires_configured_provider_and_open_request
     .await;
     assert_eq!(status, StatusCode::OK, "{update_body}");
 
-    // Completed requests never trigger an external call, configured or not.
+    // Completed requests never produce a new machine draft.
     let (status, draft_body) = json_request(
         &app,
         "POST",
@@ -7674,7 +7674,7 @@ async fn document_translations_are_saved_as_children_with_a_translated_document(
     assert_eq!(status, StatusCode::OK, "{list_body}");
     assert_eq!(list_body.as_array().map(Vec::len), Some(0));
 
-    // Without DeepL configuration the preview never leaves the host.
+    // Without the internal translation service the preview is unavailable.
     let (status, preview_body) = json_request(
         &app,
         "POST",
@@ -7710,7 +7710,7 @@ async fn document_translations_are_saved_as_children_with_a_translated_document(
             "target_language": "ru",
             "source_text": "Diagnosen\nArterielle Hypertonie",
             "translated_text": "Диагнозы\nАртериальная гипертензия",
-            "provider": "deepl"
+            "provider": "local"
         })),
     )
     .await;
@@ -7718,7 +7718,7 @@ async fn document_translations_are_saved_as_children_with_a_translated_document(
     assert_eq!(created["document_id"], document_id.to_string());
     assert_eq!(created["source_language"], "de");
     assert_eq!(created["target_language"], "ru");
-    assert_eq!(created["provider"], "deepl");
+    assert_eq!(created["provider"], "local");
     assert_eq!(created["characters"], 31);
     let translated_document_id =
         Uuid::parse_str(created["translated_document_id"].as_str().unwrap()).unwrap();

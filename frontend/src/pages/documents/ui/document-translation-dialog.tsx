@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
 import {
-  createDocumentLayoutTranslation,
   createDocumentPreviewObjectUrl,
   createDocumentTranslation,
   downloadDocumentFile,
@@ -86,37 +85,10 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
   const [sourceText, setSourceText] = useState("");
   const [translatedText, setTranslatedText] = useState("");
   const [savedText, setSavedText] = useState("");
-  const [draftProvider, setDraftProvider] = useState<"deepl" | "manual">("manual");
+  const [draftProvider, setDraftProvider] = useState<"local" | "manual">("manual");
   const [detected, setDetected] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"translate" | "save" | "layout" | null>(null);
+  const [busy, setBusy] = useState<"translate" | "save" | null>(null);
 
-  async function handleLayoutTranslate() {
-    if (!documentId) return;
-    if (sourceLanguage && sourceLanguage === targetLanguage) {
-      setError(tx("Исходный и целевой языки должны отличаться.", "Ausgangs- und Zielsprache müssen sich unterscheiden."));
-      return;
-    }
-    setBusy("layout");
-    setError("");
-    setNotice("");
-    try {
-      const saved = await createDocumentLayoutTranslation(documentId, {
-        source_language: sourceLanguage || null,
-        target_language: targetLanguage,
-      });
-      setTranslations((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
-      onSaved?.(saved);
-      onOpenChange(false);
-    } catch (nextError) {
-      setError(
-        nextError instanceof Error
-          ? nextError.message
-          : tx("Не удалось перевести PDF.", "Die PDF-Übersetzung ist fehlgeschlagen."),
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -182,8 +154,8 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
   const machineHint =
     capability?.status === "blocked"
       ? tx(
-          "Машинный перевод отключён: передача данных внешнему провайдеру для этой среды не согласована.",
-          "Die maschinelle Übersetzung ist deaktiviert: Die Datenübermittlung an den externen Anbieter ist für diese Umgebung nicht freigegeben.",
+          "Машинный перевод отключён: сервис перевода на этом сервере недоступен.",
+          "Die maschinelle Übersetzung ist deaktiviert: Der Übersetzungsdienst ist auf diesem Server nicht verfügbar.",
         )
       : capability && !machineReady
         ? tx(
@@ -208,7 +180,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
       });
       setSourceText(result.source_text);
       setTranslatedText(result.translated_text);
-      setDraftProvider("deepl");
+      setDraftProvider("local");
       setDetected(result.detected_source_language);
       if (!sourceLanguage && result.detected_source_language && LANGUAGE_LABELS[result.detected_source_language]) {
         setSourceLanguage(result.detected_source_language);
@@ -350,7 +322,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 onClick={() => void handleTranslate()}
               >
                 {busy === "translate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Languages className="size-3.5" />}
-                {tx("Перевести через DeepL", "Mit DeepL übersetzen")}
+                {tx("Перевести (локальная модель)", "Übersetzen (lokales Modell)")}
               </Button>
               <Button
                 type="button"
@@ -365,23 +337,6 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                   ? tx("Сохранить новую версию PDF", "Neue PDF-Version speichern")
                   : tx("Сохранить как PDF-документ", "Als PDF-Dokument speichern")}
               </Button>
-              {!editing ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8 rounded-lg"
-                  disabled={busy !== null || !machineReady}
-                  title={tx(
-                    "DeepL переводит сам PDF, сохраняя заголовки, списки и оформление. Результат нельзя редактировать как текст.",
-                    "DeepL übersetzt die PDF selbst und behält Überschriften, Listen und Layout bei. Das Ergebnis ist nicht als Text editierbar.",
-                  )}
-                  onClick={() => void handleLayoutTranslate()}
-                >
-                  {busy === "layout" ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-                  {tx("Перевести PDF с сохранением вёрстки", "PDF mit Layout übersetzen")}
-                </Button>
-              ) : null}
               {detected ? (
                 <span className="text-xs text-muted-foreground">
                   {tx("Определён язык:", "Erkannte Sprache:")} {documentTranslationLanguageLabel(detected, lang)}
@@ -406,8 +361,8 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 onChange={setTranslatedText}
                 lang={targetLanguage}
                 placeholder={tx(
-                  "Нажмите «Перевести через DeepL» или введите перевод вручную.",
-                  "„Mit DeepL übersetzen“ wählen oder die Übersetzung manuell eintragen.",
+                  "Нажмите «Перевести» или введите перевод вручную.",
+                  "„Übersetzen“ wählen oder die Übersetzung manuell eintragen.",
                 )}
                 labels={{
                   toolbar: tx("Форматирование перевода", "Formatierung der Übersetzung"),
@@ -443,7 +398,11 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                           {documentTranslationLanguageLabel(item.source_language, lang)} → {documentTranslationLanguageLabel(item.target_language, lang)}
                         </span>
                         <span className="ml-2 text-muted-foreground">
-                          {item.provider === "deepl" ? "DeepL" : tx("вручную", "manuell")}
+                          {item.provider === "local"
+                            ? tx("локальная модель", "lokales Modell")
+                            : item.provider === "deepl"
+                              ? "DeepL"
+                              : tx("вручную", "manuell")}
                           {item.created_by_name ? ` · ${item.created_by_name}` : ""}
                           {" · "}
                           {new Date(item.created_at).toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU")}

@@ -35,9 +35,8 @@ services:
       GMED_MEDICATION_AI_GOVERNANCE_REVIEW_ID: "${GMED_MEDICATION_AI_GOVERNANCE_REVIEW_ID:-}"
       GMED_OPENAI_API_KEY: "${GMED_OPENAI_API_KEY:-}"
       GMED_OPENAI_MODEL: "${GMED_OPENAI_MODEL:-}"
-      GMED_DEEPL_DATA_TRANSFER_APPROVED: "${GMED_DEEPL_DATA_TRANSFER_APPROVED:-false}"
-      GMED_DEEPL_API_KEY: "${GMED_DEEPL_API_KEY:-}"
-      GMED_DEEPL_API_URL: "${GMED_DEEPL_API_URL:-}"
+      # Offline OPUS-MT drafts; document text never leaves the host.
+      GMED_MACHINE_TRANSLATION_URL: "${GMED_MACHINE_TRANSLATION_URL:-http://machine-translation:8092}"
       DOCUMENT_SIGNATURES_ENABLED: "${GMED_DOCUMENT_SIGNATURES_ENABLED:-false}"
       DOCUMENT_SIGNATURES_MODE: "${GMED_DOCUMENT_SIGNATURES_MODE:-demo}"
       SKRIBBLE_USERNAME: "${GMED_SKRIBBLE_USERNAME:-}"
@@ -52,6 +51,7 @@ services:
     # The named uploads volume persists numeric ownership across deployments.
     user: "100:101"
     restart: unless-stopped
+    networks: [default, translation-internal]
     volumes:
       - uploads:/app/uploads
 
@@ -100,6 +100,41 @@ services:
     volumes:
       - uploads:/app/uploads:ro
 
+  # Offline machine translation (OPUS-MT via CTranslate2). It reuses the
+  # clinical-document-parser image (built or pulled for that service; the
+  # default name is the Compose tag of project gmed-crm) and runs a small HTTP
+  # service on an internal-only network: no internet egress, reachable only by
+  # the backend.
+  machine-translation:
+    image: "${GMED_MACHINE_TRANSLATION_IMAGE:-gmed-crm-clinical-document-parser}"
+    pull_policy: never
+    depends_on:
+      - clinical-document-parser
+    init: true
+    command: ["python", "-m", "uvicorn", "app.mt_api:app", "--host", "0.0.0.0", "--port", "8092", "--workers", "1", "--no-access-log"]
+    environment:
+      MT_THREADS: "${GMED_MT_THREADS:-2}"
+      MT_MAX_LOADED_MODELS: "${GMED_MT_MAX_LOADED_MODELS:-2}"
+    networks: [translation-internal]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    restart: unless-stopped
+    mem_limit: "${GMED_MT_MEMORY_LIMIT:-2g}"
+    cpus: "${GMED_MT_CPUS:-2.0}"
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "100:101"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8092/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   frontend:
     build:
       context: ./frontend
@@ -115,3 +150,7 @@ services:
 
 volumes:
   uploads:
+
+networks:
+  translation-internal:
+    internal: true

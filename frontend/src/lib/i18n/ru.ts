@@ -1478,7 +1478,7 @@ export const ru = {
     "Открытых запросов на перевод пока нет. Новые запросы появятся здесь, как только их создадут из карточки документа или пациент запросит перевод в портале.",
   documents_source_language: "Исходный язык",
   documents_use_extracted_text: "Подставить извлечённый текст",
-  documents_machine_translation_draft: "Черновик перевода (DeepL)",
+  documents_machine_translation_draft: "Черновик перевода (локальная модель)",
   documents_machine_translation_unavailable:
     "Машинный перевод на этом сервере не настроен.",
   documents_machine_translation_blocked:

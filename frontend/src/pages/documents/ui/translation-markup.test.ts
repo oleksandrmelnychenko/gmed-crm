@@ -47,7 +47,7 @@ describe("translation markup", () => {
     expect(htmlToMarkup(root)).toBe("**Ein ganzes** – **Wort**");
   });
 
-  it("round-trips the markup produced by DeepL drafts", () => {
+  it("round-trips the markup produced by machine drafts", () => {
     const markup = "Приложение 1\n**Согласие на передачу данных**\n\n[x] с тем, что GMED";
     const html = markupToHtml(markup);
     expect(html).toContain("<strong>Согласие на передачу данных</strong>");

@@ -32,7 +32,7 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
   }
 
-  # Machine translation may OCR a scanned PDF before calling DeepL.
+  # Machine translation may OCR a scanned PDF and runs on CPU.
   location ~ ^/api/v1/documents/(translation-requests/)?[^/]+/(translations/preview|machine-draft)$ {
     proxy_pass ${GMED_BACKEND_UPSTREAM};
     proxy_read_timeout 180s;

@@ -38,6 +38,12 @@ services:
     image: "${GMED_PARSER_IMAGE:?Set GMED_PARSER_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"
     pull_policy: always
 
+  # Offline machine translation runs from the same signed parser image.
+  machine-translation:
+    build: !reset null
+    image: "${GMED_PARSER_IMAGE:?Set GMED_PARSER_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"
+    pull_policy: always
+
   invoice-parser:
     build: !reset null
     image: "${GMED_INVOICE_PARSER_IMAGE:?Set GMED_INVOICE_PARSER_IMAGE in release.env (sops) to a digest-pinned ghcr.io/... reference}"

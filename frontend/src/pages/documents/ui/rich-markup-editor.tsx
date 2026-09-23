@@ -43,7 +43,7 @@ export function RichMarkupEditor({ value, onChange, lang, placeholder, labels, c
   const [active, setActive] = useState<ActiveState>(INACTIVE);
   const [focused, setFocused] = useState(false);
 
-  // External value changes (a DeepL draft, a loaded translation) replace the
+  // External value changes (a machine draft, a loaded translation) replace the
   // content; the editor's own edits come back through onChange unchanged.
   useEffect(() => {
     const element = editorRef.current;

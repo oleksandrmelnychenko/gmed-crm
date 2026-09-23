@@ -85,7 +85,7 @@ function postJson<T>(path: string, payload: JsonPayload, timeoutMs?: number) {
   });
 }
 
-// Machine translation may OCR a scanned PDF before calling DeepL; the default
+// Machine translation may OCR a scanned PDF and runs on CPU; the default
 // 20 s API timeout would abort a request the server is still completing.
 const MACHINE_TRANSLATION_TIMEOUT_MS = 180_000;
 
@@ -440,23 +440,12 @@ export function createDocumentTranslation(
     target_language: string;
     source_text: string | null;
     translated_text: string;
-    provider: "deepl" | "manual";
+    provider: "local" | "manual";
     auto_name?: string | null;
   },
 ) {
   return postJson<DocumentTranslation>(
     `/documents/${documentId}/translations`,
-    payload,
-  );
-}
-
-/** Layout-preserving PDF translation through the DeepL document API. */
-export function createDocumentLayoutTranslation(
-  documentId: string,
-  payload: { source_language: string | null; target_language: string },
-) {
-  return postJson<DocumentTranslation>(
-    `/documents/${documentId}/translations/document`,
     payload,
   );
 }

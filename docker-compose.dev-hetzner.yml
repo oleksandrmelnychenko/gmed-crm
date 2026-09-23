@@ -41,7 +41,7 @@ services:
       # keeps the scan mandatory; the backend refuses to start with both flags set.
       GMED_UPLOAD_SCANNER_REQUIRED: "false"
       GMED_UPLOAD_SCANNER_DISABLED: "true"
-    networks: [default, invoice-internal]
+    networks: [default, invoice-internal, translation-internal]
     # Publish the metrics-only listener so monitoring's Prometheus can
     # scrape `gmed-dev:9091` via tailnet. The main API port (3000)
     # stays internal to the docker network — Caddy is the only public

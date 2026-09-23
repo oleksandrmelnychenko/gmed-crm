@@ -1612,10 +1612,6 @@ pub fn router() -> Router<AppState> {
             post(render_document_translation_pdf),
         )
         .route(
-            "/documents/{id}/translations/document",
-            post(create_document_layout_translation),
-        )
-        .route(
             "/documents/{id}/portal-release",
             post(release_document_to_patient_portal),
         )
@@ -2128,7 +2124,7 @@ struct CreateDocumentTranslation {
     target_language: String,
     source_text: Option<String>,
     translated_text: String,
-    /// `deepl` when the text started as a machine draft, `manual` otherwise.
+    /// `local` when the text started as a machine draft, `manual` otherwise.
     provider: Option<String>,
     auto_name: Option<String>,
 }
@@ -21045,7 +21041,7 @@ async fn get_document_machine_translation_capability(
     ]) {
         return resp;
     }
-    Json(json!(state.deepl.capability())).into_response()
+    Json(json!(state.machine_translation.capability())).into_response()
 }
 
 /// Produce a machine-translation draft for a translation request. The draft
@@ -21058,7 +21054,9 @@ async fn create_document_translation_machine_draft(
     Path(request_id): Path<Uuid>,
     Json(body): Json<CreateDocumentTranslationMachineDraft>,
 ) -> axum::response::Response {
-    use crate::services::deepl_translation::{DeeplError, MAX_SOURCE_CHARS, normalize_language};
+    use crate::services::machine_translation::{
+        MAX_SOURCE_CHARS, MachineTranslationError, normalize_language,
+    };
 
     if let Err(resp) = auth.require_any_role(&[
         Role::Ceo,
@@ -21142,7 +21140,7 @@ async fn create_document_translation_machine_draft(
         );
     }
 
-    let capability = state.deepl.capability();
+    let capability = state.machine_translation.capability();
     if !capability.external_calls_enabled {
         return err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -21221,7 +21219,7 @@ async fn create_document_translation_machine_draft(
         .unwrap_or_else(|_| Uuid::nil());
     let protected = document_translation_protected_terms(&state, request_document_id).await;
     let translation = match state
-        .deepl
+        .machine_translation
         .translate_protected(&source_text, source_language, target_language, &protected)
         .await
     {
@@ -21235,25 +21233,25 @@ async fn create_document_translation_machine_draft(
                 "machine translation draft failed"
             );
             let (status, message) = match error {
-                DeeplError::Unavailable => (
+                MachineTranslationError::Unavailable => (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Machine translation is not configured on this server",
                 ),
-                DeeplError::UnsupportedLanguage => (
+                MachineTranslationError::UnsupportedLanguage => (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Machine translation does not support this language pair",
                 ),
-                DeeplError::EmptyText => (
+                MachineTranslationError::EmptyText => (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Add the source text before requesting a machine translation draft",
                 ),
-                DeeplError::TooLarge => (
+                MachineTranslationError::TooLarge => (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Source text is too long for a machine translation draft",
                 ),
-                DeeplError::UpstreamStatus(429) | DeeplError::UpstreamStatus(456) => (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "The machine translation quota is exhausted; try again later",
+                MachineTranslationError::UpstreamStatus(429 | 503) => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "The machine translation service is busy; try again later",
                 ),
                 _ => (
                     StatusCode::BAD_GATEWAY,
@@ -21476,7 +21474,7 @@ async fn document_translation_protected_terms(state: &AppState, document_id: Uui
         tracing::warn!(error = %error, document_id = %document_id, "load protected translation terms");
         Vec::new()
     });
-    crate::services::deepl_translation::normalize_protected_terms(rows.into_iter().flatten())
+    crate::services::machine_translation::normalize_protected_terms(rows.into_iter().flatten())
 }
 
 /// Machine-translate the document text without persisting anything. The
@@ -21487,13 +21485,15 @@ async fn preview_document_translation(
     Path(id): Path<Uuid>,
     Json(body): Json<PreviewDocumentTranslation>,
 ) -> axum::response::Response {
-    use crate::services::deepl_translation::{DeeplError, MAX_SOURCE_CHARS, normalize_language};
+    use crate::services::machine_translation::{
+        MAX_SOURCE_CHARS, MachineTranslationError, normalize_language,
+    };
 
     let row = match authorize_document_translation(&state, &auth, id).await {
         Ok(row) => row,
         Err(resp) => return resp,
     };
-    let capability = state.deepl.capability();
+    let capability = state.machine_translation.capability();
     if !capability.external_calls_enabled {
         return err(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -21541,7 +21541,7 @@ async fn preview_document_translation(
 
     let protected = document_translation_protected_terms(&state, id).await;
     let translation = match state
-        .deepl
+        .machine_translation
         .translate_protected(&source_text, source_language, target_language, &protected)
         .await
     {
@@ -21553,19 +21553,19 @@ async fn preview_document_translation(
                 "document machine translation failed"
             );
             let (status, message) = match error {
-                DeeplError::UnsupportedLanguage => (
+                MachineTranslationError::UnsupportedLanguage => (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Machine translation does not support this language pair",
                 ),
-                DeeplError::EmptyText | DeeplError::TooLarge => (
+                MachineTranslationError::EmptyText | MachineTranslationError::TooLarge => (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "The document text cannot be sent for machine translation",
                 ),
-                DeeplError::UpstreamStatus(429) | DeeplError::UpstreamStatus(456) => (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "The machine translation quota is exhausted; try again later",
+                MachineTranslationError::UpstreamStatus(429 | 503) => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "The machine translation service is busy; try again later",
                 ),
-                DeeplError::Unavailable => (
+                MachineTranslationError::Unavailable => (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Machine translation is not configured on this server",
                 ),
@@ -21668,7 +21668,7 @@ async fn create_document_translation(
     }
     let provider = match body.provider.as_deref().map(str::trim) {
         None | Some("") | Some("manual") => "manual",
-        Some("deepl") => "deepl",
+        Some("local") => "local",
         Some(_) => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -21723,7 +21723,6 @@ async fn create_document_translation(
         translated_text.as_str(),
         source_text.as_deref(),
         body.auto_name.as_deref(),
-        None,
     )
     .await
     {
@@ -21851,26 +21850,26 @@ struct TranslationPdfContent<'a> {
 
 fn translation_note(target_language: &str, provider: &str) -> &'static str {
     match (target_language, provider) {
-        ("ru", "deepl") => {
-            "Машинный перевод (DeepL), проверенный сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже."
+        ("ru", "local") => {
+            "Машинный перевод (локальная модель), проверенный сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже."
         }
         ("ru", _) => {
             "Перевод выполнен сотрудником. При расхождениях приоритет имеет оригинал документа, приведённый ниже."
         }
-        ("uk", "deepl") => {
-            "Машинний переклад (DeepL), перевірений співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче."
+        ("uk", "local") => {
+            "Машинний переклад (локальна модель), перевірений співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче."
         }
         ("uk", _) => {
             "Переклад виконано співробітником. У разі розбіжностей пріоритет має оригінал документа, наведений нижче."
         }
-        ("en", "deepl") => {
-            "Machine translation (DeepL) reviewed by a staff member. In case of discrepancies the original document below prevails."
+        ("en", "local") => {
+            "Machine translation (local model) reviewed by a staff member. In case of discrepancies the original document below prevails."
         }
         ("en", _) => {
             "Translation prepared by a staff member. In case of discrepancies the original document below prevails."
         }
-        (_, "deepl") => {
-            "Maschinelle Übersetzung (DeepL), von einem Mitarbeiter geprüft. Bei Abweichungen gilt das nachstehende Originaldokument."
+        (_, "local") => {
+            "Maschinelle Übersetzung (lokales Modell), von einem Mitarbeiter geprüft. Bei Abweichungen gilt das nachstehende Originaldokument."
         }
         (_, _) => {
             "Übersetzung durch einen Mitarbeiter. Bei Abweichungen gilt das nachstehende Originaldokument."
@@ -22317,253 +22316,6 @@ async fn render_document_translation_pdf(
     .into_response()
 }
 
-/// Layout-preserving translation: the source PDF goes through the DeepL
-/// document API, and the result is assembled as branded cover page +
-/// translated pages + original pages, saved as a child translation.
-async fn create_document_layout_translation(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
-    Json(body): Json<PreviewDocumentTranslation>,
-) -> axum::response::Response {
-    use crate::services::deepl_translation::{DeeplError, MAX_DOCUMENT_BYTES, normalize_language};
-
-    let row = match authorize_document_translation(&state, &auth, id).await {
-        Ok(row) => row,
-        Err(resp) => return resp,
-    };
-    let capability = state.deepl.capability();
-    if !capability.external_calls_enabled {
-        return err(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Machine translation is not configured on this server",
-        );
-    }
-    let Ok(target_language) = normalize_language(&body.target_language) else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Machine translation does not support the requested language",
-        );
-    };
-    let source_language = match body
-        .source_language
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(normalize_language)
-    {
-        None => None,
-        Some(Ok(language)) => Some(language),
-        Some(Err(_)) => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Machine translation does not support the selected source language",
-            );
-        }
-    };
-    if source_language == Some(target_language) {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Source and target language must differ",
-        );
-    }
-    let Some(original_pdf) = load_source_pdf_bytes(&row).await else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Layout-preserving translation needs a PDF source document",
-        );
-    };
-    if original_pdf.len() > MAX_DOCUMENT_BYTES {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "The PDF is too large for layout-preserving translation",
-        );
-    }
-    let source_filename = row
-        .try_get::<Option<String>, _>("original_filename")
-        .unwrap_or_default()
-        .unwrap_or_else(|| "document.pdf".to_string());
-    let protected = document_translation_protected_terms(&state, id).await;
-    let translated = match state
-        .deepl
-        .translate_document_protected(
-            &original_pdf,
-            &source_filename,
-            source_language,
-            target_language,
-            &protected,
-        )
-        .await
-    {
-        Ok(result) => result,
-        Err(error) => {
-            tracing::warn!(document_id = %id, error_code = error.code(), "document layout translation failed");
-            let (status, message) = match error {
-                DeeplError::UpstreamStatus(429) | DeeplError::UpstreamStatus(456) => (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "The machine translation quota is exhausted; try again later",
-                ),
-                DeeplError::TooLarge => (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "The PDF is too large for layout-preserving translation",
-                ),
-                _ => (
-                    StatusCode::BAD_GATEWAY,
-                    "The machine translation provider did not return a translated document",
-                ),
-            };
-            return err(status, message);
-        }
-    };
-
-    // Text of the translated PDF is kept for search, editing and the record.
-    let translated_text = match extract_document_text_from_bytes(
-        Some("application/pdf"),
-        Some("translation.pdf"),
-        &translated.bytes,
-    )
-    .await
-    {
-        DocumentTextExtractionResult::Completed { extracted_text, .. } => extracted_text,
-        _ => String::new(),
-    };
-    let source_text = row
-        .try_get::<Option<String>, _>("extracted_text")
-        .unwrap_or_default()
-        .filter(|value| !value.trim().is_empty());
-    let source_auto_name = row
-        .try_get::<String, _>("auto_name")
-        .unwrap_or_else(|_| "Document".to_string());
-
-    let translation_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO document_translations (
-                document_id, source_language, target_language, provider,
-                source_text, translated_text, characters, created_by
-           ) VALUES ($1, $2, $3, 'deepl', $4, $5, $6, $7)
-           RETURNING id"#,
-    )
-    .bind(id)
-    .bind(source_language)
-    .bind(target_language)
-    .bind(source_text.as_deref())
-    .bind(if translated_text.trim().is_empty() {
-        "(PDF)"
-    } else {
-        translated_text.as_str()
-    })
-    .bind(i32::try_from(translated.billed_characters.unwrap_or(0)).unwrap_or(i32::MAX))
-    .bind(auth.user_id)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(translation_id) => translation_id,
-        Err(e) => {
-            tracing::error!(error = %e, document_id = %id, "create document layout translation");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to save document translation",
-            );
-        }
-    };
-
-    // Cover page: heading, source name and the review note; then the
-    // translated pages with the original layout, then the original itself.
-    let cover = match build_translation_pdf(
-        &state,
-        translation_id,
-        &TranslationPdfContent {
-            source_language,
-            target_language,
-            source_name: source_auto_name.as_str(),
-            translated_text: "",
-            original_text: None,
-            provider: "deepl",
-        },
-    )
-    .await
-    {
-        Ok(bytes) => bytes,
-        Err(resp) => return resp,
-    };
-    let assembled = match crate::document_signatures::package::merge_signing_pdfs(
-        &cover,
-        &[translated.bytes.as_slice(), original_pdf.as_slice()],
-    ) {
-        Ok(bytes) => bytes,
-        Err(_) => {
-            tracing::error!(translation_id = %translation_id, "assemble layout translation PDF");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to assemble the translated document",
-            );
-        }
-    };
-
-    let translated_document_id = match create_translated_document_from_translation(
-        &state,
-        auth.user_id,
-        translation_id,
-        &row,
-        source_language,
-        target_language,
-        "deepl",
-        translated_text.as_str(),
-        source_text.as_deref(),
-        None,
-        Some(assembled),
-    )
-    .await
-    {
-        Ok(document_id) => document_id,
-        Err(resp) => return resp,
-    };
-    if let Err(e) =
-        sqlx::query("UPDATE document_translations SET translated_document_id = $2 WHERE id = $1")
-            .bind(translation_id)
-            .bind(translated_document_id)
-            .execute(&state.db)
-            .await
-    {
-        tracing::error!(error = %e, translation_id = %translation_id, "link translated document");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to link the translated document",
-        );
-    }
-    state.audit_sender.try_send(audit::domain_event(
-        "create_document_layout_translation",
-        Some(auth.user_id),
-        "document",
-        Some(id),
-        json!({
-            "translation_id": translation_id,
-            "provider": "deepl",
-            "source_language": source_language,
-            "target_language": target_language,
-            "billed_characters": translated.billed_characters,
-            "translated_document_id": translated_document_id,
-        }),
-    ));
-
-    let response_row = match sqlx::query(&format!(
-        "{DOCUMENT_TRANSLATION_SELECT}\n       WHERE dt.id = $1"
-    ))
-    .bind(translation_id)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => {
-            tracing::error!(error = %e, translation_id = %translation_id, "reload document translation");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load document translation",
-            );
-        }
-    };
-    Json(document_translation_json(&response_row)).into_response()
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn create_translated_document_from_translation(
     state: &AppState,
@@ -22576,8 +22328,6 @@ async fn create_translated_document_from_translation(
     translated_text: &str,
     source_text: Option<&str>,
     auto_name_override: Option<&str>,
-    // Already assembled PDF (layout-preserving DeepL document translation).
-    prebuilt_pdf: Option<Vec<u8>>,
 ) -> Result<Uuid, axum::response::Response> {
     let source_document_id = source_document_row
         .try_get::<Uuid, _>("id")
@@ -22618,30 +22368,25 @@ async fn create_translated_document_from_translation(
     // language pair in the target language; the source document is named first.
     // When the source is a PDF its pages are appended as they are, so the
     // original keeps its own layout instead of a plain-text annex.
-    let data = match prebuilt_pdf {
-        Some(bytes) => bytes,
-        None => {
-            let original_pdf = load_source_pdf_bytes(source_document_row).await;
-            let cover = build_translation_pdf(
-                state,
-                translation_id,
-                &TranslationPdfContent {
-                    source_language,
-                    target_language,
-                    source_name: source_auto_name.as_str(),
-                    translated_text,
-                    original_text: if original_pdf.is_some() {
-                        None
-                    } else {
-                        source_text
-                    },
-                    provider,
-                },
-            )
-            .await?;
-            attach_original_pdf(cover, original_pdf.as_deref(), translation_id)?
-        }
-    };
+    let original_pdf = load_source_pdf_bytes(source_document_row).await;
+    let cover = build_translation_pdf(
+        state,
+        translation_id,
+        &TranslationPdfContent {
+            source_language,
+            target_language,
+            source_name: source_auto_name.as_str(),
+            translated_text,
+            original_text: if original_pdf.is_some() {
+                None
+            } else {
+                source_text
+            },
+            provider,
+        },
+    )
+    .await?;
+    let data = attach_original_pdf(cover, original_pdf.as_deref(), translation_id)?;
     let notes = format!(
         "Translation {} -> {} of document {} ({})",
         source_language.unwrap_or("auto"),

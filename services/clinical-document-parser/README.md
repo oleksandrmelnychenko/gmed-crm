@@ -227,6 +227,42 @@ review routing. They contain only duration, counts, engines, route reasons,
 block-match coverage, and confidence/timeout counts; they contain no recognized
 text, paths, candidate values, or document IDs.
 
+## Offline translation service
+
+The same image also serves offline de/ru/uk/en machine-translation drafts
+(replacing the external DeepL API) as a separate process:
+
+```bash
+python -m uvicorn app.mt_api:app --host 0.0.0.0 --port 8092
+```
+
+`GET /health` answers without loading models. `POST /v1/translate` takes
+`{"text", "source_language" (de|ru|uk|en|null = detect), "target_language",
+"protected": [names, addresses, clinics]}` and returns `{"text",
+"detected_source_language", "characters", "warnings"}`. Errors are
+`422 {"detail":{"code":"unsupported_language"|"same_language"|"empty_text"|"too_large"}}`
+(limit 100 000 characters) and `503 model_unavailable`. Text is never logged.
+
+Models are pinned OPUS-MT revisions converted to CTranslate2 int8 in the
+`mt-models` Docker stage (`app/mt_models.py`, `app/build_mt_models.py`); ru↔uk
+pivots through English. Attribution and licenses: `MT_MODELS_NOTICE`
+(also `/app/mt-models/NOTICE`). Settings: `MT_MODEL_DIR` (default
+`/app/mt-models`), `MT_MAX_LOADED_MODELS` (default 2, about 250 MB RAM per
+tc-big model) and `MT_THREADS` (default 2 intra-op threads per model).
+
+Output is a draft for human review. Line breaks, blank lines, tabs and
+indentation are preserved; lines are translated sentence by sentence.
+Protected terms and every digit-bearing token (dates, doses, `1-0-1`, `HbA1c`)
+are replaced with `XQn` placeholders the models copy verbatim, because the
+models otherwise rewrite years (2026 → 2016). A segment that loses a
+placeholder is retried with a wider beam, then translated with only names
+masked, then fully unmasked; both fallbacks copy the source number spellings
+back when the counts and digit lengths match and increment `warnings`.
+`rules/mt_glossary.json` expands safe German abbreviations (`V.a.`, `Z.n.`,
+`geb.` before a date, …), inserts fixed renderings for terms the models drop
+or mistranslate (`Raumforderung`, `o.B.`, `Wiedervorstellung`; base form, case
+not adapted) and repairs documented mistranslations in the fallback output.
+
 ## Test
 
 ```bash

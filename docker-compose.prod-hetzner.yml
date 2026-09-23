@@ -56,7 +56,7 @@ services:
     environment:
       INVOICE_PARSER_URL: "http://invoice-parser:8091"
       INVOICE_PARSER_API_KEY: "${GMED_INVOICE_PARSER_API_KEY:?Set the internal invoice parser service key}"
-    networks: [default, invoice-internal]
+    networks: [default, invoice-internal, translation-internal]
     # Publish the metrics-only listener (9091) for Prometheus scrape
     # over the tailnet. The main API port (3000) stays internal to
     # the docker network — Caddy is the only public ingress for /api.
@@ -77,6 +77,13 @@ services:
         max-file: "5"
 
   clinical-document-parser:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  machine-translation:
     logging:
       driver: json-file
       options:

@@ -1,0 +1,40 @@
+{
+  "_comment": "Reviewed rules for the offline MT draft service (app/mt_engine.py). de_abbreviations are expanded in German source text before translation; only unambiguous, case-sensitive abbreviations belong here (lowercase 'v.a.' means 'vor allem' and is deliberately absent). de_terms are German terms the models drop or mistranslate; they are masked and replaced by the fixed rendering for the target language (base form, grammatical case not adapted). repairs replace documented mistranslations in target text (mainly for the unmasked fallback); 'source' limits a repair to segments whose German source matches. Repair and source patterns are case-insensitive; abbreviation and term patterns are case-sensitive. Every entry must be covered by tests/test_mt_engine.py.",
+  "de_abbreviations": [
+    {"pattern": "V\\.\\s?a\\.", "replacement": "Verdacht auf"},
+    {"pattern": "Z\\.\\s?n\\.", "replacement": "Zustand nach"},
+    {"pattern": "geb\\.(?=\\s*\\d)", "replacement": "geboren am"},
+    {"pattern": "bzw\\.", "replacement": "beziehungsweise"},
+    {"pattern": "z\\.\\s?B\\.", "replacement": "zum Beispiel"},
+    {"pattern": "ggf\\.", "replacement": "gegebenenfalls"},
+    {"pattern": "bds\\.", "replacement": "beidseits"},
+    {"pattern": "tgl\\.", "replacement": "täglich"}
+  ],
+  "de_terms": [
+    {"pattern": "Raumforderungen", "ru": "объёмные образования", "uk": "об'ємні утворення", "en": "space-occupying lesions"},
+    {"pattern": "Raumforderung", "ru": "объёмное образование", "uk": "об'ємне утворення", "en": "space-occupying lesion"},
+    {"pattern": "o\\.\\s?B\\.", "ru": "без особенностей", "uk": "без особливостей", "en": "unremarkable"},
+    {"pattern": "Wiedervorstellung", "ru": "повторный приём", "uk": "повторний прийом", "en": "follow-up appointment"}
+  ],
+  "repairs": {
+    "ru": [
+      {"source": "raumforderung", "pattern": "пространственн(?:ая|ую) нагрузк[аиу]", "replacement": "объёмное образование"},
+      {"source": "raumforderung", "pattern": "пространственной нагрузки", "replacement": "объёмного образования"},
+      {"source": "raumforderung", "pattern": "пространственной нагрузкой", "replacement": "объёмным образованием"},
+      {"source": "raumforderung", "pattern": "пространственной нагрузке", "replacement": "объёмном образовании"},
+      {"source": "raumforderung", "pattern": "пространственное требование", "replacement": "объёмное образование"},
+      {"source": "raumforderung", "pattern": "пространственного требования", "replacement": "объёмного образования"}
+    ],
+    "uk": [
+      {"source": "raumforderung", "pattern": "вимог[ау] простору", "replacement": "об'ємне утворення"},
+      {"source": "raumforderung", "pattern": "вимоги простору", "replacement": "об'ємного утворення"},
+      {"source": "raumforderung", "pattern": "вимогою простору", "replacement": "об'ємним утворенням"},
+      {"source": "raumforderung", "pattern": "вимозі простору", "replacement": "об'ємному утворенні"},
+      {"source": "raumforderung", "pattern": "потреб[ау] в просторі", "replacement": "об'ємне утворення"}
+    ],
+    "en": [
+      {"source": "raumforderung", "pattern": "space requirements?", "replacement": "space-occupying lesion"},
+      {"source": "zustand nach", "pattern": "condition after", "replacement": "status post"}
+    ]
+  }
+}

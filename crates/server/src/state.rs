@@ -7,10 +7,10 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::audit::AuditSender;
-use crate::config::{DeeplConfig, MedicationAiConfig};
+use crate::config::{MachineTranslationConfig, MedicationAiConfig};
 use crate::crypto::KeyRegistry;
 use crate::realtime::RealtimeEvent;
-use crate::services::deepl_translation::DeeplTranslator;
+use crate::services::machine_translation::MachineTranslator;
 use crate::services::medication_ai_provider::MedicationAiProvider;
 use crate::settings::SettingsCache;
 
@@ -25,7 +25,7 @@ pub struct AppState {
     pub message_keys: Arc<KeyRegistry>,
     pub audit_sender: AuditSender,
     pub medication_ai: Arc<MedicationAiProvider>,
-    pub deepl: Arc<DeeplTranslator>,
+    pub machine_translation: Arc<MachineTranslator>,
     pub document_signatures: Option<Arc<crate::document_signatures::provider::Provider>>,
     pub document_signature_cache: Arc<crate::document_signatures::connection::Cache>,
 }
@@ -61,7 +61,9 @@ impl AppState {
             message_keys,
             audit_sender: AuditSender::noop(),
             medication_ai: Arc::new(MedicationAiProvider::new(MedicationAiConfig::default())),
-            deepl: Arc::new(DeeplTranslator::new(DeeplConfig::default())),
+            machine_translation: Arc::new(MachineTranslator::new(
+                MachineTranslationConfig::default(),
+            )),
             document_signatures: None,
             document_signature_cache: Arc::new(Mutex::new(None)),
         }
@@ -79,8 +81,8 @@ impl AppState {
         self
     }
 
-    pub fn with_deepl(mut self, config: DeeplConfig) -> Self {
-        self.deepl = Arc::new(DeeplTranslator::new(config));
+    pub fn with_machine_translation(mut self, config: MachineTranslationConfig) -> Self {
+        self.machine_translation = Arc::new(MachineTranslator::new(config));
         self
     }
 

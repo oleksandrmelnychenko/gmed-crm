@@ -1,3 +1,23 @@
+# Offline machine-translation models (build stage only). Pinned OPUS-MT
+# revisions are converted to CTranslate2 int8; torch/transformers never reach
+# the runtime image. See MT_MODELS_NOTICE for licenses and attribution.
+FROM python:3.12-slim AS mt-models
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_DISABLE_TELEMETRY=1
+
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.14.0 \
+    && pip install --no-cache-dir \
+       transformers==4.57.6 sentencepiece==0.2.2 sacremoses==0.2.0 \
+       huggingface_hub==0.36.2 ctranslate2==4.8.2
+
+WORKDIR /build
+COPY app/mt_models.py app/build_mt_models.py ./app/
+RUN python -m app.build_mt_models --output /out \
+    && rm -rf /root/.cache/huggingface
+COPY MT_MODELS_NOTICE /out/NOTICE
+
 FROM python:3.12-slim
 
 ARG DEBIAN_SECURITY_REFRESH=local
@@ -49,6 +69,12 @@ RUN test -d /root/.paddlex \
     && adduser --system --uid "${GMED_RUNTIME_UID}" --ingroup gmed --home /home/gmed gmed \
     && mv /root/.paddlex /home/gmed/.paddlex \
     && chown -R gmed:gmed /home/gmed/.paddlex
+
+# Offline translation service (second compose service, same image):
+#   python -m uvicorn app.mt_api:app --host 0.0.0.0 --port 8092
+# Fail the build if a converted model is missing or numbers are not preserved.
+COPY --from=mt-models /out /app/mt-models
+RUN python -c "from pathlib import Path; from app.mt_engine import MTEngine, CTranslate2Backend, MODELS; backend = CTranslate2Backend(Path('/app/mt-models'), max_loaded=1, threads=2); missing = [key for key in MODELS if not backend.available(key)]; assert not missing, missing; result = MTEngine(backend).translate('Kontrolle am 18.03.2026 bei Anna Beispiel.', 'de', 'ru', ['Anna Beispiel']); assert '18.03.2026' in result.text and 'Anna Beispiel' in result.text, result"
 
 # Build contexts can come from restrictive workstation/deployment umasks.
 # Application code and bundled public models must be readable by the worker.

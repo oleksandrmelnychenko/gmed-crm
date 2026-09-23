@@ -368,6 +368,7 @@ tag_running_image gmed-crm-invoice-parser-1 "gmed-dev-rollback-invoice-parser:$S
   printf '  frontend:\n    image: gmed-dev-rollback-frontend:%s\n    pull_policy: never\n' "$STAMP"
   printf '  clinical-document-parser:\n    image: gmed-dev-rollback-parser:%s\n    pull_policy: never\n' "$STAMP"
   printf '  invoice-parser:\n    image: gmed-dev-rollback-invoice-parser:%s\n    pull_policy: never\n' "$STAMP"
+  printf '  machine-translation:\n    image: gmed-dev-rollback-parser:%s\n    pull_policy: never\n' "$STAMP"
 } > "$ROLLBACK_OVERRIDE"
 
 if [[ -n "$IMAGE_PINS_FILE" ]]; then

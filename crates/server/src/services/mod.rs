@@ -1,9 +1,9 @@
 pub mod bfarm_rote_hand;
 pub mod bmp_import;
-pub mod deepl_translation;
 pub mod drug_matching;
 pub mod gba_ais;
 pub mod interpreter_suggestions;
+pub mod machine_translation;
 pub mod medication_ai_jobs;
 pub mod medication_ai_provider;
 pub mod medication_benefit_evidence;

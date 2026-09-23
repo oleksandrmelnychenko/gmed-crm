@@ -164,7 +164,7 @@ export type DocumentTranslation = {
   document_id: string;
   source_language: string | null;
   target_language: string;
-  provider: "deepl" | "manual" | string;
+  provider: "local" | "manual" | "deepl" | string;
   translated_text: string;
   characters: number;
   translated_document_id: string | null;

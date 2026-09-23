@@ -1482,7 +1482,7 @@ export const de = {
     "Derzeit gibt es keine offenen Übersetzungsanfragen. Neue Anfragen erscheinen hier, sobald sie aus einer Dokumentakte erstellt werden oder ein Patient im Portal eine Übersetzung anfordert.",
   documents_source_language: "Ausgangssprache",
   documents_use_extracted_text: "Extrahierten Text übernehmen",
-  documents_machine_translation_draft: "Übersetzungsentwurf (DeepL)",
+  documents_machine_translation_draft: "Übersetzungsentwurf (lokales Modell)",
   documents_machine_translation_unavailable:
     "Die maschinelle Übersetzung ist auf diesem Server nicht eingerichtet.",
   documents_machine_translation_blocked:

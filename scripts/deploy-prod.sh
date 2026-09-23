@@ -506,6 +506,7 @@ fi
 compose_up_or_diagnose
 wait_for_compose_service_healthy backend
 wait_for_compose_service_healthy invoice-parser
+wait_for_compose_service_healthy machine-translation
 wait_for_compose_service_healthy frontend
 
 # The 2026-08-31 authentication correction must also take effect when PROD is
@@ -566,7 +567,7 @@ git rev-parse HEAD > /etc/gmed/deploy.revision
 docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" gmed-postgres \
   psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "${POSTGRES_DB:-gmed}" \
   -c "SELECT 'Successful migrations: ' || count(*) FROM _sqlx_migrations WHERE success"
-for service in backend frontend clinical-document-parser invoice-parser; do
+for service in backend frontend clinical-document-parser machine-translation invoice-parser; do
   cid="$("${compose_cmd[@]}" ps -q "$service")"
   docker inspect -f '{{.Name}} {{.Config.Image}} status={{.State.Status}} restarts={{.RestartCount}} {{if .State.Health}}health={{.State.Health.Status}}{{end}}' "$cid"
 done
