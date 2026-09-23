@@ -1,13 +1,17 @@
 """Offline machine-translation drafts for de/ru/uk/en clinical text.
 
-The output is a draft for human review, never a verified translation. Names,
-addresses and other ``protected`` terms, plus every digit-bearing token, are
-replaced with ``XQn`` placeholders before inference (the OPUS-MT models copy
-that shape verbatim, while they rewrite years and drop dates). A segment whose
-placeholders do not come back exactly once is retried with a wider beam, then
-translated with only names/glossary terms masked, and finally fully unmasked;
-both fallbacks copy source number spellings back in order and count as a
-warning.
+The output is a draft for human review, never a verified translation. PDF line
+wraps are reflowed into paragraphs first. Names, addresses and other
+``protected`` terms (plus names after titles, streets and postcodes found
+automatically), every digit-bearing token, glossary terms and characters the
+model vocabulary cannot encode are replaced with ``XQn`` placeholders before
+inference (the OPUS-MT models copy that shape verbatim, while they rewrite
+years and drop dates). A segment whose placeholders do not come back exactly
+once is retried with a wider beam, then with numbers visible, then with only
+names/symbols masked, and finally fully unmasked; the fallbacks copy source
+number spellings back in order and count as a warning. Output never contains
+the SentencePiece unknown marker "⁇" or a translated protected name: such a
+segment keeps its source text.
 
 Everything except :class:`CTranslate2Backend` is pure and unit-testable with a
 fake backend. Never log source or translated text: it is medical data.
@@ -148,13 +152,15 @@ class Glossary:
     abbreviations: tuple[tuple[re.Pattern[str], str], ...] = ()
     terms: tuple[Term, ...] = ()
     repairs: dict[str, tuple[Repair, ...]] = field(default_factory=dict)
+    headings: tuple[Term, ...] = ()
+    titles: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "Glossary":
         data = json.loads(path.read_text(encoding="utf-8"))
         abbreviations = tuple(
             (re.compile(r"(?<![\w.])(?:" + item["pattern"] + r")(?!\w)"), item["replacement"])
-            for item in data.get("de_abbreviations", [])
+            for item in data.get("de_abbreviations", []) + data.get("de_rewrites", [])
         )
         terms = tuple(
             Term(
@@ -174,7 +180,49 @@ class Glossary:
             )
             for language, items in data.get("repairs", {}).items()
         }
-        return cls(abbreviations, terms, repairs)
+        headings = tuple(
+            Term(
+                re.compile(r"(?:" + item["pattern"] + r")\s*(?P<colon>:?)", re.IGNORECASE),
+                {language: value for language, value in item.items() if language in LANGUAGES},
+            )
+            for item in data.get("de_headings", [])
+        )
+        titles = {title: dict(renderings) for title, renderings in data.get("de_titles", {}).items()}
+        return cls(abbreviations, terms, repairs, headings, titles)
+
+    def title_span(self, text: str, protected: list[str], source_language: str,
+                   target_language: str) -> list[tuple[int, int, str]]:
+        """Sentence-initial ``Frau Muster`` -> ``Г-жа Muster``.
+
+        At the start of a sentence the models tend to read "Frau" as the
+        subject ("Жінка представила Muster ..."); mid-sentence they handle it
+        and repairs fix the rendering, so only the sentence start is masked.
+        """
+        match = re.match(r"(Frau|Herrn?) ", text)
+        if source_language != "de" or not match:
+            return []
+        rendering = self.titles.get(match.group(1), {}).get(target_language)
+        for start, end in protected_spans(text, protected):
+            if start == match.end() and rendering:
+                return [(0, end, f"{rendering} {text[start:end]}")]
+        return []
+
+    def is_heading(self, line: str, source_language: str) -> bool:
+        if source_language != "de":
+            return False
+        stripped = line.strip()
+        return any(heading.pattern.fullmatch(stripped) for heading in self.headings)
+
+    def heading(self, line: str, source_language: str, target_language: str) -> str | None:
+        """Reviewed rendering of a whole-line German section heading (keeps a trailing colon)."""
+        if source_language != "de":
+            return None
+        for heading in self.headings:
+            match = heading.pattern.fullmatch(line.strip())
+            rendering = heading.renderings.get(target_language)
+            if match and rendering:
+                return rendering + match.group("colon")
+        return None
 
     def expand(self, text: str, source_language: str) -> str:
         """Expand German abbreviations; a final abbreviation keeps its sentence period."""
@@ -196,14 +244,19 @@ class Glossary:
                 continue
             for match in term.pattern.finditer(text):
                 end = match.end() - 1 if _ends_sentence(match) else match.end()
-                spans.append((match.start(), end, rendering))
+                # Renderings may reuse captured groups, e.g. "Grad (\d)" -> "\1 степени".
+                spans.append((match.start(), end, match.expand(rendering) if "\\" in rendering else rendering))
         return spans
 
     def repair(self, source: str, translated: str, target_language: str) -> str:
         for repair in self.repairs.get(target_language, ()):
             if repair.source is not None and not repair.source.search(source):
                 continue
-            translated = repair.pattern.sub(lambda match, r=repair: _keep_initial_case(match.group(), r.replacement), translated)
+            translated = repair.pattern.sub(
+                lambda match, r=repair: _keep_initial_case(
+                    match.group(), match.expand(r.replacement) if "\\" in r.replacement else r.replacement),
+                translated,
+            )
         return translated
 
 
@@ -279,10 +332,18 @@ def mask(text: str, protected: list[str], terms: list[tuple[int, int, str]] | No
     def gap(piece: str) -> str:
         return _DIGIT_TOKEN.sub(lambda match: placeholder(match.group()), piece) if numbers else piece
 
-    spans = [(start, end, text[start:end]) for start, end in protected_spans(text, protected)]
+    names = protected_spans(text, protected)
+    spans: list[tuple[int, int, str]] = []
+    # A glossary term may contain a name (``Frau Muster`` -> ``г-жа Muster``)
+    # but never cut through one.
     for start, end, rendering in sorted(terms or [], key=lambda span: (span[0], -span[1])):
-        if all(end <= left or start >= right for left, right, _ in spans):
-            spans.append((start, end, rendering))
+        if any(not (end <= left or start >= right) for left, right, _ in spans):
+            continue
+        if any(not (end <= left or start >= right) and not (start <= left and right <= end) for left, right in names):
+            continue
+        spans.append((start, end, rendering))
+    spans += [(start, end, text[start:end]) for start, end in names
+              if all(end <= left or start >= right for left, right, _ in spans)]
     pieces: list[str] = []
     cursor = 0
     for start, end, value in sorted(spans):
@@ -332,7 +393,10 @@ def repair_numbers(source: str, translated: str) -> tuple[str, bool]:
 # Segmentation
 # --------------------------------------------------------------------------
 
-_LINE_SEPARATOR = re.compile(r"(\n|\f|\t+)")
+# Line breaks, page breaks, tabs and runs of 2+ spaces (table columns) are
+# layout: they are copied literally and never sent to the model.
+_LINE_SEPARATOR = re.compile(r"(\n|\f|\t+| {2,})")
+_BULLET = re.compile(r"^\s*(?:[•·▪◦‣∙●○■□►▸➢✓–—*-]|\d{1,2}[.)])\s+")
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?…])\s+(?=[\"“„«(\[]?[A-ZÄÖÜА-ЯЁІЇЄҐ])")
 _ABBREVIATION_END = re.compile(
     r"(?:\b(?:Dr|Prof|Hr|Fr|St|Nr|ca|vs|etc|Mr|Mrs|Ms|Dipl|Med|med|Abt|Str|Tel|"
@@ -380,10 +444,119 @@ class Segment:
     terms: list[tuple[int, int, str]]
     translated: str | None = None
     warning: bool = False
+    lower_start: bool = False    # continues a rendered "Label:"; keep a lowercase start
+
+
+_SALUTATION = re.compile(r"^(?:Sehr geehrte|Liebe[rs]?\b|Hallo\b|Guten Tag|Dear\b|Уважаем|Шановн|Дорог)", re.IGNORECASE)
+_SENTENCE_END = re.compile(r"[.!?…]$")
+_LINE_BREAK_HYPHEN = re.compile(r"[^\W\d_]-$")
+
+
+def reflow(text: str, source_language: str, is_heading=lambda line: False) -> str:
+    """Join lines that PDF extraction wrapped inside a sentence.
+
+    Each output line is one block: a paragraph, heading, bullet item, table row
+    or salutation. Blank lines and page breaks are kept. A line continues into
+    the next when it does not end a sentence and the next line continues it:
+    it starts lowercase, the line ends in a line-break hyphen (``fokal-`` +
+    ``neurologisches`` -> ``fokal-neurologisches``), or the line is a long
+    wrapped prose line (German: or ends in a lowercase word / comma).
+    Headings, bullets, table rows (2+ spaces) and salutations never absorb an
+    uppercase line.
+    """
+    pages = []
+    for page in text.split("\f"):
+        lines = page.split("\n")
+        widths = [len(line.strip()) for line in lines if line.strip()]
+        wide = max(widths, default=0)
+        blocks: list[str] = []
+        last = ""
+        for raw in lines:
+            line = raw.rstrip("\r")
+            if blocks and _continues(blocks[-1], last, line, wide, source_language, is_heading):
+                previous = blocks[-1].rstrip()
+                glue = "" if _LINE_BREAK_HYPHEN.search(previous) else " "
+                blocks[-1] = previous + glue + line.strip() + ("\r" if raw.endswith("\r") else "")
+            else:
+                blocks.append(raw)
+            last = line.strip()
+        pages.append("\n".join(_collapse_prose_spaces(block) for block in blocks))
+    return "\f".join(pages)
+
+
+def _collapse_prose_spaces(block: str) -> str:
+    """Inside a sentence, 2+ spaces are extraction noise, not table columns."""
+    if not _SENTENCE_END.search(block.rstrip()):
+        return block
+    lead = block[:len(block) - len(block.lstrip())]
+    return lead + re.sub(r"(?<=\S) {2,}(?=\S)", " ", block[len(lead):])
+
+
+# "Röntgen-Thorax vom 01.03.2017: ..." starts a new block even after a long line.
+_LABEL = re.compile(r"^[A-ZÄÖÜА-ЯЁІЇЄҐ](?:(?!\.\s)[^:!?]){0,45}:(?:\s|$)")
+
+
+def _continues(block: str, last: str, line: str, wide: int, source_language: str, is_heading) -> bool:
+    previous = block.strip()
+    current = line.strip()
+    if not previous or not current or _BULLET.match(line) or is_heading(current) or is_heading(previous):
+        return False
+    if _SALUTATION.match(previous) and previous.endswith(","):
+        return False
+    if _LINE_BREAK_HYPHEN.search(previous) and current[0].isalpha():
+        return True
+    if current[0].islower():
+        return True
+    if _SENTENCE_END.search(previous) or "  " in last or "\t" in last or _LABEL.match(current):
+        return False
+    # The last physical line decides whether this was a wrapped prose line.
+    long_line = wide >= 50 and len(last) >= 0.6 * wide
+    if previous.endswith(":"):
+        return long_line and current[0].isdigit()
+    if previous.endswith(","):
+        return True
+    last_word = re.findall(r"[^\W\d_]+", last)[-1:] or [""]
+    if source_language == "de" and last_word[0][:1].islower() and wide >= 50 and len(last) >= 0.4 * wide:
+        return True
+    return long_line and not current[0].isdigit()
+
+
+# Names after titles/salutations, German street addresses and postcode + city
+# are protected automatically (verbatim), in addition to the caller's list.
+# Names never span a line break.
+_NAME = r"(?:[A-ZÄÖÜ]\. ?)*[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)?"
+_TITLED_NAME = re.compile(
+    r"\b(?:Frau|Herrn?|Fr\.|Hr\.|Dr\.|Prof\.|PD|Mr\.|Mrs\.|Ms\.)"
+    r"(?: +(?:Dr\.|Prof\.|med\.|dent\.|rer\. ?nat\.))*"
+    r" +(?!(?:Kolleg(?:in|e|en)|Doktor|Professor|Patient(?:in)?|Ober(?:arzt|ärztin)|Chef(?:arzt|ärztin))\b)"
+    r"(" + _NAME + r"(?: " + _NAME + r"(?=[\s,.;:)]|$))?|[A-ZÄÖÜ]\.)"
+)
+_STREET = re.compile(
+    r"\b[A-ZÄÖÜ][\wäöüß-]*(?:straße|strasse|str\.|weg|gasse|platz|allee|ring|damm|ufer|chaussee)"
+    r" \d{1,4} ?[a-z]?\b"
+)
+_POSTCODE_CITY = re.compile(r"\b\d{5} [A-ZÄÖÜ][\wäöüß-]*(?:(?:am|an der|im|in der) [A-ZÄÖÜ][\wäöüß-]*)?")
+
+
+def auto_protected(text: str, source_language: str) -> list[str]:
+    if source_language not in ("de", "en"):
+        return []
+    found = {match.group(1).strip() for match in _TITLED_NAME.finditer(text)}
+    found |= {match.group().strip() for match in _STREET.finditer(text)}
+    found |= {match.group().strip() for match in _POSTCODE_CITY.finditer(text)}
+    return sorted(found)
+
+
+def symbol_pattern(symbols: set[str]) -> re.Pattern[str] | None:
+    """Tokens containing characters the models cannot encode (``°C``, ``μL``, ``®``)."""
+    if not symbols:
+        return None
+    klass = "[" + "".join(re.escape(char) for char in sorted(symbols)) + "]"
+    return re.compile(r"(?:[^\W_][\w.,/]*)?(?:" + klass + r"+[^\W_]*)+")
 
 
 def plan(text: str, source_language: str, target_language: str, protected: list[str],
-         glossary: Glossary) -> tuple[list[str | Segment], list[Segment]]:
+         glossary: Glossary, symbols: re.Pattern[str] | None = None) -> tuple[list[str | Segment], list[Segment]]:
     """Split text into literal separators/whitespace and translatable segments."""
     layout: list[str | Segment] = []
     segments: list[Segment] = []
@@ -395,23 +568,51 @@ def plan(text: str, source_language: str, target_language: str, protected: list[
         if not stripped:
             layout.append(piece)
             continue
-        lead = piece[:len(piece) - len(piece.lstrip())]
+        bullet = _BULLET.match(piece)
+        lead = bullet.group() if bullet else piece[:len(piece) - len(piece.lstrip())]
+        stripped = piece[len(lead):].strip()
         trail = piece[len(piece.rstrip()):]
         layout.append(lead)
+        heading = glossary.heading(stripped, source_language, target_language)
+        if heading is not None or not stripped:
+            layout.append(heading or "")
+            layout.append(trail)
+            continue
         expanded = _expand_outside_protected(stripped, source_language, protected, glossary)
         for sentence, gap in split_sentences(expanded, protected):
-            terms = glossary.term_spans(sentence, source_language, target_language)
-            masked, values = mask(sentence, protected, terms)
-            segment = Segment(sentence, masked, values, terms)
-            if _LETTER.search(_PLACEHOLDER.sub("", masked)):
-                segments.append(segment)
-            else:
-                # Only names, numbers, glossary terms and punctuation.
-                segment.translated = restore(masked, values)
-            layout.append(segment)
+            for item in _segments(sentence, source_language, target_language, protected, glossary, symbols):
+                if isinstance(item, Segment):
+                    segments.append(item)
+                layout.append(item)
             layout.append(gap)
         layout.append(trail)
     return layout, segments
+
+
+def _segments(sentence: str, source_language: str, target_language: str, protected: list[str],
+              glossary: Glossary, symbols: re.Pattern[str] | None) -> list[str | Segment]:
+    terms = glossary.term_spans(sentence, source_language, target_language)
+    terms += glossary.title_span(sentence, protected, source_language, target_language)
+    # "Pulmo: ..." -> the rendered label is literal; the models turn a colon right
+    # after a placeholder into "⁇" or drop the placeholder.
+    for start, end, rendering in terms:
+        label = re.match(r":\s*", sentence[end:])
+        if start == 0 and label and sentence[end + label.end():].strip():
+            rest = sentence[end + label.end():]
+            head = _match_initial_case(sentence, rendering) + ":" + label.group()[1:]
+            tail = _segments(rest, source_language, target_language, protected, glossary, symbols)
+            for item in tail[:1]:
+                if isinstance(item, Segment):
+                    item.lower_start = rest[:1].islower()
+            return [head, *tail]
+    if symbols is not None:
+        terms += [(match.start(), match.end(), match.group()) for match in symbols.finditer(sentence)]
+    masked, values = mask(sentence, protected, terms)
+    segment = Segment(sentence, masked, values, terms)
+    if not _LETTER.search(_PLACEHOLDER.sub("", masked)):
+        # Only names, numbers, glossary terms and punctuation.
+        return [_match_initial_case(sentence, restore(masked, values))]
+    return [segment]
 
 
 def _expand_outside_protected(text: str, source_language: str, protected: list[str], glossary: Glossary) -> str:
@@ -456,14 +657,29 @@ class MTEngine:
             if not self.backend.available(hop.model):
                 raise ModelUnavailable(hop.model)
 
-        names = clean_protected(list(protected))
-        layout, segments = plan(text, source, target_language, names, self.glossary)
+        flowed = reflow(text, source, lambda line: self.glossary.is_heading(line, source))
+        names = clean_protected(list(protected) + auto_protected(flowed, source))
+        symbols = symbol_pattern(self._unencodable(hops, flowed))
+        layout, segments = plan(flowed, source, target_language, names, self.glossary, symbols)
         self._translate_segments(segments, hops, names)
         for segment in segments:
             repaired = self.glossary.repair(segment.source, segment.translated or "", target_language)
             segment.translated = _match_initial_case(segment.source, repaired)
+            first = re.match(r"([^\W\d_])([^\W\d_]*)", segment.translated)
+            if segment.lower_start and first and first.group(1).isupper() and first.group(2).islower():
+                segment.translated = segment.translated[0].lower() + segment.translated[1:]
         output = "".join(item if isinstance(item, str) else (item.translated or "") for item in layout)
         return TranslationResult(output, source, len(text), sum(segment.warning for segment in segments))
+
+    def _unencodable(self, hops: list[Hop], text: str) -> set[str]:
+        check = getattr(self.backend, "unencodable", None)
+        if check is None:
+            return set()
+        chars = {char for char in text if not char.isspace()}
+        unknown: set[str] = set()
+        for hop in hops:
+            unknown |= check(hop.model, chars)
+        return unknown
 
     def _run(self, hops: list[Hop], texts: list[str], beam_size: int) -> list[str]:
         for hop in hops:
@@ -480,7 +696,7 @@ class MTEngine:
             outputs = self._run(hops, [segment.masked for segment in pending], beam)
             failed: list[Segment] = []
             for segment, output in zip(pending, outputs, strict=True):
-                if placeholders_valid(output, len(segment.values)):
+                if placeholders_valid(output, len(segment.values)) and not _has_unknown(segment.source, output):
                     segment.translated = restore(output, segment.values)
                 else:
                     failed.append(segment)
@@ -494,16 +710,46 @@ class MTEngine:
         remaining: list[Segment] = []
         for segment, (masked, values), output in zip(pending, light, outputs, strict=True):
             segment.warning = True
-            if placeholders_valid(output, len(values)):
+            if placeholders_valid(output, len(values)) and not _has_unknown(segment.source, output):
                 segment.translated = restore(repair_numbers(masked, output)[0], values)
             else:
                 remaining.append(segment)
         if not remaining:
             return
-        # Fallback 2: fully unmasked translation with the same number repair.
+        # Fallback 2: only names and unencodable symbols masked; glossary terms
+        # go to the model as words (a term placeholder can be what gets dropped).
+        verbatim = [
+            mask(segment.source, protected,
+                 [span for span in segment.terms if segment.source[span[0]:span[1]] == span[2]], numbers=False)
+            for segment in remaining
+        ]
+        outputs = self._run(hops, [masked for masked, _ in verbatim], DEFAULT_BEAM)
+        unmasked: list[Segment] = []
+        for segment, (masked, values), output in zip(remaining, verbatim, outputs, strict=True):
+            if placeholders_valid(output, len(values)) and not _has_unknown(segment.source, output):
+                segment.translated = restore(repair_numbers(masked, output)[0], values)
+            else:
+                unmasked.append(segment)
+        remaining = unmasked
+        if not remaining:
+            return
+        # Fallback 3: fully unmasked translation with the same number repair.
         outputs = self._run(hops, [segment.source for segment in remaining], DEFAULT_BEAM)
         for segment, output in zip(remaining, outputs, strict=True):
-            segment.translated, _ = repair_numbers(segment.source, output)
+            # Never emit the SentencePiece unknown marker or a translated name:
+            # keep the (reviewable) source sentence instead.
+            names = [name for name in protected if name in segment.source]
+            if _has_unknown(segment.source, output) or any(name not in output for name in names):
+                segment.translated = segment.source
+            else:
+                segment.translated = repair_numbers(segment.source, output)[0]
+
+
+UNKNOWN_MARK = "⁇"
+
+
+def _has_unknown(source: str, output: str) -> bool:
+    return UNKNOWN_MARK in output and UNKNOWN_MARK not in source
 
 
 # --------------------------------------------------------------------------
@@ -531,10 +777,44 @@ class CTranslate2Backend:
         self.threads = threads or _env_int("MT_THREADS", 2)
         self._loaded: OrderedDict[str, tuple[object, object, object, threading.Lock]] = OrderedDict()
         self._registry_lock = threading.Lock()
+        self._spm: dict[str, tuple[object, object]] = {}
 
     def available(self, model: str) -> bool:
         directory = self.model_dir / model
         return all((directory / name).is_file() for name in ("model.bin", "source.spm", "target.spm"))
+
+    def _tokenizers(self, model: str) -> tuple[object, object]:
+        """SentencePiece models only (small); cached independently of the LRU."""
+        with self._registry_lock:
+            entry = self._spm.get(model)
+            if entry is None:
+                import sentencepiece
+
+                directory = self.model_dir / model
+                entry = (
+                    sentencepiece.SentencePieceProcessor(model_file=str(directory / "source.spm")),
+                    sentencepiece.SentencePieceProcessor(model_file=str(directory / "target.spm")),
+                )
+                self._spm[model] = entry
+            return entry
+
+    def unencodable(self, model: str, chars: set[str]) -> set[str]:
+        """Characters the model would turn into unk or change by normalization.
+
+        Letters are checked against the source vocabulary only (the target
+        vocabulary legitimately lacks the source script); symbols and digits
+        must survive both, because the model copies them into the output.
+        """
+        source, target = self._tokenizers(model)
+        unknown: set[str] = set()
+        for char in chars:
+            processors = (source,) if char.isalpha() else (source, target)
+            for processor in processors:
+                ids = processor.encode(char)
+                if processor.unk_id() in ids or processor.decode(ids) != char:
+                    unknown.add(char)
+                    break
+        return unknown
 
     def _get(self, model: str) -> tuple[object, object, object, threading.Lock]:
         with self._registry_lock:
@@ -554,6 +834,7 @@ class CTranslate2Backend:
             )
             source = sentencepiece.SentencePieceProcessor(model_file=str(directory / "source.spm"))
             target = sentencepiece.SentencePieceProcessor(model_file=str(directory / "target.spm"))
+            self._spm.setdefault(model, (source, target))
             entry = (translator, source, target, threading.Lock())
             self._loaded[model] = entry
             # An evicted model stays alive while an in-flight request holds it.

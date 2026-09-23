@@ -322,7 +322,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 onClick={() => void handleTranslate()}
               >
                 {busy === "translate" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Languages className="size-3.5" />}
-                {tx("Перевести (локальная модель)", "Übersetzen (lokales Modell)")}
+                {tx("Машинный перевод", "Maschinell übersetzen")}
               </Button>
               <Button
                 type="button"
@@ -361,8 +361,8 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                 onChange={setTranslatedText}
                 lang={targetLanguage}
                 placeholder={tx(
-                  "Нажмите «Перевести» или введите перевод вручную.",
-                  "„Übersetzen“ wählen oder die Übersetzung manuell eintragen.",
+                  "Нажмите «Машинный перевод» или введите перевод вручную.",
+                  "„Maschinell übersetzen“ wählen oder die Übersetzung manuell eintragen.",
                 )}
                 labels={{
                   toolbar: tx("Форматирование перевода", "Formatierung der Übersetzung"),

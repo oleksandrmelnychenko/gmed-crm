@@ -9,8 +9,10 @@ from app.mt_engine import (
     Glossary,
     Hop,
     MTEngine,
+    auto_protected,
     detect_language,
     mask,
+    reflow,
     placeholders_valid,
     repair_numbers,
     restore,
@@ -292,3 +294,130 @@ def test_translate_endpoint_hides_unexpected_error_text(client):
     response = client.post("/v1/translate", json={"text": "Hallo Welt", "source_language": "de", "target_language": "ru"})
     assert response.status_code == 500
     assert "Anna" not in response.text
+
+
+# -- PDF reflow, symbols, names, headings --------------------------------------
+
+LETTER = (
+    "Sehr geehrter Herr Dr. Hausmann,\n"
+    "im Folgenden berichten wir über unsere gemeinsame Patientin\n"
+    "Frau Anna Muster, die sich vom 01.03.2017 bis zum 05.03.2017 bei uns befand.\n"
+    "Diagnosen\n"
+    "• Ambulant erworbene Pneumonie (J15.9)\n"
+    "• Arterielle Hypertonie\n"
+    "Aktuelle Anamnese\n"
+    "Frau Muster stellte sich mit Fieber und Dyspnoe in unserer\n"
+    "Notfallambulanz vor. Kein Hinweis auf ein fokal-\n"
+    "neurologisches Defizit.\n"
+    "\n"
+    "Blutkultur vom 01.03.2017: Befund ausstehend (wird im endgültigen Arztbrief nachgereicht)\n"
+    "Röntgen-Thorax vom 01.03.2017: Infiltrat rechts.\n"
+    "Ramipril 5 mg (z.B. Delix)  1-0-0\n"
+    "Metformin 850 mg  1-0-1"
+)
+
+
+def test_reflow_joins_wrapped_sentences_and_keeps_blocks():
+    glossary = Glossary.load(DEFAULT_GLOSSARY_PATH)
+    assert reflow(LETTER, "de", lambda line: glossary.is_heading(line, "de")).split("\n") == [
+        "Sehr geehrter Herr Dr. Hausmann,",
+        "im Folgenden berichten wir über unsere gemeinsame Patientin Frau Anna Muster, "
+        "die sich vom 01.03.2017 bis zum 05.03.2017 bei uns befand.",
+        "Diagnosen",
+        "• Ambulant erworbene Pneumonie (J15.9)",
+        "• Arterielle Hypertonie",
+        "Aktuelle Anamnese",
+        "Frau Muster stellte sich mit Fieber und Dyspnoe in unserer Notfallambulanz vor. "
+        "Kein Hinweis auf ein fokal-neurologisches Defizit.",
+        "",
+        "Blutkultur vom 01.03.2017: Befund ausstehend (wird im endgültigen Arztbrief nachgereicht)",
+        "Röntgen-Thorax vom 01.03.2017: Infiltrat rechts.",
+        "Ramipril 5 mg (z.B. Delix)  1-0-0",
+        "Metformin 850 mg  1-0-1",
+    ]
+
+
+def test_reflow_collapses_double_spaces_only_inside_sentences():
+    text = "Eine Episode, die von Ihnen  mit Antibiotika behandelt wurde.\nRamipril 5 mg  1-0-0"
+    assert reflow(text, "de") == "Eine Episode, die von Ihnen mit Antibiotika behandelt wurde.\nRamipril 5 mg  1-0-0"
+
+
+def test_short_lines_and_lowercase_continuations_in_russian():
+    assert reflow("Жалобы\nна боль в груди.\nДиагноз", "ru") == "Жалобы на боль в груди.\nДиагноз"
+
+
+def test_headings_bullets_and_table_columns_are_not_sent_to_the_model():
+    backend = FakeBackend()
+    result = engine(backend).translate("Nebendiagnosen:\n• Arterielle Hypertonie Grad 1\nRamipril 5 mg  1-0-0", "de", "ru", [])
+    assert backend.calls[0][3] == ["Arterielle Hypertonie XQ1", "Ramipril XQ1 mg"]
+    tag = "[DE-ZLE>>rus<<]"
+    assert result.text == (
+        f"Сопутствующие диагнозы:\n• {tag}Arterielle Hypertonie 1 степени\n{tag}Ramipril 5 mg  1-0-0"
+    )
+
+
+def test_names_after_titles_streets_and_postcodes_are_protected():
+    text = ("Sehr geehrte Frau Kollegin, sehr geehrter Herr Dr. Hausmann,\n"
+            "Frau Anna Muster, wohnhaft Lindenstraße 2, 50937 Köln. Frau M. lebt allein.\n"
+            "Prof. Dr. B. Oss  Dr. W. Alles\nChefärztin")
+    assert auto_protected(text, "de") == [
+        "50937 Köln", "Anna Muster", "B. Oss", "Hausmann", "Lindenstraße 2", "M.", "W. Alles"]
+    backend = FakeBackend()
+    result = engine(backend).translate("Frau Muster lebt in der Lindenstraße 2 bei Frau Anna Muster.", "de", "uk", [])
+    assert backend.calls[0][3] == ["XQ1 lebt in der XQ2 bei Frau XQ3."]
+    assert result.text == "[DE-ZLE>>ukr<<]пані Muster lebt in der Lindenstraße 2 bei Frau Anna Muster."
+
+
+def test_unencodable_symbols_are_masked_and_bullets_kept_literal():
+    class Symbols(FakeBackend):
+        def unencodable(self, model, chars):
+            return chars & {"°", "μ", "®", "•"}
+
+    backend = Symbols()
+    result = engine(backend).translate("• Fieber bis 38,7°C, Leukozyten 16.000/μL, Delix® 1-0-0.", "de", "ru", [])
+    assert backend.calls[0][3] == ["Fieber bis XQ1, Leukozyten XQ2, XQ3 XQ4."]
+    assert result.text == "• [DE-ZLE>>rus<<]Fieber bis 38,7°C, Leukozyten 16.000/μL, Delix® 1-0-0."
+
+
+def test_unknown_marker_is_never_emitted():
+    backend = FakeBackend(mangle=lambda text, beam: text + " ⁇")
+    result = engine(backend).translate("Die Patientin ist stabil.", "de", "ru", [])
+    assert "⁇" not in result.text
+    assert result.text == "Die Patientin ist stabil." and result.warnings == 1
+
+
+def test_fully_unmasked_fallback_never_returns_a_translated_name():
+    def mangle(text, beam):
+        return text.replace("XQ1", "") if "XQ1" in text else text.replace("Muster", "Шаблон")
+
+    result = engine(FakeBackend(mangle=mangle)).translate("Wir sahen Herrn Dr. Muster.", "de", "ru", [])
+    assert result.text == "Wir sahen Herrn Dr. Muster." and result.warnings == 1
+
+
+def test_rendered_label_keeps_the_rest_of_the_sentence_lowercase():
+    backend = FakeBackend()
+    result = engine(backend).translate("Pulmo: rechtsseitig feuchte Rasselgeräusche. Pulmo: Giemen beidseits.", "de", "ru", [])
+    assert backend.calls[0][3] == ["Giemen beidseits."]
+    assert result.text == "Лёгкие: справа влажные хрипы. Лёгкие: [DE-ZLE>>rus<<]Giemen beidseits."
+
+
+@pytest.mark.parametrize(("source", "translated", "language", "expected"), [
+    ("Patientin Frau Anna Muster", "пациентке, женщине Anna Muster", "ru", "пациентке, г-же Anna Muster"),
+    ("Frau Anna Muster", "пацієнтку, жінку Anna Muster", "uk", "пацієнтку, пані Anna Muster"),
+    ("seit dem Tag vor der Aufnahme", "со дня приема", "ru", "со дня поступления"),
+    ("Röntgenaufnahme", "со дня приема", "ru", "со дня приема"),
+    ("geboren am 01.01.1930", "родившейся в 01.01.1930", "ru", "родившейся 01.01.1930"),
+    ("geboren am 01.01.1930", "яка народилася в 01.01.1930", "uk", "яка народилася 01.01.1930"),
+])
+def test_documented_target_repairs(source, translated, language, expected):
+    assert Glossary.load(DEFAULT_GLOSSARY_PATH).repair(source, translated, language) == expected
+
+
+def test_german_rewrites_and_phrase_terms():
+    backend = FakeBackend()
+    engine(backend).translate(
+        "Sie fühle sich stark abgeschlagen. Appetit seit dem Tag vor der Aufnahme vermindert. "
+        "Stuhlgang unauffällig. Kein Pflegegrad.", "de", "ru", [])
+    assert backend.calls[0][3] == ["Sie fühle sich sehr schwach.", "Appetit XQ1 vermindert.", "Stuhlgang XQ1."]
+    result = engine(FakeBackend()).translate("• Ambulant erworbene Pneumonie (J15.9)\nKein Pflegegrad.", "de", "ru", [])
+    assert result.text == "• Внебольничная пневмония (J15.9)\nСтепень ухода (Pflegegrad) не установлена."

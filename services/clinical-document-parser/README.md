@@ -250,18 +250,33 @@ pivots through English. Attribution and licenses: `MT_MODELS_NOTICE`
 `/app/mt-models`), `MT_MAX_LOADED_MODELS` (default 2, about 250 MB RAM per
 tc-big model) and `MT_THREADS` (default 2 intra-op threads per model).
 
-Output is a draft for human review. Line breaks, blank lines, tabs and
-indentation are preserved; lines are translated sentence by sentence.
-Protected terms and every digit-bearing token (dates, doses, `1-0-1`, `HbA1c`)
-are replaced with `XQn` placeholders the models copy verbatim, because the
-models otherwise rewrite years (2026 → 2016). A segment that loses a
-placeholder is retried with a wider beam, then translated with only names
-masked, then fully unmasked; both fallbacks copy the source number spellings
-back when the counts and digit lengths match and increment `warnings`.
+Output is a draft for human review. PDF line wraps are reflowed first: a line
+continues into the next when it does not end a sentence and the next line
+starts lowercase, follows a line-break hyphen (`fokal-` + `neurologisches`) or
+continues a long prose line. Headings, bullets, `Label:` lines, table rows
+(2+ spaces) and salutations stay separate blocks, one output line per block;
+blank lines, tabs and table columns are kept. Blocks are translated sentence
+by sentence. Bullets and whole-line German section headings (`Diagnosen`,
+`Nebendiagnosen`, `Beurteilung und Verlauf`, …) never reach the model.
+
+Protected terms, names after `Frau`/`Herr`/`Dr.`/`Prof.` (also `Frau M.`),
+German street + house number and postcode + city, every digit-bearing token
+(dates, doses, `1-0-1`, `HbA1c`) and characters the model vocabularies cannot
+encode (`°C`, `μL`, `®`, …) are replaced with `XQn` placeholders the models
+copy verbatim; the models otherwise rewrite years (2026 → 2016), translate
+names and emit `⁇`. A segment that loses a placeholder is retried with a wider
+beam, then with numbers visible, then with only names/symbols masked, then
+fully unmasked; the fallbacks copy the source number spellings back when the
+counts and digit lengths match and increment `warnings`. A segment whose output
+would still contain `⁇` or a translated protected name keeps its source text.
+
 `rules/mt_glossary.json` expands safe German abbreviations (`V.a.`, `Z.n.`,
-`geb.` before a date, …), inserts fixed renderings for terms the models drop
-or mistranslate (`Raumforderung`, `o.B.`, `Wiedervorstellung`; base form, case
-not adapted) and repairs documented mistranslations in the fallback output.
+`geb.` before a date, …), rewrites a few German words to synonyms the models
+handle (`abgeschlagen`), renders headings, inserts reviewed renderings for
+terms and phrases the models drop or mistranslate (`Raumforderung`, `o.B.`,
+`bei Aufnahme`, `unauffällig`, `Pulmo`, `Rasselgeräusche`, `Grad 1`, …) and
+repairs documented mistranslations (`женщине Anna` → `г-же Anna`, `приема`
+→ `поступления` when the source says `Aufnahme`).
 
 ## Test
 
