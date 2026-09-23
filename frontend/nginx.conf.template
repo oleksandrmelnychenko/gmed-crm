@@ -68,7 +68,27 @@ server {
     try_files $uri =404;
   }
 
+  # The app shell must be revalidated on every load, otherwise a browser may
+  # keep an index.html from before a deploy that points at old bundles.
+  location = /index.html {
+    add_header Cache-Control "no-cache" always;
+    try_files $uri =404;
+  }
+
+  location = /service-worker.js {
+    add_header Cache-Control "no-cache" always;
+    try_files $uri =404;
+  }
+
+  # Hashed bundles never change. A missing one must be a 404 (not the SPA
+  # shell), so the stale-chunk recovery in the app reloads the new release.
+  location /assets/ {
+    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    try_files $uri =404;
+  }
+
   location / {
+    add_header Cache-Control "no-cache" always;
     try_files $uri $uri/ /index.html;
   }
 }
