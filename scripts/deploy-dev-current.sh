@@ -119,7 +119,7 @@ available_memory_mb() {
 
 pause_ocr_for_build() {
   local container running
-  for container in gmed-crm-clinical-document-parser-1 gmed-crm-invoice-parser-1; do
+  for container in gmed-crm-clinical-document-parser-1 gmed-crm-invoice-parser-1 gmed-crm-machine-translation-1; do
     running="$(docker inspect --format '{{.State.Running}}' "$container")" || return 1
     if [[ "$running" == "true" ]]; then
       # Record before stopping so a partial stop failure is recovered by EXIT.

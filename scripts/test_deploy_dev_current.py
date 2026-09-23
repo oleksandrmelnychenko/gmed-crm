@@ -17,7 +17,11 @@ import unittest
 
 
 RUNNER = Path(__file__).with_name("deploy-dev-current.sh")
-OCR = ["gmed-crm-clinical-document-parser-1", "gmed-crm-invoice-parser-1"]
+OCR = [
+    "gmed-crm-clinical-document-parser-1",
+    "gmed-crm-invoice-parser-1",
+    "gmed-crm-machine-translation-1",
+]
 MOCK_DOCKER = r'''
 import json, os, signal, subprocess, sys, time
 from pathlib import Path
@@ -183,8 +187,8 @@ sys.exit(int(os.environ.get("MOCK_COSIGN_EXIT", "0")))
         self.memory(4000)
         result = self.run_guard()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.events()[:2], [["stop", container] for container in OCR])
-        self.assertEqual(self.events()[-2:], [["start", container] for container in OCR])
+        self.assertEqual(self.events()[:len(OCR)], [["stop", container] for container in OCR])
+        self.assertEqual(self.events()[-len(OCR):], [["start", container] for container in OCR])
         self.assert_running()
 
     def test_build_failure_restores_ocr_and_preserves_exit_code(self):
@@ -209,7 +213,7 @@ sys.exit(int(os.environ.get("MOCK_COSIGN_EXIT", "0")))
 
     def test_already_stopped_service_is_not_started_on_build_failure(self):
         self.memory(4000)
-        expected = {OCR[0]: True, OCR[1]: False}
+        expected = {OCR[0]: True, OCR[1]: False, OCR[2]: True}
         (self.root / "state.json").write_text(json.dumps(expected))
         result = self.run_guard(MOCK_BUILD_EXIT="37")
         self.assertEqual(result.returncode, 37)

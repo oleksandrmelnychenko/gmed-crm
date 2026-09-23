@@ -153,6 +153,21 @@ def test_ru_uk_pivots_through_english():
     assert [c[0] for c in backend.calls] == ["zle-en", "en-zle"]
 
 
+def test_pivot_checks_only_the_first_model_vocabulary():
+    # The English pivot model cannot encode Cyrillic; checking the source
+    # text against it masked every letter and returned the text unchanged.
+    class Latin(FakeBackend):
+        def unencodable(self, model, chars):
+            if model.startswith("en-"):
+                return {char for char in chars if "а" <= char.lower() <= "я" or char in "іїєґ"}
+            return set()
+
+    backend = Latin()
+    result = engine(backend).translate("Жовчевий міхур не побільшений.", "uk", "ru", [])
+    assert backend.calls[0][3] == ["Жовчевий міхур не побільшений."]
+    assert result.text == "[EN-ZLE>>rus<<][ZLE-EN]Жовчевий міхур не побільшений."
+
+
 # -- language detection -------------------------------------------------------
 
 @pytest.mark.parametrize(("text", "language"), [

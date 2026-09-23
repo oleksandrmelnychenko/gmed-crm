@@ -675,11 +675,11 @@ class MTEngine:
         check = getattr(self.backend, "unencodable", None)
         if check is None:
             return set()
+        # Only the first hop sees the source text; later hops (the English
+        # pivot for ru<->uk) receive model output, so checking the source
+        # against their vocabulary would mask every Cyrillic letter.
         chars = {char for char in text if not char.isspace()}
-        unknown: set[str] = set()
-        for hop in hops:
-            unknown |= check(hop.model, chars)
-        return unknown
+        return set(check(hops[0].model, chars)) if hops else set()
 
     def _run(self, hops: list[Hop], texts: list[str], beam_size: int) -> list[str]:
         for hop in hops:
