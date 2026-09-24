@@ -3958,7 +3958,8 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
             "{template_id}"
         );
         assert_eq!(
-            detail_body["generated_bindings"], expected_bindings,
+            bindings_without_signature_anchors(&detail_body["generated_bindings"]),
+            expected_bindings,
             "{template_id} must persist its exact binding snapshot"
         );
         let expected_sensitivity = if matches!(
@@ -4867,7 +4868,14 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(detail["generated_bindings"], bindings);
+    assert_eq!(
+        bindings_without_signature_anchors(&detail["generated_bindings"]),
+        bindings
+    );
+    assert!(
+        detail["generated_bindings"]["_signature_anchors"].is_array(),
+        "signed documents reserve Skribble signature frames: {detail}"
+    );
 
     let (status, bytes) = bytes_request(
         &app,
@@ -7753,4 +7761,14 @@ async fn document_translations_are_saved_as_children_with_a_translated_document(
         items[0]["translated_document_id"],
         translated_document_id.to_string()
     );
+}
+
+/// Generated documents also store the Skribble signature frames they reserve
+/// (`_signature_anchors`); binding assertions compare the caller's values only.
+fn bindings_without_signature_anchors(bindings: &Value) -> Value {
+    let mut bindings = bindings.clone();
+    if let Some(object) = bindings.as_object_mut() {
+        object.remove("_signature_anchors");
+    }
+    bindings
 }

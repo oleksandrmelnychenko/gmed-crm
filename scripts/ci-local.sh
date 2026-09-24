@@ -55,9 +55,11 @@ rsync -a --delete --delete-excluded \
 cd "$BUILD_DIR"
 started_pg=0
 cleanup() {
+  local status=$?
   if [[ "$started_pg" -eq 1 ]]; then
     pg pg_ctl -D "$PG_DATA" -m fast stop >/dev/null 2>&1 || true
   fi
+  exit "$status"
 }
 trap cleanup EXIT INT TERM
 
