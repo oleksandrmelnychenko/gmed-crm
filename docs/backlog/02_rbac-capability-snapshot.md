@@ -20,6 +20,7 @@
 | `orders.economics` | x |   | x |   |   |   | x |   |   |
 | `contracts.view` | x | x | x |   |   |   | x |   |   |
 | `contracts.edit` | x |   | x |   |   |   | x |   |   |
+| `contracts.terminate` | x |   | x |   |   |   |   |   |   |
 | `invoices.view` | x | x | x |   |   |   | x |   |   |
 | `invoices.create` | x |   | x |   |   |   | x |   |   |
 | `invoices.finance` | x |   |   |   |   |   | x |   |   |

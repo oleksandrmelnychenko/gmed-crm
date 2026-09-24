@@ -102,13 +102,13 @@ for (const lang of ["ru", "de"] as const) {
   });
 }
 
-test("resume checks the complete contract period and stops autosave after conflicts", async ({ page }) => {
+test("resume accepts a signed open-ended contract and stops autosave after conflicts", async ({ page }) => {
   const state = await setup(page, "ru", true);
   const sheet = page.getByRole("dialog");
   await expect(sheet.getByText("20.12.2026 – 15.01.2027", { exact: true })).toBeVisible();
   await sheet.getByRole("combobox", { name: "Рамочный договор", exact: true }).click();
   await page.getByRole("option", { name: /FC-OLD/ }).click();
-  await expect(sheet.getByText("Проверьте подпись и срок: этот договор пока не покрывает весь период заказа.")).toBeVisible();
+  await expect(sheet.getByText("Договор подписан и действует бессрочно, пока не расторгнут.")).toBeVisible();
   await expect.poll(() => state.actions.length).toBe(1);
   expect(state.creates).toBe(0);
   state.failSave = true;
@@ -287,11 +287,12 @@ test("repeat order reuses the inherited contract and flags passport expiry durin
   state.workspace.data.date_from = "2027-04-25";
   state.workspace.data.date_to = "2027-05-10";
   state.contracts.push({ ...state.contracts[0], id: "contract-inherited", contract_number: "FC-FROM-LEAD", valid_to: null });
+  state.contracts[0] = { ...state.contracts[0], status: "terminated" };
   await page.goto("/__order-wizard-qa?order=intake-qa");
   const dialog = page.getByTestId("order-wizard");
-  const expiredRow = dialog.getByRole("row").filter({ hasText: "FC-OLD" });
-  await expect(expiredRow).toContainText("Нужен другой / новый договор");
-  await expect(expiredRow.getByRole("button")).toHaveCount(0);
+  const terminatedRow = dialog.getByRole("row").filter({ hasText: "FC-OLD" });
+  await expect(terminatedRow).toContainText("Расторгнут");
+  await expect(terminatedRow.getByRole("button")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Использовать договор: FC-FROM-LEAD", exact: true }).click();
   await expect.poll(() => state.workspace.data.contract_id).toBe("contract-inherited");
   expect(state.generated).toEqual([]);

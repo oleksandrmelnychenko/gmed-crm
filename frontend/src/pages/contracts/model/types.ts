@@ -13,6 +13,9 @@ export type ContractItem = {
   signed_at: string | null;
   valid_from: string | null;
   valid_to: string | null;
+  terminated_at?: string | null;
+  termination_reason?: string | null;
+  terminated_by_name?: string | null;
   conditions: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
@@ -117,16 +120,12 @@ export type QuoteFilters = {
 export type ContractFormState = {
   patientId: string;
   status: ContractStatus;
-  validFrom: string;
-  validTo: string;
   signedAt: string;
   conditionsText: string;
 };
 
 export type ContractStatusFormState = {
   status: ContractStatus;
-  validFrom: string;
-  validTo: string;
   signedAt: string;
   conditionsText: string;
 };
@@ -200,4 +199,5 @@ export type ContractsPermissions = {
   canCreateQuote: boolean;
   canManageQuote: boolean;
   canManageCatalog: boolean;
+  canTerminateContract: boolean;
 };

@@ -11,11 +11,17 @@ export function passportReviewStatus(expiry: string | null | undefined, orderEnd
   return days <= 90 ? "expiring" : "valid";
 }
 
-export function contractValidity(contract: Pick<ContractItem, "status" | "valid_from" | "valid_to">, today = new Date().toISOString().slice(0, 10)) {
-  if (contract.status !== "signed") return contract.status;
-  if (contract.valid_to && contract.valid_to < today) return "expired";
-  if (contract.valid_from && contract.valid_from > today) return "future";
-  return "valid";
+export type ContractUsability = "usable" | "terminated" | "expired" | "draft" | "sent";
+
+// Framework contracts are open-ended: only the status decides whether a contract can back an order.
+export function contractUsability(contract: Pick<ContractItem, "status">): ContractUsability {
+  switch (contract.status) {
+    case "signed": return "usable";
+    case "terminated": return "terminated";
+    case "expired": return "expired";
+    case "sent": return "sent";
+    default: return "draft";
+  }
 }
 
 export const PASSPORT_REVIEW_LABELS: Record<PassportReviewStatus, [string, string]> = {
@@ -26,9 +32,8 @@ export const PASSPORT_REVIEW_LABELS: Record<PassportReviewStatus, [string, strin
   valid: ["Паспорт действителен", "Reisepass gültig"],
 };
 
-export const CONTRACT_VALIDITY_LABELS: Record<string, [string, string]> = {
+export const CONTRACT_USABILITY_LABELS: Record<ContractUsability, [string, string]> = {
+  usable: ["Подписан, действует", "Unterzeichnet, gültig"],
   draft: ["Черновик", "Entwurf"], sent: ["Ожидает подписи", "Unterschrift ausstehend"],
-  signed: ["Подписан", "Unterzeichnet"], expired: ["Срок истёк", "Abgelaufen"],
-  terminated: ["Расторгнут", "Gekündigt"], future: ["Ещё не вступил в силу", "Noch nicht gültig"],
-  valid: ["Действует", "Gültig"],
+  terminated: ["Расторгнут", "Gekündigt"], expired: ["Истёк", "Abgelaufen"],
 };

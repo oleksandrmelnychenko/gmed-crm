@@ -185,8 +185,6 @@ type ContractStatus = "draft" | "sent" | "signed" | "expired" | "terminated";
 
 type ContractFormState = {
   status: ContractStatus;
-  validFrom: string;
-  validTo: string;
   signedAt: string;
 };
 
@@ -454,13 +452,8 @@ const spaciousTextareaClassName = cn(
   "min-h-[104px]",
 );
 
-const CONTRACT_STATUS_OPTIONS: ContractStatus[] = [
-  "draft",
-  "sent",
-  "signed",
-  "expired",
-  "terminated",
-];
+// Terminated/expired are never set by hand: termination has its own action.
+const CONTRACT_STATUS_OPTIONS: ContractStatus[] = ["draft", "sent", "signed"];
 const INVOICE_STATUS_OPTIONS: InvoiceStatus[] = [
   "draft",
   "sent",
@@ -472,8 +465,6 @@ const INVOICE_STATUS_OPTIONS: InvoiceStatus[] = [
 function blankContractForm(): ContractFormState {
   return {
     status: "draft",
-    validFrom: "",
-    validTo: "",
     signedAt: "",
   };
 }
@@ -481,8 +472,6 @@ function blankContractForm(): ContractFormState {
 function contractToForm(contract: ContractItem): ContractFormState {
   return {
     status: (contract.status as ContractStatus) ?? "draft",
-    validFrom: contract.valid_from ?? "",
-    validTo: contract.valid_to ?? "",
     signedAt: toDateTimeLocal(contract.signed_at),
   };
 }
@@ -665,21 +654,6 @@ function normalizeTimelineOffsetValue(value: string | null | undefined) {
 function moneyValueNumber(value?: string | null) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
-}
-
-function isContractExpiringSoon(
-  contract: Pick<ContractItem, "valid_to" | "status">,
-  now = new Date(),
-) {
-  if (!contract.valid_to) return false;
-  if (contract.status === "expired" || contract.status === "terminated" || contract.status === "cancelled") {
-    return false;
-  }
-  const validTo = new Date(contract.valid_to);
-  if (Number.isNaN(validTo.getTime())) return false;
-  const threshold = new Date(now);
-  threshold.setDate(threshold.getDate() + 30);
-  return validTo >= now && validTo <= threshold;
 }
 
 function priorityBadgeClass(priority: string) {
@@ -990,11 +964,6 @@ function usePatientDetailPageContent() {
           : "Заполните обязательные поля договора.",
       sessionExpired:
         t.uiText.contracts_session_expired_retry ?? t.common_error,
-      validFromRequired: `${l("patients_valid_from")}: ${t.cf_required}`,
-      validToBeforeValidFrom:
-        lang === "de"
-          ? `${l("patients_valid_to")}: darf nicht vor ${l("patients_valid_from")} liegen.`
-          : `${l("patients_valid_to")}: дата не может быть раньше поля «${l("patients_valid_from")}».`,
     }),
     [l, lang, t],
   );
@@ -1376,11 +1345,6 @@ function usePatientDetailPageContent() {
     () => (isContractsTabActive ? contracts.filter((item) => item.status === "draft" || item.status === "sent").length : 0),
     [contracts, isContractsTabActive]
   );
-  const contractExpiringSoonCount = useMemo(() => {
-    if (!isContractsTabActive) return 0;
-    const now = new Date();
-    return contracts.filter((item) => isContractExpiringSoon(item, now)).length;
-  }, [contracts, isContractsTabActive]);
   const invoiceOutstandingAmount = useMemo(
     () => (isInvoicesTabActive ? invoices.reduce((sum, item) => sum + moneyValueNumber(item.balance_due), 0) : 0),
     [invoices, isInvoicesTabActive]
@@ -1747,8 +1711,6 @@ function usePatientDetailPageContent() {
       await createFrameworkContract({
         patient_id: id,
         status: contractCreateForm.status,
-        valid_from: toOptional(contractCreateForm.validFrom),
-        valid_to: toOptional(contractCreateForm.validTo),
         signed_at: toOptional(contractCreateForm.signedAt)
           ? new Date(contractCreateForm.signedAt).toISOString()
           : null,
@@ -1797,8 +1759,6 @@ function usePatientDetailPageContent() {
     try {
       await updateFrameworkContractStatus(contractStatusId, {
         status: contractStatusForm.status,
-        valid_from: toOptional(contractStatusForm.validFrom),
-        valid_to: toOptional(contractStatusForm.validTo),
         signed_at: toOptional(contractStatusForm.signedAt)
           ? new Date(contractStatusForm.signedAt).toISOString()
           : null,
@@ -2019,7 +1979,6 @@ function usePatientDetailPageContent() {
         canViewInvoices={canViewInvoices}
         canViewFinance={canViewFinance}
         complianceExportBusy={complianceExportBusy}
-        contractExpiringSoonCount={contractExpiringSoonCount}
         contractPendingCount={contractPendingCount}
         contractSignedCount={contractSignedCount}
         contracts={contracts}
@@ -2061,7 +2020,6 @@ function usePatientDetailPageContent() {
         invoicePaidAmountTotal={invoicePaidAmountTotal}
         invoiceTypeLabel={invoiceTypeLabel}
         invoices={invoices}
-        isContractExpiringSoon={isContractExpiringSoon}
         lang={lang}
         l={l}
         legalStatus={legalStatus}
@@ -2222,13 +2180,9 @@ function usePatientDetailPageContent() {
             onContractCreateSignedAtChange={(value) => setContractCreateForm((current) => ({ ...current, signedAt: value }))}
             onContractCreateStatusChange={(value) => setContractCreateForm((current) => ({ ...current, status: value as ContractStatus }))}
             onContractCreateSubmit={handleCreateContract}
-            onContractCreateValidFromChange={(value) => setContractCreateForm((current) => ({ ...current, validFrom: value }))}
-            onContractCreateValidToChange={(value) => setContractCreateForm((current) => ({ ...current, validTo: value }))}
             onContractStatusSignedAtChange={(value) => setContractStatusForm((current) => ({ ...current, signedAt: value }))}
             onContractStatusSubmit={handleSaveContractStatus}
             onContractStatusValueChange={(value) => setContractStatusForm((current) => ({ ...current, status: value as ContractStatus }))}
-            onContractStatusValidFromChange={(value) => setContractStatusForm((current) => ({ ...current, validFrom: value }))}
-            onContractStatusValidToChange={(value) => setContractStatusForm((current) => ({ ...current, validTo: value }))}
             onCreateDunning={handleCreateDunning}
             onDocumentUploadOpenChange={handleDocumentUploadOpenChange}
             onDunningNoteChange={setDunningNote}

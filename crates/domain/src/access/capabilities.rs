@@ -69,6 +69,7 @@ capabilities! {
     // Contracts and quotes
     ContractsView => "contracts.view",
     ContractsEdit => "contracts.edit",
+    ContractsTerminate => "contracts.terminate",
     // Invoices and payments
     InvoicesView => "invoices.view",
     InvoicesCreate => "invoices.create",
@@ -246,6 +247,7 @@ const PATIENT_MANAGER: &[Capability] = &[
     C::OrdersEconomics,
     C::ContractsView,
     C::ContractsEdit,
+    C::ContractsTerminate,
     C::InvoicesView,
     C::InvoicesCreate,
     C::DocumentsView,

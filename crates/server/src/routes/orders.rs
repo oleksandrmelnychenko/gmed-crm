@@ -2745,7 +2745,7 @@ async fn create_order(
 
     if let Some(contract_id) = contract_id {
         let contract = match sqlx::query(
-            "SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1",
+            "SELECT patient_id, lead_id, status FROM framework_contracts WHERE id = $1",
         )
         .bind(contract_id)
         .fetch_optional(&state.db)
@@ -2763,6 +2763,13 @@ async fn create_order(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
+        // A terminated contract is final; the order needs a new contract.
+        if contract.try_get::<String, _>("status").unwrap_or_default() == "terminated" {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Framework contract was terminated; create a new contract",
+            );
+        }
         let contract_patient_id = contract
             .try_get::<Option<Uuid>, _>("patient_id")
             .unwrap_or_default();
@@ -2876,7 +2883,6 @@ async fn create_order(
                    FROM framework_contracts
                    WHERE patient_id = $1
                      AND status = 'signed'
-                     AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
                    ORDER BY COALESCE(signed_at, created_at) DESC, created_at DESC
                    LIMIT 1"#,
             )
@@ -4276,7 +4282,7 @@ async fn update_order_commercial_basis(
 
     if let Some(contract_id) = body.contract_id {
         let contract = match sqlx::query(
-            "SELECT patient_id, lead_id FROM framework_contracts WHERE id = $1",
+            "SELECT patient_id, lead_id, status FROM framework_contracts WHERE id = $1",
         )
         .bind(contract_id)
         .fetch_optional(&state.db)
@@ -4294,6 +4300,13 @@ async fn update_order_commercial_basis(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
+        // A terminated contract is final; the order needs a new contract.
+        if contract.try_get::<String, _>("status").unwrap_or_default() == "terminated" {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Framework contract was terminated; create a new contract",
+            );
+        }
         let contract_patient_id = contract
             .try_get::<Option<Uuid>, _>("patient_id")
             .unwrap_or_default();

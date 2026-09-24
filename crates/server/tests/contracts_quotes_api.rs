@@ -305,7 +305,9 @@ async fn patient_contract_status_is_derived_across_multiple_framework_contracts(
         "a current signed contract must take precedence over a newer sent contract"
     );
 
-    let (status, terminated) = json_request(
+    // Ending a contract goes through the terminate action, never a plain
+    // status change, and it needs a reason.
+    let (status, rejected) = json_request(
         &app,
         "POST",
         &format!("/api/v1/framework-contracts/{signed_contract_id}/status"),
@@ -313,7 +315,51 @@ async fn patient_contract_status_is_derived_across_multiple_framework_contracts(
         Some(json!({ "status": "terminated" })),
     )
     .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {rejected}"
+    );
+    let (status, rejected) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{signed_contract_id}/terminate"),
+        &pm_bearer,
+        Some(json!({ "reason": " " })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {rejected}"
+    );
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{signed_contract_id}/terminate"),
+        &pm_bearer,
+        Some(json!({ "reason": "Patient ended the cooperation" })),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "response: {terminated}");
+    assert_eq!(terminated["status"], "terminated", "response: {terminated}");
+    assert_eq!(
+        terminated["termination_reason"], "Patient ended the cooperation",
+        "response: {terminated}"
+    );
+    assert!(
+        terminated["terminated_at"].is_string(),
+        "response: {terminated}"
+    );
+    let (status, reopened) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{signed_contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {reopened}");
     assert_eq!(
         load_patient_contract_status(&pool, patient_id)
             .await

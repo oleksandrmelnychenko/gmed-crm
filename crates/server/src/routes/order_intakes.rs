@@ -409,17 +409,11 @@ fn validate_facts(f: &Facts) -> Result<(), Response> {
     Ok(())
 }
 
-pub(crate) fn covers_period(
-    status: &str,
-    from: Option<NaiveDate>,
-    to: Option<NaiveDate>,
-    start: Option<NaiveDate>,
-    end: Option<NaiveDate>,
-) -> bool {
+/// A framework contract is concluded for an unlimited term and ends only by
+/// termination (§ 6 of the client template): once signed it covers every
+/// order, whatever the order dates, until it is terminated.
+pub(crate) fn contract_usable(status: &str) -> bool {
     status == "signed"
-        && start.zip(end).is_some_and(|(a, b)| {
-            a <= b && from.is_none_or(|v| v <= a) && to.is_none_or(|v| v >= b)
-        })
 }
 
 async fn save(
@@ -470,16 +464,22 @@ async fn save(
     let mut facts_confirmed =
         confirmed.as_ref() == Some(&json!(current)) && current == body.data.facts;
     if let Some(contract) = body.data.contract_id {
-        let belongs = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM framework_contracts WHERE id=$1 AND patient_id=$2)",
+        let status = sqlx::query_scalar::<_, String>(
+            "SELECT status FROM framework_contracts WHERE id=$1 AND patient_id=$2",
         )
         .bind(contract)
         .bind(patient)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(db_error)?;
-        if !belongs {
-            return Err(invalid("Framework contract does not belong to patient"));
+        match status.as_deref() {
+            None => return Err(invalid("Framework contract does not belong to patient")),
+            Some("terminated") => {
+                return Err(invalid(
+                    "Framework contract was terminated; create a new contract",
+                ));
+            }
+            Some(_) => {}
         }
     }
     if let Some(case_id) = body.data.case_id {
@@ -798,23 +798,15 @@ async fn checks_tx(
         validate(d, true).is_ok() && context["prepared"] == true,
         2,
     );
-    let contract = sqlx::query(
-        "SELECT status,valid_from,valid_to FROM framework_contracts WHERE id=$1 AND patient_id=$2",
+    let contract = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM framework_contracts WHERE id=$1 AND patient_id=$2",
     )
     .bind(d.contract_id)
     .bind(patient)
     .fetch_optional(&mut *conn)
     .await
     .map_err(db_error)?;
-    let contract_ok = contract.as_ref().is_some_and(|r| {
-        covers_period(
-            &r.try_get::<String, _>("status").unwrap_or_default(),
-            r.try_get("valid_from").ok().flatten(),
-            r.try_get("valid_to").ok().flatten(),
-            d.date_from,
-            d.date_to,
-        )
-    });
+    let contract_ok = contract.as_deref().is_some_and(contract_usable);
     add("contract", contract_ok, 3);
     let recheck = super::patients::load_patient_recheck_readiness(state, patient)
         .await?

@@ -23,8 +23,6 @@ type MoneyFormatter = (value?: string | null, currency?: string) => string;
 
 type ContractFormState = {
   status: string;
-  validFrom: string;
-  validTo: string;
   signedAt: string;
 };
 
@@ -61,13 +59,9 @@ type PatientFinancialDialogsProps = {
   onContractCreateSignedAtChange: (value: string) => void;
   onContractCreateStatusChange: (value: string) => void;
   onContractCreateSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
-  onContractCreateValidFromChange: (value: string) => void;
-  onContractCreateValidToChange: (value: string) => void;
   onContractStatusSignedAtChange: (value: string) => void;
   onContractStatusSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onContractStatusValueChange: (value: string) => void;
-  onContractStatusValidFromChange: (value: string) => void;
-  onContractStatusValidToChange: (value: string) => void;
   onCreateDunning: () => void | Promise<void>;
   onDunningNoteChange: (value: string) => void;
   onInvoiceDueDateChange: (value: string) => void;
@@ -162,8 +156,6 @@ type ContractCreateDialogProps = Pick<
   | "onContractCreateSignedAtChange"
   | "onContractCreateStatusChange"
   | "onContractCreateSubmit"
-  | "onContractCreateValidFromChange"
-  | "onContractCreateValidToChange"
   | "patientDetailStatusLabel"
 >;
 
@@ -178,8 +170,6 @@ function ContractCreateDialog({
   onContractCreateSignedAtChange,
   onContractCreateStatusChange,
   onContractCreateSubmit,
-  onContractCreateValidFromChange,
-  onContractCreateValidToChange,
   patientDetailStatusLabel,
 }: ContractCreateDialogProps) {
   return (
@@ -223,24 +213,6 @@ function ContractCreateDialog({
             className={inputClass}
           />
           </FormField>
-          <FormField label={l("patients_valid_from_2")} htmlFor="contract-valid-from">
-          <Input
-            id="contract-valid-from"
-            type="date"
-            value={contractCreateForm.validFrom}
-            onChange={(event) => onContractCreateValidFromChange(event.target.value)}
-            className={inputClass}
-          />
-          </FormField>
-          <FormField label={l("patients_valid_to_2")} htmlFor="contract-valid-to">
-          <Input
-            id="contract-valid-to"
-            type="date"
-            value={contractCreateForm.validTo}
-            onChange={(event) => onContractCreateValidToChange(event.target.value)}
-            className={inputClass}
-          />
-          </FormField>
         </div>
       </FormSection>
     </PatientSheetScaffold>
@@ -258,8 +230,6 @@ type ContractStatusDialogProps = Pick<
   | "onContractStatusSignedAtChange"
   | "onContractStatusSubmit"
   | "onContractStatusValueChange"
-  | "onContractStatusValidFromChange"
-  | "onContractStatusValidToChange"
   | "patientDetailStatusLabel"
 >;
 
@@ -273,8 +243,6 @@ function ContractStatusDialog({
   onContractStatusSignedAtChange,
   onContractStatusSubmit,
   onContractStatusValueChange,
-  onContractStatusValidFromChange,
-  onContractStatusValidToChange,
   patientDetailStatusLabel,
 }: ContractStatusDialogProps) {
   return (
@@ -332,24 +300,6 @@ function ContractStatusDialog({
               type="datetime-local"
               value={contractStatusForm.signedAt}
               onChange={(event) => onContractStatusSignedAtChange(event.target.value)}
-              className={inputClass}
-            />
-          </FormField>
-          <FormField label={l("patients_valid_from")} htmlFor="contract-valid-from-edit">
-            <Input
-              id="contract-valid-from-edit"
-              type="date"
-              value={contractStatusForm.validFrom}
-              onChange={(event) => onContractStatusValidFromChange(event.target.value)}
-              className={inputClass}
-            />
-          </FormField>
-          <FormField label={l("patients_valid_to")} htmlFor="contract-valid-to-edit">
-            <Input
-              id="contract-valid-to-edit"
-              type="date"
-              value={contractStatusForm.validTo}
-              onChange={(event) => onContractStatusValidToChange(event.target.value)}
               className={inputClass}
             />
           </FormField>

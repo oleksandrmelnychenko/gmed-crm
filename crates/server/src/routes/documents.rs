@@ -438,7 +438,6 @@ struct GeneratedFrameworkContractContext {
     contract_number: String,
     contract_status: String,
     valid_from: Option<NaiveDate>,
-    valid_to: Option<NaiveDate>,
     signed_at: Option<chrono::DateTime<chrono::Utc>>,
     order_number: Option<String>,
     quote_number: Option<String>,
@@ -4007,8 +4006,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "services_heading") => "Погоджені позиції",
         ("uk", "contract_number") => "Номер договору",
         ("uk", "contract_status") => "Статус договору",
-        ("uk", "valid_from") => "Дійсний з",
-        ("uk", "valid_to") => "Дійсний до",
+        ("uk", "valid_from") => "Набрав чинності",
         ("uk", "signed_at") => "Підписано",
         ("uk", "quote_number") => "Кошторис",
         ("uk", "quote_valid_until") => "Діє до",
@@ -4079,8 +4077,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "services_heading") => "Agreed positions",
         ("en", "contract_number") => "Contract number",
         ("en", "contract_status") => "Contract status",
-        ("en", "valid_from") => "Valid from",
-        ("en", "valid_to") => "Valid to",
+        ("en", "valid_from") => "In force since",
         ("en", "signed_at") => "Signed at",
         ("en", "quote_number") => "Quote",
         ("en", "quote_valid_until") => "Valid until",
@@ -4149,8 +4146,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "services_heading") => "Vereinbarte Positionen",
         (_, "contract_number") => "Vertragsnummer",
         (_, "contract_status") => "Vertragsstatus",
-        (_, "valid_from") => "Gültig ab",
-        (_, "valid_to") => "Gültig bis",
+        (_, "valid_from") => "In Kraft seit",
         (_, "signed_at") => "Unterzeichnet am",
         (_, "quote_number") => "Kostenvoranschlag",
         (_, "quote_valid_until") => "Gültig bis",
@@ -7483,7 +7479,6 @@ fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) ->
         <div class=\"meta-card\"><span class=\"label\">{contract_number_label}</span><strong>{contract_number}</strong></div>
         <div class=\"meta-card\"><span class=\"label\">{contract_status_label}</span><strong>{contract_status}</strong></div>
         <div class=\"meta-card\"><span class=\"label\">{valid_from_label}</span><strong>{valid_from}</strong></div>
-        <div class=\"meta-card\"><span class=\"label\">{valid_to_label}</span><strong>{valid_to}</strong></div>
         <div class=\"meta-card\"><span class=\"label\">{signed_at_label}</span><strong>{signed_at}</strong></div>
         </div>
         <div class=\"meta-grid\">
@@ -7513,8 +7508,6 @@ fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) ->
         contract_status = escape_html(&context.contract_status),
         valid_from_label = escape_html(translated_label(&context.language, "valid_from")),
         valid_from = escape_html(&context.valid_from.map(|value| value.format("%d.%m.%Y").to_string()).unwrap_or_else(|| "n/a".to_string())),
-        valid_to_label = escape_html(translated_label(&context.language, "valid_to")),
-        valid_to = escape_html(&context.valid_to.map(|value| value.format("%d.%m.%Y").to_string()).unwrap_or_else(|| "n/a".to_string())),
         signed_at_label = escape_html(translated_label(&context.language, "signed_at")),
         signed_at = escape_html(&context.signed_at.map(|value| value.format("%d.%m.%Y %H:%M UTC").to_string()).unwrap_or_else(|| "n/a".to_string())),
         patient_title = patient_title,
@@ -13921,9 +13914,6 @@ async fn generate_document(
                 valid_from: contract_row
                     .try_get::<Option<NaiveDate>, _>("valid_from")
                     .unwrap_or_default(),
-                valid_to: contract_row
-                    .try_get::<Option<NaiveDate>, _>("valid_to")
-                    .unwrap_or_default(),
                 signed_at: contract_row
                     .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at")
                     .unwrap_or_default(),
@@ -16118,7 +16108,7 @@ fn build_single_order_pdf(
         ),
         (
             "VII. Änderungen und Ergänzungen",
-            "Die Parteien vereinbaren, dass das Schriftformerfordernis für diesen Einzelauftrag als gewahrt gilt, sofern beide Parteien diesen mittels eines anerkannten elektronischen Signaturtools, wie beispielsweise DocuSign, unterzeichnen. Kurzfristige Änderungen oder Ergänzungen des festgelegten Leistungsumfangs dieses Einzelauftrags können hingegen per E-Mail vereinbart werden.",
+            "Die Parteien vereinbaren, dass das Schriftformerfordernis für diesen Einzelauftrag als gewahrt gilt, sofern beide Parteien diesen mittels eines anerkannten elektronischen Signaturtools, wie beispielsweise Skribble, unterzeichnen. Kurzfristige Änderungen oder Ergänzungen des festgelegten Leistungsumfangs dieses Einzelauftrags können hingegen per E-Mail vereinbart werden.",
         ),
         (
             "VIII. Salvatorische Klausel",
@@ -19145,10 +19135,17 @@ async fn load_generated_order_metadata(
         r#"SELECT COALESCE(o.signed_at::date, o.created_at::date) AS order_date,
                   COALESCE(fc.signed_at::date, fc.valid_from) AS contract_date,
                   NULLIF(BTRIM(fc.contract_number), '') AS contract_number,
+                  -- "N. Einzelauftrag" counts the single orders under this
+                  -- framework contract. Drafts cancelled before confirmation
+                  -- never existed as an order and leave no gap.
                   COALESCE((
                       SELECT COUNT(*)::BIGINT
                       FROM orders sibling
                       WHERE sibling.contract_id = o.contract_id
+                        AND (
+                            sibling.id = o.id
+                            OR NOT (sibling.intake_state = 'draft' AND sibling.status = 'cancelled')
+                        )
                         AND (
                             sibling.created_at < o.created_at
                             OR (sibling.created_at = o.created_at AND sibling.id <= o.id)
@@ -27037,7 +27034,6 @@ mod tests {
             contract_number: "RV-2026-0042".to_string(),
             contract_status: "draft".to_string(),
             valid_from: NaiveDate::from_ymd_opt(2026, 7, 1),
-            valid_to: None,
             signed_at: None,
             order_number: None,
             quote_number: None,

@@ -69,6 +69,7 @@ import {
   quoteStatusClassName,
 } from "./appearance/status-appearance";
 import {
+  CONTRACT_MANUAL_STATUSES,
   CONTRACT_STATUSES,
   DEFAULT_AGENCY_SERVICE_FILTERS,
   DEFAULT_CONTRACT_FILTERS,
@@ -83,6 +84,7 @@ import {
   buildContractsPath,
   buildQuotesPath,
   buildSearchParams,
+  canTerminateContractStatus,
   contractActionErrorMessage,
   contractToStatusForm,
   contractsPermissions,
@@ -90,6 +92,7 @@ import {
   formatCurrency,
   formatDate,
   formatDateTime,
+  isContractClosed,
   orderOptionLabel,
   patientOptionLabel,
   quoteToStatusForm,
@@ -112,6 +115,7 @@ import {
   updateContractStatus,
   updateQuoteStatus,
 } from "./data/contracts-api";
+import { ContractTerminationNote, TerminateContractDialog } from "./ui/terminate-contract-dialog";
 import type {
   AgencyServiceFilters,
   AgencyServiceFormState,
@@ -605,6 +609,7 @@ function useContractsPageContent() {
     selectedContractId,
     selectedQuoteId,
   } = contractsWorkspaceState;
+  const [terminateContractTarget, setTerminateContractTarget] = useState<ContractItem | null>(null);
   const [quoteDeleteConfirmOpen, setQuoteDeleteConfirmOpen] = useState(false);
   const [quoteDeleteBusy, setQuoteDeleteBusy] = useState(false);
   const setContracts = (nextValue: SetStateAction<ContractItem[]>) =>
@@ -944,11 +949,6 @@ function useContractsPageContent() {
           : "Заполните обязательные поля договора.",
       sessionExpired:
         t.uiText.contracts_session_expired_retry ?? t.common_error,
-      validFromRequired: `${t.providers_service_valid_from}: ${t.cf_required}`,
-      validToBeforeValidFrom:
-        lang === "de"
-          ? `${t.providers_service_valid_to}: darf nicht vor ${t.providers_service_valid_from} liegen.`
-          : `${t.providers_service_valid_to}: дата не может быть раньше поля «${t.providers_service_valid_from}».`,
     }),
     [
       lang,
@@ -957,8 +957,6 @@ function useContractsPageContent() {
       t.contracts_notes,
       t.contracts_patient,
       t.contracts_signed_at,
-      t.providers_service_valid_from,
-      t.providers_service_valid_to,
       t.uiText.contracts_session_expired_retry,
       t.users_status,
     ],
@@ -1091,28 +1089,27 @@ function useContractsPageContent() {
         ),
       },
       {
-        id: "valid_from",
-        label: t.providers_service_valid_from,
-        accessor: (row) => row.valid_from ?? "",
-        sortable: true,
-        width: 150,
-        render: (row) => formatDate(row.valid_from, locale, t.common_not_set),
-      },
-      {
-        id: "valid_to",
-        label: t.providers_service_valid_to,
-        accessor: (row) => row.valid_to ?? "",
-        sortable: true,
-        width: 150,
-        render: (row) => formatDate(row.valid_to, locale, t.common_not_set),
-      },
-      {
         id: "signed_at",
         label: t.contracts_signed_at,
         accessor: (row) => row.signed_at ?? "",
         sortable: true,
         width: 180,
         render: (row) => formatDateTime(row.signed_at, locale, t.common_not_set),
+      },
+      {
+        id: "terminated_at",
+        label: lang === "de" ? "Gekündigt am" : "Расторгнут",
+        accessor: (row) => row.terminated_at ?? "",
+        sortable: true,
+        width: 180,
+        render: (row) =>
+          row.terminated_at ? (
+            <span title={row.termination_reason ?? undefined}>
+              {formatDate(row.terminated_at, locale, t.common_not_set)}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">{t.common_not_set}</span>
+          ),
       },
       {
         id: "updated_at",
@@ -1124,13 +1121,12 @@ function useContractsPageContent() {
       },
     ],
     [
+      lang,
       locale,
       t.common_not_set,
       t.contracts_framework,
       t.contracts_patient,
       t.contracts_signed_at,
-      t.providers_service_valid_from,
-      t.providers_service_valid_to,
       t.users_status,
       text.updatedAt,
       contractStatusLabel,
@@ -1746,8 +1742,6 @@ function useContractsPageContent() {
       const payload = {
         patient_id: createContractForm.patientId,
         status: createContractForm.status,
-        valid_from: toOptional(createContractForm.validFrom),
-        valid_to: toOptional(createContractForm.validTo),
         signed_at: toOptional(createContractForm.signedAt)
           ? new Date(createContractForm.signedAt).toISOString()
           : null,
@@ -1855,8 +1849,17 @@ function useContractsPageContent() {
   const agencyServiceBaseline = agencyServices.find((service) => service.id === agencyServiceForm.id);
   const agencyServiceDirty = Boolean(agencyServiceBaseline && hasAgencyServiceFormChanges(agencyServiceForm, agencyServiceToForm(agencyServiceBaseline)));
 
+  const contractClosed = Boolean(contractDetail && isContractClosed(contractDetail.status));
+
+  function handleContractTerminated(updated: ContractItem) {
+    if (updated.id === selectedContractId) {
+      applyContractDetail(updated);
+    }
+    setContractsReloadToken((current) => current + 1);
+  }
+
   async function handleSaveContractStatus() {
-    if (!selectedContractId || !contractStatusDirty || contractStatusBusy) return;
+    if (!selectedContractId || !contractStatusDirty || contractStatusBusy || contractClosed) return;
     const validationError = validateContractStatusForm(
       contractStatusForm,
       createContractValidationMessages,
@@ -1875,8 +1878,6 @@ function useContractsPageContent() {
       }
       await updateContractStatus(selectedContractId, {
         status: contractStatusForm.status,
-        valid_from: toOptional(contractStatusForm.validFrom),
-        valid_to: toOptional(contractStatusForm.validTo),
         signed_at: toOptional(contractStatusForm.signedAt)
           ? new Date(contractStatusForm.signedAt).toISOString()
           : null,
@@ -2606,7 +2607,7 @@ function useContractsPageContent() {
                         }
                         className={selectClassName}
                       >
-                        {CONTRACT_STATUSES.map((status) => (
+                        {CONTRACT_MANUAL_STATUSES.map((status) => (
                           <option key={status} value={status}>
                             {contractStatusLabel(status)}
                           </option>
@@ -2619,33 +2620,6 @@ function useContractsPageContent() {
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.contractDates)}</h2>
                   <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    <Field label={t.providers_service_valid_from} required>
-                      <Input
-                        type="date"
-                        aria-invalid={Boolean(createContractError && !createContractForm.validFrom)}
-                        className={shellInputClassName}
-                        value={createContractForm.validFrom}
-                        onChange={(event) =>
-                          setCreateContractForm((current) => ({ ...current, validFrom: event.target.value }))
-                        }
-                      />
-                    </Field>
-                    <Field label={t.providers_service_valid_to}>
-                      <Input
-                        type="date"
-                        aria-invalid={Boolean(
-                          createContractError &&
-                          createContractForm.validFrom &&
-                          createContractForm.validTo &&
-                          createContractForm.validTo < createContractForm.validFrom,
-                        )}
-                        className={shellInputClassName}
-                        value={createContractForm.validTo}
-                        onChange={(event) =>
-                          setCreateContractForm((current) => ({ ...current, validTo: event.target.value }))
-                        }
-                      />
-                    </Field>
                     <Field label={t.contracts_signed_at} className="sm:col-span-2">
                       <Input
                         type="datetime-local"
@@ -2827,15 +2801,8 @@ function useContractsPageContent() {
                           label={t.contracts_signed_at}
                           value={formatDateTime(contractDetail.signed_at, locale, t.common_not_set)}
                         />
-                        <ContractSummaryLine
-                          label={t.providers_service_valid_from}
-                          value={formatDate(contractDetail.valid_from, locale, t.common_not_set)}
-                        />
-                        <ContractSummaryLine
-                          label={t.providers_service_valid_to}
-                          value={formatDate(contractDetail.valid_to, locale, t.common_not_set)}
-                        />
                       </div>
+                      <ContractTerminationNote contract={contractDetail} lang={lang} />
                       <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-4">
                           <div>
@@ -2919,6 +2886,7 @@ function useContractsPageContent() {
                         <Field label={t.users_status}>
                           <NativeComboboxSelect
                             value={contractStatusForm.status}
+                            disabled={contractClosed}
                             onChange={(event) =>
                               setContractStatusForm((current) => ({
                                 ...current,
@@ -2927,7 +2895,10 @@ function useContractsPageContent() {
                             }
                             className={selectClassName}
                           >
-                            {CONTRACT_STATUSES.map((status) => (
+                            {(contractClosed
+                              ? [contractDetail.status as ContractStatus]
+                              : CONTRACT_MANUAL_STATUSES
+                            ).map((status) => (
                               <option key={status} value={status}>
                                 {contractStatusLabel(status)}
                               </option>
@@ -2944,26 +2915,6 @@ function useContractsPageContent() {
                             }
                           />
                         </Field>
-                        <Field label={t.providers_service_valid_from}>
-                          <Input
-                            type="date"
-                            className={shellInputClassName}
-                            value={contractStatusForm.validFrom}
-                            onChange={(event) =>
-                              setContractStatusForm((current) => ({ ...current, validFrom: event.target.value }))
-                            }
-                          />
-                        </Field>
-                        <Field label={t.providers_service_valid_to}>
-                          <Input
-                            type="date"
-                            className={shellInputClassName}
-                            value={contractStatusForm.validTo}
-                            onChange={(event) =>
-                              setContractStatusForm((current) => ({ ...current, validTo: event.target.value }))
-                            }
-                          />
-                        </Field>
                         <Field label={t.contracts_notes} className="sm:col-span-2">
                           <textarea
                             className={textareaClassName}
@@ -2977,12 +2928,23 @@ function useContractsPageContent() {
                           />
                         </Field>
                       </div>
-                      <div className="flex justify-end pt-1">
+                      <div className="flex flex-wrap justify-end gap-2 pt-1">
+                        {permissions.canTerminateContract && canTerminateContractStatus(contractDetail.status) ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 rounded-lg px-3.5 text-destructive hover:text-destructive"
+                            disabled={contractStatusBusy}
+                            onClick={() => setTerminateContractTarget(contractDetail)}
+                          >
+                            {lang === "de" ? "Vertrag kündigen" : "Расторгнуть договор"}
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           className="h-9 rounded-lg px-3.5"
                           onClick={() => void handleSaveContractStatus()}
-                          disabled={contractStatusBusy || !permissions.canManageContract || !contractStatusDirty}
+                          disabled={contractStatusBusy || contractClosed || !permissions.canManageContract || !contractStatusDirty}
                         >
                           {contractStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {text.saveContract}
@@ -3249,6 +3211,12 @@ function useContractsPageContent() {
         destructive
         onCancel={() => setQuoteDeleteConfirmOpen(false)}
         onConfirm={() => void handleDeleteQuote()}
+      />
+      <TerminateContractDialog
+        contract={terminateContractTarget}
+        lang={lang}
+        onClose={() => setTerminateContractTarget(null)}
+        onTerminated={handleContractTerminated}
       />
     </>
   );

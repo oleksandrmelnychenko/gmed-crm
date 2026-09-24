@@ -1,5 +1,5 @@
 import { OrderPatientDocumentReview, OrderExistingContractsTable, type RequestReviewRow } from "@/pages/orders/ui/order-patient-document-review";
-import { contractCoversOrder, formatIntakeDate } from "@/pages/orders/model/order-intake";
+import { isContractUsable } from "@/pages/orders/model/order-intake";
 import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
 import { usePreviousRequests } from "../model/use-previous-requests";
 import { PreviousRequestsPanel } from "./previous-requests-panel";
@@ -302,7 +302,6 @@ type Draft = {
   costEstimateAdditionalLanguage: CostEstimateAdditionalLanguage;
   programDateFrom: string;
   programDateTo: string;
-  contractEffectiveDate: string;
   frameworkContractId: string;
   costThreshold: string;
   privacyConsent: boolean;
@@ -527,7 +526,6 @@ const HEALTHCARE_CONSENT_ID = "lead-wizard-healthcare-consent";
 const CONFIDENTIALITY_RELEASE_ID = "lead-wizard-confidentiality-release";
 const PRIVACY_DOCUMENT_ID = "lead-wizard-privacy-document";
 const FRAMEWORK_DOCUMENT_ID = "lead-wizard-framework-document";
-const CONTRACT_EFFECTIVE_DATE_ID = "lead-wizard-contract-effective-date";
 const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
 const ORDER_COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-order-cost-estimate-document";
@@ -832,7 +830,6 @@ function autosavePayload(
       referrer: draft.referrer,
       program_date_from: draft.programDateFrom,
       program_date_to: draft.programDateTo,
-      contract_effective_date: draft.contractEffectiveDate,
       framework_contract_id: draft.frameworkContractId || null,
       cost_threshold: draft.costThreshold,
       registration_country: draft.registrationCountry,
@@ -1481,7 +1478,6 @@ function draftFromLead(lead: LeadDetail): Draft {
     ),
     programDateFrom: inputString(lead.wizard_state?.["program_date_from"]),
     programDateTo: inputString(lead.wizard_state?.["program_date_to"]),
-    contractEffectiveDate: inputString(lead.wizard_state?.["contract_effective_date"]),
     frameworkContractId: inputString(lead.wizard_state?.["framework_contract_id"]),
     costThreshold: inputString(lead.wizard_state?.["cost_threshold"]),
     privacyConsent: lead.consent_privacy_practices,
@@ -1543,7 +1539,6 @@ function blankDraft(): Draft {
     costEstimateAdditionalLanguage: "",
     programDateFrom: "",
     programDateTo: "",
-    contractEffectiveDate: "",
     frameworkContractId: "",
     costThreshold: "",
     privacyConsent: false,
@@ -2023,7 +2018,6 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
     "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
-    "Framework contract does not cover the order period": tx("Договор не покрывает период заказа: измените дату начала договора или даты программы", "Der Rahmenvertrag deckt den Auftragszeitraum nicht ab: Vertragsbeginn oder Programmdaten anpassen"),
     "Framework contract document is missing": tx("Создайте документ рамочного договора", "Rahmenvertragsdokument erstellen"),
     "Onboarding order is missing": tx("Создайте заказ", "Auftrag erstellen"),
     "Order needs at least one valid service": tx("Добавьте в заказ хотя бы одну услугу", "Mindestens eine Leistung zum Auftrag hinzufügen"),
@@ -2060,7 +2054,6 @@ function readinessReasonStep(reason: string): StepId {
     "Enhanced due diligence document is not signed": "documents",
     "Anamnesis intake is incomplete": "medical",
     "Framework contract is not signed": "commercial",
-    "Framework contract does not cover the order period": "commercial",
     "Framework contract document is missing": "commercial",
     "Onboarding order is missing": "commercial",
     "Order needs at least one valid service": "commercial",
@@ -2091,7 +2084,6 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Signed confidentiality release is missing": CONFIDENTIALITY_RELEASE_ID,
     "Anamnesis intake is incomplete": SERVICE_CONCERN_ID,
     "Framework contract is not signed": FRAMEWORK_DOCUMENT_ID,
-    "Framework contract does not cover the order period": FRAMEWORK_DOCUMENT_ID,
     "Framework contract document is missing": FRAMEWORK_DOCUMENT_ID,
     "Order document is missing": ORDER_DOCUMENT_ID,
     "Order cost estimate document is missing": ORDER_COST_ESTIMATE_DOCUMENT_ID,
@@ -3149,8 +3141,6 @@ export function LeadWizard({
         ...storedLeadDraft,
         programDateFrom: storedLeadDraft.programDateFrom || nextOrder?.date_from || "",
         programDateTo: storedLeadDraft.programDateTo || nextOrder?.date_to || "",
-        contractEffectiveDate:
-          storedLeadDraft.contractEffectiveDate || nextContracts[0]?.valid_from || "",
       };
       const caseDraft: Draft = {
         ...leadDraft,
@@ -3507,10 +3497,10 @@ export function LeadWizard({
   const order = orders[0] ?? null;
   const contract = draft?.frameworkContractId
     ? [...contracts, ...patientReview.contracts].find(item => item.id === draft.frameworkContractId) ?? null
-    : contracts.find((item) => item.status !== "terminated") ?? null;
+    : contracts.find((item) => item.status !== "terminated" && item.status !== "expired") ?? null;
   const attachedPatientId = existingPatient?.id ?? lead?.prospect_patient_id;
   const inheritedContract = Boolean(contract?.patient_id && contract.patient_id === attachedPatientId);
-  const periodWarnings = draft ? orderPeriodWarnings(draft.programDateFrom, draft.programDateTo, contract) : [];
+  const periodWarnings = draft ? orderPeriodWarnings(draft.programDateFrom, draft.programDateTo) : [];
   const periodWarningBanner = periodWarnings.length ? (
     <Banner tone="warning">
       <ul data-testid="order-period-warnings" className="space-y-1 text-xs leading-5">
@@ -3518,22 +3508,19 @@ export function LeadWizard({
       </ul>
     </Banner>
   ) : null;
-  // Repeat intake: preselect the patient's signed framework contract that
-  // covers the requested period, so the new order attaches to it instead of
-  // silently creating a second contract.
+  // Repeat intake: preselect the patient's latest signed framework contract.
+  // Framework contracts are open-ended until terminated, so the new order
+  // attaches to it instead of silently creating a second contract.
   const autoContractRef = useRef(false);
   useEffect(() => {
     if (!isRepeatIntake || !draft || draft.frameworkContractId || autoContractRef.current) return;
     if (contracts.length > 0 || patientReview.contracts.length === 0) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const candidates = patientReview.contracts.filter((item) => (
-      item.status === "signed" && (!item.valid_to || item.valid_to >= today)
-    ));
-    const preferred = candidates.find((item) => contractCoversOrder(item, draft.programDateFrom || null, draft.programDateTo || null))
-      ?? (draft.programDateFrom || draft.programDateTo ? null : candidates[0]);
+    const preferred = patientReview.contracts
+      .filter(isContractUsable)
+      .sort((left, right) => (right.signed_at ?? right.created_at).localeCompare(left.signed_at ?? left.created_at))[0];
     if (!preferred) return;
     autoContractRef.current = true;
-    setDraft((current) => current ? { ...current, frameworkContractId: preferred.id, contractEffectiveDate: preferred.valid_from ?? "" } : current);
+    setDraft((current) => current ? { ...current, frameworkContractId: preferred.id } : current);
   }, [contracts.length, draft, isRepeatIntake, patientReview.contracts]);
   const currentPatientEvidence = useMemo(() => patientReview.documents.filter(item => item.is_latest_version && item.status === "active" && !item.file_deleted_at
     && ["identity", "confidentiality_release", "privacy_information", "privacy_consents"].includes(wizardDocumentKind(item) ?? "")), [patientReview.documents]);
@@ -4854,26 +4841,16 @@ ${serviceCommentLines.join("\n")}`
     }
     if (!(await save("commercial", false))) throw new Error(tx("Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"));
     if (draft.frameworkContractId && !contract) throw new Error(tx("Выбранный договор недоступен. Обновите проверку документов.", "Der gewählte Vertrag ist nicht verfügbar. Aktualisieren Sie die Dokumentenprüfung."));
-    if (inheritedContract && contract && !contractCoversOrder(contract, draft.programDateFrom || null, draft.programDateTo || null)) {
-      throw new Error(tx("Сохранённый договор не покрывает весь период. Выберите подходящий договор или оформите новый.", "Der gespeicherte Vertrag deckt den Zeitraum nicht ab. Wählen Sie einen passenden Vertrag oder erstellen Sie einen neuen."));
+    if (inheritedContract && contract && !isContractUsable(contract)) {
+      throw new Error(tx("Сохранённый договор не подписан или расторгнут. Выберите подписанный договор или оформите новый.", "Der gespeicherte Vertrag ist nicht unterzeichnet oder wurde gekündigt. Wählen Sie einen unterzeichneten Vertrag oder erstellen Sie einen neuen."));
     }
     let contractId = contract?.id;
     if (!contractId) {
       contractId = (await createContract({
         lead_id: leadId,
         status: "sent",
-        valid_from: draft.contractEffectiveDate || undefined,
         client_reference: "lead-onboarding:" + leadId + ":framework",
       })).id;
-    } else if (
-      !inheritedContract
-      && draft.contractEffectiveDate
-      && draft.contractEffectiveDate !== contract?.valid_from
-    ) {
-      await updateContractStatus(contractId, {
-        status: contract?.status || "sent",
-        valid_from: draft.contractEffectiveDate,
-      });
     }
     let orderId = order?.id;
     const needsDescription = commercialNeedsDescription();
@@ -5309,7 +5286,6 @@ ${serviceCommentLines.join("\n")}`
           : "patient",
         status: "active",
         bindings: {
-          contract_date: draft.contractEffectiveDate || undefined,
           cost_threshold: draft.costThreshold.trim() || undefined,
           party_city: draft.city.trim() || undefined,
           party_sign_place: draft.city.trim() || undefined,
@@ -5713,9 +5689,9 @@ ${serviceCommentLines.join("\n")}`
   const reviewContracts = [...contracts.filter((item) => item.lead_id && !patientReview.contracts.some((known) => known.id === item.id)), ...patientReview.contracts];
   const patientContractReview = repeatPatientId && draft ? <Section title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
     {periodWarningBanner ? <div className="mb-3">{periodWarningBanner}</div> : null}
-    <OrderExistingContractsTable contracts={reviewContracts} dateFrom={draft.programDateFrom || null} dateTo={draft.programDateTo || null} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
-      onSelect={id => { const selected = reviewContracts.find(item => item.id === id); if (selected) setDraft(current => current ? { ...current, frameworkContractId: id, contractEffectiveDate: selected.valid_from ?? "" } : current); }} />
-    {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "", contractEffectiveDate: new Date().toISOString().slice(0, 10) } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
+    <OrderExistingContractsTable contracts={reviewContracts} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
+      onSelect={id => { if (reviewContracts.some(item => item.id === id)) setDraft(current => current ? { ...current, frameworkContractId: id } : current); }} />
+    {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "" } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
   const stepIndex = STEPS.findIndex((item) => item.id === step);
   const previousStep = STEPS[stepIndex - 1];
@@ -7342,17 +7318,6 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 >
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={tx("Начало действия договора", "Vertragsbeginn")}>
-                    <Input
-                      className={inputClass}
-                      id={CONTRACT_EFFECTIVE_DATE_ID}
-                      name="contract_effective_date"
-                      disabled={inheritedContract}
-                      type="date"
-                      value={draft.contractEffectiveDate}
-                      onChange={(event) => patch("contractEffectiveDate", event.target.value)}
-                    />
-                  </Field>
                   <Field
                     label={tx(
                       "Граница согласования превышения бюджета",
@@ -7375,7 +7340,7 @@ ${serviceCommentLines.join("\n")}`
                     </div>
                   </Field>
                 </div>
-                {inheritedContract ? <p className="text-sm">{tx("Используется подписанный договор", "Unterzeichneter Vertrag wird verwendet")}: {contract?.contract_number} · {formatIntakeDate(contract?.valid_from)} – {contract?.valid_to ? formatIntakeDate(contract.valid_to) : tx("Бессрочно", "Unbefristet")}</p> : <WizardDocumentRows
+                {inheritedContract ? <p className="text-sm">{tx("Используется подписанный договор", "Unterzeichneter Vertrag wird verwendet")}: {contract?.contract_number} · {tx("Бессрочный", "Unbefristet")}</p> : <WizardDocumentRows
                   documents={commercialDocuments.framework_contract}
                   complianceKind="framework_contract"
                   showSignatureStatus={false}

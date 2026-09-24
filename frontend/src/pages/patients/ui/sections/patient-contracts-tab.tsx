@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Eye, FileSignature, Pencil, Plus } from "lucide-react";
+import { Ban, Eye, FileSignature, Pencil, Plus } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,16 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { useCan } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import {
+  canTerminateContractStatus,
+  isContractClosed,
+} from "@/pages/contracts/model/contracts-model";
+import {
+  ContractTerminationNote,
+  TerminateContractDialog,
+} from "@/pages/contracts/ui/terminate-contract-dialog";
 
 import type { ContractItem } from "../../model/detail-tab-types";
 
@@ -39,7 +48,6 @@ type PatientContractsTabProps = {
   contracts: ContractItem[];
   contractSignedCount: number;
   contractPendingCount: number;
-  contractExpiringSoonCount: number;
   canManageContracts: boolean;
   onCreateContract: () => void;
   onEditContractStatus: (contract: ContractItem) => void;
@@ -47,7 +55,8 @@ type PatientContractsTabProps = {
   statusLabel: StatusLabelFn;
   formatDate: DateFormatter;
   formatDateTime: DateTimeFormatter;
-  isContractExpiringSoon: (contract: ContractItem) => boolean;
+  /** Reloads the patient's contracts after a termination. */
+  onContractTerminated: () => void;
 };
 
 export function PatientContractsTab({
@@ -62,10 +71,15 @@ export function PatientContractsTab({
   statusLabel,
   formatDate,
   formatDateTime,
-  isContractExpiringSoon,
+  onContractTerminated,
 }: PatientContractsTabProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const canTerminateContracts = useCan("contracts.terminate");
   const [selectedContract, setSelectedContract] = useState<ContractItem | null>(null);
+  const [terminateTarget, setTerminateTarget] = useState<ContractItem | null>(null);
+  const terminateLabel = lang === "de" ? "Vertrag kündigen" : "Расторгнуть договор";
+  const canTerminate = (contract: ContractItem) =>
+    canTerminateContracts && canTerminateContractStatus(contract.status);
   const pagination = useDataTablePagination(
     contracts,
     contracts.map((contract) => contract.id).join(":"),
@@ -118,39 +132,19 @@ export function PatientContractsTab({
         ),
       },
       {
-        id: "valid_from",
-        label: l("patients_valid_from"),
-        accessor: (contract) => contract.valid_from ?? "",
+        id: "terminated_at",
+        label: lang === "de" ? "Gekündigt am" : "Расторгнут",
+        accessor: (contract) => contract.terminated_at ?? "",
         sortable: true,
         filterType: "date",
-        width: 150,
+        width: 170,
         render: (contract) => (
-          <span className="font-mono text-xs tabular-nums text-foreground">
-            {formatDate(contract.valid_from, commonNotSet)}
+          <span
+            className="font-mono text-xs tabular-nums text-foreground"
+            title={contract.termination_reason ?? undefined}
+          >
+            {formatDate(contract.terminated_at, commonNotSet)}
           </span>
-        ),
-      },
-      {
-        id: "valid_to",
-        label: l("patients_valid_to"),
-        accessor: (contract) => contract.valid_to ?? "",
-        sortable: true,
-        filterType: "date",
-        width: 220,
-        render: (contract) => (
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span className="shrink-0 font-mono text-xs tabular-nums text-foreground">
-              {formatDate(contract.valid_to, commonNotSet)}
-            </span>
-            {contract.valid_to && isContractExpiringSoon(contract) ? (
-              <Badge
-                variant="outline"
-                className="rounded-full border-amber-200 bg-amber-50 font-mono text-[10px] text-amber-700"
-              >
-                {l("patients_expiring_soon_2")}
-              </Badge>
-            ) : null}
-          </div>
         ),
       },
     ],
@@ -158,8 +152,8 @@ export function PatientContractsTab({
       commonNotSet,
       formatDate,
       formatDateTime,
-      isContractExpiringSoon,
       l,
+      lang,
       statusColors,
       statusLabel,
       t,
@@ -219,7 +213,7 @@ export function PatientContractsTab({
                 >
                   <Eye className="size-3.5" />
                 </Button>
-                {canManageContracts ? (
+                {canManageContracts && !isContractClosed(contract.status) ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -235,9 +229,25 @@ export function PatientContractsTab({
                     <Pencil className="size-3.5" />
                   </Button>
                 ) : null}
+                {canTerminate(contract) ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="size-7 rounded-full text-muted-foreground hover:text-destructive"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setTerminateTarget(contract);
+                    }}
+                    aria-label={`${terminateLabel}: ${contract.contract_number}`}
+                    title={terminateLabel}
+                  >
+                    <Ban className="size-3.5" />
+                  </Button>
+                ) : null}
               </div>
             )}
-            rowActionsWidth={100}
+            rowActionsWidth={132}
             toolbarAfter={
               <DataTablePager
                 pageIndex={pagination.pageIndex}
@@ -293,8 +303,6 @@ export function PatientContractsTab({
                   </Badge>,
                 ],
                 [l("patients_signed"), formatDateTime(selectedContract.signed_at, commonNotSet)],
-                [l("patients_valid_from"), formatDate(selectedContract.valid_from, commonNotSet)],
-                [l("patients_valid_to"), formatDate(selectedContract.valid_to, commonNotSet)],
                 [t.users_created, formatDateTime(selectedContract.created_at, commonNotSet)],
               ].map(([label, value]) => (
                 <div
@@ -309,9 +317,27 @@ export function PatientContractsTab({
               ))}
             </div>
           ) : null}
+          {selectedContract ? (
+            <ContractTerminationNote contract={selectedContract} lang={lang} />
+          ) : null}
 
           <DialogFooter>
-            {selectedContract && canManageContracts ? (
+            {selectedContract && canTerminate(selectedContract) ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={() => {
+                  const contract = selectedContract;
+                  setSelectedContract(null);
+                  setTerminateTarget(contract);
+                }}
+              >
+                <Ban aria-hidden="true" className="size-3.5" />
+                {terminateLabel}
+              </Button>
+            ) : null}
+            {selectedContract && canManageContracts && !isContractClosed(selectedContract.status) ? (
               <Button
                 type="button"
                 variant="outline"
@@ -331,6 +357,12 @@ export function PatientContractsTab({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <TerminateContractDialog
+        contract={terminateTarget}
+        lang={lang}
+        onClose={() => setTerminateTarget(null)}
+        onTerminated={() => onContractTerminated()}
+      />
     </>
   );
 }

@@ -265,7 +265,6 @@ type PatientDetailWorkspaceContentProps = {
   canViewInvoices: boolean;
   canViewFinance: boolean;
   complianceExportBusy: boolean;
-  contractExpiringSoonCount: number;
   contractPendingCount: number;
   contractSignedCount: number;
   contracts: ContractItem[];
@@ -307,7 +306,6 @@ type PatientDetailWorkspaceContentProps = {
   invoicePaidAmountTotal: number;
   invoiceTypeLabel: (value: string) => string;
   invoices: InvoiceItem[];
-  isContractExpiringSoon: (contract: ContractItem) => boolean;
   lang: "de" | "ru";
   l: LocalizeFn;
   legalStatus: PatientLegalStatus;
@@ -434,7 +432,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canViewInvoices,
     canViewFinance,
     complianceExportBusy,
-    contractExpiringSoonCount,
     contractPendingCount,
     contractSignedCount,
     contracts,
@@ -476,7 +473,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     invoicePaidAmountTotal,
     invoiceTypeLabel,
     invoices,
-    isContractExpiringSoon,
     lang,
     l,
     legalStatus,
@@ -992,7 +988,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               contracts={contracts}
               contractSignedCount={contractSignedCount}
               contractPendingCount={contractPendingCount}
-              contractExpiringSoonCount={contractExpiringSoonCount}
               canManageContracts={canManageContracts}
               onCreateContract={onCreateContract}
               onEditContractStatus={onEditContractStatus}
@@ -1000,7 +995,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               statusLabel={patientDetailStatusLabel}
               formatDate={formatDate}
               formatDateTime={formatDateTime}
-              isContractExpiringSoon={isContractExpiringSoon}
+              onContractTerminated={reload}
             />
           ) : null}
 

@@ -7,6 +7,9 @@ import {
   resolveAgencyServicePrice,
   validateCreateContractForm,
   validateContractStatusForm,
+  canTerminateContractStatus,
+  CONTRACT_MANUAL_STATUSES,
+  isValidTerminationReason,
   type ContractFormValidationMessages,
 } from "./contracts-model";
 import type { AgencyServiceItem } from "./types";
@@ -20,8 +23,6 @@ const messages: ContractFormValidationMessages = {
   patientRequired: "Patient is required.",
   requiredFields: "Please fill in the required contract fields.",
   sessionExpired: "Session expired.",
-  validFromRequired: "Valid from is required.",
-  validToBeforeValidFrom: "Valid to cannot be before valid from.",
 };
 
 const datedService: AgencyServiceItem = {
@@ -136,75 +137,51 @@ describe("validateCreateContractForm", () => {
     expect(validateCreateContractForm(blankContractForm(), messages)).toBe(
       "Patient is required.",
     );
-    expect(
-      validateCreateContractForm(
-        {
-          ...blankContractForm("patient-1"),
-          validFrom: "",
-        },
-        messages,
-      ),
-    ).toBe("Valid from is required.");
   });
 
-  it("validates date order and JSON conditions locally", () => {
+  it("validates JSON conditions locally", () => {
     expect(
       validateCreateContractForm(
-        {
-          ...blankContractForm("patient-1"),
-          validFrom: "2026-06-15",
-          validTo: "2026-06-14",
-        },
-        messages,
-      ),
-    ).toBe("Valid to cannot be before valid from.");
-    expect(
-      validateCreateContractForm(
-        {
-          ...blankContractForm("patient-1"),
-          conditionsText: "{not json",
-          validFrom: "2026-06-15",
-        },
+        { ...blankContractForm("patient-1"), conditionsText: "{not json" },
         messages,
       ),
     ).toBe("Conditions must be valid JSON.");
   });
 
-  it("accepts the minimal valid contract form", () => {
-    expect(
-      validateCreateContractForm(
-        {
-          ...blankContractForm("patient-1"),
-          validFrom: "2026-06-15",
-        },
-        messages,
-      ),
-    ).toBe("");
+  it("accepts an open-ended contract without any validity dates", () => {
+    expect(validateCreateContractForm(blankContractForm("patient-1"), messages)).toBe("");
+    expect(blankContractForm("patient-1")).not.toHaveProperty("validFrom");
+    expect(blankContractForm("patient-1")).not.toHaveProperty("validTo");
   });
 });
 
 describe("validateContractStatusForm", () => {
-  it("validates editable date order and JSON conditions before update", () => {
-    expect(
-      validateContractStatusForm(
-        {
-          validFrom: "2026-06-15",
-          validTo: "2026-06-14",
-          conditionsText: "",
-        },
-        messages,
-      ),
-    ).toBe("Valid to cannot be before valid from.");
-    expect(
-      validateContractStatusForm(
-        {
-          validFrom: "",
-          validTo: "",
-          conditionsText: "{not json",
-        },
-        messages,
-      ),
-    ).toBe("Conditions must be valid JSON.");
+  it("validates JSON conditions before update", () => {
+    expect(validateContractStatusForm({ conditionsText: "{not json" }, messages)).toBe(
+      "Conditions must be valid JSON.",
+    );
+    expect(validateContractStatusForm({ conditionsText: "" }, messages)).toBe("");
+  });
+});
+
+describe("framework contract termination", () => {
+  it("never offers terminated or expired as a manual status", () => {
+    expect(CONTRACT_MANUAL_STATUSES).toEqual(["draft", "sent", "signed"]);
+  });
+
+  it("allows termination only for signed or sent contracts", () => {
+    expect(canTerminateContractStatus("signed")).toBe(true);
+    expect(canTerminateContractStatus("sent")).toBe(true);
+    for (const status of ["draft", "terminated", "expired"]) {
+      expect(canTerminateContractStatus(status)).toBe(false);
+    }
+  });
+
+  it("requires a trimmed reason of 3 to 1000 characters", () => {
+    expect(isValidTerminationReason("  ab ")).toBe(false);
+    expect(isValidTerminationReason(" abc ")).toBe(true);
+    expect(isValidTerminationReason("x".repeat(1000))).toBe(true);
+    expect(isValidTerminationReason("x".repeat(1001))).toBe(false);
   });
 });
 

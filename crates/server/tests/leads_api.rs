@@ -1959,28 +1959,36 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
-    // Expiry during the visit fails even if the stored status still says signed.
-    for (contract_status, end) in [("signed", "2030-09-14"), ("expired", "2030-12-31")] {
+    // The contract has no validity period: legacy dates that do not cover the
+    // visit are ignored, and only a terminated contract blocks the repeat order.
+    for (contract_status, passes) in [("signed", true), ("terminated", false)] {
         sqlx::query(
-            "UPDATE framework_contracts SET status = $2, valid_to = $3::text::date WHERE id = $1",
+            "UPDATE framework_contracts SET status = $2, valid_to = DATE '2030-09-14' WHERE id = $1",
         )
         .bind(artifacts.contract_id)
         .bind(contract_status)
-        .bind(end)
         .execute(pool)
         .await
         .unwrap();
         let (status, checked) =
             json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
         assert_eq!(status, StatusCode::OK, "{checked}");
-        assert_eq!(checked["readiness"]["conversion_ready"], false, "{checked}");
         let contract_check = checked["readiness"]["checks"]
             .as_array()
             .unwrap()
             .iter()
             .find(|check| check["key"] == "contract_signed")
             .unwrap();
-        assert_eq!(contract_check["passed"], false, "{contract_check}");
+        assert_eq!(contract_check["passed"], passes, "{contract_check}");
+        if !passes {
+            assert_eq!(checked["readiness"]["conversion_ready"], false, "{checked}");
+            assert!(
+                checked
+                    .to_string()
+                    .contains("Framework contract was terminated"),
+                "{checked}"
+            );
+        }
     }
     sqlx::query("UPDATE framework_contracts SET status = 'signed', valid_to = DATE '2030-12-31' WHERE id = $1")
         .bind(artifacts.contract_id).execute(pool).await.unwrap();

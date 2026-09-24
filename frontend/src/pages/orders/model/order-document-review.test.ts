@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { contractValidity, passportReviewStatus } from "./order-document-review";
-import { contractCoversOrder } from "./order-intake";
+import { contractUsability, passportReviewStatus } from "./order-document-review";
+import { isContractUsable } from "./order-intake";
 
 describe("existing patient document validity", () => {
   it.each([
@@ -13,22 +13,19 @@ describe("existing patient document validity", () => {
     expect(passportReviewStatus(expiry, end, "2026-09-12")).toBe(expected);
   });
 
-  it("checks actual contract dates even if its saved status is still signed", () => {
-    const contract = { status: "signed", valid_from: "2025-01-01", valid_to: "2026-08-31" };
-    expect(contractValidity(contract, "2026-09-12")).toBe("expired");
-    expect(contractCoversOrder(contract, "2026-09-12", "2026-09-30")).toBe(false);
+  it("treats a signed framework contract as usable regardless of its dates", () => {
+    const contract = { status: "signed", valid_from: "2020-01-01", valid_to: "2021-08-31" };
+    expect(contractUsability(contract)).toBe("usable");
+    expect(isContractUsable(contract)).toBe(true);
   });
 
-  it("reuses a signed contract inherited from a lead without requiring a new signature", () => {
-    const contract = { status: "signed", valid_from: "2026-01-01", valid_to: null };
-    expect(contractValidity(contract, "2026-09-12")).toBe("valid");
-    expect(contractCoversOrder(contract, "2027-01-01", "2027-12-31")).toBe(true);
-    expect(contractCoversOrder({ ...contract, status: "terminated" }, "2027-01-01", "2027-12-31")).toBe(false);
-  });
-
-  it("distinguishes validity today from coverage of a future order", () => {
-    const contract = { status: "signed", valid_from: "2027-01-01", valid_to: "2027-12-31" };
-    expect(contractValidity(contract, "2026-09-12")).toBe("future");
-    expect(contractCoversOrder(contract, "2027-01-01", "2027-01-31")).toBe(true);
+  it("does not reuse terminated, expired or unsigned contracts", () => {
+    expect(contractUsability({ status: "terminated" })).toBe("terminated");
+    expect(contractUsability({ status: "expired" })).toBe("expired");
+    expect(contractUsability({ status: "sent" })).toBe("sent");
+    expect(contractUsability({ status: "draft" })).toBe("draft");
+    for (const status of ["terminated", "expired", "sent", "draft"]) {
+      expect(isContractUsable({ status })).toBe(false);
+    }
   });
 });

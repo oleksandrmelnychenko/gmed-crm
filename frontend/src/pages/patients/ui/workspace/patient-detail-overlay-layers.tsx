@@ -37,8 +37,6 @@ type MoneyFormatter = (value?: string | null, currency?: string) => string;
 
 type ContractFormState = {
   status: string;
-  validFrom: string;
-  validTo: string;
   signedAt: string;
 };
 
@@ -82,13 +80,9 @@ type PatientDetailOverlayLayersProps = {
   onContractCreateSignedAtChange: (value: string) => void;
   onContractCreateStatusChange: (value: string) => void;
   onContractCreateSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
-  onContractCreateValidFromChange: (value: string) => void;
-  onContractCreateValidToChange: (value: string) => void;
   onContractStatusSignedAtChange: (value: string) => void;
   onContractStatusSubmit: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   onContractStatusValueChange: (value: string) => void;
-  onContractStatusValidFromChange: (value: string) => void;
-  onContractStatusValidToChange: (value: string) => void;
   onCreateDunning: () => void | Promise<void>;
   onDocumentUploadOpenChange: (open: boolean) => void;
   onDunningNoteChange: (value: string) => void;
@@ -143,13 +137,9 @@ export function PatientDetailOverlayLayers({
   onContractCreateSignedAtChange,
   onContractCreateStatusChange,
   onContractCreateSubmit,
-  onContractCreateValidFromChange,
-  onContractCreateValidToChange,
   onContractStatusSignedAtChange,
   onContractStatusSubmit,
   onContractStatusValueChange,
-  onContractStatusValidFromChange,
-  onContractStatusValidToChange,
   onCreateDunning,
   onDocumentUploadOpenChange,
   onDunningNoteChange,
@@ -256,13 +246,9 @@ export function PatientDetailOverlayLayers({
             onContractCreateSignedAtChange={onContractCreateSignedAtChange}
             onContractCreateStatusChange={onContractCreateStatusChange}
             onContractCreateSubmit={onContractCreateSubmit}
-            onContractCreateValidFromChange={onContractCreateValidFromChange}
-            onContractCreateValidToChange={onContractCreateValidToChange}
             onContractStatusSignedAtChange={onContractStatusSignedAtChange}
             onContractStatusSubmit={onContractStatusSubmit}
             onContractStatusValueChange={onContractStatusValueChange}
-            onContractStatusValidFromChange={onContractStatusValidFromChange}
-            onContractStatusValidToChange={onContractStatusValidToChange}
             onCreateDunning={onCreateDunning}
             onDunningNoteChange={onDunningNoteChange}
             onInvoiceDueDateChange={onInvoiceDueDateChange}

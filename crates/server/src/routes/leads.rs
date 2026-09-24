@@ -1167,10 +1167,9 @@ struct LeadConversionReadinessInput {
     enhanced_due_diligence_document_generated: bool,
     enhanced_due_diligence_document_signed: bool,
     contract_signed: bool,
-    /// The selected contract is signed but its validity window does not cover
-    /// the order period (repeat intake), so the reason must say so instead of
-    /// "not signed".
-    contract_period_gap: bool,
+    /// The selected contract was terminated (repeat intake): a new contract
+    /// must be created, so the reason must say so instead of "not signed".
+    contract_terminated: bool,
     framework_document_generated: bool,
     order_exists: bool,
     order_service_ready: bool,
@@ -1500,9 +1499,9 @@ fn evaluate_lead_conversion_readiness(
         conversion_reasons.push("Enhanced due diligence document is not signed".to_string());
     }
     if !input.contract_signed {
-        if input.contract_period_gap {
+        if input.contract_terminated {
             conversion_reasons
-                .push("Framework contract does not cover the order period".to_string());
+                .push("Framework contract was terminated; create a new contract".to_string());
         } else {
             conversion_reasons.push("Framework contract is not signed".to_string());
         }
@@ -1610,7 +1609,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
             .try_get("enhanced_due_diligence_document_signed")
             .unwrap_or(false),
         contract_signed: row.try_get("contract_signed").unwrap_or(false),
-        contract_period_gap: false,
+        contract_terminated: false,
         framework_document_generated: row.try_get("framework_document_generated").unwrap_or(false),
         order_exists: row.try_get("order_exists").unwrap_or(false),
         order_service_ready: row.try_get("order_service_ready").unwrap_or(false),
@@ -1880,7 +1879,7 @@ async fn load_lead_conversion_readiness(
 }
 
 // Reuse the patient's current confirmations and the contract selected on this
-// repeat order. An old signed flag alone never proves coverage of the new period.
+// repeat order. A signed contract covers any later order until it is terminated.
 async fn apply_repeat_patient_readiness(
     state: &AppState,
     lead_id: Uuid,
@@ -1890,7 +1889,6 @@ async fn apply_repeat_patient_readiness(
         r#"SELECT p.id AS patient_id, p.legal_status,
                   fc.patient_id AS contract_patient_id, fc.lead_id AS contract_lead_id,
                   fc.status AS contract_status, fc.signed_at,
-                  fc.valid_from, fc.valid_to, o.date_from, o.date_to,
                   o.package_coverage_status
            FROM leads l
            JOIN patients p ON p.id = l.prospect_patient_id
@@ -1930,16 +1928,16 @@ async fn apply_repeat_patient_readiness(
         == Some(lead_id);
     let signed_at: Option<chrono::DateTime<chrono::Utc>> = row.try_get("signed_at").ok().flatten();
     let contract_linked = (inherited || own_contract) && signed_at.is_some();
-    let contract_covers_period = super::order_intakes::covers_period(
-        &row.try_get::<String, _>("contract_status")
-            .unwrap_or_default(),
-        row.try_get("valid_from").ok().flatten(),
-        row.try_get("valid_to").ok().flatten(),
-        row.try_get("date_from").ok().flatten(),
-        row.try_get("date_to").ok().flatten(),
-    );
-    input.contract_signed = contract_linked && contract_covers_period;
-    input.contract_period_gap = contract_linked && !contract_covers_period;
+    // The contract has no validity period: once signed it covers this order
+    // whatever its dates, unless it has been terminated since.
+    let contract_status = row
+        .try_get::<Option<String>, _>("contract_status")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    input.contract_signed =
+        contract_linked && super::order_intakes::contract_usable(&contract_status);
+    input.contract_terminated = (inherited || own_contract) && contract_status == "terminated";
     let document_state: (bool, bool) = sqlx::query_as(
         "SELECT EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='single_order' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id)),
                 EXISTS(SELECT 1 FROM documents d WHERE d.order_id=o.id AND d.generated_template_id='order_cost_estimate' AND d.status='active' AND d.file_deleted_at IS NULL AND d.order_intake_context=repeat_order_document_context(o.id) AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))
@@ -7286,7 +7284,7 @@ mod lead_conversion_readiness_tests {
             enhanced_due_diligence_document_generated: false,
             enhanced_due_diligence_document_signed: false,
             contract_signed: true,
-            contract_period_gap: false,
+            contract_terminated: false,
             framework_document_generated: true,
             order_exists: true,
             order_service_ready: true,

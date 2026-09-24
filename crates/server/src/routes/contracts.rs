@@ -53,6 +53,10 @@ pub fn router() -> Router<AppState> {
             "/framework-contracts/{contract_id}/status",
             post(update_framework_contract_status),
         )
+        .route(
+            "/framework-contracts/{contract_id}/terminate",
+            post(terminate_framework_contract),
+        )
         .route("/quotes", get(list_quotes))
         .route(
             "/orders/{order_id}/quotes",
@@ -87,6 +91,11 @@ struct CreateFrameworkContractRequest {
     conditions: Option<Value>,
     status: Option<String>,
     client_reference: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TerminateFrameworkContractRequest {
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -261,31 +270,22 @@ async fn sync_patient_contract_status_tx(
     tx: &mut Transaction<'_, Postgres>,
     patient_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
-    // A currently valid signed contract remains the effective patient status
-    // even if another contract is edited afterwards. In the absence of one,
-    // prefer the most advanced actionable contract (signed, sent, then draft)
-    // over historical expired/terminated records. A signed contract whose
-    // validity already ended is presented as expired even when its persisted
-    // workflow status has not yet been advanced by a job.
+    // A framework contract is concluded for an unlimited term and ends only by
+    // termination, so a signed contract is the effective patient status even
+    // if another contract is edited afterwards. In the absence of one, prefer
+    // the most advanced actionable contract (sent, then draft) over historical
+    // expired/terminated records.
     let framework_status = sqlx::query_scalar::<_, String>(
-        r#"SELECT CASE
-                    WHEN status = 'signed' AND valid_to < CURRENT_DATE THEN 'expired'
-                    ELSE status
-                  END
+        r#"SELECT status
            FROM framework_contracts
            WHERE patient_id = $1
-           ORDER BY CASE
-                      WHEN status = 'signed'
-                       AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
-                       AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
-                      THEN 0
-                      WHEN status = 'signed' AND valid_to < CURRENT_DATE THEN 4
-                      WHEN status = 'signed' THEN 1
-                      WHEN status = 'sent' THEN 2
-                      WHEN status = 'draft' THEN 3
-                      WHEN status = 'expired' THEN 4
-                      WHEN status = 'terminated' THEN 5
-                      ELSE 6
+           ORDER BY CASE status
+                      WHEN 'signed' THEN 0
+                      WHEN 'sent' THEN 1
+                      WHEN 'draft' THEN 2
+                      WHEN 'expired' THEN 3
+                      WHEN 'terminated' THEN 4
+                      ELSE 5
                     END,
                     updated_at DESC,
                     created_at DESC,
@@ -1725,12 +1725,15 @@ async fn load_contract_detail(
         r#"SELECT fc.id, fc.patient_id, fc.lead_id, fc.contract_number, fc.status, fc.signed_at,
                   fc.valid_from, fc.valid_to, fc.conditions, fc.client_reference,
                   fc.created_at, fc.updated_at,
+                  fc.terminated_at, fc.termination_reason,
+                  terminator.name AS terminated_by_name,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
            FROM framework_contracts fc
            LEFT JOIN patients p ON p.id = fc.patient_id
            LEFT JOIN leads l ON l.id = fc.lead_id
+           LEFT JOIN users terminator ON terminator.id = fc.terminated_by
            WHERE fc.id = $1"#,
     )
     .bind(contract_id)
@@ -1782,6 +1785,9 @@ async fn load_contract_detail(
         "client_reference": row.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+        "terminated_at": row.try_get::<Option<DateTime<Utc>>, _>("terminated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+        "termination_reason": row.try_get::<Option<String>, _>("termination_reason").unwrap_or_default(),
+        "terminated_by_name": row.try_get::<Option<String>, _>("terminated_by_name").unwrap_or_default(),
     })))
 }
 
@@ -1806,12 +1812,15 @@ async fn list_framework_contracts(
         r#"SELECT fc.id, fc.patient_id, fc.lead_id, fc.contract_number, fc.status, fc.signed_at,
                   fc.valid_from, fc.valid_to, fc.conditions, fc.client_reference,
                   fc.created_at, fc.updated_at,
+                  fc.terminated_at, fc.termination_reason,
+                  terminator.name AS terminated_by_name,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
            FROM framework_contracts fc
            LEFT JOIN patients p ON p.id = fc.patient_id
            LEFT JOIN leads l ON l.id = fc.lead_id
+           LEFT JOIN users terminator ON terminator.id = fc.terminated_by
            WHERE ($1::text = '%%'
                     OR de_normalize(concat_ws(' ',
                          fc.contract_number,
@@ -1880,6 +1889,9 @@ async fn list_framework_contracts(
                     "client_reference": row.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                    "terminated_at": row.try_get::<Option<DateTime<Utc>>, _>("terminated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                    "termination_reason": row.try_get::<Option<String>, _>("termination_reason").unwrap_or_default(),
+                    "terminated_by_name": row.try_get::<Option<String>, _>("terminated_by_name").unwrap_or_default(),
                 }));
             }
             Json(items).into_response()
@@ -1936,19 +1948,25 @@ async fn create_framework_contract(
     if !is_valid_contract_status(&status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
+    if matches!(status.as_str(), "terminated" | "expired") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A new framework contract cannot start terminated or expired",
+        );
+    }
 
     let signed_at = match parse_optional_datetime(body.signed_at.as_deref()) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    // The contract has no validity period. valid_from only records when it
+    // takes effect (printed in the PDF) and defaults to today; an end date is
+    // never stored.
     let valid_from = match parse_optional_date(body.valid_from.as_deref()) {
-        Ok(value) => value,
+        Ok(value) => Some(value.unwrap_or_else(|| Utc::now().date_naive())),
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let valid_to = match parse_optional_date(body.valid_to.as_deref()) {
-        Ok(value) => value,
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
-    };
+    let valid_to: Option<NaiveDate> = None;
     let client_reference = body
         .client_reference
         .as_deref()
@@ -2185,6 +2203,23 @@ async fn update_framework_contract_status(
     if !is_valid_contract_status(&body.status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
+    // The contract runs for an unlimited term: it never expires, and ending it
+    // goes through the terminate action (reason, open-order check, audit).
+    match body.status.as_str() {
+        "terminated" => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Use the terminate action to end a framework contract",
+            );
+        }
+        "expired" => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Framework contracts do not expire",
+            );
+        }
+        _ => {}
+    }
 
     let subject = match load_contract_subject(&state, contract_id).await {
         Ok(Some(subject)) => subject,
@@ -2194,6 +2229,28 @@ async fn update_framework_contract_status(
 
     if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
         return resp;
+    }
+
+    match sqlx::query_scalar::<_, String>("SELECT status FROM framework_contracts WHERE id = $1")
+        .bind(contract_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(current)) if current == "terminated" => {
+            return err(
+                StatusCode::CONFLICT,
+                "A terminated framework contract cannot be changed",
+            );
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(e) => {
+            tracing::error!(error = %e, contract_id = %contract_id, "load framework contract status");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update framework contract",
+            );
+        }
     }
 
     let signed_at = match parse_optional_datetime(body.signed_at.as_deref()) {
@@ -2233,7 +2290,7 @@ async fn update_framework_contract_status(
                valid_from = COALESCE($4, valid_from),
                valid_to = COALESCE($5, valid_to),
                conditions = COALESCE($6, conditions)
-           WHERE id = $1"#,
+           WHERE id = $1 AND status <> 'terminated'"#,
     )
     .bind(contract_id)
     .bind(body.status.clone())
@@ -2301,6 +2358,157 @@ async fn update_framework_contract_status(
                 "Failed to update framework contract",
             )
         }
+    }
+}
+
+/// End a framework contract. The contract runs for an unlimited term (§ 6 of
+/// the client template) and is terminated only by CEO or patient manager;
+/// orders still open under it must be completed or cancelled first. No
+/// termination document is generated: the status, reason and audit entry are
+/// the record. Afterwards a new contract has to be created and signed.
+async fn terminate_framework_contract(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(contract_id): Path<Uuid>,
+    Json(body): Json<TerminateFrameworkContractRequest>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_capability(Capability::ContractsTerminate) {
+        return resp;
+    }
+    let reason = body.reason.as_deref().map(str::trim).unwrap_or_default();
+    let reason_len = reason.chars().count();
+    if !(3..=1000).contains(&reason_len) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A termination reason of 3 to 1000 characters is required",
+        );
+    }
+
+    let subject = match load_contract_subject(&state, contract_id).await {
+        Ok(Some(subject)) => subject,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
+    }
+
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, contract_id = %contract_id, "terminate framework contract");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to terminate framework contract",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return failed(e),
+    };
+    let status = match sqlx::query_scalar::<_, String>(
+        "SELECT status FROM framework_contracts WHERE id = $1 FOR UPDATE",
+    )
+    .bind(contract_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(status)) => status,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(e) => return failed(e),
+    };
+    if !matches!(status.as_str(), "signed" | "sent") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only a signed or sent framework contract can be terminated",
+        );
+    }
+
+    let open_orders = match sqlx::query(
+        r#"SELECT id, order_number
+           FROM orders
+           WHERE contract_id = $1 AND status IN ('active', 'paused')
+           ORDER BY created_at, order_number"#,
+    )
+    .bind(contract_id)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => return failed(e),
+    };
+    if !open_orders.is_empty() {
+        let orders: Vec<Value> = open_orders
+            .iter()
+            .map(|row| {
+                json!({
+                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                    "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
+                })
+            })
+            .collect();
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({
+                "error": "framework_contract_has_open_orders",
+                "message": "Complete or cancel the open orders under this contract before terminating it",
+                "open_orders": orders,
+            })),
+        )
+            .into_response();
+    }
+
+    if let Err(e) = sqlx::query(
+        r#"UPDATE framework_contracts
+           SET status = 'terminated',
+               terminated_at = now(),
+               terminated_by = $2,
+               termination_reason = $3
+           WHERE id = $1"#,
+    )
+    .bind(contract_id)
+    .bind(auth.user_id)
+    .bind(reason)
+    .execute(&mut *tx)
+    .await
+    {
+        return failed(e);
+    }
+    let patient_contract_status = match subject.patient_id() {
+        Some(patient_id) => match sync_patient_contract_status_tx(&mut tx, patient_id).await {
+            Ok(status) => status,
+            Err(e) => return failed(e),
+        },
+        None => None,
+    };
+    if let Err(e) = tx.commit().await {
+        return failed(e);
+    }
+
+    let payload = json!({
+        "status": "terminated",
+        "previous_status": status,
+        "reason": reason,
+        "patient_contract_status": patient_contract_status,
+    });
+    state.audit_sender.try_send(audit::domain_event(
+        "terminate_framework_contract",
+        Some(auth.user_id),
+        "framework_contract",
+        Some(contract_id),
+        payload.clone(),
+    ));
+    crate::realtime::publish_contract_event(
+        &state,
+        Some(auth.user_id),
+        "framework_contract.status_changed",
+        contract_id,
+        payload,
+    )
+    .await;
+
+    match load_contract_detail(&state, contract_id, &auth).await {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(resp) => resp,
     }
 }
 

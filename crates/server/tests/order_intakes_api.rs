@@ -154,13 +154,15 @@ async fn returning_patient_intake_preserves_history_and_guards_every_transition(
     let (status, next) = save(&ctx.app, &token, &ws, &draft, "prepare").await;
     assert_eq!(status, StatusCode::OK, "{next}");
     ws = next;
+    // The framework contract runs for an unlimited term: legacy validity dates
+    // that end before the order do not block it.
     assert!(
-        ws["checks"]
+        !ws["checks"]
             .as_array()
             .unwrap()
             .iter()
             .any(|c| c["key"] == "contract" && c["status"] == "blocked"),
-        "Cached signed flag must not mask an uncovered period"
+        "A signed contract covers the order whatever its dates: {ws}"
     );
     let (status, _) = request(
         &ctx.app,

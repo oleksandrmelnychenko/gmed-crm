@@ -7503,7 +7503,7 @@ pub(crate) async fn load_patient_recheck_readiness(
                   created_at
            FROM framework_contracts
            WHERE patient_id = $1
-           ORDER BY COALESCE(valid_to, 'infinity'::date) DESC,
+           ORDER BY (status = 'signed') DESC,
                     COALESCE(signed_at, created_at) DESC"#,
     )
     .bind(patient_uuid)
@@ -7534,17 +7534,12 @@ pub(crate) async fn load_patient_recheck_readiness(
             "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
         })
     });
+    // A signed framework contract has no validity period; it counts until it
+    // is terminated.
     let valid_framework_contract = contract_rows.iter().any(|row| {
-        let status = row.try_get::<String, _>("status").unwrap_or_default();
-        let valid_from = row
-            .try_get::<Option<chrono::NaiveDate>, _>("valid_from")
-            .unwrap_or_default();
-        let valid_to = row
-            .try_get::<Option<chrono::NaiveDate>, _>("valid_to")
-            .unwrap_or_default();
-        status == "signed"
-            && valid_from.map(|value| value <= today).unwrap_or(true)
-            && valid_to.map(|value| value >= today).unwrap_or(true)
+        super::order_intakes::contract_usable(
+            &row.try_get::<String, _>("status").unwrap_or_default(),
+        )
     });
 
     let contract_ready = stored_contract_status == "signed" || valid_framework_contract;
@@ -7776,10 +7771,13 @@ async fn list_patient_framework_contracts(
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
-        r#"SELECT id, contract_number, status, signed_at, valid_from, valid_to, created_at
-           FROM framework_contracts
-           WHERE patient_id = $1
-           ORDER BY COALESCE(signed_at, created_at) DESC, created_at DESC"#,
+        r#"SELECT fc.id, fc.contract_number, fc.status, fc.signed_at, fc.valid_from, fc.valid_to,
+                  fc.created_at, fc.terminated_at, fc.termination_reason,
+                  terminator.name AS terminated_by_name
+           FROM framework_contracts fc
+           LEFT JOIN users terminator ON terminator.id = fc.terminated_by
+           WHERE fc.patient_id = $1
+           ORDER BY COALESCE(fc.signed_at, fc.created_at) DESC, fc.created_at DESC"#,
     )
     .bind(patient_uuid)
     .fetch_all(&state.db)
@@ -7803,6 +7801,9 @@ async fn list_patient_framework_contracts(
                 "valid_from": row.try_get::<Option<chrono::NaiveDate>, _>("valid_from").unwrap_or_default().map(|value| value.to_string()),
                 "valid_to": row.try_get::<Option<chrono::NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "terminated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("terminated_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "termination_reason": row.try_get::<Option<String>, _>("termination_reason").unwrap_or_default(),
+                "terminated_by_name": row.try_get::<Option<String>, _>("terminated_by_name").unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();

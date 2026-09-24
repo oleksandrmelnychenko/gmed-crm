@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { contractCoversOrder, formatIntakeDate, intakeTotal } from "./order-intake";
+import { isContractUsable, formatIntakeDate, intakeTotal } from "./order-intake";
 
 describe("repeat patient order", () => {
-  it("requires coverage of the entire period, including future periods", () => {
-    const contract = { status: "signed", valid_from: "2026-12-01", valid_to: "2026-12-31" };
-    expect(contractCoversOrder(contract, "2026-12-20", "2027-01-01")).toBe(false);
-    expect(contractCoversOrder(contract, "2026-12-01", "2026-12-31")).toBe(true);
-    expect(contractCoversOrder(contract, null, "2026-12-31")).toBe(false);
-    expect(contractCoversOrder({ ...contract, status: "expired" }, "2026-12-01", "2026-12-31")).toBe(false);
-    expect(contractCoversOrder({ status: "signed", valid_from: null, valid_to: null }, "2030-01-01", "2030-12-31")).toBe(true);
+  it("reuses any signed framework contract, whatever the order period", () => {
+    expect(isContractUsable({ status: "signed" })).toBe(true);
+    expect(isContractUsable({ status: "terminated" })).toBe(false);
+    expect(isContractUsable({ status: "expired" })).toBe(false);
+    expect(isContractUsable({ status: "sent" })).toBe(false);
   });
   it("displays calendar dates without a timezone shift", () => {
     expect(formatIntakeDate("2026-12-05")).toBe("05.12.2026");

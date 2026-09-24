@@ -134,6 +134,9 @@ export type ContractItem = {
   signed_at?: string | null;
   valid_from?: string | null;
   valid_to?: string | null;
+  terminated_at?: string | null;
+  termination_reason?: string | null;
+  terminated_by_name?: string | null;
   created_at: string;
 };
 

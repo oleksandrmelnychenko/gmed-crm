@@ -42,9 +42,9 @@ export function emptyIntake(facts: IntakeFacts): IntakeDraft {
     contract_id: null, lines: [], prepayment_required: false, prepayment_amount: "", prepayment_due_at: null,
     aml_review: { risk_reason: "", manager_approval_name: "", continuous_monitoring: "", reviewer_name: "", review_date: null } };
 }
-export function contractCoversOrder(contract: Pick<ContractItem, "status" | "valid_from" | "valid_to">, from: string | null, to: string | null) {
-  return !!from && !!to && from <= to && contract.status === "signed"
-    && (!contract.valid_from || contract.valid_from <= from) && (!contract.valid_to || contract.valid_to >= to);
+// A framework contract has no validity period: once signed it covers any order until it is terminated.
+export function isContractUsable(contract: Pick<ContractItem, "status">) {
+  return contract.status === "signed";
 }
 export function formatIntakeDate(value: string | null | undefined) {
   if (!value) return "—";
@@ -65,7 +65,7 @@ export const INTAKE_CHECK_LABELS: Record<string, [string, string]> = {
   facts: ["Актуальные данные пациента подтверждены", "Aktuelle Patientendaten bestätigt"],
   period: ["Указаны цель и период заказа", "Auftragsziel und Zeitraum angegeben"],
   services: ["Услуги и стоимость сохранены", "Leistungen und Preise gespeichert"],
-  contract: ["Подписанный договор покрывает весь период", "Unterzeichneter Vertrag deckt den gesamten Zeitraum ab"],
+  contract: ["Подписанный рамочный договор действует", "Unterzeichneter Rahmenvertrag liegt vor"],
   base_data_ready: ["Основные данные заполнены", "Stammdaten vollständig"],
   compliance_ready: ["Проверка и согласие на обработку данных", "Prüfung und Datenschutz-Einwilligung"],
   identity_ready: ["Личность подтверждена", "Identität bestätigt"],

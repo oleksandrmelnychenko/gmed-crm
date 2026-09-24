@@ -186,6 +186,7 @@ describe("contracts model", () => {
         canCreateQuote: manage,
         canManageQuote: manage,
         canManageCatalog: manage,
+        canTerminateContract: has("contracts.terminate"),
       });
     });
   });

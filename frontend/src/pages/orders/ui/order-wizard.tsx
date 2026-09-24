@@ -21,9 +21,9 @@ import { SelectedWorkTypesSummary } from "./order-work-types-summary";
 import { OrderExistingContractsTable, OrderPatientDocumentReview } from "./order-patient-document-review";
 import { fetchPatientOrderRecheck } from "../data/order-api";
 import type { PatientOrderRecheck } from "../model/types";
-import { contractValidity, CONTRACT_VALIDITY_LABELS } from "../model/order-document-review";
+import { contractUsability, CONTRACT_USABILITY_LABELS } from "../model/order-document-review";
 import { createOrderIntake, fetchIntakeFacts, fetchOrderIntake, saveOrderIntake } from "../data/order-intake-api";
-import { changedFacts, contractCoversOrder, emptyIntake, formatIntakeDate, intakeTotal } from "../model/order-intake";
+import { changedFacts, emptyIntake, formatIntakeDate, intakeTotal, isContractUsable } from "../model/order-intake";
 import type { IntakeAction, IntakeDraft, IntakeFacts, IntakeWorkspace } from "../model/order-intake";
 
 const STEPS = [
@@ -77,8 +77,6 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
   const [autoFailed, setAutoFailed] = useState(false);
   const [clinicalOpen, setClinicalOpen] = useState(false);
   const [editingFacts, setEditingFacts] = useState(false);
-  const [newContractFrom, setNewContractFrom] = useState("");
-  const [newContractTo, setNewContractTo] = useState("");
   const [retry, setRetry] = useState(0);
   const [documentKind, setDocumentKind] = useState<string>("single_order");
   const workCatalog = useIntakeWorkTypes(data?.specialization_ids ?? [], lang);
@@ -226,7 +224,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
       await refreshDocuments();
       onSaved?.();
     })} /> : null;
-  const existingContracts = data ? <OrderExistingContractsTable contracts={contracts} dateFrom={data.date_from} dateTo={data.date_to} selectedId={data.contract_id} lang={lang} busy={busy} onSelect={contract_id => patch({ contract_id })} /> : null;
+  const existingContracts = data ? <OrderExistingContractsTable contracts={contracts} selectedId={data.contract_id} lang={lang} busy={busy} onSelect={contract_id => patch({ contract_id })} /> : null;
 
   return <OrderWizardShell dirty={dirty} busy={busy} loading={loading} disabled={busy || loading || !data}
     onClose={onClose} lang={lang} step={step} steps={STEPS.map(labels => labels[language])}
@@ -309,15 +307,14 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
           </OrderWizardSection>
         </> : null}
 
-        {step === 3 ? <OrderWizardSection title={tx("Договор для этого периода", "Vertrag für diesen Zeitraum")}>
+        {step === 3 ? <OrderWizardSection title={tx("Рамочный договор", "Rahmenvertrag")}>
           <Badge variant="outline" className="border-primary/20 bg-primary/10 text-primary">{periodLabel}</Badge>
-          <Field label={tx("Рамочный договор", "Rahmenvertrag")}><NativeComboboxSelect aria-label={tx("Рамочный договор", "Rahmenvertrag")} disabled={busy} className="h-9 w-full text-xs" value={data.contract_id ?? ""} onChange={event => patch({ contract_id: event.target.value || null })}><option value="">{tx("Выберите договор", "Vertrag auswählen")}</option>{contracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contract_number} · {formatIntakeDate(contract.valid_from)} – {formatIntakeDate(contract.valid_to)} · {contractCoversOrder(contract, data.date_from, data.date_to) ? tx("Подходит", "Geeignet") : CONTRACT_VALIDITY_LABELS[contractValidity(contract)]?.[language] ?? tx("Проверьте статус", "Status prüfen")}</option>)}</NativeComboboxSelect></Field>
+          <Field label={tx("Рамочный договор", "Rahmenvertrag")}><NativeComboboxSelect aria-label={tx("Рамочный договор", "Rahmenvertrag")} disabled={busy} className="h-9 w-full text-xs" value={data.contract_id ?? ""} onChange={event => patch({ contract_id: event.target.value || null })}><option value="">{tx("Выберите договор", "Vertrag auswählen")}</option>{contracts.map(contract => <option key={contract.id} value={contract.id}>{contract.contract_number} · {CONTRACT_USABILITY_LABELS[contractUsability(contract)][language]}</option>)}</NativeComboboxSelect></Field>
           {existingContracts}
-          {selectedContract ? <p className={`mt-3 text-sm ${contractCoversOrder(selectedContract, data.date_from, data.date_to) ? "text-emerald-700" : "text-amber-700"}`}>{contractCoversOrder(selectedContract, data.date_from, data.date_to) ? tx("Договор подписан и покрывает весь период заказа.", "Der unterzeichnete Vertrag deckt den gesamten Auftragszeitraum ab.") : tx("Проверьте подпись и срок: этот договор пока не покрывает весь период заказа.", "Unterschrift und Gültigkeit prüfen: Dieser Vertrag deckt den gesamten Zeitraum noch nicht ab.")}</p> : null}
-          <details className="mt-5 rounded-lg border p-4"><summary className="cursor-pointer font-medium">{tx("Создать новый рамочный договор", "Neuen Rahmenvertrag erstellen")}</summary><div className="mt-4 grid gap-4 sm:grid-cols-2"><Field label={tx("Действует с", "Gültig ab")}><Input type="date" value={newContractFrom || data.date_from || ""} onChange={event => setNewContractFrom(event.target.value)} /></Field><Field label={tx("Действует до (необязательно)", "Gültig bis (optional)")}><Input type="date" value={newContractTo} onChange={event => setNewContractTo(event.target.value)} /></Field></div><Button type="button" className="mt-3" onClick={() => void run(async () => {
-            const from = newContractFrom || data.date_from; if (!from || (newContractTo && newContractTo < from)) throw new Error(tx("Проверьте период договора", "Vertragszeitraum prüfen"));
+          {selectedContract ? <p className={`mt-3 text-sm ${isContractUsable(selectedContract) ? "text-emerald-700" : "text-amber-700"}`}>{isContractUsable(selectedContract) ? tx("Договор подписан и действует бессрочно, пока не расторгнут.", "Der unterzeichnete Vertrag gilt unbefristet, bis er gekündigt wird.") : tx("Этот договор нельзя использовать: нужен подписанный и не расторгнутый рамочный договор.", "Dieser Vertrag kann nicht verwendet werden: Erforderlich ist ein unterzeichneter, nicht gekündigter Rahmenvertrag.")}</p> : null}
+          <details className="mt-5 rounded-lg border p-4"><summary className="cursor-pointer font-medium">{tx("Создать новый рамочный договор", "Neuen Rahmenvertrag erstellen")}</summary><p className="mt-3 text-sm text-muted-foreground">{tx("Рамочный договор бессрочный: после подписания он действует для всех заказов, пока не будет расторгнут.", "Der Rahmenvertrag ist unbefristet: Nach der Unterzeichnung gilt er für alle Aufträge, bis er gekündigt wird.")}</p><Button type="button" className="mt-3" onClick={() => void run(async () => {
             const draft = await persist(data);
-            const contract = await createContract({ patient_id: patient.id, status: "draft", valid_from: from, valid_to: newContractTo || null, client_reference: `order-intake:${draft.order_id}:framework:${from}:${newContractTo || "open"}` });
+            const contract = await createContract({ patient_id: patient.id, status: "draft", client_reference: `order-intake:${draft.order_id}:framework` });
             setContracts(await fetchContracts(`/framework-contracts?patient_id=${patient.id}`));
             await persist({ ...data, contract_id: contract.id });
           })}><Plus className="size-4" />{tx("Создать договор", "Vertrag erstellen")}</Button></details>

@@ -36,6 +36,7 @@ export function hasAgencyServiceFormChanges(current: AgencyServiceFormState, ini
   return hasFormChanges(comparable(current), comparable(initial));
 }
 
+/** Every status a framework contract row can carry (filters and labels). */
 export const CONTRACT_STATUSES: ContractStatus[] = [
   "draft",
   "sent",
@@ -43,6 +44,30 @@ export const CONTRACT_STATUSES: ContractStatus[] = [
   "expired",
   "terminated",
 ];
+
+/**
+ * Statuses staff may set by hand. Termination has its own action and
+ * "expired" is a legacy status: framework contracts are open-ended.
+ */
+export const CONTRACT_MANUAL_STATUSES: ContractStatus[] = ["draft", "sent", "signed"];
+
+/** Only signed or sent contracts can be terminated. */
+export function canTerminateContractStatus(status: string) {
+  return status === "signed" || status === "sent";
+}
+
+/** Terminated and legacy expired contracts are read-only. */
+export function isContractClosed(status: string) {
+  return status === "terminated" || status === "expired";
+}
+
+export const TERMINATION_REASON_MIN = 3;
+export const TERMINATION_REASON_MAX = 1000;
+
+export function isValidTerminationReason(reason: string) {
+  const length = reason.trim().length;
+  return length >= TERMINATION_REASON_MIN && length <= TERMINATION_REASON_MAX;
+}
 
 export const QUOTE_STATUSES: QuoteStatus[] = [
   "draft",
@@ -79,6 +104,7 @@ export function contractsPermissions(actor?: Actor): ContractsPermissions {
     canCreateQuote: canManage,
     canManageQuote: canManage,
     canManageCatalog: canManage,
+    canTerminateContract: hasCapability(actor, "contracts.terminate"),
   };
 }
 
@@ -197,8 +223,6 @@ export function blankContractForm(patientId = ""): ContractFormState {
   return {
     patientId,
     status: "draft",
-    validFrom: "",
-    validTo: "",
     signedAt: "",
     conditionsText: "",
   };
@@ -213,8 +237,6 @@ export type ContractFormValidationMessages = {
   patientRequired: string;
   requiredFields: string;
   sessionExpired: string;
-  validFromRequired: string;
-  validToBeforeValidFrom: string;
 };
 
 function errorStatus(error: unknown) {
@@ -255,16 +277,13 @@ export function contractActionErrorMessage(
     if (hasAnyNeedle(message, ["invalid patient", "patient_id", "uuid"])) {
       return messages.invalidPatient;
     }
-    if (hasAnyNeedle(message, ["valid-from is required", "valid_from"])) {
-      return messages.validFromRequired;
-    }
     if (hasAnyNeedle(message, ["invalid status", "status"])) {
       return messages.invalidStatus;
     }
     if (hasAnyNeedle(message, ["invalid datetime", "rfc3339", "signed_at"])) {
       return messages.invalidDateTime;
     }
-    if (hasAnyNeedle(message, ["invalid date", "valid_to", "valid_from"])) {
+    if (hasAnyNeedle(message, ["invalid date"])) {
       return messages.invalidDate;
     }
     return messages.requiredFields;
@@ -285,10 +304,6 @@ export function validateCreateContractForm(
   messages: ContractFormValidationMessages,
 ) {
   if (!form.patientId) return messages.patientRequired;
-  if (!form.validFrom) return messages.validFromRequired;
-  if (form.validTo && form.validFrom && form.validTo < form.validFrom) {
-    return messages.validToBeforeValidFrom;
-  }
   if (form.conditionsText.trim()) {
     try {
       JSON.parse(form.conditionsText);
@@ -300,12 +315,9 @@ export function validateCreateContractForm(
 }
 
 export function validateContractStatusForm(
-  form: Pick<ContractStatusFormState, "validFrom" | "validTo" | "conditionsText">,
+  form: Pick<ContractStatusFormState, "conditionsText">,
   messages: ContractFormValidationMessages,
 ) {
-  if (form.validTo && form.validFrom && form.validTo < form.validFrom) {
-    return messages.validToBeforeValidFrom;
-  }
   if (form.conditionsText.trim()) {
     try {
       JSON.parse(form.conditionsText);
@@ -344,8 +356,6 @@ export function blankAgencyServiceForm(unitLabel = ""): AgencyServiceFormState {
 export function contractToStatusForm(contract: ContractItem): ContractStatusFormState {
   return {
     status: (contract.status as ContractStatus) ?? "draft",
-    validFrom: contract.valid_from ?? "",
-    validTo: contract.valid_to ?? "",
     signedAt: contract.signed_at ? toDateTimeLocal(contract.signed_at) : "",
     conditionsText: contract.conditions ? JSON.stringify(contract.conditions, null, 2) : "",
   };

@@ -10,8 +10,8 @@ import type { Lang } from "@/lib/i18n";
 import type { ContractItem } from "@/pages/contracts/model/types";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientOrderRecheck } from "../model/types";
-import { contractCoversOrder, formatIntakeDate, INTAKE_CHECK_LABELS } from "../model/order-intake";
-import { contractValidity, CONTRACT_VALIDITY_LABELS, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
+import { formatIntakeDate, INTAKE_CHECK_LABELS, isContractUsable } from "../model/order-intake";
+import { contractUsability, CONTRACT_USABILITY_LABELS, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
 import { OrderWizardSection } from "./order-wizard-tables";
 
 const tableClass = "rounded-none border-0 bg-transparent shadow-none sm:max-h-[400px]";
@@ -19,8 +19,8 @@ function ReviewBadge({ ready, children }: { ready: boolean; children: React.Reac
   return <Badge variant="outline" className={`h-auto min-h-5 max-w-full whitespace-normal! text-[11px] leading-4 ${ready ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-800"}`}>{children}</Badge>;
 }
 
-export function OrderExistingContractsTable({ contracts, dateFrom, dateTo, selectedId, lang, busy, onSelect }: {
-  contracts: ContractItem[]; dateFrom: string | null; dateTo: string | null; selectedId: string | null;
+export function OrderExistingContractsTable({ contracts, selectedId, lang, busy, onSelect }: {
+  contracts: ContractItem[]; selectedId: string | null;
   lang: Lang; busy: boolean; onSelect: (id: string) => void;
 }) {
   const language = lang === "de" ? 1 : 0;
@@ -28,17 +28,13 @@ export function OrderExistingContractsTable({ contracts, dateFrom, dateTo, selec
   const columns: ColumnDef<ContractItem>[] = [
     { id: "number", label: tx("Договор", "Vertrag"), accessor: row => row.contract_number, minWidth: 145,
       render: row => <span className="inline-flex flex-wrap items-center gap-1.5"><span className="font-mono font-medium">{row.contract_number}</span>{row.lead_id ? <Badge variant="outline" className="h-auto border-sky-200 bg-sky-50 text-[10px] leading-4 text-sky-800">{tx("Оформлен в этом обращении", "In dieser Anfrage erstellt")}</Badge> : null}</span> },
-    { id: "status", label: tx("Статус сейчас", "Aktueller Status"), accessor: contractValidity, minWidth: 160,
-      render: row => { const status = contractValidity(row); return <ReviewBadge ready={status === "valid"}>{CONTRACT_VALIDITY_LABELS[status]?.[language] ?? tx("Проверьте статус", "Status prüfen")}</ReviewBadge>; } },
+    { id: "status", label: tx("Статус", "Status"), accessor: contractUsability, minWidth: 180,
+      render: row => { const status = contractUsability(row); return <ReviewBadge ready={status === "usable"}>{CONTRACT_USABILITY_LABELS[status][language]}</ReviewBadge>; } },
     { id: "signed", label: tx("Подписан", "Unterzeichnet am"), accessor: row => row.signed_at, width: 145,
       render: row => <span className="font-mono">{formatIntakeDate(row.signed_at)}</span> },
-    { id: "period", label: tx("Срок действия", "Gültigkeitszeitraum"), accessor: row => row.valid_to, minWidth: 245,
-      render: row => <span className="font-mono">{row.valid_from ? formatIntakeDate(row.valid_from) : tx("Без ограничения начала", "Ohne Beginnbegrenzung")} – {row.valid_to ? formatIntakeDate(row.valid_to) : tx("Бессрочно", "Unbefristet")}</span> },
-    { id: "coverage", label: tx("Для этого заказа", "Für diesen Auftrag"), accessor: row => contractCoversOrder(row, dateFrom, dateTo), minWidth: 235,
-      render: row => !dateFrom || !dateTo || dateFrom > dateTo ? <span className="text-muted-foreground">{tx("Укажите период заказа", "Auftragszeitraum angeben")}</span> : <ReviewBadge ready={contractCoversOrder(row, dateFrom, dateTo)}>{contractCoversOrder(row, dateFrom, dateTo) ? tx("Покрывает весь период", "Deckt den gesamten Zeitraum ab") : tx("Нужен другой / новый договор", "Anderer / neuer Vertrag erforderlich")}</ReviewBadge> },
   ];
   return <DataTable rows={contracts} columns={columns} rowId={row => row.id} density="compact" rowHeightOverrides={{ compact: 56 }} mobilePrimaryColumnId="number" className={tableClass}
-    rowActionsWidth={160} rowActions={row => row.id === selectedId ? <ReviewBadge ready={contractCoversOrder(row, dateFrom, dateTo)}><Check className="size-3" />{tx("Выбран", "Ausgewählt")}</ReviewBadge> : contractCoversOrder(row, dateFrom, dateTo) ? <Button type="button" size="sm" variant="outline" disabled={busy} aria-label={`${tx("Использовать договор", "Vertrag verwenden")}: ${row.contract_number}`} onClick={() => onSelect(row.id)}>{tx("Использовать", "Verwenden")}</Button> : null}
+    rowActionsWidth={160} rowActions={row => row.id === selectedId ? <ReviewBadge ready={isContractUsable(row)}><Check className="size-3" />{tx("Выбран", "Ausgewählt")}</ReviewBadge> : isContractUsable(row) ? <Button type="button" size="sm" variant="outline" disabled={busy} aria-label={`${tx("Использовать договор", "Vertrag verwenden")}: ${row.contract_number}`} onClick={() => onSelect(row.id)}>{tx("Использовать", "Verwenden")}</Button> : null}
     emptyState={<p className="p-4 text-xs text-muted-foreground">{tx("Сохранённых договоров нет. Создайте рамочный договор на этапе «Договор».", "Keine gespeicherten Verträge. Erstellen Sie im Schritt „Vertrag“ einen Rahmenvertrag.")}</p>} />;
 }
 

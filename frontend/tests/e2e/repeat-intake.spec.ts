@@ -30,8 +30,8 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
   let passportExpiry = "2020-01-01";
   const reviewContracts = [
     { id: "valid-contract", patient_id: patientId, contract_number: "FC-PREVIOUS", status: "signed", signed_at: "2025-01-01T10:00:00Z", valid_from: "2025-01-01", valid_to: "2030-12-31" },
-    { id: "expired-contract", patient_id: patientId, contract_number: "FC-EXPIRED", status: "signed", signed_at: "2019-01-01T10:00:00Z", valid_from: "2019-01-01", valid_to: "2020-12-31" },
-    { id: "short-contract", patient_id: patientId, contract_number: "FC-SHORT", status: "signed", signed_at: "2025-01-01T10:00:00Z", valid_from: "2025-01-01", valid_to: "2030-09-05" },
+    { id: "terminated-contract", patient_id: patientId, contract_number: "FC-TERMINATED", status: "terminated", signed_at: "2019-01-01T10:00:00Z", valid_from: "2019-01-01", valid_to: "2020-12-31" },
+    { id: "unsigned-contract", patient_id: patientId, contract_number: "FC-UNSIGNED", status: "sent", signed_at: "2025-01-01T10:00:00Z", valid_from: "2025-01-01", valid_to: "2030-09-05" },
   ];
   await page.route("**/api/v1/**", async route => {
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
@@ -231,7 +231,7 @@ for (const lang of ["ru", "de"] as const) {
     await expect(wizard.getByText(tx("Паспорт просрочен", "Reisepass abgelaufen"), {exact: true}).filter({visible: true})).toBeVisible();
     const useContract = wizard.getByRole("button", {name: tx("Использовать договор: FC-PREVIOUS", "Vertrag verwenden: FC-PREVIOUS"), exact: true});
     await expect(useContract).toBeVisible();
-    await expect(wizard.getByRole("button", {name: /(?:Использовать договор|Vertrag verwenden): FC-(?:EXPIRED|SHORT)/})).toHaveCount(0);
+    await expect(wizard.getByRole("button", {name: /(?:Использовать договор|Vertrag verwenden): FC-(?:TERMINATED|UNSIGNED)/})).toHaveCount(0);
     await useContract.click();
     await expect.poll(() => writes.some(item => item.path.endsWith("/update") && (item.body.wizard_state as Record<string, unknown>)?.framework_contract_id === "valid-contract")).toBe(true);
     expect(writes.filter(item => item.path === "/framework-contracts" || item.path.includes("/framework-contracts/"))).toEqual([]);
