@@ -4814,6 +4814,8 @@ struct TreatmentPlanPdfLayout {
     page_style: PdfPageStyle,
     regular_font: PdfFontHandle,
     bold_font: PdfFontHandle,
+    /// Where each party signs, collected while the PDF is laid out.
+    signature_anchors: Vec<SignatureAnchor>,
 }
 
 impl TreatmentPlanPdfLayout {
@@ -4829,6 +4831,7 @@ impl TreatmentPlanPdfLayout {
             page_style: PdfPageStyle::Standard,
             regular_font,
             bold_font,
+            signature_anchors: Vec::new(),
         }
     }
 
@@ -4848,6 +4851,7 @@ impl TreatmentPlanPdfLayout {
             page_style: PdfPageStyle::Legal,
             regular_font,
             bold_font,
+            signature_anchors: Vec::new(),
         }
     }
 
@@ -7618,7 +7622,7 @@ fn fc_body_tight(layout: &mut TreatmentPlanPdfLayout, text: &str) {
 fn build_framework_contract_pdf(
     context: &GeneratedFrameworkContractContext,
     fallback_document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference = legal_document_reference(
         Some(context.contract_number.as_str()),
@@ -8116,7 +8120,7 @@ fn build_framework_contract_pdf(
         },
     );
 
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 fn visa_invitation_patient_reference(context: &GeneratedVisaInvitationContext) -> String {
@@ -13955,7 +13959,9 @@ async fn generate_document(
 
             let preview_html = build_framework_contract_html(&context);
             let pdf_bytes = match build_framework_contract_pdf(&context, &generated_doc_id) {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build generated framework contract PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -14288,7 +14294,9 @@ async fn generate_document(
                 build_single_order_pdf(&context, &generated_doc_id)
             };
             let pdf_bytes = match pdf_result {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build order document PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -14407,7 +14415,9 @@ async fn generate_document(
                 &cost_coverage_summary_lines(&context),
             );
             let pdf_bytes = match build_cost_coverage_pdf(&context, &generated_doc_id) {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build cost coverage PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -14579,7 +14589,9 @@ async fn generate_document(
                 &bindings,
                 &generated_doc_id,
             ) {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -14607,7 +14619,9 @@ async fn generate_document(
                 &bindings,
                 &generated_doc_id,
             ) {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -14701,7 +14715,9 @@ async fn generate_document(
                 ),
                 &generated_doc_id,
             ) {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(
                         template_id = template.id,
@@ -14784,7 +14800,9 @@ async fn generate_document(
                     .unwrap_or_default()],
             );
             let pdf_bytes = match build_consent_pdf(&context) {
-                Ok(bytes) => bytes,
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
                 Err(message) => {
                     tracing::error!(template_id = template.id, patient_id = %patient_uuid, "build consent PDF");
                     return err(StatusCode::INTERNAL_SERVER_ERROR, message);
@@ -15426,6 +15444,79 @@ fn new_admin_pdf() -> Result<(PdfDocument, PdfFontHandle, PdfFontHandle), &'stat
     Ok((document, regular, bold))
 }
 
+/// A place in a generated PDF reserved for one party's electronic signature.
+/// Coordinates are millimetres from the page's bottom-left corner; `page` is
+/// zero-based within this document.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SignatureAnchor {
+    pub(crate) role: String,
+    pub(crate) page: usize,
+    pub(crate) x_mm: f32,
+    pub(crate) y_mm: f32,
+    pub(crate) width_mm: f32,
+    pub(crate) height_mm: f32,
+}
+
+/// Key under which the anchors travel inside `documents.generated_bindings`.
+pub(crate) const SIGNATURE_ANCHORS_BINDING_KEY: &str = "_signature_anchors";
+
+/// Generated PDF bytes plus the signature anchors recorded during layout.
+pub(crate) struct GeneratedPdf {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) signature_anchors: Vec<SignatureAnchor>,
+}
+
+impl std::ops::Deref for GeneratedPdf {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Vec<u8> {
+        &self.bytes
+    }
+}
+
+impl TreatmentPlanPdfLayout {
+    /// Reserve a signature frame on the current page. `y_mm` is the frame's
+    /// bottom edge measured from the page bottom.
+    fn push_signature_anchor(
+        &mut self,
+        role: &str,
+        x_mm: f32,
+        y_mm: f32,
+        width_mm: f32,
+        height_mm: f32,
+    ) {
+        self.signature_anchors.push(SignatureAnchor {
+            role: role.to_string(),
+            page: self.page_number.saturating_sub(1),
+            x_mm,
+            y_mm,
+            width_mm,
+            height_mm,
+        });
+    }
+}
+
+fn finalize_generated_pdf(
+    document: PdfDocument,
+    mut layout: TreatmentPlanPdfLayout,
+) -> GeneratedPdf {
+    let signature_anchors = std::mem::take(&mut layout.signature_anchors);
+    GeneratedPdf {
+        bytes: finalize_admin_pdf(document, layout),
+        signature_anchors,
+    }
+}
+
+/// Store the anchors next to the other generated bindings so the signature
+/// request can place Skribble's visual signatures later, and hand back the bytes.
+fn record_signature_anchors(bindings: &mut Option<Value>, generated: GeneratedPdf) -> Vec<u8> {
+    if !generated.signature_anchors.is_empty() {
+        bindings.get_or_insert_with(|| json!({}))[SIGNATURE_ANCHORS_BINDING_KEY] =
+            json!(generated.signature_anchors);
+    }
+    generated.bytes
+}
+
 fn finalize_admin_pdf(mut document: PdfDocument, layout: TreatmentPlanPdfLayout) -> Vec<u8> {
     let pages = layout.finish();
     let mut save_warnings: Vec<PdfWarnMsg> = Vec::new();
@@ -15656,6 +15747,18 @@ fn admin_signature_grid(
             0.25,
             treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
         );
+        // The electronic signature sits in the empty space above the line.
+        layout.push_signature_anchor(
+            if party.role == "Auftragnehmer" {
+                "agency"
+            } else {
+                "client"
+            },
+            x_mm,
+            signature_line_y_mm + 0.5,
+            column_width_mm.min(60.0),
+            SIGNATURE_LINE_OFFSET_MM - 1.5,
+        );
         let (headline, caption) = if party.role == "Auftragnehmer" {
             (
                 truncate_text_to_width(party.name, 8.5, column_width_mm),
@@ -15829,7 +15932,7 @@ fn single_order_scope_points(item: &GeneratedContractLineItem) -> Vec<String> {
 fn build_single_order_pdf(
     context: &GeneratedSingleOrderContext,
     fallback_document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference = legal_document_reference(
         Some(context.order_number.as_str()),
@@ -16164,13 +16267,13 @@ fn build_single_order_pdf(
     );
 
     let _ = &context.patient_pid;
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 fn build_order_cost_estimate_pdf(
     context: &GeneratedSingleOrderContext,
     fallback_document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference =
         legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
@@ -16412,7 +16515,7 @@ fn build_order_cost_estimate_pdf(
     );
 
     let _ = &context.patient_pid;
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 fn cost_coverage_summary_lines(context: &GeneratedCostCoverageContext) -> Vec<String> {
@@ -16552,7 +16655,7 @@ fn net_without_estimated_outlays(
 fn build_cost_coverage_pdf(
     context: &GeneratedCostCoverageContext,
     document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
@@ -16903,7 +17006,7 @@ fn build_cost_coverage_pdf(
     );
 
     let _ = &context.order_number;
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 /// Format a single service line-item price for the cost estimate.
@@ -17645,12 +17748,34 @@ fn adult_legal_signature_line(
         .or(bindings.sign_date)
         .map(|value| value.format("%d.%m.%Y").to_string())
         .unwrap_or_else(|| "______________".to_string());
-    layout.spacer(5.0);
+    legal_signature_line(
+        layout,
+        &format!("Ort, Datum: {place}, {date}"),
+        party.name.trim(),
+        "client",
+    );
+}
+
+/// Frame reserved above the "Unterschrift" underline of a single-party
+/// signature line, in millimetres.
+const LEGAL_SIGNATURE_FRAME_X_MM: f32 = 147.0;
+const LEGAL_SIGNATURE_FRAME_WIDTH_MM: f32 = 45.0;
+const LEGAL_SIGNATURE_FRAME_HEIGHT_MM: f32 = 9.0;
+
+/// One "Ort, Datum … Unterschrift: ____" line with the signer's name below the
+/// underline and a signature frame reserved above it.
+fn legal_signature_line(
+    layout: &mut TreatmentPlanPdfLayout,
+    left_text: &str,
+    caption: &str,
+    role: &str,
+) {
+    layout.spacer(LEGAL_SIGNATURE_FRAME_HEIGHT_MM);
     layout.ensure_space(14.0);
     let signature_y = layout.y_mm;
     append_pdf_text_line(
         &mut layout.page_ops,
-        &format!("Ort, Datum: {place}, {date}"),
+        &truncate_text_to_width(left_text, 10.0, 122.0 - PDF_LEFT_MARGIN_MM - 3.0),
         PDF_LEFT_MARGIN_MM,
         signature_y,
         10.0,
@@ -17668,12 +17793,19 @@ fn adult_legal_signature_line(
     );
     append_pdf_text_line(
         &mut layout.page_ops,
-        party.name.trim(),
-        147.0,
+        caption,
+        LEGAL_SIGNATURE_FRAME_X_MM,
         signature_y - 6.0,
         9.0,
         &layout.bold_font,
         TreatmentPlanPdfColor::Body,
+    );
+    layout.push_signature_anchor(
+        role,
+        LEGAL_SIGNATURE_FRAME_X_MM,
+        signature_y - 1.0,
+        LEGAL_SIGNATURE_FRAME_WIDTH_MM,
+        LEGAL_SIGNATURE_FRAME_HEIGHT_MM,
     );
     layout.y_mm -= 14.0;
 }
@@ -17726,7 +17858,7 @@ fn build_adult_confidentiality_release_pdf(
     agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity(agency);
@@ -17755,7 +17887,7 @@ fn build_adult_confidentiality_release_pdf(
     );
     adult_legal_signature_line(&mut layout, party, bindings);
 
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 fn render_adult_privacy_information(
@@ -17979,7 +18111,7 @@ fn build_enhanced_due_diligence_pdf(
     aml: &AmlEnhancedDueDiligenceBindings,
     order_number: Option<&str>,
     document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let countries = aml
@@ -18174,24 +18306,21 @@ fn build_enhanced_due_diligence_pdf(
         "Zusätzlich getroffene Maßnahmen",
         aml.additional_measures.as_deref(),
     );
-    layout.spacer(5.0);
-    layout.text_block(
+    let reviewer_name = aml_binding_value(aml.reviewer_name.as_deref());
+    legal_signature_line(
+        &mut layout,
         &format!(
-            "Datum: {}     Bearbeiter/in: {}     Unterschrift: ____________________",
+            "Datum: {}     Bearbeiter/in: {}",
             aml.review_date
                 .map(|date| date.format("%d.%m.%Y").to_string())
                 .unwrap_or_else(|| "____________".to_string()),
-            aml_binding_value(aml.reviewer_name.as_deref()),
+            reviewer_name,
         ),
-        10.0,
-        false,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        1.0,
+        &reviewer_name,
+        "agency",
     );
 
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 fn build_adult_privacy_consents_pdf(
@@ -18199,7 +18328,7 @@ fn build_adult_privacy_consents_pdf(
     agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
     let agency_identity = adult_legal_agency_identity(agency);
@@ -18324,10 +18453,10 @@ fn build_adult_privacy_consents_pdf(
     );
     adult_legal_signature_line(&mut layout, party, bindings);
 
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
-fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'static str> {
+fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout =
         legal_document_pdf_layout(&context.document_reference, &context.agency, regular, bold);
@@ -18621,29 +18750,28 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<Vec<u8>, &'sta
 
     // ---- Signature block(s) ----
     if context.sole_guardian {
-        admin_block(
+        legal_signature_line(
             &mut layout,
-            "Ort, Datum: __________________________   Unterschrift: __________________________________________",
-            4.0,
-            0.5,
+            "Ort, Datum: __________________________",
+            "Personensorgeberechtigte/r / ges. Vertreter",
+            "guardian_1",
         );
-        consent_caption(&mut layout, "(Personensorgeberechtigte/r / ges. Vertreter)");
     } else {
-        admin_block(
+        legal_signature_line(
             &mut layout,
-            "Ort, Datum: _________________   Unterschrift: ____________________ (Personensorgeberechtigte/r 1)",
-            4.0,
-            2.0,
+            "Ort, Datum: _________________",
+            "Personensorgeberechtigte/r 1",
+            "guardian_1",
         );
-        admin_block(
+        legal_signature_line(
             &mut layout,
-            "Ort, Datum: _________________   Unterschrift: ____________________ (Personensorgeberechtigte/r 2)",
-            0.0,
-            2.0,
+            "Ort, Datum: _________________",
+            "Personensorgeberechtigte/r 2",
+            "guardian_2",
         );
     }
 
-    Ok(finalize_admin_pdf(document, layout))
+    Ok(finalize_generated_pdf(document, layout))
 }
 
 fn consent_person_line(name: Option<&str>, birth: Option<NaiveDate>) -> String {

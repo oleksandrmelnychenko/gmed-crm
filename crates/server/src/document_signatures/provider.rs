@@ -24,12 +24,16 @@ pub struct Signer {
     pub last_name: String,
     pub email: String,
     pub role: String,
+    /// Skribble visual-signature frames inside the sent bundle, filled by the
+    /// server from the generated documents; never taken from the client.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub positions: Vec<Value>,
 }
 
 /// The client signs first; everyone else is invited only once the client has
 /// signed, so the agency receives an already signed package. A request for one
 /// side only keeps the provider's default and carries no sequence.
-fn signature_entries(signers: &[Signer]) -> Vec<Value> {
+pub(super) fn signature_entries(signers: &[Signer]) -> Vec<Value> {
     let ordered = signers.iter().any(|signer| signer.role == "client")
         && signers.iter().any(|signer| signer.role != "client");
     signers
@@ -40,6 +44,9 @@ fn signature_entries(signers: &[Signer]) -> Vec<Value> {
                 "first_name":signer.first_name,"last_name":signer.last_name,"language":"de"}});
             if ordered {
                 entry["sequence"] = json!(if signer.role == "client" { 1 } else { 2 });
+            }
+            if !signer.positions.is_empty() {
+                entry["visual_signature"] = json!({"positions": signer.positions});
             }
             entry
         })
@@ -52,6 +59,7 @@ pub fn normalize_signers(mut signers: Vec<Signer>) -> Result<Vec<Signer>, &'stat
     }
     let mut emails = HashSet::new();
     for signer in &mut signers {
+        signer.positions.clear();
         signer.first_name = signer.first_name.trim().to_string();
         signer.last_name = signer.last_name.trim().to_string();
         signer.email = signer.email.trim().to_ascii_lowercase();

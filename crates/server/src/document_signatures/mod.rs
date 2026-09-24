@@ -288,7 +288,7 @@ async fn create(
     if let Some(reason) = eligibility(&source) {
         return Err(error(StatusCode::CONFLICT, reason));
     }
-    let signers =
+    let mut signers =
         normalize_signers(body.signers).map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     signer_policy(&source)
         .validate(&signers)
@@ -307,6 +307,8 @@ async fn create(
             .collect::<Vec<_>>(),
     )
     .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
+    package::assign_visual_positions(&source, &source_pdf, &signing_members, &mut signers)
+        .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     let attachment = package::prepare(&state, &auth, &source, body.attachment_document_id).await?;
     scan_upload_bytes(Some("source.pdf"), &bytes)
         .await

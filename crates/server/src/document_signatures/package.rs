@@ -1,6 +1,7 @@
 //! Prepare a non-signing attachment before inviting anyone. Each remote mutation
 //! has a durable phase; ambiguous writes are reconciled, never blindly replayed.
 use super::*;
+use crate::routes::documents::{SIGNATURE_ANCHORS_BINDING_KEY, SignatureAnchor};
 
 pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
     match template {
@@ -772,5 +773,163 @@ mod tests {
         // Both members keep their own embedded font programs.
         let fonts = |bytes: &[u8]| bytes.windows(9).filter(|w| w == b"FontFile2").count();
         assert_eq!(fonts(&merged), fonts(&contract) + fonts(&order));
+    }
+}
+
+/// Fill each signer's Skribble visual-signature frames from the anchors the
+/// document generators recorded, translated to pages of the merged bundle
+/// (source first, then the members in bundle order).
+pub(super) fn assign_visual_positions(
+    source: &PgRow,
+    source_pdf: &[u8],
+    members: &[PreparedSigningMember],
+    signers: &mut [Signer],
+) -> Result<(), &'static str> {
+    let mut documents = Vec::with_capacity(members.len() + 1);
+    documents.push((signature_anchors_of(source), pdf_page_count(source_pdf)?));
+    for member in members {
+        documents.push((
+            signature_anchors_of(&member.row),
+            pdf_page_count(&member.bytes)?,
+        ));
+    }
+    let roles = signers_roles_snapshot(signers);
+    for (signer, positions) in signers.iter_mut().zip(visual_positions(&documents, roles)) {
+        signer.positions = positions;
+    }
+    Ok(())
+}
+
+fn signers_roles_snapshot(signers: &[Signer]) -> Vec<String> {
+    signers.iter().map(|signer| signer.role.clone()).collect()
+}
+
+fn signature_anchors_of(row: &PgRow) -> Vec<SignatureAnchor> {
+    row.try_get::<Option<Value>, _>("generated_bindings")
+        .ok()
+        .flatten()
+        .and_then(|bindings| {
+            serde_json::from_value(bindings.get(SIGNATURE_ANCHORS_BINDING_KEY)?.clone()).ok()
+        })
+        .unwrap_or_default()
+}
+
+fn pdf_page_count(bytes: &[u8]) -> Result<usize, &'static str> {
+    lopdf::Document::load_mem(bytes)
+        .map(|document| document.get_pages().len())
+        .map_err(|_| "signature_bundle_invalid_pdf")
+}
+
+fn mm_to_pdf_points(value_mm: f32) -> i64 {
+    (f64::from(value_mm) * 72.0 / 25.4).round() as i64
+}
+
+/// One list of frames per signer, in signer order. Agency signers take the
+/// `agency` anchors. Client signers take the `client` anchors; in a document
+/// without a client frame (minors' consents) the first client signer takes
+/// `guardian_1`, the second `guardian_2`.
+pub(super) fn visual_positions(
+    documents: &[(Vec<SignatureAnchor>, usize)],
+    roles: Vec<String>,
+) -> Vec<Vec<Value>> {
+    let mut client_index = 0;
+    roles
+        .iter()
+        .map(|role| {
+            let guardian_role = if role == "client" {
+                client_index += 1;
+                Some(format!("guardian_{client_index}"))
+            } else {
+                None
+            };
+            let mut frames = Vec::new();
+            let mut page_offset = 0;
+            for (anchors, page_count) in documents {
+                let has_direct = anchors.iter().any(|anchor| &anchor.role == role);
+                for anchor in anchors {
+                    let matches = if &anchor.role == role {
+                        true
+                    } else {
+                        !has_direct && guardian_role.as_deref() == Some(anchor.role.as_str())
+                    };
+                    if matches && anchor.page < *page_count {
+                        frames.push(json!({
+                            "page": (page_offset + anchor.page).to_string(),
+                            "x": mm_to_pdf_points(anchor.x_mm),
+                            "y": mm_to_pdf_points(anchor.y_mm),
+                            "width": mm_to_pdf_points(anchor.width_mm),
+                            "height": mm_to_pdf_points(anchor.height_mm),
+                        }));
+                    }
+                }
+                page_offset += page_count;
+            }
+            frames
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod visual_position_tests {
+    use super::*;
+
+    fn anchor(role: &str, page: usize, x_mm: f32, y_mm: f32) -> SignatureAnchor {
+        SignatureAnchor {
+            role: role.into(),
+            page,
+            x_mm,
+            y_mm,
+            width_mm: 60.0,
+            height_mm: 10.5,
+        }
+    }
+
+    #[test]
+    fn frames_follow_the_bundle_page_offsets_and_signer_roles() {
+        // Source: 2 pages, both parties sign on its last page. Member: 3 pages,
+        // client signs on page 1 of the member (bundle page 3).
+        let documents = vec![
+            (
+                vec![
+                    anchor("client", 1, 25.0, 40.0),
+                    anchor("agency", 1, 110.0, 40.0),
+                ],
+                2,
+            ),
+            (vec![anchor("client", 0, 147.0, 60.0)], 3),
+        ];
+        let positions = visual_positions(&documents, vec!["client".into(), "agency".into()]);
+        assert_eq!(positions[0].len(), 2);
+        assert_eq!(positions[0][0]["page"], "1");
+        assert_eq!(positions[0][1]["page"], "2");
+        assert_eq!(positions[0][0]["x"], 71); // 25 mm
+        assert_eq!(positions[0][0]["width"], 170); // 60 mm
+        assert_eq!(positions[1].len(), 1);
+        assert_eq!(positions[1][0]["page"], "1");
+        assert_eq!(positions[1][0]["x"], 312); // 110 mm
+    }
+
+    #[test]
+    fn guardians_take_the_numbered_frames_when_no_client_frame_exists() {
+        let documents = vec![(
+            vec![
+                anchor("guardian_1", 0, 147.0, 80.0),
+                anchor("guardian_2", 0, 147.0, 60.0),
+            ],
+            1,
+        )];
+        let positions = visual_positions(
+            &documents,
+            vec!["client".into(), "client".into(), "agency".into()],
+        );
+        assert_eq!(positions[0][0]["y"], mm_to_pdf_points(80.0));
+        assert_eq!(positions[1][0]["y"], mm_to_pdf_points(60.0));
+        assert!(positions[2].is_empty());
+    }
+
+    #[test]
+    fn anchors_outside_the_document_are_dropped() {
+        let documents = vec![(vec![anchor("client", 4, 25.0, 40.0)], 2)];
+        assert!(visual_positions(&documents, vec!["client".into()])[0].is_empty());
     }
 }
