@@ -87,7 +87,6 @@ struct CreateFrameworkContractRequest {
     lead_id: Option<String>,
     signed_at: Option<String>,
     valid_from: Option<String>,
-    valid_to: Option<String>,
     conditions: Option<Value>,
     status: Option<String>,
     client_reference: Option<String>,
