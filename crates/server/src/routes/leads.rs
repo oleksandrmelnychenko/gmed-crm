@@ -63,6 +63,10 @@ pub fn router() -> Router<AppState> {
             "/patients/{patient_id}/repeat-intakes",
             get(list_repeat_intakes),
         )
+        .route(
+            "/patients/{patient_id}/previous-requests",
+            get(list_previous_requests),
+        )
         .route("/leads", get(list_leads).post(create_lead))
         .route("/leads/referrer-patients", get(list_lead_referrer_patients))
         .route(
@@ -2036,6 +2040,70 @@ async fn list_repeat_intakes(
     let rows = sqlx::query("SELECT id,created_at,updated_at,primary_concern_text FROM leads WHERE repeat_patient_id=$1 AND converted_patient_id IS NULL AND failed_outcome_status='none' ORDER BY updated_at DESC,id")
         .bind(patient_id).fetch_all(&state.db).await.map_err(|_|err(StatusCode::INTERNAL_SERVER_ERROR,"Failed to load repeat intakes"))?;
     Ok(Json(rows.iter().map(|row| json!({"id":row.get::<Uuid,_>("id"),"created_at":row.get::<chrono::DateTime<chrono::Utc>,_>("created_at"),"updated_at":row.get::<chrono::DateTime<chrono::Utc>,_>("updated_at"),"concern":row.get::<Option<String>,_>("primary_concern_text")})).collect()))
+}
+
+#[derive(Deserialize)]
+struct PreviousRequestsQuery {
+    exclude_lead_id: Option<Uuid>,
+}
+
+/// Completed earlier requests of a patient, newest first, so a repeat intake
+/// can reuse a previous reason instead of retyping it. Only converted leads
+/// count; abandoned drafts never became a request.
+async fn list_previous_requests(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(patient_id): Path<Uuid>,
+    Query(query): Query<PreviousRequestsQuery>,
+) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    auth.require_capability(Capability::LeadsConvert)?;
+    require_repeat_patient_access(&state, &auth, patient_id).await?;
+    let rows = sqlx::query(
+        "SELECT l.id, l.created_at, l.primary_concern_text, l.requested_specialties,
+                o.order_number, o.date_from, o.date_to
+           FROM leads l
+           LEFT JOIN LATERAL (
+                SELECT order_number, date_from, date_to
+                  FROM orders
+                 WHERE source_lead_id = l.id AND status <> 'cancelled'
+                 ORDER BY created_at DESC, id
+                 LIMIT 1
+           ) o ON true
+          WHERE (l.converted_patient_id = $1 OR l.repeat_patient_id = $1 OR l.prospect_patient_id = $1)
+            AND l.id IS DISTINCT FROM $2
+            AND l.qualification_status = 'converted'
+            AND NULLIF(btrim(l.primary_concern_text), '') IS NOT NULL
+          ORDER BY l.created_at DESC, l.id
+          LIMIT 10",
+    )
+    .bind(patient_id)
+    .bind(query.exclude_lead_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, "load previous patient requests");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load previous requests",
+        )
+    })?;
+    Ok(Json(
+        rows.iter()
+            .map(|row| {
+                json!({
+                    "id": row.get::<Uuid, _>("id"),
+                    "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+                    "concern": row.get::<Option<String>, _>("primary_concern_text"),
+                    "specialties": row
+                        .get::<Option<Value>, _>("requested_specialties")
+                        .unwrap_or_else(|| json!([])),
+                    "order_number": row.get::<Option<String>, _>("order_number"),
+                    "date_from": row.get::<Option<NaiveDate>, _>("date_from"),
+                    "date_to": row.get::<Option<NaiveDate>, _>("date_to"),
+                })
+            })
+            .collect(),
+    ))
 }
 
 async fn create_repeat_intake(

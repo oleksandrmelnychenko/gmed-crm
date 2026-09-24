@@ -1,6 +1,9 @@
-import { OrderPatientDocumentReview, OrderExistingContractsTable } from "@/pages/orders/ui/order-patient-document-review";
+import { OrderPatientDocumentReview, OrderExistingContractsTable, type RequestReviewRow } from "@/pages/orders/ui/order-patient-document-review";
 import { contractCoversOrder, formatIntakeDate } from "@/pages/orders/model/order-intake";
 import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
+import { usePreviousRequests } from "../model/use-previous-requests";
+import { PreviousRequestsPanel } from "./previous-requests-panel";
+import { orderPeriodWarnings } from "../model/order-period-warnings";
 import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
 import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
@@ -2603,6 +2606,7 @@ export function LeadWizard({
     || (lead?.intake_model === "patient_first" && Boolean(lead?.prospect_patient_id));
   const repeatPatientId = open && isRepeatIntake ? existingPatient?.id ?? lead?.prospect_patient_id ?? null : null;
   const patientReview = useRepeatPatientReview(repeatPatientId);
+  const previousRequests = usePreviousRequests(repeatPatientId, lead?.id ?? null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [referrerSearch, setReferrerSearch] = useState("");
   const deferredReferrerSearch = useDeferredValue(referrerSearch);
@@ -3506,6 +3510,14 @@ export function LeadWizard({
     : contracts.find((item) => item.status !== "terminated") ?? null;
   const attachedPatientId = existingPatient?.id ?? lead?.prospect_patient_id;
   const inheritedContract = Boolean(contract?.patient_id && contract.patient_id === attachedPatientId);
+  const periodWarnings = draft ? orderPeriodWarnings(draft.programDateFrom, draft.programDateTo, contract) : [];
+  const periodWarningBanner = periodWarnings.length ? (
+    <Banner tone="warning">
+      <ul data-testid="order-period-warnings" className="space-y-1 text-xs leading-5">
+        {periodWarnings.map((item) => <li key={item.key}>{lang === "de" ? item.de : item.ru}</li>)}
+      </ul>
+    </Banner>
+  ) : null;
   // Repeat intake: preselect the patient's signed framework contract that
   // covers the requested period, so the new order attaches to it instead of
   // silently creating a second contract.
@@ -5655,17 +5667,54 @@ ${serviceCommentLines.join("\n")}`
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
+  // The table above checks the patient card; step 4 is closed only by this
+  // request's own consents and documents, which are never inherited. These rows
+  // show the same things the server checks, so a green table means a done step.
+  const consentReasons = ["Privacy practices consent is missing", "Healthcare consent is missing"];
+  const missingConsentField = draft && !draft.privacyConsent ? PRIVACY_CONSENT_ID : draft && !draft.healthcareConsent ? HEALTHCARE_CONSENT_ID : null;
+  const requestReviewRows: RequestReviewRow[] = draft && lead ? [
+    {
+      key: "request:consents",
+      label: tx("Согласия в этом обращении", "Einwilligungen in dieser Anfrage"),
+      ready: !missingConsentField,
+      status: missingConsentField
+        ? tx("Не отмечены: согласия из карточки не переносятся", "Nicht bestätigt: Einwilligungen werden nicht aus der Akte übernommen")
+        : tx("Отмечены в этом обращении", "In dieser Anfrage bestätigt"),
+      detail: [
+        `${tx("Политика конфиденциальности", "Datenschutzhinweise")}: ${draft.privacyConsent ? tx("да", "ja") : tx("нет", "nein")}`,
+        `${tx("Медицинские данные", "Gesundheitsdaten")}: ${draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
+      ].join(" · "),
+      action: missingConsentField ? {
+        label: tx("Отметить согласия", "Einwilligungen bestätigen"),
+        onClick: () => openValidationIssue({ key: "request-consents", step: "documents", message: readinessReasonLabel(missingConsentField === PRIVACY_CONSENT_ID ? consentReasons[0] : consentReasons[1], tx), fieldId: missingConsentField }),
+      } : undefined,
+    },
+    ...lead.readiness.blocking_reasons
+      .filter((reason) => readinessReasonStep(reason) === "documents" && !consentReasons.includes(reason))
+      .map((reason): RequestReviewRow => ({
+        key: `request:${reason}`,
+        label: tx("В этом обращении", "In dieser Anfrage"),
+        ready: false,
+        status: readinessReasonLabel(reason, tx),
+        detail: "—",
+        action: { label: tx("Исправить", "Beheben"), onClick: () => openReadinessReason(reason) },
+      })),
+  ] : [];
   const patientDocumentReview = repeatPatientId ? <>
     {patientReview.error ? <Banner tone="error"><p>{tx("Не удалось проверить документы пациента", "Patientendokumente konnten nicht geprüft werden")}: {patientReview.error}</p><Button type="button" variant="outline" size="sm" onClick={() => void patientReview.refresh().catch(() => undefined)}>{tx("Повторить", "Erneut versuchen")}</Button></Banner> : null}
     {patientReview.loading ? <p role="status" className="text-xs text-muted-foreground">{tx("Проверка документов пациента…", "Patientendokumente werden geprüft…")}</p> : null}
-    {patientReview.readiness ? <OrderPatientDocumentReview readiness={patientReview.readiness} documents={[...patientReview.documents, ...documents]} dateTo={draft?.programDateTo || null} lang={lang} busy={isBusy || patientReview.loading}
+    {patientReview.readiness ? <OrderPatientDocumentReview readiness={patientReview.readiness} documents={[...patientReview.documents, ...documents]} dateTo={draft?.programDateTo || null} lang={lang} busy={isBusy || patientReview.loading} requestRows={requestReviewRows}
       onRefresh={() => void Promise.all([patientReview.refresh(), refreshLeadState()]).catch(showWizardError)}
       onOpenDocuments={() => { setStep("documents"); window.requestAnimationFrame(() => document.getElementById(CONFIDENTIALITY_RELEASE_ID)?.focus()); }}
       onSaveExpiry={async expiry => { setBusy("passport-expiry"); setError(""); try { return await patientReview.saveExpiry(expiry); } catch (cause) { showWizardError(cause); return false; } finally { setBusy(null); } }} /> : null}
   </> : null;
+  // Contracts signed in this request stay lead-owned until the request is
+  // completed, so the patient list alone would hide them.
+  const reviewContracts = [...contracts.filter((item) => item.lead_id && !patientReview.contracts.some((known) => known.id === item.id)), ...patientReview.contracts];
   const patientContractReview = repeatPatientId && draft ? <Section title={tx("Сохранённые договоры пациента", "Gespeicherte Patientenverträge")}>
-    <OrderExistingContractsTable contracts={patientReview.contracts} dateFrom={draft.programDateFrom || null} dateTo={draft.programDateTo || null} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
-      onSelect={id => { const selected = patientReview.contracts.find(item => item.id === id); if (selected) setDraft(current => current ? { ...current, frameworkContractId: id, contractEffectiveDate: selected.valid_from ?? "" } : current); }} />
+    {periodWarningBanner ? <div className="mb-3">{periodWarningBanner}</div> : null}
+    <OrderExistingContractsTable contracts={reviewContracts} dateFrom={draft.programDateFrom || null} dateTo={draft.programDateTo || null} selectedId={contract?.id ?? null} lang={lang} busy={isBusy || patientReview.loading}
+      onSelect={id => { const selected = reviewContracts.find(item => item.id === id); if (selected) setDraft(current => current ? { ...current, frameworkContractId: id, contractEffectiveDate: selected.valid_from ?? "" } : current); }} />
     {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "", contractEffectiveDate: new Date().toISOString().slice(0, 10) } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
   const stepIndex = STEPS.findIndex((item) => item.id === step);
@@ -5673,6 +5722,8 @@ ${serviceCommentLines.join("\n")}`
   const nextStep = STEPS[stepIndex + 1];
   const commercialReady = Boolean(readiness.get("commercial")) && quoteAndPrepaymentReady;
   const conversionReady = Boolean(lead?.readiness.conversion_ready) && quoteAndPrepaymentReady;
+  const completionBlockerCount = (lead?.readiness.blocking_reasons.length ?? 0)
+    + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
     if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
     if (id === "medical") return Boolean(draft?.concern.trim());
@@ -6504,6 +6555,13 @@ ${serviceCommentLines.join("\n")}`
             <section className="space-y-5">
               <Section title={tx("Обращение", "Anliegen")}>
               <Field label={tx("Направивший врач", "Zuweisender Arzt")} className="block pb-2"><Input className={inputClass} value={draft.referrer} onChange={(event) => patch("referrer", event.target.value)} /></Field>
+              <PreviousRequestsPanel
+                requests={previousRequests.requests}
+                currentConcern={draft.concern}
+                tx={tx}
+                specialtyLabel={specialtyLabel}
+                onUse={(concern) => patch("concern", concern)}
+              />
               <Field
                 required
                 label={tx("Причина обращения", "Anliegen")}
@@ -6614,6 +6672,7 @@ ${serviceCommentLines.join("\n")}`
                     />
                   </Field>
                 </div>
+                {periodWarningBanner ? <div className="mt-3">{periodWarningBanner}</div> : null}
               </Section>
               {isQuestionnaireLead ? (
                 <Section title={tx("Данные опросника", "Fragebogendaten")}>
@@ -6775,6 +6834,11 @@ ${serviceCommentLines.join("\n")}`
                   )}
                 >
                 <div className="space-y-1 rounded-lg border border-border/70 bg-muted/10 px-3 py-2">
+                  {isRepeatIntake && (!draft.privacyConsent || !draft.healthcareConsent) ? (
+                    <p data-testid="repeat-consent-note" className="pb-1 text-xs leading-5 text-amber-800">
+                      {tx("Согласия из карточки пациента не переносятся: подтвердите их с клиентом для этого обращения.", "Einwilligungen werden nicht aus der Patientenakte übernommen: bitte für diese Anfrage mit dem Kunden bestätigen.")}
+                    </p>
+                  ) : null}
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
                   <ToggleRow checked={draft.providerReleaseConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("providerReleaseConsent", checked)} label={tx("Разрешена передача данных медицинским учреждениям и врачам", "Datenübermittlung an medizinische Einrichtungen und Ärztinnen/Ärzte ist erlaubt")} />
@@ -7912,28 +7976,48 @@ ${serviceCommentLines.join("\n")}`
               </Section>
               {lead.readiness.blocking_reasons.length > 0 || !quoteAndPrepaymentReady ? (
                 <Banner tone="warning">
-                  <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}</div>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs leading-5">
-                    {lead.readiness.blocking_reasons.map((reason) => (
-                      <li key={reason}>
-                        <button
-                          type="button"
-                          className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          disabled={isBusy}
-                          onClick={() => openReadinessReason(reason)}
-                        >
-                          {readinessReasonLabel(reason, tx)}
-                        </button>
-                      </li>
-                    ))}
-                    {!quoteAndPrepaymentReady && !lead.readiness.blocking_reasons.some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? (
-                      <li>
-                        <button type="button" className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => navigateToStep("commercial")}>
-                          {quoteStateLabel}
-                        </button>
-                      </li>
-                    ) : null}
-                  </ul>
+                  <div className="font-medium">{tx("Что осталось заполнить", "Was noch fehlt")}: {completionBlockerCount}</div>
+                  <div data-testid="completion-blockers" className="mt-2 space-y-2">
+                    {STEPS.map((candidate) => {
+                      const reasons = lead.readiness.blocking_reasons.filter((reason) => readinessReasonStep(reason) === candidate.id);
+                      const quoteMissing = candidate.id === "commercial" && !quoteAndPrepaymentReady
+                        && !lead.readiness.blocking_reasons.some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason));
+                      if (!reasons.length && !quoteMissing) return null;
+                      return (
+                        <div key={candidate.id}>
+                          <button
+                            type="button"
+                            className="text-left text-xs font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={isBusy || candidate.id === step}
+                            onClick={() => navigateToStep(candidate.id)}
+                          >
+                            {readinessStepLabel(candidate.id, tx, isRepeatIntake)}
+                          </button>
+                          <ul className="mt-1 list-disc space-y-1 pl-5 text-xs leading-5">
+                            {reasons.map((reason) => (
+                              <li key={reason}>
+                                <button
+                                  type="button"
+                                  className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  disabled={isBusy}
+                                  onClick={() => openReadinessReason(reason)}
+                                >
+                                  {readinessReasonLabel(reason, tx)}
+                                </button>
+                              </li>
+                            ))}
+                            {quoteMissing ? (
+                              <li>
+                                <button type="button" className="text-left underline decoration-dotted underline-offset-2 hover:decoration-solid focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" disabled={isBusy} onClick={() => navigateToStep("commercial")}>
+                                  {quoteStateLabel}
+                                </button>
+                              </li>
+                            ) : null}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </Banner>
               ) : null}
               <label className="flex items-start gap-3 rounded-lg border border-border bg-card px-4 py-3">
@@ -7987,7 +8071,22 @@ ${serviceCommentLines.join("\n")}`
               </div>
             ) : null}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-              <span>{tx("Этап", "Schritt")} {stepIndex + 1} {tx("из", "von")} {STEPS.length}</span>
+              <span className="inline-flex flex-wrap items-center gap-x-3">
+                <span>{tx("Этап", "Schritt")} {stepIndex + 1} {tx("из", "von")} {STEPS.length}</span>
+                {lead && step !== "release" && completionBlockerCount > 0 ? (
+                  <button
+                    type="button"
+                    data-testid="completion-blocker-count"
+                    className="font-medium text-amber-800 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    disabled={loading || isBusy}
+                    onClick={() => navigateToStep("release")}
+                  >
+                    {isRepeatIntake ? tx("До завершения обращения осталось", "Bis zum Abschluss offen") : tx("До создания пациента осталось", "Bis zur Patientenanlage offen")}: {completionBlockerCount}
+                  </button>
+                ) : lead && step !== "release" && conversionReady ? (
+                  <span className="font-medium text-emerald-700">{isRepeatIntake ? tx("Обращение можно завершить", "Anfrage kann abgeschlossen werden") : tx("Пациента можно создать", "Patient kann angelegt werden")}</span>
+                ) : null}
+              </span>
               <span role="status" className="inline-flex items-center gap-1.5">
                 {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>

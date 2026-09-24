@@ -3930,3 +3930,133 @@ async fn concierge_sees_only_the_service_grid_and_cannot_mutate_leads() {
     assert_eq!(after["notes"], "internal note about the case");
     assert_eq!(after["qualification_status"], "new");
 }
+
+async fn insert_previous_request_patient(
+    pool: &PgPool,
+    patient_number: String,
+    created_by: Uuid,
+) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, lifecycle_status, created_by)
+         VALUES ($1, 'Previous', 'Requests', DATE '1980-02-01', 'male', 'active', $2) RETURNING id",
+    )
+    .bind(patient_number)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn insert_previous_request_lead(
+    pool: &PgPool,
+    status: &str,
+    concern: &str,
+    converted_patient: Option<Uuid>,
+    repeat_patient: Option<Uuid>,
+    created_by: Uuid,
+) -> Uuid {
+    sqlx::query_scalar(
+        "INSERT INTO leads (first_name, last_name, primary_concern_text, requested_specialties,
+                            qualification_status, converted_patient_id, repeat_patient_id,
+                            intake_source, created_by)
+         VALUES ('Previous', 'Requests', $1, '[\"radiologie\"]'::jsonb, $2, $3, $4, 'staff_wizard', $5)
+         RETURNING id",
+    )
+    .bind(concern)
+    .bind(status)
+    .bind(converted_patient)
+    .bind(repeat_patient)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn previous_requests_list_only_completed_requests_of_the_patient() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let pm_id = app.patient_manager_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient = insert_previous_request_patient(pool, format!("P-PREV-{tag}"), pm_id).await;
+    let other_patient =
+        insert_previous_request_patient(pool, format!("P-OTHER-{tag}"), pm_id).await;
+    sqlx::query("INSERT INTO patient_assignments(patient_id,user_id,assigned_by) VALUES($1,$2,$2)")
+        .bind(patient)
+        .bind(pm_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let first = insert_previous_request_lead(
+        pool,
+        "converted",
+        "Knee pain after sports injury",
+        Some(patient),
+        None,
+        pm_id,
+    )
+    .await;
+    insert_previous_request_lead(pool, "converted", "   ", Some(patient), None, pm_id).await;
+    insert_previous_request_lead(
+        pool,
+        "archived",
+        "Dropped enquiry",
+        None,
+        Some(patient),
+        pm_id,
+    )
+    .await;
+    insert_previous_request_lead(
+        pool,
+        "converted",
+        "Other patient",
+        Some(other_patient),
+        None,
+        pm_id,
+    )
+    .await;
+    let current = insert_previous_request_lead(
+        pool,
+        "in_progress",
+        "Current repeat request",
+        None,
+        Some(patient),
+        pm_id,
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO orders(order_number, patient_id, source_lead_id, phase, status, date_from, date_to, created_by)
+         VALUES ($1, $2, $3, 'followup', 'completed', DATE '2026-03-02', DATE '2026-03-06', $4)",
+    )
+    .bind(format!("A-PREV-{tag}"))
+    .bind(patient)
+    .bind(first)
+    .bind(pm_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let path = format!("/api/v1/patients/{patient}/previous-requests?exclude_lead_id={current}");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &path,
+        &app.auth_header("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = body.as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{body}");
+    assert_eq!(rows[0]["id"], first.to_string());
+    assert_eq!(rows[0]["concern"], "Knee pain after sports injury");
+    assert_eq!(rows[0]["specialties"], json!(["radiologie"]));
+    assert_eq!(rows[0]["order_number"], format!("A-PREV-{tag}"));
+    assert_eq!(rows[0]["date_from"], "2026-03-02");
+    assert_eq!(rows[0]["date_to"], "2026-03-06");
+
+    let (status, _) = json_request(&app, "GET", &path, &app.auth_header("interpreter"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

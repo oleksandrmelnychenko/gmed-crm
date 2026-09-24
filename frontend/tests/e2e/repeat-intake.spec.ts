@@ -52,6 +52,7 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
     let response: unknown = [];
     if (path === "/leads" && post) response = {id: leadId};
     else if (path === `/patients/${patientId}/repeat-intakes`) response = hasOrder ? [{id:leadId,created_at:"2026-09-13T10:00:00Z",concern:"Saved repeat"}] : [];
+    else if (path === `/patients/${patientId}/previous-requests`) response = [{id: "00000000-0000-0000-0000-000000000aaa", created_at: "2026-03-01T09:00:00Z", concern: "Knee pain after sports injury", specialties: [], order_number: "A-PREVIOUS-001", date_from: "2026-03-02", date_to: "2026-03-06"}];
     else if (path === `/leads/${leadId}/update`) { lead = {...lead, ...body}; response = {ok: true}; }
     else if (path === `/leads/${leadId}/prospect`) {
       attachAttempts += 1;
@@ -453,4 +454,27 @@ test("a role without clinical access can continue repeat administration", async 
   await wizard.getByRole("tab",{name:/Сервисная история/}).click();
   await expect(wizard.getByRole("tab",{name:/Сервисная история/})).toHaveAttribute("aria-selected","true");
   expect(writes.filter(item=>item.path.startsWith(`/patients/${patientId}/`))).toEqual([]);
+});
+
+test("repeat intake offers earlier reasons and copies one into the required field", async ({page}) => {
+  const {wizard} = await mount(page);
+  await wizard.getByRole("button", {name: "Далее", exact: true}).click();
+  const previous = wizard.getByRole("region", {name: "Предыдущие обращения"});
+  await expect(previous.getByText("Knee pain after sports injury", {exact: true})).toBeVisible();
+  await expect(previous.getByText(/A-PREVIOUS-001 · 02\.03\.2026 – 06\.03\.2026/)).toBeVisible();
+  await previous.getByRole("button", {name: "Взять причину обращения от 01.03.2026"}).click();
+  await expect(wizard.locator("#lead-wizard-concern")).toHaveValue("Knee pain after sports injury");
+  await expect(previous.getByRole("button", {name: "Взять причину обращения от 01.03.2026"})).toBeDisabled();
+  await expect(previous.getByText("Уже в поле", {exact: true})).toBeVisible();
+});
+
+test("document review shows that consents of this request are still missing", async ({page}) => {
+  const {wizard} = await mount(page, "ru", undefined, false, true);
+  await wizard.getByRole("button", {name: "Далее", exact: true}).click();
+  await wizard.getByRole("tab", {name: /Проверка документов/}).click();
+  await expect(wizard.getByText("Согласия в этом обращении", {exact: true}).first()).toBeVisible();
+  await expect(wizard.getByText("Не отмечены: согласия из карточки не переносятся", {exact: true}).first()).toBeVisible();
+  await expect(wizard.getByTestId("repeat-consent-note")).toBeVisible();
+  await wizard.getByRole("button", {name: "Отметить согласия", exact: true}).first().click();
+  await expect(page.locator("#lead-wizard-privacy-consent")).toBeFocused();
 });

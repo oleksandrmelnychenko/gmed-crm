@@ -27,7 +27,7 @@ export function OrderExistingContractsTable({ contracts, dateFrom, dateTo, selec
   const tx = (ru: string, de: string) => language ? de : ru;
   const columns: ColumnDef<ContractItem>[] = [
     { id: "number", label: tx("Договор", "Vertrag"), accessor: row => row.contract_number, minWidth: 145,
-      render: row => <span className="font-mono font-medium">{row.contract_number}</span> },
+      render: row => <span className="inline-flex flex-wrap items-center gap-1.5"><span className="font-mono font-medium">{row.contract_number}</span>{row.lead_id ? <Badge variant="outline" className="h-auto border-sky-200 bg-sky-50 text-[10px] leading-4 text-sky-800">{tx("Оформлен в этом обращении", "In dieser Anfrage erstellt")}</Badge> : null}</span> },
     { id: "status", label: tx("Статус сейчас", "Aktueller Status"), accessor: contractValidity, minWidth: 160,
       render: row => { const status = contractValidity(row); return <ReviewBadge ready={status === "valid"}>{CONTRACT_VALIDITY_LABELS[status]?.[language] ?? tx("Проверьте статус", "Status prüfen")}</ReviewBadge>; } },
     { id: "signed", label: tx("Подписан", "Unterzeichnet am"), accessor: row => row.signed_at, width: 145,
@@ -42,9 +42,11 @@ export function OrderExistingContractsTable({ contracts, dateFrom, dateTo, selec
     emptyState={<p className="p-4 text-xs text-muted-foreground">{tx("Сохранённых договоров нет. Создайте рамочный договор на этапе «Договор».", "Keine gespeicherten Verträge. Erstellen Sie im Schritt „Vertrag“ einen Rahmenvertrag.")}</p>} />;
 }
 
-type ReviewRow = { key: string; label: string; ready: boolean; status: string; detail: string };
-export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang, busy, onRefresh, onOpenDocuments, onSaveExpiry }: {
-  readiness: PatientOrderRecheck; documents: DocumentItem[]; dateTo: string | null; lang: Lang; busy: boolean;
+/** A check of the current request itself (consents, documents) rather than of the patient card. */
+export type RequestReviewRow = { key: string; label: string; ready: boolean; status: string; detail: string; action?: { label: string; onClick: () => void } };
+type ReviewRow = RequestReviewRow;
+export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang, busy, requestRows = [], onRefresh, onOpenDocuments, onSaveExpiry }: {
+  readiness: PatientOrderRecheck; documents: DocumentItem[]; dateTo: string | null; lang: Lang; busy: boolean; requestRows?: RequestReviewRow[];
   onRefresh: () => void; onOpenDocuments: () => void; onSaveExpiry: (expiry: string) => Promise<boolean | undefined>;
 }) {
   const language = lang === "de" ? 1 : 0;
@@ -76,6 +78,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
         : key === "confidentiality_release_ready" && releaseDate ? `${tx("Подписано", "Unterzeichnet")}: ${formatIntakeDate(releaseDate)}`
         : key === "document_pack_ready" && readiness.document_alerts.missing_count > 0 ? `${tx("Не хватает документов", "Fehlende Dokumente")}: ${readiness.document_alerts.missing_count}` : "—",
     })),
+    ...requestRows,
   ];
   const columns: ColumnDef<ReviewRow>[] = [
     { id: "document", label: tx("Документ / проверка", "Dokument / Prüfung"), accessor: row => row.label, minWidth: 265, render: row => <span className="font-medium">{row.label}</span> },
@@ -85,7 +88,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
   return <OrderWizardSection flush title={tx("Проверка документов пациента", "Patientendokumente prüfen")}
     accessory={<Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onRefresh}><RefreshCw className="size-3.5" />{tx("Проверить снова", "Erneut prüfen")}</Button>}>
     <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: 44 }} mobilePrimaryColumnId="document" className={tableClass}
-      rowActionsWidth={210} rowActions={row => row.key === "debt" ? null : row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
+      rowActionsWidth={210} rowActions={row => row.action ? <Button type="button" size="sm" variant={row.ready ? "outline" : "default"} disabled={busy} onClick={row.action.onClick}>{row.action.label}</Button> : row.key.startsWith("request:") ? null : row.key === "debt" ? null : row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
     {editing ? <div role="group" aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} className="space-y-3 border-t p-3 sm:p-4">
       <Field label={tx("Паспорт действителен до", "Reisepass gültig bis")}><Input aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} type="date" value={expiry} onChange={event => setExpiry(event.target.value)} className="max-w-xs" /></Field>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy || !expiry || expiry === readiness.passport_expiry} onClick={() => { void onSaveExpiry(expiry).then(saved => { if (saved) setEditing(false); }); }}>{tx("Сохранить срок в карточке пациента", "Gültigkeit in Patientenakte speichern")}</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>{tx("Отмена", "Abbrechen")}</Button></div>
