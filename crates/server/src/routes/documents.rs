@@ -15466,6 +15466,12 @@ pub(crate) struct GeneratedPdf {
     pub(crate) signature_anchors: Vec<SignatureAnchor>,
 }
 
+impl AsRef<[u8]> for GeneratedPdf {
+    fn as_ref(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
 impl std::ops::Deref for GeneratedPdf {
     type Target = Vec<u8>;
 
@@ -18316,7 +18322,7 @@ fn build_enhanced_due_diligence_pdf(
                 .unwrap_or_else(|| "____________".to_string()),
             reviewer_name,
         ),
-        &reviewer_name,
+        reviewer_name,
         "agency",
     );
 
