@@ -27363,7 +27363,7 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(signature_text_y_positions.len(), 4);
+        assert_eq!(signature_text_y_positions.len(), 6);
         assert!(
             signature_text_y_positions
                 .iter()
