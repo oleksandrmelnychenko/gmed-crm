@@ -18,6 +18,7 @@ import {
   invoiceCreationErrorMessage,
 } from "@/pages/invoices/model/billing-release";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
+import { PatientTerminationSettlements } from "@/pages/invoices/termination-settlement/ui";
 
 type BillingOrder = {
   id: string;
@@ -28,6 +29,16 @@ type BillingOrder = {
   billing_release_status: string;
   package_coverage_status: string;
   services: Array<{ id: string; status: string }>;
+  cancellation_reason?: string | null;
+  termination_settlement?: {
+    id: string;
+    status: "open" | "settled";
+    terminated_at: string;
+    accrued_gross: string;
+    balance_gross: string;
+    uninvoiced_gross: string;
+    final_invoice_id: string | null;
+  } | null;
 };
 
 type BillingExpense = {
@@ -232,6 +243,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   ];
 
   return <div className="mt-4 min-w-0 space-y-4" data-testid="patient-billing">
+    <PatientTerminationSettlements patientId={patientId} lang={lang} />
     <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div><h2 className="flex items-center gap-2 text-sm font-semibold"><span className="size-2 rounded-full bg-[var(--brand)]" />{copy.title}</h2><p className="mt-1 text-xs text-muted-foreground">{copy.subtitle}</p></div>
@@ -240,7 +252,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       <p className="border-b border-border/60 bg-muted/20 px-4 py-2.5 text-xs leading-5 text-muted-foreground">{copy.late}</p>
       <form className="space-y-4 p-4" onSubmit={submit}>
         <div className="grid gap-3 lg:grid-cols-5">
-          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
+          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>

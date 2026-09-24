@@ -74,6 +74,7 @@ import {
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
+import { OrderTerminationBanner } from "@/pages/invoices/termination-settlement/ui";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import {
   formatEnumLabel,
@@ -768,6 +769,7 @@ function useOrdersPageContent() {
       delivered: l("orders_erbracht"),
       approved: l("orders_freigegeben_2"),
       invoiced: lang === "de" ? "Abgerechnet" : "Выставлен счёт",
+      cancelled: lang === "de" ? "Storniert" : "Отменено",
     });
   const leistungBillingStatusLabel = (value: LeistungBillingStatus) =>
     labelFor(value, {
@@ -3770,6 +3772,13 @@ function useOrdersPageContent() {
             ) : (
               <div className="min-w-0 space-y-4 rounded-xl">
                 {detailError ? <Banner tone="error" withIcon>{detailError}</Banner> : null}
+                {orderDetail.cancellation_reason === "contract_terminated" ? (
+                  <OrderTerminationBanner
+                    orderId={orderDetail.id}
+                    patientId={orderDetail.patient_id}
+                    lang={lang}
+                  />
+                ) : null}
                 <section className="relative rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                   <div className="relative p-5">
                     <span
@@ -6974,7 +6983,8 @@ function useOrdersPageContent() {
                                       </Button>
                                     ) : null}
                                     {permissions.canApproveLeistung &&
-                                    !leistung.delivered_at ? (
+                                    !leistung.delivered_at &&
+                                    leistung.status !== "cancelled" ? (
                                       <Button
                                         variant="outline"
                                         className="mt-4 h-8 w-full rounded-lg"

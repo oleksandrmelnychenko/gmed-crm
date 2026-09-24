@@ -20,6 +20,7 @@ import {
   Download,
   Eye,
   FileText,
+  FileWarning,
   FileUp,
   FileInput,
   FileOutput,
@@ -69,6 +70,7 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { IncomingInvoices } from "./ui/incoming-invoices";
+import { TerminationSettlementQueue } from "./termination-settlement/queue";
 import { PaymentEditForm } from "./ui/payment-edit-form";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { DatevWorkspace } from "./datev/workspace";
@@ -431,6 +433,7 @@ function useStaffInvoicesPageContent() {
   const [importOpen, setImportOpen] = useState(false);
   const datevActive = searchParams.get("source") === "datev";
   const incomingActive = searchParams.get("source") === "incoming";
+  const settlementsActive = searchParams.get("source") === "settlements";
   const datevDemo = searchParams.get("datev_mode") === "demo";
   const access = invoicesPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -2039,9 +2042,10 @@ function useStaffInvoicesPageContent() {
 
         <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
           <nav aria-label={lang === "de" ? "Rechnungsquelle" : "Источник счетов"} className="flex w-max min-w-full justify-center gap-1">
-            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive || incomingActive ? "ghost" : "default"} aria-current={!datevActive && !incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive || incomingActive || settlementsActive ? "ghost" : "default"} aria-current={!datevActive && !incomingActive && !settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: null, datev_mode: null }, { replace: false })}><FileOutput className="size-4" aria-hidden />{lang === "de" ? "Ausgangsrechnungen" : "Исходящие"}</Button>
             <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={incomingActive ? "default" : "ghost"} aria-current={incomingActive ? "page" : undefined} onClick={() => syncQuery({ source: "incoming", invoice: null, datev_mode: null }, { replace: false })}><FileInput className="size-4" aria-hidden />{lang === "de" ? "Eingangsrechnungen" : "Входящие"}</Button>
             <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={datevActive ? "default" : "ghost"} aria-current={datevActive ? "page" : undefined} onClick={() => syncQuery({ source: "datev", invoice: null }, { replace: false })}><Landmark className="size-4" aria-hidden />{lang === "de" ? "Aus DATEV" : "Из DATEV"}</Button>
+            <Button type="button" size="sm" className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8" variant={settlementsActive ? "default" : "ghost"} aria-current={settlementsActive ? "page" : undefined} onClick={() => syncQuery({ source: "settlements", invoice: null, datev_mode: null }, { replace: false })}><FileWarning className="size-4" aria-hidden />{lang === "de" ? "Abrechnung bei Kündigung" : "Расчёты при расторжении"}</Button>
           </nav>
         </div>
         <DatevWorkspace active={datevActive} demo={datevDemo} onConnection={canStaffPath("/admin/datev") ? () => staffGo("/admin/datev") : undefined} onModeChange={(demo) => syncQuery({ datev_mode: demo ? "demo" : null })} />
@@ -2065,7 +2069,8 @@ function useStaffInvoicesPageContent() {
         ) : null}
 
         {incomingActive ? <IncomingInvoices key={`${filters.patientId}:${filters.orderId}`} canManage={access.canManage} patientId={filters.patientId} orderId={filters.orderId} reloadToken={reloadToken} onChanged={() => { clearApiCache("/invoices/accounting-ledger"); setReloadToken(current => current + 1); }} /> : null}
-        <div hidden={datevActive || incomingActive} className="space-y-5">
+        {settlementsActive ? <TerminationSettlementQueue onOpenInvoice={(invoiceId) => syncQuery({ source: null, invoice: invoiceId }, { replace: false })} /> : null}
+        <div hidden={datevActive || incomingActive || settlementsActive} className="space-y-5">
         {optionsError ? <ShellBanner tone="error">{optionsError}</ShellBanner> : null}
 
         <div className="space-y-3">
@@ -2313,7 +2318,7 @@ function useStaffInvoicesPageContent() {
         </div>
 
         </div>
-        <div hidden={datevActive} className="space-y-5">
+        <div hidden={datevActive || settlementsActive} className="space-y-5">
         {access.canAccounting ? (
           <>
             <div className="space-y-2">

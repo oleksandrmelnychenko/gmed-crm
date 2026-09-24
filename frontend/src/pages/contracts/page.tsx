@@ -1806,6 +1806,7 @@ function useContractsPageContent() {
           ? Number(agencyServiceForm.vatRate)
           : null,
         is_active: agencyServiceForm.isActive,
+        due_in_full_on_termination: agencyServiceForm.dueInFullOnTermination,
         valid_from: agencyServiceForm.validFrom,
         valid_to: toOptional(agencyServiceForm.validTo),
       };
@@ -2544,6 +2545,27 @@ function useContractsPageContent() {
                         className={checkboxClass}
                       />
                       {text.itemIsActive}
+                    </label>
+                    <label
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-foreground",
+                        tokens.surface.mutedCard,
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={agencyServiceForm.dueInFullOnTermination}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({
+                            ...current,
+                            dueInFullOnTermination: event.target.checked,
+                          }))
+                        }
+                        className={checkboxClass}
+                      />
+                      {lang === "de"
+                        ? "Bei Kündigung voll fällig (Pauschale)"
+                        : "При расторжении оплачивается полностью (паушал)"}
                     </label>
                   </div>
                 </section>

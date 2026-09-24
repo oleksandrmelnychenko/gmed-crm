@@ -153,6 +153,8 @@ export type AgencyServiceItem = {
   currency: string;
   vat_rate: unknown;
   is_active: boolean;
+  /** Flat fee ("Pauschale") that becomes due in full when the contract is terminated. */
+  due_in_full_on_termination?: boolean;
   valid_from: string | null;
   valid_to: string | null;
   created_at: string | null;
@@ -188,6 +190,7 @@ export type AgencyServiceFormState = {
   currency: string;
   vatRate: string;
   isActive: boolean;
+  dueInFullOnTermination: boolean;
   validFrom: string;
   validTo: string;
 };

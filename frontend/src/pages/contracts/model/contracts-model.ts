@@ -348,6 +348,7 @@ export function blankAgencyServiceForm(unitLabel = ""): AgencyServiceFormState {
     currency: "EUR",
     vatRate: "19",
     isActive: true,
+    dueInFullOnTermination: false,
     validFrom: "",
     validTo: "",
   };
@@ -381,6 +382,7 @@ export function agencyServiceToForm(service: AgencyServiceItem): AgencyServiceFo
     currency: service.currency,
     vatRate: valueToInput(service.vat_rate),
     isActive: service.is_active,
+    dueInFullOnTermination: service.due_in_full_on_termination ?? false,
     validFrom: service.valid_from ?? "",
     validTo: service.valid_to ?? "",
   };

@@ -1,4 +1,5 @@
-import { apiFetch, ApiRequestError } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import type { TerminationResultSettlement } from "@/pages/invoices/termination-settlement/api";
 
 import type {
   AgencyServiceItem,
@@ -94,25 +95,17 @@ export function updateContractStatus(contractId: string, payload: JsonPayload) {
   return postJson<ContractItem>(`/framework-contracts/${contractId}/status`, payload);
 }
 
-export type ContractOpenOrder = { id: string; order_number: string };
+export type TerminatedContract = ContractItem & {
+  /** One entry per order the termination stopped (final settlement figures). */
+  settlements?: TerminationResultSettlement[];
+};
 
-/** Terminates a signed or sent framework contract; the reason is required (3–1000 chars). */
+/**
+ * Terminates a signed or sent framework contract; the reason is required (3–1000 chars).
+ * Open orders under the contract are stopped and a final settlement is stored per order.
+ */
 export function terminateContract(contractId: string, reason: string) {
-  return postJson<ContractItem>(`/framework-contracts/${contractId}/terminate`, { reason });
-}
-
-/** Open orders that block a termination, as returned in the 409 response body. */
-export function terminationOpenOrders(error: unknown): ContractOpenOrder[] {
-  if (!(error instanceof ApiRequestError) || error.status !== 409) return [];
-  const orders = error.body?.open_orders;
-  if (!Array.isArray(orders)) return [];
-  return orders.filter(
-    (order): order is ContractOpenOrder =>
-      typeof order === "object" &&
-      order !== null &&
-      typeof (order as ContractOpenOrder).id === "string" &&
-      typeof (order as ContractOpenOrder).order_number === "string",
-  );
+  return postJson<TerminatedContract>(`/framework-contracts/${contractId}/terminate`, { reason });
 }
 
 export function updateQuoteStatus(quoteId: string, payload: JsonPayload) {

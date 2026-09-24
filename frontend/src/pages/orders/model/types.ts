@@ -2,7 +2,7 @@ import type { SpecializationItem } from "@/pages/providers/model/types";
 
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
-export type LeistungStatus = "planned" | "delivered" | "approved" | "invoiced";
+export type LeistungStatus = "planned" | "delivered" | "approved" | "invoiced" | "cancelled";
 export type LeistungBillingStatus =
   | "not_invoiced"
   | "partially_invoiced"
@@ -229,6 +229,10 @@ export type OrderDetail = {
   execution_flow?: OrderExecutionFlow | null;
   followup_flow?: OrderFollowupFlow | null;
   lifecycle?: OrderLifecycle | null;
+  /** "contract_terminated" when the framework contract termination stopped the order. */
+  cancellation_reason?: string | null;
+  cancelled_at?: string | null;
+  termination_settlement?: { id: string; status: "open" | "settled" } | null;
   created_at: string;
   updated_at: string;
 };
