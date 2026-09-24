@@ -758,6 +758,7 @@ mod tests {
                     "orders.economics",
                     "contracts.view",
                     "contracts.edit",
+                    "contracts.terminate",
                     "invoices.view",
                     "invoices.create",
                     "documents.view",
