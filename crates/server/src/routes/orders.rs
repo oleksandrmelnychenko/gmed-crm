@@ -3082,7 +3082,9 @@ async fn get_order(
                   o.case_id, cs.case_id AS case_code,
                   o.phase, o.status, o.needs_description, o.signed_patient,
                   o.signed_agency, o.total_estimated, o.total_actual, UPPER(o.currency) AS currency,
-                  o.created_at, o.updated_at,
+                  o.created_at, o.updated_at, o.cancellation_reason, o.cancelled_at,
+                  settlement.id AS termination_settlement_id,
+                  settlement.status AS termination_settlement_status,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS p_pid
@@ -3090,6 +3092,7 @@ async fn get_order(
            LEFT JOIN leads l ON l.id = o.source_lead_id
            LEFT JOIN patients p ON p.id = COALESCE(o.patient_id, l.converted_patient_id)
            LEFT JOIN cases cs ON cs.id = o.case_id
+           LEFT JOIN order_termination_settlements settlement ON settlement.order_id = o.id
            WHERE o.id = $1"#,
     )
     .bind(order_id)
@@ -3519,6 +3522,12 @@ async fn get_order(
         "patient_name": patient_name,
         "patient_pid": patient_pid,
         "phase": phase, "status": status,
+        "cancellation_reason": order.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
+        "cancelled_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "termination_settlement": order.try_get::<Option<Uuid>, _>("termination_settlement_id").unwrap_or_default().map(|id| serde_json::json!({
+            "id": id,
+            "status": order.try_get::<Option<String>, _>("termination_settlement_status").unwrap_or_default(),
+        })),
         "needs_description": needs_description,
         "date_from": order_date_from.map(|value| value.to_string()),
         "date_to": order_date_to.map(|value| value.to_string()),
@@ -4587,11 +4596,16 @@ async fn update_status(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    match sqlx::query("UPDATE orders SET status = $2 WHERE id = $1")
-        .bind(order_id)
-        .bind(&requested_status)
-        .execute(&state.db)
-        .await
+    match sqlx::query(
+        r#"UPDATE orders
+           SET status = $2,
+               cancelled_at = CASE WHEN $2 = 'cancelled' THEN now() ELSE cancelled_at END
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(&requested_status)
+    .execute(&state.db)
+    .await
     {
         Ok(result) if result.rows_affected() > 0 => {
             let payload = serde_json::json!({
@@ -8329,7 +8343,7 @@ async fn deliver_leistung(
         "UPDATE order_leistungen
          SET status = CASE WHEN status = 'planned' THEN 'delivered' ELSE status END,
              delivered_at = now()
-         WHERE id = $2 AND order_id = $1 AND delivered_at IS NULL",
+         WHERE id = $2 AND order_id = $1 AND delivered_at IS NULL AND status <> 'cancelled'",
     )
     .bind(order_id)
     .bind(leistung_id)

@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::routes::invoices::termination_settlements;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -56,6 +57,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/framework-contracts/{contract_id}/terminate",
             post(terminate_framework_contract),
+        )
+        .route(
+            "/framework-contracts/{contract_id}/termination-preview",
+            get(preview_framework_contract_termination),
         )
         .route("/quotes", get(list_quotes))
         .route(
@@ -157,6 +162,9 @@ struct UpsertAgencyServiceRequest {
     is_active: Option<bool>,
     valid_from: String,
     valid_to: Option<String>,
+    /// Flat fee that becomes due in full when the framework contract is
+    /// terminated (e.g. the treatment-organisation Pauschale).
+    due_in_full_on_termination: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -190,6 +198,7 @@ struct NormalizedAgencyServicePayload {
     is_active: bool,
     valid_from: NaiveDate,
     valid_to: Option<NaiveDate>,
+    due_in_full_on_termination: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -568,6 +577,7 @@ fn normalize_agency_service_payload(
         is_active: body.is_active.unwrap_or(true),
         valid_from,
         valid_to,
+        due_in_full_on_termination: body.due_in_full_on_termination,
     })
 }
 
@@ -753,7 +763,7 @@ async fn list_agency_services(
                   COALESCE(current_price.unit_price, catalog.unit_price) AS unit_price,
                   COALESCE(current_price.currency, catalog.currency) AS currency,
                   COALESCE(current_price.vat_rate, catalog.vat_rate) AS vat_rate,
-                  catalog.is_active,
+                  catalog.is_active, catalog.due_in_full_on_termination,
                   COALESCE(current_price.valid_from, catalog.valid_from) AS valid_from,
                   CASE
                       WHEN current_price.id IS NOT NULL THEN current_price.valid_to
@@ -827,6 +837,7 @@ async fn list_agency_services(
                         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                         "vat_rate": row.try_get::<Decimal, _>("vat_rate").unwrap_or(Decimal::ZERO),
                         "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
+                        "due_in_full_on_termination": row.try_get::<bool, _>("due_in_full_on_termination").unwrap_or(false),
                         "valid_from": row.try_get::<NaiveDate, _>("valid_from").ok().map(|value| value.to_string()),
                         "valid_to": row.try_get::<Option<NaiveDate>, _>("valid_to").unwrap_or_default().map(|value| value.to_string()),
                         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").ok().map(|value| value.to_rfc3339()),
@@ -869,10 +880,12 @@ async fn create_agency_service(
         r#"WITH inserted AS (
              INSERT INTO agency_service_catalog (
                 service_key, service_name, description, unit_label, unit_price,
-                currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by, description_items
+                currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by, description_items,
+                due_in_full_on_termination
              ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10, $11, $11, $12
+                $6, $7, $8, $9, $10, $11, $11, $12,
+                COALESCE($13, false)
              )
              RETURNING id, created_at, updated_at
            )
@@ -896,6 +909,7 @@ async fn create_agency_service(
     .bind(payload.valid_to)
     .bind(auth.user_id)
     .bind(payload.description_items)
+    .bind(payload.due_in_full_on_termination)
     .fetch_one(&state.db)
     .await
     {
@@ -977,6 +991,7 @@ async fn update_agency_service(
                valid_from = $10,
                valid_to = $11,
                updated_by = $12,
+               due_in_full_on_termination = COALESCE($14, due_in_full_on_termination),
                updated_at = now()
              WHERE id = $1
              RETURNING id
@@ -1009,6 +1024,7 @@ async fn update_agency_service(
     .bind(payload.valid_to)
     .bind(auth.user_id)
     .bind(payload.description_items)
+    .bind(payload.due_in_full_on_termination)
     .fetch_optional(&mut *tx)
     .await
     {
@@ -2361,8 +2377,10 @@ async fn update_framework_contract_status(
 }
 
 /// End a framework contract. The contract runs for an unlimited term (§ 6 of
-/// the client template) and is terminated only by CEO or patient manager;
-/// orders still open under it must be completed or cancelled first. No
+/// the client template) and is terminated only by CEO or patient manager. The
+/// patient may terminate at any time, also during a running order: orders
+/// still open under the contract stop (planned services are cancelled, flat
+/// fees due in full are kept) and each gets a final settlement for billing. No
 /// termination document is generated: the status, reason and audit entry are
 /// the record. Afterwards a new contract has to be created and signed.
 async fn terminate_framework_contract(
@@ -2421,39 +2439,15 @@ async fn terminate_framework_contract(
         );
     }
 
-    let open_orders = match sqlx::query(
-        r#"SELECT id, order_number
-           FROM orders
-           WHERE contract_id = $1 AND status IN ('active', 'paused')
-           ORDER BY created_at, order_number"#,
-    )
-    .bind(contract_id)
-    .fetch_all(&mut *tx)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => return failed(e),
-    };
-    if !open_orders.is_empty() {
-        let orders: Vec<Value> = open_orders
-            .iter()
-            .map(|row| {
-                json!({
-                    "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                    "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
-                })
-            })
-            .collect();
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({
-                "error": "framework_contract_has_open_orders",
-                "message": "Complete or cancel the open orders under this contract before terminating it",
-                "open_orders": orders,
-            })),
-        )
-            .into_response();
-    }
+    // Termination is possible during a running order: every open order stops
+    // and receives its final settlement in the same transaction.
+    let terminated_orders =
+        match termination_settlements::terminate_open_orders_tx(&mut tx, contract_id, auth.user_id)
+            .await
+        {
+            Ok(value) => value,
+            Err(e) => return failed(e),
+        };
 
     if let Err(e) = sqlx::query(
         r#"UPDATE framework_contracts
@@ -2503,11 +2497,61 @@ async fn terminate_framework_contract(
         payload,
     )
     .await;
+    termination_settlements::publish_terminated_orders(
+        &state,
+        auth.user_id,
+        contract_id,
+        &terminated_orders,
+    )
+    .await;
 
     match load_contract_detail(&state, contract_id, &auth).await {
-        Ok(Some(value)) => Json(value).into_response(),
+        Ok(Some(mut value)) => {
+            value["settlements"] = Value::Array(
+                terminated_orders
+                    .iter()
+                    .map(termination_settlements::TerminatedOrder::summary_json)
+                    .collect(),
+            );
+            Json(value).into_response()
+        }
         Ok(None) => err(StatusCode::NOT_FOUND, "Framework contract not found"),
         Err(resp) => resp,
+    }
+}
+
+/// What terminating the contract would do to the orders still open under it:
+/// accrued, invoiced and paid amounts per order and the services that would be
+/// cancelled. Nothing is written.
+async fn preview_framework_contract_termination(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(contract_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_capability(Capability::ContractsTerminate) {
+        return resp;
+    }
+    let subject = match load_contract_subject(&state, contract_id).await {
+        Ok(Some(subject)) => subject,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
+    }
+    match termination_settlements::preview_open_orders(&state, contract_id).await {
+        Ok(open_orders) => Json(json!({
+            "contract_id": contract_id,
+            "open_orders": open_orders,
+        }))
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, contract_id = %contract_id, "preview framework contract termination");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to preview framework contract termination",
+            )
+        }
     }
 }
 
@@ -2691,7 +2735,7 @@ async fn load_quote_line_items_from_order_tx(
                   external_document_id, provider_id, doctor_id, notes
            FROM order_leistungen
            WHERE order_id = $1
-             AND status <> 'invoiced'
+             AND status NOT IN ('invoiced', 'cancelled')
            ORDER BY (is_cost_passthrough AND description = 'Voraussichtliche Auslagen'),
                     created_at, id
            FOR SHARE"#,

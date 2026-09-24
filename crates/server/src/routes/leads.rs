@@ -1830,7 +1830,7 @@ async fn load_lead_conversion_readiness(
                           LIMIT 1
                       )
                         -- Keep readiness on the same commercial scope used by quote creation.
-                        AND ol.status <> 'invoiced'
+                        AND ol.status NOT IN ('invoiced', 'cancelled')
                   ), '[]'::jsonb) AS order_service_line_items,
                   EXISTS (
                       SELECT 1 FROM documents d

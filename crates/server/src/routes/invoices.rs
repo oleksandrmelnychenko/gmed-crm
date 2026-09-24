@@ -30,6 +30,7 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+pub(crate) mod termination_settlements;
 mod zugferd;
 
 const INVOICE_PDF_PAGE_WIDTH_MM: f32 = 210.0;
@@ -50,6 +51,7 @@ const DEFAULT_AUTO_DUNNING_COLLECTIONS_DELAY_DAYS: i64 = 28;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(termination_settlements::router())
         .route("/me/invoices", get(list_my_invoices))
         .route("/me/invoices/{invoice_id}", get(get_my_invoice))
         .route(
@@ -319,6 +321,11 @@ struct QuoteInvoiceContext {
     total_gross: Decimal,
     line_items: Value,
     notes: Option<String>,
+    /// The order was stopped by framework contract termination. Its final
+    /// invoice settles only what accrued, so the "every remaining quote line"
+    /// rule does not apply and cancelled services can never be invoiced.
+    order_contract_terminated: bool,
+    cancelled_source_line_ids: BTreeSet<Uuid>,
 }
 
 struct InvoiceCreationSnapshot {
@@ -2801,6 +2808,11 @@ async fn load_quote_invoice_context(
     let row = sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.total_net, q.total_vat, q.total_gross,
                   q.line_items, q.notes, o.patient_id, o.order_number, o.contract_id,
+                  (o.status = 'cancelled' AND o.cancellation_reason = 'contract_terminated')
+                      AS order_contract_terminated,
+                  ARRAY(SELECT service.id FROM order_leistungen service
+                        WHERE service.order_id = o.id AND service.status = 'cancelled')
+                      AS cancelled_source_line_ids,
                   p.first_name, p.last_name, p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
@@ -2844,6 +2856,15 @@ async fn load_quote_invoice_context(
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default(),
+        order_contract_terminated: row
+            .try_get::<Option<bool>, _>("order_contract_terminated")
+            .unwrap_or_default()
+            .unwrap_or(false),
+        cancelled_source_line_ids: row
+            .try_get::<Vec<Uuid>, _>("cancelled_source_line_ids")
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
     }))
 }
 
@@ -2969,6 +2990,21 @@ async fn build_selected_invoice_snapshot(
                 "Quote contains an invalid line quantity",
             ));
         }
+        let source_service_cancelled = ctx.order_contract_terminated
+            && source_item
+                .get("source_order_leistung_id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
+        if source_service_cancelled {
+            if requested.contains_key(&line_index) {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "A service cancelled by contract termination cannot be invoiced",
+                ));
+            }
+            continue;
+        }
         let already_allocated = allocated
             .get(&line_index)
             .copied()
@@ -2988,7 +3024,7 @@ async fn build_selected_invoice_snapshot(
             None => Some(remaining),
         };
         let Some(selected_quantity) = selected_quantity else {
-            if invoice_type == "final" {
+            if invoice_type == "final" && !ctx.order_contract_terminated {
                 incomplete_final_lines.insert(line_index);
             }
             continue;
@@ -3000,7 +3036,10 @@ async fn build_selected_invoice_snapshot(
                 "Selected quantity exceeds the remaining quote line quantity",
             ));
         }
-        if invoice_type == "final" && selected_quantity < remaining {
+        if invoice_type == "final"
+            && !ctx.order_contract_terminated
+            && selected_quantity < remaining
+        {
             incomplete_final_lines.insert(line_index);
         }
 
@@ -3095,7 +3134,7 @@ async fn build_selected_invoice_snapshot(
 
     let first_settlement = invoice_type != "advance" && allocated.is_empty();
     let selected_all_lines = requested_items.is_none();
-    if first_settlement && selected_all_lines {
+    if first_settlement && selected_all_lines && !ctx.order_contract_terminated {
         let mut snapshot =
             build_invoice_snapshot_with_approved_package_overages(state, ctx).await?;
         snapshot.allocations = allocations;
@@ -4875,6 +4914,20 @@ async fn get_patient_billing_workspace(
                     'currency', UPPER(patient_order.currency),
                     'billing_release_status', patient_order.billing_release_status,
                     'package_coverage_status', patient_order.package_coverage_status,
+                    'cancellation_reason', patient_order.cancellation_reason,
+                    'termination_settlement', (
+                        SELECT jsonb_build_object(
+                            'id', settlement.id,
+                            'status', settlement.status,
+                            'terminated_at', settlement.terminated_at,
+                            'accrued_gross', settlement.accrued_gross::text,
+                            'balance_gross', settlement.balance_gross::text,
+                            'uninvoiced_gross', settlement.uninvoiced_gross::text,
+                            'final_invoice_id', settlement.final_invoice_id
+                        )
+                        FROM order_termination_settlements settlement
+                        WHERE settlement.order_id = patient_order.id
+                    ),
                     'services', COALESCE((
                         SELECT jsonb_agg(jsonb_build_object(
                             'id', service.id,
@@ -4890,7 +4943,16 @@ async fn get_patient_billing_workspace(
                     patient_order.updated_at DESC)
                 FROM orders patient_order
                 WHERE patient_order.patient_id = patient.id
-                  AND patient_order.status <> 'cancelled'
+                  AND (
+                      patient_order.status <> 'cancelled'
+                      -- Orders stopped by contract termination stay billable
+                      -- until their final settlement is closed.
+                      OR EXISTS (
+                          SELECT 1 FROM order_termination_settlements open_settlement
+                          WHERE open_settlement.order_id = patient_order.id
+                            AND open_settlement.status = 'open'
+                      )
+                  )
             ), '[]'::jsonb),
             'expenses', COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
@@ -5101,7 +5163,7 @@ async fn create_patient_billing_invoice(
         .map(str::to_uppercase);
     if let Some(order_id) = body.order_id {
         let anchor = match sqlx::query(
-            r#"SELECT UPPER(currency) AS currency, status
+            r#"SELECT UPPER(currency) AS currency, status, cancellation_reason
                FROM orders WHERE id = $1 AND patient_id = $2 FOR UPDATE"#,
         )
         .bind(order_id)
@@ -5124,7 +5186,15 @@ async fn create_patient_billing_invoice(
                 );
             }
         };
-        if anchor.try_get::<String, _>("status").unwrap_or_default() == "cancelled" {
+        // An order stopped by framework contract termination still has to be
+        // settled for what accrued, so it may anchor its final billing.
+        if anchor.try_get::<String, _>("status").unwrap_or_default() == "cancelled"
+            && anchor
+                .try_get::<Option<String>, _>("cancellation_reason")
+                .unwrap_or_default()
+                .as_deref()
+                != Some(termination_settlements::CONTRACT_TERMINATED_REASON)
+        {
             return err(
                 StatusCode::CONFLICT,
                 "Cancelled orders cannot anchor a patient invoice",
@@ -10403,6 +10473,17 @@ async fn update_invoice_status(
                              FROM invoice_order_line_allocations
                              WHERE invoice_id = $1
                                AND order_leistung_id IS NOT NULL
+                             UNION
+                             -- Termination final invoices bill services outside
+                             -- any quote directly from the order line.
+                             SELECT (item.value ->> 'source_order_leistung_id')::UUID
+                             FROM invoices cancelled_invoice
+                             CROSS JOIN LATERAL jsonb_array_elements(
+                                 CASE WHEN jsonb_typeof(cancelled_invoice.line_items) = 'array'
+                                      THEN cancelled_invoice.line_items ELSE '[]'::jsonb END
+                             ) AS item(value)
+                             WHERE cancelled_invoice.id = $1
+                               AND item.value ->> 'source' = 'termination_order_service'
                          )
                          AND NOT EXISTS (
                              SELECT 1
