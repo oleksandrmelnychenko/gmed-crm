@@ -92,6 +92,7 @@ fn empty(role: &str) -> Signer {
         last_name: String::new(),
         email: String::new(),
         role: role.into(),
+        positions: Vec::new(),
     }
 }
 
@@ -155,6 +156,7 @@ fn guardian_signer(contacts: &Value) -> Option<Signer> {
             last_name,
             email: email.to_lowercase(),
             role: "client".into(),
+            positions: Vec::new(),
         })
     })
 }
@@ -241,6 +243,7 @@ mod tests {
             last_name: " Muster ".into(),
             email: " MAX@EXAMPLE.ORG ".into(),
             role: "agency".into(),
+            positions: Vec::new(),
         };
         assert_eq!(
             normalize_defaults(vec![agency.clone()]).unwrap()[0].email,
@@ -251,6 +254,7 @@ mod tests {
         assert!(
             normalize_defaults(vec![Signer {
                 role: "client".into(),
+                positions: Vec::new(),
                 ..agency
             }])
             .is_err()

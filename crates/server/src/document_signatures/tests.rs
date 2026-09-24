@@ -19,12 +19,14 @@ fn signers() -> Vec<Signer> {
             last_name: "Mustermann".into(),
             email: "erika@example.org".into(),
             role: "client".into(),
+            positions: Vec::new(),
         },
         Signer {
             first_name: "Max".into(),
             last_name: "Muster".into(),
             email: "max@example.org".into(),
             role: "agency".into(),
+            positions: Vec::new(),
         },
     ])
     .unwrap()
@@ -1485,4 +1487,19 @@ async fn verify_signer_defaults(state: &AppState, auth: &AuthUser) {
     assert_eq!(cleared.len(), 2);
     assert_eq!(cleared[1].role, "agency");
     assert!(cleared[1].email.is_empty());
+}
+
+#[test]
+fn visual_signature_frames_are_sent_only_for_signers_that_have_them() {
+    let mut signers = signers();
+    signers[0].positions = vec![json!({"page":"0","x":71,"y":113,"width":170,"height":30})];
+    let entries = provider::signature_entries(&signers);
+    assert_eq!(
+        entries[0]["visual_signature"]["positions"],
+        json!([{"page":"0","x":71,"y":113,"width":170,"height":30}])
+    );
+    assert!(entries[1].get("visual_signature").is_none());
+    // Client-supplied frames are discarded; only the server fills them in.
+    let cleaned = normalize_signers(signers).unwrap();
+    assert!(cleaned.iter().all(|signer| signer.positions.is_empty()));
 }
