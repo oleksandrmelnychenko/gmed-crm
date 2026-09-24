@@ -15709,8 +15709,11 @@ fn admin_signature_grid(
     right: AdminSignatureParty<'_>,
 ) {
     const COLUMN_GAP_MM: f32 = 14.0;
-    const BLOCK_HEIGHT_MM: f32 = 27.0;
+    const BLOCK_HEIGHT_MM: f32 = 32.0;
     const SIGNATURE_LINE_OFFSET_MM: f32 = 12.0;
+    /// Distance from the signature line down to the "Ort, den Datum" line;
+    /// leaves room to write the date by hand under the printed name.
+    const PLACE_DATE_OFFSET_MM: f32 = 10.5;
 
     if layout.page_style == PdfPageStyle::Legal {
         let anchored_top_mm = PDF_LEGAL_CONTENT_BOTTOM_MM + BLOCK_HEIGHT_MM;
@@ -15765,20 +15768,17 @@ fn admin_signature_grid(
             column_width_mm.min(60.0),
             SIGNATURE_LINE_OFFSET_MM - 1.5,
         );
-        let (headline, caption) = if party.role == "Auftragnehmer" {
-            (
-                truncate_text_to_width(party.name, 8.5, column_width_mm),
-                format!("{place_and_date} · Unterschrift, Stempel"),
-            )
+        // Both columns read the same way under the line: who signs, then
+        // place and date on their own line with room to fill them in by
+        // hand, then the role caption.
+        let caption = if party.role == "Auftragnehmer" {
+            "Unterschrift, Stempel".to_string()
         } else {
-            (
-                place_and_date,
-                format!("Ort, Datum · Unterschrift {}", party.role),
-            )
+            format!("Unterschrift {}", party.role)
         };
         append_pdf_text_line(
             &mut layout.page_ops,
-            &headline,
+            &truncate_text_to_width(party.name, 8.5, column_width_mm),
             x_mm,
             signature_line_y_mm - 4.0,
             8.5,
@@ -15787,9 +15787,18 @@ fn admin_signature_grid(
         );
         append_pdf_text_line(
             &mut layout.page_ops,
+            &place_and_date,
+            x_mm,
+            signature_line_y_mm - PLACE_DATE_OFFSET_MM,
+            8.5,
+            &regular_font,
+            TreatmentPlanPdfColor::Body,
+        );
+        append_pdf_text_line(
+            &mut layout.page_ops,
             &truncate_text_to_width(&caption, 7.5, column_width_mm),
             x_mm,
-            signature_line_y_mm - 8.0,
+            signature_line_y_mm - PLACE_DATE_OFFSET_MM - 4.5,
             7.5,
             &regular_font,
             TreatmentPlanPdfColor::Muted,
@@ -27275,21 +27284,32 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        assert_eq!(cursor_x_positions.len(), 4);
+        assert_eq!(cursor_x_positions.len(), 6);
+        let anchors = layout.signature_anchors.clone();
+        assert_eq!(anchors.len(), 2);
+        assert_eq!(anchors[0].role, "client");
+        assert_eq!(anchors[1].role, "agency");
+        assert!(
+            anchors
+                .iter()
+                .all(|anchor| anchor.page == 0 && anchor.height_mm > 9.0)
+        );
+        assert!(anchors[0].x_mm < anchors[1].x_mm);
         let page_midpoint_pt = pdf_mm_to_pt(PDF_PAGE_WIDTH_MM / 2.0).0;
         assert!(
-            cursor_x_positions[..2]
+            cursor_x_positions[..3]
                 .iter()
                 .all(|x| *x < page_midpoint_pt)
         );
         assert!(
-            cursor_x_positions[2..]
+            cursor_x_positions[3..]
                 .iter()
                 .all(|x| *x > page_midpoint_pt)
         );
 
         let text = normalized_pdf_text(&finalize_admin_pdf(document, layout));
         for expected in [
+            "Anna Beispiel",
             "Berlin, den 17.07.2026",
             "Auftraggeber",
             "GMED - Agentur für Patientenbetreuung",
