@@ -734,19 +734,23 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         {canPrintPatientLabel ? (
           <NativeComboboxSelect
             value=""
-
+            aria-label={l("patients_print_label")}
+            title={l("patients_print_label")}
+            hidePlaceholderOption
             disabled={patientLabelBusy}
-
             onChange={(event) => {
               if (!event.target.value) return;
               onPrintPatientLabel(event.target.value as PatientLabelFormatId);
-            }} className="h-9 rounded-lg bg-field text-[13px] gap-1.5 w-auto">
-              {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {patientLabelFormatLabel(option)}
-                </option>
-              ))}
-            </NativeComboboxSelect>
+            }}
+            className="h-9 rounded-lg bg-field text-[13px] gap-1.5 w-auto"
+          >
+            <option value="">{l("patients_print_label")}</option>
+            {PATIENT_LABEL_FORMAT_OPTIONS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {patientLabelFormatLabel(option)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
         ) : null}
         {canCreateOrders && id ? (
           <Button
