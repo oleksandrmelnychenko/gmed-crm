@@ -4,8 +4,9 @@ import type { RefObject } from "react";
 
 import { selectClass } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
+import { isAppointmentCompletionTooEarly } from "@/pages/appointments/model/completion-rules";
 import { statusActionKey } from "@/pages/appointments/model/form-factories";
-import { statusLabel } from "@/pages/appointments/model/labels";
+import { appointmentText, statusLabel } from "@/pages/appointments/model/labels";
 import type {
   AppointmentListItem,
   AppointmentRecurringActionScope,
@@ -40,6 +41,7 @@ export function AppointmentCalendarQuickActionsMenu({
   onOpenDetail,
   onStatusChange,
 }: AppointmentCalendarQuickActionsMenuProps) {
+  const completionTooEarly = isAppointmentCompletionTooEarly(item.date);
   return (
     <div
       ref={menuRef}
@@ -113,7 +115,12 @@ export function AppointmentCalendarQuickActionsMenu({
           type="button"
           role="menuitem"
           className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm text-foreground transition hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={Boolean(actionBusy)}
+          disabled={Boolean(actionBusy) || completionTooEarly}
+          title={
+            completionTooEarly
+              ? appointmentText("appointments_status_completion_not_before_date")
+              : undefined
+          }
           onClick={() => void onStatusChange(item.id, "completed", activeScope)}
         >
           <span>{dictionary.dash_completed}</span>

@@ -22,6 +22,7 @@ import {
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
+import { isAppointmentCompletionTooEarly } from "@/pages/appointments/model/completion-rules";
 import {
   defaultAppointmentOwnerUserId,
   statusActionKey,
@@ -960,7 +961,17 @@ function useQueueSheetContent({
                     size="sm"
                     variant="outline"
                     className="h-8 rounded-lg"
-                    disabled={Boolean(actionBusy)}
+                    disabled={
+                      Boolean(actionBusy) ||
+                      isAppointmentCompletionTooEarly(item.date)
+                    }
+                    title={
+                      isAppointmentCompletionTooEarly(item.date)
+                        ? appointmentText(
+                            "appointments_status_completion_not_before_date",
+                          )
+                        : undefined
+                    }
                     onClick={() => void onStatusChange(item.id, "completed")}
                   >
                     {actionBusy === statusActionKey(item.id, "completed") ? (

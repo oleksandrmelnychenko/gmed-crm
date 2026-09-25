@@ -45,6 +45,10 @@ import {
   appointmentSlateInputClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
+import {
+  futureCompletionTargets,
+  isAppointmentCompletionTooEarly,
+} from "@/pages/appointments/model/completion-rules";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
@@ -1738,7 +1742,11 @@ function AppointmentCompletionSectionContent({
 
   const canCompleteAppointment =
     detail.status !== "completed" && detail.status !== "cancelled";
-  const completionBlocked = openChecklistCount > 0;
+  const completionTooEarly = isAppointmentCompletionTooEarly(detail.date);
+  const completionBlocked = openChecklistCount > 0 || completionTooEarly;
+  const completionTooEarlyHint = appointmentText(
+    "appointments_status_completion_not_before_date",
+  );
 
   return (
     <>
@@ -1756,11 +1764,22 @@ function AppointmentCompletionSectionContent({
               size="sm"
               className="h-8 shrink-0 rounded-lg gap-1.5"
               disabled={Boolean(busyAction) || completionBlocked}
+              title={completionTooEarly ? completionTooEarlyHint : undefined}
               onClick={() => setCompletionSheetOpen(true)}
             >
               <Plus className="size-3.5" />
               {t.appointments_complete_and_schedule}
             </Button>
+            {/* The embedded status toggle shows the same hint under its buttons. */}
+            {completionTooEarly && !showStatusToggle ? (
+              <span
+                className="min-w-0 truncate text-xs text-muted-foreground"
+                title={completionTooEarlyHint}
+                data-testid="appointment-completion-date-hint"
+              >
+                {completionTooEarlyHint}
+              </span>
+            ) : null}
           </>
         ) : null}
       </div>
@@ -1907,6 +1926,10 @@ function AppointmentStatusToggleControl({
       ),
     [selectedRecurringStatusTargets],
   );
+  const completionDateBlockers = useMemo(
+    () => futureCompletionTargets(selectedRecurringStatusTargets),
+    [selectedRecurringStatusTargets],
+  );
 
   useEffect(() => {
     setStatusRecurrenceScope("single");
@@ -1995,11 +2018,14 @@ function AppointmentStatusToggleControl({
             );
             const completionBlocked =
               status === "completed" && completionScopeBlockers.length > 0;
+            const completionTooEarly =
+              status === "completed" && completionDateBlockers.length > 0;
             const statusDisabled =
               Boolean(busyAction) ||
               isNoop ||
               !transitionAllowed ||
-              completionBlocked;
+              completionBlocked ||
+              completionTooEarly;
             const statusOptionLabel =
               detail.recurrence_frequency && status === "cancelled"
                 ? statusRecurrenceScope === "following"
@@ -2013,7 +2039,9 @@ function AppointmentStatusToggleControl({
                 key={status}
                 type="button"
                 title={
-                  completionBlocked
+                  completionTooEarly && transitionAllowed
+                    ? appointmentText("appointments_status_completion_not_before_date")
+                    : completionBlocked
                     ? appointmentText("appointments_status_completion_blocked")
                     : !transitionAllowed
                       ? appointmentText("appointments_status_transition_not_allowed")
@@ -2051,6 +2079,14 @@ function AppointmentStatusToggleControl({
             );
           })}
         </div>
+        {completionDateBlockers.length > 0 ? (
+          <p
+            className={cn(tokens.text.muted, "mt-2")}
+            data-testid="appointment-status-completion-date-hint"
+          >
+            {appointmentText("appointments_status_completion_not_before_date")}
+          </p>
+        ) : null}
       </div>
       {detail.recurrence_frequency ? (
         <div className="space-y-3">
