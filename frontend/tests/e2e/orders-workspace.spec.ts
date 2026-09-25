@@ -103,6 +103,28 @@ async function refresh(page: Page, type = "order.process_gates_updated") {
   })), {id:orderId, type});
 }
 
+// The overview shows the headline money tiles; the full calculation, including
+// the per-service table, sits in a collapsed disclosure below them.
+function orderFinance(page: Page, lang = "ru") {
+  return page.locator("section").filter({has:page.getByRole("heading", {name:lang === "de" ? "Finanzen des Auftrags" : "Деньги по заказу", exact:true})});
+}
+
+async function openFullEconomics(page: Page, lang = "ru") {
+  const summary = orderFinance(page, lang).locator("summary", {hasText:lang === "de" ? "Vollständige Finanzübersicht" : "Показать полный финансовый расчёт"});
+  await summary.click();
+  await expect(summary.locator("xpath=..")).toHaveAttribute("open", "");
+}
+
+// Order total tile in the workspace header, shown on every section.
+function orderTotal(page: Page) {
+  return page.locator("dt", {hasText:/^Сумма заказа$/}).first().locator("xpath=following-sibling::dd");
+}
+
+async function openOrderActions(page: Page) {
+  const summary = page.locator("summary", {hasText:"Управление заказом"});
+  if (await summary.locator("xpath=..").getAttribute("open") === null) await summary.click();
+}
+
 for (const lang of ["ru", "de"]) {
   test(`service economics table sorts numbers and preserves hidden margins in ${lang}`, async ({ page }) => {
     await page.setViewportSize({ width: 1720, height: 1120 });
@@ -113,6 +135,7 @@ for (const lang of ["ru", "de"]) {
       { order_leistung_id: "s3", name: "Transfer", planned_revenue_net: "120", actual_revenue_net: "0", planned_partner_cost_net: null, actual_partner_cost_net: null, margin_net: null },
     ];
     await page.goto(`/orders/${orderId}`);
+    await openFullEconomics(page, lang);
     const section = page.getByTestId("order-economics-table");
     const table = section.getByRole("table");
     await expect(table.getByRole("columnheader")).toHaveCount(6);
@@ -130,6 +153,7 @@ for (const lang of ["ru", "de"]) {
     economics.margin_visible = false;
     await page.setViewportSize({ width: 1720, height: 1120 });
     await page.reload();
+    await openFullEconomics(page, lang);
     await expect(table.getByRole("columnheader")).toHaveCount(3);
     await section.getByRole("button", { name: lang === "ru" ? /Колонки/ : /Spalten/ }).click();
     await expect(section.getByRole("menuitemcheckbox")).toHaveCount(3);
@@ -243,8 +267,11 @@ for (const lang of ["ru", "de"]) {
       const heading = page.getByRole("heading", {name:"Toni Müller", exact:true});
       await expect(heading).toBeVisible();
       expect((await heading.boundingBox())!.width).toBeGreaterThan(width === 390 ? 250 : 500);
-      const economics = page.locator("section").filter({has:page.getByRole("heading", {name:lang === "de" ? "Wirtschaftlichkeit des Auftrags" : "Экономика заказа", exact:true})});
-      await expect(economics.locator("dd")).toHaveCount(12);
+      const economics = orderFinance(page, lang);
+      // Four headline tiles, then plan (4) and actual state (8) once the full calculation is open.
+      await expect(economics.locator("dd:visible")).toHaveCount(4);
+      await openFullEconomics(page, lang);
+      await expect(economics.locator("dd:visible")).toHaveCount(16);
       const overflow = await economics.locator("dd").evaluateAll(nodes => nodes.filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent));
       expect(overflow).toEqual([]);
       await page.screenshot({path:`../artifacts/design-qa/order-overview-${lang}-${width}.png`, fullPage:true});
@@ -266,7 +293,7 @@ test("advance phase prevents duplicate requests and shows a server error in the 
     await route.fulfill({status:409, json:{error:"Phase is blocked by a new invoice"}});
   });
   await page.goto(`/orders/${orderId}`);
-  const advance = page.getByRole("button", {name:/Перевести в/});
+  const advance = page.getByRole("button", {name:/Перейти в Исполнение/});
   await advance.click();
   const disabled = await advance.isDisabled();
   finish();
@@ -282,9 +309,10 @@ test("background updates preserve an edited planning note and saving makes it cl
   const note = page.locator("textarea").filter({hasText:"Saved plan"});
   await expect(note).toBeVisible();
   await note.fill("Unsent planning note");
+  await expect(orderTotal(page)).toHaveText(/12.500|12 500/);
   order.total_estimated = "13500";
   await refresh(page);
-  await expect(page.getByText(/Брутто:.*13.500|Брутто:.*13 500/)).toBeVisible();
+  await expect(orderTotal(page)).toHaveText(/13.500|13 500/);
   await expect(page.locator("textarea").first()).toHaveValue("Unsent planning note");
   const save = page.getByRole("button", {name:/Сохранить/}).last();
   await save.click();
@@ -386,13 +414,16 @@ test("opening debt management preserves other readiness drafts", async ({page}) 
 test("successful phase and status changes update the workspace", async ({page}) => {
   const {order, writes} = await prepare(page);
   await page.goto(`/orders/${orderId}`);
+  // Status changes live in the "Управление заказом" menu; a blocked one stays disabled.
+  await openOrderActions(page);
   await expect(page.getByRole("button", {name:"Завершить", exact:true})).toBeDisabled();
-  await page.getByRole("button", {name:/Перевести в/}).click();
+  await page.getByRole("button", {name:/Перейти в Исполнение/}).click();
   await expect.poll(() => order.phase).toBe("execution");
   await expect(page.locator('[data-workspace-rail="order"]').getByRole("link", {name:"Исполнение", exact:true})).toBeVisible();
+  await openOrderActions(page);
   await page.getByRole("button", {name:"Приостановить", exact:true}).click();
   await expect.poll(() => order.status).toBe("paused");
-  await expect(page.getByRole("button", {name:/Перевести в/})).toBeDisabled();
+  await expect(page.getByRole("button", {name:/Перейти в Исполнение/})).toBeDisabled();
   expect(writes.filter(write => write.path.endsWith("/phase"))).toHaveLength(1);
   expect(writes.filter(write => write.path.endsWith("/status"))).toHaveLength(1);
 });
@@ -545,9 +576,10 @@ test("approving an amount amendment refreshes the order total", async ({page}) =
     return route.fulfill({json:{amendment, order_total_estimated:"12600"}});
   });
   await page.goto(`/orders/${orderId}?section=services`);
+  await expect(orderTotal(page)).toHaveText(/12.500|12 500/);
   await page.getByRole("button", {name:"Одобрить", exact:true}).click();
   await expect(page.getByText("Одобрено", {exact:true})).toBeVisible();
-  await expect(page.getByText(/Брутто:.*12.600|Брутто:.*12 600/)).toBeVisible();
+  await expect(orderTotal(page)).toHaveText(/12.600|12 600/);
 });
 
 test("a failed amendment load is visible and can be retried", async ({page}) => {
