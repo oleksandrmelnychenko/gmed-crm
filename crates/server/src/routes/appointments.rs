@@ -2744,6 +2744,17 @@ fn is_allowed_appointment_status_transition(current: &str, target: &str) -> bool
     matches!((rank(current), rank(target)), (Some(current), Some(target)) if target >= current)
 }
 
+const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE: &str = "appointment_completion_before_date";
+
+/// Completion counts as delivery (billing lines, order execution evidence), so
+/// it only opens on the appointment's own day in the business timezone.
+fn completion_precedes_appointment_date(
+    appointment_date: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+) -> bool {
+    appointment_date > today
+}
+
 async fn close_terminal_appointment_artifacts_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     appointment_ids: &[Uuid],
@@ -5305,7 +5316,7 @@ async fn update_status(
         None
     };
     let appointment_ctx = match sqlx::query(
-        r#"SELECT recurrence_series_id, recurrence_index, status
+        r#"SELECT recurrence_series_id, recurrence_index, status, date
            FROM appointments
            WHERE id = $1
            FOR UPDATE"#,
@@ -5332,6 +5343,10 @@ async fn update_status(
     }
     let current_recurrence_index: i32 = appointment_ctx.try_get("recurrence_index").unwrap_or(0);
     let current_status: String = appointment_ctx.try_get("status").unwrap_or_default();
+    let current_date: chrono::NaiveDate = match appointment_ctx.try_get("date") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+    };
     let recurrence_scope = match parse_appointment_recurrence_scope(
         body.recurrence_scope.as_deref(),
         recurrence_series_id,
@@ -5364,7 +5379,7 @@ async fn update_status(
     };
 
     let target_rows = if recurrence_scope == AppointmentRecurrenceScope::Single {
-        vec![(apt_id, current_status)]
+        vec![(apt_id, current_status, current_date)]
     } else {
         let series_id = match effective_series_id {
             Some(value) => value,
@@ -5376,7 +5391,7 @@ async fn update_status(
             }
         };
         let rows = match sqlx::query(
-            r#"SELECT id, status
+            r#"SELECT id, status, date
                FROM appointments
                WHERE recurrence_series_id = $1
                  AND status NOT IN ('completed', 'cancelled')
@@ -5406,11 +5421,15 @@ async fn update_status(
                 Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
             };
             let status: String = row.try_get("status").unwrap_or_default();
-            targets.push((target_id, status));
+            let date: chrono::NaiveDate = match row.try_get("date") {
+                Ok(value) => value,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+            };
+            targets.push((target_id, status, date));
         }
         targets
     };
-    for (target_id, current_status) in &target_rows {
+    for (target_id, current_status, _) in &target_rows {
         if !is_allowed_appointment_status_transition(current_status, &body.status) {
             return err_with_details(
                 StatusCode::CONFLICT,
@@ -5423,13 +5442,35 @@ async fn update_status(
             );
         }
     }
-    let target_ids: Vec<Uuid> = target_rows.iter().map(|(id, _)| *id).collect();
+    let target_ids: Vec<Uuid> = target_rows.iter().map(|(id, _, _)| *id).collect();
 
     let requires_completion_gate = body.status == "completed"
         && target_rows
             .iter()
-            .any(|(_, current_status)| current_status != "completed");
+            .any(|(_, current_status, _)| current_status != "completed");
     if requires_completion_gate {
+        let today = berlin_today();
+        if let Some((target_id, _, target_date)) =
+            target_rows.iter().find(|(_, current_status, date)| {
+                current_status != "completed" && completion_precedes_appointment_date(*date, today)
+            })
+        {
+            return err_with_details(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                if target_rows.len() == 1 {
+                    "Appointment cannot be completed before its date"
+                } else {
+                    "At least one targeted appointment is dated after today and cannot be completed before its date"
+                },
+                serde_json::json!({
+                    "code": APPOINTMENT_COMPLETION_BEFORE_DATE_CODE,
+                    "appointment_id": target_id,
+                    "appointment_date": target_date,
+                    "today": today,
+                }),
+            );
+        }
+
         let blocked = match sqlx::query(
             r#"SELECT appointment_id
                FROM appointment_checklists
@@ -9840,6 +9881,25 @@ mod tests {
         assert!(!is_allowed_appointment_status_transition(
             "cancelled",
             "confirmed"
+        ));
+    }
+
+    #[test]
+    fn completion_opens_on_the_appointment_date() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 25).expect("valid date");
+
+        assert!(completion_precedes_appointment_date(
+            chrono::NaiveDate::from_ymd_opt(2026, 10, 5).expect("valid date"),
+            today,
+        ));
+        assert!(completion_precedes_appointment_date(
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 26).expect("valid date"),
+            today,
+        ));
+        assert!(!completion_precedes_appointment_date(today, today));
+        assert!(!completion_precedes_appointment_date(
+            chrono::NaiveDate::from_ymd_opt(2026, 9, 24).expect("valid date"),
+            today,
         ));
     }
 

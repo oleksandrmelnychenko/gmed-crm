@@ -8127,6 +8127,221 @@ async fn appointment_completion_is_blocked_when_checklist_items_remain_open() {
     );
 }
 
+fn berlin_today() -> chrono::NaiveDate {
+    chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .date_naive()
+}
+
+async fn appointment_status(pool: &PgPool, appointment_id: Uuid) -> String {
+    sqlx::query_scalar("SELECT status FROM appointments WHERE id = $1")
+        .bind(appointment_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn appointment_completion_opens_on_the_appointment_date() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-complete-date-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let today = berlin_today();
+    let future_date = (today + chrono::Duration::days(10)).to_string();
+    let future_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Future visit {tag}"),
+        "planned",
+        &future_date,
+    )
+    .await;
+    let status_path = format!("/api/v1/appointments/{future_id}/status");
+
+    // Statuses other than completed still move a future appointment forward.
+    for next in ["confirmed", "in_progress"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &status_path,
+            &pm_bearer,
+            Some(json!({ "status": next })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next}: {body}");
+        assert_eq!(appointment_status(&pool, future_id).await, next);
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "appointment_completion_before_date");
+    assert_eq!(body["appointment_id"], future_id.to_string());
+    assert_eq!(body["appointment_date"], future_date);
+    assert_eq!(body["today"], today.to_string());
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("before its date"),
+        "{body}"
+    );
+    assert_eq!(appointment_status(&pool, future_id).await, "in_progress");
+    let billed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM order_leistungen WHERE source_medical_appointment_id = $1",
+    )
+    .bind(future_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(billed, 0);
+
+    // Cancelling a future appointment stays possible.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm_bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(appointment_status(&pool, future_id).await, "cancelled");
+
+    // Same-day completion is allowed.
+    let today_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Same-day visit {tag}"),
+        "confirmed",
+        &today.to_string(),
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{today_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(appointment_status(&pool, today_id).await, "completed");
+}
+
+#[tokio::test]
+async fn recurring_completion_scope_is_rejected_while_it_contains_future_occurrences() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("recurring-complete-date-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "appointment_type": "medical",
+            "title": format!("Recurring therapy {tag}"),
+            "date": berlin_today().to_string(),
+            "time_start": "07:00",
+            "time_end": "07:30",
+            "recurrence_frequency": "weekly",
+            "recurrence_interval": 1,
+            "recurrence_count": 3
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let root_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let occurrence_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id
+           FROM appointments
+           WHERE recurrence_series_id = $1
+           ORDER BY recurrence_index"#,
+    )
+    .bind(root_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(occurrence_ids.len(), 3);
+
+    for (target, scope) in [(root_id, "series"), (occurrence_ids[1], "following")] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/appointments/{target}/status"),
+            &pm_bearer,
+            Some(json!({ "status": "completed", "recurrence_scope": scope })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{scope}: {body}");
+        assert_eq!(body["code"], "appointment_completion_before_date");
+    }
+    for id in &occurrence_ids {
+        assert_eq!(appointment_status(&pool, *id).await, "planned");
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "confirmed", "recurrence_scope": "series" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["affected_count"], 3);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{root_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "completed", "recurrence_scope": "single" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(appointment_status(&pool, root_id).await, "completed");
+    assert_eq!(
+        appointment_status(&pool, occurrence_ids[1]).await,
+        "confirmed"
+    );
+}
+
 #[tokio::test]
 async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
