@@ -119,6 +119,10 @@ struct ListQuotesQuery {
     patient_id: Option<Uuid>,
     lead_id: Option<Uuid>,
     status: Option<String>,
+    /// Only quotes an invoice can still be created from, so an open quote is
+    /// not pushed out of the capped list by newer closed ones.
+    #[serde(default)]
+    invoiceable: bool,
 }
 
 #[derive(Deserialize, Clone)]
@@ -2969,6 +2973,19 @@ async fn list_quotes(
              AND ($3::uuid IS NULL OR o.patient_id = $3)
              AND ($4::uuid IS NULL OR o.source_lead_id = $4)
              AND ($5::text IS NULL OR q.status = $5)
+             AND (
+                NOT $6::boolean
+                OR (
+                    o.patient_id IS NOT NULL
+                    AND q.status NOT IN ('rejected', 'expired')
+                    AND NOT EXISTS (
+                        SELECT 1 FROM invoices final_invoice
+                        WHERE final_invoice.quote_id = q.id
+                          AND final_invoice.invoice_type = 'final'
+                          AND final_invoice.status <> 'cancelled'
+                    )
+                )
+             )
            ORDER BY q.created_at DESC, q.id DESC
            LIMIT 200"#,
     )
@@ -2977,6 +2994,7 @@ async fn list_quotes(
     .bind(query.patient_id)
     .bind(query.lead_id)
     .bind(query.status)
+    .bind(query.invoiceable)
     .fetch_all(&state.db)
     .await
     {
@@ -3063,6 +3081,7 @@ async fn list_order_quotes(
             patient_id: None,
             lead_id: None,
             status: None,
+            invoiceable: false,
         }),
     )
     .await

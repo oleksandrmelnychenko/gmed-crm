@@ -33,7 +33,7 @@ export async function fetchInvoiceLookups(
   canLoadOrderOptions: boolean,
   canLoadQuoteOptions: boolean,
 ) {
-  const [patients, orders, quotes] = await Promise.all([
+  const [patients, orders, recentQuotes, invoiceableQuotes] = await Promise.all([
     apiFetch<PatientOption[]>("/patients?active_only=false", {
       cacheTtlMs: INVOICE_LOOKUPS_CACHE_TTL_MS,
     }),
@@ -47,8 +47,23 @@ export async function fetchInvoiceLookups(
           cacheTtlMs: INVOICE_LOOKUPS_CACHE_TTL_MS,
         })
       : Promise.resolve([]),
+    // The recent list is capped; open quotes are fetched separately so an
+    // older one can still be invoiced.
+    canLoadQuoteOptions
+      ? apiFetch<QuoteOption[]>("/quotes?invoiceable=true", {
+          cacheTtlMs: INVOICE_LOOKUPS_CACHE_TTL_MS,
+        })
+      : Promise.resolve([]),
   ]);
-  return { patients, orders, quotes };
+  return { patients, orders, quotes: mergeQuoteOptions(recentQuotes, invoiceableQuotes) };
+}
+
+export function mergeQuoteOptions(...lists: QuoteOption[][]) {
+  const byId = new Map<string, QuoteOption>();
+  for (const quote of lists.flat()) {
+    if (!byId.has(quote.id)) byId.set(quote.id, quote);
+  }
+  return [...byId.values()];
 }
 
 export function fetchInvoices(path: string) {

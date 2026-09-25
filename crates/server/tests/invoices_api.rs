@@ -452,6 +452,14 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
+    let invoiceable_quotes_path =
+        format!("/api/v1/quotes?patient_id={patient_id}&invoiceable=true");
+
+    let (status, body) =
+        json_request(&app, "GET", &invoiceable_quotes_path, &billing_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body[0]["id"], quote_id);
 
     let (status, body) = json_request(
         &app,
@@ -467,6 +475,23 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["invoice_type"], "final");
+
+    // A quote with an active final invoice leaves the invoiceable list but
+    // stays in the plain one.
+    let (status, invoiceable) =
+        json_request(&app, "GET", &invoiceable_quotes_path, &billing_bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(invoiceable.as_array().unwrap().is_empty());
+    let (status, all_quotes) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?patient_id={patient_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(all_quotes.as_array().unwrap().len(), 1);
     assert_eq!(body["status"], "draft");
     assert!(body["invoice_number"].as_str().unwrap().starts_with("INV-"));
     assert_eq!(body["order_id"], order_id.to_string());
