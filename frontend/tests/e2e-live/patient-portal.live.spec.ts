@@ -5,6 +5,7 @@ import {
   bootstrapAndLogin,
   chooseComboboxOption,
   ensureLiveBackendHealthy,
+  expectPageHeading,
   setGermanLanguage,
 } from "./support/live-helpers";
 
@@ -45,24 +46,34 @@ async function openInvoiceDetail(page: Page, invoiceNumber: string) {
   await expect(page.getByRole("heading", { name: invoiceNumber })).toBeVisible();
 }
 
-async function fillNativeDate(
-  container: Locator,
-  selector: string,
-  value: string,
-) {
-  const dateInput = container.locator(selector);
-  await expect(dateInput).toBeVisible();
-  await dateInput.evaluate((node, nextValue) => {
-    const input = node as HTMLInputElement;
-    const setter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      "value",
-    )?.set;
-    setter?.call(input, nextValue);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, value);
-  await expect(dateInput).toHaveValue(value);
+/**
+ * Date fields are MUI pickers: the element with the id is a hidden input that
+ * ignores programmatic values, so the day/month/year sections next to it are
+ * typed like a user would.
+ */
+async function fillMuiDate(container: Locator, selector: string, value: string) {
+  const [year = "", month = "", day = ""] = value.split("-");
+  const field = container
+    .locator(selector)
+    .locator("xpath=ancestor::*[.//*[@role='spinbutton']][1]");
+  const yearField = field.getByRole("spinbutton", { name: "Year" });
+  const monthField = field.getByRole("spinbutton", { name: "Month" });
+  const dayField = field.getByRole("spinbutton", { name: "Day" });
+  await yearField.fill(year);
+  await monthField.fill(month);
+  await dayField.fill(day);
+  await expect(dayField).toHaveText(day);
+  await expect(monthField).toHaveText(month);
+  await expect(yearField).toHaveText(year);
+}
+
+function isoDateInDays(days: number) {
+  const value = new Date();
+  value.setHours(12, 0, 0, 0);
+  value.setDate(value.getDate() + days);
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${day}`;
 }
 
 test.describe("patient portal live workflows", () => {
@@ -74,9 +85,7 @@ test.describe("patient portal live workflows", () => {
     await bootstrapAndLogin(page, request, "patient");
 
     await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: /Hallo,|Hello,/i }),
-    ).toBeVisible();
+    await expectPageHeading(page, /Hallo,|Hello,/i);
     await expect(
       page.getByText(/Erforderliche Dokumente|Required documents/i).first(),
     ).toBeVisible();
@@ -397,9 +406,11 @@ test.describe("patient portal live workflows", () => {
       buffer: MINIMAL_PDF,
     });
     await page.getByLabel(/Notiz|Note/i).fill("Front and back scanned.");
-    await page.getByRole("button", { name: /Upload senden|Send upload/i }).click();
+    await page.getByRole("button", { name: /Datei senden|Upload senden|Send upload/i }).click();
 
-    await expect(page.getByText(/Upload wurde an das Betreuungsteam gesendet|Upload sent to the care team/i)).toBeVisible();
+    await expect(
+      page.getByText(/Datei wurde an das Betreuungsteam gesendet|Upload sent to the care team/i),
+    ).toBeVisible();
 
     const uploadedCard = page.locator("article").filter({
       hasText: "Insurance card April",
@@ -464,8 +475,10 @@ test.describe("patient portal live workflows", () => {
       .last();
     await expect(requestSheet).toBeVisible();
     const requestForm = requestSheet.locator("form").first();
-    await fillNativeDate(requestForm, "#portal-appointment-preferred-from", "2026-06-10");
-    await fillNativeDate(requestForm, "#portal-appointment-preferred-to", "2026-06-12");
+    const preferredFrom = isoDateInDays(30);
+    const preferredTo = isoDateInDays(32);
+    await fillMuiDate(requestForm, "#portal-appointment-preferred-from", preferredFrom);
+    await fillMuiDate(requestForm, "#portal-appointment-preferred-to", preferredTo);
     await requestForm
       .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
       .fill("Cardiology follow-up");
@@ -515,8 +528,8 @@ test.describe("patient portal live workflows", () => {
       );
       expect(submitted).toBeDefined();
       expect(submitted!.patient_id).toBe(scenario.patient.id);
-      expect(submitted!.preferred_date_from).toBe("2026-06-10");
-      expect(submitted!.preferred_date_to).toBe("2026-06-12");
+      expect(submitted!.preferred_date_from).toBe(preferredFrom);
+      expect(submitted!.preferred_date_to).toBe(preferredTo);
       expect(submitted!.specialty).toBe("Cardiology follow-up");
       expect(submitted!.location).toBe("Clinic Cologne");
       expect(submitted!.notes).toBe("Morning slots preferred.");
