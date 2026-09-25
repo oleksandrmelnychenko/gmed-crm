@@ -118,6 +118,10 @@ import {
   isOrderReadinessGateApplicable,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
+import {
+  isCreateOrderPatientChange,
+  resolveCreateOrderSubmitBlock,
+} from "./model/create-order-gate";
 import { mergeOrderDraft } from "./model/order-draft";
 import {
   approveOrderLeistung,
@@ -1300,6 +1304,37 @@ function useOrdersPageContent() {
   const pendingCreateAgencyService = requestedAgencyServiceId
     ? agencyServices.find((item) => item.id === requestedAgencyServiceId) ?? null
     : null;
+  const createSubmitBlock = resolveCreateOrderSubmitBlock({
+    patientId: createForm.patientId,
+    requestedAgencyServiceId,
+    agencyServicesLoaded,
+    hasPendingAgencyService: pendingCreateAgencyService !== null,
+    recheck: createRecheck,
+    recheckLoading: createRecheckLoading,
+    recheckError: createRecheckError,
+  });
+  const createSubmitBlockMessage = (() => {
+    switch (createSubmitBlock?.kind) {
+      case undefined:
+        return null;
+      case "agency_service_loading":
+        return lang === "de"
+          ? "Der Leistungskatalog wird noch geladen."
+          : "Каталог услуг ещё загружается.";
+      case "agency_service_unavailable":
+        return lang === "de"
+          ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
+          : "Выбранная позиция каталога больше не активна или недоступна.";
+      case "recheck_loading":
+        return l("orders_error_recheck_still_loading");
+      case "recheck_unavailable":
+        return createSubmitBlock.error ?? l("orders_error_load_patient_recheck");
+      case "recheck_blocked":
+        return createSubmitBlock.reason
+          ? localizedBlockingReason(createSubmitBlock.reason)
+          : l("orders_error_recheck_incomplete");
+    }
+  })();
   const selectedLeistungAgencyService = useMemo(
     () =>
       leistungForm.agencyServiceId
@@ -2497,36 +2532,8 @@ function useOrdersPageContent() {
       setCreateError(l("orders_error_patient_required"));
       return;
     }
-    if (
-      requestedAgencyServiceId &&
-      (!agencyServicesLoaded || !pendingCreateAgencyService)
-    ) {
-      setCreateError(
-        agencyServicesLoaded
-          ? lang === "de"
-            ? "Die ausgewählte Katalogleistung ist nicht mehr aktiv oder nicht verfügbar."
-            : "Выбранная позиция каталога больше не активна или недоступна."
-          : lang === "de"
-            ? "Der Leistungskatalog wird noch geladen."
-            : "Каталог услуг ещё загружается.",
-      );
-      return;
-    }
-    if (createRecheckLoading) {
-      setCreateError(l("orders_error_recheck_still_loading"));
-      return;
-    }
-    if (!createRecheck) {
-      setCreateError(createRecheckError ?? l("orders_error_load_patient_recheck"));
-      return;
-    }
-    if (createRecheck?.requires_recheck && !createRecheck.can_create_order) {
-      const blockingReason = createRecheck?.blocking_reasons?.[0];
-      setCreateError(
-        blockingReason
-          ? localizedBlockingReason(blockingReason)
-          : l("orders_error_recheck_incomplete"),
-      );
+    if (createSubmitBlock) {
+      setCreateError(createSubmitBlockMessage);
       return;
     }
 
@@ -8275,17 +8282,8 @@ function useOrdersPageContent() {
                   cancelLabel={t.common_cancel}
                   submitLabel={t.common_save}
                   submitting={createSaving}
-                  submitDisabled={
-                    (!!requestedAgencyServiceId &&
-                      (!agencyServicesLoaded || !pendingCreateAgencyService)) ||
-                    createRecheckLoading ||
-                    (!!createForm.patientId &&
-                      !createRecheck &&
-                      !createRecheckLoading) ||
-                    (!!createForm.patientId &&
-                      createRecheck?.requires_recheck === true &&
-                      !createRecheck.can_create_order)
-                  }
+                  submitDisabled={createSubmitBlock !== null}
+                  hint={createSubmitBlockMessage}
                   onCancel={() => resetCreateDialog(false)}
                 />
               }
@@ -8351,6 +8349,14 @@ function useOrdersPageContent() {
                           event.target.value && event.target.value !== "__empty__"
                             ? event.target.value
                             : "";
+                        if (
+                          !isCreateOrderPatientChange(
+                            createForm.patientId,
+                            patientId,
+                          )
+                        ) {
+                          return;
+                        }
                         setCreateError(null);
                         setCreateRecheck(null);
                         setCreateForm((current) => ({

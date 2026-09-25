@@ -261,6 +261,7 @@ export function SheetFormFooter({
   submittingLabel,
   submitting = false,
   submitDisabled = false,
+  hint,
   onCancel,
   onSubmit,
 }: {
@@ -270,6 +271,8 @@ export function SheetFormFooter({
   submittingLabel?: ReactNode;
   submitting?: boolean;
   submitDisabled?: boolean;
+  /** Neutral explanation shown next to the actions, e.g. why Save is disabled. */
+  hint?: ReactNode;
   onCancel: () => void;
   onSubmit?: () => void;
 }) {
@@ -279,6 +282,14 @@ export function SheetFormFooter({
   return (
     <div className="shrink-0 bg-popover">
       <SheetFooterError error={error} />
+      {hint && !error ? (
+        <div
+          role="status"
+          className="border-t border-border px-4 pt-2 text-xs text-muted-foreground"
+        >
+          {hint}
+        </div>
+      ) : null}
       <div className="flex justify-end gap-2 px-4 py-3">
         <Button
           type="button"
