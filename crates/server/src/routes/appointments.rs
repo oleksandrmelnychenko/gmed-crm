@@ -50,7 +50,10 @@ const CONCIERGE_CHECKLIST_ITEMS: [(&str, &str); 4] = [
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct InterpreterReportBillingSyncSummary {
+    /// New order lines inserted because the order had no planned interpreter line.
     pub leistungen_created: u64,
+    /// Planned interpreter lines converted into the approved actual hours.
+    pub planned_lines_consumed: u64,
     pub already_synced: u64,
     pub missing_order: u64,
     pub missing_catalog: u64,
@@ -7005,92 +7008,237 @@ async fn sync_interpreter_report_billing_candidates(
             continue;
         };
 
-        let Some(catalog_item) =
-            load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?
-        else {
-            summary.missing_catalog += 1;
-            continue;
-        };
-
-        let approved_at = candidate.approved_at.unwrap_or_else(chrono::Utc::now);
-        let description = format!(
-            "{} · {} · {}",
-            catalog_item.service_name, candidate.appointment_title, candidate.appointment_date
-        );
-
-        let notes = {
-            let mut parts = vec![
-                format!(
-                    "Automatisch aus freigegebenem Dolmetscherbericht {} erstellt",
-                    candidate.report_id
-                ),
-                format!("Dolmetscher: {}", candidate.interpreter_name),
-                format!("Stunden: {}", candidate.hours.normalize()),
-                format!("Termin: {}", candidate.appointment_id),
-                format!("Katalogschlüssel: {}", catalog_item.service_key),
-            ];
-            if let Some(text) = candidate.report_text.as_ref().map(|value| value.trim())
-                && !text.is_empty()
-            {
-                parts.push(format!("Report: {text}"));
+        match sync_interpreter_report_billing_candidate(state, &candidate, order_id).await? {
+            InterpreterReportBillingOutcome::NotApproved => {}
+            InterpreterReportBillingOutcome::AlreadySynced => summary.already_synced += 1,
+            InterpreterReportBillingOutcome::MissingCatalog => summary.missing_catalog += 1,
+            InterpreterReportBillingOutcome::ConsumedPlanned {
+                leistung_id,
+                planned_quantity,
+            } => {
+                summary.planned_lines_consumed += 1;
+                state.audit_sender.try_send(audit::domain_event(
+                    "consume_planned_interpreter_order_leistung".to_string(),
+                    candidate.approved_by,
+                    "order",
+                    Some(order_id),
+                    serde_json::json!({
+                        "patient_id": candidate.patient_id,
+                        "appointment_id": candidate.appointment_id,
+                        "interpreter_report_id": candidate.report_id,
+                        "order_leistung_id": leistung_id,
+                        "service_key": INTERPRETER_HOURS_SERVICE_KEY,
+                        "planned_quantity": planned_quantity.normalize().to_string(),
+                        "hours": candidate.hours.normalize().to_string(),
+                    }),
+                ));
             }
-            parts.join("\n")
-        };
-
-        let result = sqlx::query(
-            r#"INSERT INTO order_leistungen (
-                    order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
-                    is_cost_passthrough, status, delivered_at, approved_by, approved_at,
-                    notes, source_interpreter_report_id, agency_service_id,
-                    agency_service_price_version_id
-               ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7,
-                    false, 'approved', $8, $9, $8,
-                    $10, $11, $12, $13
-               )
-               ON CONFLICT (source_interpreter_report_id)
-                   WHERE source_interpreter_report_id IS NOT NULL
-               DO NOTHING"#,
-        )
-        .bind(order_id)
-        .bind(candidate.patient_id)
-        .bind(description)
-        .bind(candidate.hours)
-        .bind(catalog_item.unit_price)
-        .bind(catalog_item.currency)
-        .bind(catalog_item.vat_rate)
-        .bind(approved_at)
-        .bind(candidate.approved_by)
-        .bind(notes)
-        .bind(candidate.report_id)
-        .bind(catalog_item.id)
-        .bind(catalog_item.price_version_id)
-        .execute(&state.db)
-        .await?;
-
-        if result.rows_affected() == 0 {
-            summary.already_synced += 1;
-            continue;
+            InterpreterReportBillingOutcome::Created {
+                leistung_id,
+                service_key,
+            } => {
+                summary.leistungen_created += 1;
+                state.audit_sender.try_send(audit::domain_event(
+                    "auto_create_interpreter_order_leistung".to_string(),
+                    candidate.approved_by,
+                    "order",
+                    Some(order_id),
+                    serde_json::json!({
+                        "patient_id": candidate.patient_id,
+                        "appointment_id": candidate.appointment_id,
+                        "interpreter_report_id": candidate.report_id,
+                        "order_leistung_id": leistung_id,
+                        "service_key": service_key,
+                        "hours": candidate.hours.normalize().to_string(),
+                    }),
+                ));
+            }
         }
-
-        summary.leistungen_created += result.rows_affected();
-
-        state.audit_sender.try_send(audit::domain_event(
-            "auto_create_interpreter_order_leistung".to_string(),
-            candidate.approved_by,
-            "order",
-            Some(order_id),
-            serde_json::json!({
-                "patient_id": candidate.patient_id,
-                "appointment_id": candidate.appointment_id,
-                "interpreter_report_id": candidate.report_id,
-                "service_key": catalog_item.service_key,
-                "hours": candidate.hours.normalize().to_string(),
-            }),
-        ));
     }
 
     Ok(summary)
+}
+
+enum InterpreterReportBillingOutcome {
+    /// The report is no longer approved (e.g. changed concurrently).
+    NotApproved,
+    AlreadySynced,
+    MissingCatalog,
+    /// A planned interpreter line of the order now carries the actual hours.
+    ConsumedPlanned {
+        leistung_id: Uuid,
+        planned_quantity: rust_decimal::Decimal,
+    },
+    /// No planned interpreter line was left, so a new approved line was added.
+    Created {
+        leistung_id: Uuid,
+        service_key: String,
+    },
+}
+
+fn interpreter_report_billing_notes(
+    candidate: &InterpreterReportBillingCandidate,
+    headline: String,
+) -> String {
+    let mut parts = vec![
+        headline,
+        format!("Dolmetscher: {}", candidate.interpreter_name),
+        format!("Stunden: {}", candidate.hours.normalize()),
+        format!("Termin: {}", candidate.appointment_id),
+        format!("Katalogschlüssel: {INTERPRETER_HOURS_SERVICE_KEY}"),
+    ];
+    if let Some(text) = candidate.report_text.as_ref().map(|value| value.trim())
+        && !text.is_empty()
+    {
+        parts.push(format!("Report: {text}"));
+    }
+    parts.join("\n")
+}
+
+/// Bills one approved interpreter report. The report consumes the order's
+/// oldest planned interpreter-hours line that is not linked yet: its quantity
+/// becomes the reported hours (a larger planned remainder does not stay
+/// planned), it is approved and linked to the report. Only when no planned
+/// line is left is a new approved line added. Runs in one transaction that
+/// locks the report, so the approval handler and the scheduler cannot bill
+/// the same report twice.
+async fn sync_interpreter_report_billing_candidate(
+    state: &AppState,
+    candidate: &InterpreterReportBillingCandidate,
+    order_id: Uuid,
+) -> Result<InterpreterReportBillingOutcome, sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    let still_approved = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM interpreter_reports
+           WHERE id = $1 AND approval_status = 'approved'
+           FOR UPDATE"#,
+    )
+    .bind(candidate.report_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if still_approved.is_none() {
+        return Ok(InterpreterReportBillingOutcome::NotApproved);
+    }
+    let already_linked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM order_leistungen WHERE source_interpreter_report_id = $1)",
+    )
+    .bind(candidate.report_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if already_linked {
+        return Ok(InterpreterReportBillingOutcome::AlreadySynced);
+    }
+
+    let approved_at = candidate.approved_at.unwrap_or_else(chrono::Utc::now);
+    let planned = sqlx::query(
+        r#"SELECT ol.id, ol.quantity
+           FROM order_leistungen ol
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           WHERE ol.order_id = $1
+             AND ol.status = 'planned'
+             AND ol.source_interpreter_report_id IS NULL
+             AND ol.source_medical_appointment_id IS NULL
+             AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $2
+           ORDER BY ol.created_at, ol.id
+           LIMIT 1
+           FOR UPDATE OF ol SKIP LOCKED"#,
+    )
+    .bind(order_id)
+    .bind(INTERPRETER_HOURS_SERVICE_KEY)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some(planned) = planned {
+        let leistung_id: Uuid = planned.try_get("id")?;
+        let planned_quantity: rust_decimal::Decimal = planned.try_get("quantity")?;
+        let notes = interpreter_report_billing_notes(
+            candidate,
+            format!(
+                "Geplante Leistung ({} Std.) durch freigegebenen Dolmetscherbericht {} mit den tatsächlichen Stunden ersetzt",
+                planned_quantity.normalize(),
+                candidate.report_id
+            ),
+        );
+        sqlx::query(
+            r#"UPDATE order_leistungen
+               SET quantity = $2,
+                   status = 'approved',
+                   delivered_at = COALESCE(delivered_at, $3),
+                   approved_by = $4,
+                   approved_at = $3,
+                   source_interpreter_report_id = $5,
+                   notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $6)
+               WHERE id = $1"#,
+        )
+        .bind(leistung_id)
+        .bind(candidate.hours)
+        .bind(approved_at)
+        .bind(candidate.approved_by)
+        .bind(candidate.report_id)
+        .bind(notes)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(InterpreterReportBillingOutcome::ConsumedPlanned {
+            leistung_id,
+            planned_quantity,
+        });
+    }
+
+    let Some(catalog_item) =
+        load_interpreter_hours_catalog_item(state, candidate.appointment_date).await?
+    else {
+        return Ok(InterpreterReportBillingOutcome::MissingCatalog);
+    };
+    let description = format!(
+        "{} · {} · {}",
+        catalog_item.service_name, candidate.appointment_title, candidate.appointment_date
+    );
+    let notes = interpreter_report_billing_notes(
+        candidate,
+        format!(
+            "Automatisch aus freigegebenem Dolmetscherbericht {} erstellt",
+            candidate.report_id
+        ),
+    );
+    let inserted = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO order_leistungen (
+                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+                is_cost_passthrough, status, delivered_at, approved_by, approved_at,
+                notes, source_interpreter_report_id, agency_service_id,
+                agency_service_price_version_id
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                false, 'approved', $8, $9, $8,
+                $10, $11, $12, $13
+           )
+           ON CONFLICT (source_interpreter_report_id)
+               WHERE source_interpreter_report_id IS NOT NULL
+           DO NOTHING
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(candidate.patient_id)
+    .bind(description)
+    .bind(candidate.hours)
+    .bind(catalog_item.unit_price)
+    .bind(&catalog_item.currency)
+    .bind(catalog_item.vat_rate)
+    .bind(approved_at)
+    .bind(candidate.approved_by)
+    .bind(notes)
+    .bind(candidate.report_id)
+    .bind(catalog_item.id)
+    .bind(catalog_item.price_version_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(match inserted {
+        Some(leistung_id) => InterpreterReportBillingOutcome::Created {
+            leistung_id,
+            service_key: catalog_item.service_key,
+        },
+        None => InterpreterReportBillingOutcome::AlreadySynced,
+    })
 }
 
 async fn load_interpreter_report_billing_projection(

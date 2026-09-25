@@ -97,6 +97,10 @@ pub fn router() -> Router<AppState> {
             post(update_leistung_planned_cost),
         )
         .route(
+            "/orders/{order_id}/leistungen/{leistung_id}/cancel",
+            post(cancel_leistung),
+        )
+        .route(
             "/orders/{order_id}/amendments",
             get(list_order_amendments).post(create_order_amendment),
         )
@@ -240,6 +244,11 @@ struct UpdateLeistungPlannedCostRequest {
     amount_vat: String,
     amount_gross: String,
     reason: String,
+}
+
+#[derive(Deserialize)]
+struct CancelLeistungRequest {
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -3192,6 +3201,7 @@ async fn get_order(
     let leistungen = match sqlx::query(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
                   ol.is_cost_passthrough, ol.status, ol.delivered_at, ol.approved_at, ol.notes,
+                  ol.cancelled_at, ol.cancellation_reason,
                   ol.client_reference,
                   ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
                   ol.source_medical_appointment_id, ol.agency_service_id,
@@ -3331,6 +3341,8 @@ async fn get_order(
             "status": l.try_get::<String, _>("status").unwrap_or_default(),
             "delivered_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "approved_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+            "cancelled_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+            "cancellation_reason": l.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
             "notes": l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "client_reference": l.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
             "provider_id": l.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
@@ -7420,6 +7432,7 @@ async fn list_leistungen(
     match sqlx::query(
         r#"SELECT ol.id, ol.patient_id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
                   ol.is_cost_passthrough, ol.status, ol.notes, ol.client_reference,
+                  ol.cancelled_at, ol.cancellation_reason,
                   ol.provider_id, ol.doctor_id,
                   ol.source_interpreter_report_id, ol.source_medical_appointment_id,
                   ol.agency_service_id, ol.agency_service_price_version_id,
@@ -7473,6 +7486,8 @@ async fn list_leistungen(
                     "vat_rate": r.try_get::<rust_decimal::Decimal, _>("vat_rate").unwrap_or(rust_decimal::Decimal::ZERO),
                     "is_cost_passthrough": r.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
+                    "cancelled_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default(),
+                    "cancellation_reason": r.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
                     "notes": r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                     "client_reference": r.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
                     "provider_id": r.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
@@ -8421,6 +8436,128 @@ async fn approve_leistung(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
     }
+}
+
+/// Staff cancel a service line that is still planned, e.g. a planned
+/// interpreter block whose hours an approved report already billed. The line
+/// is kept with who, when and why; it no longer counts for quotes, invoices or
+/// the order completion gate. Delivered, approved and invoiced lines cannot be
+/// cancelled here.
+async fn cancel_leistung(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, leistung_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<CancelLeistungRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_capability(Capability::OrdersEdit) {
+        return response;
+    }
+    let reason = body.reason.as_deref().map(str::trim).unwrap_or_default();
+    if !(3..=1000).contains(&reason.chars().count()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A cancellation reason of 3 to 1000 characters is required",
+        );
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+
+    let failed = |error: sqlx::Error, step: &str| {
+        tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, step, "cancel order service");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to cancel order service",
+        )
+    };
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => return failed(error, "begin"),
+    };
+    let current = match sqlx::query(
+        r#"SELECT status, description, quantity
+           FROM order_leistungen
+           WHERE id = $1 AND order_id = $2
+           FOR UPDATE"#,
+    )
+    .bind(leistung_id)
+    .bind(order_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order service not found"),
+        Err(error) => return failed(error, "lock"),
+    };
+    let status = current.try_get::<String, _>("status").unwrap_or_default();
+    if status != "planned" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only a planned order service can be cancelled",
+        );
+    }
+    let description = current
+        .try_get::<String, _>("description")
+        .unwrap_or_default();
+    let quantity = current
+        .try_get::<rust_decimal::Decimal, _>("quantity")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let cancelled_at = match sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+        r#"UPDATE order_leistungen
+           SET status = 'cancelled',
+               cancelled_at = now(),
+               cancelled_by = $3,
+               cancellation_reason = $4
+           WHERE id = $1 AND order_id = $2 AND status = 'planned'
+           RETURNING cancelled_at"#,
+    )
+    .bind(leistung_id)
+    .bind(order_id)
+    .bind(auth.user_id)
+    .bind(reason)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return failed(error, "update"),
+    };
+    if let Err(error) = transaction.commit().await {
+        return failed(error, "commit");
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "cancel_order_service",
+        Some(auth.user_id),
+        "order_leistung",
+        Some(leistung_id),
+        serde_json::json!({
+            "order_id": order_id,
+            "previous_status": status,
+            "description": description,
+            "quantity": quantity.normalize().to_string(),
+            "reason": reason,
+        }),
+    ));
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.leistung_cancelled",
+        order_id,
+        serde_json::json!({ "leistung_id": leistung_id }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "id": leistung_id,
+        "order_id": order_id,
+        "status": "cancelled",
+        "cancelled_at": cancelled_at.to_rfc3339(),
+        "cancelled_by": auth.user_id,
+        "cancellation_reason": reason,
+    }))
+    .into_response()
 }
 
 async fn validate_provider_doctor_context(

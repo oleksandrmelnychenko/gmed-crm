@@ -3122,6 +3122,446 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
     );
 }
 
+struct InterpreterReportFixture<'a> {
+    app: &'a axum::Router,
+    pool: &'a PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Uuid,
+    pm_id: Uuid,
+    interpreter_id: Uuid,
+}
+
+impl InterpreterReportFixture<'_> {
+    /// Books a confirmed appointment on the order, lets the interpreter report
+    /// `hours` and the patient manager approve it. Returns the report id.
+    async fn approved_report(&self, date: &str, hours: f64) -> String {
+        let appointment_id = seed_appointment(
+            self.pool,
+            self.patient_id,
+            self.provider_id,
+            self.doctor_id,
+            self.pm_id,
+            &format!("Interpreter visit {date}"),
+            "confirmed",
+            date,
+        )
+        .await;
+        sqlx::query(
+            "UPDATE appointments
+             SET order_id = $2, interpreter_id = $3, interpreter_response = 'accepted'
+             WHERE id = $1",
+        )
+        .bind(appointment_id)
+        .bind(self.order_id)
+        .bind(self.interpreter_id)
+        .execute(self.pool)
+        .await
+        .unwrap();
+        let (status, body) = json_request(
+            self.app,
+            "POST",
+            &format!("/api/v1/appointments/{appointment_id}/report"),
+            &auth_header_for(self.interpreter_id, "interpreter"),
+            Some(json!({ "hours": hours, "report_text": format!("Support on {date}") })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let report_id = body["id"].as_str().unwrap().to_string();
+        let (status, body) = json_request(
+            self.app,
+            "POST",
+            &format!("/api/v1/appointments/{appointment_id}/report/approve"),
+            &auth_header_for(self.pm_id, "patient_manager"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["billing_sync_deferred"], false, "{body}");
+        report_id
+    }
+}
+
+async fn seed_planned_order_service(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    agency_service_id: Option<Uuid>,
+    description: &str,
+    quantity: &str,
+    created_days_ago: i32,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, patient_id, description, quantity, unit_price, vat_rate,
+                status, agency_service_id, created_at
+           ) VALUES (
+                $1, $2, $3, $4::numeric, 60, 19,
+                'planned', $5, now() - make_interval(days => $6)
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(description)
+    .bind(quantity)
+    .bind(agency_service_id)
+    .bind(created_days_ago)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn order_service_state(pool: &PgPool, leistung_id: Uuid) -> (String, String, Option<Uuid>) {
+    let row = sqlx::query(
+        "SELECT status, quantity::text AS quantity, source_interpreter_report_id
+         FROM order_leistungen WHERE id = $1",
+    )
+    .bind(leistung_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (
+        row.get("status"),
+        row.get("quantity"),
+        row.get("source_interpreter_report_id"),
+    )
+}
+
+/// An approved interpreter report consumes the order's planned interpreter
+/// line instead of adding a second one: the quote and invoice show the actual
+/// hours once, and no planned remainder blocks order completion. Only when no
+/// planned interpreter line is left is a new line created.
+#[tokio::test]
+async fn approved_interpreter_report_consumes_the_planned_interpreter_line() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interp-billing-planned");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-PLAN-{tag}"),
+        "execution",
+        "active",
+        "Interpreter support",
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let interpreter_service_id = seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "interpreter_hours",
+        "Interpreter hours",
+        "2026-01-01",
+    )
+    .await;
+    let organisation_service_id = seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "treatment_organization",
+        "Organisation der Behandlung",
+        "2026-01-01",
+    )
+    .await;
+
+    let first_planned = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(interpreter_service_id),
+        "Dolmetscher-/Betreuungsleistung",
+        "4",
+        2,
+    )
+    .await;
+    let second_planned = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(interpreter_service_id),
+        "Dolmetscher-/Betreuungsleistung",
+        "3",
+        1,
+    )
+    .await;
+    let other_planned = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(organisation_service_id),
+        "Organisation der Behandlung",
+        "1",
+        3,
+    )
+    .await;
+
+    let fixture = InterpreterReportFixture {
+        app: &app,
+        pool: &pool,
+        order_id,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        interpreter_id,
+    };
+
+    // 4 h planned, 2.5 h reported: the oldest planned line becomes 2.5 h approved.
+    let first_report = fixture.approved_report("2026-04-21", 2.5).await;
+    let (status, quantity, report) = order_service_state(&pool, first_planned).await;
+    assert_eq!(status, "approved");
+    assert_eq!(quantity.parse::<f64>().unwrap(), 2.5);
+    assert_eq!(report.map(|id| id.to_string()), Some(first_report.clone()));
+    assert_eq!(
+        order_service_state(&pool, second_planned).await.0,
+        "planned"
+    );
+    assert_eq!(order_service_state(&pool, other_planned).await.0, "planned");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let interpreter_lines = body["leistungen"]
+        .as_array()
+        .expect("leistungen")
+        .iter()
+        .filter(|line| line["agency_service_key"] == "interpreter_hours")
+        .collect::<Vec<_>>();
+    assert_eq!(interpreter_lines.len(), 2, "no second line for the report");
+    let consumed = interpreter_lines
+        .iter()
+        .find(|line| line["id"] == first_planned.to_string())
+        .expect("consumed line");
+    assert_eq!(consumed["source_interpreter_report_id"], first_report);
+    assert!(
+        consumed["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Geplante Leistung (4 Std.)"),
+        "{consumed}"
+    );
+
+    // The next report consumes the next planned line.
+    let second_report = fixture.approved_report("2026-04-22", 1.5).await;
+    let (status, quantity, report) = order_service_state(&pool, second_planned).await;
+    assert_eq!(status, "approved");
+    assert_eq!(quantity.parse::<f64>().unwrap(), 1.5);
+    assert_eq!(report.map(|id| id.to_string()), Some(second_report));
+
+    // No planned interpreter line left: a new approved line is created.
+    let third_report = fixture.approved_report("2026-04-23", 1.0).await;
+    let created: (Uuid, String, String) = sqlx::query_as(
+        "SELECT id, status, quantity::text FROM order_leistungen
+         WHERE source_interpreter_report_id::text = $1",
+    )
+    .bind(&third_report)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(created.0 != first_planned && created.0 != second_planned);
+    assert_eq!(created.1, "approved");
+    assert_eq!(created.2.parse::<f64>().unwrap(), 1.0);
+    assert_eq!(order_service_state(&pool, other_planned).await.0, "planned");
+
+    // The scheduler finds nothing left to bill and never duplicates a line.
+    let state = AppState::new(
+        pool.clone(),
+        TEST_SECRET,
+        SettingsCache::new(TokenSettings::default()),
+    );
+    let rerun = gmed_server::routes::appointments::run_interpreter_report_billing_sync_once(&state)
+        .await
+        .unwrap();
+    assert_eq!(rerun.leistungen_created, 0);
+    assert_eq!(rerun.planned_lines_consumed, 0);
+    let (lines, interpreter_hours): (i64, String) = sqlx::query_as(
+        r#"SELECT count(*), COALESCE(sum(quantity) FILTER (
+                    WHERE agency_service_key_snapshot = 'interpreter_hours'), 0)::text
+           FROM order_leistungen WHERE order_id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(lines, 4);
+    assert_eq!(interpreter_hours.parse::<f64>().unwrap(), 5.0);
+
+    support::wait_until("planned interpreter line consumption audit", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'consume_planned_interpreter_order_leistung'
+                     AND entity_id = $1
+                     AND context->>'order_leistung_id' = $2
+                     AND context->>'planned_quantity' = '4')"#,
+        )
+        .bind(order_id)
+        .bind(first_planned.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    })
+    .await;
+}
+
+/// Staff with `orders.edit` can cancel a line that is still planned (e.g. the
+/// rest of an interpreter block); the reason is kept and audited, other
+/// statuses are refused.
+#[tokio::test]
+async fn staff_cancel_only_planned_order_services_with_a_reason() {
+    let Some((app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-service-cancel");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let other_pm_id = seed_user(&pool, &format!("{tag}-other"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-CANCEL-{tag}"),
+        "execution",
+        "active",
+        "Interpreter support",
+    )
+    .await;
+    let planned =
+        seed_planned_order_service(&pool, order_id, patient_id, None, "Rest block", "1.5", 1).await;
+    let approved =
+        seed_planned_order_service(&pool, order_id, patient_id, None, "Delivered", "1", 2).await;
+    sqlx::query(
+        "UPDATE order_leistungen SET status = 'approved', delivered_at = now(), approved_at = now() WHERE id = $1",
+    )
+    .bind(approved)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let path = format!("/api/v1/orders/{order_id}/leistungen/{planned}/cancel");
+    let reason = "Interpreter needed fewer hours than planned";
+
+    let (status, body) =
+        json_request(&app, "POST", &path, &pm, Some(json!({ "reason": " " }))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &auth_header_for(billing_id, "billing"),
+        Some(json!({ "reason": reason })),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "billing lacks orders.edit: {body}"
+    );
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &auth_header_for(other_pm_id, "patient_manager"),
+        Some(json!({ "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "unassigned manager: {body}");
+
+    let (status, body) =
+        json_request(&app, "POST", &path, &pm, Some(json!({ "reason": reason }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "cancelled");
+    assert_eq!(body["cancellation_reason"], reason);
+    assert_eq!(body["cancelled_by"], pm_id.to_string());
+    assert!(body["cancelled_at"].is_string());
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let line = detail["leistungen"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| line["id"] == planned.to_string())
+        .expect("cancelled line stays visible");
+    assert_eq!(line["status"], "cancelled");
+    assert_eq!(line["cancellation_reason"], reason);
+    let unsettled: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM order_leistungen WHERE order_id = $1 AND status IN ('planned', 'delivered')",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(unsettled, 0, "a cancelled line no longer blocks completion");
+
+    let (status, body) =
+        json_request(&app, "POST", &path, &pm, Some(json!({ "reason": reason }))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "already cancelled: {body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{approved}/cancel"),
+        &pm,
+        Some(json!({ "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "approved line: {body}");
+    assert_eq!(order_service_state(&pool, approved).await.0, "approved");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/orders/{order_id}/leistungen/{}/cancel",
+            Uuid::new_v4()
+        ),
+        &pm,
+        Some(json!({ "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    support::wait_until("order service cancellation audit", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'cancel_order_service'
+                     AND entity_type = 'order_leistung'
+                     AND entity_id = $1
+                     AND context->>'reason' = $2)"#,
+        )
+        .bind(planned)
+        .bind(reason)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn completed_medical_appointment_auto_creates_order_leistung_from_agency_catalog() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
