@@ -154,23 +154,26 @@ test.describe("provider registry live workflows", () => {
     if (provider.tax_id) {
       await expect(sheet.getByText(provider.tax_id).first()).toBeVisible();
     }
+    // The detail is an overview plus data tables titled in their toolbars.
     await expect(
-      sheet.getByRole("heading", { name: /Profil|Profile/i }),
+      sheet.getByRole("heading", { name: /Providerübersicht|Provider overview/i }),
     ).toBeVisible();
-    await expect(
-      sheet.getByRole("heading", { name: /Servicekatalog|Service catalog/i }),
-    ).toBeVisible();
-    await expect(
-      sheet.getByRole("heading", { name: /Verknüpfte Patienten|Linked patients/i }),
-    ).toBeVisible();
-    await expect(
-      sheet.getByRole("heading", { name: /Interaktionsverlauf|Interaction history/i }),
-    ).toBeVisible();
+    for (const table of [
+      /^\d* ?(Servicekatalog|Service catalog)$/i,
+      /^(Verknüpfte Patienten|Linked patients)$/i,
+      /^\d* ?(Interaktionsverlauf|Interaction history)$/i,
+    ]) {
+      await expect(sheet.getByText(table).first()).toBeVisible();
+    }
 
+    // The scenario patient has an appointment at this provider.
     const linkedPatient = provider.linked_patients.find(
       (item) => item.id === scenario.patient.id,
     );
-    expect(linkedPatient).toBeDefined();
+    expect(
+      linkedPatient,
+      `the patient manager's patient is among the provider's ${provider.linked_patients.length} visible linked patients`,
+    ).toBeDefined();
     await expect(sheet.getByText(scenario.patient.patient_id).first()).toBeVisible();
 
     const visibleInteraction = provider.interactions.find((item) => item.title);
@@ -182,7 +185,7 @@ test.describe("provider registry live workflows", () => {
       page.getByRole("heading", { name: provider.name }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /Profil|Profile/i }),
+      page.getByRole("heading", { name: /Providerübersicht|Provider overview/i }),
     ).toBeVisible();
     await expect(page.locator("form#provider-profile-form")).toHaveCount(0);
     await expect(
@@ -191,11 +194,9 @@ test.describe("provider registry live workflows", () => {
     await expect(
       page.getByRole("button", { name: /^Bearbeiten$/i }).first(),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: /Servicekatalog|Service catalog/i }),
-    ).toBeVisible();
+    await expect(page.getByText(/^\d* ?(Servicekatalog|Service catalog)$/i).first()).toBeVisible();
     if (provider.doctors.length > 0) {
-      await expect(page.getByText(provider.doctors[0]!.name)).toBeVisible();
+      await expect(page.getByText(provider.doctors[0]!.name).first()).toBeVisible();
     }
     if (provider.services.length > 0) {
       await expect(page.getByText(provider.services[0]!.service_name).first()).toBeVisible();
@@ -416,11 +417,13 @@ test.describe("provider registry live workflows", () => {
     await chooseFieldOption(page, relationshipForm, /Zielarzt/i, new RegExp(`Release ${targetDoctorLastName}`));
     await chooseFieldOption(page, relationshipForm, /Beziehungstyp/i, /Überweisung|Ueberweisung|referral/i);
     await relationshipForm.getByRole("button", { name: /Beziehung hinzuf(ü|ue)gen/i }).click();
+    // Relationships are listed as rows under the doctor (target and type).
     await expect(
       page
         .locator("main")
-        .getByRole("group")
+        .getByRole("row")
         .filter({ hasText: `Dr. med. Release ${targetDoctorLastName}` })
+        .filter({ hasText: /Überweisung|Referral/i })
         .first(),
     ).toBeVisible();
 
@@ -439,7 +442,8 @@ test.describe("provider registry live workflows", () => {
     await expect(staffForm).toBeVisible();
     await staffForm.getByLabel(/Vorname/i).fill("Release");
     await staffForm.getByLabel(/Nachname/i).fill(`Staff ${tag}`);
-    await staffForm.getByLabel(/Anzeigename/i).fill(staffDisplayName);
+    // The display name is derived from first and last name.
+    await expect(staffForm.getByLabel(/Anzeigename/i)).toHaveValue(staffDisplayName);
     await chooseFieldOption(page, staffForm, /Rolle/i, staffRoleNameDe);
     await staffForm.getByLabel(/Abteilung/i).fill("Front desk");
     await staffForm.getByRole("button", { name: /^Telefon hinzufügen$/i }).click();
@@ -489,7 +493,8 @@ test.describe("provider registry live workflows", () => {
     const detail = (await detailResponse.json()) as ProviderDetail;
 
     expect(detail.name).toBe(providerName);
-    expect(detail.address_country).toBe("Germany");
+    // Countries are stored as ISO codes.
+    expect(detail.address_country).toBe("DE");
     expect(detail.phone).toBe(providerPhone);
     expect(detail.email).toBe(providerEmail);
     expect(detail.contacts?.some((item) => item.contact_kind === "phone" && item.value === providerPhone)).toBe(true);
@@ -501,7 +506,7 @@ test.describe("provider registry live workflows", () => {
     const doctor = detail.doctors.find((item) => item.name === `Release ${doctorLastName}`);
     expect(doctor).toBeDefined();
     expect(doctor!.license_number).toBe(doctorLicenseNumber);
-    expect(doctor!.licensing_country).toBe("Austria");
+    expect(doctor!.licensing_country).toBe("AT");
     expect(
       doctor!.specializations?.some((item) => item.name_en === doctorSpecializationNameEn),
     ).toBe(true);
