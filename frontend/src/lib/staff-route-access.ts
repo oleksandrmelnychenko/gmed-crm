@@ -34,8 +34,14 @@ const ROLES_CHAT = [
 
 const ROLES_NOTES = ALL_STAFF_ROLES;
 
+// `feedback.view` in docs/backlog/02_rbac-capability-snapshot.md; the page hides
+// capture for roles without `feedback.capture`.
 const ROLES_FEEDBACK = [
   "ceo",
+  "ceo_assistant",
+  "patient_manager",
+  "teamlead_interpreter",
+  "concierge",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_REPORTS = [
@@ -418,6 +424,7 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "exact",
     path: "/feedback",
     roles: ROLES_FEEDBACK,
+    capability: "feedback.view",
     nav: { section: "main", labelKey: "nav_feedback" },
   },
   {

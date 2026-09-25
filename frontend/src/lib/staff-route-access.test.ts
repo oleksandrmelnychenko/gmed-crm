@@ -75,11 +75,11 @@ describe("staff route access by capability", () => {
       "/documents",
       "/documents/document-1",
       "/sops",
+      "/feedback",
     ]) {
       expect(canAccessStaffRoute("concierge", path), path).toBe(true);
     }
     for (const path of [
-      "/feedback",
       "/reports",
       "/orders",
       "/contracts",
@@ -310,6 +310,8 @@ describe("staff route access by capability", () => {
       "/admin/signatures": ["ceo", "it_admin"],
       "/admin/users": ["ceo", "it_admin"],
       "/leads": ["ceo", "ceo_assistant", "patient_manager", "concierge", "sales"],
+      // feedback.view; capture stays behind feedback.capture on the page.
+      "/feedback": ["ceo", "ceo_assistant", "patient_manager", "teamlead_interpreter", "concierge"],
     } as const;
 
     for (const [path, allowedRoles] of Object.entries(matrix)) {
@@ -339,7 +341,7 @@ describe("staff route access by capability", () => {
     expect(concierge).toContain("/files");
     expect(concierge).toContain("/documents");
     expect(concierge).toContain("/patients");
-    expect(concierge).not.toContain("/feedback");
+    expect(concierge).toContain("/feedback");
     expect(concierge).not.toContain("/reports");
 
     const billing = nav("billing");
