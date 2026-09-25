@@ -2353,6 +2353,13 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
 
 /// German money notation for the printed invoice: two decimals, dot-grouped
 /// thousands, the symbol for euro and the ISO code for anything else.
+/// An amount subtracted from the total: printed negative, and "0,00" rather
+/// than "-0,00" when nothing was deducted.
+fn format_invoice_pdf_deduction(raw: &str, currency: &str) -> String {
+    let amount = Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
+    format_invoice_pdf_money(&(-amount).to_string(), currency)
+}
+
 fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     let parsed = Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
     let cents = (parsed.abs().round_cents() * Decimal::from(100))
@@ -4034,10 +4041,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     );
     layout.summary_row(
         invoice_pdf_label(&context.language, "credited_amount"),
-        &format!(
-            "-{}",
-            format_invoice_pdf_money(&context.credited_amount, &context.currency)
-        ),
+        &format_invoice_pdf_deduction(&context.credited_amount, &context.currency),
         false,
         false,
     );
@@ -10733,7 +10737,14 @@ mod tests {
 
 #[cfg(test)]
 mod invoice_pdf_money_tests {
-    use super::format_invoice_pdf_money;
+    use super::{format_invoice_pdf_deduction, format_invoice_pdf_money};
+
+    #[test]
+    fn prints_deductions_negative_without_a_negative_zero() {
+        assert_eq!(format_invoice_pdf_deduction("0", "EUR"), "0,00 €");
+        assert_eq!(format_invoice_pdf_deduction("0.00", "EUR"), "0,00 €");
+        assert_eq!(format_invoice_pdf_deduction("50", "EUR"), "-50,00 €");
+    }
 
     #[test]
     fn prints_german_money_with_two_decimals_and_grouping() {
