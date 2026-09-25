@@ -1664,6 +1664,86 @@ async fn appointments_list_supports_context_and_date_filters() {
 }
 
 #[tokio::test]
+async fn appointments_calendar_week_returns_every_day_of_a_busy_week() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("apt-busy-week");
+    let provider_id = seed_provider(&pool, &tag).await;
+    // Week of Monday 2025-10-06: five appointments on Monday, 205 on Friday.
+    // Newest-first with a 200-row cap returned only Friday. The week lies in the
+    // past, so every still-planned visit is also an attention item.
+    let monday_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"WITH busy_patients AS (
+               INSERT INTO patients (
+                    patient_id, first_name, last_name, birth_date, gender, created_by
+               )
+               SELECT format('PT-%s-%s', $1::text, n), format('Busy %s', n),
+                      format('Week %s', n), DATE '1990-01-01', 'diverse', $2
+               FROM generate_series(1, 210) AS n
+               RETURNING id
+           ), numbered AS (
+               SELECT id, row_number() OVER (ORDER BY id) AS n
+               FROM busy_patients
+           ), inserted AS (
+               INSERT INTO appointments (
+                    patient_id, provider_id, appointment_type, title, date, status, created_by
+               )
+               SELECT id, $3, 'medical', format('Busy week %s', n),
+                      CASE WHEN n <= 5 THEN DATE '2025-10-06' ELSE DATE '2025-10-10' END,
+                      'planned', $2
+               FROM numbered
+               RETURNING id, date
+           )
+           SELECT id FROM inserted WHERE date = DATE '2025-10-06' ORDER BY id"#,
+    )
+    .bind(&tag)
+    .bind(admin_id)
+    .bind(provider_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(monday_ids.len(), 5);
+
+    for path in [
+        "/api/v1/appointments?date_from=2025-10-06&date_to=2025-10-12",
+        "/api/v1/appointments/meta/attention?date_from=2025-10-06&date_to=2025-10-12",
+    ] {
+        let (status, body) = json_request(&app, "GET", path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let items = body.as_array().unwrap();
+        assert_eq!(items.len(), 210, "{path}");
+        let dates = items
+            .iter()
+            .map(|item| item["date"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            dates.is_sorted(),
+            "{path}: a calendar window is chronological"
+        );
+        assert_eq!(dates.first().map(String::as_str), Some("2025-10-06"));
+        for monday_id in &monday_ids {
+            assert!(
+                items.iter().any(|item| item["id"] == monday_id.to_string()),
+                "{path}: Monday appointment {monday_id} is missing"
+            );
+        }
+    }
+
+    // An open-ended list keeps the newest-first order and the smaller cap.
+    let (status, body) = json_request(&app, "GET", "/api/v1/appointments", &bearer, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 200);
+    let dates = items
+        .iter()
+        .map(|item| item["date"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(dates.is_sorted_by(|newer, older| newer >= older));
+}
+
+#[tokio::test]
 async fn appointments_list_and_attention_support_provider_taxonomy_filter() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;

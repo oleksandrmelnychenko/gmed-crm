@@ -1597,6 +1597,7 @@ async fn list_appointments(
     if let Err(message) = validate_query_date_range(date_from, date_to) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
+    let (calendar_window, row_cap) = appointment_list_window(date_from, date_to);
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let requires_assignment = access::requires_patient_assignment(auth.role);
     let can_access_as_interpreter =
@@ -1685,8 +1686,11 @@ async fn list_appointments(
                       AND scoped_assignment.revoked_at IS NULL
                 )
              )
-           ORDER BY a.date DESC, a.time_start
-           LIMIT 200"#,
+           ORDER BY CASE WHEN $17::boolean THEN a.date END ASC,
+                    CASE WHEN $17::boolean THEN a.time_start END ASC,
+                    a.date DESC,
+                    a.time_start
+           LIMIT $18"#,
     )
     .bind(search_pattern)
     .bind(query.appointment_type)
@@ -1704,10 +1708,15 @@ async fn list_appointments(
     .bind(can_access_as_interpreter)
     .bind(can_access_as_owner)
     .bind(auth.user_id)
+    .bind(calendar_window)
+    .bind(row_cap)
     .fetch_all(&state.db)
     .await
     {
         Ok(rows) => {
+            if calendar_window && rows.len() as i64 >= row_cap {
+                tracing::warn!(?date_from, ?date_to, row_cap, "appointment calendar window reached its row cap");
+            }
             let mut items = Vec::with_capacity(rows.len());
             for r in rows {
                 let appointment_id: Uuid = match r.try_get("id") {
@@ -1762,6 +1771,9 @@ async fn list_attention_items(
     if let Err(message) = validate_query_date_range(date_from, date_to) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, message);
     }
+    // The scheduler asks for attention items over the same window as the
+    // calendar and decorates its events with them.
+    let (calendar_window, row_cap) = appointment_list_window(date_from, date_to);
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let today = berlin_today();
     let preparation_window_end = today + chrono::Days::new(2);
@@ -1931,8 +1943,11 @@ async fn list_attention_items(
                       AND scoped_assignment.revoked_at IS NULL
                 )
              )
-           ORDER BY a.date DESC, a.time_start
-           LIMIT 200"#,
+           ORDER BY CASE WHEN $19::boolean THEN a.date END ASC,
+                    CASE WHEN $19::boolean THEN a.time_start END ASC,
+                    a.date DESC,
+                    a.time_start
+           LIMIT $20"#,
     )
     .bind(search_pattern)
     .bind(query.appointment_type)
@@ -1952,6 +1967,8 @@ async fn list_attention_items(
     .bind(auth.user_id)
     .bind(today)
     .bind(preparation_window_end)
+    .bind(calendar_window)
+    .bind(row_cap)
     .fetch_all(&state.db)
     .await
     {
@@ -3608,6 +3625,31 @@ fn validate_query_date_range(
         return Err("date_to must be on or after date_from");
     }
     Ok(())
+}
+
+/// Longest date window (inclusive days) the scheduler loads as one calendar view.
+const CALENDAR_WINDOW_MAX_DAYS: i64 = 62;
+/// Safety cap for a calendar window; well above a busy month.
+const CALENDAR_WINDOW_ROW_CAP: i64 = 2000;
+/// Cap for open-ended lists, which show the newest appointments first.
+const APPOINTMENT_LIST_ROW_CAP: i64 = 200;
+
+/// A bounded date window is a calendar view: it must contain every appointment
+/// in the window, in chronological order. Capping it at the newest rows dropped
+/// the earliest days of a busy week. Other lists keep newest-first with the
+/// smaller cap. Returns (calendar window, row cap).
+fn appointment_list_window(
+    date_from: Option<chrono::NaiveDate>,
+    date_to: Option<chrono::NaiveDate>,
+) -> (bool, i64) {
+    match (date_from, date_to) {
+        (Some(date_from), Some(date_to))
+            if (date_to - date_from).num_days() < CALENDAR_WINDOW_MAX_DAYS =>
+        {
+            (true, CALENDAR_WINDOW_ROW_CAP)
+        }
+        _ => (false, APPOINTMENT_LIST_ROW_CAP),
+    }
 }
 
 fn parse_optional_rfc3339(
