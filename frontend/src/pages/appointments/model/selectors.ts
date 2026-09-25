@@ -77,6 +77,19 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
   };
 }
 
+/**
+ * The appointments page is read-only without `appointments.edit`, but the
+ * interpreter can still respond to assignments and submit visit reports on
+ * it, so a "view only" banner above those working buttons would be wrong.
+ */
+export function appointmentsReadOnlyScope(actor?: Actor) {
+  const permissions = appointmentPermissions(actor);
+  return {
+    active: !permissions.canEditSchedule,
+    banner: !(permissions.canRespondToAssignment || permissions.canSubmitReport),
+  };
+}
+
 export function linkedPatientPermissions(actor?: Actor): LinkedPatientPermissions {
   const { canCreateEdit, canViewAssignments, canManageAssignments } = patientPermissions(actor);
   return { canCreateEdit, canViewAssignments, canManageAssignments };

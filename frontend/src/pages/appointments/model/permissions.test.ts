@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { appointmentPermissions, linkedPatientPermissions } from "./selectors";
+import {
+  appointmentPermissions,
+  appointmentsReadOnlyScope,
+  linkedPatientPermissions,
+} from "./selectors";
 import { getRequiredAppointmentDetailResourceGroups } from "./detail-resource-needs";
 
 describe("appointment role contracts", () => {
@@ -115,5 +119,17 @@ describe("appointment role contracts", () => {
       canViewAssignments: false,
       canManageAssignments: false,
     });
+  });
+});
+
+describe("appointments read-only scope", () => {
+  it("keeps the interpreter read-only without the view-only banner above its response buttons", () => {
+    expect(appointmentsReadOnlyScope("interpreter")).toEqual({ active: true, banner: false });
+  });
+
+  it("shows the banner to view-only roles and no scope to schedulers", () => {
+    expect(appointmentsReadOnlyScope("ceo_assistant")).toEqual({ active: true, banner: true });
+    expect(appointmentsReadOnlyScope("patient_manager").active).toBe(false);
+    expect(appointmentsReadOnlyScope("teamlead_interpreter").active).toBe(false);
   });
 });

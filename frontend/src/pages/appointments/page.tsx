@@ -22,7 +22,6 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
-import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -34,6 +33,7 @@ import {
 } from "@/pages/appointments/model/selectors";
 import {
   appointmentPermissions,
+  appointmentsReadOnlyScope,
   linkedPatientPermissions,
 } from "@/pages/appointments/model/selectors";
 import {
@@ -2000,7 +2000,12 @@ function useStaffAppointmentsPageContent() {
 function StaffAppointmentsPage(...args: Parameters<typeof useStaffAppointmentsPageContent>) {
   const { user } = useAuth();
   const content = useStaffAppointmentsPageContent(...args);
-  return <ReadOnlyScope active={!hasCapability(user, "appointments.edit")}>{content}</ReadOnlyScope>;
+  const readOnly = appointmentsReadOnlyScope(user);
+  return (
+    <ReadOnlyScope active={readOnly.active} banner={readOnly.banner}>
+      {content}
+    </ReadOnlyScope>
+  );
 }
 
 export function AppointmentsPage() {
