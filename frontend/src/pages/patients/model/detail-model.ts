@@ -95,6 +95,8 @@ type PatientTabAccess = {
   canViewFinance?: boolean;
   canViewOperationalSurface: boolean;
   canViewCareHistory?: boolean;
+  /** Appointments tab; falls back to the care-history surface when omitted. */
+  canViewAppointments?: boolean;
   /** Curators tab; falls back to the operational surface when omitted. */
   canViewAssignments?: boolean;
   canViewDocuments: boolean;
@@ -174,7 +176,7 @@ const TIMELINE_RANGE_DAYS: Record<Exclude<PatientTimelineRangeFilter, "all">, nu
   "365d": 365,
 };
 
-const PATIENT_CARE_HISTORY_TAB_KEYS = new Set(["orders", "appointments", "timeline"]);
+const PATIENT_CARE_HISTORY_TAB_KEYS = new Set(["orders", "timeline"]);
 const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "relations",
   "orders",
@@ -237,13 +239,23 @@ const PATIENT_RECORD_SERVER_ROLES: ReadonlySet<string> = new Set([
   "concierge",
 ]);
 
-/** `/patients/{id}/orders`, `/appointments`, `/timeline`, `/document-alerts`. */
+/** `/patients/{id}/orders`, `/timeline`, `/document-alerts`. */
 const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
   "patient_manager",
   "billing",
   "teamlead_interpreter",
   "interpreter",
+]);
+
+/**
+ * `/patients/{id}/appointments`: the care-history roles plus the concierge,
+ * who reads a patient's appointments (medical ones as blocked slots) but not
+ * the orders or the timeline.
+ */
+const PATIENT_APPOINTMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
+  ...PATIENT_CARE_HISTORY_SERVER_ROLES,
+  "concierge",
 ]);
 
 /** `/patients/{id}/assignments` (the curators tab). */
@@ -318,11 +330,23 @@ export function canViewPatientFinanceSurface(actor?: Actor) {
   return hasCapability(actor, "invoices.view");
 }
 
-/** Orders, appointments and the timeline. */
+/** Orders and the timeline. */
 export function canViewPatientCareHistorySurface(actor?: Actor) {
   return (
     hasAnyCapability(actor, ["orders.view", "appointments.view"]) &&
     serverAdmitsRole(actor, PATIENT_CARE_HISTORY_SERVER_ROLES)
+  );
+}
+
+/**
+ * The appointments tab: the care-history rule widened to the concierge, who
+ * holds `appointments.view`. Billing keeps reaching the tab through
+ * `orders.view`, as before the split.
+ */
+export function canViewPatientAppointmentsSurface(actor?: Actor) {
+  return (
+    hasAnyCapability(actor, ["orders.view", "appointments.view"]) &&
+    serverAdmitsRole(actor, PATIENT_APPOINTMENTS_SERVER_ROLES)
   );
 }
 
@@ -359,6 +383,12 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
   if (
     PATIENT_CARE_HISTORY_TAB_KEYS.has(requestedTab) &&
     !(access.canViewCareHistory ?? access.canViewOperationalSurface)
+  ) {
+    return "profile";
+  }
+  if (
+    requestedTab === "appointments" &&
+    !(access.canViewAppointments ?? access.canViewCareHistory ?? access.canViewOperationalSurface)
   ) {
     return "profile";
   }

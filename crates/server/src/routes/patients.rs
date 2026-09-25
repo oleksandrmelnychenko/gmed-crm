@@ -6702,12 +6702,15 @@ async fn list_patient_appointments(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    // The concierge reads the appointments of a visible patient in the patient
+    // card (read-only here; its orders and timeline stay closed to the role).
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
+        Role::Concierge,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -6734,16 +6737,22 @@ async fn list_patient_appointments(
     let items = rows
         .into_iter()
         .map(|row| {
+            let appointment_type = row
+                .try_get::<String, _>("appointment_type")
+                .unwrap_or_default();
+            // Same redaction as `/appointments`: medical slots stay blocked for the concierge.
+            let blocked = super::appointments::is_blocked_slot(&auth, &appointment_type);
             serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
-                "title": row.try_get::<String, _>("title").unwrap_or_default(),
+                "title": if blocked { "Blocked medical slot".to_string() } else { row.try_get::<String, _>("title").unwrap_or_default() },
                 "date": row.try_get::<chrono::NaiveDate, _>("date").map(|value| value.to_string()).unwrap_or_default(),
                 "time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
-                "apt_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
-                "care_path_kind": row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string()),
+                "apt_type": appointment_type,
+                "care_path_kind": if blocked { None } else { Some(row.try_get::<String, _>("care_path_kind").unwrap_or_else(|_| "regular".to_string())) },
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
-                "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
-                "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
+                "provider_name": if blocked { None } else { row.try_get::<Option<String>, _>("provider_name").unwrap_or_default() },
+                "doctor_name": if blocked { None } else { row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default() },
+                "is_blocked": blocked,
             })
         })
         .collect::<Vec<_>>();

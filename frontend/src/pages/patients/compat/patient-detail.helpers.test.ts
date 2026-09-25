@@ -7,6 +7,7 @@ import {
   buildPatientTimelineSummary,
   canManagePatientProfile,
   canOpenPatientDocumentsWorkspace,
+  canViewPatientAppointmentsSurface,
   canViewPatientCareHistorySurface,
   canViewPatientContractsSurface,
   canViewPatientClinicalProfile,
@@ -308,8 +309,9 @@ describe("patient surface access helpers", () => {
   it("gives Concierge the service-side patient card without clinical or financial surfaces", () => {
     expect(canViewPatientOperationalSurface("concierge")).toBe(true);
     expect(canViewPatientAssignmentsSurface("concierge")).toBe(true);
-    // appointments.view alone: the server refuses /patients/{id}/appointments,
-    // /orders and /timeline for the concierge, so those tabs stay hidden.
+    // The server serves /patients/{id}/appointments to the concierge but
+    // refuses /orders and /timeline, so only the appointments tab shows.
+    expect(canViewPatientAppointmentsSurface("concierge")).toBe(true);
     expect(canViewPatientCareHistorySurface("concierge")).toBe(false);
     expect(canViewPatientDocumentsSurface("concierge")).toBe(true);
     expect(canOpenPatientDocumentsWorkspace("concierge")).toBe(true);
@@ -324,6 +326,7 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(false);
     expect(canViewPatientAssignmentsSurface("ceo_assistant")).toBe(false);
     expect(canViewPatientCareHistorySurface("ceo_assistant")).toBe(false);
+    expect(canViewPatientAppointmentsSurface("ceo_assistant")).toBe(false);
     expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(false);
     expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(false);
     expect(canLoadPatientAssignableStaff("ceo_assistant")).toBe(false);
@@ -591,10 +594,11 @@ describe("normalizePatientDetailTab", () => {
     ).toBe("profile");
   });
 
-  it("keeps Concierge out of patient care-history tabs", () => {
+  it("opens the appointments tab to Concierge but keeps orders and the timeline closed", () => {
     const conciergeAccess = {
-      canViewOperationalSurface: true,
-      canViewCareHistory: false,
+      canViewOperationalSurface: canViewPatientOperationalSurface("concierge"),
+      canViewCareHistory: canViewPatientCareHistorySurface("concierge"),
+      canViewAppointments: canViewPatientAppointmentsSurface("concierge"),
       canViewDocuments: true,
       canViewContracts: false,
       canViewInvoices: false,
@@ -602,9 +606,24 @@ describe("normalizePatientDetailTab", () => {
 
     expect(normalizePatientDetailTab("relations", conciergeAccess)).toBe("relations");
     expect(normalizePatientDetailTab("documents", conciergeAccess)).toBe("documents");
+    expect(normalizePatientDetailTab("appointments", conciergeAccess)).toBe("appointments");
     expect(normalizePatientDetailTab("orders", conciergeAccess)).toBe("profile");
-    expect(normalizePatientDetailTab("appointments", conciergeAccess)).toBe("profile");
     expect(normalizePatientDetailTab("timeline", conciergeAccess)).toBe("profile");
+  });
+
+  it("closes the appointments tab without appointment access", () => {
+    const access = {
+      canViewOperationalSurface: true,
+      canViewCareHistory: true,
+      canViewAppointments: false,
+      canViewDocuments: true,
+      canViewContracts: true,
+      canViewInvoices: true,
+    };
+
+    expect(normalizePatientDetailTab("appointments", access)).toBe("profile");
+    expect(normalizePatientDetailTab("orders", access)).toBe("orders");
+    expect(normalizePatientDetailTab("timeline", access)).toBe("timeline");
   });
 
   it("keeps allowed commercial tabs intact for read-only executives", () => {

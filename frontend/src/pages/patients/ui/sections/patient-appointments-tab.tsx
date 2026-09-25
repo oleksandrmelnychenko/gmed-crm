@@ -84,18 +84,28 @@ export function PatientAppointmentsTab({
     onAppointmentSheetOpenChange(true);
   };
 
-  const columns = useMemo<ColumnDef<AppointmentItem>[]>(
-    () => [
+  const columns = useMemo<ColumnDef<AppointmentItem>[]>(() => {
+    // The concierge gets medical appointments as blocked slots without details.
+    const appointmentTitle = (item: AppointmentItem) =>
+      item.is_blocked ? (dict.uiText.appointments_blocked_slot ?? item.title) : item.title;
+    return [
       {
         id: "title",
         label: dict.appointments_title_col,
-        accessor: (item) => item.title,
+        accessor: appointmentTitle,
         sortable: true,
         searchable: true,
         required: true,
         width: 260,
         render: (item) => (
-          <span className="block truncate text-xs font-medium text-foreground">{item.title}</span>
+          <span
+            className={cn(
+              "block truncate text-xs font-medium",
+              item.is_blocked ? "text-muted-foreground" : "text-foreground",
+            )}
+          >
+            {appointmentTitle(item)}
+          </span>
         ),
       },
       {
@@ -128,12 +138,14 @@ export function PatientAppointmentsTab({
             <Badge variant="outline" className="rounded-full font-mono text-[10px]">
               {appointmentTypeLabel(item.apt_type)}
             </Badge>
-            <Badge
-              variant="outline"
-              className="rounded-full border-violet-200 bg-violet-50 font-mono text-[10px] text-violet-700"
-            >
-              {appointmentCarePathKindLabel(item.care_path_kind)}
-            </Badge>
+            {item.care_path_kind ? (
+              <Badge
+                variant="outline"
+                className="rounded-full border-violet-200 bg-violet-50 font-mono text-[10px] text-violet-700"
+              >
+                {appointmentCarePathKindLabel(item.care_path_kind)}
+              </Badge>
+            ) : null}
           </div>
         ),
       },
@@ -165,9 +177,8 @@ export function PatientAppointmentsTab({
           </span>
         ),
       },
-    ],
-    [appointmentCarePathKindLabel, appointmentTypeLabel, dict, formatDate, statusColors, statusLabel],
-  );
+    ];
+  }, [appointmentCarePathKindLabel, appointmentTypeLabel, dict, formatDate, statusColors, statusLabel]);
 
   return (
     <TabsContent value="appointments" className="space-y-4 mt-4 min-h-[400px]">

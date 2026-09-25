@@ -18,4 +18,10 @@ describe("patient navigation", () => {
     expect(normalizePatientDetailTab("finance", { canViewFinance: allowed, canViewInvoices: true, canViewDocuments: true, canViewContracts: true, canViewOperationalSurface: true })).toBe(allowed ? "finance" : "profile");
     expect(normalizePatientDetailTab("billing", { canViewFinance: true, canViewInvoices: allowed, canViewDocuments: true, canViewContracts: true, canViewOperationalSurface: true })).toBe(allowed ? "billing" : "profile");
   });
+  it("lists appointments for the concierge but not orders or the timeline", () => {
+    const keys = patientWorkspaceNavigation("concierge", "ru", t("ru")).map(item => item.key);
+    expect(keys).toContain("appointments");
+    expect(keys).not.toContain("orders");
+    expect(keys).not.toContain("timeline");
+  });
 });

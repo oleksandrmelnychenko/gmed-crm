@@ -34,10 +34,13 @@ export type AppointmentItem = {
   date: string;
   time_start?: string | null;
   apt_type: string;
-  care_path_kind: string;
+  /** `null` on a blocked slot. */
+  care_path_kind: string | null;
   status: string;
   provider_name?: string | null;
   doctor_name?: string | null;
+  /** A medical appointment shown to the concierge without its details. */
+  is_blocked?: boolean;
 };
 
 export type RelationItem = {

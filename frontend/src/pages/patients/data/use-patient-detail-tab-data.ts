@@ -25,6 +25,7 @@ import type {
 
 type UsePatientDetailTabDataArgs = {
   activeTab: string;
+  canViewAppointments: boolean;
   canViewCareHistory: boolean;
   canViewContracts: boolean;
   canViewDocuments: boolean;
@@ -140,6 +141,7 @@ function patientDetailTabDataReducer(
 
 export function usePatientDetailTabData({
   activeTab,
+  canViewAppointments,
   canViewCareHistory,
   canViewContracts,
   canViewDocuments,
@@ -169,8 +171,8 @@ export function usePatientDetailTabData({
     (activeTab === "invoices" && !canViewInvoices) ||
     ((activeTab === "relations" || activeTab === "workflow") &&
       !canViewOperationalSurface) ||
-    ((activeTab === "orders" || activeTab === "appointments" || activeTab === "timeline") &&
-      !canViewCareHistory)
+    ((activeTab === "orders" || activeTab === "timeline") && !canViewCareHistory) ||
+    (activeTab === "appointments" && !canViewAppointments)
       ? ""
       : [
           id,

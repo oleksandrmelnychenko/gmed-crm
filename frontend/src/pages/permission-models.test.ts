@@ -29,6 +29,7 @@ import {
   canLoadPatientAssignableStaff,
   canManagePatientProfile,
   canOpenPatientDocumentsWorkspace,
+  canViewPatientAppointmentsSurface,
   canViewPatientAssignmentsSurface,
   canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
@@ -127,6 +128,7 @@ describe("patient detail model", () => {
   // workflow_checklists.rs): narrower than the capabilities, e.g. no CEO assistant.
   const RECORD_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter", "concierge"];
   const CARE_HISTORY_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter"];
+  const APPOINTMENT_ROLES = [...CARE_HISTORY_ROLES, "concierge"];
   const ASSIGNMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
 
   it.each(STAFF_ROLES)("derives every surface from capabilities and server role lists for %s", (role) => {
@@ -147,6 +149,9 @@ describe("patient detail model", () => {
       expect(canManagePatientProfile(actor)).toBe(has("patients.edit"));
       expect(canViewPatientCareHistorySurface(actor)).toBe(
         (has("orders.view") || has("appointments.view")) && CARE_HISTORY_ROLES.includes(role),
+      );
+      expect(canViewPatientAppointmentsSurface(actor)).toBe(
+        (has("orders.view") || has("appointments.view")) && APPOINTMENT_ROLES.includes(role),
       );
       expect(canLoadPatientAssignableStaff(actor)).toBe(has("users.view"));
     });

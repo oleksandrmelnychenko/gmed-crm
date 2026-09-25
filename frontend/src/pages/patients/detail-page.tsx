@@ -49,6 +49,7 @@ import {
   canManagePatientProfile,
   canLoadPatientAssignableStaff,
   canOpenPatientDocumentsWorkspace,
+  canViewPatientAppointmentsSurface,
   canViewPatientAssignmentsSurface,
   canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
@@ -1141,6 +1142,7 @@ function usePatientDetailPageContent() {
   const canManageRelations = hasCapability(user, "patients.edit");
   const canViewOperationalSurface = canViewPatientOperationalSurface(user);
   const canViewCareHistory = canViewPatientCareHistorySurface(user);
+  const canViewAppointments = canViewPatientAppointmentsSurface(user);
   const canViewAssignments = canViewPatientAssignmentsSurface(user);
   const canLoadAssignableStaff = canLoadPatientAssignableStaff(user);
   const canViewClinical = canViewPatientClinicalProfile(user);
@@ -1194,6 +1196,7 @@ function usePatientDetailPageContent() {
     workflowChecklist,
   } = usePatientDetailTabData({
     activeTab,
+    canViewAppointments,
     canViewCareHistory,
     canViewContracts,
     canViewDocuments,
@@ -1554,6 +1557,7 @@ function usePatientDetailPageContent() {
     const normalizedTab = normalizePatientDetailTab(requestedTab, {
       canViewOperationalSurface,
       canViewCareHistory,
+      canViewAppointments,
       canViewAssignments,
       canViewClinical,
       canUseMedicationAi,
@@ -1579,6 +1583,7 @@ function usePatientDetailPageContent() {
   }, [
     activeTab,
     applyActiveTab,
+    canViewAppointments,
     canViewAssignments,
     canViewCareHistory,
     canViewContracts,

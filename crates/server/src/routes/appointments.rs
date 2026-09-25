@@ -8470,7 +8470,9 @@ async fn bootstrap_billing_handoff(
     .await
 }
 
-fn is_blocked_slot(auth: &AuthUser, appointment_type: &str) -> bool {
+/// The concierge sees a medical appointment only as a blocked slot: its date,
+/// time, type and status, without title, provider, doctor or care path.
+pub(crate) fn is_blocked_slot(auth: &AuthUser, appointment_type: &str) -> bool {
     auth.role == Role::Concierge && appointment_type == "medical"
 }
 

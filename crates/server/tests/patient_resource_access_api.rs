@@ -639,3 +639,155 @@ async fn nested_patient_documents_respect_document_deny_and_medical_boundary() {
     assert!(response_contains_resource(&body, visible_document_id));
     assert!(!response_contains_resource(&body, medical_document_id));
 }
+
+async fn seed_provider(pool: &PgPool, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO providers (
+                name, provider_type, address_street, address_city, fachbereich, address_country, phone, email
+           )
+           VALUES ($1, 'medical', 'Clinic Street 1', $2, $3, 'Germany', $4, $5)
+           RETURNING id"#,
+    )
+    .bind(format!("Clinic {tag}"))
+    .bind(format!("City {tag}"))
+    .bind(format!("Fach {tag}"))
+    .bind(format!("+49-221-{tag}"))
+    .bind(format!("{tag}@clinic.example"))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_appointment(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    created_by: Uuid,
+    appointment_type: &str,
+    title: &str,
+    date: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, appointment_type, title, date, status, created_by
+           ) VALUES ($1, $2, $3, $4, $5::date, 'planned', $6)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(appointment_type)
+    .bind(title)
+    .bind(date)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+fn find_resource(body: &Value, resource_id: Uuid) -> Value {
+    body.as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row["id"] == resource_id.to_string())
+                .cloned()
+        })
+        .unwrap_or_else(|| panic!("resource {resource_id} missing from {body}"))
+}
+
+#[tokio::test]
+async fn concierge_reads_patient_appointments_but_not_orders_or_timeline() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-concierge-appointments");
+    let concierge_id = seed_staff_user(&pool, &tag, "concierge").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let unassigned_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-unassigned")).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let service_title = format!("Airport transfer {tag}");
+    let medical_title = format!("Cardiology consult {tag}");
+    let service_appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "non_medical",
+        &service_title,
+        "2026-04-14",
+    )
+    .await;
+    let medical_appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &medical_title,
+        "2026-04-15",
+    )
+    .await;
+    let bearer = auth_header_for(concierge_id, "concierge");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let service = find_resource(&body, service_appointment_id);
+    assert_eq!(service["title"], service_title);
+    assert_eq!(service["apt_type"], "non_medical");
+    assert_eq!(service["provider_name"], format!("Clinic {tag}"));
+    assert_eq!(service["is_blocked"], false);
+    // A medical appointment reaches the concierge only as a blocked slot, as in `/appointments`.
+    let medical = find_resource(&body, medical_appointment_id);
+    assert_eq!(medical["title"], "Blocked medical slot");
+    assert_eq!(medical["apt_type"], "medical");
+    assert_eq!(medical["date"], "2026-04-15");
+    assert_eq!(medical["care_path_kind"], Value::Null);
+    assert_eq!(medical["provider_name"], Value::Null);
+    assert_eq!(medical["doctor_name"], Value::Null);
+    assert_eq!(medical["is_blocked"], true);
+    assert!(!body.to_string().contains(&medical_title), "{body}");
+
+    // Staff with clinical access still see the medical appointment in full.
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let medical = find_resource(&body, medical_appointment_id);
+    assert_eq!(medical["title"], medical_title);
+    assert_eq!(medical["provider_name"], format!("Clinic {tag}"));
+    assert_eq!(medical["is_blocked"], false);
+
+    // Patient visibility still gates the list: no assignment, no appointments.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{unassigned_patient_id}/appointments"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Orders and the timeline stay closed to the concierge.
+    for path in [
+        format!("/api/v1/patients/{patient_id}/orders"),
+        format!("/api/v1/patients/{patient_id}/timeline"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+}
