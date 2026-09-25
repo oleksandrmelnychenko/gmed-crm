@@ -29,11 +29,10 @@ fn normalized_responsible_person(value: &str) -> &str {
         })
 }
 
+/// Joins a multi-line address into one footer line. Settings loaders decode the
+/// JSONB string (`#>> '{}'`), so only real line breaks need handling here.
 fn normalize_single_line(value: &str) -> String {
     value
-        .replace("\\r\\n", "\n")
-        .replace("\\n", "\n")
-        .replace("\\r", "\n")
         .replace('\r', "\n")
         .lines()
         .map(str::trim)
@@ -249,8 +248,7 @@ mod tests {
     fn footer_uses_the_same_company_contact_labels_as_lead_pdfs() {
         for address in [
             "Albert-Schweitzer-Straße 56\n81735 München\nDeutschland",
-            r"Albert-Schweitzer-Straße 56\n81735 München\nDeutschland",
-            r"Albert-Schweitzer-Straße 56\r\n81735 München\r\nDeutschland",
+            "Albert-Schweitzer-Straße 56\r\n81735 München\r\nDeutschland",
             " Albert-Schweitzer-Straße 56 \r\n\r\n81735 München\rDeutschland\n",
         ] {
             let brand = PatientPdfBrand {

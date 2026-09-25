@@ -2007,13 +2007,11 @@ fn resolve_patient_label_format(
         })
 }
 
-fn normalize_setting_text_value(value: &str) -> Option<String> {
-    let normalized = value.trim().trim_matches('"').trim();
-    if normalized.is_empty() || normalized.eq_ignore_ascii_case("null") {
-        None
-    } else {
-        Some(normalized.to_string())
-    }
+/// Settings are JSONB strings; the loader decodes them with `#>> '{}'`, so a
+/// stored line break arrives as a real newline instead of the escape `\n`.
+fn normalize_setting_text_value(value: Option<&str>) -> Option<String> {
+    let normalized = value?.trim();
+    (!normalized.is_empty()).then(|| normalized.to_string())
 }
 
 fn money_json(value: rust_decimal::Decimal) -> String {
@@ -2098,7 +2096,7 @@ pub(crate) async fn load_patient_label_agency_settings(
     state: &AppState,
 ) -> Result<PatientLabelAgencySettings, axum::response::Response> {
     let rows = sqlx::query(
-        r#"SELECT key, value::TEXT AS value_text
+        r#"SELECT key, value #>> '{}' AS value_text
            FROM system_settings
            WHERE key IN (
                'agency_name',
@@ -2128,15 +2126,17 @@ pub(crate) async fn load_patient_label_agency_settings(
                 "Failed to load patient label settings",
             )
         })?;
-        let value = row.try_get::<String, _>("value_text").map_err(|e| {
-            tracing::error!(error = %e, "Failed to read patient label settings value");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load patient label settings",
-            )
-        })?;
+        let value = row
+            .try_get::<Option<String>, _>("value_text")
+            .map_err(|e| {
+                tracing::error!(error = %e, "Failed to read patient label settings value");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load patient label settings",
+                )
+            })?;
 
-        if let Some(value) = normalize_setting_text_value(&value) {
+        if let Some(value) = normalize_setting_text_value(value.as_deref()) {
             values.insert(key, value);
         }
     }

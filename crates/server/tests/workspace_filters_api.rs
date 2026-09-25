@@ -4812,7 +4812,13 @@ async fn patient_manager_can_fetch_patient_label_payload() {
     for (key, value, description) in [
         ("agency_name", "GMED Ops", "Agency name"),
         ("agency_care_of", "c/o GMED Ops", "Agency care of"),
-        ("agency_address", "Main Street 1, Berlin", "Agency address"),
+        // A multi-line address is stored as a JSONB string with an escaped
+        // line break; the label must return the decoded newline.
+        (
+            "agency_address",
+            "Main Street 1\n10115 Berlin",
+            "Agency address",
+        ),
         ("agency_phone", "+49 30 000000", "Agency phone"),
         ("agency_email", "ops@gmed.de", "Agency email"),
     ] {
@@ -4851,7 +4857,14 @@ async fn patient_manager_can_fetch_patient_label_payload() {
     assert_eq!(body["insurance_provider"], "AXA");
     assert_eq!(body["format"]["id"], "sheet-70x37");
     assert_eq!(body["agency"]["care_of"], "c/o GMED Ops");
-    assert_eq!(body["agency"]["address"], "Main Street 1, Berlin");
+    assert_eq!(body["agency"]["address"], "Main Street 1\n10115 Berlin");
+    assert!(
+        !body["agency"]["address"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("\\n"),
+        "the label must not show a literal escape: {body}"
+    );
     assert_eq!(body["agency"]["phone"], "+49 30 000000");
     assert_eq!(body["agency"]["email"], "ops@gmed.de");
     assert!(
