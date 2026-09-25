@@ -942,6 +942,9 @@ async fn create_lead(
     let first_name = label.to_string();
     let last_name = format!("Lead {}", &tag[tag.len().saturating_sub(6)..]);
     let email = format!("{}.{}@example.com", label.to_lowercase(), tag);
+    // Every seeded lead needs its own number: lead edits reject a phone that
+    // already belongs to another person.
+    let phone = synthetic_lead_phone(id);
 
     sqlx::query(
         r#"INSERT INTO leads (
@@ -962,7 +965,7 @@ async fn create_lead(
     .bind(&first_name)
     .bind(&last_name)
     .bind(email)
-    .bind("+49 30 100001")
+    .bind(phone)
     .bind(if ready_for_conversion {
         "signed"
     } else {
@@ -1228,6 +1231,12 @@ async fn create_feedback(
     Ok(SeededFeedback { id, comments })
 }
 
+/// A synthetic Berlin number derived from the lead id (eight digits after the
+/// area code), so repeated bootstraps do not seed the same phone twice.
+fn synthetic_lead_phone(lead_id: Uuid) -> String {
+    format!("+49 30 {:08}", lead_id.as_u128() % 100_000_000)
+}
+
 fn parse_uuid(value: &str) -> Result<Uuid, String> {
     Uuid::parse_str(value).map_err(|error| format!("parse uuid {value}: {error}"))
 }
@@ -1241,4 +1250,24 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn seeded_leads_get_distinct_phone_numbers() {
+        let first = synthetic_lead_phone(Uuid::from_u128(1));
+        let second = synthetic_lead_phone(Uuid::from_u128(2));
+        assert_eq!(first, "+49 30 00000001");
+        assert_ne!(first, second);
+        assert!(
+            synthetic_lead_phone(Uuid::new_v4())
+                .strip_prefix("+49 30 ")
+                .is_some_and(
+                    |digits| digits.len() == 8 && digits.chars().all(|ch| ch.is_ascii_digit())
+                )
+        );
+    }
 }

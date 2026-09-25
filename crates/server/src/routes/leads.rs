@@ -3341,14 +3341,19 @@ async fn update_lead(
     let effective_last_name = last_name
         .clone()
         .unwrap_or_else(|| current_identity.get::<String, _>("last_name"));
-    let effective_email = body
-        .email
-        .clone()
-        .or_else(|| current_identity.get::<Option<String>, _>("email"));
-    let effective_phone = body
-        .phone
-        .clone()
-        .or_else(|| current_identity.get::<Option<String>, _>("phone"));
+    // Uniqueness is checked only for a contact the request changes to a new
+    // value. Data already stored (e.g. an earlier duplicate) must not block
+    // unrelated edits such as trusted contacts.
+    let current_email = current_identity.get::<Option<String>, _>("email");
+    let current_phone = current_identity.get::<Option<String>, _>("phone");
+    let changed_email = body.email.clone().filter(|email| {
+        normalized_identity_email(Some(email))
+            != normalized_identity_email(current_email.as_deref())
+    });
+    let changed_phone = body.phone.clone().filter(|phone| {
+        normalized_identity_phone(Some(phone))
+            != normalized_identity_phone(current_phone.as_deref())
+    });
     let effective_birth_date = date_of_birth.or_else(|| {
         current_identity
             .try_get::<Option<NaiveDate>, _>("date_of_birth")
@@ -3380,8 +3385,8 @@ async fn update_lead(
             first_name: &effective_first_name,
             last_name: &effective_last_name,
             date_of_birth: effective_birth_date,
-            email: effective_email.as_deref(),
-            phone: effective_phone.as_deref(),
+            email: changed_email.as_deref(),
+            phone: changed_phone.as_deref(),
             guardians: effective_guardians,
         },
     )

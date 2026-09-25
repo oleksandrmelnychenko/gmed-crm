@@ -841,6 +841,113 @@ async fn lead_contacts_are_unique_except_for_a_minor_and_linked_guardian() {
     );
 }
 
+/// Leads that already share a phone or email (e.g. imported before the
+/// uniqueness rule) stay editable: only a contact the request changes to a new
+/// value is checked against other people.
+#[tokio::test]
+async fn lead_update_checks_uniqueness_only_for_changed_contacts() {
+    let Some(app) = test_app().await else { return };
+    let ceo = app.auth_header("ceo");
+    let mut lead_ids = Vec::new();
+    for (first_name, birth_date) in [("First", "1980-01-01"), ("Second", "1981-02-02")] {
+        let lead_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO leads (first_name, last_name, date_of_birth, email, phone, created_by)
+               VALUES ($1, 'Duplicate', $2::date, 'shared-contact@example.org', '+49 30 5550100', $3)
+               RETURNING id"#,
+        )
+        .bind(first_name)
+        .bind(birth_date)
+        .bind(app.ceo_id)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+        lead_ids.push(lead_id);
+    }
+    let other_phone_owner: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, date_of_birth, phone, created_by)
+           VALUES ('Third', 'Person', DATE '1979-03-03', '+49 30 5550199', $1)
+           RETURNING id"#,
+    )
+    .bind(app.ceo_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    let lead_id = lead_ids[0];
+    let path = format!("/api/v1/leads/{lead_id}/update");
+
+    // Editing only trusted contacts no longer trips over the stored duplicate.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({
+            "trusted_contacts": [{
+                "id": Uuid::new_v4(),
+                "name": "Maria Duplicate",
+                "phone": "+49 151 0000001",
+                "relation": "spouse"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Re-sending the stored values (another format of the same number) is not a change.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({
+            "phone": "0049 30 5550100",
+            "email": " Shared-Contact@example.org ",
+            "notes": "Unchanged contacts"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A change to another person's number is still rejected.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "phone": "+49 30 5550199" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Phone is already used by another person");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{}/update", lead_ids[1]),
+        &ceo,
+        Some(json!({ "email": "shared-contact-new@example.org" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "email": "shared-contact-new@example.org" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Email is already used by another person");
+
+    let stored_phone: Option<String> = sqlx::query_scalar("SELECT phone FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(stored_phone.as_deref(), Some("0049 30 5550100"));
+    assert_ne!(other_phone_owner, lead_id);
+}
+
 #[tokio::test]
 async fn qualify_lead_flow() {
     let Some(app) = test_app().await else { return };
