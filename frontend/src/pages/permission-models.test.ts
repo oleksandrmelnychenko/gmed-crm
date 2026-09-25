@@ -26,8 +26,10 @@ import { leadPermissions } from "@/pages/leads/model/leads-model";
 import { orderPermissions } from "@/pages/orders/model/order-model";
 import {
   canEditPatientClinicalProfile,
+  canLoadPatientAssignableStaff,
   canManagePatientProfile,
   canOpenPatientDocumentsWorkspace,
+  canViewPatientAssignmentsSurface,
   canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
   canViewPatientContractsSurface,
@@ -121,19 +123,32 @@ describe("patients list model", () => {
 });
 
 describe("patient detail model", () => {
-  it.each(STAFF_ROLES)("derives every surface from capabilities for %s", (role) => {
+  // Server role lists of the patient sub-resources (crates/server/src/routes/patients.rs,
+  // workflow_checklists.rs): narrower than the capabilities, e.g. no CEO assistant.
+  const RECORD_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter", "concierge"];
+  const CARE_HISTORY_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter"];
+  const ASSIGNMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
+
+  it.each(STAFF_ROLES)("derives every surface from capabilities and server role lists for %s", (role) => {
     forEachActor((actor, has, actorRole) => {
       if (actorRole !== role) return;
-      expect(canViewPatientOperationalSurface(actor)).toBe(has("patients.view"));
-      expect(canViewPatientDocumentsSurface(actor)).toBe(has("patients.view") && has("documents.view"));
-      expect(canOpenPatientDocumentsWorkspace(actor)).toBe(has("patients.view") && has("documents.view"));
+      const record = RECORD_ROLES.includes(role);
+      expect(canViewPatientOperationalSurface(actor)).toBe(has("patients.view") && record);
+      expect(canViewPatientAssignmentsSurface(actor)).toBe(
+        has("patients.view") && ASSIGNMENT_ROLES.includes(role),
+      );
+      expect(canViewPatientDocumentsSurface(actor)).toBe(has("patients.view") && has("documents.view") && record);
+      expect(canOpenPatientDocumentsWorkspace(actor)).toBe(has("patients.view") && has("documents.view") && record);
       expect(canViewPatientContractsSurface(actor)).toBe(has("contracts.view"));
       expect(canViewPatientInvoicesSurface(actor)).toBe(has("invoices.view"));
       expect(canViewPatientFinanceSurface(actor)).toBe(has("invoices.view"));
       expect(canViewPatientClinicalProfile(actor)).toBe(has("patients.medical.view"));
       expect(canEditPatientClinicalProfile(actor)).toBe(has("patients.medical.edit"));
       expect(canManagePatientProfile(actor)).toBe(has("patients.edit"));
-      expect(canViewPatientCareHistorySurface(actor)).toBe(has("orders.view") || has("appointments.view"));
+      expect(canViewPatientCareHistorySurface(actor)).toBe(
+        (has("orders.view") || has("appointments.view")) && CARE_HISTORY_ROLES.includes(role),
+      );
+      expect(canLoadPatientAssignableStaff(actor)).toBe(has("users.view"));
     });
   });
 

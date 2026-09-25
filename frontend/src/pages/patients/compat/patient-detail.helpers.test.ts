@@ -19,6 +19,10 @@ import {
   formatRelatedPatientOption,
   resolvePatientTimelineRoute,
 } from "./patient-detail.helpers";
+import {
+  canLoadPatientAssignableStaff,
+  canViewPatientAssignmentsSurface,
+} from "../model/detail-model";
 
 describe("canManagePatientProfile", () => {
   it.each([
@@ -303,8 +307,10 @@ describe("buildPatientLabelPrintHtml", () => {
 describe("patient surface access helpers", () => {
   it("gives Concierge the service-side patient card without clinical or financial surfaces", () => {
     expect(canViewPatientOperationalSurface("concierge")).toBe(true);
-    // appointments.view: the concierge sees the care history for its services.
-    expect(canViewPatientCareHistorySurface("concierge")).toBe(true);
+    expect(canViewPatientAssignmentsSurface("concierge")).toBe(true);
+    // appointments.view alone: the server refuses /patients/{id}/appointments,
+    // /orders and /timeline for the concierge, so those tabs stay hidden.
+    expect(canViewPatientCareHistorySurface("concierge")).toBe(false);
     expect(canViewPatientDocumentsSurface("concierge")).toBe(true);
     expect(canOpenPatientDocumentsWorkspace("concierge")).toBe(true);
     expect(canViewPatientClinicalProfile("concierge")).toBe(false);
@@ -312,14 +318,56 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientInvoicesSurface("concierge")).toBe(false);
   });
 
-  it("gives the ceo assistant every patient surface read-only", () => {
-    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(true);
-    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(true);
-    expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(true);
+  it("shows the ceo assistant only the surfaces the server serves to the role (read-only)", () => {
+    // Refused by the server role lists: documents, relations, workflow,
+    // assignments (curators), orders, appointments and the timeline.
+    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(false);
+    expect(canViewPatientAssignmentsSurface("ceo_assistant")).toBe(false);
+    expect(canViewPatientCareHistorySurface("ceo_assistant")).toBe(false);
+    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(false);
+    expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(false);
+    expect(canLoadPatientAssignableStaff("ceo_assistant")).toBe(false);
+    // Served: profile, clinical profile, contracts, invoices and finance.
     expect(canViewPatientClinicalProfile("ceo_assistant")).toBe(true);
     expect(canViewPatientContractsSurface("ceo_assistant")).toBe(true);
     expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
     expect(canManagePatientProfile("ceo_assistant")).toBe(false);
+    const access = {
+      canViewOperationalSurface: false,
+      canViewCareHistory: false,
+      canViewAssignments: false,
+      canViewDocuments: false,
+      canViewContracts: true,
+      canViewInvoices: true,
+      canViewClinical: true,
+    };
+    for (const tab of ["documents", "relations", "appointments", "orders", "timeline", "curators", "workflow"]) {
+      expect(normalizePatientDetailTab(tab, access)).toBe("profile");
+    }
+    expect(normalizePatientDetailTab("contracts", access)).toBe("contracts");
+    expect(normalizePatientDetailTab("clinical", access)).toBe("clinical");
+  });
+
+  it("hides the curators tab from Billing (no access to patient assignments)", () => {
+    expect(canViewPatientAssignmentsSurface("billing")).toBe(false);
+    expect(
+      normalizePatientDetailTab("curators", {
+        canViewOperationalSurface: true,
+        canViewAssignments: false,
+        canViewDocuments: true,
+        canViewContracts: true,
+        canViewInvoices: true,
+      }),
+    ).toBe("profile");
+    expect(
+      normalizePatientDetailTab("relations", {
+        canViewOperationalSurface: true,
+        canViewAssignments: false,
+        canViewDocuments: true,
+        canViewContracts: true,
+        canViewInvoices: true,
+      }),
+    ).toBe("relations");
   });
 
   it("keeps IT admin out of every patient surface", () => {

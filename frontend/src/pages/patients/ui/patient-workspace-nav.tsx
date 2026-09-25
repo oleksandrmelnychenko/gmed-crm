@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
+  canViewPatientAssignmentsSurface,
   canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
   canViewPatientContractsSurface,
@@ -31,6 +32,7 @@ export function PatientWorkspaceNav() {
 
   const canViewOperationalSurface = canViewPatientOperationalSurface(user);
   const canViewCareHistory = canViewPatientCareHistorySurface(user);
+  const canViewAssignments = canViewPatientAssignmentsSurface(user);
   const canViewClinical = canViewPatientClinicalProfile(user);
   const canUseMedicationAi = user?.role === "ceo";
   const canViewDocuments = canViewPatientDocumentsSurface(user);
@@ -44,6 +46,7 @@ export function PatientWorkspaceNav() {
     ? normalizePatientDetailTab(routeId ? searchParams.get("tab") : contextualTab, {
         canViewOperationalSurface,
         canViewCareHistory,
+        canViewAssignments,
         canViewClinical,
         canUseMedicationAi,
         canViewDocuments,

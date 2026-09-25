@@ -1,6 +1,6 @@
 import type { Lang, Translations } from "@/lib/i18n";
 import { type Actor } from "@/lib/permissions";
-import { canViewPatientCareHistorySurface, canViewPatientClinicalProfile, canViewPatientContractsSurface, canViewPatientDocumentsSurface, canViewPatientFinanceSurface, canViewPatientInvoicesSurface, canViewPatientOperationalSurface } from "./detail-model";
+import { canViewPatientAssignmentsSurface, canViewPatientCareHistorySurface, canViewPatientClinicalProfile, canViewPatientContractsSurface, canViewPatientDocumentsSurface, canViewPatientFinanceSurface, canViewPatientInvoicesSurface, canViewPatientOperationalSurface } from "./detail-model";
 
 export type PatientNavigationItem = { key: string; label: string; group: string; groupLabel: string };
 
@@ -24,7 +24,7 @@ export function patientWorkspaceNavigation(actor: Actor, lang: Lang, t: Translat
     { key: "coordination", label: de ? "Betreuung" : "Сопровождение", items: [
       ["orders", t.orders_title, care],
       ["workflow", t.patients_workflow, operational],
-      ["curators", t.patients_assign_owner, operational],
+      ["curators", t.patients_assign_owner, canViewPatientAssignmentsSurface(actor)],
       ["timeline", t.patients_timeline, care],
     ] },
     { key: "finance", label: de ? "Finanzen" : "Финансы", items: [

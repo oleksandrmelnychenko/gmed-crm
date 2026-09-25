@@ -76,13 +76,14 @@ export function useNewLeadCounter(enabled: boolean): number {
 }
 
 /**
- * Lightweight badge counters for the nav panel. Each source degrades
- * silently: roles without access to an endpoint simply get no badge.
+ * Lightweight badge counters for the nav panel. `leadsEnabled` must follow
+ * the leads route access (`/stats/leads/by-status` answers 403 to roles
+ * without `leads.view`, e.g. interpreters), so those roles never call it.
  */
-export function useNavCounters(enabled: boolean): NavCounters {
+export function useNavCounters(enabled: boolean, leadsEnabled: boolean): NavCounters {
   const [chatUnread, setChatUnread] = useState(0);
   const chatRequestId = useRef(0);
-  const newLeads = useNewLeadCounter(enabled);
+  const newLeads = useNewLeadCounter(enabled && leadsEnabled);
 
   const refreshChat = useCallback(() => {
     if (!enabled) return;

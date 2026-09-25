@@ -9,6 +9,10 @@ import type {
 } from "../model/list-model";
 
 type UsePatientDetailCoreDataArgs = {
+  /** Only roles the server admits to `/patients/{id}/assignments`. */
+  canViewAssignments: boolean;
+  /** `/users` requires `users.view`; other roles would only get a 403. */
+  canLoadAssignableStaff: boolean;
   id: string | undefined;
   version: number;
 };
@@ -100,6 +104,8 @@ function patientDetailCoreDataReducer(
 }
 
 export function usePatientDetailCoreData({
+  canLoadAssignableStaff,
+  canViewAssignments,
   id,
   version,
 }: UsePatientDetailCoreDataArgs) {
@@ -111,7 +117,9 @@ export function usePatientDetailCoreData({
     EMPTY_PATIENT_DETAIL_CORE_DATA_STATE,
   );
 
-  const requestKey = id ? `${id}:${version}` : "";
+  const requestKey = id
+    ? `${id}:${version}:${Number(canViewAssignments)}:${Number(canLoadAssignableStaff)}`
+    : "";
 
   useEffect(() => {
     if (!requestKey || !id) return;
@@ -121,8 +129,12 @@ export function usePatientDetailCoreData({
 
     Promise.all([
       apiFetch<PatientDetail>(`/patients/${id}`, { signal }),
-      apiFetch<PatientAssignment[]>(`/patients/${id}/assignments`, { signal }).catch(() => []),
-      apiFetch<StaffOption[]>("/users?assignable_only=true&active_only=true", { signal }).catch(() => []),
+      canViewAssignments
+        ? apiFetch<PatientAssignment[]>(`/patients/${id}/assignments`, { signal }).catch(() => [])
+        : Promise.resolve([] as PatientAssignment[]),
+      canLoadAssignableStaff
+        ? apiFetch<StaffOption[]>("/users?assignable_only=true&active_only=true", { signal }).catch(() => [])
+        : Promise.resolve([] as StaffOption[]),
     ])
       .then(([nextDetail, nextAssignments, nextStaff]) => {
         if (signal.aborted) return;
@@ -152,7 +164,7 @@ export function usePatientDetailCoreData({
     return () => {
       controller.abort();
     };
-  }, [id, requestKey]);
+  }, [canLoadAssignableStaff, canViewAssignments, id, requestKey]);
 
   const { hasCurrentPatientData, isSettled, loading } =
     patientDetailCoreDataPresentation(

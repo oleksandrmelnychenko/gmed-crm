@@ -45,6 +45,7 @@ import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
 import {
+  canAccessStaffRoute,
   listPatientPortalNavItems,
   listStaffNavItems,
   type PatientPortalNavItem,
@@ -141,7 +142,10 @@ export function NavPanel() {
   const tr = t as unknown as Record<string, string>;
   const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
-  const counters = useNavCounters(Boolean(user) && !isPatientPortal);
+  const counters = useNavCounters(
+    Boolean(user) && !isPatientPortal,
+    Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
+  );
   const patientPortalNav = isPatientPortal ? listPatientPortalNavItems().map(toPatientNavItem) : [];
   const staffNavBySection =
     user && user.role !== "patient"

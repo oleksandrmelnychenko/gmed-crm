@@ -47,7 +47,9 @@ import {
 import {
   buildPatientLabelPrintHtml,
   canManagePatientProfile,
+  canLoadPatientAssignableStaff,
   canOpenPatientDocumentsWorkspace,
+  canViewPatientAssignmentsSurface,
   canViewPatientCareHistorySurface,
   canViewPatientClinicalProfile,
   canViewPatientContractsSurface,
@@ -1139,6 +1141,8 @@ function usePatientDetailPageContent() {
   const canManageRelations = hasCapability(user, "patients.edit");
   const canViewOperationalSurface = canViewPatientOperationalSurface(user);
   const canViewCareHistory = canViewPatientCareHistorySurface(user);
+  const canViewAssignments = canViewPatientAssignmentsSurface(user);
+  const canLoadAssignableStaff = canLoadPatientAssignableStaff(user);
   const canViewClinical = canViewPatientClinicalProfile(user);
   const canUseMedicationAi = user?.role === "ceo";
   const canViewDocuments = canViewPatientDocumentsSurface(user);
@@ -1163,6 +1167,8 @@ function usePatientDetailPageContent() {
     loading,
     staff,
   } = usePatientDetailCoreData({
+    canLoadAssignableStaff,
+    canViewAssignments,
     id,
     version,
   });
@@ -1548,6 +1554,7 @@ function usePatientDetailPageContent() {
     const normalizedTab = normalizePatientDetailTab(requestedTab, {
       canViewOperationalSurface,
       canViewCareHistory,
+      canViewAssignments,
       canViewClinical,
       canUseMedicationAi,
       canViewDocuments,
@@ -1572,6 +1579,7 @@ function usePatientDetailPageContent() {
   }, [
     activeTab,
     applyActiveTab,
+    canViewAssignments,
     canViewCareHistory,
     canViewContracts,
     canViewClinical,

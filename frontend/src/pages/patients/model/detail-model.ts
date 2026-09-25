@@ -4,7 +4,7 @@ import {
   t as translateCatalog,
   type TranslationKey,
 } from "@/lib/i18n";
-import { hasAnyCapability, hasCapability, type Actor } from "@/lib/permissions";
+import { actorRole, hasAnyCapability, hasCapability, type Actor } from "@/lib/permissions";
 
 export type PatientTimelineItem = {
   entity_type: string;
@@ -95,6 +95,8 @@ type PatientTabAccess = {
   canViewFinance?: boolean;
   canViewOperationalSurface: boolean;
   canViewCareHistory?: boolean;
+  /** Curators tab; falls back to the operational surface when omitted. */
+  canViewAssignments?: boolean;
   canViewDocuments: boolean;
   canViewContracts: boolean;
   canViewInvoices: boolean;
@@ -216,13 +218,75 @@ export function patientLabelFormatLabel(format: PatientLabelFormat) {
   return tr.uiText[format.labelKey] ?? format.labelKey;
 }
 
-/** Relations, workflow, curators: every role that may open the patient card. */
+/*
+ * The patient sub-resources behind the workspace tabs authorize by explicit
+ * role lists on the server, which are narrower than the capability registry:
+ * e.g. the CEO assistant holds orders/appointments/documents.view yet
+ * `/patients/{id}/orders` answers 403. A tab is shown only when the role
+ * holds the capability AND the server admits it, so no role lands on a
+ * section that can only render "Insufficient permissions" over an empty table.
+ */
+
+/** `/patients/{id}/relations`, `/documents`, `/workflow-checklist`. */
+const PATIENT_RECORD_SERVER_ROLES: ReadonlySet<string> = new Set([
+  "ceo",
+  "patient_manager",
+  "billing",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
+/** `/patients/{id}/orders`, `/appointments`, `/timeline`, `/document-alerts`. */
+const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
+  "ceo",
+  "patient_manager",
+  "billing",
+  "teamlead_interpreter",
+  "interpreter",
+]);
+
+/** `/patients/{id}/assignments` (the curators tab). */
+const PATIENT_ASSIGNMENT_SERVER_ROLES: ReadonlySet<string> = new Set([
+  "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
+  "interpreter",
+  "concierge",
+]);
+
+function serverAdmitsRole(actor: Actor | undefined, roles: ReadonlySet<string>) {
+  const role = actorRole(actor);
+  return role !== undefined && roles.has(role);
+}
+
+/** Relations and workflow. */
 export function canViewPatientOperationalSurface(actor?: Actor) {
-  return hasCapability(actor, "patients.view");
+  return (
+    hasCapability(actor, "patients.view") &&
+    serverAdmitsRole(actor, PATIENT_RECORD_SERVER_ROLES)
+  );
+}
+
+/** Curators: the patient's assignments. */
+export function canViewPatientAssignmentsSurface(actor?: Actor) {
+  return (
+    hasCapability(actor, "patients.view") &&
+    serverAdmitsRole(actor, PATIENT_ASSIGNMENT_SERVER_ROLES)
+  );
+}
+
+/** Staff picker for assignments (`/users` needs `users.view`). */
+export function canLoadPatientAssignableStaff(actor?: Actor) {
+  return hasCapability(actor, "users.view");
 }
 
 export function canViewPatientDocumentsSurface(actor?: Actor) {
-  return hasCapability(actor, "patients.view") && hasCapability(actor, "documents.view");
+  return (
+    hasCapability(actor, "patients.view") &&
+    hasCapability(actor, "documents.view") &&
+    serverAdmitsRole(actor, PATIENT_RECORD_SERVER_ROLES)
+  );
 }
 
 export function canOpenPatientDocumentsWorkspace(actor?: Actor) {
@@ -256,7 +320,10 @@ export function canViewPatientFinanceSurface(actor?: Actor) {
 
 /** Orders, appointments and the timeline. */
 export function canViewPatientCareHistorySurface(actor?: Actor) {
-  return hasAnyCapability(actor, ["orders.view", "appointments.view"]);
+  return (
+    hasAnyCapability(actor, ["orders.view", "appointments.view"]) &&
+    serverAdmitsRole(actor, PATIENT_CARE_HISTORY_SERVER_ROLES)
+  );
 }
 
 /**
@@ -296,6 +363,12 @@ export function normalizePatientDetailTab(tab: string | null | undefined, access
     return "profile";
   }
   if (PATIENT_OPERATIONAL_TAB_KEYS.has(requestedTab) && !access.canViewOperationalSurface) {
+    return "profile";
+  }
+  if (
+    requestedTab === "curators" &&
+    !(access.canViewAssignments ?? access.canViewOperationalSurface)
+  ) {
     return "profile";
   }
   if (requestedTab === "clinical" && !access.canViewClinical) {
