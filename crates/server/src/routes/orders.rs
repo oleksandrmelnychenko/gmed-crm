@@ -1705,6 +1705,14 @@ async fn ensure_order_followup_flow_state(
     Ok(())
 }
 
+fn pending_when_required(status: String, required: bool) -> String {
+    if required && status == "not_required" {
+        "pending".to_string()
+    } else {
+        status
+    }
+}
+
 async fn load_order_execution_readiness(
     state: &AppState,
     order_id: Uuid,
@@ -1882,6 +1890,12 @@ async fn load_order_execution_readiness(
     let interpreter_required: bool = execution_row
         .try_get("interpreter_required")
         .unwrap_or(false);
+    // The execution row starts as "not_required"; once planning requires the
+    // service, that value would read as done while the gate still blocks.
+    let non_medical_execution_status =
+        pending_when_required(non_medical_execution_status, non_medical_required);
+    let interpreter_service_status =
+        pending_when_required(interpreter_service_status, interpreter_required);
 
     let medical_completed: i64 = evidence_row
         .try_get("medical_completed")

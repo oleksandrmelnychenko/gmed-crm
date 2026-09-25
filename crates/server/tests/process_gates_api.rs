@@ -1716,6 +1716,26 @@ async fn execution_flow_blocks_closure_until_arrival_scope_and_checklists_are_cl
             .any(|item| item.as_str().unwrap_or_default().contains("arrival"))
     );
 
+    // Planning required both services, so the untouched execution row must not
+    // read as "not_required" while the gate still waits for them.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        detail["execution_flow"]["interpreter_service_status"],
+        "pending"
+    );
+    assert_eq!(
+        detail["execution_flow"]["non_medical_execution_status"],
+        "pending"
+    );
+
     complete_order_workflow_group(&pool, order_id, "order_execution").await;
 
     let (status, flow) = json_request(
