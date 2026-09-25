@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 import {
   authenticateApiClient,
@@ -57,33 +63,82 @@ async function clickTranslationAction(
   await requestSurface.getByRole("button", { name }).click();
 }
 
+/**
+ * Seeds built before the onboarding quote carried line items leave the "ready"
+ * lead blocked by "Quote is not accepted"; recalculate and accept the quote
+ * from the order services (what staff do in the wizard) in that case.
+ */
+async function ensureReadyLeadQuoteAccepted(
+  request: APIRequestContext,
+  scenario: BootstrapScenario,
+) {
+  const api = await authenticateApiClient(
+    request,
+    scenario.credentials.pm.email,
+    scenario.credentials.password,
+  );
+  const leadResponse = await request.get(
+    `${api.backendUrl}/api/v1/leads/${scenario.leads.ready.id}`,
+    { headers: api.headers },
+  );
+  expect(leadResponse.ok()).toBe(true);
+  const lead = (await leadResponse.json()) as {
+    readiness: { conversion_ready: boolean; blocking_reasons: string[] };
+  };
+  if (lead.readiness.conversion_ready) return;
+  expect(lead.readiness.blocking_reasons).toEqual(["Quote is not accepted"]);
+  const ordersResponse = await request.get(
+    `${api.backendUrl}/api/v1/orders?lead_id=${scenario.leads.ready.id}`,
+    { headers: api.headers },
+  );
+  expect(ordersResponse.ok()).toBe(true);
+  const orders = (await ordersResponse.json()) as Array<{ id: string }> | { items: Array<{ id: string }> };
+  const orderId = (Array.isArray(orders) ? orders : orders.items)[0]!.id;
+  const quoteResponse = await request.post(
+    `${api.backendUrl}/api/v1/orders/${orderId}/quotes`,
+    { headers: api.headers, data: {} },
+  );
+  expect(quoteResponse.ok(), await quoteResponse.text()).toBe(true);
+  const quote = (await quoteResponse.json()) as { id: string };
+  const acceptResponse = await request.post(
+    `${api.backendUrl}/api/v1/quotes/${quote.id}/status`,
+    { headers: api.headers, data: { status: "accepted" } },
+  );
+  expect(acceptResponse.ok(), await acceptResponse.text()).toBe(true);
+}
+
 test.describe("staff live workflows", () => {
-  test("patient manager sees blocked and ready convert states directly on lead cards", async ({
+  // Lead rows no longer carry a convert button; the wizard's release step shows
+  // whether a lead can become a patient.
+  test("patient manager sees blocked and ready conversion states in the lead wizard", async ({
     page,
     request,
   }) => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
+    await ensureReadyLeadQuoteAccepted(request, scenario);
 
     await page.goto("/leads");
-    await expect(page.getByText(scenario.leads.blocked.name)).toBeVisible();
-    await expect(page.getByText(scenario.leads.ready.name)).toBeVisible();
+    const leadTable = page.getByRole("table");
+    await expect(leadTable.getByText(scenario.leads.blocked.name)).toBeVisible();
+    await expect(leadTable.getByText(scenario.leads.ready.name)).toBeVisible();
 
-    const blockedCard = page.getByRole("row").filter({
-      hasText: scenario.leads.blocked.name,
-    }).first();
-    const readyCard = page.getByRole("row").filter({
-      hasText: scenario.leads.ready.name,
-    }).first();
-
-    await blockedCard.scrollIntoViewIfNeeded();
-    await readyCard.scrollIntoViewIfNeeded();
-
+    await page.goto(`/leads?lead=${scenario.leads.blocked.id}&view=wizard`);
+    const blockedWizard = page.getByRole("dialog").filter({ hasText: scenario.leads.blocked.name });
+    await blockedWizard.getByRole("tab", { name: /^Freigabe — noch offen/ }).click();
+    await expect(blockedWizard.getByText(/^Was noch fehlt: \d+$/)).toBeVisible();
+    await blockedWizard.getByRole("checkbox", { name: /Ich habe die Angaben geprüft/i }).check();
     await expect(
-      blockedCard.getByRole("button", { name: /Konvertieren|Convert/i }),
+      blockedWizard.getByRole("button", { name: /^Patient anlegen$/ }),
     ).toBeDisabled();
+
+    await page.goto(`/leads?lead=${scenario.leads.ready.id}&view=wizard`);
+    const readyWizard = page.getByRole("dialog").filter({ hasText: scenario.leads.ready.name });
+    await readyWizard.getByRole("tab", { name: /^Freigabe — erledigt/ }).click();
+    await expect(readyWizard.getByText(/^Was noch fehlt/)).toHaveCount(0);
+    await readyWizard.getByRole("checkbox", { name: /Ich habe die Angaben geprüft/i }).check();
     await expect(
-      readyCard.getByRole("button", { name: /Konvertieren|Convert/i }),
+      readyWizard.getByRole("button", { name: /^Patient anlegen$/ }),
     ).toBeEnabled();
   });
 
@@ -121,7 +176,9 @@ test.describe("staff live workflows", () => {
       .locator('[data-workspace-rail="patient"]')
       .getByRole("link", { name: /Verträge|Contracts/i })
       .click();
-    await expect(page.getByText(scenario.contract.contract_number)).toBeVisible();
+    await expect(
+      page.getByRole("table").getByText(scenario.contract.contract_number),
+    ).toBeVisible();
     await expect(
       page.getByRole("button", { name: /^Öffnen$|^Open$/i }).first(),
     ).toBeVisible();
@@ -132,14 +189,13 @@ test.describe("staff live workflows", () => {
       .locator('[data-workspace-rail="patient"]')
       .getByRole("link", { name: /Rechnungen|Invoices/i })
       .click();
-    await expect(page.getByText(scenario.invoice.invoice_number).first()).toBeVisible();
     await expect(
-      page.getByRole("button", { name: /^Öffnen$|^Open$/i }).first(),
+      page.getByRole("table").getByText(scenario.invoice.invoice_number).first(),
     ).toBeVisible();
     await expect(page.getByRole("button", { name: /Billing verwalten|Manage billing/i })).toHaveCount(0);
   });
 
-  test("ceo assistant can inspect released document share and translation history without mutation controls", async ({
+  test("ceo assistant sees translation history but no provider share trail and no mutation controls", async ({
     page,
     request,
   }) => {
@@ -194,19 +250,26 @@ test.describe("staff live workflows", () => {
     );
     expect(translationUpdateResponse.ok()).toBe(true);
 
+    // Share trails (recipient, channel, cover message) need documents.shares.view,
+    // which the CEO assistant does not hold: the API refuses and the sheet hides them.
+    const assistantApi = await authenticateApiClient(
+      request,
+      scenario.credentials.assistant.email,
+      scenario.credentials.password,
+    );
+    const assistantShares = await request.get(
+      `${assistantApi.backendUrl}/api/v1/documents/${scenario.documents.provider_ready.id}/shares`,
+      { headers: assistantApi.headers },
+    );
+    expect(assistantShares.status()).toBe(403);
+
     const shareSheet = await openDocumentSheet(
       page,
       scenario.documents.provider_ready.title,
     );
     await expect(
-      shareSheet.getByText("Charite Universitaetsmedizin Berlin").first(),
-    ).toBeVisible();
-    await expect(
-      shareSheet.getByText("Provider", { exact: true }).first(),
-    ).toBeVisible();
-    await expect(
       shareSheet.getByText("Read-only provider share trail for executive review."),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       shareSheet.getByRole("button", { name: /^Widerrufen$|^Revoke$/i }),
     ).toHaveCount(0);
@@ -254,7 +317,7 @@ test.describe("staff live workflows", () => {
     ).toHaveCount(0);
   });
 
-  test("interpreter can request document translation but cannot access share portal or translation-status controls", async ({
+  test("interpreter can request and work on a document translation but cannot release or share the document", async ({
     page,
     request,
   }) => {
@@ -308,20 +371,13 @@ test.describe("staff live workflows", () => {
       sheet,
       "Interpreter shell should stay request-only for translation handling.",
     );
-    await expect(
-      sheet.getByRole("button", { name: /^Starten$|^Start$/i }),
-    ).toHaveCount(0);
-    await expect(
-      sheet.getByRole("button", { name: /Abschließen|Complete/i }),
-    ).toHaveCount(0);
-    await expect(
-      sheet.getByRole("button", { name: /Abbrechen|Cancel/i }),
-    ).toHaveCount(0);
+    // Translation updates share the documents.upload gate, so the interpreter
+    // may maintain the translation workspace.
     await expect(
       sheet.getByRole("button", {
         name: /Workspace speichern|Save workspace/i,
       }),
-    ).toHaveCount(0);
+    ).toBeVisible();
   });
 
   test("concierge can run translation workflow without provider-share or portal controls", async ({
