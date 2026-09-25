@@ -997,6 +997,9 @@ async fn create_lead(
     })
 }
 
+/// Synthetic medical work type chosen for the seeded VKS; readiness only checks the choice.
+const E2E_LEAD_WORK_TYPE_ID: &str = "7a3c9e21-5b64-4f0d-9c2e-1d8b6a4f3e70";
+
 async fn seed_complete_lead_onboarding(
     state: &AppState,
     lead_id: Uuid,
@@ -1017,6 +1020,8 @@ async fn seed_complete_lead_onboarding(
                    '{clinical_draft}',
                    '{"anamnese":"Symptoms require a cardiology follow-up."}'::jsonb,
                    true
+               ) || jsonb_build_object(
+                   'selected_specialization_work_type_ids', jsonb_build_array($3::text)
                ),
                compliance_status = CASE WHEN $2 THEN 'signed' ELSE compliance_status END,
                consent_healthcare = CASE WHEN $2 THEN true ELSE consent_healthcare END,
@@ -1025,6 +1030,7 @@ async fn seed_complete_lead_onboarding(
     )
     .bind(lead_id)
     .bind(gate_ready)
+    .bind(E2E_LEAD_WORK_TYPE_ID)
     .execute(&state.db)
     .await
     .map_err(|error| format!("prepare lead onboarding fixture: {error}"))?;
@@ -1180,15 +1186,20 @@ async fn seed_complete_lead_onboarding(
         )
         .await
         .map_err(|error| format!("write lead commercial document fixture: {error}"))?;
+        // A VKS records the medical work types it lists; lead readiness requires it.
+        let generated_bindings = (template_id == "cost_estimate").then(
+            || serde_json::json!({ "_cost_estimate_work_type_ids": [E2E_LEAD_WORK_TYPE_ID] }),
+        );
         sqlx::query(
             r#"INSERT INTO documents (
                     id, lead_id, order_id, auto_name, original_filename, art, category,
                     status, visibility, is_medical, mime_type, file_size, storage_key,
-                    generated_template_id, version_root_document_id, version_number, uploaded_by
+                    generated_template_id, version_root_document_id, version_number, uploaded_by,
+                    generated_bindings
                ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     'active', 'patient_visible', false, 'application/pdf', 128, $8,
-                    $6, $1, 1, $9
+                    $6, $1, 1, $9, $10
                )"#,
         )
         .bind(document_id)
@@ -1200,6 +1211,7 @@ async fn seed_complete_lead_onboarding(
         .bind(category)
         .bind(storage_key)
         .bind(created_by)
+        .bind(generated_bindings)
         .execute(&state.db)
         .await
         .map_err(|error| format!("insert lead commercial document fixture: {error}"))?;

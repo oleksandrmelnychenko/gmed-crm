@@ -1144,6 +1144,22 @@ async fn validate_lead_contact_identity(
     Ok(())
 }
 
+/// Readiness reason when the VKS cannot be created yet: it lists medical work
+/// types only, so they must be chosen in the wizard first.
+const COST_ESTIMATE_WORK_TYPES_MISSING: &str = "Medical work types are not selected";
+
+fn lead_cost_estimate_work_types_selected(wizard_state: &Value) -> bool {
+    wizard_state
+        .get("selected_specialization_work_type_ids")
+        .or_else(|| wizard_state.get("selectedSpecializationWorkTypeIds"))
+        .and_then(Value::as_array)
+        .is_some_and(|ids| {
+            ids.iter()
+                .filter_map(Value::as_str)
+                .any(|id| Uuid::parse_str(id.trim()).is_ok())
+        })
+}
+
 #[derive(Default)]
 struct LeadConversionReadinessInput {
     qualification_status: String,
@@ -1178,6 +1194,9 @@ struct LeadConversionReadinessInput {
     order_signed_patient: bool,
     order_signed_agency: bool,
     quote_accepted: bool,
+    /// The wizard has medical work types selected for the VKS.
+    cost_estimate_work_types_selected: bool,
+    /// A VKS generated from medical work types exists (agency lines never count).
     cost_estimate_document_generated: bool,
     prepayment_ready: bool,
     /// Existing customer (2B): overdue invoices are surfaced for attention.
@@ -1237,6 +1256,9 @@ fn evaluate_lead_conversion_readiness(
         && (!input.enhanced_due_diligence_required
             || (input.enhanced_due_diligence_document_generated
                 && input.enhanced_due_diligence_document_signed));
+    // The VKS lists the selected medical work types, never the agency's services.
+    let cost_estimate_ready =
+        input.cost_estimate_work_types_selected && input.cost_estimate_document_generated;
     let commercial_ready = input.contract_signed
         && input.framework_document_generated
         && input.order_exists
@@ -1246,7 +1268,7 @@ fn evaluate_lead_conversion_readiness(
         && input.order_signed_patient
         && input.order_signed_agency
         && (input.package_covered || input.quote_accepted)
-        && (input.package_covered || input.cost_estimate_document_generated);
+        && (input.package_covered || cost_estimate_ready);
 
     let checks = vec![
         json!({
@@ -1429,7 +1451,7 @@ fn evaluate_lead_conversion_readiness(
         json!({
             "key": "cost_estimate_document_generated",
             "label": "Cost estimate document generated",
-            "passed": input.cost_estimate_document_generated,
+            "passed": cost_estimate_ready,
             "blocking_for": "conversion",
             "stage": "commercial",
         }),
@@ -1530,7 +1552,9 @@ fn evaluate_lead_conversion_readiness(
     if !input.package_covered && !input.quote_accepted {
         conversion_reasons.push("Quote is not accepted".to_string());
     }
-    if !input.package_covered && !input.cost_estimate_document_generated {
+    if !input.package_covered && !input.cost_estimate_work_types_selected {
+        conversion_reasons.push(COST_ESTIMATE_WORK_TYPES_MISSING.to_string());
+    } else if !input.package_covered && !input.cost_estimate_document_generated {
         conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
     }
     if input.converted_patient_id.is_some() {
@@ -1620,6 +1644,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         order_signed_patient: row.try_get("order_signed_patient").unwrap_or(false),
         order_signed_agency: row.try_get("order_signed_agency").unwrap_or(false),
         quote_accepted: row.try_get("quote_accepted").unwrap_or(false) && quote_matches_order,
+        cost_estimate_work_types_selected: lead_cost_estimate_work_types_selected(&wizard_state),
         cost_estimate_document_generated: row
             .try_get("cost_estimate_document_generated")
             .unwrap_or(false),
@@ -1834,12 +1859,16 @@ async fn load_lead_conversion_readiness(
                         -- Keep readiness on the same commercial scope used by quote creation.
                         AND ol.status NOT IN ('invoiced', 'cancelled')
                   ), '[]'::jsonb) AS order_service_line_items,
+                  -- Only a VKS that records the medical work types it lists counts.
+                  -- Older versions may list agency services and must be recreated.
                   EXISTS (
                       SELECT 1 FROM documents d
                       WHERE d.lead_id = leads.id
                         AND d.generated_template_id = 'cost_estimate'
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
+                        AND jsonb_typeof(d.generated_bindings -> '_cost_estimate_work_type_ids') = 'array'
+                        AND d.generated_bindings -> '_cost_estimate_work_type_ids' <> '[]'::jsonb
                   ) AS cost_estimate_document_generated,
                   COALESCE((
                       SELECT CASE
@@ -7299,6 +7328,7 @@ mod lead_conversion_readiness_tests {
         input.package_covered = true;
         input.order_cost_estimate_document_generated = false;
         input.quote_accepted = false;
+        input.cost_estimate_work_types_selected = false;
         input.cost_estimate_document_generated = false;
         let readiness = evaluate_lead_conversion_readiness(&input);
         assert!(
@@ -7344,6 +7374,7 @@ mod lead_conversion_readiness_tests {
             order_signed_patient: true,
             order_signed_agency: true,
             quote_accepted: true,
+            cost_estimate_work_types_selected: true,
             cost_estimate_document_generated: true,
             prepayment_ready: true,
             debt_attention: false,
@@ -7460,6 +7491,59 @@ mod lead_conversion_readiness_tests {
             readiness.conversion_reasons,
             vec!["Order cost estimate document is missing".to_string()]
         );
+    }
+
+    #[test]
+    fn preliminary_cost_calculation_asks_for_medical_work_types_first() {
+        let mut input = ready_input();
+        input.cost_estimate_work_types_selected = false;
+        // A VKS generated earlier does not stand in for the missing work types.
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(!readiness.conversion_ready);
+        assert_eq!(
+            readiness.conversion_reasons,
+            vec![COST_ESTIMATE_WORK_TYPES_MISSING.to_string()]
+        );
+        let check = readiness.payload["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["key"] == "cost_estimate_document_generated")
+            .unwrap();
+        assert_eq!(check["passed"], false);
+        let commercial = readiness.payload["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["key"] == "commercial")
+            .unwrap();
+        assert_eq!(commercial["ready"], false);
+
+        input.cost_estimate_work_types_selected = true;
+        input.cost_estimate_document_generated = false;
+        assert_eq!(
+            evaluate_lead_conversion_readiness(&input).conversion_reasons,
+            vec!["Preliminary cost calculation document is missing".to_string()]
+        );
+    }
+
+    #[test]
+    fn cost_estimate_work_type_selection_reads_the_wizard_state() {
+        let id = "6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f";
+        assert!(lead_cost_estimate_work_types_selected(
+            &json!({ "selected_specialization_work_type_ids": [id] })
+        ));
+        assert!(lead_cost_estimate_work_types_selected(
+            &json!({ "selectedSpecializationWorkTypeIds": [id] })
+        ));
+        for state in [
+            json!({}),
+            json!({ "selected_specialization_work_type_ids": [] }),
+            json!({ "selected_specialization_work_type_ids": null }),
+            json!({ "selected_specialization_work_type_ids": ["not-a-uuid"] }),
+        ] {
+            assert!(!lead_cost_estimate_work_types_selected(&state), "{state}");
+        }
     }
 
     #[test]

@@ -197,6 +197,9 @@ async fn make_lead_ready_for_qualification(
     body
 }
 
+/// A synthetic medical work type chosen for the seeded VKS (readiness only checks the choice).
+const ONBOARDING_WORK_TYPE_ID: &str = "7a3c9e21-5b64-4f0d-9c2e-1d8b6a4f3e70";
+
 struct SeededOnboardingArtifacts {
     case_id: Uuid,
     document_ids: Vec<Uuid>,
@@ -219,10 +222,13 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
                requested_specialties = '["orthopedics"]'::jsonb,
                compliance_status = 'signed',
                consent_healthcare = true,
-               consent_privacy_practices = true
+               consent_privacy_practices = true,
+               wizard_state = COALESCE(wizard_state, '{}'::jsonb)
+                   || jsonb_build_object('selected_specialization_work_type_ids', jsonb_build_array($2::text))
            WHERE id = $1"#,
     )
     .bind(lead_id)
+    .bind(ONBOARDING_WORK_TYPE_ID)
     .execute(pool)
     .await
     .unwrap();
@@ -380,15 +386,19 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         ("cost_estimate", "finance_cost_estimate"),
     ] {
         let document_id = Uuid::new_v4();
+        // A VKS records the medical work types it lists.
+        let generated_bindings = (template_id == "cost_estimate")
+            .then(|| json!({ "_cost_estimate_work_type_ids": [ONBOARDING_WORK_TYPE_ID] }));
         sqlx::query(
             r#"INSERT INTO documents (
                     id, lead_id, order_id, auto_name, original_filename, art, category,
                     status, visibility, is_medical, mime_type, file_size,
-                    generated_template_id, version_root_document_id, version_number, uploaded_by
+                    generated_template_id, version_root_document_id, version_number, uploaded_by,
+                    generated_bindings
                ) VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     'active', 'patient_visible', false, 'application/pdf', 128,
-                    $6, $1, 1, $8
+                    $6, $1, 1, $8, $9
                )"#,
         )
         .bind(document_id)
@@ -399,6 +409,7 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
         .bind(template_id)
         .bind(category)
         .bind(app.patient_manager_id)
+        .bind(generated_bindings)
         .execute(pool)
         .await
         .unwrap();
