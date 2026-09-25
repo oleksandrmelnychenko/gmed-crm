@@ -23,7 +23,7 @@ async function prepare(page: Page, lang = "ru") {
   ];
   const order = { id: orderId, order_number: "A-TEST-1", patient_id: patientId, patient_name: "Anna Beispiel", patient_pid: "P-TEST-1", process_gates: { billing_release_status: "granted", billing_release_note: null, package_coverage_status: "not_covered" }, leistungen: lines.map(line => ({ id: line.source_order_leistung_id, status: "approved" })) };
   const invoice = { ...quote, id: invoiceId, invoice_number: "INV-TEST-1", quote_id: quoteId, invoice_type: "final", status: "draft", issued_at: "2026-09-07T10:00:00Z", created_at: "2026-09-07T10:00:00Z", updated_at: "2026-09-07T10:00:00Z", total_net: "1200", total_vat: "228", total_gross: "1428", paid_amount: "0", balance_due: "1428", due_date: null, paid_at: null, notes: null, available_prepayments: [], prepayment_allocations: [] };
-  const fixture = { quote, quotes, order, invoice, postError: "", orderError: false, writes: [] as unknown[], pdfReads: 0, errors: [] as string[] };
+  const fixture = { quote, quotes, order, invoice, postError: "", quotesError: false, writes: [] as unknown[], pdfReads: 0, errors: [] as string[] };
   page.on("pageerror", error => fixture.errors.push(error.message));
   await page.addInitScript(language => {
     localStorage.setItem("gmed_access_token", "invoice-test-token");
@@ -38,7 +38,7 @@ async function prepare(page: Page, lang = "ru") {
       return route.fulfill(fixture.postError ? { status: 422, json: { error: fixture.postError } } : { json: invoice });
     }
     if (path === `/invoices/${invoiceId}/pdf`) { fixture.pdfReads++; return route.fulfill({ contentType: "application/pdf", body: previewPdf }); }
-    if (path === `/orders/${orderId}` && fixture.orderError) return route.fulfill({ status: 500, json: { error: "Order unavailable" } });
+    if (path === "/quotes" && fixture.quotesError) return route.fulfill({ status: 500, json: { error: "Quotes unavailable" } });
     let body: unknown = [];
     if (path === "/me") body = { id: "invoice-test-user", email: "invoice@example.org", name: "Invoice QA", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
     if (path === "/auth/refresh") body = { access_token: "invoice-test-token", refresh_token: "invoice-test-refresh", expires_in: 900 };
@@ -65,17 +65,15 @@ async function openCreate(page: Page, lang = "ru") {
   return dialog;
 }
 
-test("blocks unapproved selected services before submit and recovers after approval", async ({ page }) => {
+// The separate order-service approval step before invoicing was dropped (b6e12b62),
+// so a not-yet-approved service no longer holds back the invoice.
+test("an unapproved order service does not block creating the final invoice", async ({ page }) => {
   const fixture = await prepare(page);
   fixture.order.leistungen[0].status = "pending";
   const dialog = await openCreate(page);
   const footer = dialog.getByTestId("invoice-create-footer");
-  await expect(footer).toContainText("Утвердите выбранные услуги");
-  await expect(footer.getByRole("link")).toHaveAttribute("href", `/orders?order=${orderId}&section=services`);
-  await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeDisabled();
-  await expect(dialog.getByText("Выставление счетов разрешено", { exact: true })).toHaveCount(0);
-  fixture.order.leistungen[0].status = "approved";
-  await footer.getByRole("button", { name: "Проверить", exact: true }).click();
+  await expect(footer.getByRole("alert")).toHaveCount(0);
+  await expect(footer.getByRole("status")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -149,15 +147,18 @@ test("final invoice refresh uses the new remainder without losing notes", async 
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
 });
 
-test("failed readiness load stays blocked and shows retry beside submit", async ({ page }) => {
+test("failed quote refresh stays blocked and shows retry beside submit", async ({ page }) => {
   const fixture = await prepare(page);
-  fixture.orderError = true;
   const dialog = await openCreate(page);
   const footer = dialog.getByTestId("invoice-create-footer");
-  await expect(footer.getByRole("alert")).toContainText("Не удалось проверить");
+  await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
+  fixture.quotesError = true;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(footer.getByRole("alert")).toContainText("Quotes unavailable");
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeDisabled();
-  fixture.orderError = false;
+  fixture.quotesError = false;
   await footer.getByRole("button", { name: "Проверить", exact: true }).click();
+  await expect(footer.getByRole("alert")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
   expect(fixture.writes).toEqual([]);
 });
@@ -167,14 +168,16 @@ for (const lang of ["ru", "de"]) {
     test(`invoice error remains visible at end of a long form ${lang} ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
       const fixture = await prepare(page, lang);
-      fixture.postError = "All order services must be approved before invoice creation";
+      fixture.postError = "Invoice quantity changed; reload the quote and try again";
       const dialog = await openCreate(page, lang);
       await expect(dialog.getByRole("button", { name: lang === "de" ? "Rechnung erstellen" : "Создать счёт", exact: true })).toBeEnabled();
       await page.screenshot({ path: `../artifacts/design-qa/invoice-create-${lang}-${width}.png`, animations: "disabled" });
       await dialog.locator("textarea").fill("Invoice note");
       await dialog.getByRole("button", { name: lang === "de" ? "Rechnung erstellen" : "Создать счёт", exact: true }).click();
       const alert = dialog.getByTestId("invoice-create-footer").getByRole("alert");
-      await expect(alert).toContainText(lang === "de" ? "genehmigt" : "утвердить");
+      // The server's conflict is shown in the interface language, never as raw English.
+      await expect(alert).toContainText(lang === "de" ? "Aktualisieren Sie das Angebot" : "Обновите предложение");
+      await expect(alert).not.toContainText(fixture.postError);
       const box = (await alert.boundingBox())!;
       expect(box.y).toBeGreaterThan(0);
       expect(box.y + box.height).toBeLessThanOrEqual(width === 390 ? 844 : 1000);
