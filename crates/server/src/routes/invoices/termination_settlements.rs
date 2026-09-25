@@ -44,6 +44,7 @@ use super::{
 };
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 
@@ -151,11 +152,11 @@ pub(crate) struct OrderSettlement {
 
 impl OrderSettlement {
     pub fn balance_gross(&self) -> Decimal {
-        (self.accrued_gross - self.paid_gross).round_dp(2)
+        (self.accrued_gross - self.paid_gross).round_cents()
     }
 
     pub fn uninvoiced_gross(&self) -> Decimal {
-        (self.accrued_gross - self.invoiced_gross).round_dp(2)
+        (self.accrued_gross - self.invoiced_gross).round_cents()
     }
 
     fn is_balanced(&self) -> bool {
@@ -370,12 +371,12 @@ pub(crate) async fn compute_order_settlement(
         let gross = row
             .try_get::<Decimal, _>("patient_receivable_gross")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_cents();
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let remaining_receivable = row
             .try_get::<Decimal, _>("remaining_receivable_gross")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_cents();
         let billable_now = status == "paid"
             && row.try_get::<String, _>("paid_by").unwrap_or_default() == "agency"
             && row
@@ -474,10 +475,10 @@ pub(crate) async fn compute_order_settlement(
             .try_get::<Option<Uuid>, _>("patient_id")
             .unwrap_or_default(),
         currency,
-        accrued_net: accrued_net.round_dp(2),
-        accrued_gross: accrued_gross.round_dp(2),
-        invoiced_gross: invoiced_gross.round_dp(2),
-        paid_gross: paid_gross.round_dp(2),
+        accrued_net: accrued_net.round_cents(),
+        accrued_gross: accrued_gross.round_cents(),
+        invoiced_gross: invoiced_gross.round_cents(),
+        paid_gross: paid_gross.round_cents(),
         lines,
         cancelled_lines,
         warnings,
@@ -1146,15 +1147,15 @@ async fn create_termination_final_invoice(
             };
             let quoted = invoice_json_decimal(item, "quantity")
                 .unwrap_or(Decimal::ZERO)
-                .round_dp(2);
+                .round_commercial(2);
             let quote_remaining = (quoted
                 - allocated
                     .get(&line_index)
                     .copied()
                     .unwrap_or(Decimal::ZERO)
-                    .round_dp(2))
+                    .round_commercial(2))
             .max(Decimal::ZERO);
-            let quantity = service_remaining.round_dp(2).min(quote_remaining);
+            let quantity = service_remaining.round_commercial(2).min(quote_remaining);
             if quantity <= Decimal::ZERO {
                 continue;
             }
@@ -1218,9 +1219,9 @@ async fn create_termination_final_invoice(
                         "source": TERMINATION_ORDER_SERVICE_SOURCE,
                         "source_order_leistung_id": service_id,
                     }));
-                    snapshot.total_net = (snapshot.total_net + line_net).round_dp(2);
-                    snapshot.total_vat = (snapshot.total_vat + line_vat).round_dp(2);
-                    snapshot.total_gross = (snapshot.total_gross + line_gross).round_dp(2);
+                    snapshot.total_net = (snapshot.total_net + line_net).round_cents();
+                    snapshot.total_vat = (snapshot.total_vat + line_vat).round_cents();
+                    snapshot.total_gross = (snapshot.total_gross + line_gross).round_cents();
                     invoiced_service_ids.push(service_id);
                 }
                 "third_party_cost" => {
@@ -1247,8 +1248,8 @@ async fn create_termination_final_invoice(
                         "source_order_id": order_id,
                         "source_invoice_date": line.source_invoice_date,
                     }));
-                    snapshot.total_net = (snapshot.total_net + amount).round_dp(2);
-                    snapshot.total_gross = (snapshot.total_gross + amount).round_dp(2);
+                    snapshot.total_net = (snapshot.total_net + amount).round_cents();
+                    snapshot.total_gross = (snapshot.total_gross + amount).round_cents();
                     external_allocations.push((external_id, amount));
                 }
                 _ => {}

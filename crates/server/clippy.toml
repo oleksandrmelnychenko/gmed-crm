@@ -1,0 +1,7 @@
+# Every rounded amount (money to cents, quantities, rates, percentages) goes
+# through `crate::money`: commercial rounding, ties half away from zero, the
+# same rule as the frontend and PostgreSQL `ROUND(numeric)`.
+disallowed-methods = [
+    { path = "rust_decimal::Decimal::round_dp", reason = "rounds ties to even; use crate::money::round_cents or round_commercial" },
+    { path = "rust_decimal::Decimal::round", reason = "rounds ties to even; use crate::money::round_commercial(value, 0)" },
+]

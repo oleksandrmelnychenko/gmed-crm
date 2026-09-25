@@ -20,6 +20,7 @@ use crate::{
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
+    money::CommercialRounding,
     routes::documents::{
         MAX_FILE_SIZE, read_document_storage_bytes, remove_document_blob, store_document_blob,
     },
@@ -243,7 +244,7 @@ async fn insert_finance_review_notifications(
     .bind(actor_user_id)
     .bind(format!(
         "A new receipt from {vendor} for {} {currency} is waiting for financial review.",
-        amount_gross.round_dp(2)
+        amount_gross.round_cents()
     ))
     .fetch_all(&mut **transaction)
     .await?;
@@ -450,7 +451,7 @@ fn parse_money(value: &str, field: &'static str) -> Result<Decimal, Response> {
             &format!("{field} must be a non-negative amount with at most two decimals"),
         ));
     }
-    Ok(parsed.round_dp(2))
+    Ok(parsed.round_cents())
 }
 
 fn validate_amounts(net: Decimal, vat: Decimal, gross: Decimal) -> Result<(), Response> {
@@ -1699,7 +1700,7 @@ async fn submit_expense_for_scope(
 fn decimal_string(row: &sqlx::postgres::PgRow, column: &str) -> String {
     row.try_get::<Decimal, _>(column)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2)
+        .round_cents()
         .to_string()
 }
 
@@ -1919,7 +1920,7 @@ async fn load_expense_item_for_scope(
         "expense_date": row.try_get::<NaiveDate, _>("expense_date").ok(),
         "amount_net": decimal_string(&row, "amount_net"),
         "amount_vat": decimal_string(&row, "amount_vat"),
-        "amount_gross": amount_gross.round_dp(2).to_string(),
+        "amount_gross": amount_gross.round_cents().to_string(),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "paid_by": paid_by,
         "service_delivered": service_delivered,
@@ -1942,12 +1943,12 @@ async fn load_expense_item_for_scope(
         })),
         "balance_consequence": {
             "posting_pending": status == "pending_review",
-            "patient_receivable_gross": patient_receivable.round_dp(2).to_string(),
-            "company_paid_gross": company_paid.round_dp(2).to_string(),
-            "provider_liability_gross": provider_liability.round_dp(2).to_string(),
-            "intended_patient_receivable_gross": intended_receivable.round_dp(2).to_string(),
-            "intended_company_paid_gross": intended_company_paid.round_dp(2).to_string(),
-            "intended_provider_liability_gross": intended_liability.round_dp(2).to_string(),
+            "patient_receivable_gross": patient_receivable.round_cents().to_string(),
+            "company_paid_gross": company_paid.round_cents().to_string(),
+            "provider_liability_gross": provider_liability.round_cents().to_string(),
+            "intended_patient_receivable_gross": intended_receivable.round_cents().to_string(),
+            "intended_company_paid_gross": intended_company_paid.round_cents().to_string(),
+            "intended_provider_liability_gross": intended_liability.round_cents().to_string(),
         },
         "history": history,
     })))
@@ -2893,7 +2894,7 @@ async fn post_expense_for_scope(
         &format!(
             "The receipt from {} for {} {} was approved and posted.",
             expense.vendor_name,
-            expense.amount_gross.round_dp(2),
+            expense.amount_gross.round_cents(),
             expense.currency
         ),
     )

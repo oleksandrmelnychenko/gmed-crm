@@ -21,6 +21,8 @@ use printpdf::{
     Color, FontMetrics, Mm, Op, PaintMode, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
     PdfWarnMsg, Point, Pt, Rect, Rgb, TextItem, WindingOrder,
 };
+use rust_decimal::Decimal;
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -31,6 +33,7 @@ use crate::{
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
+    money,
     pdf_text::{pdf_text_save_options, win_ansi_show_text_op},
     routes::{
         me::resolve_self_patient_id,
@@ -18833,6 +18836,16 @@ fn payer_block_from_bindings(bindings: &DocumentBindingOverrides) -> DocPartyBlo
 /// Parse the first monetary amount from a free-text value, accepting German
 /// formatting ("1.234,56 EUR", "999,00 €", "100,00 EUR/Stunde").
 fn parse_eur_amount(value: &str) -> Option<f64> {
+    normalized_eur_amount(value)?.parse::<f64>().ok()
+}
+
+/// [`parse_eur_amount`] as an exact decimal, for amounts that are rounded to
+/// cents or summed.
+fn parse_eur_decimal(value: &str) -> Option<Decimal> {
+    normalized_eur_amount(value)?.parse::<Decimal>().ok()
+}
+
+fn normalized_eur_amount(value: &str) -> Option<String> {
     let mut cleaned = String::new();
     for ch in value.chars() {
         if ch.is_ascii_digit() || ch == ',' || ch == '.' {
@@ -18845,12 +18858,11 @@ fn parse_eur_amount(value: &str) -> Option<f64> {
     if cleaned.is_empty() {
         return None;
     }
-    let normalized = if cleaned.contains(',') {
+    Some(if cleaned.contains(',') {
         cleaned.replace('.', "").replace(',', ".")
     } else {
         cleaned.to_string()
-    };
-    normalized.parse::<f64>().ok()
+    })
 }
 
 /// Parse a value only when the complete input is one monetary amount. Free text
@@ -18888,7 +18900,15 @@ fn doc_salutation(gender: &str) -> Option<String> {
 
 /// German currency formatting with thousands grouping: 1234.5 -> "1.234,50 EUR".
 fn format_eur(value: f64) -> String {
-    let cents = (value.abs() * 100.0).round() as u64;
+    format_eur_decimal(Decimal::from_f64(value).unwrap_or_default())
+}
+
+/// [`format_eur`] for an exact decimal; cents are rounded half away from zero.
+fn format_eur_decimal(value: Decimal) -> String {
+    let rounded = money::round_cents(value);
+    let cents = (rounded.abs() * Decimal::ONE_HUNDRED)
+        .to_u128()
+        .unwrap_or(0);
     let euros = cents / 100;
     let frac = cents % 100;
     let mut grouped = String::new();
@@ -18900,7 +18920,7 @@ fn format_eur(value: f64) -> String {
         }
         grouped.push(ch);
     }
-    let sign = if value < 0.0 { "-" } else { "" };
+    let sign = if rounded < Decimal::ZERO { "-" } else { "" };
     format!("{sign}{grouped},{frac:02} EUR")
 }
 
@@ -18908,42 +18928,47 @@ fn format_eur(value: f64) -> String {
 /// German "2.698,00") into "2.698,00 EUR". Returns the trimmed input unchanged
 /// when it cannot be parsed (so already-formatted free text is preserved).
 fn fmt_money_de(raw: &str) -> String {
-    match parse_eur_amount(raw) {
-        Some(amount) => format_eur(amount),
+    match parse_eur_decimal(raw) {
+        Some(amount) => format_eur_decimal(amount),
         None => raw.trim().to_string(),
     }
 }
 
-/// Best-effort net/VAT/gross totals summed from manual service lines.
+/// Best-effort net/VAT/gross totals summed from manual service lines, rounded
+/// per line like quotes and invoices (`crate::money::line_amounts`).
 fn compute_line_item_totals(
     items: &[GeneratedContractLineItem],
 ) -> Option<(String, String, String)> {
-    let mut net = 0.0_f64;
-    let mut vat = 0.0_f64;
+    let mut net = Decimal::ZERO;
+    let mut vat = Decimal::ZERO;
     for item in items {
-        let line_net = if let Some(amount) = parse_eur_amount(&item.line_gross) {
-            amount
-        } else if let Some(unit_price) = parse_eur_amount(&item.unit_price) {
-            let quantity = parse_eur_amount(&item.quantity)
-                .filter(|value| *value > 0.0)
-                .unwrap_or(1.0);
-            unit_price * quantity
+        let line_net = if let Some(amount) = parse_eur_decimal(&item.line_gross) {
+            money::round_cents(amount)
+        } else if let Some(unit_price) = parse_eur_decimal(&item.unit_price) {
+            let quantity = parse_eur_decimal(&item.quantity)
+                .filter(|value| *value > Decimal::ZERO)
+                .unwrap_or(Decimal::ONE);
+            money::round_cents(unit_price * quantity)
         } else {
             continue;
         };
         let vat_rate = item
             .vat_rate
             .as_deref()
-            .and_then(parse_eur_amount)
-            .unwrap_or(19.0)
-            .clamp(0.0, 100.0);
+            .and_then(parse_eur_decimal)
+            .unwrap_or(Decimal::new(19, 0))
+            .clamp(Decimal::ZERO, Decimal::ONE_HUNDRED);
         net += line_net;
-        vat += line_net * vat_rate / 100.0;
+        vat += money::vat_amount(line_net, vat_rate);
     }
-    if net <= 0.0 {
+    if net <= Decimal::ZERO {
         return None;
     }
-    Some((format_eur(net), format_eur(vat), format_eur(net + vat)))
+    Some((
+        format_eur_decimal(net),
+        format_eur_decimal(vat),
+        format_eur_decimal(net + vat),
+    ))
 }
 
 fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLineItem> {
@@ -27940,6 +27965,25 @@ mod tests {
         assert_eq!(totals.0, "400,00 EUR");
         assert_eq!(totals.1, "76,00 EUR");
         assert_eq!(totals.2, "476,00 EUR");
+    }
+
+    #[test]
+    fn manual_line_totals_round_vat_midpoints_like_the_quote() {
+        let totals = compute_line_item_totals(&[GeneratedContractLineItem {
+            description_items: None,
+            localized_sections: Vec::new(),
+            description: "Dolmetscher".to_string(),
+            quantity: "2,5".to_string(),
+            unit_price: "95,00 EUR/1 Stunde".to_string(),
+            line_gross: String::new(),
+            vat_rate: Some("19".to_string()),
+            notes: None,
+        }])
+        .unwrap();
+
+        assert_eq!(totals.0, "237,50 EUR");
+        assert_eq!(totals.1, "45,13 EUR");
+        assert_eq!(totals.2, "282,63 EUR");
     }
 
     #[test]

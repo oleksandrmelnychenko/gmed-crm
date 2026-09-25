@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::access::{self, resolve_explicit_resource_access};
 use crate::audit;
 use crate::auth::{middleware::AuthUser, password};
+use crate::money::CommercialRounding;
 use crate::routes::documents::{
     can_view_document_row, document_access_allowed, is_iso_country_code, load_assignment_set,
     load_document_acl_candidates,
@@ -2016,7 +2017,7 @@ fn normalize_setting_text_value(value: &str) -> Option<String> {
 }
 
 fn money_json(value: rust_decimal::Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 pub(crate) fn patient_label_salutation(gender: &str) -> &'static str {
@@ -7681,7 +7682,7 @@ pub(crate) async fn load_patient_recheck_readiness(
             "passport_days_until_expiry": passport_days_until_expiry,
             "overdue_invoice_count": overdue_invoice_count,
             "debt_management": debt_management.payload,
-            "outstanding_balance": debt_management.outstanding_balance.round_dp(2).normalize().to_string(),
+            "outstanding_balance": debt_management.outstanding_balance.round_cents().normalize().to_string(),
             "base_data_missing_fields": base_data_missing_fields,
             "blocking_reasons": blocking_reasons,
             "checks": checks,
@@ -7992,12 +7993,12 @@ async fn list_patient_invoices(
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "issued_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("issued_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                 "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
-                "total_gross": total_gross.round_dp(2).normalize().to_string(),
-                "credited_amount": credited_amount.round_dp(2).normalize().to_string(),
-                "adjusted_total_gross": (total_gross - credited_amount).max(rust_decimal::Decimal::ZERO).round_dp(2).normalize().to_string(),
-                "paid_amount": paid_amount.round_dp(2).normalize().to_string(),
-                "prepayment_applied_amount": prepayment_applied_amount.round_dp(2).normalize().to_string(),
-                "balance_due": (total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(rust_decimal::Decimal::ZERO).round_dp(2).normalize().to_string(),
+                "total_gross": total_gross.round_cents().normalize().to_string(),
+                "credited_amount": credited_amount.round_cents().normalize().to_string(),
+                "adjusted_total_gross": (total_gross - credited_amount).max(rust_decimal::Decimal::ZERO).round_cents().normalize().to_string(),
+                "paid_amount": paid_amount.round_cents().normalize().to_string(),
+                "prepayment_applied_amount": prepayment_applied_amount.round_cents().normalize().to_string(),
+                "balance_due": (total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(rust_decimal::Decimal::ZERO).round_cents().normalize().to_string(),
                 "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                 "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
             })

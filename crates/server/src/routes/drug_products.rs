@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::services::drug_matching::{
     load_german_equivalents, load_medication_german_equivalents, search_drug_products,
 };
@@ -496,7 +497,7 @@ async fn create_patient_medication_drug_match(
             Json(serde_json::json!({
                 "id": match_id,
                 "verification_status": row.try_get::<String, _>("verification_status").unwrap_or_else(|_| "candidate".to_string()),
-                "confidence": row.try_get::<Decimal, _>("confidence").unwrap_or(confidence).round_dp(2).normalize().to_string(),
+                "confidence": row.try_get::<Decimal, _>("confidence").unwrap_or(confidence).round_commercial(2).normalize().to_string(),
             }))
             .into_response()
         }

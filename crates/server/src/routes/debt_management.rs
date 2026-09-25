@@ -403,7 +403,7 @@ pub(crate) fn build_blocking_reason(
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {

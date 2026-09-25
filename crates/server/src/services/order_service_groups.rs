@@ -3,6 +3,8 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::money::CommercialRounding;
+
 #[derive(Debug, Serialize)]
 pub struct GeneratedServiceGroupLines {
     pub generated_count: u64,
@@ -424,7 +426,7 @@ fn participant_description(
 }
 
 fn decimal_json(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    value.round_commercial(2).normalize().to_string()
 }
 
 #[cfg(test)]

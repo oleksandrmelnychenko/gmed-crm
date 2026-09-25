@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -104,7 +105,7 @@ fn can_manage_company_accounts(role: Role) -> bool {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 fn parse_currency(value: &str) -> Result<String, &'static str> {
@@ -127,7 +128,7 @@ fn parse_date(value: &str, field: &str) -> Result<NaiveDate, String> {
 fn parse_amount(value: &str, positive_only: bool) -> Result<Decimal, &'static str> {
     let amount = Decimal::from_str(value.trim())
         .map_err(|_| "Invalid amount")?
-        .round_dp(2);
+        .round_cents();
     if positive_only && amount <= Decimal::ZERO {
         return Err("Amount must be greater than zero");
     }

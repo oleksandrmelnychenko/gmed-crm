@@ -684,8 +684,7 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
                 ));
             }
         }
-        let line_net = (qty * price).round_dp(2);
-        total += line_net + (line_net * vat / Decimal::from(100)).round_dp(2);
+        total += crate::money::line_amounts(qty, price, vat).gross;
         let key = format!("order-intake:{id}:{}", l.id);
         let note = d.catalog_snapshot["services"]
             .as_array()

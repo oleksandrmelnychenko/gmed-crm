@@ -15,6 +15,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -44,7 +45,7 @@ fn can_read_company_financials(role: Role) -> bool {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 #[derive(Default)]
@@ -351,7 +352,7 @@ async fn get_company_financial_position(
         let calculated_balance = (invoice_due + external_receivable + manual_balance
             - available_prepayment
             - invoice_cash_credit)
-            .round_dp(2);
+            .round_cents();
         let reconciliation_required =
             external_receivable > Decimal::ZERO && released_invoice_count > 0;
         if calculated_balance > Decimal::ZERO {
@@ -732,13 +733,13 @@ async fn get_company_financial_position(
         })
         .collect::<Vec<_>>();
 
-    patient_receivables = patient_receivables.round_dp(2);
-    patient_credits = patient_credits.round_dp(2);
-    provider_payables = provider_payables.round_dp(2);
-    expected_provider_costs = expected_provider_costs.round_dp(2);
-    unreconciled_external_receivables = unreconciled_external_receivables.round_dp(2);
+    patient_receivables = patient_receivables.round_cents();
+    patient_credits = patient_credits.round_cents();
+    provider_payables = provider_payables.round_cents();
+    expected_provider_costs = expected_provider_costs.round_cents();
+    unreconciled_external_receivables = unreconciled_external_receivables.round_cents();
     let calculated_net_position =
-        (patient_receivables - patient_credits - provider_payables).round_dp(2);
+        (patient_receivables - patient_credits - provider_payables).round_cents();
     let reconciliation_required = reconciliation_count > 0;
 
     Json(json!({

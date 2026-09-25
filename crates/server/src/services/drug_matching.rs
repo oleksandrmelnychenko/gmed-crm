@@ -3,6 +3,8 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::money::CommercialRounding;
+
 #[derive(Debug, Serialize)]
 pub struct DrugProductSearchResult {
     pub id: Uuid,
@@ -351,7 +353,7 @@ fn equivalent_from_row(row: sqlx::postgres::PgRow) -> GermanEquivalentResult {
         form: row.try_get("form").unwrap_or_default(),
         strength: row.try_get("strength").unwrap_or_default(),
         manufacturer: row.try_get("manufacturer").unwrap_or_default(),
-        confidence: confidence.round_dp(2).normalize().to_string(),
+        confidence: confidence.round_commercial(2).normalize().to_string(),
         verification_status: row
             .try_get("verification_status")
             .unwrap_or_else(|_| "candidate".to_string()),

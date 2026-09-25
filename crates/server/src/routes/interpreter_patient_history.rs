@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::role::Role;
 
@@ -148,7 +149,7 @@ async fn get_interpreter_patient_history(
                         "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
                         "completed_appointment_count": row.try_get::<i64, _>("completed_appointment_count").unwrap_or_default(),
                         "approved_report_count": row.try_get::<i64, _>("approved_report_count").unwrap_or_default(),
-                        "total_report_hours": total_hours.round_dp(2).normalize().to_string(),
+                        "total_report_hours": total_hours.round_commercial(2).normalize().to_string(),
                         "average_feedback_score": row.try_get::<Option<f64>, _>("average_feedback_score").unwrap_or_default(),
                         "feedback_count": row.try_get::<i64, _>("feedback_count").unwrap_or_default(),
                         "last_appointment_date": row.try_get::<Option<chrono::NaiveDate>, _>("last_appointment_date").unwrap_or_default().map(|value| value.to_string()),
@@ -252,7 +253,7 @@ async fn get_patient_interpreter_history(
                         "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
                         "completed_appointment_count": row.try_get::<i64, _>("completed_appointment_count").unwrap_or_default(),
                         "approved_report_count": row.try_get::<i64, _>("approved_report_count").unwrap_or_default(),
-                        "total_report_hours": total_hours.round_dp(2).normalize().to_string(),
+                        "total_report_hours": total_hours.round_commercial(2).normalize().to_string(),
                         "average_feedback_score": row.try_get::<Option<f64>, _>("average_feedback_score").unwrap_or_default(),
                         "feedback_count": row.try_get::<i64, _>("feedback_count").unwrap_or_default(),
                         "last_appointment_date": row.try_get::<Option<chrono::NaiveDate>, _>("last_appointment_date").unwrap_or_default().map(|value| value.to_string()),

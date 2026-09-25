@@ -17,6 +17,7 @@ pub mod datev;
 pub mod document_signatures;
 pub mod file_scan;
 pub mod file_sniff;
+pub mod money;
 pub(crate) mod pdf_logo;
 pub(crate) mod pdf_text;
 pub mod rate_limit;

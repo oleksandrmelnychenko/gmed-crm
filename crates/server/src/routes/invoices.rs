@@ -23,6 +23,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::{self, CommercialRounding};
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options, unicode_show_text_op};
 use crate::routes::me::resolve_self_patient_id;
 use crate::services::patient_pdf_brand::{PatientPdfBrand, append_company_chrome};
@@ -698,11 +699,11 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    money::money_string(value)
 }
 
 fn round_accounting_money(value: Decimal) -> Decimal {
-    value.round_dp(2)
+    money::round_cents(value)
 }
 
 fn value_to_decimal(value: &Value) -> Decimal {
@@ -718,9 +719,8 @@ fn compute_invoice_line_parts(
     unit_price_net: Decimal,
     vat_rate: Decimal,
 ) -> (Decimal, Decimal, Decimal) {
-    let line_net = (quantity * unit_price_net).round_dp(2);
-    let line_vat = (line_net * vat_rate / Decimal::new(100, 0)).round_dp(2);
-    (line_net, line_vat, (line_net + line_vat).round_dp(2))
+    let amounts = money::line_amounts(quantity, unit_price_net, vat_rate);
+    (amounts.net, amounts.vat, amounts.gross)
 }
 
 fn proportional_share(amount: Decimal, part: Decimal, total: Decimal) -> Decimal {
@@ -2355,7 +2355,7 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
 /// thousands, the symbol for euro and the ISO code for anything else.
 fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     let parsed = Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
-    let cents = (parsed.abs().round_dp(2) * Decimal::from(100))
+    let cents = (parsed.abs().round_cents() * Decimal::from(100))
         .to_u128()
         .unwrap_or(0);
     let whole = (cents / 100).to_string();
@@ -2956,7 +2956,7 @@ async fn build_selected_invoice_snapshot(
                     "Invalid invoice line quantity",
                 ));
             };
-            let quantity = quantity.round_dp(2);
+            let quantity = quantity.round_commercial(2);
             if quantity <= Decimal::ZERO {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -2983,7 +2983,7 @@ async fn build_selected_invoice_snapshot(
     for (line_index, source_item) in quote_items.iter().enumerate() {
         let quoted_quantity = invoice_json_decimal(source_item, "quantity")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_commercial(2);
         if quoted_quantity <= Decimal::ZERO {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -3009,7 +3009,7 @@ async fn build_selected_invoice_snapshot(
             .get(&line_index)
             .copied()
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_commercial(2);
         let remaining = if invoice_type == "advance" {
             quoted_quantity
         } else {
@@ -3045,10 +3045,10 @@ async fn build_selected_invoice_snapshot(
 
         let unit_price = invoice_json_decimal(source_item, "unit_price")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_cents();
         let vat_rate = invoice_json_decimal(source_item, "vat_rate")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_commercial(2);
         if unit_price < Decimal::ZERO || vat_rate < Decimal::ZERO {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -3085,9 +3085,9 @@ async fn build_selected_invoice_snapshot(
             );
         }
 
-        total_net = (total_net + line_net).round_dp(2);
-        total_vat = (total_vat + line_vat).round_dp(2);
-        total_gross = (total_gross + line_gross).round_dp(2);
+        total_net = (total_net + line_net).round_cents();
+        total_vat = (total_vat + line_vat).round_cents();
+        total_gross = (total_gross + line_gross).round_cents();
         selected_items.push(selected_item);
 
         if invoice_type != "advance" {
@@ -3204,7 +3204,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         let quantity = row
             .try_get::<Decimal, _>("overage_quantity")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_commercial(2);
         if quantity <= Decimal::ZERO {
             continue;
         }
@@ -3212,7 +3212,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         let unit_price_net = row
             .try_get::<Decimal, _>("unit_price_net")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_cents();
         if unit_price_net <= Decimal::ZERO {
             return Err(err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -3223,7 +3223,7 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         let vat_rate = row
             .try_get::<Decimal, _>("vat_rate")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(2);
+            .round_commercial(2);
         let (line_net, line_vat, line_gross) =
             compute_invoice_line_parts(quantity, unit_price_net, vat_rate);
         let package_name = row.try_get::<String, _>("package_name").unwrap_or_default();
@@ -3251,9 +3251,9 @@ async fn build_invoice_snapshot_with_approved_package_overages(
         };
         let vat_rate_label = decimal_to_string(vat_rate);
 
-        total_net = (total_net + line_net).round_dp(2);
-        total_vat = (total_vat + line_vat).round_dp(2);
-        total_gross = (total_gross + line_gross).round_dp(2);
+        total_net = (total_net + line_net).round_cents();
+        total_vat = (total_vat + line_vat).round_cents();
+        total_gross = (total_gross + line_gross).round_cents();
 
         line_items.push(json!({
             "description": format!("Package overage: {package_name} - {item_description}"),
@@ -5282,7 +5282,7 @@ async fn create_patient_billing_invoice(
         .fetch_optional(&mut *transaction)
         .await
         {
-            Ok(Some(value)) if value > Decimal::ZERO => value.round_dp(2),
+            Ok(Some(value)) if value > Decimal::ZERO => value.round_cents(),
             Ok(_) => return err(StatusCode::CONFLICT, "Incoming invoice was already included in a patient invoice"),
             Err(error) => {
                 tracing::error!(%error, %external_id, "load patient receivable balance");
@@ -5311,8 +5311,8 @@ async fn create_patient_billing_invoice(
             "source_order_id": source.try_get::<Option<Uuid>, _>("source_order_id").unwrap_or_default(),
             "source_invoice_date": source.try_get::<Option<NaiveDate>, _>("invoice_date").unwrap_or_default(),
         }));
-        snapshot.total_net = (snapshot.total_net + remaining).round_dp(2);
-        snapshot.total_gross = (snapshot.total_gross + remaining).round_dp(2);
+        snapshot.total_net = (snapshot.total_net + remaining).round_cents();
+        snapshot.total_gross = (snapshot.total_gross + remaining).round_cents();
         external_allocations.push((external_id, remaining));
     }
     let Some(currency) = currency else {
@@ -5965,7 +5965,7 @@ async fn apply_invoice_prepayment(
             "Invalid prepayment amount",
         );
     };
-    let amount_gross = amount_gross.round_dp(2);
+    let amount_gross = amount_gross.round_cents();
     if amount_gross <= Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -6834,7 +6834,7 @@ async fn create_invoice_payment(
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
     };
-    let amount_gross = amount_gross.round_dp(2);
+    let amount_gross = amount_gross.round_cents();
     if amount_gross <= Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -7477,7 +7477,7 @@ async fn correct_invoice_payment(
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
     };
-    let amount_gross = amount_gross.round_dp(2);
+    let amount_gross = amount_gross.round_cents();
     if amount_gross <= Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -7930,7 +7930,7 @@ async fn create_invoice_credit_note(
             "Invalid credit-note amount",
         );
     };
-    let amount_gross = amount_gross.round_dp(2);
+    let amount_gross = amount_gross.round_cents();
     let request_id = body.request_id;
     if amount_gross <= Decimal::ZERO {
         return err(
@@ -8635,7 +8635,7 @@ async fn create_invoice_refund(
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund amount");
     };
-    let amount_gross = amount_gross.round_dp(2);
+    let amount_gross = amount_gross.round_cents();
     if amount_gross <= Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -10107,7 +10107,7 @@ async fn update_invoice_status(
         .unwrap_or(Decimal::ZERO);
     let requested_paid_amount = match body.paid_amount.as_ref() {
         Some(value) => match value.parse_decimal() {
-            Some(value) if value >= existing_paid_amount => Some(value.round_dp(2)),
+            Some(value) if value >= existing_paid_amount => Some(value.round_cents()),
             Some(_) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -10745,5 +10745,44 @@ mod invoice_pdf_money_tests {
         assert_eq!(format_invoice_pdf_money("-15.5", "EUR"), "-15,50 €");
         assert_eq!(format_invoice_pdf_money("99.999", "CHF"), "100,00 CHF");
         assert_eq!(format_invoice_pdf_money("garbage", "EUR"), "0,00 €");
+    }
+
+    #[test]
+    fn prints_midpoint_amounts_rounded_half_away_from_zero() {
+        assert_eq!(format_invoice_pdf_money("45.125", "EUR"), "45,13 €");
+        assert_eq!(format_invoice_pdf_money("-45.125", "EUR"), "-45,13 €");
+    }
+}
+
+#[cfg(test)]
+mod invoice_line_rounding_tests {
+    use super::{compute_invoice_line_parts, decimal_to_string, proportional_share};
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn invoice_line_matches_the_quote_for_two_and_a_half_hours_at_95_euro() {
+        let (net, vat, gross) = compute_invoice_line_parts(
+            Decimal::new(25, 1),
+            Decimal::new(95, 0),
+            Decimal::new(19, 0),
+        );
+        assert_eq!(net, Decimal::new(23750, 2));
+        assert_eq!(vat, Decimal::new(4513, 2));
+        assert_eq!(gross, Decimal::new(28263, 2));
+        assert_eq!(decimal_to_string(gross), "282.63");
+    }
+
+    #[test]
+    fn proportional_shares_round_half_away_from_zero() {
+        // 90.25 x 1 / 2 = 45.125 -> 45.13; the negative (credit) side mirrors it.
+        let amount = Decimal::new(9025, 2);
+        assert_eq!(
+            proportional_share(amount, Decimal::ONE, Decimal::TWO),
+            Decimal::new(4513, 2)
+        );
+        assert_eq!(
+            proportional_share(-amount, Decimal::ONE, Decimal::TWO),
+            Decimal::new(-4513, 2)
+        );
     }
 }

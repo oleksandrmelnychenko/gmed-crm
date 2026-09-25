@@ -3,6 +3,8 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::money::CommercialRounding;
+
 #[derive(Debug, Serialize)]
 pub struct InterpreterSuggestion {
     pub interpreter_id: Uuid,
@@ -148,7 +150,10 @@ pub async fn load_appointment_interpreter_suggestions(
             previous_appointment_count,
             completed_appointment_count,
             approved_report_count,
-            total_report_hours: total_report_hours.round_dp(2).normalize().to_string(),
+            total_report_hours: total_report_hours
+                .round_commercial(2)
+                .normalize()
+                .to_string(),
             average_feedback_score,
             last_worked_at,
             score,

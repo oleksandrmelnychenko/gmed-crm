@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::{self, CommercialRounding};
 use crate::routes::invoices::termination_settlements;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -372,11 +373,11 @@ fn parse_optional_subject_uuid(
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    money::money_string(value)
 }
 
 fn quantity_to_string(value: Decimal) -> String {
-    value.round_dp(4).normalize().to_string()
+    value.round_commercial(4).normalize().to_string()
 }
 
 fn quote_decimal_value(value: Option<&Value>) -> Decimal {
@@ -464,7 +465,7 @@ fn add_remaining_quote_quantities(mut line_items: Value, allocated_quantities: &
     for (index, item) in items.iter_mut().enumerate() {
         let quoted = quote_decimal_value(item.get("quantity"));
         let allocated = quote_decimal_value(allocated_quantities.get(index.to_string().as_str()));
-        let remaining = (quoted - allocated).max(Decimal::ZERO).round_dp(2);
+        let remaining = (quoted - allocated).max(Decimal::ZERO).round_commercial(2);
         if let Some(map) = item.as_object_mut() {
             map.insert(
                 "invoiced_quantity".to_string(),
@@ -616,9 +617,9 @@ fn normalize_agency_service_price_version(
     }
     Ok(NormalizedAgencyServicePriceVersion {
         name,
-        unit_price: body.unit_price.round_dp(2),
+        unit_price: body.unit_price.round_cents(),
         currency,
-        vat_rate: vat_rate.round_dp(2),
+        vat_rate: vat_rate.round_commercial(2),
         valid_from,
         valid_to,
     })
@@ -701,9 +702,9 @@ fn compute_quote_totals(items: &[QuoteLineItem]) -> QuoteTotals {
     }
 
     QuoteTotals {
-        total_net: total_net.round_dp(2),
-        total_vat: total_vat.round_dp(2),
-        total_gross: total_gross.round_dp(2),
+        total_net: total_net.round_cents(),
+        total_vat: total_vat.round_cents(),
+        total_gross: total_gross.round_cents(),
     }
 }
 
@@ -2608,7 +2609,7 @@ fn normalize_custom_line_items(
 
         let quantity = Decimal::try_from(item.quantity)
             .map_err(|_| "Invalid line item quantity")?
-            .round_dp(4);
+            .round_commercial(4);
         if quantity <= Decimal::ZERO {
             return Err("Line item quantity is below the supported precision");
         }
@@ -2624,9 +2625,11 @@ fn normalize_custom_line_items(
         if vat_rate < Decimal::ZERO || vat_rate > Decimal::new(100, 0) {
             return Err("Line item vat_rate must be between 0 and 100");
         }
-        let line_net = (quantity * unit_price).round_dp(2);
-        let line_vat = (line_net * vat_rate / Decimal::new(100, 0)).round_dp(2);
-        let line_gross = (line_net + line_vat).round_dp(2);
+        let money::LineAmounts {
+            net: line_net,
+            vat: line_vat,
+            gross: line_gross,
+        } = money::line_amounts(quantity, unit_price, vat_rate);
 
         normalized.push(QuoteLineItem {
             description_items: item
@@ -2660,7 +2663,7 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
         let quantity = row
             .try_get::<Decimal, _>("quantity")
             .unwrap_or(Decimal::ZERO)
-            .round_dp(4);
+            .round_commercial(4);
         let unit_price = row
             .try_get::<Decimal, _>("unit_price")
             .unwrap_or(Decimal::ZERO);
@@ -2673,9 +2676,11 @@ fn quote_line_items_from_order_rows(rows: Vec<sqlx::postgres::PgRow>) -> Vec<Quo
             row.try_get::<Decimal, _>("vat_rate")
                 .unwrap_or(Decimal::ZERO)
         };
-        let line_net = (quantity * unit_price).round_dp(2);
-        let line_vat = (line_net * vat_rate / Decimal::new(100, 0)).round_dp(2);
-        let line_gross = (line_net + line_vat).round_dp(2);
+        let money::LineAmounts {
+            net: line_net,
+            vat: line_vat,
+            gross: line_gross,
+        } = money::line_amounts(quantity, unit_price, vat_rate);
 
         let catalog_description = row
             .try_get::<Option<String>, _>("agency_service_description_snapshot")
@@ -3758,7 +3763,11 @@ async fn update_quote_status(
 
 #[cfg(test)]
 mod tests {
-    use super::patient_contract_status;
+    use super::{
+        QuoteLineItemInput, compute_quote_totals, normalize_custom_line_items,
+        patient_contract_status,
+    };
+    use rust_decimal::Decimal;
 
     #[test]
     fn framework_contract_status_maps_to_patient_profile_domain() {
@@ -3766,5 +3775,53 @@ mod tests {
         for status in ["sent", "signed", "expired", "terminated"] {
             assert_eq!(patient_contract_status(status), status);
         }
+    }
+
+    fn quote_line(quantity: f64, unit_price: f64, vat_rate: f64) -> QuoteLineItemInput {
+        QuoteLineItemInput {
+            description_items: None,
+            description: "Dolmetscherleistung".to_string(),
+            quantity,
+            unit_price,
+            vat_rate: Some(vat_rate),
+            is_cost_passthrough: None,
+            source_order_leistung_id: None,
+            external_document_id: None,
+            provider_id: None,
+            doctor_id: None,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn quote_rounds_vat_midpoints_half_up_like_the_lead_wizard() {
+        // 2.5 h x 95 EUR = 237.50 net; 19 % VAT = 45.125 -> 45.13 (not 45.12).
+        let items =
+            normalize_custom_line_items(&[quote_line(2.5, 95.0, 19.0)]).expect("valid quote line");
+        assert_eq!(items[0].line_net, "237.5");
+        assert_eq!(items[0].line_vat, "45.13");
+        assert_eq!(items[0].line_gross, "282.63");
+
+        let totals = compute_quote_totals(&items);
+        assert_eq!(totals.total_net, Decimal::new(23750, 2));
+        assert_eq!(totals.total_vat, Decimal::new(4513, 2));
+        assert_eq!(totals.total_gross, Decimal::new(28263, 2));
+    }
+
+    #[test]
+    fn quote_totals_sum_commercially_rounded_lines() {
+        // 0.5 h and 4.5 h at 95 EUR hit the same VAT midpoint (9.025, 81.225).
+        let items = normalize_custom_line_items(&[
+            quote_line(0.5, 95.0, 19.0),
+            quote_line(4.5, 95.0, 19.0),
+        ])
+        .expect("valid quote lines");
+        assert_eq!(items[0].line_gross, "56.53");
+        assert_eq!(items[1].line_gross, "508.73");
+
+        let totals = compute_quote_totals(&items);
+        assert_eq!(totals.total_net, Decimal::new(47500, 2));
+        assert_eq!(totals.total_vat, Decimal::new(9026, 2));
+        assert_eq!(totals.total_gross, Decimal::new(56526, 2));
     }
 }

@@ -14,6 +14,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -61,7 +62,7 @@ fn can_manage_tax_profiles(role: Role) -> bool {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    value.round_commercial(2).normalize().to_string()
 }
 
 fn normalize_required_key(
@@ -187,7 +188,7 @@ async fn create_tax_profile(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_dp(2);
+    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_commercial(2);
     if vat_rate < Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -303,7 +304,7 @@ async fn update_tax_profile(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_dp(2);
+    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_commercial(2);
     if vat_rate < Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,

@@ -150,7 +150,7 @@ async fn seed_invoice(
     hide_amounts: bool,
 ) -> Uuid {
     let net = Decimal::new(gross, 0) * Decimal::new(100, 0) / Decimal::new(119, 0);
-    let net = net.round_dp(2);
+    let net = gmed_server::money::round_cents(net);
     let gross = Decimal::new(gross, 0);
     sqlx::query_scalar(
         r#"INSERT INTO invoices (

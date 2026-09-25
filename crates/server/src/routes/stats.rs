@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 use sqlx::Row;
 
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -214,7 +215,7 @@ fn risk_reason_codes(details: &[RiskReasonDetail]) -> Vec<String> {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 fn quote_status_weight(status: &str) -> Decimal {
@@ -227,7 +228,7 @@ fn quote_status_weight(status: &str) -> Decimal {
 }
 
 fn optional_decimal_to_f64(value: Option<Decimal>) -> Option<f64> {
-    value.and_then(|current| current.round_dp(2).to_f64())
+    value.and_then(|current| current.round_commercial(2).to_f64())
 }
 
 fn percentage(value: i64, total: i64) -> Option<f64> {
@@ -242,7 +243,9 @@ fn decimal_percentage(value: Decimal, total: Decimal) -> Option<f64> {
     if total <= Decimal::ZERO {
         None
     } else {
-        ((value / total) * Decimal::from(100)).round_dp(1).to_f64()
+        ((value / total) * Decimal::from(100))
+            .round_commercial(1)
+            .to_f64()
     }
 }
 
@@ -1724,7 +1727,7 @@ async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Err
         .unwrap_or(Decimal::ZERO);
     let utilization_rate_pct = if booked > Decimal::ZERO {
         ((approved / booked) * Decimal::from(100))
-            .round_dp(1)
+            .round_commercial(1)
             .to_f64()
             .unwrap_or(0.0)
     } else {
@@ -1815,7 +1818,7 @@ async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Err
                 .unwrap_or(Decimal::ZERO);
             let utilization_rate_pct = if booked > Decimal::ZERO {
                 ((approved / booked) * Decimal::from(100))
-                    .round_dp(1)
+                    .round_commercial(1)
                     .to_f64()
                     .unwrap_or(0.0)
             } else {
@@ -3237,7 +3240,7 @@ async fn load_report_provider_costs(
                 .unwrap_or(Decimal::ZERO);
             let change_pct = if earliest_unit_gross > Decimal::ZERO {
                 ((latest_unit_gross - earliest_unit_gross) / earliest_unit_gross * Decimal::from(100))
-                    .round_dp(2)
+                    .round_commercial(2)
                     .to_f64()
             } else {
                 None
@@ -3967,7 +3970,7 @@ async fn load_forecast_quote_pipeline(
         let gross_total = row
             .try_get::<Decimal, _>("gross_total")
             .unwrap_or(Decimal::ZERO);
-        let weighted_gross = (gross_total * quote_status_weight(&status)).round_dp(2);
+        let weighted_gross = (gross_total * quote_status_weight(&status)).round_cents();
 
         open_quotes += quote_count;
         expiring_next_14d += expiring;

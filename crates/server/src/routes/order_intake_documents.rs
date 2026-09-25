@@ -1,5 +1,4 @@
 use super::*;
-use rust_decimal::Decimal;
 
 fn line_net(line: &Value) -> Decimal {
     let number = |key| {
@@ -8,7 +7,7 @@ fn line_net(line: &Value) -> Decimal {
             .parse::<Decimal>()
             .unwrap_or_default()
     };
-    (number("quantity") * number("unit_price")).round_dp(2)
+    money::round_cents(number("quantity") * number("unit_price"))
 }
 
 pub(super) fn totals(data: &Value) -> Option<(String, String, String)> {
@@ -22,9 +21,9 @@ pub(super) fn totals(data: &Value) -> Option<(String, String, String)> {
             .parse::<Decimal>()
             .unwrap_or_default();
         net += amount;
-        vat += (amount * rate / Decimal::from(100)).round_dp(2);
+        vat += money::vat_amount(amount, rate);
     }
-    let format = |amount: Decimal| format_eur(amount.to_string().parse().unwrap_or_default());
+    let format = format_eur_decimal;
     Some((format(net), format(vat), format(net + vat)))
 }
 
@@ -112,9 +111,7 @@ pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, templ
                         format!(" {unit}")
                     }
                 )),
-                line_total: Some(format_eur(
-                    line_net(line).to_string().parse().unwrap_or_default(),
-                )),
+                line_total: Some(format_eur_decimal(line_net(line))),
                 vat_rate: Some(text(line, "vat_rate").to_string()),
                 note,
             }
@@ -258,9 +255,7 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                         format!(" / {unit}")
                     }
                 )),
-                line_total: Some(format_eur(
-                    line_net(line).to_string().parse().unwrap_or_default(),
-                )),
+                line_total: Some(format_eur_decimal(line_net(line))),
                 vat_rate: Some(text(line, "vat_rate").to_owned()),
             }
         })

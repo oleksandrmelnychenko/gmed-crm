@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -101,7 +102,7 @@ fn can_manage_provider_settlements(role: Role) -> bool {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 fn parse_date(value: &str, field: &str) -> Result<NaiveDate, String> {
@@ -112,7 +113,7 @@ fn parse_date(value: &str, field: &str) -> Result<NaiveDate, String> {
 fn parse_positive_amount(value: &str) -> Result<Decimal, &'static str> {
     let amount = Decimal::from_str(value.trim())
         .map_err(|_| "Invalid amount")?
-        .round_dp(2);
+        .round_cents();
     if amount <= Decimal::ZERO {
         return Err("Amount must be greater than zero");
     }
@@ -886,7 +887,7 @@ async fn create_provider_payment(
     let amount_vat = if context.amount_gross == Decimal::ZERO {
         Decimal::ZERO
     } else {
-        (input.amount_gross * context.amount_vat / context.amount_gross).round_dp(2)
+        (input.amount_gross * context.amount_vat / context.amount_gross).round_cents()
     };
     let amount_net = input.amount_gross - amount_vat;
     if let Err(error) = sqlx::query(
@@ -929,7 +930,7 @@ async fn create_provider_payment(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    let new_paid = (already_paid + input.amount_gross).round_dp(2);
+    let new_paid = (already_paid + input.amount_gross).round_cents();
     let base_status = context
         .provider_settlement_base_status
         .clone()
@@ -1200,7 +1201,7 @@ async fn reverse_provider_payment(
     let amount_vat = if context.amount_gross == Decimal::ZERO {
         Decimal::ZERO
     } else {
-        (amount_gross * context.amount_vat / context.amount_gross).round_dp(2)
+        (amount_gross * context.amount_vat / context.amount_gross).round_cents()
     };
     let amount_net = amount_gross - amount_vat;
     if let Err(error) = sqlx::query(

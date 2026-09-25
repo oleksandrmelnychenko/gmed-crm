@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use crate::access;
 use crate::auth::middleware::AuthUser;
+use crate::money::{self, CommercialRounding};
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -192,7 +193,7 @@ async fn ensure_patient_access(
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    money::money_string(value)
 }
 
 fn normalize_required_key(
@@ -278,9 +279,8 @@ async fn tax_profile_rate(
 }
 
 fn compute_price_parts(base_price_net: Decimal, vat_rate: Decimal) -> (Decimal, Decimal, Decimal) {
-    let net = base_price_net.round_dp(2);
-    let vat = (net * vat_rate / Decimal::new(100, 0)).round_dp(2);
-    (net, vat, (net + vat).round_dp(2))
+    let amounts = money::line_amounts(Decimal::ONE, base_price_net, vat_rate);
+    (amounts.net, amounts.vat, amounts.gross)
 }
 
 async fn load_service_package_payloads(
@@ -517,9 +517,13 @@ async fn replace_package_items(
             .bind(item.agency_service_price_version_id)
             .bind(service_key)
             .bind(description)
-            .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
+            .bind(
+                item.included_quantity
+                    .unwrap_or(Decimal::ONE)
+                    .round_commercial(2),
+            )
             .bind(unit_label)
-            .bind(item.overage_unit_price_net.map(|value| value.round_dp(2)))
+            .bind(item.overage_unit_price_net.map(|value| value.round_cents()))
             .bind(item.tax_profile_id)
             .bind(item.requires_patient_approval.unwrap_or(false))
             .bind(index as i32)
@@ -546,9 +550,13 @@ async fn replace_package_items(
             .bind(item.agency_service_price_version_id)
             .bind(service_key)
             .bind(description)
-            .bind(item.included_quantity.unwrap_or(Decimal::ONE).round_dp(2))
+            .bind(
+                item.included_quantity
+                    .unwrap_or(Decimal::ONE)
+                    .round_commercial(2),
+            )
             .bind(unit_label)
-            .bind(item.overage_unit_price_net.map(|value| value.round_dp(2)))
+            .bind(item.overage_unit_price_net.map(|value| value.round_cents()))
             .bind(item.tax_profile_id)
             .bind(item.requires_patient_approval.unwrap_or(false))
             .bind(index as i32)
@@ -2332,8 +2340,8 @@ async fn create_package_consumption(
     .bind(package_item_id)
     .bind(body.order_id)
     .bind(body.order_leistung_id)
-    .bind(body.quantity.round_dp(2))
-    .bind(overage_quantity.round_dp(2))
+    .bind(body.quantity.round_commercial(2))
+    .bind(overage_quantity.round_commercial(2))
     .bind(requires_patient_approval)
     .bind(approval_status)
     .bind(normalize_optional(body.notes.as_deref()))

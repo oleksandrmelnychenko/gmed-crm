@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::{self, CommercialRounding};
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -376,9 +377,9 @@ fn validate_money_components(
     ),
     axum::response::Response,
 > {
-    let amount_net = amount_net.round_dp(2);
-    let amount_vat = amount_vat.round_dp(2);
-    let amount_gross = amount_gross.round_dp(2);
+    let amount_net = amount_net.round_cents();
+    let amount_vat = amount_vat.round_cents();
+    let amount_gross = amount_gross.round_cents();
     let maximum = rust_decimal::Decimal::new(999_999_999_999, 2);
     if amount_net < rust_decimal::Decimal::ZERO
         || amount_vat < rust_decimal::Decimal::ZERO
@@ -833,8 +834,8 @@ async fn list_debt_management_queue(
                     "resolved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("resolved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "updated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "overdue_invoice_count": overdue_invoice_count,
-                    "overdue_balance": overdue_balance.round_dp(2).normalize().to_string(),
-                    "outstanding_balance": outstanding_balance.round_dp(2).normalize().to_string(),
+                    "overdue_balance": overdue_balance.round_cents().normalize().to_string(),
+                    "outstanding_balance": outstanding_balance.round_cents().normalize().to_string(),
                 }));
             }
 
@@ -1377,7 +1378,7 @@ async fn load_order_process_readiness(
             "execution_ready": execution_ready,
             "debt_hold": debt_hold,
             "overdue_invoice_count": overdue_invoice_count,
-            "outstanding_balance": outstanding_balance.round_dp(2).normalize().to_string(),
+            "outstanding_balance": outstanding_balance.round_cents().normalize().to_string(),
             "debt_management": debt_management.payload,
             "billing_release_status": billing_release_status,
             "billing_release_note": billing_release_note,
@@ -3547,7 +3548,7 @@ async fn get_order(
 }
 
 fn economics_money(value: rust_decimal::Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    money::money_string(value)
 }
 
 async fn get_order_economics(
@@ -3971,7 +3972,7 @@ async fn get_order_economics(
         .unwrap_or(rust_decimal::Decimal::ZERO);
     let margin_net = revenue_net - incurred_net;
     let margin_percent = if revenue_net > rust_decimal::Decimal::ZERO {
-        (margin_net / revenue_net * rust_decimal::Decimal::new(100, 0)).round_dp(2)
+        (margin_net / revenue_net * rust_decimal::Decimal::new(100, 0)).round_commercial(2)
     } else {
         rust_decimal::Decimal::ZERO
     };
@@ -4001,11 +4002,11 @@ async fn get_order_economics(
             let vat_rate = row
                 .try_get::<rust_decimal::Decimal, _>("vat_rate_snapshot")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
-            let service_planned_net = (quantity * unit_price).round_dp(2);
-            let service_planned_vat = (service_planned_net * vat_rate
-                / rust_decimal::Decimal::new(100, 0))
-            .round_dp(2);
-            let service_planned_gross = service_planned_net + service_planned_vat;
+            let money::LineAmounts {
+                net: service_planned_net,
+                vat: service_planned_vat,
+                gross: service_planned_gross,
+            } = money::line_amounts(quantity, unit_price, vat_rate);
             let service_planned_cost_net = row
                 .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_net")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -5948,7 +5949,7 @@ async fn create_external_invoice_allocation(
         Err(response) => return response,
     }
     let amount = match rust_decimal::Decimal::from_str(body.amount_gross.trim()) {
-        Ok(value) if value > rust_decimal::Decimal::ZERO => value.round_dp(2),
+        Ok(value) if value > rust_decimal::Decimal::ZERO => value.round_cents(),
         _ => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -7689,7 +7690,7 @@ async fn add_leistung(
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service VAT rate"),
     };
     let qty = match rust_decimal::Decimal::try_from(body.quantity) {
-        Ok(value) => value.round_dp(4),
+        Ok(value) => value.round_commercial(4),
         Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid service quantity"),
     };
     if qty <= rust_decimal::Decimal::ZERO {
@@ -7714,8 +7715,8 @@ async fn add_leistung(
         price = resolved_price;
         vat = resolved_vat;
     }
-    price = price.round_dp(2);
-    vat = vat.round_dp(2);
+    price = price.round_cents();
+    vat = vat.round_commercial(2);
 
     let maximum_service_total = rust_decimal::Decimal::new(999_999_999_999, 2);
     let maximum_quantity = rust_decimal::Decimal::new(1_000_000, 0);

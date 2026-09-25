@@ -15,6 +15,7 @@ use uuid::Uuid;
 use crate::access::{resolve_explicit_resource_access, role_db_name};
 use crate::audit::{self as audit_mod};
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::access::resource_access::{
@@ -6625,8 +6626,8 @@ fn normalize_specialization_work_type_payload(
         None => None,
     };
 
-    let min_price_eur = body.min_price_eur.round_dp(2);
-    let max_price_eur = body.max_price_eur.round_dp(2);
+    let min_price_eur = body.min_price_eur.round_cents();
+    let max_price_eur = body.max_price_eur.round_cents();
     let largest_supported_price = Decimal::new(999_999_999_999, 2);
     if min_price_eur < Decimal::ZERO || max_price_eur < Decimal::ZERO {
         return Err("Work type prices must be non-negative");
@@ -7982,7 +7983,7 @@ async fn sync_specialization_work_type_descriptions_tx(
 }
 
 fn normalized_money_string(value: Decimal) -> String {
-    format!("{:.2}", value.round_dp(2))
+    crate::money::cents_string(value)
 }
 
 async fn toggle_specialization_active(

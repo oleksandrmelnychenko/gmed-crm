@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::services::order_service_groups::{
     generate_order_service_group_lines, preview_order_service_group_lines,
 };
@@ -1065,8 +1066,8 @@ fn participant_json(row: sqlx::postgres::PgRow) -> serde_json::Value {
         "doctor_id": row.try_get::<Uuid, _>("doctor_id").unwrap_or_default(),
         "doctor_name": row.try_get::<String, _>("doctor_name").unwrap_or_default(),
         "role_label": row.try_get::<Option<String>, _>("role_label").unwrap_or_default(),
-        "quantity_override": row.try_get::<Option<Decimal>, _>("quantity_override").unwrap_or_default().map(|value| value.round_dp(2).normalize().to_string()),
-        "unit_price_override": row.try_get::<Option<Decimal>, _>("unit_price_override").unwrap_or_default().map(|value| value.round_dp(2).normalize().to_string()),
+        "quantity_override": row.try_get::<Option<Decimal>, _>("quantity_override").unwrap_or_default().map(|value| value.round_commercial(2).normalize().to_string()),
+        "unit_price_override": row.try_get::<Option<Decimal>, _>("unit_price_override").unwrap_or_default().map(|value| value.round_cents().normalize().to_string()),
         "description_override": row.try_get::<Option<String>, _>("description_override").unwrap_or_default(),
         "external_invoice_id": row.try_get::<Option<Uuid>, _>("external_invoice_id").unwrap_or_default(),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -1252,7 +1253,7 @@ fn optional_decimal(value: Option<f64>) -> Option<Decimal> {
 fn decimal_json(row: &sqlx::postgres::PgRow, column: &str) -> String {
     row.try_get::<Decimal, _>(column)
         .unwrap_or(Decimal::ZERO)
-        .round_dp(2)
+        .round_commercial(2)
         .normalize()
         .to_string()
 }

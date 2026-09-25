@@ -13,6 +13,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use crate::{access, audit};
@@ -149,7 +150,7 @@ fn parse_query_currency(value: Option<&str>) -> Result<Option<String>, String> {
 }
 
 fn decimal_to_string(value: Decimal) -> String {
-    value.round_dp(2).normalize().to_string()
+    crate::money::money_string(value)
 }
 
 fn normalize_optional(value: Option<&str>) -> Option<String> {
@@ -607,7 +608,7 @@ async fn load_patient_settlement_ledger(
         .fold(Decimal::ZERO, |total, movement| {
             total + movement.debit - movement.credit
         })
-        .round_dp(2);
+        .round_cents();
     let external_balance = source_movements
         .iter()
         .filter(|movement| movement.kind.starts_with("external_"))
@@ -615,14 +616,14 @@ async fn load_patient_settlement_ledger(
             balance + movement.debit - movement.credit
         })
         .max(Decimal::ZERO)
-        .round_dp(2);
+        .round_cents();
     let opening_balance = source_movements
         .iter()
         .filter(|movement| from.is_some_and(|from_date| movement.entry_date < from_date))
         .fold(Decimal::ZERO, |balance, movement| {
             balance + movement.debit - movement.credit
         })
-        .round_dp(2);
+        .round_cents();
     let mut running_balance = opening_balance;
     let mut debit_total = Decimal::ZERO;
     let mut credit_total = Decimal::ZERO;
@@ -632,9 +633,9 @@ async fn load_patient_settlement_ledger(
         .into_iter()
         .filter(|movement| from.is_none_or(|from_date| movement.entry_date >= from_date))
     {
-        debit_total = (debit_total + movement.debit).round_dp(2);
-        credit_total = (credit_total + movement.credit).round_dp(2);
-        running_balance = (running_balance + movement.debit - movement.credit).round_dp(2);
+        debit_total = (debit_total + movement.debit).round_cents();
+        credit_total = (credit_total + movement.credit).round_cents();
+        running_balance = (running_balance + movement.debit - movement.credit).round_cents();
         movements.push(serde_json::json!({
             "id": movement.id,
             "kind": movement.kind,
@@ -1169,9 +1170,8 @@ async fn load_patient_account_statement(
             let vat_rate = row
                 .try_get::<Decimal, _>("vat_rate")
                 .unwrap_or(Decimal::ZERO);
-            let gross = (quantity * unit_price * (Decimal::new(100, 0) + vat_rate)
-                / Decimal::new(100, 0))
-            .round_dp(2);
+            // Same per-line rounding as the quote and invoice of this service.
+            let gross = crate::money::line_amounts(quantity, unit_price, vat_rate).gross;
             let financial_state = if invoiced_quantity <= Decimal::ZERO {
                 "not_invoiced"
             } else if invoiced_quantity < quantity {
@@ -1655,13 +1655,13 @@ async fn get_patient_financial_summary(
                 let original_net = value_to_decimal(item.get("line_net").unwrap_or(&Value::Null));
                 let gross = if total_gross > Decimal::ZERO {
                     (original_gross * (total_gross - credited).max(Decimal::ZERO) / total_gross)
-                        .round_dp(2)
+                        .round_cents()
                 } else {
                     Decimal::ZERO
                 };
                 let net = if total_net > Decimal::ZERO {
                     (original_net * (total_net - credited_net).max(Decimal::ZERO) / total_net)
-                        .round_dp(2)
+                        .round_cents()
                 } else {
                     Decimal::ZERO
                 };
@@ -1721,7 +1721,7 @@ async fn get_patient_financial_summary(
         && receivable_currency_mismatch_count == 0;
     let margin_net = revenue_net - expenses_net;
     let margin_percent = if revenue_net > Decimal::ZERO {
-        (margin_net / revenue_net * Decimal::new(100, 0)).round_dp(2)
+        (margin_net / revenue_net * Decimal::new(100, 0)).round_commercial(2)
     } else {
         Decimal::ZERO
     };
@@ -2020,7 +2020,7 @@ async fn create_patient_balance_adjustment(
             "Invalid adjustment category",
         );
     }
-    let amount = value_to_decimal(&body.amount).round_dp(2);
+    let amount = value_to_decimal(&body.amount).round_cents();
     if amount <= Decimal::ZERO {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,

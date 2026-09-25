@@ -11,6 +11,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -301,7 +302,7 @@ async fn load_invoice_actions(
                 "due_at": due_date,
                 "action_label": "Open invoices",
                 "action_url": "/invoices",
-                "amount": balance.round_dp(2).normalize().to_string(),
+                "amount": balance.round_cents().normalize().to_string(),
                 "currency": "EUR",
                 "metadata": {
                     "pdf_action_visible": pdf_visible,
@@ -388,10 +389,10 @@ async fn load_package_actions(
                     "package_id": package_id,
                     "package_item_id": row.try_get::<Option<Uuid>, _>("package_item_id").unwrap_or_default(),
                     "package_name": row.try_get::<String, _>("package_name").unwrap_or_default(),
-                    "included_quantity": included.round_dp(2).normalize().to_string(),
-                    "used_quantity": used.round_dp(2).normalize().to_string(),
-                    "remaining_quantity": remaining.round_dp(2).normalize().to_string(),
-                    "overage_quantity": overage.round_dp(2).normalize().to_string(),
+                    "included_quantity": included.round_commercial(2).normalize().to_string(),
+                    "used_quantity": used.round_commercial(2).normalize().to_string(),
+                    "remaining_quantity": remaining.round_commercial(2).normalize().to_string(),
+                    "overage_quantity": overage.round_commercial(2).normalize().to_string(),
                     "requires_patient_approval": row.try_get::<bool, _>("requires_patient_approval").unwrap_or(false),
                     "pending_approval": row.try_get::<bool, _>("pending_approval").unwrap_or(false),
                 },

@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -62,7 +63,7 @@ fn can_manage_company_accounts(role: Role) -> bool {
 fn parse_amount(value: &str) -> Result<Decimal, &'static str> {
     let amount = Decimal::from_str(value.trim())
         .map_err(|_| "Invalid amount")?
-        .round_dp(2);
+        .round_cents();
     if amount <= Decimal::ZERO {
         return Err("Amount must be greater than zero");
     }

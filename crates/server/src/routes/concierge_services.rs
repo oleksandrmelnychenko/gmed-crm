@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::money::CommercialRounding;
 use crate::routes::me::resolve_self_patient_id;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -2385,7 +2386,7 @@ async fn apply_partner_quote_as_cost_estimate(
 
     Json(serde_json::json!({
         "interaction_id": interaction_id,
-        "cost_estimate": quoted_cost.round_dp(2).to_string(),
+        "cost_estimate": quoted_cost.round_cents().to_string(),
         "currency": service_currency,
         "applied_as_cost_estimate_at": applied_at.to_rfc3339(),
         "applied_by": auth.user_id,
@@ -3563,7 +3564,7 @@ async fn apply_task_partner_quote_as_cost_estimate(
     .await;
     Json(serde_json::json!({
         "interaction_id": interaction_id,
-        "cost_estimate": quoted_cost.round_dp(2).to_string(),
+        "cost_estimate": quoted_cost.round_cents().to_string(),
         "currency": task_currency,
         "applied_as_cost_estimate_at": applied_at.to_rfc3339(),
         "applied_by": auth.user_id,
@@ -4635,7 +4636,7 @@ fn build_task_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_cents().to_string()),
         "key_status": row.try_get::<Option<String>, _>("key_status").unwrap_or_default(),
         "key_responsible_user_id": row.try_get::<Option<Uuid>, _>("key_responsible_user_id").unwrap_or_default(),
         "key_responsible_user_name": row.try_get::<Option<String>, _>("key_responsible_user_name").unwrap_or_default(),
@@ -5279,7 +5280,7 @@ fn parse_optional_non_negative_patch(
 }
 
 fn round_money(value: f64) -> f64 {
-    (value * 100.0).round() / 100.0
+    crate::money::round_cents_f64(value)
 }
 
 fn is_valid_service_kind(value: &str) -> bool {
@@ -5406,9 +5407,9 @@ fn build_portal_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
-        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_dp(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
-        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_cents().to_string()),
+        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_commercial(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
+        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_cents().to_string()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "service_notes": row.try_get::<Option<String>, _>("service_notes").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
@@ -5454,10 +5455,10 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "service_address": row.try_get::<Option<String>, _>("service_address").unwrap_or_default(),
         "starts_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("starts_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "ends_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("ends_at").unwrap_or_default().map(|value| value.to_rfc3339()),
-        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
-        "actual_cost": row.try_get::<Option<rust_decimal::Decimal>, _>("actual_cost").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
-        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_dp(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
-        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "cost_estimate": row.try_get::<Option<rust_decimal::Decimal>, _>("cost_estimate").unwrap_or_default().map(|value| value.round_cents().to_string()),
+        "actual_cost": row.try_get::<Option<rust_decimal::Decimal>, _>("actual_cost").unwrap_or_default().map(|value| value.round_cents().to_string()),
+        "quantity": row.try_get::<rust_decimal::Decimal, _>("quantity").map(|value| value.round_commercial(2).normalize().to_string()).unwrap_or_else(|_| "1".to_string()),
+        "unit_price": row.try_get::<Option<rust_decimal::Decimal>, _>("unit_price").unwrap_or_default().map(|value| value.round_cents().to_string()),
         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "billing_status": row.try_get::<String, _>("billing_status").unwrap_or_default(),
         "key_status": row.try_get::<Option<String>, _>("key_status").unwrap_or_default(),
@@ -5562,7 +5563,7 @@ fn build_partner_interaction_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "occurred_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("occurred_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "contact_person": row.try_get::<Option<String>, _>("contact_person").unwrap_or_default(),
         "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
-        "quoted_cost": row.try_get::<Option<rust_decimal::Decimal>, _>("quoted_cost").unwrap_or_default().map(|value| value.round_dp(2).to_string()),
+        "quoted_cost": row.try_get::<Option<rust_decimal::Decimal>, _>("quoted_cost").unwrap_or_default().map(|value| value.round_cents().to_string()),
         "quoted_currency": row.try_get::<Option<String>, _>("quoted_currency").unwrap_or_default(),
         "applied_as_cost_estimate_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("applied_as_cost_estimate_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "applied_by": row.try_get::<Option<Uuid>, _>("applied_by").unwrap_or_default(),

@@ -6,7 +6,11 @@
 
 use chrono::NaiveDate;
 use lopdf::{Dictionary, Object, Stream, StringFormat, dictionary};
-use rust_decimal::{Decimal, RoundingStrategy};
+use rust_decimal::Decimal;
+
+// VAT per breakdown is round(basis × rate / 100), half away from zero, the
+// same rule as the stored invoice lines (see `crate::money`).
+use crate::money::{cents_string, round_cents, vat_amount};
 
 pub(super) const ZUGFERD_XML_FILENAME: &str = "factur-x.xml";
 /// sRGB profile for the PDF/A output intent (CC0, see assets/icc/README.md).
@@ -131,16 +135,9 @@ fn escape(value: &str) -> String {
     out
 }
 
-fn round_cents(value: Decimal) -> Decimal {
-    value.round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
-}
-
-fn vat_amount(basis: Decimal, rate: Decimal) -> Decimal {
-    round_cents(basis * rate / Decimal::ONE_HUNDRED)
-}
-
+/// Fixed two-decimal amount (BT-106 ff.), commercially rounded.
 fn money(value: Decimal) -> String {
-    format!("{:.2}", round_cents(value))
+    cents_string(value)
 }
 
 fn plain(value: Decimal) -> String {
@@ -677,6 +674,28 @@ mod tests {
         let xml = build_cii_xml(&invoice);
         assert!(xml.contains("<ram:RoundingAmount>0.01</ram:RoundingAmount>"));
         assert!(xml.contains("<ram:DuePayableAmount>319.01</ram:DuePayableAmount>"));
+    }
+
+    #[test]
+    fn midpoint_vat_matches_the_stored_invoice_without_rounding_amount() {
+        // 2.5 h x 95 EUR: 237.50 net, 19 % VAT 45.125 -> 45.13, gross 282.63,
+        // exactly what the stored invoice line and total carry.
+        let mut invoice = sample();
+        invoice.lines = vec![EInvoiceLine {
+            name: "Dolmetscherleistung".to_string(),
+            quantity: dec("2.5"),
+            unit_net: dec("95"),
+            line_net: dec("237.50"),
+            vat_rate: dec("19"),
+            is_cost_passthrough: false,
+        }];
+        invoice.total_gross = dec("282.63");
+        invoice.prepaid_amount = Decimal::ZERO;
+        let xml = build_cii_xml(&invoice);
+        assert!(xml.contains(r#"<ram:TaxTotalAmount currencyID="EUR">45.13</ram:TaxTotalAmount>"#));
+        assert!(xml.contains("<ram:GrandTotalAmount>282.63</ram:GrandTotalAmount>"));
+        assert!(xml.contains("<ram:DuePayableAmount>282.63</ram:DuePayableAmount>"));
+        assert!(!xml.contains("RoundingAmount"));
     }
 
     #[test]
