@@ -32,7 +32,7 @@ test.describe("appointments workflow detail", () => {
       status: "confirmed",
       location: "Heidelberg International Office",
       interpreter_response: "accepted",
-      checklist_phase: "follow_up",
+      checklist_phase: "followup",
       patient_id: patientId,
       patient_name: "Fatima Al Rashid",
       patient_pid: "P-0008",
@@ -192,21 +192,21 @@ test.describe("appointments workflow detail", () => {
         return json(route, [
           {
             id: "check-1",
-            phase: "visit_processing",
+            phase: "execution",
             item_text: "Verify translated pathology files",
             is_completed: false,
             completed_at: null,
           },
           {
             id: "check-2",
-            phase: "follow_up",
+            phase: "followup",
             item_text: "Prepare tumour board recap",
             is_completed: false,
             completed_at: null,
           },
           {
             id: "check-3",
-            phase: "intake",
+            phase: "preparation",
             item_text: "Patient identity confirmed",
             is_completed: true,
             completed_at: "2026-04-12T10:00:00Z",
@@ -307,39 +307,53 @@ test.describe("appointments workflow detail", () => {
       `/appointments?appointment=${appointmentId}&detailTab=workflow`,
     );
 
-    await expect(
-      page.getByRole("heading", { name: /Operativer .berblick/i }),
-    ).toBeVisible();
-    await expect(page.getByText("Operativer Überblick")).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Abschlussbereitschaft" }),
-    ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Termine" })).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Dolmetscherbesetzung" }),
-    ).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Checkliste" })).toBeVisible();
+    // The metric-tile overview was replaced by one warning banner that lists
+    // what still blocks closing the appointment (4e914dc1).
+    const blockers = page
+      .getByRole("status")
+      .filter({ hasText: "Vor dem Abschluss sind noch offene operative Punkte zu prüfen." });
+    await expect(blockers).toBeVisible();
+    await expect(blockers).toContainText("2 Checklistenpunkte sind noch offen.");
+    await expect(blockers).toContainText(
+      "Dolmetscherbericht oder Freigabe ist noch ausstehend.",
+    );
 
-    const overviewSection = page
+    const readiness = page
       .locator("section")
-      .filter({ hasText: "Operativer Überblick" })
+      .filter({ hasText: "Abschlussbereitschaft" })
       .first();
-    await expect(overviewSection).toContainText("Checklisten-Fortschritt");
-    await expect(overviewSection).toContainText("1/3");
-    await expect(overviewSection).toContainText("Dolmetscher-Gate");
-    await expect(overviewSection).toContainText("Ausstehend");
+    await expect(
+      readiness.getByRole("button", { name: "Abschließen & planen" }),
+    ).toBeDisabled();
+    await expect(
+      readiness.getByRole("group", { name: "Status" }).getByRole("button", { name: "Bestätigt" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    await expect(page.getByRole("heading", { name: "Termin", exact: true })).toBeVisible();
+    await expect(page.getByText("Dolmetscherbesetzung", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("row").filter({ hasText: "Marina Sokolova" }),
+    ).toContainText("Bestätigt");
+
+    const openChecklistRow = page
+      .getByRole("row")
+      .filter({ hasText: "Verify translated pathology files" });
+    await expect(openChecklistRow).toContainText("Durchführung");
+    await expect(
+      openChecklistRow.getByRole("button", { name: "Als erledigt" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("row").filter({ hasText: "Patient identity confirmed" }),
+    ).toContainText("Abgeschlossen");
 
     await expect(
-      page
-        .locator("section")
-        .filter({ hasText: "Operativer Überblick" })
-        .first()
-        .getByText(/Dolmetscherbericht oder Freigabe ist noch ausstehend/i)
-        .first(),
-    ).toBeVisible();
+      page.getByRole("row").filter({ hasText: "Confirm released recommendation" }),
+    ).toContainText("Ausstehend");
+    await expect(page.getByText("Operative Aufgaben", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("row").filter({ hasText: "PM follow-up with clinic" }),
+    ).toContainText("Hoch");
     await expect(page.getByText("Ein Fehler ist aufgetreten")).toHaveCount(0);
-    await expect(page.getByRole("heading", { name: "Erinnerungen" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Operative Aufgaben" })).toBeVisible();
 
     await page.screenshot({
       path: "test-results/appointment-workflow-11000000.png",
