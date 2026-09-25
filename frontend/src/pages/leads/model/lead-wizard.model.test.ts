@@ -371,6 +371,18 @@ describe("Phase B order lines (#8)", () => {
     expect(estimate.gross).toBe(36.06);
   });
 
+  it("rounds VAT midpoints half up per line like the server quote", () => {
+    // 2.5 h x 95 EUR = 237.50 net; 19 % VAT = 45.125 -> 45.13; gross 282.63.
+    expect(costEstimate([
+      line({ description: "Dolmetscher", quantity: "2,5", unitPrice: "95", vatRate: "19" }),
+    ])).toEqual({ net: 237.5, vat: 45.13, gross: 282.63 });
+    // 0.5 h + 4.5 h: VAT 9.025 -> 9.03 and 81.225 -> 81.23 before summing.
+    expect(costEstimate([
+      line({ description: "A", quantity: "0.5", unitPrice: "95", vatRate: "19" }),
+      line({ description: "B", quantity: "4.5", unitPrice: "95", vatRate: "19" }),
+    ])).toEqual({ net: 475, vat: 90.26, gross: 565.26 });
+  });
+
   it("builds the leistung payload with numeric fields", () => {
     const value = line({
       clientKey: "line-1",

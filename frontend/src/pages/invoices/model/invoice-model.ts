@@ -1,4 +1,4 @@
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, moneyLineAmounts, roundCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
@@ -147,10 +147,6 @@ export function blankCreateForm(quoteId = ""): CreateForm {
   };
 }
 
-function roundInvoiceMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
 export function invoiceLineQuantityAvailable(
   line: InvoiceLineItem,
   invoiceType: InvoiceType,
@@ -220,13 +216,16 @@ export function calculateInvoiceSelectionTotals(
       ) {
         return totals;
       }
-      const lineNet = roundInvoiceMoney(quantity * unitPrice);
-      const lineVat = roundInvoiceMoney((lineNet * vatRate) / 100);
-      const lineGross = roundInvoiceMoney(lineNet + lineVat);
+      // Same per-line rounding as the server invoice (half away from zero).
+      const {
+        net: lineNet,
+        vat: lineVat,
+        gross: lineGross,
+      } = moneyLineAmounts(quantity, unitPrice, vatRate);
       return {
-        net: roundInvoiceMoney(totals.net + lineNet),
-        vat: roundInvoiceMoney(totals.vat + lineVat),
-        gross: roundInvoiceMoney(totals.gross + lineGross),
+        net: roundCents(totals.net + lineNet),
+        vat: roundCents(totals.vat + lineVat),
+        gross: roundCents(totals.gross + lineGross),
         lineGrossByIndex: {
           ...totals.lineGrossByIndex,
           [lineIndex]: lineGross,

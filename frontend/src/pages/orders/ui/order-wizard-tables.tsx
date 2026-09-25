@@ -1,6 +1,7 @@
 import { OrderCatalogServicesTable } from "./order-catalog-services-table";
 import type { ServiceLine } from "../model/order-service-line";
 import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
+import { moneyLineAmounts, roundCents } from "@/lib/money";
 import { money, formatMoneyValue, germanDateLabel, servicePriceOptionValue, parseServicePriceOptionValue, serviceBillingUnitLabel, resolveServiceDescriptionItems } from "../model/order-service-presentation";
 import { useState, type ReactNode } from "react";
 import { ArrowRight, Check, Download } from "lucide-react";
@@ -49,9 +50,8 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
       currency: "EUR", quantity: line.quantity, price: line.unit_price, vat: line.vat_rate };
   });
   const totals = rows.reduce((result, line) => {
-    const net = Math.round(money(line.quantity) * money(line.price) * 100) / 100;
-    const vat = Math.round(net * money(line.vat)) / 100;
-    return { net: result.net + net, vat: result.vat + vat, gross: result.gross + net + vat };
+    const { net, vat, gross } = moneyLineAmounts(money(line.quantity), money(line.price), money(line.vat));
+    return { net: roundCents(result.net + net), vat: roundCents(result.vat + vat), gross: roundCents(result.gross + gross) };
   }, { net: 0, vat: 0, gross: 0 });
   const updateLine = (id: string, patch: Partial<IntakeLine>) => onChange(lines.map(line => line.id === id ? { ...line, ...patch } : line));
   const describe = (line: ServiceLine) => serviceDescriptionText(resolveServiceDescriptionItems(line.catalogDescriptionItems ?? [], {

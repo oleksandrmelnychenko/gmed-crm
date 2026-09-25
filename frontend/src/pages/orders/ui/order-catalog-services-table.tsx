@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Trash2 } from "lucide-react";
+import { roundCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { Lang } from "@/lib/i18n";
 import { listAgencyServicePriceChoices } from "@/pages/contracts/model/contracts-model";
@@ -219,7 +220,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
     {
       id: "total",
       label: tx("Сумма", "Gesamt"),
-      accessor: (line) => money(line.quantity) * money(line.price),
+      accessor: (line) => roundCents(money(line.quantity) * money(line.price)),
       sortable: false,
       align: "right",
       width: 150,
@@ -231,7 +232,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
           line.catalogUnitLabel || catalogService?.unit_label,
           tx,
         );
-        const total = money(line.quantity) * money(line.price);
+        const total = roundCents(money(line.quantity) * money(line.price));
         return (
           <span
             className="whitespace-nowrap font-semibold"

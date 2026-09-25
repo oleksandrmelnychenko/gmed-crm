@@ -70,6 +70,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { paymentStatusLabel } from "@/lib/payment-status";
+import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -1776,24 +1777,25 @@ function validLine(line: ServiceLine): boolean {
   return line.description.trim().length > 0 && money(line.quantity) > 0 && money(line.price) >= 0 && money(line.vat) >= 0 && money(line.vat) <= 100;
 }
 
+/** Order totals rounded per line, half away from zero, exactly like the server quote. */
 export function calculateServiceLineEstimate(serviceLines: ServiceLine[]) {
   let net = 0;
   let vat = 0;
   let gross = 0;
   serviceLines.filter(validLine).forEach((line) => {
-    const lineNet = Math.round(money(line.quantity) * money(line.price) * 100) / 100;
-    const lineVat = line.isCostPassthrough
-      ? 0
-      : Math.round(lineNet * money(line.vat)) / 100;
-    const lineGross = Math.round((lineNet + lineVat) * 100) / 100;
-    net += lineNet;
-    vat += lineVat;
-    gross += lineGross;
+    const amounts = moneyLineAmounts(
+      money(line.quantity),
+      money(line.price),
+      line.isCostPassthrough ? 0 : money(line.vat),
+    );
+    net += amounts.net;
+    vat += amounts.vat;
+    gross += amounts.gross;
   });
   return {
-    net: Math.round(net * 100) / 100,
-    vat: Math.round(vat * 100) / 100,
-    gross: Math.round(gross * 100) / 100,
+    net: roundCents(net),
+    vat: roundCents(vat),
+    gross: roundCents(gross),
   };
 }
 
@@ -1847,7 +1849,7 @@ export function quoteMatchesCurrentServices(
   lines: ServiceLine[],
   totalGross: number,
 ) {
-  return Math.abs(money(quote.total_gross) - totalGross) < 0.005
+  return sameCents(money(quote.total_gross), totalGross)
     && quoteMatchesServiceLines(quote, lines);
 }
 
@@ -3617,7 +3619,7 @@ export function LeadWizard({
   const requiredPrepaymentValid = !prepayment || (
     validMoneyInput(prepaymentAmount)
     && requiredPrepayment > 0
-    && requiredPrepayment <= quoteTotal + 0.005
+    && toCents(requiredPrepayment) <= toCents(quoteTotal)
   );
   const prepaymentRemaining = Math.max(requiredPrepayment - enteredPrepayment, 0);
   const prepaymentInvoiceHref = quote?.patient_id && order?.id
@@ -3641,7 +3643,7 @@ export function LeadWizard({
           ? tx("Смета не соответствует текущему заказу — пересчитайте", "Kostenvoranschlag stimmt nicht mit dem aktuellen Auftrag überein — neu berechnen")
         : prepayment && (
             !requiredPrepaymentValid
-            || persistedPrepayment + 0.005 < requiredPrepayment
+            || toCents(persistedPrepayment) < toCents(requiredPrepayment)
             || serverPrepaymentReady === false
           )
           ? tx("Смета подтверждена, ожидается предоплата", "Kostenvoranschlag angenommen, Vorauszahlung ausstehend")
@@ -4926,7 +4928,7 @@ ${serviceCommentLines.join("\n")}`
       if (
         normalizedPrepaymentAmount
         && validMoneyInput(normalizedPrepaymentAmount)
-        && money(normalizedPrepaymentAmount) > persistedEstimate.gross + 0.005
+        && toCents(money(normalizedPrepaymentAmount)) > toCents(persistedEstimate.gross)
       ) {
         throw new Error(tx(
           "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
@@ -5119,7 +5121,7 @@ ${serviceCommentLines.join("\n")}`
     try {
       const result = await ensureCommercial();
       const persistedEstimate = calculateServiceLineEstimate(result.serviceLines);
-      if (prepayment && requiredPrepayment > persistedEstimate.gross + 0.005) {
+      if (prepayment && toCents(requiredPrepayment) > toCents(persistedEstimate.gross)) {
         await reload(false, true);
         setCommercialQuoteError(tx(
           "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
@@ -5242,7 +5244,7 @@ ${serviceCommentLines.join("\n")}`
       if (
         prepayment
         && commercialServiceLines.length > 0
-        && requiredPrepayment > commercialEstimate.gross + 0.005
+        && toCents(requiredPrepayment) > toCents(commercialEstimate.gross)
       ) {
         await reload(false, true);
         setCommercialDocumentErrors((current) => ({
@@ -5306,7 +5308,7 @@ ${serviceCommentLines.join("\n")}`
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
-                line_total: `${(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
+                line_total: `${roundCents(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
                 vat_rate: line.vat,
                 note: serviceDocumentNote(line),
                 description_items: resolvedServiceCatalogItems(line),
@@ -8583,8 +8585,11 @@ ${serviceCommentLines.join("\n")}`
                     const rawUnit = line.catalogUnitLabel || catalogService?.unit_label;
                     const unit = serviceBillingUnitLabel(rawUnit, tx);
                     const descriptionItems = resolvedServiceCatalogItems(line);
-                    const net = money(line.quantity) * money(line.price);
-                    const vat = net * money(line.vat) / 100;
+                    const { net, gross: lineGross } = moneyLineAmounts(
+                      money(line.quantity),
+                      money(line.price),
+                      line.isCostPassthrough ? 0 : money(line.vat),
+                    );
                     return (
                       <article
                         key={line.id}
@@ -8640,7 +8645,7 @@ ${serviceCommentLines.join("\n")}`
                               { label: tx("Ставка", "Satz"), value: `${formatMoneyValue(money(line.price), lang)} ${line.currency || "EUR"}/${unit}`, isTotal: false },
                               { label: tx("НДС", "MwSt."), value: `${formatMoneyValue(money(line.vat), lang)}%`, isTotal: false },
                               { label: tx("Нетто", "Netto"), value: `${formatMoneyValue(net, lang)} ${line.currency || "EUR"}`, isTotal: false },
-                              { label: tx("Итого", "Gesamt"), value: `${formatMoneyValue(net + vat, lang)} ${line.currency || "EUR"}`, isTotal: true },
+                              { label: tx("Итого", "Gesamt"), value: `${formatMoneyValue(lineGross, lang)} ${line.currency || "EUR"}`, isTotal: true },
                             ].map((item) => (
                               <div key={item.label} className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
                                 <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</dt>

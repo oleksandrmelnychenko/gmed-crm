@@ -1,4 +1,5 @@
 import type { LeadDetail } from "@/lib/api/types";
+import { moneyLineAmounts, roundCents } from "@/lib/money";
 import type {
   ClinicalMedication,
   ClinicalNarrative,
@@ -392,26 +393,26 @@ export function orderLinesAreReady(lines: WizardOrderLine[]): boolean {
 
 export type CostEstimate = { net: number; vat: number; gross: number };
 
-function roundMoney(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
-}
-
-/** Kostenschätzung across the valid lines: net, VAT and gross totals. */
+/**
+ * Kostenschätzung across the valid lines: net, VAT and gross totals, rounded
+ * per line and half away from zero like the server quote.
+ */
 export function costEstimate(lines: WizardOrderLine[]): CostEstimate {
   let net = 0;
   let vat = 0;
+  let gross = 0;
   for (const line of lines) {
     if (!orderLineIsValid(line)) continue;
-    const quantity = numberOrNull(line.quantity) ?? 0;
-    const unitPrice = numberOrNull(line.unitPrice) ?? 0;
-    const rate = numberOrNull(line.vatRate) ?? 0;
-    const lineNet = quantity * unitPrice;
-    net += lineNet;
-    vat += (lineNet * rate) / 100;
+    const amounts = moneyLineAmounts(
+      numberOrNull(line.quantity) ?? 0,
+      numberOrNull(line.unitPrice) ?? 0,
+      numberOrNull(line.vatRate) ?? 0,
+    );
+    net += amounts.net;
+    vat += amounts.vat;
+    gross += amounts.gross;
   }
-  net = roundMoney(net);
-  vat = roundMoney(vat);
-  return { net, vat, gross: roundMoney(net + vat) };
+  return { net: roundCents(net), vat: roundCents(vat), gross: roundCents(gross) };
 }
 
 /** The `POST /orders/{id}/leistungen` payload for one line. */

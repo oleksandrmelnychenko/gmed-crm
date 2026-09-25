@@ -1,4 +1,5 @@
 import { money } from "./order-service-presentation";
+import { moneyLineAmounts, roundCents } from "@/lib/money";
 import type { ContractItem } from "@/pages/contracts/model/types";
 
 export type IntakeFacts = {
@@ -51,11 +52,12 @@ export function formatIntakeDate(value: string | null | undefined) {
   const [year, month, day] = value.slice(0, 10).split("-");
   return day && month && year ? `${day}.${month}.${year}` : value;
 }
+/** Gross order total, rounded per line like the server (`order_intakes::sync_services`). */
 export function intakeTotal(lines: IntakeLine[]) {
-  return lines.reduce((sum, line) => {
-    const net = Math.round(money(line.quantity) * money(line.unit_price) * 100);
-    return sum + (Number.isFinite(net) ? net + Math.round(net * money(line.vat_rate) / 100) : 0);
-  }, 0) / 100;
+  return roundCents(lines.reduce((sum, line) => {
+    const { gross } = moneyLineAmounts(money(line.quantity), money(line.unit_price), money(line.vat_rate));
+    return sum + (Number.isFinite(gross) ? gross : 0);
+  }, 0));
 }
 export function changedFacts(before: IntakeFacts, after: IntakeFacts) {
   return (Object.keys(before) as (keyof IntakeFacts)[]).filter(key => before[key] !== after[key]);

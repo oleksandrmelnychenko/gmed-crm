@@ -74,6 +74,21 @@ describe("invoice creation totals", () => {
     });
   });
 
+  it("rounds VAT midpoints half up like the server invoice (2.5 h x 95 EUR = 282.63)", () => {
+    expect(
+      calculateInvoiceSelectionTotals(
+        [line({ quantity: "2.5", unit_price: "95" })],
+        [0],
+        { "0": "2.5" },
+      ),
+    ).toEqual({
+      net: 237.5,
+      vat: 45.13,
+      gross: 282.63,
+      lineGrossByIndex: { 0: 282.63 },
+    });
+  });
+
   it("uses the full quoted scope for an advance and the remaining scope for settlements", () => {
     const quoteLine = line({ quantity: "3", remaining_quantity: "1" });
     expect(invoiceLineQuantityAvailable(quoteLine, "advance")).toBe(3);

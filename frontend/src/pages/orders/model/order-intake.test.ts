@@ -17,4 +17,8 @@ describe("repeat patient order", () => {
     expect(intakeTotal([line, { ...line, id: "b" }])).toBe(2.36);
     expect(intakeTotal([{ ...line, quantity: "1,5", unit_price: "100" }])).toBe(178.5);
   });
+  it("rounds VAT midpoints half up like the server (2.5 h x 95 EUR = 282.63)", () => {
+    const line = { id: "a", description: "Dolmetscher", quantity: "2.5", unit_price: "95", vat_rate: "19", agency_service_id: null, agency_service_price_version_id: null };
+    expect(intakeTotal([line])).toBe(282.63);
+  });
 });

@@ -1,3 +1,4 @@
+import { toCents } from "@/lib/money";
 import type { InvoicePaymentTransaction } from "./types";
 
 /** Methods the API accepts for new receipts; `legacy_import` is import-only. */
@@ -51,10 +52,10 @@ export function paymentCorrectionProblem(
 ): PaymentCorrectionProblem | null {
   const amount = Number(form.amountGross);
   if (!Number.isFinite(amount) || amount <= 0) return "invalid_amount";
-  if (Math.round(amount * 100) > Math.round(maxAmount * 100)) return "exceeds_balance";
+  if (toCents(amount) > toCents(maxAmount)) return "exceeds_balance";
   if (!form.receivedOn) return "missing_date";
   const unchanged =
-    Math.round(amount * 100) === Math.round(Number(payment.amount_gross) * 100) &&
+    toCents(amount) === toCents(Number(payment.amount_gross)) &&
     form.paymentMethod === payment.payment_method &&
     form.paymentReference.trim() === (payment.payment_reference ?? "").trim() &&
     form.receivedOn === payment.received_on &&

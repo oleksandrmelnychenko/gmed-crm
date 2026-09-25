@@ -124,6 +124,26 @@ describe("lead wizard commercial source of truth", () => {
     expect(quoteMatchesCurrentServices(staleQuote, persisted, estimate.gross)).toBe(false);
   });
 
+  it("matches the server quote for VAT midpoints (2.5 h x 95 EUR = 282.63 gross)", () => {
+    const hours: ServiceLine = { ...storedLine("95"), quantity: "2,5" };
+    const estimate = calculateServiceLineEstimate([hours]);
+    expect(estimate).toEqual({ net: 237.5, vat: 45.13, gross: 282.63 });
+
+    const serverQuote = {
+      total_gross: "282.63",
+      line_items: [{
+        description: hours.description,
+        quantity: "2.5",
+        unit_price: "95",
+        vat_rate: "19",
+      }],
+    } as QuoteItem;
+    const bankersRoundedQuote = { ...serverQuote, total_gross: "282.62" } as QuoteItem;
+
+    expect(quoteMatchesCurrentServices(serverQuote, [hours], estimate.gross)).toBe(true);
+    expect(quoteMatchesCurrentServices(bankersRoundedQuote, [hours], estimate.gross)).toBe(false);
+  });
+
   it("does not show a green commercial status when server readiness rejects the quote", () => {
     expect(mergeCommercialQuoteReadiness(true, false, true)).toBe(false);
     expect(mergeCommercialQuoteReadiness(true, true, false)).toBe(true);

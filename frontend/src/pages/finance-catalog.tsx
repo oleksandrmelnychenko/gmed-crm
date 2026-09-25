@@ -85,7 +85,7 @@ import type {
   AgencyServicePriceVersion,
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, moneyLineAmounts } from "@/lib/money";
 
 type TaxProfile = {
   id: string;
@@ -525,7 +525,7 @@ export function agencyServiceGrossAmount(
 ) {
   const net = numberValue(valueToInput(service.unit_price));
   const vatRate = numberValue(valueToInput(service.vat_rate));
-  return Math.round((net * (1 + vatRate / 100) + Number.EPSILON) * 100) / 100;
+  return moneyLineAmounts(1, net, vatRate).gross;
 }
 
 export function agencyServicePackageUsagesByServiceId(servicePackages: ServicePackage[]) {
@@ -1654,14 +1654,14 @@ function useFinanceCatalogPageContent() {
           if (!row.version) return agencyServiceGrossAmount(row.service);
           const net = Number(row.version.unit_price) || 0;
           const vat = Number(row.version.vat_rate) || 0;
-          return net * (1 + vat / 100);
+          return moneyLineAmounts(1, net, vat).gross;
         },
         filterType: "number",
         sortable: true,
         width: 120,
         render: (row) => {
           const gross = row.version
-            ? (Number(row.version.unit_price) || 0) * (1 + (Number(row.version.vat_rate) || 0) / 100)
+            ? moneyLineAmounts(1, Number(row.version.unit_price) || 0, Number(row.version.vat_rate) || 0).gross
             : agencyServiceGrossAmount(row.service);
           return (
           <span className="tabular-nums text-foreground">

@@ -66,6 +66,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { hasFormChanges } from "@/lib/form-changes";
+import { roundCents, toCents } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   agencyServiceDescriptionLabel,
@@ -2909,7 +2910,7 @@ function useOrdersPageContent() {
       !Number.isFinite(net) || net < 0 ||
       !Number.isFinite(vat) || vat < 0 ||
       !Number.isFinite(gross) || gross < 0 ||
-      Math.abs(net + vat - gross) > 0.005
+      toCents(net) + toCents(vat) !== toCents(gross)
     ) {
       setPlannedCostError(
         lang === "de"
@@ -2934,9 +2935,9 @@ function useOrdersPageContent() {
         plannedCostEditor.leistungId,
         {
           request_id: plannedCostEditor.requestId,
-          amount_net: net.toFixed(2),
-          amount_vat: vat.toFixed(2),
-          amount_gross: gross.toFixed(2),
+          amount_net: roundCents(net).toFixed(2),
+          amount_vat: roundCents(vat).toFixed(2),
+          amount_gross: roundCents(gross).toFixed(2),
           reason: plannedCostEditor.reason.trim(),
         },
       );

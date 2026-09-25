@@ -52,6 +52,7 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { roundCents } from "@/lib/money";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { servicesPermissions } from "@/pages/services.model";
@@ -358,7 +359,7 @@ function calculatedServiceTotal(service: ServiceItem | null | undefined, quantit
   const unitPrice = providerServiceUnitPrice(service);
   const quantity = integerInputValue(quantityInput);
   if (unitPrice === null || !Number.isFinite(quantity) || quantity <= 0) return null;
-  return unitPrice * quantity;
+  return roundCents(unitPrice * quantity);
 }
 
 function buildServicesPath(filters: { search: string; mineOnly: boolean; taxonomyNodeId: string }) {
@@ -1462,7 +1463,7 @@ function useStaffServicesPageContent() {
     const calculatedCostEstimate =
       selectedProviderServiceTotal === null
         ? null
-        : Number(selectedProviderServiceTotal.toFixed(2));
+        : roundCents(selectedProviderServiceTotal);
     const costEstimate =
       calculatedCostEstimate ?? optionalMoney(createForm.costEstimate);
     const actualCost = optionalMoney(createForm.actualCost);
@@ -1550,7 +1551,7 @@ function useStaffServicesPageContent() {
       const calculatedCostEstimate =
         selectedEditProviderServiceTotal === null
           ? null
-          : Number(selectedEditProviderServiceTotal.toFixed(2));
+          : roundCents(selectedEditProviderServiceTotal);
       costEstimate =
         calculatedCostEstimate ?? optionalMoney(editForm.costEstimate);
       if (Number.isNaN(costEstimate)) {
