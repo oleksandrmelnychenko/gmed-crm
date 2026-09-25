@@ -163,12 +163,30 @@ export function PatientRelationsTab({
     [formatDateTime, l, lang, relationTypeLabel, t],
   );
 
+  // Also offered in the empty state: the table toolbar only exists once there is a row.
+  const newRelationButton = canManageRelations ? (
+    <Button
+      type="button"
+      size="sm"
+      className="h-8 shrink-0 rounded-lg gap-1.5"
+      onClick={onCreateRelation}
+    >
+      <Plus className="size-3.5" />
+      {l("patients_new_relation")}
+    </Button>
+  ) : null;
+
   return (
     <TabsContent value="relations" className="mt-4 min-h-[400px]">
         {tabLoading ? (
           <TabLoader />
         ) : relations.length === 0 ? (
-          <EmptyCell>{l("patients_not_recorded_yet")}</EmptyCell>
+          <EmptyCell>
+            <div className="flex flex-col items-center gap-3">
+              <span>{l("patients_not_recorded_yet")}</span>
+              {newRelationButton}
+            </div>
+          </EmptyCell>
         ) : (
           <DataTableSurface
             rows={pagination.pagedRows}
@@ -178,17 +196,7 @@ export function PatientRelationsTab({
             emptyState={<EmptyCell>{l("patients_not_recorded_yet")}</EmptyCell>}
             toolbarStart={
               <>
-                {canManageRelations ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="h-8 shrink-0 rounded-lg gap-1.5"
-                    onClick={onCreateRelation}
-                  >
-                    <Plus className="size-3.5" />
-                    {l("patients_new_relation")}
-                  </Button>
-                ) : null}
+                {newRelationButton}
                 <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
               </>
             }

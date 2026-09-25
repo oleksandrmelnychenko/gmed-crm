@@ -431,8 +431,28 @@ function WorkflowContent({
     [commonNotSet, formatDateTime, l, priorityBadgeClass, priorityLabel, roleLabel, statusColors, statusLabel, t],
   );
 
+  // Also offered in the empty state: the table toolbar only exists once there is an item.
+  const addItemButton = canManageWorkflowChecklist ? (
+    <Button
+      type="button"
+      size="sm"
+      className="h-8 shrink-0 rounded-lg gap-1.5"
+      onClick={onCreateItemClick}
+    >
+      <Plus className="size-3.5" />
+      {l("patients_add_item")}
+    </Button>
+  ) : null;
+
   if (!workflowChecklist || workflowChecklist.items.length === 0) {
-    return <EmptyCell>{l("patients_no_patient_workflow_checklist_yet")}</EmptyCell>;
+    return (
+      <EmptyCell>
+        <div className="flex flex-col items-center gap-3">
+          <span>{l("patients_no_patient_workflow_checklist_yet")}</span>
+          {addItemButton}
+        </div>
+      </EmptyCell>
+    );
   }
 
   return (
@@ -443,17 +463,9 @@ function WorkflowContent({
       dictionary={t as unknown as Record<string, string>}
       emptyState={<EmptyCell>{l("patients_no_patient_workflow_checklist_yet")}</EmptyCell>}
       toolbarStart={
-        canManageWorkflowChecklist ? (
+        addItemButton ? (
           <>
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 shrink-0 rounded-lg gap-1.5"
-              onClick={onCreateItemClick}
-            >
-              <Plus className="size-3.5" />
-              {l("patients_add_item")}
-            </Button>
+            {addItemButton}
             <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
           </>
         ) : undefined
