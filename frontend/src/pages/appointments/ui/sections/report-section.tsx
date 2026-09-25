@@ -586,14 +586,25 @@ function useAppointmentReportSectionContent({
               </div>
             ) : null}
 
-            {showReportReviewActions ? (
+            {showReportReviewActions && detailReport ? (
               <>
                 <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
                   <p className={tokens.text.label}>
+                    {appointmentText("appointments_report_hours")}
+                  </p>
+                  <p
+                    data-testid="report-review-hours"
+                    className="mt-2 font-mono text-sm tabular-nums text-foreground"
+                  >
+                    {appointmentText("appointments_report_hours_value", {
+                      hours: detailReport.hours,
+                    })}
+                  </p>
+                  <p className={cn(tokens.text.label, "mt-4")}>
                     {appointmentText("appointments_report")}
                   </p>
                   <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
-                    {detailReport?.report_text ||
+                    {detailReport.report_text ||
                       appointmentText("appointments_no_free_text_report_submitted")}
                   </p>
                 </div>

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { ReadOnlyScope } from "@/components/read-only-scope";
+import { uiText } from "@/lib/i18n";
 import type { AppointmentDetail, ReportSummary } from "@/pages/appointments/model/types";
 
 import { MemoizedAppointmentReportSection } from "./report-section";
@@ -125,5 +126,36 @@ describe("AppointmentReportSection on the read-only interpreter page", () => {
 
     expect(html).not.toContain('data-testid="report-editor"');
     expect(html).not.toContain('type="number"');
+  });
+});
+
+describe("AppointmentReportSection review decision", () => {
+  it("shows the reported hours next to the report text before approval", () => {
+    const html = renderToStaticMarkup(
+      <MemoizedAppointmentReportSection
+        detail={detail}
+        detailReport={report()}
+        reportReviewMeta=""
+        reportActions={{
+          ...noActions,
+          showReportReviewActions: true,
+          canApproveReport: true,
+          canRejectReport: true,
+        }}
+        onRefresh={() => {}}
+        onError={() => {}}
+      />,
+    );
+
+    expect(html).toContain("Решение по проверке");
+    expect(html).toContain("Согласовать часы и отчёт");
+    expect(html).toMatch(/data-testid="report-review-hours"[^>]*>2\.5 ч</);
+    expect(html).toContain("Часы");
+    expect(html).toContain("Accompanied the consultation.");
+  });
+
+  it("labels the hours in both catalogs", () => {
+    expect(uiText("appointments_report_hours", "ru")).toBe("Часы");
+    expect(uiText("appointments_report_hours", "de")).toBe("Stunden");
   });
 });
