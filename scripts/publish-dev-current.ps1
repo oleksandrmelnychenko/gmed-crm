@@ -40,6 +40,21 @@ function Invoke-GitText {
   return ($result | Out-String).Trim()
 }
 
+# Best-effort native call: Windows PowerShell turns any stderr output into a
+# terminating error under ErrorActionPreference=Stop. Returns the exit code.
+function Invoke-Quiet {
+  param([string]$FilePath, [string[]]$Arguments)
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $FilePath @Arguments *> $null
+    return $LASTEXITCODE
+  }
+  finally {
+    $ErrorActionPreference = $previous
+  }
+}
+
 function Get-DockerCli {
   $command = Get-Command docker -ErrorAction SilentlyContinue
   if ($command) { return $command.Source }
@@ -110,7 +125,7 @@ function Publish-LocalImages {
   $keyPath = (Resolve-Path -LiteralPath $IdentityFile).Path
   $bootstrap = "docker inspect gmed-dev-registry >/dev/null 2>&1 || docker run -d --name gmed-dev-registry --restart unless-stopped -p 127.0.0.1:5000:5000 -v gmed-dev-registry:/var/lib/registry -e REGISTRY_STORAGE_DELETE_ENABLED=true registry:2 >/dev/null"
   Invoke-Checked "ssh" ($SshOptions + @($Remote, $bootstrap))
-  & $docker rm -f gmed-dev-tunnel 2>$null | Out-Null
+  Invoke-Quiet $docker @("rm", "-f", "gmed-dev-tunnel") | Out-Null
   $tunnel = "apk add -q --no-cache openssh-client && cp /key /tmp/k && chmod 600 /tmp/k && exec ssh -i /tmp/k -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -N -L 127.0.0.1:15000:127.0.0.1:5000 $Remote"
   Invoke-Checked $docker @(
     "run", "-d", "--name", "gmed-dev-tunnel", "--network", "host",
@@ -120,8 +135,7 @@ function Publish-LocalImages {
     $ready = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
       Start-Sleep -Seconds 1
-      & $docker run --rm --network host alpine:3.20 wget -q -O /dev/null http://127.0.0.1:15000/v2/ 2>$null
-      if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+      if ((Invoke-Quiet $docker @("run", "--rm", "--network", "host", "alpine:3.20", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:15000/v2/")) -eq 0) { $ready = $true; break }
     }
     if (-not $ready) { throw "SSH tunnel to the DEV registry did not come up" }
     foreach ($service in $services) {
@@ -129,11 +143,11 @@ function Publish-LocalImages {
       Invoke-Checked $docker @("tag", ("gmed-crm-" + $service + ":latest"), $target)
       Write-Host "Pushing $target"
       Invoke-Checked $docker @("push", "-q", $target)
-      & $docker rmi $target 2>$null | Out-Null
+      Invoke-Quiet $docker @("rmi", $target) | Out-Null
     }
   }
   finally {
-    & $docker rm -f gmed-dev-tunnel 2>$null | Out-Null
+    Invoke-Quiet $docker @("rm", "-f", "gmed-dev-tunnel") | Out-Null
   }
 }
 
