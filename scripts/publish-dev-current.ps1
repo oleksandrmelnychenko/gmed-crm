@@ -84,6 +84,16 @@ function Publish-LocalImages {
     "        GMED_CARGO_BUILD_JOBS: `"$LocalBuildJobs`""
   ) | Set-Content -LiteralPath $buildOverride -Encoding ascii
 
+  # The public Argos model host may refuse downloads; like the DEV runner,
+  # reuse a cached archive (the image build verifies its pinned SHA-256).
+  $modelCache = Join-Path $env:LOCALAPPDATA "gmed\translation-model.argosmodel"
+  if (-not (Test-Path -LiteralPath $modelCache)) {
+    [void](New-Item -ItemType Directory -Force -Path (Split-Path -Parent $modelCache))
+    Write-Host "Caching the translation model archive from the DEV host..."
+    Invoke-Checked "scp" ($SshOptions + @(($Remote + ":/home/gmed/gmed-crm/services/clinical-document-parser/translation-model.argosmodel"), $modelCache))
+  }
+  Copy-Item -LiteralPath $modelCache -Destination (Join-Path $buildRoot "services\clinical-document-parser\translation-model.argosmodel")
+
   $services = @("backend", "frontend", "clinical-document-parser", "invoice-parser")
   Write-Host "Building DEV images locally: $($services -join ', ')"
   Invoke-Checked $docker (@(
