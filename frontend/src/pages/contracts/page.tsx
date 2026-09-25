@@ -3114,7 +3114,7 @@ function useContractsPageContent() {
                     </div>
                     <div className="mt-5 space-y-4">
                       {quoteStatusError ? <ShellBanner tone="error">{quoteStatusError}</ShellBanner> : null}
-                      <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="grid gap-4 sm:grid-cols-3">
                         <Field label={t.users_status}>
                           <NativeComboboxSelect
                             value={quoteStatusForm.status}
@@ -3133,17 +3133,23 @@ function useContractsPageContent() {
                             ))}
                           </NativeComboboxSelect>
                         </Field>
-                        <Field label={t.invoices_paid_at}>
+                        <Field label={t.invoices_paid}>
                           <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
+                            type="text"
                             className={shellInputClassName}
-                            value={String(quoteDetail?.paid_amount ?? "0")}
+                            value={formatCurrency(quoteDetail.paid_amount)}
                             readOnly
                           />
                         </Field>
-                        <Field label={t.contracts_notes} className="sm:col-span-2">
+                        <Field label={t.invoices_paid_at}>
+                          <Input
+                            type="text"
+                            className={shellInputClassName}
+                            value={formatDateTime(quoteDetail.paid_at, locale, t.common_not_set)}
+                            readOnly
+                          />
+                        </Field>
+                        <Field label={t.contracts_notes} className="sm:col-span-3">
                           <textarea
                             className={textareaClassName}
                             value={quoteStatusForm.notes}
