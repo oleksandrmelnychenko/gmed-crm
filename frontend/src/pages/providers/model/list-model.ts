@@ -281,6 +281,35 @@ export function doctorListDisplayName(doctor: {
   return [salutation, formatDoctorTitleValue(doctor.title), rest].filter(Boolean).join(" ");
 }
 
+/**
+ * Relationships to list under a doctor: only the ones this doctor is the
+ * source of (the target doctor does not repeat them), each listed once.
+ */
+export function outgoingDoctorRelationships<
+  T extends { id: string; source_doctor_id?: string | null },
+>(doctorId: string, relationships: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return relationships.filter((relationship) => {
+    if (relationship.source_doctor_id && relationship.source_doctor_id !== doctorId) {
+      return false;
+    }
+    if (seen.has(relationship.id)) return false;
+    seen.add(relationship.id);
+    return true;
+  });
+}
+
+/** The related (target) doctor of a doctor-to-doctor relationship. */
+export function doctorRelationshipTargetLabel(relationship: {
+  target_doctor_name: string;
+  target_doctor_title?: string | null;
+}) {
+  return doctorListDisplayName({
+    name: relationship.target_doctor_name,
+    title: relationship.target_doctor_title,
+  });
+}
+
 export type WeeklyAvailabilityDayCode =
   | "mon"
   | "tue"

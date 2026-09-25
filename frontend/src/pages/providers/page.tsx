@@ -119,6 +119,7 @@ import {
   doctorIdentityValue,
   doctorToForm,
   doctorListDisplayName,
+  doctorRelationshipTargetLabel,
   doctorRelationshipTypeLabel,
   doctorRoleLabel,
   formatWeeklyAvailabilityValue,
@@ -137,6 +138,7 @@ import {
   providerToForm,
   providerTypeLabel,
   existingDoctorLinkOptions,
+  outgoingDoctorRelationships,
   serviceToForm,
   servicePriceLabel,
   staffToForm,
@@ -4852,10 +4854,9 @@ function ProviderDoctorDetailSheet({
                   <p className="text-sm text-muted-foreground">{l("providers_relationships_empty")}</p>
                 ) : (
                   <div className="space-y-2">
-                    {doctor.relationships.map((relationship) => {
+                    {outgoingDoctorRelationships(doctor.id, doctor.relationships).map((relationship) => {
                       const targetName = [
-                        relationship.target_doctor_title,
-                        relationship.target_doctor_name,
+                        doctorRelationshipTargetLabel(relationship),
                         relationship.target_provider_name,
                       ].filter(Boolean).join(" - ");
                       return (
@@ -6964,18 +6965,21 @@ function ProviderDoctorsTable({
     rows.map((row) => row.key).join(":"),
   );
 
-  const expandRow = useCallback(
-    (row: ProviderDoctorTableRow) =>
-      row.kind === "doctor" && row.doctor.relationships.length > 0
-        ? row.doctor.relationships.map((rel) => ({
-            key: `${row.doctor.id}:${rel.id}`,
-            kind: "relationship" as const,
-            doctor: row.doctor,
-            rel,
-          }))
-        : null,
-    [],
-  );
+  const expandRow = useCallback((row: ProviderDoctorTableRow) => {
+    if (row.kind !== "doctor") return null;
+    const relationships = outgoingDoctorRelationships(
+      row.doctor.id,
+      row.doctor.relationships,
+    );
+    return relationships.length > 0
+      ? relationships.map((rel) => ({
+          key: `${row.doctor.id}:${rel.id}`,
+          kind: "relationship" as const,
+          doctor: row.doctor,
+          rel,
+        }))
+      : null;
+  }, []);
 
   const columns = useMemo<ColumnDef<ProviderDoctorTableRow>[]>(
     () => [
@@ -6985,7 +6989,11 @@ function ProviderDoctorsTable({
         accessor: (row) =>
           row.kind === "doctor"
             ? doctorListDisplayName(row.doctor)
-            : row.rel?.target_provider_name ?? "",
+            : row.rel
+              ? [doctorRelationshipTargetLabel(row.rel), row.rel.target_provider_name]
+                  .filter(Boolean)
+                  .join(" ")
+              : "",
         sortable: true,
         searchable: true,
         required: true,
@@ -7006,16 +7014,22 @@ function ProviderDoctorsTable({
           ) : (
             <div className="flex min-w-0 items-center gap-1.5 pl-5">
               <span aria-hidden className="text-muted-foreground/60">↳</span>
-              <button
-                type="button"
-                className="truncate font-mono text-xs font-medium text-sky-700 hover:underline"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (row.rel) onOpenProvider(row.rel.target_provider_id);
-                }}
-              >
-                {row.rel?.target_provider_name}
-              </button>
+              <span className="truncate font-mono text-xs font-medium text-foreground">
+                {row.rel ? doctorRelationshipTargetLabel(row.rel) : ""}
+              </span>
+              {row.rel?.target_provider_name ? (
+                <button
+                  type="button"
+                  className="truncate font-mono text-[11px] text-sky-700 hover:underline"
+                  title={row.rel.target_provider_name}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (row.rel) onOpenProvider(row.rel.target_provider_id);
+                  }}
+                >
+                  {row.rel.target_provider_name}
+                </button>
+              ) : null}
               <Badge variant="outline" className="rounded-full font-mono text-[10px]">
                 {doctorRelationshipTypeLabel(row.rel?.relationship_type)}
               </Badge>
@@ -7256,7 +7270,7 @@ function ProviderDoctorsTable({
                 onDeleteRelationship(
                   row.doctor.id,
                   (row.rel as DoctorRelationship).id,
-                  doctorListDisplayName(row.doctor),
+                  doctorRelationshipTargetLabel(row.rel as DoctorRelationship),
                 )
               }
               aria-label={t.common_delete}

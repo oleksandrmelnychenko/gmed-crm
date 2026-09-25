@@ -15,8 +15,10 @@ import {
   composeStaffDisplayName,
   doctorIdentityValue,
   doctorListDisplayName,
+  doctorRelationshipTargetLabel,
   doctorToForm,
   existingDoctorLinkOptions,
+  outgoingDoctorRelationships,
   formatDoctorTitleValue,
   formatWeeklyAvailabilityDisplay,
   formatWeeklyAvailabilityDisplayItems,
@@ -1003,4 +1005,32 @@ describe("weekly availability helpers", () => {
     expect(value).toBe("Mon 09:00-17:00");
   });
 
+});
+
+describe("doctor relationships", () => {
+  const relationship = (id: string, source: string) => ({
+    id,
+    source_doctor_id: source,
+    target_doctor_name: "Release Target",
+    target_doctor_title: "Dr. med.",
+  });
+
+  it("lists only the doctor's own outgoing relationships, once each", () => {
+    const rows = [
+      relationship("r1", "doctor-a"),
+      relationship("r1", "doctor-a"),
+      relationship("r2", "doctor-b"),
+    ];
+    expect(outgoingDoctorRelationships("doctor-a", rows).map((row) => row.id)).toEqual(["r1"]);
+    expect(outgoingDoctorRelationships("doctor-b", rows).map((row) => row.id)).toEqual(["r2"]);
+  });
+
+  it("labels the relationship with the target doctor, not the clinic", () => {
+    expect(doctorRelationshipTargetLabel(relationship("r1", "doctor-a"))).toBe(
+      "Dr. med. Release Target",
+    );
+    expect(
+      doctorRelationshipTargetLabel({ target_doctor_name: "Release Target", target_doctor_title: null }),
+    ).toBe("Release Target");
+  });
 });
