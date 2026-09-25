@@ -314,6 +314,47 @@ test.describe("staff appointments live workflows", () => {
     }).toPass({ timeout: 15_000 });
   });
 
+  test("a future appointment cannot be completed before its date in the UI or on the server", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "pm");
+    const api = await authenticateApiClient(
+      request,
+      scenario.credentials.pm.email,
+      scenario.credentials.password,
+    );
+    // The seeded recurring series starts two weeks ahead.
+    const futureAppointment = scenario.recurring_appointment;
+
+    await openAppointmentDetail(page, futureAppointment.id, futureAppointment.title);
+    await expect(
+      page.getByRole("button", { name: completedStatusButtonName }),
+    ).toBeDisabled();
+    await expect(
+      page.getByTestId("appointment-status-completion-date-hint"),
+    ).toHaveText(/erst ab dem Termindatum/);
+    await expect(
+      page.getByRole("button", { name: inProgressStatusButtonName }),
+    ).toBeEnabled();
+
+    const early = await request.post(
+      `${api.backendUrl}/api/v1/appointments/${futureAppointment.id}/status`,
+      {
+        headers: api.headers,
+        data: { status: "completed", recurrence_scope: "single" },
+      },
+    );
+    expect(early.status(), await early.text()).toBe(422);
+    expect(((await early.json()) as { code?: string }).code).toBe(
+      "appointment_completion_before_date",
+    );
+    expect(
+      (await fetchAppointmentDetail(request, api, futureAppointment.id)).status,
+    ).toBe("confirmed");
+  });
+
   test("completing a medical appointment auto-creates the treatment-organization leistung and shows it in order detail", async ({
     page,
     request,

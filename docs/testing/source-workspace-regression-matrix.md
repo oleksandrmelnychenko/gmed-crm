@@ -1348,6 +1348,13 @@ Covers:
   Covers:
   browser-level staff flow proves the medical path live: complete the medical appointment in UI, then see the delivered `Organisation der Behandlung` line materialized in order detail.
 
+- `a future appointment cannot be completed before its date in the UI or on the server`
+  Source:
+  продуктове рішення 2026-09-25: прийом не можна завершити раніше його дати (Europe/Berlin)
+  `docs/requirements/03_product-backlog_ua.md:125`
+  Covers:
+  live staff flow opens a future appointment, sees `Abgeschlossen` disabled with the date hint while `Läuft` stays available, and the server rejects the completion with 422 `appointment_completion_before_date`.
+
 - `interpreter_report_billing_scheduler_backfills_after_catalog_setup_without_duplicates`
   Source:
   `docs/requirements/03_product-backlog_ua.md:106`
@@ -1708,6 +1715,19 @@ Covers:
   `docs/backlog/04_implementation-tasks_ua.md:233`
   Covers:
   appointment status cannot be moved to `completed` while checklist items remain open, so UI warnings are enforced server-side as well.
+
+- `appointment_completion_opens_on_the_appointment_date`
+  Source:
+  продуктове рішення 2026-09-25: прийом не можна завершити раніше його дати (Europe/Berlin)
+  `docs/requirements/03_product-backlog_ua.md:125`
+  Covers:
+  `completed` for an appointment dated after today in Europe/Berlin returns 422 `appointment_completion_before_date` and creates no `Organisation der Behandlung` line; same-day completion succeeds and `confirmed`, `in_progress` and `cancelled` stay available for future appointments.
+
+- `recurring_completion_scope_is_rejected_while_it_contains_future_occurrences`
+  Source:
+  продуктове рішення 2026-09-25: прийом не можна завершити раніше його дати (Europe/Berlin)
+  Covers:
+  `following` / `series` completion scopes are rejected as a whole while any targeted occurrence is dated after today; the same-day occurrence can still be completed with `single` scope.
 
 - `concierge_service_update_and_completion_flow_sets_ready_for_billing`
   Source:

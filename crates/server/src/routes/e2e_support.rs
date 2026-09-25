@@ -728,7 +728,10 @@ async fn create_appointment(
 ) -> Result<SeededAppointment, String> {
     let id = Uuid::new_v4();
     let title = format!("Clinic follow-up {tag}");
-    let date = (Utc::now() + Duration::days(7))
+    // Today in the business timezone: live staff specs complete this
+    // appointment, and completion only opens on the appointment date.
+    let date = Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
         .date_naive()
         .format("%Y-%m-%d")
         .to_string();

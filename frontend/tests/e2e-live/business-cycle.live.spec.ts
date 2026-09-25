@@ -1070,12 +1070,33 @@ test.describe("business cycle (live API) - execution", () => {
     });
 
     await test.step("complete a medical appointment -> delivered service line (idempotent)", async () => {
+      // Completion opens on the appointment date (Europe/Berlin), so the
+      // completed appointment takes place today; the UTC date is never later.
+      const medicalDate = isoDate(0);
+      const futureMedicalAppointment = await createAppointment(pm, {
+        patientId: onboarded.patientId,
+        orderId: onboarded.orderId,
+        type: "medical",
+        title: `Kontrolle ${onboarded.tag}`,
+        date,
+        start: "15:00",
+        end: "16:00",
+      });
+      const tooEarly = await pm.post(`/appointments/${futureMedicalAppointment}/status`, {
+        status: "completed",
+      });
+      expect(tooEarly.status, `completion before the date: ${describeResult(tooEarly)}`).toBe(422);
+      expect(tooEarly.body.code).toBe("appointment_completion_before_date");
+      await pm.ok("POST", `/appointments/${futureMedicalAppointment}/status`, {
+        status: "cancelled",
+      });
+
       const medicalAppointment = await createAppointment(pm, {
         patientId: onboarded.patientId,
         orderId: onboarded.orderId,
         type: "medical",
         title: `Untersuchung ${onboarded.tag}`,
-        date,
+        date: medicalDate,
         start: "13:00",
         end: "14:00",
       });
@@ -1094,7 +1115,7 @@ test.describe("business cycle (live API) - execution", () => {
       expect(added[0].status).toBe("delivered");
       expect(added[0].source_medical_appointment_id).toBe(medicalAppointment);
       expect(money(added[0].quantity)).toBe(1);
-      const expected = effectiveCatalogPrice(medicalCatalog, date);
+      const expected = effectiveCatalogPrice(medicalCatalog, medicalDate);
       expect.soft(money(added[0].unit_price), "treatment_organization catalog price").toBe(expected.unit_price);
 
       const reopen = await pm.post(`/appointments/${medicalAppointment}/status`, { status: "completed" });
