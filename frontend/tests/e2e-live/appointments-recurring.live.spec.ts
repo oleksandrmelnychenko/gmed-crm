@@ -58,17 +58,21 @@ async function openAppointmentWorkflow(
   await attemptOpen(0);
 }
 
-async function fillRepeatUntil(editForm: Locator, value: string) {
-  const [year = "", month = "", day = ""] = value.split("-");
-  await editForm.getByRole("spinbutton", { name: "Year" }).nth(1).fill(year);
-  await editForm.getByRole("spinbutton", { name: "Month" }).nth(1).fill(month);
-  await editForm.getByRole("spinbutton", { name: "Day" }).nth(1).fill(day);
-}
-
 async function chooseComboboxValue(page: Page, combobox: Locator, value: string) {
   await combobox.click();
   await page.getByPlaceholder(/Suchen|Search|Поиск/i).last().fill(value);
   await page.keyboard.press("Enter");
+}
+
+/** Cancelling appointments asks for confirmation and names the affected count. */
+async function confirmAppointmentCancellation(page: Page, count: number) {
+  const confirmation = page.getByRole("alertdialog", {
+    name: /Termin wirklich absagen\?/i,
+  });
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText(`(${count})`);
+  await confirmation.getByRole("button", { name: /^Termin absagen$/i }).click();
+  await expect(confirmation).toBeHidden();
 }
 
 async function chooseWholeSeries(page: Page, combobox: Locator) {
@@ -79,7 +83,7 @@ async function openScheduleEditor(page: Page) {
   const scheduleSection = page
     .locator("section")
     .filter({
-      has: page.getByRole("heading", { name: /^Termine$/i }),
+      has: page.getByRole("heading", { name: /^Termine?$/i }),
     })
     .last();
   await scheduleSection.getByRole("button", { name: /Bearbeiten|Edit/i }).click();
@@ -170,6 +174,7 @@ test.describe("appointments recurring live workflows", () => {
       .last();
     await expect(cancelWholeSeriesButton).toBeVisible();
     await cancelWholeSeriesButton.click();
+    await confirmAppointmentCancellation(page, 3);
 
     await expect(async () => {
       const refreshed = await fetchSeriesOccurrences(
@@ -230,6 +235,7 @@ test.describe("appointments recurring live workflows", () => {
       .last();
     await expect(cancelSingleButton).toBeVisible();
     await cancelSingleButton.click();
+    await confirmAppointmentCancellation(page, 1);
 
     await expect(async () => {
       const refreshed = await fetchSeriesOccurrences(
@@ -360,8 +366,12 @@ test.describe("appointments recurring live workflows", () => {
       /Anzahl Termine|Total occurrences/i,
       "4",
     );
+    // The series ends either after a count or on a date ("Serienende"); a count
+    // sends no until date. 4 occurrences every 2 weeks end 42 days later.
+    await expect(
+      editForm.getByRole("combobox", { name: /Serienende|Series end/i }),
+    ).toContainText(/Nach Anzahl|After count/i);
     const finalOccurrenceDate = addDaysIso(firstDate!, 42);
-    await fillRepeatUntil(editForm, finalOccurrenceDate);
     const updateRequestPromise = page.waitForRequest(
       (candidate) =>
         candidate.method() === "POST" &&
@@ -473,6 +483,7 @@ test.describe("appointments recurring live workflows", () => {
     });
     await expect(cancelFollowingButton).toBeVisible();
     await cancelFollowingButton.click();
+    await confirmAppointmentCancellation(page, 2);
 
     await expect(async () => {
       const items = await fetchPatientAppointments(
