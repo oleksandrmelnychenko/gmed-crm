@@ -9,6 +9,7 @@ import { fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 import { fetchSpecializationWorkTypes, type SpecializationWorkType } from "@/pages/specializations/data/specialization-work-types-api";
 import type { IntakeDraft } from "../model/order-intake";
+import { costEstimateWorkTypeHint } from "../model/cost-estimate-work-types";
 import { SelectedWorkTypesSummary, specializationChipClass } from "./order-work-types-summary";
 
 export const intakeSpecializationName = (item: SpecializationItem, lang: Lang) => lang === "de"
@@ -79,6 +80,7 @@ export function OrderIntakeWorkTypes({ data, specializations, workTypes, loading
     </div> : null}
     {loading ? <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />{tx("Загрузка видов работ…", "Leistungsarten werden geladen…")}</p> : error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-destructive">{error}<Button type="button" variant="outline" size="sm" onClick={reload}><RefreshCw className="size-3.5" />{tx("Повторить", "Erneut versuchen")}</Button></div> : workTypes.length ?
       <SelectedWorkTypesSummary workTypes={workTypes} specializationLabels={labels} lang={lang} tx={tx} selection={{ ids: selected, onChange: next => { if (!disabled) onChange({ selected_work_type_ids: next }); } }} /> :
-      <p className="py-3 text-xs text-muted-foreground">{ids.length ? tx("Нет активных видов работ", "Keine aktiven Leistungsarten") : tx("Выберите специализацию, чтобы добавить виды работ.", "Wählen Sie eine Fachrichtung, um Leistungsarten hinzuzufügen.")}</p>}
+      ids.length ? <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{costEstimateWorkTypeHint("no_catalog_work_types", tx, { ru: "Новый заказ", de: "Neuer Auftrag" })}</p> :
+      <p className="py-3 text-xs text-muted-foreground">{tx("Выберите специализацию, чтобы добавить виды работ.", "Wählen Sie eine Fachrichtung, um Leistungsarten hinzuzufügen.")}</p>}
   </Section>;
 }

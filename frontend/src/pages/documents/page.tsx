@@ -48,7 +48,9 @@ import { DocumentsGrid } from "@/components/documents-grid";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
+  documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
+  formatCostEstimateGenerationError,
   formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
@@ -626,6 +628,9 @@ function formatGenerateDocumentError(
 
   const amlMessage = formatEnhancedDueDiligenceError(error, lang);
   if (amlMessage !== message) return amlMessage;
+
+  const costEstimateMessage = formatCostEstimateGenerationError(error, lang);
+  if (costEstimateMessage) return costEstimateMessage;
 
   if (message.includes("Treatment plan template requires at least one appointment")) {
     return l("documents_scope");
@@ -4393,11 +4398,9 @@ function StaffDocumentsPage({
                       bindings={generateForm.bindings}
                       lang={lang}
                       templateId={selectedTemplate?.id ?? ""}
-                      useOrderServices={Boolean(
-                        generateForm.orderId &&
-                        ["single_order", "order_cost_estimate", "cost_estimate"].includes(
-                          selectedTemplate?.id ?? "",
-                        ),
+                      useOrderServices={documentTemplateUsesOrderServices(
+                        selectedTemplate?.id ?? "",
+                        generateForm.orderId,
                       )}
                       onChange={updateBindingField}
                     />

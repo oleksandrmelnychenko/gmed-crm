@@ -48,7 +48,11 @@ async function setup(page: Page, language: "ru" | "de", resume = false, failLoad
       return route.fulfill({ json: { ok: true } });
     }
     if (path === "/framework-contracts") return route.fulfill({ json: state.contracts });
-    if (path === "/providers/specializations") return route.fulfill({ json: [{ id: "specialty-qa", code: "urology", name_de: "Urologie", name_ru: "Урология", name_en: "Urology", is_active: true }] });
+    if (path === "/providers/specializations") return route.fulfill({ json: [
+      { id: "specialty-qa", code: "urology", name_de: "Urologie", name_ru: "Урология", name_en: "Urology", is_active: true },
+      // A specialization without catalog work types (its work-type list falls through to []).
+      { id: "specialty-empty", code: "cardiology", name_de: "Kardiologie", name_ru: "Кардиология", name_en: "Cardiology", is_active: true },
+    ] });
     if (path.includes("/specializations/specialty-qa/work-types")) return route.fulfill({ json: [{ id: "work-qa", specialization_id: "specialty-qa", specialization_ids: ["specialty-qa"], code: "surgery", name_de: "Operation", name_ru: "Операция", name_en: "Surgery", name_es: "", min_price_eur: 28000, max_price_eur: 35000, duration_hours: 15, sort_order: 1, is_active: true, descriptions: [] }] });
     if (path === "/agency-services") return route.fulfill({ json: [{
       id: "service-qa", service_name: "Organisation und Begleitung medizinischer Untersuchungen", unit_label: "Std.", description: "Planung: [Fachrichtung 1], [Fachrichtung 2]", currency: "EUR", unit_price: "120", vat_rate: "19", valid_from: "2020-01-01", valid_to: null,
@@ -144,6 +148,48 @@ test("resumed order can remove unavailable work types without losing the special
   await expect.poll(() => state.workspace.data.selected_work_type_ids).toEqual([]);
   expect(state.workspace.data.specialization_ids).toEqual(["specialty-qa"]);
   expect(state.creates).toBe(0);
+});
+
+test("preliminary cost calculation asks for medical work types instead of using agency services", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const state = await setup(page, "ru");
+  const dialog = page.getByTestId("order-wizard");
+  const steps = dialog.getByRole("navigation").getByRole("tab");
+  const create = dialog.getByRole("button", { name: "Создать документ", exact: true });
+  const chooseEstimate = async () => {
+    await steps.nth(4).click();
+    await dialog.getByRole("combobox", { name: "Документ для подготовки", exact: true }).click();
+    await page.getByRole("option", { name: "Предварительный расчёт медицинских расходов", exact: true }).click();
+  };
+
+  await chooseEstimate();
+  await expect(create).toBeDisabled();
+  await expect(dialog.getByText(/Выберите специализацию и медицинские виды работ на этапе «Новый заказ»/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Перейти к видам работ", exact: true }).click();
+  await expect(steps.nth(1)).toHaveAttribute("aria-selected", "true");
+
+  const addSpecialization = dialog.getByRole("combobox", { name: "Добавить специализацию", exact: true });
+  await addSpecialization.click();
+  await page.getByRole("option", { name: "Кардиология", exact: true }).click();
+  await expect(dialog.getByText(/в каталоге нет видов работ/)).toBeVisible();
+  await chooseEstimate();
+  await expect(create).toBeDisabled();
+  await expect(dialog.getByText(/в каталоге нет видов работ/)).toBeVisible();
+
+  await steps.nth(1).click();
+  await addSpecialization.click();
+  await page.getByRole("option", { name: "Урология", exact: true }).click();
+  await chooseEstimate();
+  await expect(create).toBeDisabled();
+  await expect(dialog.getByText(/Услуги агентства в предварительный расчёт не входят/)).toBeVisible();
+
+  await steps.nth(1).click();
+  await dialog.getByRole("row").filter({ hasText: "Операция" }).getByRole("checkbox").check();
+  await expect.poll(() => state.workspace.data.selected_work_type_ids).toEqual(["work-qa"]);
+  await chooseEstimate();
+  await expect(dialog.getByText(/Услуги агентства в предварительный расчёт не входят/)).toHaveCount(0);
+  await create.click();
+  await expect.poll(() => state.generated).toEqual(["cost_estimate"]);
 });
 
 for (const lang of ["ru", "de"] as const) {

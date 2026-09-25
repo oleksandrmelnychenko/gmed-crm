@@ -25,6 +25,10 @@ import { contractUsability, CONTRACT_USABILITY_LABELS } from "../model/order-doc
 import { createOrderIntake, fetchIntakeFacts, fetchOrderIntake, saveOrderIntake } from "../data/order-intake-api";
 import { changedFacts, emptyIntake, formatIntakeDate, intakeTotal, isContractUsable } from "../model/order-intake";
 import type { IntakeAction, IntakeDraft, IntakeFacts, IntakeWorkspace } from "../model/order-intake";
+import { costEstimateWorkTypeHint, costEstimateWorkTypeStatus } from "../model/cost-estimate-work-types";
+
+const WORK_TYPES_STEP = 1;
+const COST_ESTIMATE_WORK_TYPES_REQUIRED = "Select medical work types before creating the preliminary cost calculation";
 
 const STEPS = [
   ["Актуальные данные", "Aktuelle Daten"], ["Новый заказ", "Neuer Auftrag"],
@@ -43,7 +47,9 @@ const FACT_LABELS: Record<keyof IntakeFacts, [string, string]> = {
 };
 const DOC_KINDS = [
   ["framework_contract", "Рамочный договор", "Rahmenvertrag"], ["single_order", "Заказ", "Einzelauftrag"],
-  ["order_cost_estimate", "Согласование стоимости", "Kostenvereinbarung"], ["cost_estimate", "Смета", "Kostenvoranschlag"],
+  ["order_cost_estimate", "Согласование стоимости", "Kostenvereinbarung"],
+  // The VKS lists medical work types only; the agency's Kostenvoranschlag is order_cost_estimate.
+  ["cost_estimate", "Предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation"],
   ["privacy_consents", "Согласие на обработку данных", "Datenschutz-Einwilligung"],
   ["confidentiality_release", "Освобождение от врачебной тайны", "Schweigepflichtentbindung"],
   ["privacy_information", "Информация о защите данных", "Datenschutzinformation"],
@@ -187,11 +193,22 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
   const selectedSpecializations = (data?.specialization_ids ?? []).flatMap(id => { const item = specializationById.get(id); return item ? [item] : []; });
   const workTypeById = new Map([...(data?.catalog_snapshot?.work_types ?? []), ...workCatalog.workTypes].map(item => [item.id, item]));
   const selectedWorkTypes = (data?.selected_work_type_ids ?? []).flatMap(id => { const item = workTypeById.get(id); return item ? [item] : []; });
+  const workTypesStepLabel = { ru: STEPS[WORK_TYPES_STEP][0], de: STEPS[WORK_TYPES_STEP][1] };
+  const costEstimateHint = costEstimateWorkTypeHint(costEstimateWorkTypeStatus({
+    specializationCount: data?.specialization_ids?.length ?? 0,
+    availableWorkTypeCount: workCatalog.workTypes.length,
+    selectedWorkTypeCount: selectedWorkTypes.length,
+    loading: workCatalog.loading,
+    failed: Boolean(workCatalog.error),
+  }), tx, workTypesStepLabel);
   const orderCatalog = [...new Map([...(data?.catalog_snapshot?.services ?? []), ...catalog].map(item => [item.id, item])).values()];
   const amount = intakeTotal(data?.lines ?? []);
   const amountLabel = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", { style: "currency", currency: "EUR" }).format(amount);
   const periodLabel = data?.date_from || data?.date_to ? `${formatIntakeDate(data.date_from)} – ${formatIntakeDate(data.date_to)}` : tx("Период не указан", "Zeitraum nicht angegeben");
   const pep = data?.facts.pep_contract_partner === true || data?.facts.pep_beneficial_owner === true;
+  const selectedDocumentKind = documentKind === "enhanced_due_diligence" && !pep ? "single_order" : documentKind;
+  // The VKS cannot be created without medical work types; agency services never replace them.
+  const documentBlockedHint = selectedDocumentKind === "cost_estimate" ? costEstimateHint : null;
   const selectedContract = contracts.find(contract => contract.id === data?.contract_id);
   const factsChanged = data && workspace ? changedFacts(workspace.baseline_facts, data.facts) : [];
   const prettyFact = (key: keyof IntakeFacts, value: string | boolean | null) => {
@@ -231,7 +248,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
     onStepChange={index => { if (data) void run(async () => { await persist({ ...data, step: index }); }); }}
     title={workspace?.order_number ?? tx("Новый заказ пациента", "Neuer Patientenauftrag")}
     description={`${patient.first_name} ${patient.last_name} · ${patient.patient_id}`}
-    error={error === "API route not found" ? tx("Сервис оформления заказа пока недоступен. Повторите загрузку позже.", "Die Auftragsvorbereitung ist derzeit nicht verfügbar. Bitte laden Sie später erneut.") : error}
+    error={error === "API route not found" ? tx("Сервис оформления заказа пока недоступен. Повторите загрузку позже.", "Die Auftragsvorbereitung ist derzeit nicht verfügbar. Bitte laden Sie später erneut.")
+      : error === COST_ESTIMATE_WORK_TYPES_REQUIRED ? costEstimateWorkTypeHint("not_selected", tx, workTypesStepLabel) : error}
     footer={<>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
         <span>{tx("Этап", "Schritt")} {step + 1} {tx("из", "von")} {STEPS.length}</span>
@@ -329,12 +347,16 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
           ] as const).map(([key, ru, de]) => <Field key={key} label={tx(ru, de)}><Input value={data.aml_review[key]} onChange={event => patch({ aml_review: { ...data.aml_review, [key]: event.target.value } })} /></Field>)}<Field label={tx("Дата проверки", "Prüfdatum")}><Input type="date" value={data.aml_review.review_date ?? ""} onChange={event => patch({ aml_review: { ...data.aml_review, review_date: event.target.value || null } })} /></Field></div></OrderWizardSection> : null}
           <OrderWizardSection flush title={tx("Документы этого заказа", "Dokumente dieses Auftrags")}>
             <div className="flex flex-wrap items-center gap-2 border-b border-border/60 p-2.5">
-              <div className="w-full min-w-0 sm:w-80"><NativeComboboxSelect aria-label={tx("Документ для подготовки", "Dokument zur Erstellung")} disabled={busy} className="h-9 w-full text-xs" value={documentKind === "enhanced_due_diligence" && !pep ? "single_order" : documentKind} onChange={event => setDocumentKind(event.target.value)}>
+              <div className="w-full min-w-0 sm:w-80"><NativeComboboxSelect aria-label={tx("Документ для подготовки", "Dokument zur Erstellung")} disabled={busy} className="h-9 w-full text-xs" value={selectedDocumentKind} onChange={event => setDocumentKind(event.target.value)}>
                 {DOC_KINDS.filter(([kind]) => kind !== "enhanced_due_diligence" || pep).map(([kind, ru, de]) => <option key={kind} value={kind}>{tx(ru, de)}</option>)}
               </NativeComboboxSelect></div>
-              <Button type="button" variant="outline" size="sm" onClick={() => void run(async () => generate(documentKind === "enhanced_due_diligence" && !pep ? "single_order" : documentKind))}><Plus className="size-3.5" />{tx("Создать документ", "Dokument erstellen")}</Button>
+              <Button type="button" variant="outline" size="sm" disabled={Boolean(documentBlockedHint)} aria-describedby={documentBlockedHint ? "order-wizard-document-hint" : undefined} onClick={() => void run(async () => generate(selectedDocumentKind))}><Plus className="size-3.5" />{tx("Создать документ", "Dokument erstellen")}</Button>
               <Button type="button" variant="outline" size="sm" className="sm:ml-auto" onClick={reviewEvidence}><RefreshCw className="size-3.5" />{tx("Обновить проверки", "Prüfungen aktualisieren")}</Button>
             </div>
+            {documentBlockedHint ? <div id="order-wizard-document-hint" role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">
+              <span className="min-w-0 flex-1">{documentBlockedHint}</span>
+              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(async () => { await persist({ ...data, step: WORK_TYPES_STEP }); })}>{tx("Перейти к видам работ", "Zu den Leistungsarten")}</Button>
+            </div> : null}
             <OrderWizardDocumentsTable documents={documents.filter(doc => doc.order_id === workspace?.order_id && doc.is_latest_version && doc.status !== "archived")} currentIds={workspace?.current_document_ids ?? []} lang={lang} busy={busy}
               documentTitle={doc => { const label = DOC_KINDS.find(([kind]) => kind === doc.generated_template_id); return label ? label[language + 1] : doc.auto_name; }}
               onDownload={doc => void run(async () => { await downloadDocumentFile(doc.id, doc.auto_name); })}

@@ -421,6 +421,7 @@ export interface OperationsTranslations {
   lead_readiness_reason_agency_order_signature_missing: string;
   lead_readiness_reason_quote_not_accepted: string;
   lead_readiness_reason_cost_calculation_missing: string;
+  lead_readiness_reason_cost_calculation_work_types_missing: string;
   lead_readiness_reason_prepayment_incomplete: string;
   lead_section_lifecycle: string;
   lead_lifecycle_description: string;
@@ -1038,6 +1039,8 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_quote_not_accepted: "Смета не принята",
   lead_readiness_reason_cost_calculation_missing:
     "Нет предварительного расчёта медицинских расходов",
+  lead_readiness_reason_cost_calculation_work_types_missing:
+    "Не выбраны медицинские виды работ для предварительного расчёта",
   lead_readiness_reason_prepayment_incomplete: "Требуемая предоплата получена не полностью",
   lead_section_lifecycle: "Жизненный цикл лида",
   lead_lifecycle_description:
@@ -1676,6 +1679,8 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_quote_not_accepted: "Kostenvoranschlag ist nicht angenommen",
   lead_readiness_reason_cost_calculation_missing:
     "Vorläufige medizinische Kostenkalkulation fehlt",
+  lead_readiness_reason_cost_calculation_work_types_missing:
+    "Medizinische Leistungsarten für die vorläufige Kostenkalkulation fehlen",
   lead_readiness_reason_prepayment_incomplete: "Erforderliche Vorauszahlung ist nicht vollständig",
   lead_section_lifecycle: "Lead-Lebenszyklus",
   lead_lifecycle_description:

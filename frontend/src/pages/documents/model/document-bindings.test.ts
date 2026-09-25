@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
+  formatCostEstimateGenerationError,
   formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
@@ -323,6 +325,23 @@ describe("document template binding payloads", () => {
     expect(formatEnhancedDueDiligenceError(error, "de")).toContain(
       "Pflichtfelder der AML-Prüfung",
     );
+  });
+
+  it("never takes the preliminary cost calculation lines from the order", () => {
+    expect(documentTemplateUsesOrderServices("single_order", "order-1")).toBe(true);
+    expect(documentTemplateUsesOrderServices("order_cost_estimate", "order-1")).toBe(true);
+    expect(documentTemplateUsesOrderServices("cost_estimate", "order-1")).toBe(false);
+    expect(documentTemplateUsesOrderServices("single_order", null)).toBe(false);
+    expect(DOCUMENT_BINDING_FIELDS.cost_estimate?.some((field) => field.key === "service_lines_text")).toBe(true);
+  });
+
+  it("explains a cost calculation refused for missing medical services", () => {
+    const noWorkTypes = new Error("Select medical work types before creating the preliminary cost calculation");
+    const noLines = new Error("Enter the medical services before creating the preliminary cost calculation");
+    expect(formatCostEstimateGenerationError(noWorkTypes, "ru")).toContain("медицинские виды работ");
+    expect(formatCostEstimateGenerationError(noWorkTypes, "de")).toContain("medizinischen Leistungsarten");
+    expect(formatCostEstimateGenerationError(noLines, "de")).toContain("Agenturleistungen aus dem Auftrag");
+    expect(formatCostEstimateGenerationError(new Error("Unknown document template"), "ru")).toBeNull();
   });
 
   it("keeps fixed legal templates on the protected renderer", () => {

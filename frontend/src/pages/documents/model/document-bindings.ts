@@ -107,6 +107,15 @@ export function isDesignedAgencyDocumentTemplate(templateId: string) {
   return DESIGNED_AGENCY_TEMPLATE_IDS.has(templateId);
 }
 
+/**
+ * Templates whose service lines come from the selected order and its quote.
+ * The preliminary cost calculation (`cost_estimate`) is not one of them: it
+ * lists medical services only, never the agency's order lines.
+ */
+export function documentTemplateUsesOrderServices(templateId: string, orderId?: string | null) {
+  return Boolean(orderId) && (templateId === "single_order" || templateId === "order_cost_estimate");
+}
+
 export function documentBindingFieldLabel(
   field: BindingFieldDef,
   lang: "de" | "ru",
@@ -281,6 +290,25 @@ export function formatEnhancedDueDiligenceError(
   return message;
 }
 
+/** Server refusals for a preliminary cost calculation without medical services. */
+export function formatCostEstimateGenerationError(
+  error: unknown,
+  lang: "de" | "ru",
+): string | null {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "Select medical work types before creating the preliminary cost calculation") {
+    return lang === "de"
+      ? "Wählen Sie zuerst in der Auftragsvorbereitung die medizinischen Leistungsarten aus. Agenturleistungen gehören nicht in die vorläufige Kostenkalkulation."
+      : "Сначала выберите медицинские виды работ при оформлении заказа. Услуги агентства в предварительный расчёт не входят.";
+  }
+  if (message === "Enter the medical services before creating the preliminary cost calculation") {
+    return lang === "de"
+      ? "Tragen Sie die medizinischen Leistungen mit ihren Preisspannen ein. Agenturleistungen aus dem Auftrag werden nicht übernommen."
+      : "Укажите медицинские услуги и диапазоны их стоимости. Услуги агентства из заказа не переносятся.";
+  }
+  return null;
+}
+
 const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "party_street", label: "Patient Straße", labelRu: "Улица пациента", kind: "text" },
   { key: "party_zip", label: "Patient PLZ", labelRu: "Индекс пациента", kind: "text" },
@@ -400,8 +428,8 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "order_date", label: "Datum", labelRu: "Дата расчёта", kind: "date" },
     {
       key: "service_lines_text",
-      label: "Leistungen (eine pro Zeile: Beschreibung | Preis/Spanne)",
-      labelRu: "Услуги и ориентировочные диапазоны стоимости",
+      label: "Medizinische Leistungen (eine pro Zeile: Beschreibung | Preis/Spanne)",
+      labelRu: "Медицинские услуги и ориентировочные диапазоны стоимости",
       kind: "textarea",
     },
     { key: "estimate_total", label: "Gesamt (Spanne)", labelRu: "Ориентировочный итог / диапазон", kind: "text" },

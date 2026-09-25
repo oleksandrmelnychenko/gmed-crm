@@ -20,7 +20,9 @@ import {
 } from "@/pages/documents/data/document-api";
 import {
   DOCUMENT_BINDING_FIELDS,
+  documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
+  formatCostEstimateGenerationError,
   formatEnhancedDueDiligenceError,
   isDesignedAgencyDocumentTemplate,
   patientPartyBindingDefaults,
@@ -328,9 +330,10 @@ export function PatientDocumentGenerateDialog({
       onGenerated?.();
       onOpenChange(false);
     } catch (error) {
-      const amlError = formatEnhancedDueDiligenceError(error, lang);
+      const knownError = formatCostEstimateGenerationError(error, lang)
+        ?? formatEnhancedDueDiligenceError(error, lang);
       const errorMessage =
-        amlError ||
+        knownError ||
         (error instanceof Error
           ? error.message
           : tx("Не удалось сгенерировать документ", "Dokument konnte nicht erstellt werden"));
@@ -581,12 +584,7 @@ export function PatientDocumentGenerateDialog({
                 bindings={form.bindings}
                 lang={lang}
                 templateId={selectedTemplate.id}
-                useOrderServices={Boolean(
-                  form.orderId &&
-                    ["single_order", "order_cost_estimate", "cost_estimate"].includes(
-                      selectedTemplate.id,
-                    ),
-                )}
+                useOrderServices={documentTemplateUsesOrderServices(selectedTemplate.id, form.orderId)}
                 onChange={(key, value) => {
                   setValidationError("");
                   setForm((current) => ({

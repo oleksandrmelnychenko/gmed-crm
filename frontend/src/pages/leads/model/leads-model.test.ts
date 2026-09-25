@@ -75,6 +75,7 @@ const SERVER_READINESS_REASONS = [
   "Agency order signature is missing",
   "Quote is not accepted",
   "Preliminary cost calculation document is missing",
+  "Medical work types are not selected",
   "Lead is already converted",
 ];
 
@@ -251,6 +252,9 @@ describe("lead errors", () => {
     expect(leadErrorMessage(new Error("Phone is already used by another person"), de)).toBe(
       "Diese Telefonnummer wird bereits von einer anderen Person verwendet",
     );
+    const noWorkTypes = new Error("Select medical work types before creating the preliminary cost calculation");
+    expect(leadErrorMessage(noWorkTypes, ru)).toContain("медицинские виды работ");
+    expect(leadErrorMessage(noWorkTypes, de)).toContain("medizinischen Leistungsarten");
   });
 
   it("localizes structured backend validation messages without leaking field keys", () => {

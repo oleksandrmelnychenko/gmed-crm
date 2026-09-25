@@ -9,6 +9,7 @@ import type { ServiceLine } from "@/pages/orders/model/order-service-line";
 import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 export { resolveServiceDescriptionTemplate, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 import { SelectedWorkTypesSummary, workTypeDurationLabel } from "@/pages/orders/ui/order-work-types-summary";
+import { costEstimateWorkTypeHint, costEstimateWorkTypeStatus } from "@/pages/orders/model/cost-estimate-work-types";
 export { SelectedWorkTypesSummary } from "@/pages/orders/ui/order-work-types-summary";
 import { serviceDescriptionItems, serviceDescriptionText, type ServiceDescriptionItem } from "@/lib/service-description";
 import {
@@ -531,6 +532,11 @@ const COST_THRESHOLD_ID = "lead-wizard-cost-threshold";
 const ORDER_DOCUMENT_ID = "lead-wizard-order-document";
 const ORDER_COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-order-cost-estimate-document";
 const COST_ESTIMATE_DOCUMENT_ID = "lead-wizard-cost-estimate-document";
+const COST_ESTIMATE_WORK_TYPES_ID = "lead-wizard-cost-estimate-work-types";
+/** Server readiness reason (crates/server/src/routes/leads.rs): the VKS lists medical work types only. */
+const COST_ESTIMATE_WORK_TYPES_REASON = "Medical work types are not selected";
+const COST_ESTIMATE_OUTDATED_REASON = "Preliminary cost calculation document is missing";
+const COST_ESTIMATE_WORK_TYPES_STEP = { ru: "Оформление заказа", de: "Auftragserfassung" };
 const WIZARD_DOCUMENT_SECTION_CLASS = "rounded-xl border border-border/70 bg-card p-4";
 
 const DISCOVERY_SOURCE_OPTIONS = [
@@ -2031,6 +2037,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Quote is not accepted": tx("Подтвердите смету", "Kostenvoranschlag annehmen"),
     "Cost estimate document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
     "Preliminary cost calculation document is missing": tx("Создайте предварительный расчёт медицинских расходов", "Vorläufige medizinische Kostenkalkulation erstellen"),
+    [COST_ESTIMATE_WORK_TYPES_REASON]: tx("Выберите медицинские виды работ для предварительного расчёта", "Medizinische Leistungsarten für die vorläufige Kostenkalkulation auswählen"),
     "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
   };
@@ -2068,6 +2075,7 @@ function readinessReasonStep(reason: string): StepId {
     "Quote is not accepted": "commercial",
     "Cost estimate document is missing": "commercial",
     "Preliminary cost calculation document is missing": "commercial",
+    [COST_ESTIMATE_WORK_TYPES_REASON]: "order",
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
   };
@@ -2095,6 +2103,10 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Cost estimate document is missing": COST_ESTIMATE_DOCUMENT_ID,
     "Preliminary cost calculation document is missing": COST_ESTIMATE_DOCUMENT_ID,
   };
+  if (reason === COST_ESTIMATE_WORK_TYPES_REASON) {
+    // The work-type list appears once a specialization is chosen.
+    return draft && draft.specialties.length === 0 ? SERVICE_SPECIALTIES_ID : COST_ESTIMATE_WORK_TYPES_ID;
+  }
   if (reason === "Complete street, city and postal code" || reason === "Complete city and postal code") {
     if (!draft?.street.trim() && reason !== "Complete city and postal code") return MASTER_FIELD_IDS.street;
     if (!draft?.city.trim()) return MASTER_FIELD_IDS.city;
@@ -2974,6 +2986,22 @@ export function LeadWizard({
       workTypesBySpecialization,
     ],
   );
+  // The VKS lists medical work types only; agency services never stand in for them.
+  const costEstimateStatus = costEstimateWorkTypeStatus({
+    specializationCount: draft?.specialties.length ?? 0,
+    availableWorkTypeCount: selectedSpecializationItems.reduce(
+      (count, specialization) => count + (workTypesBySpecialization[specialization.id]?.length ?? 0),
+      0,
+    ),
+    selectedWorkTypeCount: selectedCostEstimateWorkTypes.length,
+    loading: !workTypesError && (
+      workTypesLoading
+      || commercialLookupsLoading
+      || selectedSpecializationItems.some((specialization) => !(specialization.id in workTypesBySpecialization))
+    ),
+    failed: Boolean(workTypesError),
+  });
+  const costEstimateHint = costEstimateWorkTypeHint(costEstimateStatus, tx, COST_ESTIMATE_WORK_TYPES_STEP);
   const selectedSpecializationLabelById = useMemo(
     () => new Map(
       selectedSpecializationItems.map((specialization) => [
@@ -3668,9 +3696,12 @@ export function LeadWizard({
     const clientName = lead
       ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
       : "";
-    const totalLabel = templateId === "cost_estimate" && selectedCostEstimateWorkTypes.length > 0
-      ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
-      : `${formatMoneyValue(estimate.gross, lang)} EUR`;
+    // The VKS total is the medical work-type range; the agency order total never applies.
+    const totalLabel = templateId !== "cost_estimate"
+      ? `${formatMoneyValue(estimate.gross, lang)} EUR`
+      : selectedCostEstimateWorkTypes.length > 0
+        ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
+        : null;
     const prepaymentLabel = !prepayment
       ? tx("не требуется", "nicht erforderlich")
       : prepaymentAmount.trim()
@@ -3703,10 +3734,12 @@ export function LeadWizard({
             <dt className="sr-only">{tx("Заказ", "Auftrag")}</dt>
             <dd>{tx("Заказ", "Auftrag")}: {order?.order_number || tx("ещё не создан", "noch nicht erstellt")}</dd>
           </div>
-          <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
-            <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
-            <dd>{tx("Итого", "Gesamt")}: {totalLabel}</dd>
-          </div>
+          {totalLabel ? (
+            <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
+              <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
+              <dd>{tx("Итого", "Gesamt")}: {totalLabel}</dd>
+            </div>
+          ) : null}
           {templateId !== "cost_estimate" ? (
             <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
               <dt className="sr-only">{tx("Предоплата", "Vorauszahlung")}</dt>
@@ -4982,7 +5015,7 @@ ${serviceCommentLines.join("\n")}`
         });
       } else {
         const remaining = (nextLead?.readiness.blocking_reasons ?? [])
-          .filter((reason) => readinessReasonStep(reason) === "commercial")
+          .filter((reason) => readinessReasonStep(reason) === "commercial" || reason === COST_ESTIMATE_WORK_TYPES_REASON)
           .map((reason) => readinessReasonLabel(reason, tx));
         setCommercialSaveFeedback({
           tone: "warning",
@@ -5193,20 +5226,10 @@ ${serviceCommentLines.join("\n")}`
   async function generateCommercialDocument(templateId: CommercialDocumentKind) {
     if (!leadId || !draft || commercialGenerationInFlightRef.current) return;
     const validServiceLines = lines.filter(validLine);
-    const usesSpecializationWorkTypes = selectedCostEstimateWorkTypes.length > 0;
-    if (
-      templateId === "cost_estimate"
-      && !usesSpecializationWorkTypes
-      && validServiceLines.length === 0
-    ) {
+    // The VKS lists the selected medical work types only, never the agency's services.
+    if (templateId === "cost_estimate" && costEstimateHint) {
       setError("");
-      setCommercialDocumentErrors((current) => ({
-        ...current,
-        cost_estimate: tx(
-          "Добавьте хотя бы одну позицию заказа или выберите вид работы на этапе «Оформление заказа».",
-          "Fügen Sie mindestens eine Auftragsposition hinzu oder wählen Sie im Schritt „Auftragserfassung“ eine Leistungsart aus.",
-        ),
-      }));
+      setCommercialDocumentErrors((current) => ({ ...current, cost_estimate: costEstimateHint }));
       return;
     }
     const normalizedPrepaymentAmount = prepaymentAmount.trim();
@@ -5303,11 +5326,9 @@ ${serviceCommentLines.join("\n")}`
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,
           estimate_total: templateId === "cost_estimate"
-            ? usesSpecializationWorkTypes
-              ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
-              : `${formatMoneyValue(documentEstimate.gross, "de")} EUR`
+            ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
             : `${documentEstimate.gross.toFixed(2)} EUR`,
-          service_lines: templateId === "cost_estimate" && usesSpecializationWorkTypes
+          service_lines: templateId === "cost_estimate"
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
                 draft.costEstimateAdditionalLanguage,
@@ -7118,7 +7139,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </div>
                 {selectedSpecializationItems.length > 0 ? (
-                  <div className="mt-3 border-t border-border/70 pt-3">
+                  <div id={COST_ESTIMATE_WORK_TYPES_ID} tabIndex={-1} className="mt-3 border-t border-border/70 pt-3 focus:outline-none">
                     <div className="mb-2 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold text-foreground">
@@ -7148,6 +7169,11 @@ ${serviceCommentLines.join("\n")}`
                     </div>
                     {workTypesError ? (
                       <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
+                    ) : null}
+                    {costEstimateStatus === "no_catalog_work_types" && costEstimateHint ? (
+                      <p role="status" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                        {costEstimateHint}
+                      </p>
                     ) : null}
                     {!workTypesLoading && !workTypesError ? (
                       <div
@@ -7890,7 +7916,8 @@ ${serviceCommentLines.join("\n")}`
                       type="button"
                       size="sm"
                       className="h-8 rounded-lg"
-                      disabled={isBusy}
+                      disabled={isBusy || costEstimateStatus !== "ready"}
+                      aria-describedby={costEstimateHint ? `${COST_ESTIMATE_DOCUMENT_ID}-hint` : undefined}
                       onClick={() => void generateCommercialDocument("cost_estimate")}
                       variant="default"
                     >
@@ -7911,6 +7938,40 @@ ${serviceCommentLines.join("\n")}`
                   onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                   onChanged={() => { void refreshDocumentsState(); }}
                 />
+                {costEstimateHint ? (
+                  <div id={`${COST_ESTIMATE_DOCUMENT_ID}-hint`} className="mt-3">
+                    {costEstimateStatus === "loading" ? (
+                      <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin motion-reduce:animate-none" />
+                        {costEstimateHint}
+                      </p>
+                    ) : (
+                      <Banner tone="warning">
+                        <p>{costEstimateHint}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-2 h-8"
+                          disabled={isBusy}
+                          onClick={() => openReadinessReason(COST_ESTIMATE_WORK_TYPES_REASON)}
+                        >
+                          {tx("Перейти к видам работ", "Zu den Leistungsarten")}
+                        </Button>
+                      </Banner>
+                    )}
+                  </div>
+                ) : commercialDocuments.cost_estimate.length > 0
+                  && lead?.readiness.blocking_reasons.includes(COST_ESTIMATE_OUTDATED_REASON) ? (
+                  <div className="mt-3">
+                    <Banner tone="warning">
+                      {tx(
+                        "Предварительный расчёт не отражает выбранные медицинские виды работ. Создайте новую версию.",
+                        "Die vorläufige Kostenkalkulation enthält die gewählten medizinischen Leistungsarten nicht. Erstellen Sie eine neue Version.",
+                      )}
+                    </Banner>
+                  </div>
+                ) : null}
                 {renderCommercialDocumentError("cost_estimate")}
                 </Section>
               </div>

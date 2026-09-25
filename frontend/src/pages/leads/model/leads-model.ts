@@ -46,6 +46,10 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "lead already converted": ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"],
   "lead is already converted": ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"],
   "no order services available for quote": ["Добавьте хотя бы одну услугу", "Mindestens eine Leistung hinzufügen"],
+  "select medical work types before creating the preliminary cost calculation": [
+    "Сначала выберите медицинские виды работ на этапе «Оформление заказа». Услуги агентства в предварительный расчёт не входят",
+    "Wählen Sie zuerst im Schritt „Auftragserfassung“ die medizinischen Leistungsarten aus. Agenturleistungen gehören nicht in die vorläufige Kostenkalkulation",
+  ],
   "failed to create quote": ["Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"],
   "case intake is incomplete": ["Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"],
   "failed to import attachments": ["Не удалось импортировать файлы лида", "Lead-Dateien konnten nicht importiert werden"],
@@ -566,6 +570,8 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Cost estimate document is missing": "lead_readiness_reason_cost_calculation_missing",
   "Preliminary cost calculation document is missing":
     "lead_readiness_reason_cost_calculation_missing",
+  "Medical work types are not selected":
+    "lead_readiness_reason_cost_calculation_work_types_missing",
   "Required prepayment is not complete": "lead_readiness_reason_prepayment_incomplete",
 };
 
