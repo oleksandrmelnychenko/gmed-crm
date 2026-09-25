@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { t as translateCatalog } from "@/lib/i18n";
+
 import {
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   LEAD_WIZARD_SERVICE_OPTIONS,
@@ -7,10 +9,105 @@ import {
   leadErrorBlockingReasons,
   leadErrorMessage,
   leadPermissions,
+  leadReadinessCheckLabel,
+  leadReadinessReasonLabel,
   normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
   updateLeadServiceSelection,
 } from "./leads-model";
+
+// Mirrors the readiness payload built in crates/server/src/routes/leads.rs.
+const SERVER_READINESS_CHECK_KEYS = [
+  "lead_qualified",
+  "compliance_completed",
+  "birth_date_present",
+  "legal_sex_present",
+  "primary_contact_present",
+  "privacy_consent",
+  "healthcare_consent",
+  "address_present",
+  "primary_concern_present",
+  "specialties_present",
+  "identity_document_verified",
+  "dsgvo_document_signed",
+  "confidentiality_release_signed",
+  "enhanced_due_diligence_document_generated",
+  "enhanced_due_diligence_document_signed",
+  "medical_characteristics_present",
+  "contract_signed",
+  "framework_document_generated",
+  "order_exists",
+  "order_service_ready",
+  "order_document_generated",
+  "order_cost_estimate_document_generated",
+  "order_signed_patient",
+  "order_signed_agency",
+  "quote_accepted",
+  "cost_estimate_document_generated",
+  "debt_clear",
+  "prepayment_ready",
+];
+
+const SERVER_READINESS_REASONS = [
+  "Compliance is not signed yet",
+  "Birth date is missing",
+  "Legal sex is missing",
+  "Email or phone is required",
+  "Privacy practices consent is missing",
+  "Healthcare consent is missing",
+  "Lead must be qualified before conversion",
+  "Complete street, city and postal code",
+  "Primary concern is missing",
+  "Requested specialty is missing",
+  "Identity document is not verified",
+  "Signed DSGVO document is missing",
+  "Signed confidentiality release is missing",
+  "Enhanced due diligence document is missing",
+  "Enhanced due diligence document is not signed",
+  "Framework contract was terminated; create a new contract",
+  "Framework contract is not signed",
+  "Framework contract document is missing",
+  "Onboarding order is missing",
+  "Order needs at least one valid service",
+  "Order document is missing",
+  "Order cost estimate document is missing",
+  "Customer order signature is missing",
+  "Agency order signature is missing",
+  "Quote is not accepted",
+  "Preliminary cost calculation document is missing",
+  "Lead is already converted",
+];
+
+describe("lead readiness labels", () => {
+  for (const lang of ["de", "ru"] as const) {
+    const tr = translateCatalog(lang);
+
+    it(`translates every server readiness check (${lang})`, () => {
+      for (const key of SERVER_READINESS_CHECK_KEYS) {
+        const label = leadReadinessCheckLabel({ key, label: `raw ${key}` }, tr);
+        expect(label, key).not.toBe(`raw ${key}`);
+        expect(label.trim(), key).not.toBe("");
+      }
+    });
+
+    it(`translates every server blocking reason (${lang})`, () => {
+      for (const reason of SERVER_READINESS_REASONS) {
+        const label = leadReadinessReasonLabel(reason, tr);
+        expect(label, reason).not.toBe(reason);
+        expect(label.trim(), reason).not.toBe("");
+      }
+    });
+  }
+
+  it("names the terminated framework contract in German", () => {
+    expect(
+      leadReadinessReasonLabel(
+        "Framework contract was terminated; create a new contract",
+        translateCatalog("de"),
+      ),
+    ).toBe("Rahmenvertrag wurde gekündigt – neuen Vertrag erstellen");
+  });
+});
 
 describe("lead release permissions", () => {
   it("gives Concierge and the CEO assistant the grid without detail or mutation rights", () => {

@@ -493,8 +493,36 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
   primary_contact_present: "lead_readiness_check_primary_contact_present",
   privacy_consent: "lead_readiness_check_privacy_consent",
   healthcare_consent: "lead_readiness_check_healthcare_consent",
+  address_present: "lead_readiness_check_address_present",
+  primary_concern_present: "lead_readiness_check_primary_concern_present",
+  specialties_present: "lead_readiness_check_specialties_present",
+  identity_document_verified: "lead_readiness_check_identity_document_verified",
+  dsgvo_document_signed: "lead_readiness_check_dsgvo_document_signed",
+  confidentiality_release_signed:
+    "lead_readiness_check_confidentiality_release_signed",
+  enhanced_due_diligence_document_generated:
+    "lead_readiness_check_enhanced_due_diligence_document_generated",
+  enhanced_due_diligence_document_signed:
+    "lead_readiness_check_enhanced_due_diligence_document_signed",
+  medical_characteristics_present:
+    "lead_readiness_check_medical_characteristics_present",
+  contract_signed: "lead_readiness_check_contract_signed",
+  framework_document_generated: "lead_readiness_check_framework_document_generated",
+  order_exists: "lead_readiness_check_order_exists",
+  order_service_ready: "lead_readiness_check_order_service_ready",
+  order_document_generated: "lead_readiness_check_order_document_generated",
+  order_cost_estimate_document_generated:
+    "lead_readiness_check_order_cost_estimate_document_generated",
+  order_signed_patient: "lead_readiness_check_order_signed_patient",
+  order_signed_agency: "lead_readiness_check_order_signed_agency",
+  quote_accepted: "lead_readiness_check_quote_accepted",
+  cost_estimate_document_generated:
+    "lead_readiness_check_cost_estimate_document_generated",
+  debt_clear: "lead_readiness_check_debt_clear",
+  prepayment_ready: "lead_readiness_check_prepayment_ready",
 };
 
+/** Server readiness blocking reasons (crates/server/src/routes/leads.rs). */
 const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
   "Compliance is not signed yet": "lead_readiness_reason_compliance_not_signed",
   "Birth date is missing": "lead_readiness_reason_birth_date_missing",
@@ -505,6 +533,40 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Lead must be qualified before conversion":
     "lead_readiness_reason_lead_must_be_qualified",
   "Lead is already converted": "lead_readiness_reason_already_converted",
+  "Complete street, city and postal code": "lead_readiness_reason_address_incomplete",
+  "Complete city and postal code": "lead_readiness_reason_city_zip_incomplete",
+  "Primary concern is missing": "lead_readiness_reason_primary_concern_missing",
+  "Requested specialty is missing": "lead_readiness_reason_specialty_missing",
+  "Anamnesis intake is incomplete": "lead_readiness_reason_anamnesis_incomplete",
+  "Identity document is not verified": "lead_readiness_reason_identity_not_verified",
+  "Signed DSGVO document is missing": "lead_readiness_reason_dsgvo_document_missing",
+  "Signed confidentiality release is missing":
+    "lead_readiness_reason_confidentiality_release_missing",
+  "Enhanced due diligence document is missing":
+    "lead_readiness_reason_edd_document_missing",
+  "Enhanced due diligence document is not signed":
+    "lead_readiness_reason_edd_document_unsigned",
+  "Framework contract was terminated; create a new contract":
+    "lead_readiness_reason_framework_contract_terminated",
+  "Framework contract is not signed":
+    "lead_readiness_reason_framework_contract_unsigned",
+  "Framework contract document is missing":
+    "lead_readiness_reason_framework_document_missing",
+  "Onboarding order is missing": "lead_readiness_reason_order_missing",
+  "Order needs at least one valid service":
+    "lead_readiness_reason_order_service_missing",
+  "Order document is missing": "lead_readiness_reason_order_document_missing",
+  "Order cost estimate document is missing":
+    "lead_readiness_reason_order_cost_estimate_missing",
+  "Customer order signature is missing":
+    "lead_readiness_reason_customer_order_signature_missing",
+  "Agency order signature is missing":
+    "lead_readiness_reason_agency_order_signature_missing",
+  "Quote is not accepted": "lead_readiness_reason_quote_not_accepted",
+  "Cost estimate document is missing": "lead_readiness_reason_cost_calculation_missing",
+  "Preliminary cost calculation document is missing":
+    "lead_readiness_reason_cost_calculation_missing",
+  "Required prepayment is not complete": "lead_readiness_reason_prepayment_incomplete",
 };
 
 function runtimeTranslations(translations?: Translations) {

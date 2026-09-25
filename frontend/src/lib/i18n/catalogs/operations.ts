@@ -379,6 +379,49 @@ export interface OperationsTranslations {
   lead_readiness_reason_healthcare_missing: string;
   lead_readiness_reason_lead_must_be_qualified: string;
   lead_readiness_reason_already_converted: string;
+  lead_readiness_check_address_present: string;
+  lead_readiness_check_primary_concern_present: string;
+  lead_readiness_check_specialties_present: string;
+  lead_readiness_check_identity_document_verified: string;
+  lead_readiness_check_dsgvo_document_signed: string;
+  lead_readiness_check_confidentiality_release_signed: string;
+  lead_readiness_check_enhanced_due_diligence_document_generated: string;
+  lead_readiness_check_enhanced_due_diligence_document_signed: string;
+  lead_readiness_check_medical_characteristics_present: string;
+  lead_readiness_check_contract_signed: string;
+  lead_readiness_check_framework_document_generated: string;
+  lead_readiness_check_order_exists: string;
+  lead_readiness_check_order_service_ready: string;
+  lead_readiness_check_order_document_generated: string;
+  lead_readiness_check_order_cost_estimate_document_generated: string;
+  lead_readiness_check_order_signed_patient: string;
+  lead_readiness_check_order_signed_agency: string;
+  lead_readiness_check_quote_accepted: string;
+  lead_readiness_check_cost_estimate_document_generated: string;
+  lead_readiness_check_debt_clear: string;
+  lead_readiness_check_prepayment_ready: string;
+  lead_readiness_reason_address_incomplete: string;
+  lead_readiness_reason_city_zip_incomplete: string;
+  lead_readiness_reason_primary_concern_missing: string;
+  lead_readiness_reason_specialty_missing: string;
+  lead_readiness_reason_anamnesis_incomplete: string;
+  lead_readiness_reason_identity_not_verified: string;
+  lead_readiness_reason_dsgvo_document_missing: string;
+  lead_readiness_reason_confidentiality_release_missing: string;
+  lead_readiness_reason_edd_document_missing: string;
+  lead_readiness_reason_edd_document_unsigned: string;
+  lead_readiness_reason_framework_contract_terminated: string;
+  lead_readiness_reason_framework_contract_unsigned: string;
+  lead_readiness_reason_framework_document_missing: string;
+  lead_readiness_reason_order_missing: string;
+  lead_readiness_reason_order_service_missing: string;
+  lead_readiness_reason_order_document_missing: string;
+  lead_readiness_reason_order_cost_estimate_missing: string;
+  lead_readiness_reason_customer_order_signature_missing: string;
+  lead_readiness_reason_agency_order_signature_missing: string;
+  lead_readiness_reason_quote_not_accepted: string;
+  lead_readiness_reason_cost_calculation_missing: string;
+  lead_readiness_reason_prepayment_incomplete: string;
   lead_section_lifecycle: string;
   lead_lifecycle_description: string;
   lead_current_stage: string;
@@ -944,6 +987,58 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_lead_must_be_qualified:
     "Перед созданием пациента лид должен быть квалифицирован",
   lead_readiness_reason_already_converted: "Лид уже конвертирован",
+  lead_readiness_check_address_present: "Адрес заполнен (при медицинском согласии)",
+  lead_readiness_check_primary_concern_present: "Причина обращения указана",
+  lead_readiness_check_specialties_present: "Специализация выбрана",
+  lead_readiness_check_identity_document_verified: "Документ, удостоверяющий личность, проверен",
+  lead_readiness_check_dsgvo_document_signed: "Документ DSGVO подписан",
+  lead_readiness_check_confidentiality_release_signed:
+    "Освобождение от врачебной тайны подписано",
+  lead_readiness_check_enhanced_due_diligence_document_generated:
+    "Усиленная AML-проверка оформлена (если требуется)",
+  lead_readiness_check_enhanced_due_diligence_document_signed:
+    "Документ усиленной AML-проверки подписан (если требуется)",
+  lead_readiness_check_medical_characteristics_present: "Медицинские данные заполнены",
+  lead_readiness_check_contract_signed: "Рамочный договор подписан",
+  lead_readiness_check_framework_document_generated: "Документ рамочного договора создан",
+  lead_readiness_check_order_exists: "Заказ создан",
+  lead_readiness_check_order_service_ready: "Услуга в заказе настроена",
+  lead_readiness_check_order_document_generated: "Документ заказа создан",
+  lead_readiness_check_order_cost_estimate_document_generated: "Смета к заказу создана",
+  lead_readiness_check_order_signed_patient: "Заказ подписан клиентом",
+  lead_readiness_check_order_signed_agency: "Заказ подписан агентством",
+  lead_readiness_check_quote_accepted: "Смета принята",
+  lead_readiness_check_cost_estimate_document_generated:
+    "Предварительный расчёт медицинских расходов создан",
+  lead_readiness_check_debt_clear: "Нет просроченных счетов",
+  lead_readiness_check_prepayment_ready: "Требуемая предоплата получена",
+  lead_readiness_reason_address_incomplete: "Заполните улицу, город и почтовый индекс",
+  lead_readiness_reason_city_zip_incomplete: "Заполните город и почтовый индекс",
+  lead_readiness_reason_primary_concern_missing: "Не указана причина обращения",
+  lead_readiness_reason_specialty_missing: "Не выбрана специализация",
+  lead_readiness_reason_anamnesis_incomplete: "Анамнез заполнен не полностью",
+  lead_readiness_reason_identity_not_verified:
+    "Документ, удостоверяющий личность, не проверен",
+  lead_readiness_reason_dsgvo_document_missing: "Нет подписанного документа DSGVO",
+  lead_readiness_reason_confidentiality_release_missing:
+    "Нет подписанного освобождения от врачебной тайны",
+  lead_readiness_reason_edd_document_missing: "Нет документа усиленной AML-проверки",
+  lead_readiness_reason_edd_document_unsigned: "Документ усиленной AML-проверки не подписан",
+  lead_readiness_reason_framework_contract_terminated:
+    "Рамочный договор расторгнут — оформите новый договор",
+  lead_readiness_reason_framework_contract_unsigned: "Рамочный договор не подписан",
+  lead_readiness_reason_framework_document_missing: "Нет документа рамочного договора",
+  lead_readiness_reason_order_missing: "Заказ не создан",
+  lead_readiness_reason_order_service_missing:
+    "В заказе должна быть хотя бы одна действующая услуга",
+  lead_readiness_reason_order_document_missing: "Нет документа заказа",
+  lead_readiness_reason_order_cost_estimate_missing: "Нет сметы к заказу",
+  lead_readiness_reason_customer_order_signature_missing: "Нет подписи клиента на заказе",
+  lead_readiness_reason_agency_order_signature_missing: "Нет подписи агентства на заказе",
+  lead_readiness_reason_quote_not_accepted: "Смета не принята",
+  lead_readiness_reason_cost_calculation_missing:
+    "Нет предварительного расчёта медицинских расходов",
+  lead_readiness_reason_prepayment_incomplete: "Требуемая предоплата получена не полностью",
   lead_section_lifecycle: "Жизненный цикл лида",
   lead_lifecycle_description:
     "Последовательная история квалификации, обработки неуспешного лида и конверсии.",
@@ -1524,8 +1619,64 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_healthcare_missing:
     "Medizinische Einwilligung fehlt",
   lead_readiness_reason_lead_must_be_qualified:
-    "Vor dem Anlegen eines Patienten muss der Lead qualified sein",
+    "Vor dem Anlegen eines Patienten muss der Lead qualifiziert sein",
   lead_readiness_reason_already_converted: "Lead ist bereits konvertiert",
+  lead_readiness_check_address_present: "Adresse erfasst (bei medizinischer Einwilligung)",
+  lead_readiness_check_primary_concern_present: "Anliegen erfasst",
+  lead_readiness_check_specialties_present: "Gewünschte Fachrichtung ausgewählt",
+  lead_readiness_check_identity_document_verified: "Ausweisdokument geprüft",
+  lead_readiness_check_dsgvo_document_signed: "DSGVO-Dokument unterschrieben",
+  lead_readiness_check_confidentiality_release_signed:
+    "Schweigepflichtsentbindung unterschrieben",
+  lead_readiness_check_enhanced_due_diligence_document_generated:
+    "Verstärkte AML-Sorgfaltsprüfung dokumentiert (falls erforderlich)",
+  lead_readiness_check_enhanced_due_diligence_document_signed:
+    "Dokument zur verstärkten AML-Sorgfaltsprüfung unterschrieben (falls erforderlich)",
+  lead_readiness_check_medical_characteristics_present: "Medizinische Merkmale erfasst",
+  lead_readiness_check_contract_signed: "Rahmenvertrag unterschrieben",
+  lead_readiness_check_framework_document_generated: "Rahmenvertragsdokument erstellt",
+  lead_readiness_check_order_exists: "Auftrag angelegt",
+  lead_readiness_check_order_service_ready: "Leistung im Auftrag erfasst",
+  lead_readiness_check_order_document_generated: "Auftragsdokument erstellt",
+  lead_readiness_check_order_cost_estimate_document_generated:
+    "Kostenvoranschlag zum Auftrag erstellt",
+  lead_readiness_check_order_signed_patient: "Auftrag vom Kunden unterschrieben",
+  lead_readiness_check_order_signed_agency: "Auftrag von der Agentur unterschrieben",
+  lead_readiness_check_quote_accepted: "Kostenvoranschlag angenommen",
+  lead_readiness_check_cost_estimate_document_generated:
+    "Vorläufige medizinische Kostenkalkulation erstellt",
+  lead_readiness_check_debt_clear: "Keine überfälligen Rechnungen",
+  lead_readiness_check_prepayment_ready: "Erforderliche Vorauszahlung erhalten",
+  lead_readiness_reason_address_incomplete: "Straße, Ort und Postleitzahl vervollständigen",
+  lead_readiness_reason_city_zip_incomplete: "Ort und Postleitzahl vervollständigen",
+  lead_readiness_reason_primary_concern_missing: "Anliegen fehlt",
+  lead_readiness_reason_specialty_missing: "Gewünschte Fachrichtung fehlt",
+  lead_readiness_reason_anamnesis_incomplete: "Anamnese ist unvollständig",
+  lead_readiness_reason_identity_not_verified: "Ausweisdokument ist nicht geprüft",
+  lead_readiness_reason_dsgvo_document_missing: "Unterschriebenes DSGVO-Dokument fehlt",
+  lead_readiness_reason_confidentiality_release_missing:
+    "Unterschriebene Schweigepflichtsentbindung fehlt",
+  lead_readiness_reason_edd_document_missing:
+    "Dokument zur verstärkten AML-Sorgfaltsprüfung fehlt",
+  lead_readiness_reason_edd_document_unsigned:
+    "Dokument zur verstärkten AML-Sorgfaltsprüfung ist nicht unterschrieben",
+  lead_readiness_reason_framework_contract_terminated:
+    "Rahmenvertrag wurde gekündigt – neuen Vertrag erstellen",
+  lead_readiness_reason_framework_contract_unsigned: "Rahmenvertrag ist nicht unterschrieben",
+  lead_readiness_reason_framework_document_missing: "Rahmenvertragsdokument fehlt",
+  lead_readiness_reason_order_missing: "Auftrag fehlt",
+  lead_readiness_reason_order_service_missing:
+    "Der Auftrag benötigt mindestens eine gültige Leistung",
+  lead_readiness_reason_order_document_missing: "Auftragsdokument fehlt",
+  lead_readiness_reason_order_cost_estimate_missing: "Kostenvoranschlag zum Auftrag fehlt",
+  lead_readiness_reason_customer_order_signature_missing:
+    "Unterschrift des Kunden zum Auftrag fehlt",
+  lead_readiness_reason_agency_order_signature_missing:
+    "Unterschrift der Agentur zum Auftrag fehlt",
+  lead_readiness_reason_quote_not_accepted: "Kostenvoranschlag ist nicht angenommen",
+  lead_readiness_reason_cost_calculation_missing:
+    "Vorläufige medizinische Kostenkalkulation fehlt",
+  lead_readiness_reason_prepayment_incomplete: "Erforderliche Vorauszahlung ist nicht vollständig",
   lead_section_lifecycle: "Lead-Lebenszyklus",
   lead_lifecycle_description:
     "Sequenzielle Historie für Qualifikation, Bearbeitung nicht erfolgreicher Leads und Konvertierung.",

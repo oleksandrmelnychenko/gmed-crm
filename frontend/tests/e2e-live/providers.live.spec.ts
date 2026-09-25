@@ -342,7 +342,7 @@ test.describe("provider registry live workflows", () => {
     await chooseFieldOption(page, providerForm, /^Land$/i, /Deutschland|Germany/i);
     await chooseFieldOption(page, providerForm, /Fachbereich/i, /Cardiology|Kardiologie/i);
     await chooseFieldOption(page, providerForm, /Organisationsebene/i, /Klinik/i);
-    await chooseFieldOption(page, providerForm, /Uebergeordneter Provider/i, parentProvider.name);
+    await chooseFieldOption(page, providerForm, /(Ü|Ue)bergeordneter Provider/i, parentProvider.name);
     await providerForm.getByRole("button", { name: /^Telefon hinzufügen$/i }).click();
     await providerForm.getByLabel(/^Telefon$/i).fill(providerPhone);
     await providerForm.getByRole("button", { name: /^E-Mail hinzufügen$/i }).click();
@@ -411,11 +411,11 @@ test.describe("provider registry live workflows", () => {
     await expect(readOnlyDoctorSheet).toBeHidden();
 
     await page.getByRole("button", { name: /Beziehung/i }).first().click();
-    const relationshipForm = formWithHeading(page, /Beziehung hinzufuegen/i);
+    const relationshipForm = formWithHeading(page, /Beziehung hinzuf(ü|ue)gen/i);
     await expect(relationshipForm).toBeVisible();
     await chooseFieldOption(page, relationshipForm, /Zielarzt/i, new RegExp(`Release ${targetDoctorLastName}`));
-    await chooseFieldOption(page, relationshipForm, /Beziehungstyp/i, /Ueberweisung|referral/i);
-    await relationshipForm.getByRole("button", { name: /Beziehung hinzufuegen/i }).click();
+    await chooseFieldOption(page, relationshipForm, /Beziehungstyp/i, /Überweisung|Ueberweisung|referral/i);
+    await relationshipForm.getByRole("button", { name: /Beziehung hinzuf(ü|ue)gen/i }).click();
     await expect(
       page
         .locator("main")

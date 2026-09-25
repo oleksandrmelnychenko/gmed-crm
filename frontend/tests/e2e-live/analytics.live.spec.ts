@@ -8,7 +8,7 @@ import {
 
 const REPORTS_WORKSPACE_HEADING = "Berichtsarbeitsbereich";
 const DASHBOARD_HEADING = /Guten (Morgen|Tag|Abend),/i;
-const SALES_KPI_HEADING = "Vertriebs-KPI-Ubersicht";
+const SALES_KPI_HEADING = "Vertriebs-KPI-Übersicht";
 const PIPELINE_HEADING = "Prognose-Pipeline";
 const COLLECTIONS_HEADING = "Forderungsprognose";
 const FOLLOWUP_HEADING = "Nachsorge-Prognose";

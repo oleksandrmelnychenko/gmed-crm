@@ -381,7 +381,7 @@ const revenueReportsTextDe = {
           costPassthroughShare: "Anteil Durchlaufkosten",
         },
         sales: {
-          title: "Vertriebs-KPI-Ubersicht",
+          title: "Vertriebs-KPI-Übersicht",
           description:
             "Lead-Dynamik, Konversionsdruck und Wachstum neuer Kliniken aus der CRM-Schicht.",
           leadCountries: (count: number) => `${count} Lead-Länder`,

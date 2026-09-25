@@ -16,7 +16,7 @@ export const de = {
   app_subtitle: "Medizintourismus-Management",
   app_not_found_title: "Seite nicht gefunden",
   app_not_found_body:
-    "Diese Route existiert nicht oder ist fuer die aktuelle Sitzung nicht verfuegbar.",
+    "Diese Route existiert nicht oder ist für die aktuelle Sitzung nicht verfügbar.",
 
   nav_dashboard: "Dashboard",
   nav_concierge_workspace: "Arbeitszentrale",
@@ -115,9 +115,9 @@ export const de = {
   users_unlock: "Entsperren",
   users_password_hint: "Min. 8 Zeichen",
   users_password_policy_hint:
-    "Min. 8 Zeichen: Klein-/Grossbuchstabe, Zahl und Sonderzeichen",
+    "Min. 8 Zeichen: Klein-/Großbuchstabe, Zahl und Sonderzeichen",
   users_password_policy_complexity:
-    "Passwort muss Klein-/Grossbuchstaben, Zahl und Sonderzeichen enthalten",
+    "Passwort muss Klein-/Großbuchstaben, Zahl und Sonderzeichen enthalten",
   users_confirm_password: "Passwort bestätigen",
   users_password_mismatch: "Passwörter stimmen nicht überein",
   users_admins: "Administratoren",
@@ -410,11 +410,11 @@ export const de = {
   providers_amount: "Betrag",
   providers_select_first: "Zuerst Provider auswählen",
   providers_price_numeric: "Preis muss numerisch sein",
-  providers_delete_provider_confirm: "Provider \"{name}\" loeschen?",
-  providers_delete_doctor_confirm: "Arzt \"{name}\" loeschen?",
-  providers_delete_contact_confirm: "Kontakt \"{name}\" loeschen?",
-  providers_delete_staff_confirm: "Mitarbeitenden \"{name}\" loeschen?",
-  providers_delete_service_confirm: "Leistung \"{name}\" loeschen?",
+  providers_delete_provider_confirm: "Provider \"{name}\" löschen?",
+  providers_delete_doctor_confirm: "Arzt \"{name}\" löschen?",
+  providers_delete_contact_confirm: "Kontakt \"{name}\" löschen?",
+  providers_delete_staff_confirm: "Mitarbeitenden \"{name}\" löschen?",
+  providers_delete_service_confirm: "Leistung \"{name}\" löschen?",
   gender_male: "Männlich",
   gender_female: "Weiblich",
   gender_diverse: "Divers",

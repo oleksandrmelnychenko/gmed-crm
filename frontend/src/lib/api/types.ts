@@ -70,7 +70,7 @@ interface LeadReadinessCheck {
   key: string;
   label: string;
   passed: boolean;
-  blocking_for: string;
+  blocking_for: string | null;
   stage?: string;
 }
 

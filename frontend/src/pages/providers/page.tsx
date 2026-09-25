@@ -848,11 +848,11 @@ const TAXONOMY_ATTRIBUTE_LABELS: Record<string, { de: string; ru: string }> = {
   michelin_stars: { de: "Michelin-Sterne", ru: "Звёзды Michelin" },
   room_type: { de: "Zimmertyp", ru: "Тип номера" },
   cuisine: { de: "Kueche", ru: "Кухня" },
-  diet: { de: "Diaet / Ernaehrung", ru: "Диета / питание" },
+  diet: { de: "Diät / Ernährung", ru: "Диета / питание" },
   language: { de: "Sprache", ru: "Язык" },
   music_direction: { de: "Musikrichtung", ru: "Направление музыки" },
   sport_type: { de: "Sportart", ru: "Вид спорта" },
-  government_affiliation: { de: "Staatliche Zugehoerigkeit", ru: "Государственная принадлежность" },
+  government_affiliation: { de: "Staatliche Zugehörigkeit", ru: "Государственная принадлежность" },
   administrative_specialization: { de: "Verwaltungsspezialisierung", ru: "Административная специализация" },
   legal_area: { de: "Rechtsgebiet", ru: "Область права" },
 };

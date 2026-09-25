@@ -598,7 +598,7 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_auto_planned_from_appointment:
     "Automatisch aus Termin {patientPid} · {title} geplant.",
   appointments_auto_planned_completion:
-    "Automatisch beim Terminabschluss fuer {patientPid} · {title} geplant.",
+    "Automatisch beim Terminabschluss für {patientPid} · {title} geplant.",
   appointments_package_follow_up_title: "Nachsorge zum Paketende",
   appointments_package_follow_up_description: "Planen Sie den erforderlichen Reminder einen Monat vor Ende des verknüpften Paket- oder Auftragsfensters.",
   appointments_package_follow_up_reminder_scheduled_for: "Reminder wird geplant für",
@@ -630,7 +630,7 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_interpreter_note: "Notiz",
   appointments_interpreter_saving: "Speichern",
   appointments_report_approved_at: "Freigegeben {date}",
-  appointments_report_returned_at: "Zurueckgegeben {date}",
+  appointments_report_returned_at: "Zurückgegeben {date}",
   appointments_recurring_occurrence_summary:
     "Termin {index} am {date} ({count} {checklistLabel})",
   appointments_edit_recurrence_rule_guidance: "Änderungen an der Wiederholungsregel greifen nur, wenn Sie „diesen und folgende“ oder „ganze Serie“ auswählen. Einzeltermine bleiben von Regeländerungen getrennt.",

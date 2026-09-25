@@ -2049,9 +2049,11 @@ function useLeadsPageContent() {
                           <p className="break-words text-sm font-medium text-foreground">
                             {leadReadinessCheckLabel(check, t)}
                           </p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
-                          </p>
+                          {check.blocking_for ? (
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {t.lead_blocks} {leadStageLabel(check.blocking_for, t)}
+                            </p>
+                          ) : null}
                         </div>
                         <span className="h-px min-w-6 flex-1 bg-border/70" />
                         <Badge

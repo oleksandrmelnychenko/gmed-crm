@@ -331,7 +331,7 @@ const DOCUMENT_VARIANT_OPTIONS: Array<{
   labelDe: string;
 }> = [
   { value: "original", labelRu: "Оригинал", labelDe: "Original" },
-  { value: "translation", labelRu: "Перевод", labelDe: "Uebersetzung" },
+  { value: "translation", labelRu: "Перевод", labelDe: "Übersetzung" },
 ];
 const DOCUMENT_ACCESS_CATEGORY_OPTIONS: Array<{
   value: DocumentAccessCategory;
@@ -341,7 +341,7 @@ const DOCUMENT_ACCESS_CATEGORY_OPTIONS: Array<{
   { value: "internal", labelRu: "Внутренний", labelDe: "Intern" },
   { value: "patient", labelRu: "Пациент", labelDe: "Patient" },
   { value: "provider", labelRu: "Провайдер", labelDe: "Provider" },
-  { value: "authority", labelRu: "Ведомство", labelDe: "Behoerde" },
+  { value: "authority", labelRu: "Ведомство", labelDe: "Behörde" },
   { value: "financial", labelRu: "Финансовый", labelDe: "Finanziell" },
   { value: "medical", labelRu: "Медицинский", labelDe: "Medizinisch" },
   { value: "other", labelRu: "Другое", labelDe: "Sonstiges" },
@@ -354,7 +354,7 @@ const DOCUMENT_FINANCIAL_STATUS_OPTIONS: Array<{
   { value: "open", labelRu: "Открыт", labelDe: "Offen" },
   { value: "in_progress", labelRu: "В работе", labelDe: "In Bearbeitung" },
   { value: "paid", labelRu: "Оплачен", labelDe: "Bezahlt" },
-  { value: "overdue", labelRu: "Просрочен", labelDe: "Ueberfaellig" },
+  { value: "overdue", labelRu: "Просрочен", labelDe: "Überfällig" },
   {
     value: "billed_to_patient",
     labelRu: "Выставлен пациенту",
@@ -368,7 +368,7 @@ const DOCUMENT_PAYMENT_METHOD_OPTIONS: Array<{
   labelDe: string;
 }> = [
   { value: "cash", labelRu: "Наличные", labelDe: "Bar" },
-  { value: "bank_transfer", labelRu: "Перевод", labelDe: "Ueberweisung" },
+  { value: "bank_transfer", labelRu: "Перевод", labelDe: "Überweisung" },
   { value: "card", labelRu: "Карта", labelDe: "Karte" },
   { value: "other", labelRu: "Другое", labelDe: "Sonstiges" },
 ];
@@ -972,7 +972,7 @@ function StaffDocumentsPage({
       lang === "ru" ? "Все категории доступа" : "Alle Zugriffskategorien",
     allFinancialStatuses:
       lang === "ru" ? "Все фин. статусы" : "Alle Finanzstatus",
-    paymentDueDate: lang === "ru" ? "Срок оплаты" : "Faellig am",
+    paymentDueDate: lang === "ru" ? "Срок оплаты" : "Fällig am",
     paymentDate: lang === "ru" ? "Дата оплаты" : "Zahlungsdatum",
     paymentMethod: lang === "ru" ? "Метод оплаты" : "Zahlungsart",
     notFinancial: lang === "ru" ? "Не финансовый" : "Nicht finanziell",
