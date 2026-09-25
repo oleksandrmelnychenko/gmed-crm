@@ -4,12 +4,17 @@ import {
   authenticateApiClient,
   bootstrapFullSmokeScenario,
   chooseComboboxOption,
+  expectPageHeading,
   loginViaApi,
   loginViaUi,
   setGermanLanguage,
 } from "./support/live-helpers";
 
 const SEEDED_MEDICAL_PROVIDER_ID = "c0000000-0000-0000-0000-000000000001";
+// The invoice sheet opens the dunning dialog ("Zahlung nachverfolgen") with
+// "Mahnung hinzufügen"; the dialog records an internal note.
+const ADD_DUNNING_BUTTON_NAME = /Mahnung hinzufügen|Создать взыскание/i;
+const DUNNING_NOTE_NAME = /Interne Notiz|Internal note/i;
 
 function dateInputOffset(days: number) {
   const value = new Date();
@@ -38,17 +43,18 @@ test.describe("commercial live workflows", () => {
     await expect(
       page.locator("h1").filter({ hasText: /Rechnungen|Invoices/i }).first(),
     ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: /Buchhaltungsledger/i }),
-    ).toBeVisible();
+    await expect(page.getByTestId("read-only-banner")).toBeVisible();
+    // The ledger is a toolbar under the invoice table: its year field is labelled
+    // "Buchhaltungsledger".
+    const yearInput = page.getByRole("spinbutton", { name: /Buchhaltungsledger/i });
+    await expect(yearInput).toBeVisible();
     await expect(
       page.getByRole("button", { name: /Neue Rechnung|New invoice/i }),
     ).toHaveCount(0);
 
-    const accountingSection = page
-      .getByRole("heading", { name: /Buchhaltungsledger/i })
-      .locator("xpath=ancestor::*[.//button[normalize-space()='CSV exportieren']][1]");
-    const yearInput = accountingSection.locator('input[type="number"]').first();
+    const accountingSection = yearInput.locator(
+      "xpath=ancestor::*[.//button[normalize-space()='CSV exportieren']][1]",
+    );
     const accountingYear = (await yearInput.inputValue()).trim() || `${new Date().getFullYear()}`;
     await expect(
       accountingSection.getByRole("button", {
@@ -130,7 +136,7 @@ test.describe("commercial live workflows", () => {
     ).toBeDisabled();
     await expect(
       invoiceSheet.getByRole("button", {
-        name: /Mahnung erstellen|Создать взыскание/i,
+        name: ADD_DUNNING_BUTTON_NAME,
       }),
     ).toBeDisabled();
     await expect(
@@ -181,11 +187,11 @@ test.describe("commercial live workflows", () => {
       invoiceSheet.getByRole("button", { name: /Bearbeiten|Edit|Редактировать/i }).first(),
     ).toBeDisabled();
     await expect(
-      invoiceSheet.getByPlaceholder(/Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i),
+      page.getByRole("textbox", { name: DUNNING_NOTE_NAME }),
     ).toHaveCount(0);
     await expect(
       invoiceSheet.getByRole("button", {
-        name: /Mahnung erstellen|Создать взыскание/i,
+        name: ADD_DUNNING_BUTTON_NAME,
       }),
     ).toBeDisabled();
     await expect(
@@ -219,16 +225,17 @@ test.describe("commercial live workflows", () => {
       page.locator("h1").filter({ hasText: /Rechnungen|Invoices/i }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole("heading", { name: /Buchhaltungsledger/i }),
+      page.getByRole("spinbutton", { name: /Buchhaltungsledger/i }),
     ).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: /CSV exportieren|Экспорт CSV/i }),
     ).toHaveCount(0);
+    // Creating invoices is a billing task; patient managers only read them.
     await expect(
       page.getByRole("button", { name: /Neue Rechnung|New invoice/i }),
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
-      page.getByText(scenario.invoice.invoice_number),
+      page.getByRole("table").getByText(scenario.invoice.invoice_number),
     ).toBeVisible();
   });
 
@@ -254,11 +261,20 @@ test.describe("commercial live workflows", () => {
         name: /Billing-Gate speichern|Abrechnungskontrolle speichern|Сохранить billing-gate/i,
       }),
     ).toBeVisible();
+    // The debt workflow is edited in a side panel opened from "Forderungsmanagement".
+    await page
+      .getByText("Forderungsmanagement", { exact: true })
+      .locator("xpath=ancestor::*[.//button[normalize-space()='Bearbeiten']][1]")
+      .getByRole("button", { name: /^Bearbeiten$/ })
+      .click();
+    const debtPanel = page.getByRole("dialog", { name: "Forderungsmanagement" });
     await expect(
-      page.getByRole("button", {
+      debtPanel.getByRole("button", {
         name: /Debt-Workflow speichern|Forderungsprozess speichern|Сохранить debt-workflow/i,
       }),
     ).toBeVisible();
+    await debtPanel.getByRole("button", { name: /^Abbrechen$/ }).click();
+    await expect(debtPanel).toBeHidden();
 
     await expect(
       page.getByRole("button", {
@@ -290,14 +306,14 @@ test.describe("commercial live workflows", () => {
       .getByRole("button", {
         name: /Billing-Gate speichern|Abrechnungskontrolle speichern|Сохранить billing-gate/i,
       })
-      .locator("xpath=ancestor::*[.//textarea][1]");
+      .locator("xpath=ancestor::*[.//*[@role='combobox']][1]");
     await chooseComboboxOption(
       page,
       billingGateSection.getByRole("combobox").first(),
       /Abgelehnt|Denied|Отклонено/i,
     );
     await billingGateSection
-      .locator("textarea")
+      .getByRole("textbox", { name: /Abrechnungsnotiz|Billing note/i })
       .fill("Live E2E billing order-shell proof.");
 
     const saveBillingGateResponse = page.waitForResponse(
@@ -417,9 +433,7 @@ test.describe("commercial live workflows", () => {
     await page.goto(
       `/contracts?patient=${scenario.patient.id}&order=${scenario.order.id}&tab=quotes`,
     );
-    await expect(
-      page.getByRole("heading", { name: /Verträge und Angebote|Договоры и предложения/i }),
-    ).toBeVisible();
+    await expectPageHeading(page, /Verträge und Angebote|Договоры и предложения/i);
 
     const pmApi = await authenticateApiClient(
       request,
@@ -586,17 +600,15 @@ test.describe("commercial live workflows", () => {
       invoiceSheet.getByText(/Rechnungsübersicht|Обзор счёта/i),
     ).toBeVisible();
 
-    await invoiceSheet.getByRole("button", { name: /Mahnung erstellen|Создать взыскание/i }).click();
-    const dunningDialog = billingPage.getByRole("dialog").filter({
-      has: billingPage.getByPlaceholder(
-        /Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i,
-      ),
+    await invoiceSheet.getByRole("button", { name: ADD_DUNNING_BUTTON_NAME }).click();
+    const dunningDialog = billingPage.getByRole("dialog", {
+      name: /Zahlung nachverfolgen/i,
     });
     await expect(
       dunningDialog.getByText(/Erste Mahnung|Первое напоминание/i),
     ).toBeVisible();
     await dunningDialog
-      .getByPlaceholder(/Erinnerungstext oder interner Abrechnungshinweis|Текст напоминания или внутренняя заметка биллинга/i)
+      .getByRole("textbox", { name: DUNNING_NOTE_NAME })
       .fill("First live dunning reminder for the commercial QA flow.");
     const dunningResponse = billingPage.waitForResponse(
       (nextResponse) =>
@@ -604,7 +616,7 @@ test.describe("commercial live workflows", () => {
         nextResponse.request().method() === "POST",
     );
     await dunningDialog
-      .getByRole("button", { name: /Mahnung erstellen|Создать взыскание/i })
+      .getByRole("button", { name: ADD_DUNNING_BUTTON_NAME })
       .click();
     const firstDunningResponse = await dunningResponse;
     const firstDunningBody = await firstDunningResponse.text();
@@ -620,8 +632,12 @@ test.describe("commercial live workflows", () => {
       "First live dunning reminder for the commercial QA flow.",
     );
 
+    await expect(dunningDialog).toBeHidden();
+    // The sheet renders the dunning note more than once (event list and table).
     await expect(
-      invoiceSheet.getByText("First live dunning reminder for the commercial QA flow."),
+      invoiceSheet
+        .getByText("First live dunning reminder for the commercial QA flow.")
+        .first(),
     ).toBeVisible();
 
     await expect(async () => {
@@ -661,13 +677,13 @@ test.describe("commercial live workflows", () => {
       reloadedInvoiceSheet.getByText(createdInvoice.invoice_number).first(),
     ).toBeVisible();
     await expect(
-      reloadedInvoiceSheet.getByText(
-        "First live dunning reminder for the commercial QA flow.",
-      ),
+      reloadedInvoiceSheet
+        .getByText("First live dunning reminder for the commercial QA flow.")
+        .first(),
     ).toBeVisible();
     await expect(
       reloadedInvoiceSheet.getByRole("button", {
-        name: /Mahnung erstellen|Создать взыскание/i,
+        name: ADD_DUNNING_BUTTON_NAME,
       }),
     ).toBeVisible();
 
