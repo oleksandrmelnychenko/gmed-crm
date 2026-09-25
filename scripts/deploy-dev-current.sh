@@ -374,6 +374,19 @@ tag_running_image gmed-crm-invoice-parser-1 "gmed-dev-rollback-invoice-parser:$S
 if [[ -n "$IMAGE_PINS_FILE" ]]; then
   echo "Pulling four verified DEV images; no server-side build..."
   compose "$STAGING_DIR" pull backend frontend clinical-document-parser invoice-parser
+elif [[ -n "${GMED_DEV_PREBUILT_TAG:-}" ]]; then
+  # Images built on the publishing workstation and pushed to the DEV-local
+  # registry (127.0.0.1:5000, reachable only through SSH). Only changed layers
+  # travel, and the DEV host skips the memory-heavy build entirely.
+  if [[ ! "$GMED_DEV_PREBUILT_TAG" =~ ^[A-Za-z0-9_.-]{1,128}$ ]]; then
+    echo "ERROR: invalid prebuilt image tag." >&2
+    exit 1
+  fi
+  echo "Pulling workstation-built DEV images ($GMED_DEV_PREBUILT_TAG); no server-side build..."
+  for service in backend frontend clinical-document-parser invoice-parser; do
+    docker pull -q "127.0.0.1:5000/gmed-crm-$service:$GMED_DEV_PREBUILT_TAG" >/dev/null
+    docker image tag "127.0.0.1:5000/gmed-crm-$service:$GMED_DEV_PREBUILT_TAG" "gmed-crm-$service:latest"
+  done
 else
   echo "Building DEV images with the host Docker cache..."
   export COMPOSE_BAKE=true
