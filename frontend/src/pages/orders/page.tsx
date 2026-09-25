@@ -3526,14 +3526,14 @@ function useOrdersPageContent() {
                     id="orders-search"
                     value={filters.search}
                     data-readonly="exempt"
-                    onChange={(event) =>
-                      startTransition(() =>
-                        setFilters((current) => ({
-                          ...current,
-                          search: event.target.value,
-                        })),
-                      )
-                    }
+                    onChange={(event) => {
+                      // Read the value now: the reducer runs the updater later,
+                      // and a controlled input must update synchronously.
+                      // deferredSearch already keeps the list fetch off the
+                      // typing path.
+                      const search = event.target.value;
+                      setFilters((current) => ({ ...current, search }));
+                    }}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         setFilters((current) => ({ ...current, search: "" }));

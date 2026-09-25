@@ -191,6 +191,9 @@ test.describe("CEO assistant cabinet is read-only", () => {
     await expect(page.getByText("A-RO-1").first()).toBeVisible();
     const search = page.locator("#orders-search");
     await expect(search).toBeEnabled();
+    await search.pressSequentially("A-RO");
+    await expect(search).toHaveValue("A-RO");
+    await search.fill("");
     expect(await writableControls(page)).toEqual([]);
 
     await page.goto(`/orders/${orderId}`);
