@@ -868,6 +868,154 @@ async fn provider_view_does_not_bypass_patient_manager_patient_scope() {
 }
 
 #[tokio::test]
+async fn provider_patient_lists_cap_only_the_patients_the_manager_may_see() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("provider-linked-cap");
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    let bearer = auth_header_for(manager_id, "patient_manager");
+    let provider_id = seed_provider_with_type(&pool, &tag, "medical", "Germany").await;
+    let doctor_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO provider_doctors (provider_id, name)
+           VALUES ($1, $2)
+           RETURNING id"#,
+    )
+    .bind(provider_id)
+    .bind(format!("Busy doctor {tag}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // The manager's own patient was seen a month ago; 205 other patients of the
+    // same doctor were seen more recently and fill the 200-row cap on their own.
+    let own_patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(own_patient_id)
+    .bind(manager_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, doctor_id, appointment_type,
+                title, date, status, created_by
+           ) VALUES (
+                $1, $2, $3, 'medical',
+                'Own appointment', CURRENT_DATE - 30, 'planned', $4
+           )"#,
+    )
+    .bind(own_patient_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"WITH others AS (
+               INSERT INTO patients (
+                    patient_id, first_name, last_name, birth_date, gender, created_by
+               )
+               SELECT format('PT-%s-%s', $1::text, n), format('Other %s', n),
+                      format('Busy %s', n), DATE '1985-01-01', 'diverse', $2
+               FROM generate_series(1, 205) AS n
+               RETURNING id
+           )
+           INSERT INTO appointments (
+                patient_id, provider_id, doctor_id, appointment_type,
+                title, date, time_start, time_end, status, created_by
+           )
+           -- Distinct half-hour slots keep the doctor's schedule conflict-free.
+           SELECT id, $3, $4, 'medical', 'Busy appointment',
+                  CURRENT_DATE - (slot / 20),
+                  TIME '07:00' + (slot % 20) * INTERVAL '30 minutes',
+                  TIME '07:30' + (slot % 20) * INTERVAL '30 minutes',
+                  'planned', $2
+           FROM (SELECT id, row_number() OVER (ORDER BY id)::int - 1 AS slot FROM others) numbered"#,
+    )
+    .bind(&tag)
+    .bind(admin_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let own = json!([own_patient_id.to_string()]);
+    let ids = |items: &Value, key: &str| {
+        json!(
+            items
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item[key].clone())
+                .collect::<Vec<_>>()
+        )
+    };
+
+    for path in [
+        format!("/api/v1/providers/{provider_id}/patients"),
+        format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}/patients"),
+    ] {
+        let (status, patients) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {patients}");
+        assert_eq!(ids(&patients, "id"), own, "{path}");
+    }
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(ids(&detail["linked_patients"], "id"), own);
+    assert_eq!(ids(&detail["interactions"], "patient_uuid"), own);
+    let doctor = detail["doctors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|doctor| doctor["id"] == doctor_id.to_string())
+        .unwrap();
+    assert_eq!(ids(&doctor["linked_patients"], "id"), own);
+    assert_eq!(doctor["patient_count"], 1);
+    assert_eq!(
+        doctor["appointment_count"], 0,
+        "appointment totals over hidden patients stay redacted"
+    );
+
+    let (status, doctor) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/doctors/{doctor_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{doctor}");
+    assert_eq!(ids(&doctor["linked_patients"], "id"), own);
+    assert_eq!(ids(&doctor["interactions"], "patient_uuid"), own);
+    assert_eq!(doctor["appointment_count"], 0);
+
+    let (status, patients) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/providers/{provider_id}/patients"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(patients.as_array().map(Vec::len), Some(200));
+}
+
+#[tokio::test]
 async fn insurance_provider_options_include_patient_insurance_names() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;

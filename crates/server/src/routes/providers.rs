@@ -636,6 +636,66 @@ fn redact_provider_patient_metrics(item: &mut Value) {
     object.insert("last_interaction_at".to_string(), Value::Null);
 }
 
+/// The caller's patient visibility, applied inside the capped linked-patient and
+/// interaction queries so the cap counts only rows the caller may see. It mirrors
+/// `can_access_linked_patient`: a record rule decides first, then an "all
+/// patients" rule, then the role baseline (assignments, Concierge tasks). The
+/// per-row filter still runs afterwards as the authoritative check.
+struct LinkedPatientScope {
+    requires_assignment: bool,
+    baseline_patient_ids: Vec<Uuid>,
+    allowed_record_ids: Vec<Uuid>,
+    record_rule_ids: Vec<Uuid>,
+    all_decision: Option<bool>,
+}
+
+async fn load_linked_patient_scope(
+    state: &AppState,
+    auth: &AuthUser,
+) -> Result<LinkedPatientScope, axum::response::Response> {
+    let rules = crate::routes::patients::load_patient_view_rule_scope(state, auth).await?;
+    let requires_assignment = crate::access::requires_patient_assignment(auth.role);
+    let mut baseline_patient_ids = HashSet::new();
+    if requires_assignment {
+        let scope_error = |e: sqlx::Error| {
+            tracing::error!(error = %e, user_id = %auth.user_id, "Failed to load linked patient scope");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to authorize provider filter",
+            )
+        };
+        baseline_patient_ids =
+            crate::access::load_active_patient_assignment_set(&state.db, auth.user_id)
+                .await
+                .map_err(scope_error)?;
+        if auth.role == Role::Concierge {
+            baseline_patient_ids.extend(
+                crate::access::load_active_concierge_task_patient_access_set(
+                    &state.db,
+                    auth.user_id,
+                )
+                .await
+                .map_err(scope_error)?,
+            );
+        }
+    }
+    Ok(LinkedPatientScope {
+        requires_assignment,
+        baseline_patient_ids: baseline_patient_ids.into_iter().collect(),
+        allowed_record_ids: rules.allowed_record_ids().collect(),
+        record_rule_ids: rules.record_rule_ids().collect(),
+        all_decision: rules.all_decision(),
+    })
+}
+
+/// Patients linked to a provider (or one of its doctors) within the caller's scope.
+struct ProviderLinkedPatients {
+    items: Vec<Value>,
+    /// Some linked patients are outside the caller's scope, so aggregate
+    /// metrics over all of them must stay hidden.
+    restricted: bool,
+}
+
 async fn can_access_linked_patient(
     state: &AppState,
     auth: &AuthUser,
@@ -3230,6 +3290,10 @@ async fn get_provider(
         None
     };
 
+    let linked_patient_scope = match load_linked_patient_scope(&state, &auth).await {
+        Ok(scope) => scope,
+        Err(resp) => return resp,
+    };
     let (
         doctors,
         services,
@@ -3243,10 +3307,10 @@ async fn get_provider(
         children,
         taxonomy,
     ) = tokio::join!(
-        load_doctors_json(&state, &auth, provider_id),
+        load_doctors_json(&state, &auth, &linked_patient_scope, provider_id),
         load_services_json(&state, provider_id),
-        load_provider_patients_json(&state, provider_id, None),
-        load_provider_interactions_json(&state, provider_id, None),
+        load_provider_patients_json(&state, &linked_patient_scope, provider_id, None),
+        load_provider_interactions_json(&state, &linked_patient_scope, provider_id, None),
         load_provider_templates_json(&state, provider_id),
         load_provider_specializations_json(&state, provider_id),
         load_provider_insurances_json(&state, provider_id),
@@ -3277,7 +3341,7 @@ async fn get_provider(
         Err(resp) => return resp,
     };
     let linked_patients = match linked_patients {
-        Ok(items) => items,
+        Ok(linked) => linked.items,
         Err(resp) => return resp,
     };
     let linked_patients =
@@ -3707,8 +3771,12 @@ async fn list_provider_patients(
         return resp;
     }
 
-    let items = match load_provider_patients_json(&state, provider_id, None).await {
-        Ok(items) => items,
+    let scope = match load_linked_patient_scope(&state, &auth).await {
+        Ok(scope) => scope,
+        Err(resp) => return resp,
+    };
+    let items = match load_provider_patients_json(&state, &scope, provider_id, None).await {
+        Ok(linked) => linked.items,
         Err(resp) => return resp,
     };
     match filter_accessible_patient_items(&state, &auth, items, "id").await {
@@ -3974,10 +4042,15 @@ async fn list_doctor_patients(
         return resp;
     }
 
-    let items = match load_provider_patients_json(&state, provider_id, Some(doctor_id)).await {
-        Ok(items) => items,
+    let scope = match load_linked_patient_scope(&state, &auth).await {
+        Ok(scope) => scope,
         Err(resp) => return resp,
     };
+    let items =
+        match load_provider_patients_json(&state, &scope, provider_id, Some(doctor_id)).await {
+            Ok(linked) => linked.items,
+            Err(resp) => return resp,
+        };
     match filter_accessible_patient_items(&state, &auth, items, "id").await {
         Ok(items) => Json(items).into_response(),
         Err(resp) => resp,
@@ -4449,7 +4522,11 @@ async fn list_doctors(
         return resp;
     }
 
-    match load_doctors_json(&state, &auth, provider_id).await {
+    let linked_patient_scope = match load_linked_patient_scope(&state, &auth).await {
+        Ok(scope) => scope,
+        Err(resp) => return resp,
+    };
+    match load_doctors_json(&state, &auth, &linked_patient_scope, provider_id).await {
         Ok(mut doctors) => {
             if let Err(resp) = filter_doctor_linked_patient_items(&state, &auth, &mut doctors).await
             {
@@ -4539,16 +4616,26 @@ async fn get_doctor(
                 Ok(items) => items,
                 Err(resp) => return resp,
             };
-            let linked_patients =
-                match load_provider_patients_json(&state, provider_id, Some(doctor_id)).await {
-                    Ok(items) => items,
-                    Err(resp) => return resp,
-                };
-            let original_patient_count = linked_patients.len();
+            let linked_patient_scope = match load_linked_patient_scope(&state, &auth).await {
+                Ok(scope) => scope,
+                Err(resp) => return resp,
+            };
+            let linked = match load_provider_patients_json(
+                &state,
+                &linked_patient_scope,
+                provider_id,
+                Some(doctor_id),
+            )
+            .await
+            {
+                Ok(linked) => linked,
+                Err(resp) => return resp,
+            };
+            let original_patient_count = linked.items.len();
             let linked_patients = match filter_accessible_patient_items(
                 &state,
                 &auth,
-                linked_patients,
+                linked.items,
                 "id",
             )
             .await
@@ -4556,12 +4643,19 @@ async fn get_doctor(
                 Ok(items) => items,
                 Err(resp) => return resp,
             };
-            let patient_metrics_restricted = linked_patients.len() != original_patient_count;
-            let interactions =
-                match load_provider_interactions_json(&state, provider_id, Some(doctor_id)).await {
-                    Ok(items) => items,
-                    Err(resp) => return resp,
-                };
+            let patient_metrics_restricted =
+                linked.restricted || linked_patients.len() != original_patient_count;
+            let interactions = match load_provider_interactions_json(
+                &state,
+                &linked_patient_scope,
+                provider_id,
+                Some(doctor_id),
+            )
+            .await
+            {
+                Ok(items) => items,
+                Err(resp) => return resp,
+            };
             let interactions = match filter_accessible_patient_items(
                 &state,
                 &auth,
@@ -9572,6 +9666,7 @@ async fn load_provider_children_json(
 async fn load_doctors_json(
     state: &AppState,
     auth: &AuthUser,
+    linked_patient_scope: &LinkedPatientScope,
     provider_id: Uuid,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
     let relationship_view_scope =
@@ -9624,12 +9719,12 @@ async fn load_doctors_json(
         let (specializations, insurance_providers, linked_patients) = tokio::join!(
             load_doctor_specializations_json(state, doctor_id),
             load_doctor_insurances_json(state, doctor_id),
-            load_provider_patients_json(state, provider_id, Some(doctor_id)),
+            load_provider_patients_json(state, linked_patient_scope, provider_id, Some(doctor_id)),
         );
         let specializations = specializations?;
         let insurance_providers = insurance_providers?;
         let linked_patients = linked_patients?;
-        let linked_patient_count = linked_patients.len() as i64;
+        let linked_patient_count = linked_patients.items.len() as i64;
         let phone = row
             .try_get::<Option<String>, _>("phone")
             .unwrap_or_default();
@@ -9671,13 +9766,17 @@ async fn load_doctors_json(
             "phone": phone,
             "email": email,
             "contacts": contacts,
-            "linked_patients": linked_patients,
+            "linked_patients": linked_patients.items,
             "license_number": row.try_get::<Option<String>, _>("license_number").unwrap_or_default(),
             "licensing_country": row.try_get::<Option<String>, _>("licensing_country").unwrap_or_default(),
             "licensing_valid_until": row.try_get::<Option<chrono::NaiveDate>, _>("licensing_valid_until").unwrap_or_default().map(|v| v.to_string()),
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "patient_count": linked_patient_count,
-            "appointment_count": row.try_get::<i64, _>("appointment_count").unwrap_or_default(),
+            "appointment_count": if linked_patients.restricted {
+                0
+            } else {
+                row.try_get::<i64, _>("appointment_count").unwrap_or_default()
+            },
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
             "relationships": relationships,
         }));
@@ -9802,9 +9901,10 @@ async fn load_provider_templates_json(
 
 async fn load_provider_patients_json(
     state: &AppState,
+    scope: &LinkedPatientScope,
     provider_id: Uuid,
     doctor_id: Option<Uuid>,
-) -> Result<Vec<serde_json::Value>, axum::response::Response> {
+) -> Result<ProviderLinkedPatients, axum::response::Response> {
     let rows = sqlx::query(
         r#"WITH links AS (
                 SELECT a.patient_id,
@@ -9914,17 +10014,53 @@ async fn load_provider_patients_json(
                        MAX(last_interaction_at) AS last_interaction_at
                 FROM links
                 GROUP BY patient_id
+            ),
+            scoped AS (
+                SELECT p.id, p.patient_id, p.first_name, p.last_name,
+                       p.address_street, p.address_city, p.address_zip, p.address_country,
+                       l.appointment_count, l.leistung_count, l.concierge_count,
+                       l.last_interaction_at,
+                       (
+                           p.id = ANY($5::uuid[])
+                           OR (
+                               NOT (p.id = ANY($6::uuid[]))
+                               AND CASE
+                                   WHEN $7::boolean IS NOT NULL THEN $7::boolean
+                                   ELSE $3::boolean = false OR p.id = ANY($4::uuid[])
+                               END
+                           )
+                       ) AS visible
+                FROM linked l
+                JOIN patients p ON p.id = l.patient_id
             )
-            SELECT p.id, p.patient_id, p.first_name, p.last_name,
-                   p.address_street, p.address_city, p.address_zip, p.address_country,
-                   l.appointment_count, l.leistung_count, l.concierge_count, l.last_interaction_at
-            FROM linked l
-            JOIN patients p ON p.id = l.patient_id
-            ORDER BY l.last_interaction_at DESC, p.last_name, p.first_name
-            LIMIT 200"#,
+            -- The single summary row keeps the hidden count even when the
+            -- caller sees none of the linked patients.
+            SELECT visible_rows.*, summary.hidden_count
+            FROM (
+                SELECT COUNT(*) FILTER (WHERE visible IS NOT TRUE)::bigint AS hidden_count
+                FROM scoped
+            ) summary
+            LEFT JOIN LATERAL (
+                SELECT s.id, s.patient_id, s.first_name, s.last_name,
+                       s.address_street, s.address_city, s.address_zip, s.address_country,
+                       s.appointment_count, s.leistung_count, s.concierge_count,
+                       s.last_interaction_at
+                FROM scoped s
+                WHERE s.visible
+                ORDER BY s.last_interaction_at DESC, s.last_name, s.first_name
+                LIMIT 200
+            ) visible_rows ON true
+            ORDER BY visible_rows.last_interaction_at DESC,
+                     visible_rows.last_name,
+                     visible_rows.first_name"#,
     )
     .bind(provider_id)
     .bind(doctor_id)
+    .bind(scope.requires_assignment)
+    .bind(&scope.baseline_patient_ids)
+    .bind(&scope.allowed_record_ids)
+    .bind(&scope.record_rule_ids)
+    .bind(scope.all_decision)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -9935,10 +10071,17 @@ async fn load_provider_patients_json(
         )
     })?;
 
+    let restricted = rows.first().is_some_and(|row| {
+        row.try_get::<i64, _>("hidden_count")
+            .is_ok_and(|hidden| hidden > 0)
+    });
     let mut patients = Vec::with_capacity(rows.len());
     for row in rows {
+        let Some(id) = row.try_get::<Option<Uuid>, _>("id").ok().flatten() else {
+            continue;
+        };
         patients.push(json!({
-            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "id": id,
             "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
             "first_name": row.try_get::<String, _>("first_name").unwrap_or_default(),
             "last_name": row.try_get::<String, _>("last_name").unwrap_or_default(),
@@ -9953,11 +10096,15 @@ async fn load_provider_patients_json(
         }));
     }
 
-    Ok(patients)
+    Ok(ProviderLinkedPatients {
+        items: patients,
+        restricted,
+    })
 }
 
 async fn load_provider_interactions_json(
     state: &AppState,
+    scope: &LinkedPatientScope,
     provider_id: Uuid,
     doctor_id: Option<Uuid>,
 ) -> Result<Vec<serde_json::Value>, axum::response::Response> {
@@ -10045,11 +10192,24 @@ async fn load_provider_interactions_json(
                 WHERE cs.provider_id = $1
                   AND $2::uuid IS NULL
             ) interactions
+           WHERE patient_uuid = ANY($5::uuid[])
+              OR (
+                  NOT (patient_uuid = ANY($6::uuid[]))
+                  AND CASE
+                      WHEN $7::boolean IS NOT NULL THEN $7::boolean
+                      ELSE $3::boolean = false OR patient_uuid = ANY($4::uuid[])
+                  END
+              )
            ORDER BY occurred_at DESC, patient_name, title
            LIMIT 200"#,
     )
     .bind(provider_id)
     .bind(doctor_id)
+    .bind(scope.requires_assignment)
+    .bind(&scope.baseline_patient_ids)
+    .bind(&scope.allowed_record_ids)
+    .bind(&scope.record_rule_ids)
+    .bind(scope.all_decision)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {

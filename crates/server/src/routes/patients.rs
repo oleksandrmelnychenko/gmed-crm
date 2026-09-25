@@ -199,7 +199,7 @@ struct PatientRuleCandidate {
 }
 
 #[derive(Default)]
-struct PatientViewRuleScope {
+pub(crate) struct PatientViewRuleScope {
     all: Vec<PatientRuleCandidate>,
     records: HashMap<Uuid, Vec<PatientRuleCandidate>>,
 }
@@ -224,7 +224,7 @@ impl PatientViewRuleScope {
             .map(|rule| rule.allow)
     }
 
-    fn all_decision(&self) -> Option<bool> {
+    pub(crate) fn all_decision(&self) -> Option<bool> {
         self.all
             .iter()
             .max_by_key(|rule| {
@@ -237,19 +237,19 @@ impl PatientViewRuleScope {
             .map(|rule| rule.allow)
     }
 
-    fn allowed_record_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+    pub(crate) fn allowed_record_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
         self.records
             .keys()
             .copied()
             .filter(|patient_id| self.decision(*patient_id) == Some(true))
     }
 
-    fn record_rule_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+    pub(crate) fn record_rule_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
         self.records.keys().copied()
     }
 }
 
-async fn load_patient_view_rule_scope(
+pub(crate) async fn load_patient_view_rule_scope(
     state: &AppState,
     auth: &AuthUser,
 ) -> Result<PatientViewRuleScope, axum::response::Response> {
