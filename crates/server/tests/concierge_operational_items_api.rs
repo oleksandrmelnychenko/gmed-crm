@@ -2866,13 +2866,20 @@ async fn assigned_concierge_task_grants_non_clinical_patient_access_only() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{clinical}");
 
-    for restricted_path in [
-        "cases",
-        "orders",
-        "appointments",
-        "document-alerts",
-        "timeline",
-    ] {
+    // The patient card's appointment list is open to the concierge (medical
+    // appointments as blocked slots); the rest of the care history is not.
+    let (status, appointments) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{appointments}");
+    assert!(appointments.is_array(), "{appointments}");
+
+    for restricted_path in ["cases", "orders", "document-alerts", "timeline"] {
         let (status, response) = json_request(
             &ctx.app,
             "GET",
