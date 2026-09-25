@@ -4,6 +4,7 @@ import {
   authenticateApiClient,
   bootstrapAndLogin,
   bootstrapFullSmokeScenario,
+  expectPageHeading,
   loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
@@ -11,8 +12,9 @@ import {
 function privacyQueueRow(page: Page, requestType: RegExp, reason: string) {
   const escapedReason = reason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const flags = requestType.flags.replace("g", "");
+  // Group the type alternation, otherwise "A|B[..]reason" matches any row with A.
   const combinedMatch = new RegExp(
-    `(${requestType.source}[\\s\\S]*${escapedReason})|(${escapedReason}[\\s\\S]*${requestType.source})`,
+    `((?:${requestType.source})[\\s\\S]*${escapedReason})|(${escapedReason}[\\s\\S]*(?:${requestType.source}))`,
     flags,
   );
   return page
@@ -34,44 +36,103 @@ async function openQueueReviewSheet(page: Page, row: Locator) {
 }
 
 async function closeCurrentSheet(page: Page) {
+  const sheet = page.getByRole("dialog").last();
   await page.getByRole("button", { name: /Schließen|Close/i }).last().click();
+  // The request sheet stays open after "Antrag anlegen" and keeps the chosen
+  // type, so closing it asks to discard; nothing unsaved is left at this point.
+  const discard = page.getByRole("alertdialog", { name: /Ohne Speichern schließen\?/i });
+  const asked = await discard
+    .waitFor({ state: "visible", timeout: 2_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (asked) {
+    await discard.getByRole("button", { name: /^OK$/ }).click();
+  }
+  await expect(sheet).toBeHidden();
 }
 
 test.describe("compliance live workflows", () => {
-  test("patient manager can grant consent and execute a third-party revoke request", async ({
+  // /admin/compliance is a CEO workspace; patient managers are redirected away.
+  test("ceo records a patient consent on the compliance page", async ({
     page,
     request,
   }) => {
     await setGermanLanguage(page);
-    const scenario = await bootstrapAndLogin(page, request, "pm");
-    const consentNote =
-      "Consent granted in the clinic for external provider sharing.";
-    const revokeReason =
-      "Patient withdrew all external provider sharing permissions.";
+    const scenario = await bootstrapAndLogin(page, request, "ceo");
+    const consentNote = `Consent granted in the clinic for external provider sharing ${scenario.tag}.`;
 
     await page.goto(`/admin/compliance?patient=${scenario.patient.id}`);
+    await expectPageHeading(page, /DSGVO \/ Compliance|Compliance/i);
+
     await expect(
-      page.getByRole("heading", { name: /DSGVO \/ Compliance|Compliance/i }),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: "Details" }).first().click();
-    const consentSheet = page.getByRole("dialog").last();
-    await chooseSheetOption(
-      page,
-      consentSheet,
-      /Weitergabe an Dritte|Third-party sharing/i,
-    );
-    await consentSheet.locator("#consent-note").fill(consentNote);
-    await consentSheet
-      .getByRole("button", { name: /Einwilligung erteilen|Grant consent/i })
+      page.getByRole("heading", { name: "Einwilligungen des Patienten" }),
+      "the patient consent section is rendered once",
+    ).toHaveCount(1);
+    // Consents are recorded inline: type, note, "Als erteilt erfassen".
+    const consentsList = page.getByTestId("patient-consents");
+    const consentForm = consentsList.locator("xpath=..");
+    await consentForm.locator("#consent-type").selectOption("third_party_sharing");
+    await consentForm.locator("#consent-note").fill(consentNote);
+    await consentForm
+      .getByRole("button", { name: /Als erteilt erfassen|Grant consent/i })
       .click();
-    await closeCurrentSheet(page);
+    const consentEntry = consentsList.locator("div").filter({ hasText: consentNote }).last();
+    await expect(consentEntry).toBeVisible();
+    await expect(consentEntry.getByText(/^Weitergabe an Dritte$/)).toBeVisible();
+    await expect(consentEntry.getByText(/^aktiv$/i)).toBeVisible();
 
-    const consentTypeRows = page
-      .getByRole("row")
-      .filter({ hasText: /Weitergabe an Dritte|Third-party sharing/i });
-    const consentHistoryRow = consentTypeRows.filter({ hasText: consentNote }).first();
-    await expect(consentHistoryRow).toBeVisible();
+    const api = await authenticateApiClient(
+      request,
+      scenario.credentials.ceo.email,
+      scenario.credentials.password,
+    );
+    const consentsResponse = await request.get(
+      `${api.backendUrl}/api/v1/admin/compliance/patient/${scenario.patient.id}/consents`,
+      { headers: api.headers },
+    );
+    expect(consentsResponse.ok()).toBe(true);
+    const consents = (await consentsResponse.json()) as Array<{
+      consent_type: string;
+      granted: boolean;
+      note: string | null;
+    }>;
+    expect(
+      consents.some(
+        (consent) =>
+          consent.consent_type === "third_party_sharing" &&
+          consent.granted &&
+          consent.note === consentNote,
+      ),
+    ).toBe(true);
+  });
+
+  test("ceo approves and executes a third-party revoke request", async ({
+    page,
+    request,
+  }) => {
+    await setGermanLanguage(page);
+    const scenario = await bootstrapAndLogin(page, request, "ceo");
+    const revokeReason = `Patient withdrew all external provider sharing permissions ${scenario.tag}.`;
+    const api = await authenticateApiClient(
+      request,
+      scenario.credentials.ceo.email,
+      scenario.credentials.password,
+    );
+    const grantResponse = await request.post(
+      `${api.backendUrl}/api/v1/admin/compliance/patient/${scenario.patient.id}/consents`,
+      {
+        headers: api.headers,
+        data: {
+          consent_type: "third_party_sharing",
+          action: "grant",
+          note: "Consent granted in the clinic for external provider sharing.",
+        },
+      },
+    );
+    expect(grantResponse.ok(), await grantResponse.text()).toBe(true);
+
+    await page.goto(`/admin/compliance?patient=${scenario.patient.id}`);
+    await expectPageHeading(page, /DSGVO \/ Compliance|Compliance/i);
 
     await page
       .getByRole("button", { name: /Antrag anlegen|Create request/i })
@@ -83,9 +144,17 @@ test.describe("compliance live workflows", () => {
       /Widerruf der Drittweitergabe|Third-party sharing revoke/i,
     );
     await requestSheet.locator("#privacy-request-reason").fill(revokeReason);
+    const createdRequest = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response
+          .url()
+          .includes(`/admin/compliance/patient/${scenario.patient.id}/privacy-requests`),
+    );
     await requestSheet
       .getByRole("button", { name: /Antrag anlegen|Create request/i })
       .click();
+    expect((await createdRequest).ok()).toBe(true);
     await closeCurrentSheet(page);
 
     const privacyRequestRows = page.getByRole("row").filter({
@@ -178,6 +247,8 @@ test.describe("compliance live workflows", () => {
     await reviewSheet.getByRole("button", { name: /Genehmigen|Approve/i }).click();
     await expect(queueRow.getByText(/Genehmigt|Approved/i)).toBeVisible();
 
+    // The patient manager neither reaches the compliance workspace nor may
+    // execute an erasure through the API.
     const baseUrl = new URL(page.url()).origin;
     const pmContext = await browser.newContext({ baseURL: baseUrl });
     const pmPage = await pmContext.newPage();
@@ -189,14 +260,12 @@ test.describe("compliance live workflows", () => {
       scenario.credentials.password,
     );
     await pmPage.goto(`/admin/compliance?patient=${scenario.patient.id}`);
-
-    const pmQueueRow = privacyQueueRow(pmPage, /Löschantrag|Erasure/i, reason);
-
-    await expect(pmQueueRow).toBeVisible();
-    await expect(pmQueueRow.getByText(/Genehmigt|Approved/i)).toBeVisible();
-    await expect(
-      pmQueueRow.getByRole("button", { name: /Details/i }),
-    ).toHaveCount(0);
+    await expect(pmPage).not.toHaveURL(/\/admin\/compliance/);
+    const pmExecute = await request.post(
+      `${pmApi.backendUrl}/api/v1/admin/compliance/privacy-requests/${created.id}/execute`,
+      { headers: pmApi.headers, data: {} },
+    );
+    expect(pmExecute.status(), await pmExecute.text()).toBe(403);
 
     page.once("dialog", (dialog) => dialog.accept());
     reviewSheet = await openQueueReviewSheet(page, queueRow);
