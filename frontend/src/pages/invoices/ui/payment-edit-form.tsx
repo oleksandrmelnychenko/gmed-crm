@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
+import { hasFormChanges } from "@/lib/form-changes";
 import { cn } from "@/lib/utils";
 
 import {
@@ -24,6 +25,8 @@ type PaymentEditFormProps = {
   busy: boolean;
   cancelLabel: string;
   onCancel: () => void;
+  /** Reports whether the correction differs from the recorded payment. */
+  onDirtyChange?: (dirty: boolean) => void;
   onSubmit: (payload: ReturnType<typeof buildPaymentCorrectionPayload>) => void;
 };
 
@@ -44,10 +47,11 @@ export function PaymentEditForm({
   busy,
   cancelLabel,
   onCancel,
+  onDirtyChange,
   onSubmit,
 }: PaymentEditFormProps) {
   const de = lang === "de";
-  const [form, setForm] = useState<PaymentCorrectionForm>(() => ({
+  const [initialForm] = useState<PaymentCorrectionForm>(() => ({
     requestId: crypto.randomUUID(),
     amountGross: String(payment.amount_gross ?? ""),
     paymentMethod: payment.payment_method,
@@ -56,9 +60,13 @@ export function PaymentEditForm({
     note: payment.note ?? "",
     reason: "",
   }));
+  const [form, setForm] = useState<PaymentCorrectionForm>(initialForm);
   const problem = paymentCorrectionProblem(form, payment, maxAmount);
-  const set = (patch: Partial<PaymentCorrectionForm>) =>
-    setForm((current) => ({ ...current, ...patch }));
+  const set = (patch: Partial<PaymentCorrectionForm>) => {
+    const next = { ...form, ...patch };
+    setForm(next);
+    onDirtyChange?.(hasFormChanges(next, initialForm));
+  };
 
   return (
     <div className="mt-3 space-y-3 border-t border-border/60 pt-3">

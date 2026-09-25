@@ -77,6 +77,14 @@ import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
 import { dunningBlockReason, dunningErrorKey } from "./model/invoice-dunning";
 import { buildPaymentCorrectionPayload, canCorrectPayment } from "./model/payment-correction";
+import {
+  invoiceDetailHasUnsavedInput,
+  newCreditNoteDraft,
+  newPaymentDraft,
+  newRefundDraft,
+  useDraftWithBaseline,
+  type InvoicePrepaymentDraft,
+} from "./model/invoice-detail-drafts";
 import { zugferdErrorMessage } from "./model/zugferd";
 import {
   formatEnumLabelFromKeys,
@@ -867,39 +875,31 @@ function useStaffInvoicesPageContent() {
   const [prepaymentRequestId, setPrepaymentRequestId] = useState(() => crypto.randomUUID());
   const [prepaymentBusy, setPrepaymentBusy] = useState(false);
   const [prepaymentError, setPrepaymentError] = useState<string | null>(null);
-  const [paymentForm, setPaymentForm] = useState({
-    requestId: crypto.randomUUID(),
-    amountGross: "",
-    paymentMethod: "bank_transfer",
-    paymentReference: "",
-    receivedOn: new Date().toISOString().slice(0, 10),
-    note: "",
+  // What the page prefilled for the prepayment; only a change away from it is user input.
+  const [prepaymentBaseline, setPrepaymentBaseline] = useState<InvoicePrepaymentDraft>({
+    invoiceId: "",
+    amount: "",
   });
+  const [paymentDraft, setPaymentForm, resetPaymentForm] = useDraftWithBaseline(() =>
+    newPaymentDraft(undefined),
+  );
+  const paymentForm = paymentDraft.draft;
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [reversingPaymentId, setReversingPaymentId] = useState("");
   const [editingPaymentId, setEditingPaymentId] = useState("");
+  const [paymentCorrectionDirty, setPaymentCorrectionDirty] = useState(false);
   const [reversalNote, setReversalNote] = useState("");
-  const [creditNoteForm, setCreditNoteForm] = useState({
-    requestId: crypto.randomUUID(),
-    amountGross: "",
-    reason: "",
-    issuedOn: new Date().toISOString().slice(0, 10),
-    portalVisible: true,
-  });
+  const [creditNoteDraft, setCreditNoteForm, resetCreditNoteForm] = useDraftWithBaseline(() =>
+    newCreditNoteDraft(),
+  );
+  const creditNoteForm = creditNoteDraft.draft;
   const [creditNoteBusy, setCreditNoteBusy] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [reversingCreditNoteId, setReversingCreditNoteId] = useState("");
   const [creditNoteReversalReason, setCreditNoteReversalReason] = useState("");
-  const [refundForm, setRefundForm] = useState({
-    requestId: crypto.randomUUID(),
-    amountGross: "",
-    paymentMethod: "bank_transfer",
-    paymentReference: "",
-    refundedOn: new Date().toISOString().slice(0, 10),
-    reason: "",
-    note: "",
-  });
+  const [refundDraft, setRefundForm, resetRefundForm] = useDraftWithBaseline(() => newRefundDraft());
+  const refundForm = refundDraft.draft;
   const [refundBusy, setRefundBusy] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
   const [reversingRefundId, setReversingRefundId] = useState("");
@@ -951,29 +951,25 @@ function useStaffInvoicesPageContent() {
 
   useEffect(() => {
     const firstAvailable = detail?.available_prepayments?.[0];
-    setPrepaymentInvoiceId(firstAvailable?.invoice_id ?? "");
-    setPrepaymentAmount(
-      firstAvailable
+    const prefilled: InvoicePrepaymentDraft = {
+      invoiceId: firstAvailable?.invoice_id ?? "",
+      amount: firstAvailable
         ? cappedPrepaymentAmount(
             firstAvailable.available_amount,
             detail?.balance_due,
           )
         : "",
-    );
+    };
+    setPrepaymentInvoiceId(prefilled.invoiceId);
+    setPrepaymentAmount(prefilled.amount);
+    setPrepaymentBaseline(prefilled);
     setPrepaymentRequestId(crypto.randomUUID());
     setPrepaymentError(null);
   }, [detail?.id, detail?.available_prepayments]);
 
   useEffect(() => {
-    const balance = Number(detail?.balance_due ?? 0);
-    setPaymentForm({
-      requestId: crypto.randomUUID(),
-      amountGross: Number.isFinite(balance) && balance > 0 ? balance.toFixed(2) : "",
-      paymentMethod: "bank_transfer",
-      paymentReference: "",
-      receivedOn: new Date().toISOString().slice(0, 10),
-      note: "",
-    });
+    // A prefill, not an edit: the open balance received today is the baseline.
+    resetPaymentForm(newPaymentDraft(detail?.balance_due));
     setPaymentError(null);
     setReversingPaymentId("");
     setReversalNote("");
@@ -1722,7 +1718,8 @@ function useStaffInvoicesPageContent() {
         received_on: paymentForm.receivedOn,
         note: paymentForm.note.trim() || null,
       });
-      setPaymentForm((current) => ({
+      // Recorded values are no longer unsaved; the reload prefills the new balance.
+      resetPaymentForm((current) => ({
         ...current,
         requestId: crypto.randomUUID(),
       }));
@@ -1783,13 +1780,7 @@ function useStaffInvoicesPageContent() {
         issued_on: creditNoteForm.issuedOn,
         portal_visible: creditNoteForm.portalVisible,
       });
-      setCreditNoteForm({
-        requestId: crypto.randomUUID(),
-        amountGross: "",
-        reason: "",
-        issuedOn: new Date().toISOString().slice(0, 10),
-        portalVisible: true,
-      });
+      resetCreditNoteForm(newCreditNoteDraft());
       setReloadToken((current) => current + 1);
     } catch (error) {
       setCreditNoteError(error instanceof Error ? error.message : t.common_error);
@@ -1831,15 +1822,7 @@ function useStaffInvoicesPageContent() {
         reason: refundForm.reason.trim(),
         note: refundForm.note.trim() || null,
       });
-      setRefundForm({
-        requestId: crypto.randomUUID(),
-        amountGross: "",
-        paymentMethod: "bank_transfer",
-        paymentReference: "",
-        refundedOn: new Date().toISOString().slice(0, 10),
-        reason: "",
-        note: "",
-      });
+      resetRefundForm(newRefundDraft());
       setReloadToken((current) => current + 1);
     } catch (error) {
       setRefundError(error instanceof Error ? error.message : t.common_error);
@@ -1885,6 +1868,19 @@ function useStaffInvoicesPageContent() {
   const statusDirty = Boolean(detail && hasFormChanges(statusForm, invoiceToStatusForm(detail)));
   const visibilityDirty = Boolean(detail && hasFormChanges(visibilityForm, invoiceToVisibilityForm(detail)));
   const payerDirty = Boolean(detail && hasFormChanges(payerForm, invoiceToPayerForm(detail)));
+  // The detail sheet's inline forms are prefilled and re-prefilled after every
+  // save, so compare with those prefills instead of tracking edited fields.
+  const detailHasUnsavedInput = invoiceDetailHasUnsavedInput({
+    payment: paymentDraft,
+    creditNote: creditNoteDraft,
+    refund: refundDraft,
+    prepayment: {
+      draft: { invoiceId: prepaymentInvoiceId, amount: prepaymentAmount },
+      baseline: prepaymentBaseline,
+    },
+    reversalTexts: [reversalNote, creditNoteReversalReason, refundReversalReason],
+    paymentCorrectionDirty: editingPaymentId !== "" && paymentCorrectionDirty,
+  });
 
   async function handleSaveStatus() {
     if (!statusDirty || statusBusy) return;
@@ -2488,7 +2484,7 @@ function useStaffInvoicesPageContent() {
         onRetry={() => { setCreateError(null); clearApiCache(); setReloadToken((current) => current + 1); }}
       />
 
-      <Sheet open={Boolean(selectedInvoiceId)} onOpenChange={(open) => {
+      <Sheet dirty={detailHasUnsavedInput} open={Boolean(selectedInvoiceId)} onOpenChange={(open) => {
         if (!open) {
           setSelectedInvoiceId("");
           setDetail(null);
@@ -2498,6 +2494,15 @@ function useStaffInvoicesPageContent() {
           setPayerError(null);
           setDetailError(null);
           setInvoicePdfPreview(null);
+          // Closing discards unsaved input; the next invoice starts from clean forms.
+          resetCreditNoteForm(newCreditNoteDraft());
+          resetRefundForm(newRefundDraft());
+          setEditingPaymentId("");
+          setPaymentCorrectionDirty(false);
+          setReversingCreditNoteId("");
+          setCreditNoteReversalReason("");
+          setReversingRefundId("");
+          setRefundReversalReason("");
           syncQuery({ invoice: null }, { replace: false });
         }
       }}>
@@ -2873,6 +2878,7 @@ function useStaffInvoicesPageContent() {
                                       className="mt-1 h-7 px-2 text-xs"
                                       onClick={() => {
                                         setEditingPaymentId(payment.id);
+                                        setPaymentCorrectionDirty(false);
                                         setReversingPaymentId("");
                                       }}
                                     >
@@ -2905,6 +2911,7 @@ function useStaffInvoicesPageContent() {
                                   busy={paymentBusy}
                                   cancelLabel={t.common_cancel}
                                   onCancel={() => setEditingPaymentId("")}
+                                  onDirtyChange={setPaymentCorrectionDirty}
                                   onSubmit={(payload) => void handleCorrectPayment(payment.id, payload)}
                                 />
                               ) : null}
