@@ -117,6 +117,7 @@ import {
 } from "./sections";
 import {
   isOrderReadinessGateApplicable,
+  orderBlockingReasonSection,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
 import {
@@ -227,6 +228,7 @@ import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
+import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
   CancelLeistungDialog,
@@ -487,46 +489,6 @@ function providerTaxonomyLabel(
     item.provider_taxonomy_node_code ||
     ""
   );
-}
-
-function orderBlockingReasonSection(reason: string): OrderSectionKey {
-  if (
-    reason === "Treatment plan must be finalized before execution" ||
-    reason === "At least one confirmed medical appointment is required" ||
-    reason === "Required non-medical services still need a confirmed booking" ||
-    reason === "Interpreter is required but not assigned yet" ||
-    reason === "Assigned interpreter has not confirmed yet" ||
-    reason === "Interpreter briefing is still pending" ||
-    reason === "Preparation documents still need to be sent" ||
-    /required patient document\(s\) are missing$/.test(reason)
-  ) {
-    return "planning";
-  }
-
-  if (
-    reason === "Patient arrival or execution start is not recorded yet" ||
-    reason === "Medical execution must be completed and backed by delivered appointments or services" ||
-    reason === "Required non-medical services still need execution confirmation" ||
-    reason === "Interpreter-supported execution still needs completion or report confirmation" ||
-    reason === "Execution deviations or incidents must be resolved or marked as not required" ||
-    reason === "Results, Arztbrief or final patient handoff still need to be released" ||
-    /execution checklist item\(s\) remain open$/.test(reason)
-  ) {
-    return "execution";
-  }
-
-  if (
-    reason === "Doctor-directed follow-up is required but not scheduled yet" ||
-    reason === "1-week follow-up is not scheduled yet" ||
-    reason === "1-month follow-up is not scheduled yet" ||
-    reason === "6-month follow-up is not scheduled yet" ||
-    reason === "Package-end follow-up is required but not scheduled yet" ||
-    reason === "No follow-up reminder, task or appointment has been launched yet"
-  ) {
-    return "followup";
-  }
-
-  return "gates";
 }
 
 type OrdersPageState = {
@@ -5096,31 +5058,15 @@ function useOrdersPageContent() {
                         />
                       </div>
 
-                      {orderDetail.planning_preparation.interpreter_required ? (
-                        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-200 bg-orange-50/60 px-4 py-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-orange-950">
-                              {lang === "de" ? "Dolmetscher einem Termin zuweisen" : "Назначить переводчика"}
-                            </p>
-                            <p className="mt-0.5 text-xs leading-5 text-orange-900/75">
-                              {lang === "de"
-                                ? "Der Dolmetscher wird einem konkreten Termin dieses Auftrags zugewiesen."
-                                : "Переводчик назначается на конкретный приём этого заказа."}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="h-8 shrink-0 rounded-lg"
-                            onClick={() => staffGo(detailAppointmentsHref)}
-                          >
-                            <CalendarClock className="size-3.5" />
-                            {orderDetail.planning_preparation.interpreter_assigned > 0
-                              ? (lang === "de" ? "Zuweisung prüfen" : "Проверить назначение")
-                              : (lang === "de" ? "Termin öffnen" : "Открыть приёмы")}
-                          </Button>
-                        </div>
-                      ) : null}
+                      <OrderInterpreterCallout
+                        orderId={orderDetail.id}
+                        patientId={detailPatientId}
+                        lang={lang}
+                        reloadNonce={reloadNonce}
+                        planning={orderDetail.planning_preparation}
+                        appointmentsHref={detailAppointmentsHref}
+                        onNavigate={staffGo}
+                      />
 
                       {planningReadinessApplicable ? (
                         orderDetail.planning_preparation.blocking_reasons

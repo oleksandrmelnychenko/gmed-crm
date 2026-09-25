@@ -1,5 +1,7 @@
 import type { UiTextValues } from "@/lib/i18n";
 
+import type { OrderSectionKey } from "../sections";
+
 export type OrderBlockingReasonTranslation = {
   key: string;
   values?: UiTextValues;
@@ -156,4 +158,54 @@ export function resolveOrderBlockingReason(
   }
 
   return null;
+}
+
+const PLANNING_REASONS = new Set([
+  "Treatment plan must be finalized before execution",
+  "At least one confirmed medical appointment is required",
+  "Required non-medical services still need a confirmed booking",
+  "Interpreter is required but not assigned yet",
+  "Assigned interpreter has not confirmed yet",
+  "Interpreter briefing is still pending",
+  "Preparation documents still need to be sent",
+]);
+
+const EXECUTION_REASONS = new Set([
+  "Patient arrival or execution start is not recorded yet",
+  "Medical execution must be completed and backed by delivered appointments or services",
+  "Required non-medical services still need execution confirmation",
+  "Interpreter-supported execution still needs completion or report confirmation",
+  "Execution deviations or incidents must be resolved or marked as not required",
+]);
+
+// Results handoff and the follow-up schedule are recorded in the follow-up
+// section ("Наблюдение"), not in execution.
+const FOLLOWUP_REASONS = new Set([
+  "Results, Arztbrief or final patient handoff still need to be released",
+  "Doctor-directed follow-up is required but not scheduled yet",
+  "1-week follow-up is not scheduled yet",
+  "1-month follow-up is not scheduled yet",
+  "6-month follow-up is not scheduled yet",
+  "Package-end follow-up is required but not scheduled yet",
+  "No follow-up reminder, task or appointment has been launched yet",
+]);
+
+/**
+ * Order workspace section where a lifecycle blocker is resolved; the "Open"
+ * link of the blocker list navigates there. Reasons are the server's texts.
+ */
+export function orderBlockingReasonSection(reason: string): OrderSectionKey {
+  if (
+    PLANNING_REASONS.has(reason) ||
+    /^\d+ required patient document\(s\) are missing$/.test(reason)
+  ) {
+    return "planning";
+  }
+  // Execution checklist items are worked off in the order task list ("Задачи").
+  if (/^\d+ execution checklist item\(s\) remain open$/.test(reason)) {
+    return "workflow";
+  }
+  if (EXECUTION_REASONS.has(reason)) return "execution";
+  if (FOLLOWUP_REASONS.has(reason)) return "followup";
+  return "gates";
 }

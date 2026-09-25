@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isOrderReadinessGateApplicable,
+  orderBlockingReasonSection,
   resolveOrderBlockingReason,
 } from "./blocking-reasons";
 
@@ -51,5 +52,46 @@ describe("resolveOrderBlockingReason", () => {
 
   it("returns null for unknown values so the localized generic fallback is used", () => {
     expect(resolveOrderBlockingReason("Unexpected future blocker")).toBeNull();
+  });
+});
+
+describe("orderBlockingReasonSection", () => {
+  it("opens the task list for open execution checklist items", () => {
+    expect(orderBlockingReasonSection("1 execution checklist item(s) remain open")).toBe("workflow");
+    expect(orderBlockingReasonSection("12 execution checklist item(s) remain open")).toBe("workflow");
+  });
+
+  it("opens the follow-up section for results handoff and follow-up scheduling", () => {
+    for (const reason of [
+      "Results, Arztbrief or final patient handoff still need to be released",
+      "Doctor-directed follow-up is required but not scheduled yet",
+      "1-week follow-up is not scheduled yet",
+      "1-month follow-up is not scheduled yet",
+      "6-month follow-up is not scheduled yet",
+      "Package-end follow-up is required but not scheduled yet",
+      "No follow-up reminder, task or appointment has been launched yet",
+    ]) {
+      expect(orderBlockingReasonSection(reason), reason).toBe("followup");
+    }
+  });
+
+  it("keeps execution evidence in the execution section", () => {
+    for (const reason of [
+      "Patient arrival or execution start is not recorded yet",
+      "Medical execution must be completed and backed by delivered appointments or services",
+      "Required non-medical services still need execution confirmation",
+      "Interpreter-supported execution still needs completion or report confirmation",
+      "Execution deviations or incidents must be resolved or marked as not required",
+    ]) {
+      expect(orderBlockingReasonSection(reason), reason).toBe("execution");
+    }
+  });
+
+  it("sends planning blockers to planning and everything else to the gates", () => {
+    expect(orderBlockingReasonSection("Assigned interpreter has not confirmed yet")).toBe("planning");
+    expect(orderBlockingReasonSection("Treatment plan must be finalized before execution")).toBe("planning");
+    expect(orderBlockingReasonSection("2 required patient document(s) are missing")).toBe("planning");
+    expect(orderBlockingReasonSection("Order signatures are still incomplete")).toBe("gates");
+    expect(orderBlockingReasonSection("Order status must be active (currently paused)")).toBe("gates");
   });
 });
