@@ -1026,12 +1026,15 @@ async fn seed_complete_lead_onboarding(
     .await
     .map_err(|error| format!("prepare lead onboarding fixture: {error}"))?;
 
+    // The lead wizard's prospect step reuses the intake case by source_lead_id;
+    // a case linked only through the legacy lead_id column would be created a
+    // second time and the conversion would hit idx_cases_source_lead_unique.
     sqlx::query(
         r#"INSERT INTO cases (
-                case_id, lead_id, manager_id, status, hauptanfragegrund,
+                case_id, lead_id, source_lead_id, manager_id, status, hauptanfragegrund,
                 zuweiser, intake_completed_at, intake_completed_by
            ) VALUES (
-                $1, $2, $3, 'open', 'Cardiology follow-up',
+                $1, $2, $2, $3, 'open', 'Cardiology follow-up',
                 'Self referral', now(), $3
            )"#,
     )
@@ -1113,29 +1116,44 @@ async fn seed_complete_lead_onboarding(
     .await
     .map_err(|error| format!("insert lead order fixture: {error}"))?;
 
-    sqlx::query(
+    let service_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO order_leistungen (
                 order_id, description, quantity, unit_price, vat_rate, client_reference
-           ) VALUES ($1, 'Initial cardiology coordination', 1, 100, 19, $2)"#,
+           ) VALUES ($1, 'Initial cardiology coordination', 1, 100, 19, $2)
+           RETURNING id"#,
     )
     .bind(order_id)
     .bind(format!("lead-onboarding:{lead_id}:service:1"))
-    .execute(&state.db)
+    .fetch_one(&state.db)
     .await
     .map_err(|error| format!("insert lead order service fixture: {error}"))?;
 
+    // Conversion readiness compares the accepted quote's line items with the
+    // order services, so the quote carries the same single line.
+    let quote_line_items = serde_json::json!([{
+        "source_order_leistung_id": service_id,
+        "description": "Initial cardiology coordination",
+        "quantity": "1",
+        "unit_price": "100",
+        "vat_rate": "19",
+        "line_net": "100",
+        "line_vat": "19",
+        "line_gross": "119",
+        "is_cost_passthrough": false
+    }]);
     sqlx::query(
         r#"INSERT INTO quotes (
                 order_id, quote_number, total_net, total_vat, total_gross,
                 status, paid_amount, paid_at, line_items, created_by
            ) VALUES (
                 $1, $2, 100, 19, 119,
-                'accepted', 119, now(), '[]'::jsonb, $3
+                'accepted', 119, now(), $4, $3
            )"#,
     )
     .bind(order_id)
     .bind(format!("KV-E2E-{tag}"))
     .bind(created_by)
+    .bind(quote_line_items)
     .execute(&state.db)
     .await
     .map_err(|error| format!("insert lead quote fixture: {error}"))?;
