@@ -48,6 +48,15 @@ export async function chooseComboboxOption(
   await option.click();
 }
 
+/**
+ * Every page renders one h1; on desktop it sits in the top bar next to the page
+ * actions, which can truncate it to zero width. Assert the page title exists
+ * instead of requiring it to be visible.
+ */
+export async function expectPageHeading(page: Page, name: string | RegExp) {
+  await expect(page.getByRole("heading", { level: 1, name }).first()).toBeAttached();
+}
+
 export async function ensureDetailsOpen(details: Locator) {
   if (!(await details.evaluate((node) => (node as HTMLDetailsElement).open))) {
     await details.locator("summary").click();

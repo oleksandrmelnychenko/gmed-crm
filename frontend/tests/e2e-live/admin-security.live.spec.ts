@@ -1,6 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-import { bootstrapAndLogin, setGermanLanguage } from "./support/live-helpers";
+import {
+  bootstrapAndLogin,
+  expectPageHeading,
+  setGermanLanguage,
+} from "./support/live-helpers";
 
 test.describe("admin security live workflows", () => {
   test("it_admin can open audit analytics and see the security summary shell", async ({
@@ -11,9 +15,7 @@ test.describe("admin security live workflows", () => {
     await bootstrapAndLogin(page, request, "it_admin");
 
     await page.goto("/admin/security");
-    await expect(
-      page.getByRole("heading", { name: /^Sicherheit$/i }),
-    ).toBeVisible();
+    await expectPageHeading(page, /^Sicherheit$/i);
     await expect(
       page.getByRole("heading", { name: /Audit-Analytik|Audit analytics/i }),
     ).toBeVisible();

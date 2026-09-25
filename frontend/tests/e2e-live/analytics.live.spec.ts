@@ -12,6 +12,24 @@ const SALES_KPI_HEADING = "Vertriebs-KPI-Übersicht";
 const PIPELINE_HEADING = "Prognose-Pipeline";
 const COLLECTIONS_HEADING = "Forderungsprognose";
 const FOLLOWUP_HEADING = "Nachsorge-Prognose";
+// The CEO lands on the executive business map; every other staff role gets the
+// role dashboard (KPI cards, focus list and quick links).
+const EXECUTIVE_DASHBOARD_HEADINGS = ["Finanzen", "Cashflow-Entwicklung", "Nächste Termine"];
+const ROLE_DASHBOARD_HEADINGS = ["Weitere Kennzahlen", "Fokus heute", "Schnellzugriff"];
+
+async function expectDashboardSections(
+  page: Page,
+  visible: readonly string[],
+  absent: readonly string[] = [],
+) {
+  await expect(page.getByRole("heading", { name: DASHBOARD_HEADING })).toBeVisible();
+  for (const heading of visible) {
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+  }
+  for (const heading of absent) {
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toHaveCount(0);
+  }
+}
 
 function reportExportSection(page: Page, heading: string) {
   return page
@@ -66,15 +84,7 @@ test.describe("analytics live workflows", () => {
     );
 
     await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: DASHBOARD_HEADING }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Leistungsmix" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Top-Kliniken" }),
-    ).toBeVisible();
+    await expectDashboardSections(page, EXECUTIVE_DASHBOARD_HEADINGS);
 
     await page.goto("/reports");
     await expect(
@@ -118,15 +128,7 @@ test.describe("analytics live workflows", () => {
     );
 
     await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: DASHBOARD_HEADING }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Leistungsmix" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Top-Kliniken" }),
-    ).toBeVisible();
+    await expectDashboardSections(page, ROLE_DASHBOARD_HEADINGS, EXECUTIVE_DASHBOARD_HEADINGS);
 
     await page.goto("/reports");
     await expect(
@@ -242,12 +244,7 @@ test.describe("analytics live workflows", () => {
     );
 
     await page.goto("/");
-    await expect(
-      page.getByRole("heading", { name: DASHBOARD_HEADING }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("heading", { name: "Leistungsmix" }),
-    ).toBeVisible();
+    await expectDashboardSections(page, ROLE_DASHBOARD_HEADINGS, EXECUTIVE_DASHBOARD_HEADINGS);
 
     await page.goto("/reports");
     await expect(
