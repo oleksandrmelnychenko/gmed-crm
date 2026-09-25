@@ -2185,8 +2185,29 @@ async fn create_repeat_intake(
         .fetch_one(&mut *tx)
         .await
         .map_err(failed)?;
-    sqlx::query("INSERT INTO orders(order_number,patient_id,source_lead_id,case_id,created_by,intake_state) VALUES($1,$2,$3,$4,$5,'draft')")
-        .bind(super::orders::gen_order_number(seq)).bind(patient).bind(id).bind(case_id).bind(auth.user_id).execute(&mut *tx).await.map_err(failed)?;
+    // A signed framework contract has no validity period and covers every later
+    // order until it is terminated, so the repeat draft inherits the patient's
+    // latest signed one; readiness then needs no new contract PDF.
+    let contract_id: Option<Uuid> = sqlx::query_scalar(
+        r#"INSERT INTO orders(order_number,patient_id,source_lead_id,case_id,created_by,intake_state,contract_id)
+           VALUES($1,$2,$3,$4,$5,'draft',(
+               SELECT fc.id FROM framework_contracts fc
+               WHERE fc.patient_id = $2
+                 AND fc.status = 'signed'
+                 AND fc.signed_at IS NOT NULL
+                 AND fc.terminated_at IS NULL
+               ORDER BY fc.signed_at DESC, fc.created_at DESC, fc.id DESC
+               LIMIT 1))
+           RETURNING contract_id"#,
+    )
+    .bind(super::orders::gen_order_number(seq))
+    .bind(patient)
+    .bind(id)
+    .bind(case_id)
+    .bind(auth.user_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(failed)?;
     sqlx::query("INSERT INTO workflow_lifecycle_events(entity_type,entity_id,to_stage,transition_kind,changed_by,metadata) VALUES('lead',$1,'new','created',$2,$3)")
         .bind(id).bind(auth.user_id).bind(json!({"intake_source":"staff_wizard","repeat_patient_id":patient})).execute(&mut *tx).await.map_err(failed)?;
     tx.commit().await.map_err(failed)?;
@@ -2203,7 +2224,7 @@ async fn create_repeat_intake(
         Some(auth.user_id),
         "lead",
         Some(id),
-        json!({"patient_id":patient,"case_id":case_id}),
+        json!({"patient_id":patient,"case_id":case_id,"inherited_contract_id":contract_id}),
     ));
     Ok(id)
 }

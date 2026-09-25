@@ -3411,6 +3411,127 @@ async fn repeat_intake_requires_existing_patient_access_before_assignment() {
     .unwrap();
     assert_eq!(grants, 0);
 }
+async fn insert_patient_framework_contract(
+    app: &TestApp,
+    patient: Uuid,
+    status: &str,
+    signed_days_ago: Option<i32>,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (
+                patient_id, contract_number, status, signed_at, terminated_at, created_by
+           ) VALUES (
+                $1, $2, $3,
+                CASE WHEN $4::int IS NULL THEN NULL ELSE now() - make_interval(days => $4) END,
+                CASE WHEN $3 = 'terminated' THEN now() END,
+                $5
+           ) RETURNING id"#,
+    )
+    .bind(patient)
+    .bind(format!("FC-REPEAT-{}", Uuid::new_v4().simple()))
+    .bind(status)
+    .bind(signed_days_ago)
+    .bind(app.ceo_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap()
+}
+
+fn readiness_check_passed(lead: &Value, key: &str) -> bool {
+    lead["readiness"]["checks"]
+        .as_array()
+        .expect("readiness checks")
+        .iter()
+        .find(|check| check["key"] == key)
+        .unwrap_or_else(|| panic!("readiness check {key} missing: {lead}"))["passed"]
+        == true
+}
+
+/// The repeat draft inherits the patient's latest signed framework contract on
+/// the server. The contract is open-ended, so no new contract or PDF is needed;
+/// terminated, unsigned and superseded contracts are never picked.
+#[tokio::test]
+async fn repeat_intake_inherits_the_latest_signed_framework_contract() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+
+    let patient = seed_repeat_patient(&app, true).await;
+    insert_patient_framework_contract(&app, patient, "signed", Some(30)).await;
+    let latest_signed = insert_patient_framework_contract(&app, patient, "signed", Some(10)).await;
+    insert_patient_framework_contract(&app, patient, "terminated", Some(1)).await;
+    insert_patient_framework_contract(&app, patient, "sent", None).await;
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Repeat",
+            "last_name": "Regression",
+            "repeat_patient_id": patient,
+            "creation_key": Uuid::new_v4()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let (order_contract, intake_state): (Option<Uuid>, String) =
+        sqlx::query_as("SELECT contract_id, intake_state FROM orders WHERE source_lead_id = $1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(intake_state, "draft");
+    assert_eq!(order_contract, Some(latest_signed));
+
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(
+        readiness_check_passed(&detail, "contract_signed"),
+        "{detail}"
+    );
+    assert!(
+        readiness_check_passed(&detail, "framework_document_generated"),
+        "an inherited signed contract needs no new PDF: {detail}"
+    );
+
+    // Only a terminated contract: the draft starts without one and needs a new contract.
+    let terminated_only = seed_repeat_patient(&app, true).await;
+    insert_patient_framework_contract(&app, terminated_only, "terminated", Some(5)).await;
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Repeat",
+            "last_name": "Regression",
+            "repeat_patient_id": terminated_only,
+            "creation_key": Uuid::new_v4()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let order_contract: Option<Uuid> =
+        sqlx::query_scalar("SELECT contract_id FROM orders WHERE source_lead_id = $1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_contract, None);
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(
+        !readiness_check_passed(&detail, "contract_signed"),
+        "{detail}"
+    );
+}
+
 #[tokio::test]
 async fn repeat_clinical_retry_conflict_and_explicit_removal_preserve_integrity() {
     let Some(app) = test_app().await else { return };
