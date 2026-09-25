@@ -85,7 +85,7 @@ type UseAppointmentDetailOptions = {
   permissions: AppointmentPermissions;
 };
 
-type AppointmentDetailState = {
+export type AppointmentDetailState = {
   detailLoading: boolean;
   detailError: string;
   detail: AppointmentDetail | null;
@@ -105,7 +105,7 @@ type AppointmentDetailPatch =
   | Partial<AppointmentDetailState>
   | ((current: AppointmentDetailState) => Partial<AppointmentDetailState>);
 
-function createAppointmentDetailState(): AppointmentDetailState {
+export function createAppointmentDetailState(): AppointmentDetailState {
   return {
     detailLoading: false,
     detailError: "",
@@ -123,7 +123,7 @@ function createAppointmentDetailState(): AppointmentDetailState {
   };
 }
 
-function appointmentDetailReducer(
+export function appointmentDetailReducer(
   state: AppointmentDetailState,
   patch: AppointmentDetailPatch,
 ): AppointmentDetailState {
@@ -131,6 +131,82 @@ function appointmentDetailReducer(
     ...state,
     ...(typeof patch === "function" ? patch(state) : patch),
   };
+}
+
+/** Empty rows for a resource group, as its state field patch. */
+const EMPTY_DETAIL_RESOURCE_PATCH: Record<
+  AppointmentDetailResourceGroup,
+  () => Partial<AppointmentDetailState>
+> = {
+  checklist: () => ({ detailChecklist: [] }),
+  reminders: () => ({ detailReminders: [] }),
+  report: () => ({ detailReport: null }),
+  tasks: () => ({ detailTasks: [] }),
+  services: () => ({ detailServices: [] }),
+  communications: () => ({ detailCommunications: [] }),
+};
+
+/**
+ * Start of a detail (re)load for a new resource key: no resource group
+ * counts as loaded, attempted or in flight any more.
+ */
+export function beginAppointmentDetailLoad(): Partial<AppointmentDetailState> {
+  return {
+    detailLoading: true,
+    detailResourceKeys: createDetailResourceKeyState(),
+    detailResourceAttemptedKeys: createDetailResourceKeyState(),
+    detailResourceLoadingKeys: createDetailResourceKeyState(),
+    detailError: "",
+  };
+}
+
+/**
+ * `GET /appointments/{id}` answered for `resourceKey`. The resource groups
+ * for the same key are requested in parallel and may already have settled
+ * (a refresh bumps the key while the previous detail is still shown), so
+ * only groups not loaded for `resourceKey` are cleared: they still hold the
+ * previous key's rows. Clearing everything here wiped a just-approved
+ * report or a just-added checklist item until the page was reloaded,
+ * because their groups already counted as loaded and were not requested
+ * again.
+ */
+export function applyLoadedAppointmentDetail(
+  current: AppointmentDetailState,
+  loaded: {
+    detail: AppointmentDetail;
+    assignments: PatientAssignment[];
+    assignmentsError: string;
+  },
+  resourceKey: string,
+): Partial<AppointmentDetailState> {
+  const patch: Partial<AppointmentDetailState> = {
+    detail: loaded.detail,
+    detailAssignments: loaded.assignments,
+    // Keep an extended-resource error that already arrived for this load.
+    detailError: loaded.assignmentsError || current.detailError,
+    detailLoading: false,
+  };
+  for (const group of APPOINTMENT_DETAIL_RESOURCE_GROUPS) {
+    if (current.detailResourceKeys[group] !== resourceKey) {
+      Object.assign(patch, EMPTY_DETAIL_RESOURCE_PATCH[group]());
+    }
+  }
+  return patch;
+}
+
+/** The resource groups in `groups` were requested for `resourceKey`. */
+export function markAppointmentDetailResourceGroupsRequested(
+  current: AppointmentDetailState,
+  groups: AppointmentDetailResourceGroup[],
+  resourceKey: string,
+): Partial<AppointmentDetailState> {
+  const detailResourceAttemptedKeys = { ...current.detailResourceAttemptedKeys };
+  const detailResourceLoadingKeys = { ...current.detailResourceLoadingKeys };
+  for (const group of groups) {
+    detailResourceAttemptedKeys[group] = resourceKey;
+    detailResourceLoadingKeys[group] = resourceKey;
+  }
+  return { detailResourceAttemptedKeys, detailResourceLoadingKeys };
 }
 
 export function settleAppointmentDetailResourceResults(
@@ -177,6 +253,37 @@ export function settleAppointmentDetailResourceResults(
   }
 
   return { detailPatch, firstErrorMessage, loadedGroups };
+}
+
+/**
+ * Store a settled resource request for `resourceKey`: the fulfilled groups
+ * count as loaded for that key and no requested group stays in flight.
+ */
+export function applyAppointmentDetailResourceSettlement(
+  current: AppointmentDetailState,
+  pendingGroups: AppointmentDetailResourceGroup[],
+  settlement: ReturnType<typeof settleAppointmentDetailResourceResults>,
+  resourceKey: string,
+): Partial<AppointmentDetailState> {
+  const patch: Partial<AppointmentDetailState> = { ...settlement.detailPatch };
+  const detailResourceLoadingKeys = { ...current.detailResourceLoadingKeys };
+  for (const group of pendingGroups) {
+    if (detailResourceLoadingKeys[group] === resourceKey) {
+      detailResourceLoadingKeys[group] = "";
+    }
+  }
+  patch.detailResourceLoadingKeys = detailResourceLoadingKeys;
+  if (settlement.loadedGroups.length > 0) {
+    const detailResourceKeys = { ...current.detailResourceKeys };
+    for (const group of settlement.loadedGroups) {
+      detailResourceKeys[group] = resourceKey;
+    }
+    patch.detailResourceKeys = detailResourceKeys;
+  }
+  if (settlement.firstErrorMessage) {
+    patch.detailError = settlement.firstErrorMessage;
+  }
+  return patch;
 }
 
 export function useAppointmentDetail({
@@ -302,16 +409,11 @@ export function useAppointmentDetail({
   useEffect(() => {
     if (!selectedId || !detailOpen) return;
     let active = true;
+    const resourceKey = `${selectedId}:${detailVersion}`;
 
     async function loadDetail() {
       detailResourceRequestKeysRef.current = createDetailResourceKeyState();
-      dispatchDetailState({
-        detailLoading: true,
-        detailResourceKeys: createDetailResourceKeyState(),
-        detailResourceAttemptedKeys: createDetailResourceKeyState(),
-        detailResourceLoadingKeys: createDetailResourceKeyState(),
-        detailError: "",
-      });
+      dispatchDetailState(beginAppointmentDetailLoad());
       try {
         const appointmentDetail = await apiFetch<AppointmentDetail>(
           `/appointments/${selectedId}`,
@@ -331,18 +433,13 @@ export function useAppointmentDetail({
         }
 
         if (!active) return;
-        dispatchDetailState({
-          detail: appointmentDetail,
-          detailAssignments: assignments,
-          detailChecklist: [],
-          detailReminders: [],
-          detailReport: null,
-          detailTasks: [],
-          detailServices: [],
-          detailCommunications: [],
-          detailError: assignmentsError,
-          detailLoading: false,
-        });
+        dispatchDetailState((current) =>
+          applyLoadedAppointmentDetail(
+            current,
+            { detail: appointmentDetail, assignments, assignmentsError },
+            resourceKey,
+          ),
+        );
       } catch {
         if (!active) return;
         dispatchDetailState({
@@ -373,6 +470,10 @@ export function useAppointmentDetail({
     selectedId,
   ]);
 
+  // On a refresh `detail` still holds the previous load when the key changes,
+  // so the groups for the new key are requested alongside
+  // `GET /appointments/{id}` and can settle first (see
+  // `applyLoadedAppointmentDetail`).
   useEffect(() => {
     if (
       !selectedId ||
@@ -400,20 +501,13 @@ export function useAppointmentDetail({
       for (const group of pendingGroups) {
         detailResourceRequestKeysRef.current[group] = currentDetailResourceKey;
       }
-      dispatchDetailState((current) => {
-        const nextAttemptedKeys = {
-          ...current.detailResourceAttemptedKeys,
-        };
-        const nextLoadingKeys = { ...current.detailResourceLoadingKeys };
-        for (const group of pendingGroups) {
-          nextAttemptedKeys[group] = currentDetailResourceKey;
-          nextLoadingKeys[group] = currentDetailResourceKey;
-        }
-        return {
-          detailResourceAttemptedKeys: nextAttemptedKeys,
-          detailResourceLoadingKeys: nextLoadingKeys,
-        };
-      });
+      dispatchDetailState((current) =>
+        markAppointmentDetailResourceGroupsRequested(
+          current,
+          pendingGroups,
+          currentDetailResourceKey,
+        ),
+      );
 
       const detailResourceRequest = Promise.allSettled(
         pendingGroups.map((group) =>
@@ -437,41 +531,18 @@ export function useAppointmentDetail({
           return;
         }
 
-        const { detailPatch, firstErrorMessage, loadedGroups } =
-          settleAppointmentDetailResourceResults(pendingGroups, results);
-
-        if (
-          loadedGroups.length > 0 ||
-          firstErrorMessage ||
-          Object.keys(detailPatch).length > 0
-        ) {
-          dispatchDetailState((current) => {
-            const detailResourceLoadingKeys = {
-              ...current.detailResourceLoadingKeys,
-            };
-            for (const group of pendingGroups) {
-              if (
-                detailResourceLoadingKeys[group] ===
-                currentDetailResourceKey
-              ) {
-                detailResourceLoadingKeys[group] = "";
-              }
-            }
-            detailPatch.detailResourceLoadingKeys =
-              detailResourceLoadingKeys;
-            if (loadedGroups.length > 0) {
-              const detailResourceKeys = { ...current.detailResourceKeys };
-              for (const group of loadedGroups) {
-                detailResourceKeys[group] = currentDetailResourceKey;
-              }
-              detailPatch.detailResourceKeys = detailResourceKeys;
-            }
-            if (firstErrorMessage) {
-              detailPatch.detailError = firstErrorMessage;
-            }
-            return detailPatch;
-          });
-        }
+        const settlement = settleAppointmentDetailResourceResults(
+          pendingGroups,
+          results,
+        );
+        dispatchDetailState((current) =>
+          applyAppointmentDetailResourceSettlement(
+            current,
+            pendingGroups,
+            settlement,
+            currentDetailResourceKey,
+          ),
+        );
       });
     }
 
