@@ -7306,11 +7306,13 @@ pub fn spawn_interpreter_report_billing_sync_scheduler(state: AppState) {
             match run_interpreter_report_billing_sync_once(&state).await {
                 Ok(summary) => {
                     if summary.leistungen_created > 0
+                        || summary.planned_lines_consumed > 0
                         || summary.missing_order > 0
                         || summary.missing_catalog > 0
                     {
                         tracing::info!(
                             leistungen_created = summary.leistungen_created,
+                            planned_lines_consumed = summary.planned_lines_consumed,
                             already_synced = summary.already_synced,
                             missing_order = summary.missing_order,
                             missing_catalog = summary.missing_catalog,
@@ -7539,6 +7541,9 @@ async fn approve_report(
         report_id = %report_id,
         leistungen_created = sync_summary
             .map(|summary| summary.leistungen_created)
+            .unwrap_or_default(),
+        planned_lines_consumed = sync_summary
+            .map(|summary| summary.planned_lines_consumed)
             .unwrap_or_default(),
         "Report approved"
     );
