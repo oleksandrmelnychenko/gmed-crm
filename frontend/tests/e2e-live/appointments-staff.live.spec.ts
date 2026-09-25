@@ -81,7 +81,9 @@ const addChecklistItemButtonName =
   /Checklistenpunkt hinzufügen|Add checklist item/i;
 const completeChecklistItemButtonName =
   /Als erledigt(?: markieren)?|Mark complete/i;
-const acceptedResponseButtonName = /^(Angenommen|Accepted)$/i;
+const acceptedResponseButtonName = /^(Bestätigt|Accepted|Confirmed)$/i;
+const createDoctorFollowUpButtonName =
+  /Ärztliche Nachsorge erstellen|Ärztliches Follow-up erstellen|Create doctor follow-up/i;
 const inProgressStatusButtonName = /^(Läuft|Lauft|In progress)$/i;
 const completedStatusButtonName = /^(Abgeschlossen|Completed)$/i;
 const approveReportButtonName =
@@ -116,10 +118,13 @@ async function assignInterpreter(page: Page, interpreterName: string) {
   await expect(sheet).toBeHidden({ timeout: 15_000 });
 }
 
+/** The checklist is a data table; adds an item and returns its table row. */
 async function addChecklistItem(page: Page, itemText: string) {
-  const section = sectionWithButton(page, addChecklistItemButtonName);
-  await expect(section).toBeVisible();
-  await section.getByRole("button", { name: addChecklistItemButtonName }).click();
+  const addButton = page
+    .getByRole("button", { name: addChecklistItemButtonName })
+    .first();
+  await expect(addButton).toBeVisible();
+  await addButton.click();
   const sheet = page
     .getByRole("dialog")
     .filter({
@@ -127,10 +132,21 @@ async function addChecklistItem(page: Page, itemText: string) {
     })
     .last();
   await expect(sheet).toBeVisible();
-  await sheet.locator("input[required]").first().fill(itemText);
+  const titleInput = sheet.getByRole("textbox", { name: /^(Titel|Title)$/i });
+  await titleInput.fill(itemText);
+  await expect(titleInput).toHaveValue(itemText);
   await sheet.getByRole("button", { name: addChecklistItemButtonName }).click();
   await expect(sheet).toBeHidden({ timeout: 15_000 });
-  return section;
+  const row = page.getByRole("row").filter({ hasText: itemText }).first();
+  await expect(row).toBeVisible();
+  return row;
+}
+
+/** The interpreter answer buttons sit under the "Dolmetscherantwort" heading. */
+function interpreterResponseGroup(page: Page) {
+  return page
+    .getByRole("heading", { name: /^(Dolmetscherantwort|Interpreter response)$/i })
+    .locator("xpath=ancestor::*[.//button][1]");
 }
 
 test.describe("staff appointments live workflows", () => {
@@ -164,16 +180,11 @@ test.describe("staff appointments live workflows", () => {
       );
     }).toPass({ timeout: 15_000 });
 
-    const checklistSection = await addChecklistItem(
+    const checklistRow = await addChecklistItem(
       page,
       "Live E2E appointment checklist",
     );
-    const checklistCard = checklistSection
-      .locator("div")
-      .filter({ hasText: "Live E2E appointment checklist" })
-      .first();
-    await expect(checklistCard).toBeVisible();
-    await checklistCard
+    await checklistRow
       .getByRole("button", { name: completeChecklistItemButtonName })
       .click();
     await expect(async () => {
@@ -199,39 +210,35 @@ test.describe("staff appointments live workflows", () => {
       scenario.appointment.title,
       "coordination",
     );
-    const doctorFollowUpSection = page
-      .locator("section")
-      .filter({ hasText: "Ärztlich angeordnete Nachsorge" })
-      .last();
-    const doctorFollowUpForm = doctorFollowUpSection.locator("form").first();
+    // The doctor-directed follow-up is created in a sheet opened from its table.
+    await page
+      .getByRole("button", { name: createDoctorFollowUpButtonName })
+      .first()
+      .click();
+    const doctorFollowUpForm = page.getByRole("dialog", {
+      name: /Ärztlich angeordnete Nachsorge|Doctor-directed follow-up/i,
+    });
     await expect(doctorFollowUpForm).toBeVisible();
+    const followUpTitle = doctorFollowUpForm.getByRole("textbox", {
+      name: /^(Titel|Title)$/i,
+    });
+    await followUpTitle.fill("Live E2E doctor follow-up");
+    await expect(followUpTitle).toHaveValue("Live E2E doctor follow-up");
     await chooseComboboxOption(
       page,
-      doctorFollowUpForm.getByRole("combobox").first(),
+      doctorFollowUpForm.getByRole("combobox", { name: /^(Betreuer|Assignee)$/i }),
       scenario.credentials.pm.name,
     );
     await fillMuiDateTime(doctorFollowUpForm, futureLocalDateTime(3));
     await doctorFollowUpForm
-      .locator("textarea")
-      .first()
+      .getByRole("textbox", { name: /^(Notizen|Notes)$/i })
       .fill("Coordinate the directed follow-up with the patient.");
-    await doctorFollowUpForm
-      .locator("input")
-      .first()
-      .fill("Live E2E doctor follow-up");
-    await expect(doctorFollowUpForm.locator("input").first()).toHaveValue(
-      "Live E2E doctor follow-up",
-    );
-    await expect(
-      doctorFollowUpForm.getByRole("button", {
-        name: /Ärztliches Follow-up erstellen|Ärztliche Nachsorge erstellen|Create doctor follow-up/i,
-      }),
-    ).toBeEnabled();
-    await doctorFollowUpForm
-      .getByRole("button", {
-        name: /Ärztliches Follow-up erstellen|Ärztliche Nachsorge erstellen|Create doctor follow-up/i,
-      })
-      .click();
+    const createFollowUp = doctorFollowUpForm.getByRole("button", {
+      name: createDoctorFollowUpButtonName,
+    });
+    await expect(createFollowUp).toBeEnabled();
+    await createFollowUp.click();
+    await expect(doctorFollowUpForm).toBeHidden({ timeout: 15_000 });
     await expect(async () => {
       const remindersResponse = await request.get(
         `${api.backendUrl}/api/v1/appointments/${scenario.appointment.id}/reminders`,
@@ -353,7 +360,7 @@ test.describe("staff appointments live workflows", () => {
             item.agency_service_key === "treatment_organization" &&
             item.source_medical_appointment_id === scenario.appointment.id &&
             (item.notes ?? "").includes(
-              "Auto-created from completed medical appointment",
+              `Automatisch aus abgeschlossenem medizinischem Termin ${scenario.appointment.id} erstellt`,
             ),
         ),
       ).toBe(true);
@@ -388,27 +395,21 @@ test.describe("staff appointments live workflows", () => {
       scenario.appointment.title,
     );
 
-    const checklistSection = await addChecklistItem(
-      page,
-      "Block-completion checklist item",
-    );
+    await addChecklistItem(page, "Block-completion checklist item");
+
+    // The UI blocks completion while a checklist item is open ...
     await expect(
-      checklistSection
-        .locator("div")
-        .filter({ hasText: "Block-completion checklist item" })
-        .first(),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: completedStatusButtonName }).click();
-
-    await expect(async () => {
-      const detail = await fetchAppointmentDetail(
-        request,
-        api,
-        scenario.appointment.id,
-      );
-      expect(detail.status).not.toBe("completed");
-    }).toPass({ timeout: 5_000 });
+      page.getByRole("button", { name: completedStatusButtonName }),
+    ).toBeDisabled();
+    // ... and so does the server.
+    const blockedCompletion = await request.post(
+      `${api.backendUrl}/api/v1/appointments/${scenario.appointment.id}/status`,
+      { headers: api.headers, data: { status: "completed" } },
+    );
+    expect(blockedCompletion.status(), await blockedCompletion.text()).toBeGreaterThanOrEqual(400);
+    expect(
+      (await fetchAppointmentDetail(request, api, scenario.appointment.id)).status,
+    ).not.toBe("completed");
 
     const checklistList = await request.get(
       `${api.backendUrl}/api/v1/appointments/${scenario.appointment.id}/checklist`,
@@ -520,7 +521,12 @@ test.describe("staff appointments live workflows", () => {
         .first();
       await expect(reportForm).toBeVisible();
 
-      await reportForm.locator('input[type="number"][step="0.25"]').fill("2.5");
+      const hoursInput = reportForm.locator('input[type="number"][step="0.25"]');
+      await expect(
+        hoursInput,
+        "the assigned interpreter must be able to enter the report hours",
+      ).toBeEnabled();
+      await hoursInput.fill("2.5");
       await reportForm
         .locator("textarea")
         .fill("Live E2E interpreter report covering the cardiology follow-up.");
@@ -674,15 +680,12 @@ test.describe("staff appointments live workflows", () => {
         scenario.appointment.title,
       );
 
-      const responseSection = interpreterPage
-        .locator("section")
-        .filter({
-          has: interpreterPage.getByRole("button", {
-            name: acceptedResponseButtonName,
-          }),
-        })
-        .first();
+      const responseSection = interpreterResponseGroup(interpreterPage);
       await expect(responseSection).toBeVisible();
+      await expect(
+        interpreterPage.getByTestId("read-only-banner"),
+        "no view-only banner above the interpreter's own actions",
+      ).toHaveCount(0);
       await responseSection
         .getByRole("button", { name: acceptedResponseButtonName })
         .click();
@@ -745,7 +748,7 @@ test.describe("staff appointments live workflows", () => {
       );
 
       await expect(
-        teamleadPage.getByRole("button", {
+        interpreterResponseGroup(teamleadPage).getByRole("button", {
           name: acceptedResponseButtonName,
         }),
       ).toBeVisible();
