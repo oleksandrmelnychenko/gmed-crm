@@ -2745,14 +2745,39 @@ fn is_allowed_appointment_status_transition(current: &str, target: &str) -> bool
 }
 
 const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE: &str = "appointment_completion_before_date";
+const APPOINTMENT_REPORT_BEFORE_DATE_CODE: &str = "appointment_report_before_date";
 
 /// Completion counts as delivery (billing lines, order execution evidence), so
-/// it only opens on the appointment's own day in the business timezone.
+/// it only opens on the appointment's own day in the business timezone. The
+/// same holds for interpreter reports, whose approval bills the hours.
 fn completion_precedes_appointment_date(
     appointment_date: chrono::NaiveDate,
     today: chrono::NaiveDate,
 ) -> bool {
     appointment_date > today
+}
+
+/// Rejects submitting or approving an interpreter report for an appointment
+/// that has not taken place yet (dated after today in Europe/Berlin).
+fn ensure_report_not_before_appointment_date(
+    appointment_id: Uuid,
+    appointment_date: chrono::NaiveDate,
+    message: &str,
+) -> Result<(), axum::response::Response> {
+    let today = berlin_today();
+    if !completion_precedes_appointment_date(appointment_date, today) {
+        return Ok(());
+    }
+    Err(err_with_details(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        message,
+        serde_json::json!({
+            "code": APPOINTMENT_REPORT_BEFORE_DATE_CODE,
+            "appointment_id": appointment_id,
+            "appointment_date": appointment_date,
+            "today": today,
+        }),
+    ))
 }
 
 async fn close_terminal_appointment_artifacts_in_tx(
@@ -6714,7 +6739,7 @@ async fn submit_report(
         }
     };
     let appointment = match sqlx::query(
-        "SELECT interpreter_id, status FROM appointments WHERE id = $1 FOR UPDATE",
+        "SELECT interpreter_id, status, date FROM appointments WHERE id = $1 FOR UPDATE",
     )
     .bind(apt_id)
     .fetch_optional(&mut *tx)
@@ -6744,6 +6769,17 @@ async fn submit_report(
             StatusCode::CONFLICT,
             "Interpreter reports are only available for confirmed, in-progress or completed appointments",
         );
+    }
+    let appointment_date: chrono::NaiveDate = match appointment.try_get("date") {
+        Ok(value) => value,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"),
+    };
+    if let Err(resp) = ensure_report_not_before_appointment_date(
+        apt_id,
+        appointment_date,
+        "Interpreter reports cannot be submitted before the appointment date",
+    ) {
+        return resp;
     }
 
     let report_id = match sqlx::query_scalar::<_, Uuid>(
@@ -7539,8 +7575,11 @@ async fn approve_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let appointment_status = match sqlx::query_scalar::<_, String>(
-        "SELECT status FROM appointments WHERE id = $1 FOR UPDATE",
+    let (appointment_status, appointment_date) = match sqlx::query_as::<
+        _,
+        (String, chrono::NaiveDate),
+    >(
+        "SELECT status, date FROM appointments WHERE id = $1 FOR UPDATE",
     )
     .bind(apt_id)
     .fetch_optional(&mut *tx)
@@ -7561,6 +7600,13 @@ async fn approve_report(
             StatusCode::CONFLICT,
             "Reports can only be approved for confirmed, in-progress or completed appointments",
         );
+    }
+    if let Err(resp) = ensure_report_not_before_appointment_date(
+        apt_id,
+        appointment_date,
+        "Interpreter reports cannot be approved before the appointment date",
+    ) {
+        return resp;
     }
     let report_id = match sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id

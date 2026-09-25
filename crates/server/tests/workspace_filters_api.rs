@@ -8251,6 +8251,184 @@ async fn appointment_completion_opens_on_the_appointment_date() {
 }
 
 #[tokio::test]
+async fn interpreter_reports_open_on_the_appointment_date() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interp-report-date-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-RPT-{tag}"),
+        "execution",
+        "active",
+        "Interpreter support",
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let interpreter_service_id = seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "interpreter_hours",
+        "Interpreter hours",
+        "2026-01-01",
+    )
+    .await;
+    // Approval bills the hours by consuming this planned line.
+    let planned_line = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(interpreter_service_id),
+        "Dolmetscher-/Betreuungsleistung",
+        "4",
+        1,
+    )
+    .await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let book = |title: String, date: String| {
+        let pool = pool.clone();
+        async move {
+            let appointment_id = seed_appointment(
+                &pool,
+                patient_id,
+                provider_id,
+                doctor_id,
+                pm_id,
+                &title,
+                "confirmed",
+                &date,
+            )
+            .await;
+            sqlx::query(
+                "UPDATE appointments
+                 SET order_id = $2, interpreter_id = $3, interpreter_response = 'accepted'
+                 WHERE id = $1",
+            )
+            .bind(appointment_id)
+            .bind(order_id)
+            .bind(interpreter_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+            appointment_id
+        }
+    };
+
+    let today = berlin_today();
+    let future_date = (today + chrono::Duration::days(10)).to_string();
+    let future_id = book(format!("Future interpreting {tag}"), future_date.clone()).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{future_id}/report"),
+        &interpreter_bearer,
+        Some(json!({ "hours": 2.5, "report_text": "too early" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "appointment_report_before_date");
+    assert_eq!(body["appointment_id"], future_id.to_string());
+    assert_eq!(body["appointment_date"], future_date);
+    let report_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM interpreter_reports WHERE appointment_id = $1")
+            .bind(future_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(report_count, 0);
+
+    // A pending report that predates the rule cannot be approved either ...
+    let early_report: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO interpreter_reports (appointment_id, interpreter_id, hours, report_text)
+           VALUES ($1, $2, 2.5, 'submitted before the date rule')
+           RETURNING id"#,
+    )
+    .bind(future_id)
+    .bind(interpreter_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{future_id}/report/approve"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "appointment_report_before_date");
+    let early_status: String =
+        sqlx::query_scalar("SELECT approval_status FROM interpreter_reports WHERE id = $1")
+            .bind(early_report)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(early_status, "pending");
+    let billed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM order_leistungen WHERE source_interpreter_report_id = $1",
+    )
+    .bind(early_report)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(billed, 0);
+    assert_eq!(
+        order_service_state(&pool, planned_line).await,
+        ("planned".to_string(), "4".to_string(), None)
+    );
+
+    // ... but it can still be rejected.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{future_id}/report/reject"),
+        &pm_bearer,
+        Some(json!({ "notes": "Submit after the appointment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Same day: submit and approval go through and bill the hours.
+    let today_id = book(format!("Same-day interpreting {tag}"), today.to_string()).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{today_id}/report"),
+        &interpreter_bearer,
+        Some(json!({ "hours": 2.5, "report_text": "same day" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let today_report = body["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{today_id}/report/approve"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (line_status, quantity, source_report) = order_service_state(&pool, planned_line).await;
+    assert_eq!(line_status, "approved");
+    assert_eq!(quantity.parse::<f64>().unwrap(), 2.5);
+    assert_eq!(source_report.map(|id| id.to_string()), Some(today_report));
+}
+
+#[tokio::test]
 async fn recurring_completion_scope_is_rejected_while_it_contains_future_occurrences() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
