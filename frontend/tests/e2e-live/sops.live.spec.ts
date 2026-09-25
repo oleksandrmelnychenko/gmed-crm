@@ -9,6 +9,8 @@ import {
 } from "./support/live-helpers";
 
 const sopHeadingName = /SOP (?:&|und) Lernen|SOP (?:&|and) learning/i;
+// The interpreter role is labelled "Mitarbeitender" in the audience picker.
+const INTERPRETER_AUDIENCE = /^(Mitarbeitender|Dolmetscher|Interpreter)$/i;
 const contentCreatedNotice =
   /Inhalt erstellt|Lerninhalt erstellt|Content created|Learning content created/i;
 
@@ -58,7 +60,7 @@ test.describe("SOP live workflows", () => {
     await createTextboxes.nth(0).fill(sopTitle);
     await createTextboxes.nth(1).fill(sopSummary);
     await createTextboxes.nth(2).fill(sopBody);
-    await checkboxInLabel(createDialog, /^(Dolmetscher|Interpreter)$/i).check();
+    await checkboxInLabel(createDialog, INTERPRETER_AUDIENCE).check();
     const requiresAckCheckbox = checkboxInLabel(
       createDialog,
       /Kenntnisnahme erforderlich|Acknowledgement required/i,
@@ -224,7 +226,7 @@ test.describe("SOP live workflows", () => {
     const createDialog = page.getByRole("dialog");
     await expect(createDialog).toBeVisible();
     await expect(
-      checkboxInLabel(createDialog, /^(Dolmetscher|Interpreter)$/i),
+      checkboxInLabel(createDialog, INTERPRETER_AUDIENCE),
     ).toBeVisible();
     await expect(
       createDialog.getByRole("checkbox", { name: /Concierge/i }),
@@ -234,7 +236,7 @@ test.describe("SOP live workflows", () => {
     await createTextboxes.nth(0).fill(sopTitle);
     await createTextboxes.nth(1).fill(sopSummary);
     await createTextboxes.nth(2).fill(sopBody);
-    await checkboxInLabel(createDialog, /^(Dolmetscher|Interpreter)$/i).check();
+    await checkboxInLabel(createDialog, INTERPRETER_AUDIENCE).check();
     const requiresAckCheckbox = checkboxInLabel(
       createDialog,
       /Kenntnisnahme erforderlich|Acknowledgement required/i,
