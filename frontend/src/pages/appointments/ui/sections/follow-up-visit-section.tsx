@@ -32,6 +32,7 @@ import {
   hasPairedAppointmentTimes,
   hasValidAppointmentTimeRange,
   serializeAppointmentTimes,
+  shiftAppointmentSlot,
   shiftLocalDateTime,
 } from "@/pages/appointments/model/date-time";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
@@ -58,7 +59,6 @@ import {
   formatScheduleConflictError,
 } from "@/pages/appointments/model/schedule-warnings";
 import {
-  appointmentAnchorDateTime,
   toRfc3339,
 } from "@/pages/appointments/model/workflow-helpers";
 import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
@@ -352,27 +352,20 @@ function useAppointmentFollowUpVisitSectionContent({
   ]);
 
   function applyPreset(preset: (typeof FOLLOW_UP_PRESETS)[number]) {
-    const anchor = appointmentAnchorDateTime(detail);
-    const shifted = shiftLocalDateTime(anchor, {
-      days: "offsetDays" in preset ? preset.offsetDays : undefined,
-      months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
-    });
-    if (!shifted) return;
-    const nextReminderAt = shiftLocalDateTime(shifted, { days: -3 });
+    const slot = shiftAppointmentSlot(
+      { date: detail.date, timeStart: detail.time_start, timeEnd: detail.time_end },
+      {
+        days: "offsetDays" in preset ? preset.offsetDays : undefined,
+        months: "offsetMonths" in preset ? preset.offsetMonths : undefined,
+      },
+    );
+    if (!slot) return;
+    const nextReminderAt = shiftLocalDateTime(slot.startsAt, { days: -3 });
     setForm((current) => ({
       ...current,
-      date: shifted.slice(0, 10),
-      timeStart: shifted.slice(11, 16),
-      timeEnd: current.timeEnd
-        ? shiftLocalDateTime(
-            `${detail.date}T${detail.time_end?.slice(0, 5) ?? current.timeEnd}`,
-            {
-              days: "offsetDays" in preset ? preset.offsetDays : undefined,
-              months:
-                "offsetMonths" in preset ? preset.offsetMonths : undefined,
-            },
-          ).slice(11, 16)
-        : current.timeEnd,
+      date: slot.date,
+      timeStart: slot.timeStart,
+      timeEnd: slot.timeEnd || current.timeEnd,
       title:
         current.title.trim() === "" || current.title.startsWith(t.phase_followup)
           ? followUpPresetTitle(preset.id)

@@ -8,6 +8,7 @@ import {
   initialCalendarVisibleRange,
   endOfWeekInput,
   startOfWeekInput,
+  shiftAppointmentSlot,
 } from "./date-time";
 
 describe("appointment time serialization", () => {
@@ -60,5 +61,19 @@ describe("appointment calendar date ranges", () => {
   it("uses Monday through Sunday for every weekly range", () => {
     expect(startOfWeekInput("2026-08-23")).toBe("2026-08-17");
     expect(endOfWeekInput("2026-08-23")).toBe("2026-08-23");
+  });
+});
+
+describe("follow-up slot presets", () => {
+  it("moves start and end together and keeps the duration", () => {
+    expect(shiftAppointmentSlot({ date: "2026-10-05", timeStart: "10:00", timeEnd: "11:00" }, { days: 7 }))
+      .toMatchObject({ date: "2026-10-12", timeStart: "10:00", timeEnd: "11:00" });
+    expect(shiftAppointmentSlot({ date: "2026-10-05", timeStart: "10:00:00", timeEnd: "11:30:00" }, { months: 6 }))
+      .toMatchObject({ date: "2027-04-05", timeStart: "10:00", timeEnd: "11:30" });
+  });
+
+  it("leaves the end empty when the source has none", () => {
+    expect(shiftAppointmentSlot({ date: "2026-10-05", timeStart: "10:00", timeEnd: null }, { months: 1 }))
+      .toMatchObject({ date: "2026-11-05", timeStart: "10:00", timeEnd: "" });
   });
 });

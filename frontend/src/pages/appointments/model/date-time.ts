@@ -157,6 +157,30 @@ export function shiftLocalDateTime(
   return toDateTimeLocalInput(value.toISOString());
 }
 
+/**
+ * The same time slot moved by a calendar offset: start and end shift
+ * together, so the new slot keeps the original duration.
+ */
+export function shiftAppointmentSlot(
+  slot: { date: string; timeStart?: string | null; timeEnd?: string | null },
+  adjustment: { days?: number; months?: number },
+) {
+  const start = shiftLocalDateTime(
+    `${slot.date}T${(slot.timeStart ?? "09:00").slice(0, 5)}`,
+    adjustment,
+  );
+  if (!start) return null;
+  const end = slot.timeEnd
+    ? shiftLocalDateTime(`${slot.date}T${slot.timeEnd.slice(0, 5)}`, adjustment)
+    : "";
+  return {
+    date: start.slice(0, 10),
+    timeStart: start.slice(11, 16),
+    timeEnd: end ? end.slice(11, 16) : "",
+    startsAt: start,
+  };
+}
+
 export function toTimeInput(date: Date): string {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
     .toISOString()
