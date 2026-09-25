@@ -22,7 +22,7 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
   let failureSent = false;
   let lead: Record<string, unknown> = {
     id: leadId, first_name: "Anna", last_name: "Beispiel", qualification_status: "in_progress",
-    intake_model: "patient_first", wizard_state: withDocuments && asLead ? {framework_contract_id: "valid-contract"} : {}, services: [], attachments: [],
+    intake_model: "patient_first", repeat_patient_id: patientId, wizard_state: withDocuments && asLead ? {framework_contract_id: "valid-contract"} : {}, services: [], attachments: [],
     ...(convertedLead || linkedPatientLifecycle ? {converted_patient_id: convertedLead ? patientId : null, prospect_patient_id: patientId, prospect_patient_lifecycle: linkedPatientLifecycle ?? "active"} : {}),
     readiness: {conversion_ready: false, blocking_reasons: [], steps: [], checks: []},
   };

@@ -2596,12 +2596,14 @@ export function LeadWizard({
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
-  // A repeat intake (patient_first lead linked to an existing patient) keeps
-  // its patient review even when reopened from the leads registry, so the
-  // patient's valid documents and contracts are reused instead of recreated.
-  const isRepeatIntake = entryPoint === "repeat-patient"
-    || (lead?.intake_model === "patient_first" && Boolean(lead?.prospect_patient_id));
-  const repeatPatientId = open && isRepeatIntake ? existingPatient?.id ?? lead?.prospect_patient_id ?? null : null;
+  // A repeat intake (lead opened for an existing patient) keeps its patient
+  // review even when reopened from the leads registry, so the patient's valid
+  // documents and contracts are reused instead of recreated. A first intake
+  // that has already created its patient only has prospect_patient_id.
+  const isRepeatIntake = entryPoint === "repeat-patient" || Boolean(lead?.repeat_patient_id);
+  const repeatPatientId = open && isRepeatIntake
+    ? existingPatient?.id ?? lead?.repeat_patient_id ?? lead?.prospect_patient_id ?? null
+    : null;
   const patientReview = useRepeatPatientReview(repeatPatientId);
   const previousRequests = usePreviousRequests(repeatPatientId, lead?.id ?? null);
   const [draft, setDraft] = useState<Draft | null>(null);
