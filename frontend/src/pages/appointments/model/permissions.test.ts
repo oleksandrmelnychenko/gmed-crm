@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appointmentPermissions,
+  appointmentReportActions,
   appointmentsReadOnlyScope,
   linkedPatientPermissions,
 } from "./selectors";
@@ -131,5 +132,120 @@ describe("appointments read-only scope", () => {
     expect(appointmentsReadOnlyScope("ceo_assistant")).toEqual({ active: true, banner: true });
     expect(appointmentsReadOnlyScope("patient_manager").active).toBe(false);
     expect(appointmentsReadOnlyScope("teamlead_interpreter").active).toBe(false);
+  });
+});
+
+describe("appointment report actions", () => {
+  const interpreterId = "interpreter-1";
+  const reportFor = (approval_status: string) => ({ approval_status });
+
+  it("lets the assigned interpreter submit a first report and resubmit a returned one on the read-only page", () => {
+    const permissions = appointmentPermissions("interpreter");
+    expect(appointmentsReadOnlyScope("interpreter").active).toBe(true);
+
+    expect(
+      appointmentReportActions({
+        permissions,
+        currentUserId: interpreterId,
+        interpreterId,
+        report: null,
+      }),
+    ).toEqual({
+      canSubmitInterpreterReport: true,
+      canResubmitRejectedReport: false,
+      showReportReviewActions: false,
+    });
+    expect(
+      appointmentReportActions({
+        permissions,
+        currentUserId: interpreterId,
+        interpreterId,
+        report: reportFor("rejected"),
+      }),
+    ).toEqual({
+      canSubmitInterpreterReport: true,
+      canResubmitRejectedReport: true,
+      showReportReviewActions: false,
+    });
+    for (const status of ["pending", "approved"]) {
+      expect(
+        appointmentReportActions({
+          permissions,
+          currentUserId: interpreterId,
+          interpreterId,
+          report: reportFor(status),
+        }).canSubmitInterpreterReport,
+        status,
+      ).toBe(false);
+    }
+  });
+
+  it("keeps report submission with the assigned interpreter only", () => {
+    const interpreter = appointmentPermissions("interpreter");
+    for (const assignee of ["interpreter-2", null, undefined]) {
+      expect(
+        appointmentReportActions({
+          permissions: interpreter,
+          currentUserId: interpreterId,
+          interpreterId: assignee,
+          report: reportFor("rejected"),
+        }),
+        String(assignee),
+      ).toEqual({
+        canSubmitInterpreterReport: false,
+        canResubmitRejectedReport: false,
+        showReportReviewActions: false,
+      });
+    }
+    expect(
+      appointmentReportActions({
+        permissions: interpreter,
+        currentUserId: undefined,
+        interpreterId: undefined,
+        report: null,
+      }).canSubmitInterpreterReport,
+    ).toBe(false);
+
+    // The server accepts reports from the `interpreter` role only.
+    expect(
+      appointmentReportActions({
+        permissions: appointmentPermissions("teamlead_interpreter"),
+        currentUserId: interpreterId,
+        interpreterId,
+        report: null,
+      }).canSubmitInterpreterReport,
+    ).toBe(false);
+  });
+
+  it("offers the review decision to approvers while the report is pending", () => {
+    for (const role of ["ceo", "patient_manager", "teamlead_interpreter"]) {
+      const permissions = appointmentPermissions(role);
+      expect(
+        appointmentReportActions({
+          permissions,
+          currentUserId: "reviewer-1",
+          interpreterId,
+          report: reportFor("pending"),
+        }).showReportReviewActions,
+        role,
+      ).toBe(true);
+      expect(
+        appointmentReportActions({
+          permissions,
+          currentUserId: "reviewer-1",
+          interpreterId,
+          report: reportFor("approved"),
+        }).showReportReviewActions,
+        role,
+      ).toBe(false);
+    }
+    expect(
+      appointmentReportActions({
+        permissions: appointmentPermissions("interpreter"),
+        currentUserId: interpreterId,
+        interpreterId,
+        report: reportFor("pending"),
+      }).showReportReviewActions,
+    ).toBe(false);
   });
 });

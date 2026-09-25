@@ -11,6 +11,7 @@ import {
 } from "react";
 import { LoaderCircle, Plus } from "lucide-react";
 
+import { WritableScope } from "@/components/read-only-scope";
 import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -767,11 +768,14 @@ function AppointmentInterpreterSection({
         />
       ) : null}
       {canRespond && detail.interpreter_id === currentUserId ? (
-        <InterpreterResponseControls
-          busyAction={busyAction}
-          interpreterResponse={detail.interpreter_response}
-          onResponse={handleInterpreterResponse}
-        />
+        // The assignee answers on a page that is otherwise read-only for them.
+        <WritableScope>
+          <InterpreterResponseControls
+            busyAction={busyAction}
+            interpreterResponse={detail.interpreter_response}
+            onResponse={handleInterpreterResponse}
+          />
+        </WritableScope>
       ) : null}
     </>
   );

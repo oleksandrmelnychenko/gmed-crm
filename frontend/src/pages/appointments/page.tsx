@@ -28,7 +28,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
   buildInterpreterMobileAgendaSections,
   buildAppointmentTimelineEvents,
-  canResubmitInterpreterReport,
+  appointmentReportActions,
   normalizeAppointmentWorkspaceTab,
 } from "@/pages/appointments/model/selectors";
 import {
@@ -982,23 +982,16 @@ function useStaffAppointmentsPageContent() {
       t.appointments_billing_sync_missing_catalog,
       t.appointments_billing_sync_missing_order,
     ]);
-  const canResubmitRejectedReport =
-    permissions.canSubmitReport &&
-    canResubmitInterpreterReport({
-      approvalStatus: detailReport?.approval_status,
-      currentUserId: user?.id,
-      interpreterId: detail?.interpreter_id,
-    });
-  const canSubmitInterpreterReport = Boolean(
-    permissions.canSubmitReport &&
-    detail?.interpreter_id === user?.id &&
-    (!detailReport || canResubmitRejectedReport),
-  );
-  const showReportReviewActions = Boolean(
-    (permissions.canApproveReport || permissions.canRejectReport) &&
-    detailReport &&
-    detailReport.approval_status === "pending",
-  );
+  const {
+    canSubmitInterpreterReport,
+    canResubmitRejectedReport,
+    showReportReviewActions,
+  } = appointmentReportActions({
+    permissions,
+    currentUserId: user?.id,
+    interpreterId: detail?.interpreter_id,
+    report: detailReport,
+  });
   const reportReviewMeta = !detailReport
     ? ""
     : detailReport.approval_status === "approved"

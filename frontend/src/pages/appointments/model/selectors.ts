@@ -81,6 +81,8 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
  * The appointments page is read-only without `appointments.edit`, but the
  * interpreter can still respond to assignments and submit visit reports on
  * it, so a "view only" banner above those working buttons would be wrong.
+ * Those assignee-owned controls open a `WritableScope` inside the page scope
+ * (report sheet, assignment response); everything else stays disabled.
  */
 export function appointmentsReadOnlyScope(actor?: Actor) {
   const permissions = appointmentPermissions(actor);
@@ -377,6 +379,43 @@ export function canResubmitInterpreterReport(params: {
     Boolean(params.currentUserId) &&
     params.currentUserId === params.interpreterId
   );
+}
+
+/**
+ * Report controls for one appointment. Submitting a report (or resubmitting
+ * a returned one) belongs to the interpreter assigned to the visit: the
+ * server accepts `POST /appointments/{id}/report` from that user only.
+ * Reviewers see approve/reject while the latest report is pending.
+ */
+export function appointmentReportActions(params: {
+  permissions: Pick<
+    AppointmentPermissions,
+    "canSubmitReport" | "canApproveReport" | "canRejectReport"
+  >;
+  currentUserId?: string | null;
+  interpreterId?: string | null;
+  report?: { approval_status: string } | null;
+}) {
+  const { permissions, currentUserId, interpreterId, report } = params;
+  const isAssignedInterpreter =
+    Boolean(currentUserId) && currentUserId === interpreterId;
+  const canResubmitRejectedReport =
+    permissions.canSubmitReport &&
+    canResubmitInterpreterReport({
+      approvalStatus: report?.approval_status,
+      currentUserId,
+      interpreterId,
+    });
+  return {
+    canSubmitInterpreterReport:
+      permissions.canSubmitReport &&
+      isAssignedInterpreter &&
+      (!report || canResubmitRejectedReport),
+    canResubmitRejectedReport,
+    showReportReviewActions:
+      (permissions.canApproveReport || permissions.canRejectReport) &&
+      report?.approval_status === "pending",
+  };
 }
 
 export function buildAppointmentWorkflowSummary(args: {

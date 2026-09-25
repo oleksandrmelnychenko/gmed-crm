@@ -4,10 +4,12 @@ import {
   useMemo,
   useReducer,
   type FormEvent,
+  type ReactNode,
 } from "react";
 
 import { LoaderCircle } from "lucide-react";
 
+import { WritableScope } from "@/components/read-only-scope";
 import { Button } from "@/components/ui/button";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -57,6 +59,21 @@ function withEllipsis(value: string) {
   return value.endsWith("...") || value.endsWith("…") ? value : `${value}…`;
 }
 
+/**
+ * Interpreters see the appointments page read-only (no `appointments.edit`),
+ * but submitting the visit report is the assigned interpreter's own action,
+ * so the report sheet's hours field and submit button stay enabled for them.
+ */
+function ReportSubmissionScope({
+  writable,
+  children,
+}: {
+  writable: boolean;
+  children: ReactNode;
+}) {
+  return writable ? <WritableScope>{children}</WritableScope> : children;
+}
+
 type AppointmentReportActions = {
   canSubmitInterpreterReport: boolean;
   canResubmitRejectedReport: boolean;
@@ -86,9 +103,18 @@ type ReportSectionPatch =
   | Partial<ReportSectionState>
   | ((current: ReportSectionState) => Partial<ReportSectionState>);
 
-function createReportSectionState(): ReportSectionState {
+/** A returned report opens prefilled so the interpreter only edits what changed. */
+function createReportSectionState(
+  detailReport: ReportSummary | null,
+): ReportSectionState {
   return {
-    form: blankReportForm(),
+    form:
+      detailReport && detailReport.approval_status === "rejected"
+        ? {
+            hours: detailReport.hours,
+            reportText: detailReport.report_text ?? "",
+          }
+        : blankReportForm(),
     rejectReason: "",
     busyAction: "",
     editorOpen: false,
@@ -118,7 +144,7 @@ function useAppointmentReportSectionContent({
   const tr = t as unknown as Record<string, string>;
   const [reportState, dispatchReportState] = useReducer(
     reportSectionReducer,
-    undefined,
+    detailReport,
     createReportSectionState,
   );
   const { form, rejectReason, busyAction, editorOpen, formError } = reportState;
@@ -131,19 +157,7 @@ function useAppointmentReportSectionContent({
   } = reportActions;
 
   useEffect(() => {
-    dispatchReportState({
-      form:
-        detailReport && detailReport.approval_status === "rejected"
-          ? {
-              hours: detailReport.hours,
-              reportText: detailReport.report_text ?? "",
-            }
-          : blankReportForm(),
-      rejectReason: "",
-      busyAction: "",
-      editorOpen: false,
-      formError: "",
-    });
+    dispatchReportState(createReportSectionState(detailReport));
   }, [detail.id, detailReport]);
 
   async function handleReportSubmit(event: FormEvent<HTMLFormElement>) {
@@ -450,152 +464,154 @@ function useAppointmentReportSectionContent({
         )}
 
       {canOpenReportEditor ? (
-        <AppointmentEditorSheet
-          open={editorOpen}
-          onOpenChange={(open) => dispatchReportState({ editorOpen: open })}
-          title={reportEditorTitle}
-          description={
-            showReportReviewActions
-              ? appointmentText("appointments_review_the_hours_and_report_directly_in_the_context_of_t")
-              : appointmentText("appointments_manage_hours_and_free_text_report_directly_in_this_appoi")
-          }
-          onSubmit={
-            canSubmitInterpreterReport ? handleReportSubmit : (event) => event.preventDefault()
-          }
-          footerError={formError || undefined}
-          footer={
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 rounded-lg"
-                onClick={() => dispatchReportState({ editorOpen: false })}
-              >
-                {t.common_cancel}
-              </Button>
-              {showReportReviewActions && canRejectReport ? (
+        <ReportSubmissionScope writable={canSubmitInterpreterReport}>
+          <AppointmentEditorSheet
+            open={editorOpen}
+            onOpenChange={(open) => dispatchReportState({ editorOpen: open })}
+            title={reportEditorTitle}
+            description={
+              showReportReviewActions
+                ? appointmentText("appointments_review_the_hours_and_report_directly_in_the_context_of_t")
+                : appointmentText("appointments_manage_hours_and_free_text_report_directly_in_this_appoi")
+            }
+            onSubmit={
+              canSubmitInterpreterReport ? handleReportSubmit : (event) => event.preventDefault()
+            }
+            footerError={formError || undefined}
+            footer={
+              <>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 gap-1.5 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
-                  disabled={busyAction === "report-reject"}
-                  onClick={handleRejectReport}
+                  className="h-8 rounded-lg"
+                  onClick={() => dispatchReportState({ editorOpen: false })}
                 >
-                  {busyAction === "report-reject" ? (
-                    <LoaderCircle className="size-3.5 animate-spin" />
-                  ) : null}
-                  {appointmentText("appointments_return_for_revision")}
+                  {t.common_cancel}
                 </Button>
-              ) : null}
-              {showReportReviewActions && canApproveReport ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 gap-1.5 rounded-lg"
-                  disabled={busyAction === "report-approve"}
-                  onClick={handleApproveReport}
-                >
-                  {busyAction === "report-approve" ? (
-                    <LoaderCircle className="size-3.5 animate-spin" />
-                  ) : null}
-                  {appointmentText("appointments_approve_hours_and_report")}
-                </Button>
-              ) : null}
-              {canSubmitInterpreterReport ? (
-                <Button
-                  type="submit"
-                  size="sm"
-                  className="h-8 gap-1.5 rounded-lg"
-                  disabled={
-                    busyAction === "report-submit" ||
-                    parseValidInterpreterReportHours(form.hours) === null
-                  }
-                >
-                  {busyAction === "report-submit" ? (
-                    <LoaderCircle className="size-3.5 animate-spin" />
-                  ) : null}
-                  {canResubmitRejectedReport
-                    ? appointmentText("appointments_resubmit_report")
-                    : t.common_save}
-                </Button>
-              ) : null}
-            </>
-          }
-        >
-          {canResubmitRejectedReport ? (
-            <Banner tone="warning" withIcon>
-              {appointmentText("appointments_the_latest_report_was_returned_update_the_hours_or_text")}
-            </Banner>
-          ) : null}
+                {showReportReviewActions && canRejectReport ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 rounded-lg border-rose-200 text-rose-700 hover:bg-rose-50"
+                    disabled={busyAction === "report-reject"}
+                    onClick={handleRejectReport}
+                  >
+                    {busyAction === "report-reject" ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : null}
+                    {appointmentText("appointments_return_for_revision")}
+                  </Button>
+                ) : null}
+                {showReportReviewActions && canApproveReport ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 gap-1.5 rounded-lg"
+                    disabled={busyAction === "report-approve"}
+                    onClick={handleApproveReport}
+                  >
+                    {busyAction === "report-approve" ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : null}
+                    {appointmentText("appointments_approve_hours_and_report")}
+                  </Button>
+                ) : null}
+                {canSubmitInterpreterReport ? (
+                  <Button
+                    type="submit"
+                    size="sm"
+                    className="h-8 gap-1.5 rounded-lg"
+                    disabled={
+                      busyAction === "report-submit" ||
+                      parseValidInterpreterReportHours(form.hours) === null
+                    }
+                  >
+                    {busyAction === "report-submit" ? (
+                      <LoaderCircle className="size-3.5 animate-spin" />
+                    ) : null}
+                    {canResubmitRejectedReport
+                      ? appointmentText("appointments_resubmit_report")
+                      : t.common_save}
+                  </Button>
+                ) : null}
+              </>
+            }
+          >
+            {canResubmitRejectedReport ? (
+              <Banner tone="warning" withIcon>
+                {appointmentText("appointments_the_latest_report_was_returned_update_the_hours_or_text")}
+              </Banner>
+            ) : null}
 
-          {canSubmitInterpreterReport ? (
-            <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
-              <Field label={t.appointments_time}>
-                <Input
-                  type="number"
-                  min="0.25"
-                  max="24"
-                  step="0.25"
-                  value={form.hours}
-                  onChange={(event) =>
-                    dispatchReportState((current) => ({
-                      form: {
-                        ...current.form,
-                        hours: event.target.value,
-                      },
-                      formError: "",
-                    }))
-                  }
-                  className={appointmentFilterControlClassName}
-                  required
-                />
-              </Field>
-              <Field label={tr.patients_notes}>
-                <textarea
-                  value={form.reportText}
-                  onChange={(event) =>
-                    dispatchReportState((current) => ({
-                      form: {
-                        ...current.form,
-                        reportText: event.target.value,
-                      },
-                    }))
-                  }
-                  className={appointmentTextareaControlClassName}
-                  rows={5}
-                  placeholder={withEllipsis(tr.patients_notes)}
-                />
-              </Field>
-            </div>
-          ) : null}
-
-          {showReportReviewActions ? (
-            <>
-              <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
-                <p className={tokens.text.label}>
-                  {appointmentText("appointments_report")}
-                </p>
-                <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
-                  {detailReport?.report_text ||
-                    appointmentText("appointments_no_free_text_report_submitted")}
-                </p>
+            {canSubmitInterpreterReport ? (
+              <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+                <Field label={t.appointments_time}>
+                  <Input
+                    type="number"
+                    min="0.25"
+                    max="24"
+                    step="0.25"
+                    value={form.hours}
+                    onChange={(event) =>
+                      dispatchReportState((current) => ({
+                        form: {
+                          ...current.form,
+                          hours: event.target.value,
+                        },
+                        formError: "",
+                      }))
+                    }
+                    className={appointmentFilterControlClassName}
+                    required
+                  />
+                </Field>
+                <Field label={tr.patients_notes}>
+                  <textarea
+                    value={form.reportText}
+                    onChange={(event) =>
+                      dispatchReportState((current) => ({
+                        form: {
+                          ...current.form,
+                          reportText: event.target.value,
+                        },
+                      }))
+                    }
+                    className={appointmentTextareaControlClassName}
+                    rows={5}
+                    placeholder={withEllipsis(tr.patients_notes)}
+                  />
+                </Field>
               </div>
-              <Field label={tr.patients_notes}>
-                <textarea
-                  value={rejectReason}
-                  onChange={(event) =>
-                    dispatchReportState({ rejectReason: event.target.value })
-                  }
-                  className={appointmentTextareaControlClassName}
-                  rows={4}
-                  placeholder={withEllipsis(tr.patients_notes)}
-                />
-              </Field>
-            </>
-          ) : null}
-        </AppointmentEditorSheet>
+            ) : null}
+
+            {showReportReviewActions ? (
+              <>
+                <div className={cn("rounded-xl px-4 py-3", tokens.surface.mutedCard)}>
+                  <p className={tokens.text.label}>
+                    {appointmentText("appointments_report")}
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                    {detailReport?.report_text ||
+                      appointmentText("appointments_no_free_text_report_submitted")}
+                  </p>
+                </div>
+                <Field label={tr.patients_notes}>
+                  <textarea
+                    value={rejectReason}
+                    onChange={(event) =>
+                      dispatchReportState({ rejectReason: event.target.value })
+                    }
+                    className={appointmentTextareaControlClassName}
+                    rows={4}
+                    placeholder={withEllipsis(tr.patients_notes)}
+                  />
+                </Field>
+              </>
+            ) : null}
+          </AppointmentEditorSheet>
+        </ReportSubmissionScope>
       ) : null}
     </div>
   );
