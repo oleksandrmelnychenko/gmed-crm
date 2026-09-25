@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   futureCompletionTargets,
   isAppointmentCompletionTooEarly,
+  isInterpreterReportTooEarly,
 } from "./completion-rules";
 
 describe("isAppointmentCompletionTooEarly", () => {
@@ -32,6 +33,16 @@ describe("isAppointmentCompletionTooEarly", () => {
 
     expect(isAppointmentCompletionTooEarly("2026-09-25")).toBe(false);
     expect(isAppointmentCompletionTooEarly("2026-09-26")).toBe(true);
+  });
+});
+
+describe("isInterpreterReportTooEarly", () => {
+  it("keeps report submit and approval closed until the appointment date", () => {
+    const today = "2026-09-25";
+
+    expect(isInterpreterReportTooEarly("2026-10-05", today)).toBe(true);
+    expect(isInterpreterReportTooEarly("2026-09-25", today)).toBe(false);
+    expect(isInterpreterReportTooEarly("2026-09-01", today)).toBe(false);
   });
 });
 

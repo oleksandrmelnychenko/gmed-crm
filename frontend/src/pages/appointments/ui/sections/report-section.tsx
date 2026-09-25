@@ -29,6 +29,7 @@ import {
   appointmentPreviewInfoCardClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
+import { isInterpreterReportTooEarly } from "@/pages/appointments/model/completion-rules";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   blankReportForm,
@@ -331,6 +332,13 @@ function useAppointmentReportSectionContent({
     [reportReviewMeta, t, tr],
   );
   const canOpenReportEditor = canSubmitInterpreterReport || showReportReviewActions;
+  // Approval bills the reported hours, so submitting and approving a report
+  // open on the appointment date (Europe/Berlin); returning it stays possible.
+  const reportTooEarly = isInterpreterReportTooEarly(detail.date);
+  const reportTooEarlyHint = appointmentText("appointments_report_not_before_date");
+  const showReportDateHint =
+    reportTooEarly &&
+    (canSubmitInterpreterReport || (showReportReviewActions && canApproveReport));
   const reportEditorTitle = showReportReviewActions
     ? appointmentText("appointments_review_decision")
     : canResubmitRejectedReport
@@ -509,7 +517,8 @@ function useAppointmentReportSectionContent({
                     type="button"
                     size="sm"
                     className="h-8 gap-1.5 rounded-lg"
-                    disabled={busyAction === "report-approve"}
+                    disabled={busyAction === "report-approve" || reportTooEarly}
+                    title={reportTooEarly ? reportTooEarlyHint : undefined}
                     onClick={handleApproveReport}
                   >
                     {busyAction === "report-approve" ? (
@@ -525,8 +534,10 @@ function useAppointmentReportSectionContent({
                     className="h-8 gap-1.5 rounded-lg"
                     disabled={
                       busyAction === "report-submit" ||
+                      reportTooEarly ||
                       parseValidInterpreterReportHours(form.hours) === null
                     }
+                    title={reportTooEarly ? reportTooEarlyHint : undefined}
                   >
                     {busyAction === "report-submit" ? (
                       <LoaderCircle className="size-3.5 animate-spin" />
@@ -539,6 +550,14 @@ function useAppointmentReportSectionContent({
               </>
             }
           >
+            {showReportDateHint ? (
+              <Banner tone="warning" withIcon>
+                <span data-testid="appointment-report-date-hint">
+                  {reportTooEarlyHint}
+                </span>
+              </Banner>
+            ) : null}
+
             {canResubmitRejectedReport ? (
               <Banner tone="warning" withIcon>
                 {appointmentText("appointments_the_latest_report_was_returned_update_the_hours_or_text")}

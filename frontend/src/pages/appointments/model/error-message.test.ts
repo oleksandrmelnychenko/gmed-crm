@@ -41,6 +41,23 @@ describe("appointmentActionErrorMessage", () => {
     );
   });
 
+  it("localizes the server rejection of a report submitted or approved before the date", () => {
+    const error = new ApiRequestError(
+      "Interpreter reports cannot be approved before the appointment date",
+      {
+        status: 422,
+        code: "Unprocessable Entity",
+        body: { code: "appointment_report_before_date" },
+      },
+    );
+
+    const message = appointmentActionErrorMessage(error, "Fallback");
+
+    expect(message).not.toBe("Fallback");
+    expect(message).not.toBe("appointments_report_not_before_date");
+    expect(message).toBe(appointmentText("appointments_report_not_before_date"));
+  });
+
   it("keeps the fallback for unknown or inherited body codes", () => {
     for (const code of ["constructor", "something_else", 42]) {
       const error = new ApiRequestError("Rejected", {

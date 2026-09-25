@@ -1,5 +1,8 @@
 import { ApiRequestError } from "@/lib/api";
-import { APPOINTMENT_COMPLETION_BEFORE_DATE_CODE } from "@/pages/appointments/model/completion-rules";
+import {
+  APPOINTMENT_COMPLETION_BEFORE_DATE_CODE,
+  APPOINTMENT_REPORT_BEFORE_DATE_CODE,
+} from "@/pages/appointments/model/completion-rules";
 import { appointmentText } from "@/pages/appointments/model/labels";
 
 const LOCALIZED_TRANSPORT_CODES = new Set(["aborted", "network", "timeout"]);
@@ -10,6 +13,7 @@ const LOCALIZED_BODY_CODE_KEYS = new Map<string, string>([
     APPOINTMENT_COMPLETION_BEFORE_DATE_CODE,
     "appointments_status_completion_not_before_date",
   ],
+  [APPOINTMENT_REPORT_BEFORE_DATE_CODE, "appointments_report_not_before_date"],
 ]);
 
 export function appointmentActionErrorMessage(

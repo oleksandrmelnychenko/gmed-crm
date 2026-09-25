@@ -4,6 +4,9 @@ import { currentDateInput } from "@/pages/appointments/model/date-time";
 export const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE =
   "appointment_completion_before_date";
 
+/** Error code the server returns when a report is submitted or approved too early. */
+export const APPOINTMENT_REPORT_BEFORE_DATE_CODE = "appointment_report_before_date";
+
 /**
  * Completion counts as delivery (billing lines, order execution), so it only
  * opens on the appointment's own day in Europe/Berlin. Same day is allowed.
@@ -15,6 +18,12 @@ export function isAppointmentCompletionTooEarly(
   const day = String(appointmentDate ?? "").slice(0, 10);
   return day.length === 10 && day > today;
 }
+
+/**
+ * Interpreter reports follow the same rule: approval bills the reported hours,
+ * so neither submitting nor approving a report opens before the appointment day.
+ */
+export const isInterpreterReportTooEarly = isAppointmentCompletionTooEarly;
 
 /** Open targets of a completion scope that are still dated after today. */
 export function futureCompletionTargets<

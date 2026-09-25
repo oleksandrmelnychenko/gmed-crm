@@ -28,8 +28,33 @@ const completedStatusButton = /^Abgeschlossen$/;
 const completeAndScheduleButton = /Abschließen & planen/;
 const dateHint = "Abschließen ist erst ab dem Termindatum möglich.";
 
-async function openMockedAppointment(page: Page, date: string) {
+const interpreterId = "a0000000-0000-0000-0000-000000000032";
+const reportDateHint =
+  "Dolmetscherberichte können erst ab dem Termindatum eingereicht und freigegeben werden.";
+
+const pendingReport = {
+  id: "report-0031",
+  interpreter_id: interpreterId,
+  interpreter_name: "Marina Sokolova",
+  hours: "2.5",
+  report_text: "Interpreted the consultation.",
+  approval_status: "pending",
+  notes: null,
+  approved_by_name: null,
+  approved_at: null,
+  created_at: "2026-09-20T12:00:00Z",
+  billing_leistung_id: null,
+  billing_sync_status: null,
+  billing_service_key: null,
+};
+
+async function openMockedAppointment(
+  page: Page,
+  date: string,
+  options: { report?: typeof pendingReport; detailTab?: string } = {},
+) {
   const statusPosts: unknown[] = [];
+  const reportPosts: string[] = [];
   const listItem = {
     id: appointmentId,
     title: "Cardiology consultation",
@@ -52,8 +77,8 @@ async function openMockedAppointment(page: Page, date: string) {
     owner_user_id: ownerId,
     owner_name: "Sarah Kovacs",
     owner_role: "patient_manager",
-    interpreter_id: null,
-    interpreter_name: null,
+    interpreter_id: options.report ? interpreterId : null,
+    interpreter_name: options.report ? "Marina Sokolova" : null,
     recurrence_series_id: null,
     recurrence_frequency: null,
     recurrence_interval: null,
@@ -122,7 +147,17 @@ async function openMockedAppointment(page: Page, date: string) {
     if (path === "/appointments/meta/staff") {
       return json(route, [{ id: ownerId, name: "Sarah Kovacs", role: "patient_manager" }]);
     }
-    if (path === `/appointments/${appointmentId}/report`) return json(route, null);
+    if (
+      method === "POST" &&
+      (path === `/appointments/${appointmentId}/report/approve` ||
+        path === `/appointments/${appointmentId}/report/reject`)
+    ) {
+      reportPosts.push(path.split("/").pop() ?? "");
+      return json(route, { ok: true, report_id: pendingReport.id });
+    }
+    if (path === `/appointments/${appointmentId}/report`) {
+      return json(route, options.report ?? null);
+    }
     if (path === "/patients") {
       return json(route, [
         { id: patientId, patient_id: "P-0031", first_name: "Synthetic", last_name: "Patient" },
@@ -151,19 +186,32 @@ async function openMockedAppointment(page: Page, date: string) {
   await page.locator("#password").fill("admin123");
   await page.getByRole("button", { name: /Anmelden|Войти/i }).click();
   await page.waitForURL(/\/$/, { timeout: 15_000 });
-  await page.goto(`/appointments?appointment=${appointmentId}&detailTab=workflow`);
+  await page.goto(
+    `/appointments?appointment=${appointmentId}&detailTab=${options.detailTab ?? "workflow"}`,
+  );
+  return { statusPosts, reportPosts };
+}
+
+async function expectWorkflowReady(page: Page) {
   await expect(
     page.getByRole("button", { name: completeAndScheduleButton }).first(),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: completedStatusButton }),
   ).toBeVisible();
-  return statusPosts;
+}
+
+async function openReportReview(page: Page) {
+  await page.getByRole("button", { name: /Review öffnen/ }).click();
+  const sheet = page.getByRole("dialog").last();
+  await expect(sheet).toBeVisible();
+  return sheet;
 }
 
 test.describe("appointment completion date rule", () => {
   test("a future appointment keeps completion closed with a hint", async ({ page }) => {
-    const statusPosts = await openMockedAppointment(page, berlinDate(10));
+    const { statusPosts } = await openMockedAppointment(page, berlinDate(10));
+    await expectWorkflowReady(page);
 
     const completed = page.getByRole("button", { name: completedStatusButton });
     await expect(completed).toBeDisabled();
@@ -186,7 +234,8 @@ test.describe("appointment completion date rule", () => {
   });
 
   test("an appointment dated today can be completed", async ({ page }) => {
-    const statusPosts = await openMockedAppointment(page, berlinDate(0));
+    const { statusPosts } = await openMockedAppointment(page, berlinDate(0));
+    await expectWorkflowReady(page);
 
     await expect(
       page.getByRole("button", { name: completeAndScheduleButton }).first(),
@@ -200,5 +249,37 @@ test.describe("appointment completion date rule", () => {
     await expect.poll(() => statusPosts).toEqual([
       { status: "completed", recurrence_scope: "single" },
     ]);
+  });
+
+  test("a pending report of a future appointment can be returned but not approved", async ({
+    page,
+  }) => {
+    const { reportPosts } = await openMockedAppointment(page, berlinDate(10), {
+      report: pendingReport,
+      detailTab: "clinical",
+    });
+    const sheet = await openReportReview(page);
+
+    const approve = sheet.getByRole("button", { name: /Stunden und Bericht freigeben/ });
+    await expect(approve).toBeDisabled();
+    await expect(approve).toHaveAttribute("title", reportDateHint);
+    await expect(sheet.getByTestId("appointment-report-date-hint")).toHaveText(
+      reportDateHint,
+    );
+
+    await sheet.getByRole("button", { name: /Zur Überarbeitung zurückgeben/ }).click();
+    await expect.poll(() => reportPosts).toEqual(["reject"]);
+  });
+
+  test("a pending report of today's appointment can be approved", async ({ page }) => {
+    const { reportPosts } = await openMockedAppointment(page, berlinDate(0), {
+      report: pendingReport,
+      detailTab: "clinical",
+    });
+    const sheet = await openReportReview(page);
+
+    await expect(sheet.getByTestId("appointment-report-date-hint")).toHaveCount(0);
+    await sheet.getByRole("button", { name: /Stunden und Bericht freigeben/ }).click();
+    await expect.poll(() => reportPosts).toEqual(["approve"]);
   });
 });
