@@ -38,11 +38,10 @@ fn decimal(value: &Value) -> f64 {
         .unwrap_or_default()
 }
 
+/// Agency services feed the order and its Kostenvoranschlag only. The VKS
+/// (`cost_estimate`) lists the selected medical work types, see `estimate_selection`.
 pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, template: &str) {
-    if !matches!(
-        template,
-        "single_order" | "order_cost_estimate" | "cost_estimate"
-    ) {
+    if !matches!(template, "single_order" | "order_cost_estimate") {
         return;
     }
     bindings.specialties = data["catalog_snapshot"]["specializations"]
@@ -126,6 +125,10 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
         .filter(|items| !items.is_empty())?;
     let mut minimum = 0.0;
     let mut maximum = 0.0;
+    let work_type_ids = work_types
+        .iter()
+        .filter_map(|item| item["id"].as_str()?.parse::<Uuid>().ok())
+        .collect();
     let line_items = work_types
         .iter()
         .map(|item| {
@@ -167,6 +170,7 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
         })
         .collect();
     Some(GeneratedCostEstimateCatalogSelection {
+        work_type_ids,
         line_items,
         total_range: format_eur_range(minimum, maximum),
     })
@@ -272,7 +276,7 @@ mod tests {
             "lines":[{"agency_service_id":"service","description":"Coordination","quantity":"19","unit_price":"60","vat_rate":"19"}],
             "catalog_snapshot":{"specializations":[{"name_de":"Urologie"}],
             "services":[{"id":"service","unit_label":"Std.","description_items":[{"id":"scope","text":"[Datum Beginn] bis [Datum Ende]: [Fachrichtung 1], [Fachrichtung 2]"}]}],
-            "work_types":[{"name_de":"Operation","name_ru":"Операция","duration_hours":15,"min_price_eur":28000,"max_price_eur":35000,"descriptions":[]}]}});
+            "work_types":[{"id":"6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f","name_de":"Operation","name_ru":"Операция","duration_hours":15,"min_price_eur":28000,"max_price_eur":35000,"descriptions":[]}]}});
         let mut bindings = DocumentBindingOverrides::default();
         apply(&mut bindings, &data, "single_order");
         assert_eq!(
@@ -297,6 +301,27 @@ mod tests {
         assert_eq!(selection.total_range, "28.000,00 - 35.000,00 EUR");
         assert_eq!(selection.line_items[0].quantity, "15");
         assert_eq!(selection.line_items[0].localized_sections.len(), 2);
+        assert_eq!(
+            selection.work_type_ids,
+            vec![Uuid::parse_str("6f1c2d3e-4b5a-4c7d-8e9f-0a1b2c3d4e5f").unwrap()]
+        );
+    }
+
+    #[test]
+    fn intake_cost_estimate_never_receives_the_agency_services() {
+        let data = json!({"lines":[{"agency_service_id":"service","description":"Interpreter support",
+            "quantity":"1","unit_price":"285","vat_rate":"19"}],
+            "catalog_snapshot":{"specializations":[{"name_de":"Gastroenterologie"}],
+            "services":[{"id":"service","unit_label":"Std."}]}});
+        let mut bindings = DocumentBindingOverrides::default();
+        apply(&mut bindings, &data, "cost_estimate");
+        assert!(bindings.service_lines.is_empty());
+        assert_eq!(bindings.estimate_total, None);
+        // No medical work types chosen: the intake has no estimate to render.
+        assert!(estimate_selection(&json!({ "data": data })).is_none());
+
+        apply(&mut bindings, &data, "order_cost_estimate");
+        assert_eq!(bindings.service_lines[0].description, "Interpreter support");
     }
 
     #[test]

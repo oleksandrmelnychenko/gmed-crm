@@ -340,6 +340,8 @@ async function generateCommercialDocument(
   },
 ) {
   const financial = ["order_cost_estimate", "cost_estimate"].includes(input.templateId);
+  // The VKS lists the lead's medical work types (selectMedicalWorkTypes), never agency lines.
+  const medicalEstimate = input.templateId === "cost_estimate";
   return pm.post("/documents/generate", {
     template_id: input.templateId,
     ...(input.leadId ? { lead_id: input.leadId } : {}),
@@ -356,15 +358,43 @@ async function generateCommercialDocument(
       party_sign_place: "Berlin",
       specialties: "Kardiologie",
       ...(input.period ? { period_from: input.period.from, period_to: input.period.to } : {}),
-      estimate_total: `${input.estimateGross.toFixed(2)} EUR`,
-      service_lines: input.lines.map((line) => ({
-        description: line.description,
-        quantity: String(line.quantity),
-        fee: `${line.unit_price.toFixed(2)} EUR`,
-        line_total: `${(line.quantity * line.unit_price).toFixed(2)} EUR`,
-        vat_rate: String(line.vat_rate),
-      })),
+      ...(medicalEstimate ? {} : {
+        estimate_total: `${input.estimateGross.toFixed(2)} EUR`,
+        service_lines: input.lines.map((line) => ({
+          description: line.description,
+          quantity: String(line.quantity),
+          fee: `${line.unit_price.toFixed(2)} EUR`,
+          line_total: `${(line.quantity * line.unit_price).toFixed(2)} EUR`,
+          vat_rate: String(line.vat_rate),
+        })),
+      }),
     },
+  });
+}
+
+let medicalWorkTypeIds: Promise<string[]> | undefined;
+
+/** First active catalog work type, cardiology preferred, as a staff member would pick it. */
+function catalogMedicalWorkTypeIds(pm: Actor) {
+  medicalWorkTypeIds ??= (async () => {
+    const specializations = [...listOf(await pm.ok("GET", "/providers/specializations"))]
+      .sort((left, right) => Number(!/cardio|kardio/i.test(left.code)) - Number(!/cardio|kardio/i.test(right.code)));
+    for (const specialization of specializations) {
+      const workTypes = listOf(await pm.ok("GET", `/providers/specializations/${specialization.id}/work-types`));
+      const active = workTypes.find((item) => item.is_active !== false);
+      if (active) return [active.id as string];
+    }
+    throw new Error("The environment needs an active medical work type for the preliminary cost calculation");
+  })();
+  return medicalWorkTypeIds;
+}
+
+/** The lead wizard stores the chosen medical work types in wizard_state; the VKS lists only those. */
+async function selectMedicalWorkTypes(pm: Actor, leadId: string) {
+  const ids = await catalogMedicalWorkTypeIds(pm);
+  const lead = await pm.ok("GET", `/leads/${leadId}`);
+  await pm.ok("POST", `/leads/${leadId}/update`, {
+    wizard_state: { ...(lead.wizard_state ?? {}), selected_specialization_work_type_ids: ids },
   });
 }
 
@@ -476,6 +506,7 @@ async function onboardNewPatient(
   const quote = await pm.ok("POST", `/orders/${order.id}/quotes`, {});
   expect(money(quote.total_gross), JSON.stringify(quote).slice(0, 500)).toBe(estimateGross);
 
+  await selectMedicalWorkTypes(pm, leadId);
   const documents: OnboardedPatient["documents"] = {};
   for (const templateId of [
     "framework_contract",
@@ -709,6 +740,7 @@ async function completeRepeatIntake(
     prepayment_required: false,
   });
   const quote = await pm.ok("POST", `/orders/${input.orderId}/quotes`, {});
+  await selectMedicalWorkTypes(pm, input.leadId);
   const documents: Record<string, string> = {};
   for (const templateId of ["single_order", "order_cost_estimate", "cost_estimate"] as const) {
     const generated = await generateCommercialDocument(pm, {

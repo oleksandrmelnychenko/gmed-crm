@@ -409,8 +409,60 @@ struct GeneratedContractLineItem {
 }
 
 struct GeneratedCostEstimateCatalogSelection {
+    /// The medical work types the estimate lists, recorded with the document.
+    work_type_ids: Vec<Uuid>,
     line_items: Vec<GeneratedContractLineItem>,
     total_range: String,
+}
+
+/// Recorded in `documents.generated_bindings` for a VKS built from medical work
+/// types; lead readiness only accepts a VKS that carries it.
+const COST_ESTIMATE_WORK_TYPE_IDS_BINDING_KEY: &str = "_cost_estimate_work_type_ids";
+const COST_ESTIMATE_WORK_TYPES_REQUIRED: &str =
+    "Select medical work types before creating the preliminary cost calculation";
+const COST_ESTIMATE_MEDICAL_LINES_REQUIRED: &str =
+    "Enter the medical services before creating the preliminary cost calculation";
+
+/// The lines, total and source work types of one VKS.
+struct CostEstimateLines {
+    line_items: Vec<GeneratedContractLineItem>,
+    total_range: Option<String>,
+    /// Empty for medical lines entered by hand in the document generator.
+    work_type_ids: Vec<Uuid>,
+}
+
+/// The VKS ("Kostenschätzung für medizinische Leistungen") is separate from the
+/// agency's Kostenvoranschlag: it lists medical work types only and never falls
+/// back to the order's or the quote's agency service lines. The lead wizard and
+/// the order preparation choose work types; only the generic document generator
+/// (patient context) accepts medical cost lines entered by hand.
+fn resolve_cost_estimate_lines(
+    selection: Option<GeneratedCostEstimateCatalogSelection>,
+    work_types_are_the_source: bool,
+    bindings: &DocumentBindingOverrides,
+) -> Result<CostEstimateLines, &'static str> {
+    if let Some(selection) = selection.filter(|selection| !selection.line_items.is_empty()) {
+        return Ok(CostEstimateLines {
+            line_items: selection.line_items,
+            total_range: Some(selection.total_range),
+            work_type_ids: selection.work_type_ids,
+        });
+    }
+    if work_types_are_the_source {
+        return Err(COST_ESTIMATE_WORK_TYPES_REQUIRED);
+    }
+    let line_items = service_lines_to_items(&bindings.service_lines);
+    if line_items.is_empty() {
+        return Err(COST_ESTIMATE_MEDICAL_LINES_REQUIRED);
+    }
+    Ok(CostEstimateLines {
+        line_items,
+        total_range: bindings
+            .estimate_total
+            .clone()
+            .filter(|value| !value.trim().is_empty()),
+        work_type_ids: Vec::new(),
+    })
 }
 
 #[allow(dead_code)]
@@ -13137,6 +13189,30 @@ async fn generate_document(
         );
     }
 
+    // Resolve the VKS lines before an existing version is reused or a document
+    // number is allocated, so an estimate without medical services is never issued.
+    let cost_estimate_lines = if template.id == "cost_estimate" {
+        let selection = if let Some(context) = &intake_context {
+            intake_documents::estimate_selection(context)
+        } else {
+            match load_lead_cost_estimate_catalog_selection(&state, lead_id).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            }
+        };
+        let no_bindings = DocumentBindingOverrides::default();
+        match resolve_cost_estimate_lines(
+            selection,
+            intake_context.is_some() || lead_id.is_some(),
+            body.bindings.as_ref().unwrap_or(&no_bindings),
+        ) {
+            Ok(lines) => Some(lines),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
+    } else {
+        None
+    };
+
     if let (Some(context), Some(guard)) = (
         intake_context.as_ref().or(repeat_context.as_ref()),
         intake_generation_guard.as_mut(),
@@ -14434,44 +14510,22 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let catalog_selection = if let Some(context) = &intake_context {
-                intake_documents::estimate_selection(context)
-            } else {
-                match load_lead_cost_estimate_catalog_selection(&state, lead_id).await {
-                    Ok(value) => value,
-                    Err(resp) => return resp,
-                }
+            // Resolved and validated before the document number was allocated.
+            let Some(CostEstimateLines {
+                line_items,
+                total_range,
+                work_type_ids,
+            }) = cost_estimate_lines
+            else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    COST_ESTIMATE_WORK_TYPES_REQUIRED,
+                );
             };
-            let quote = if let Some(order_uuid) = order_id {
-                match load_order_quote_summary(&state, order_uuid).await {
-                    Ok(value) => value,
-                    Err(resp) => return resp,
-                }
-            } else {
-                None
-            };
-            let uses_catalog_lines = catalog_selection.is_some();
-            let uses_quote_lines = !uses_catalog_lines && bindings.service_lines.is_empty();
-            let line_items = if let Some(selection) = catalog_selection.as_ref() {
-                selection.line_items.clone()
-            } else if uses_quote_lines {
-                quote
-                    .as_ref()
-                    .map(|q| q.line_items.clone())
-                    .unwrap_or_default()
-            } else {
-                service_lines_to_items(&bindings.service_lines)
-            };
-            let total_range = if let Some(selection) = catalog_selection.as_ref() {
-                Some(selection.total_range.clone())
-            } else if uses_quote_lines {
-                bindings
-                    .estimate_total
-                    .clone()
-                    .or_else(|| quote.as_ref().and_then(|q| q.total_gross.clone()))
-            } else {
-                bindings.estimate_total.clone()
-            };
+            if !work_type_ids.is_empty() {
+                generated_bindings_snapshot.get_or_insert_with(|| json!({}))
+                    [COST_ESTIMATE_WORK_TYPE_IDS_BINDING_KEY] = json!(work_type_ids);
+            }
             let context = GeneratedCostEstimateContext {
                 language: language.to_string(),
                 auto_name: auto_name.clone(),
@@ -17184,9 +17238,9 @@ fn build_cost_estimate_pdf(
         );
     } else {
         for item in &context.line_items {
-            // Range estimate: prefer the operator's free-text line total, fall
-            // back to the unit price. Verbatim ranges are preserved; only single
-            // numeric quote-fallback values are normalised via fmt_money_de.
+            // Range estimate: prefer the line total, fall back to the unit price.
+            // Verbatim ranges are preserved; only single numeric amounts entered
+            // by hand are normalised to the German money format.
             let raw_price = {
                 let line_gross = item.line_gross.trim();
                 if line_gross.is_empty() {
@@ -19128,6 +19182,7 @@ async fn load_lead_cost_estimate_catalog_selection(
 
     let mut total_min = 0.0_f64;
     let mut total_max = 0.0_f64;
+    let mut work_type_ids = Vec::with_capacity(rows.len());
     let mut line_items = Vec::with_capacity(rows.len());
     for row in rows {
         let work_type_id = row.try_get::<Uuid, _>("id").map_err(|error| {
@@ -19184,6 +19239,7 @@ async fn load_lead_cost_estimate_catalog_selection(
         );
         let price_range = format_eur_range(min_price, max_price);
         let line_total_range = price_range.clone();
+        work_type_ids.push(work_type_id);
         line_items.push(GeneratedContractLineItem {
             description_items: None,
             localized_sections,
@@ -19197,6 +19253,7 @@ async fn load_lead_cost_estimate_catalog_selection(
     }
 
     Ok(Some(GeneratedCostEstimateCatalogSelection {
+        work_type_ids,
         line_items,
         total_range: format_eur_range(total_min, total_max),
     }))
@@ -26437,8 +26494,10 @@ mod tests {
     use super::create_private_ocr_temp_file;
     use super::{
         AdminSignatureParty, AgencyContractSettings, AmlEnhancedDueDiligenceBindings,
+        COST_ESTIMATE_MEDICAL_LINES_REQUIRED, COST_ESTIMATE_WORK_TYPES_REQUIRED, CostEstimateLines,
         DOCUMENT_TEMPLATES, DocPartyBlock, DocumentBindingOverrides, GeneratedConsentContext,
-        GeneratedContractLineItem, GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
+        GeneratedContractLineItem, GeneratedCostEstimateCatalogSelection,
+        GeneratedCostEstimateContext, GeneratedFrameworkContractContext,
         GeneratedPatientStickerContext, GeneratedSingleOrderContext, PDF_LEGAL_CONTENT_BOTTOM_MM,
         PDF_PAGE_WIDTH_MM, ServiceLineInput, TreatmentPlanPdfColor, TreatmentPlanPdfLayout,
         admin_signature_grid, adult_legal_agency_identity, agency_block_lines,
@@ -26456,8 +26515,8 @@ mod tests {
         is_lead_allowed_document_template, is_structured_generated_document_template,
         legal_agency_block_lines, legal_document_reference, localized_estimate_work_type_sections,
         new_admin_pdf, parse_document_ocr_max_concurrency, parse_document_ocr_timeout_seconds,
-        patient_sticker_agency_line, pdf_mm_to_pt, single_order_scope_points,
-        tesseract_input_extension, trusted_contact_recipients_binding,
+        patient_sticker_agency_line, pdf_mm_to_pt, resolve_cost_estimate_lines,
+        single_order_scope_points, tesseract_input_extension, trusted_contact_recipients_binding,
         valid_tesseract_language_spec,
     };
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
@@ -27861,6 +27920,109 @@ mod tests {
             "100,00 - 1000,00 €"
         );
         assert_eq!(cost_estimate_price_text("1428.00"), "1.428,00 EUR");
+    }
+
+    /// The agency line the wizard used to send for a VKS without work types.
+    fn agency_interpreter_bindings() -> DocumentBindingOverrides {
+        DocumentBindingOverrides {
+            estimate_total: Some("339,15 EUR".to_string()),
+            service_lines: vec![ServiceLineInput {
+                description: "Interpreter support".to_string(),
+                description_items: None,
+                fee: Some("285,00 EUR / Std.".to_string()),
+                quantity: Some("1".to_string()),
+                line_total: Some("285,00 EUR".to_string()),
+                vat_rate: Some("19".to_string()),
+                note: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn cost_estimate_without_work_types_never_lists_agency_services() {
+        for selection in [
+            None,
+            Some(GeneratedCostEstimateCatalogSelection {
+                work_type_ids: Vec::new(),
+                line_items: Vec::new(),
+                total_range: "0,00 - 0,00 EUR".to_string(),
+            }),
+        ] {
+            let Err(message) =
+                resolve_cost_estimate_lines(selection, true, &agency_interpreter_bindings())
+            else {
+                panic!("a lead or order preparation VKS must require medical work types");
+            };
+            assert_eq!(message, COST_ESTIMATE_WORK_TYPES_REQUIRED);
+        }
+        let Err(message) =
+            resolve_cost_estimate_lines(None, false, &DocumentBindingOverrides::default())
+        else {
+            panic!("a VKS without medical lines must not be generated");
+        };
+        assert_eq!(message, COST_ESTIMATE_MEDICAL_LINES_REQUIRED);
+    }
+
+    #[test]
+    fn cost_estimate_with_work_types_lists_only_the_medical_ranges() {
+        let work_type_id = Uuid::new_v4();
+        let selection = GeneratedCostEstimateCatalogSelection {
+            work_type_ids: vec![work_type_id],
+            line_items: vec![GeneratedContractLineItem {
+                description_items: None,
+                localized_sections: vec![("Gastroskopie".to_string(), String::new())],
+                description: String::new(),
+                quantity: "2".to_string(),
+                unit_price: "800,00 - 1.200,00 EUR".to_string(),
+                line_gross: "800,00 - 1.200,00 EUR".to_string(),
+                vat_rate: None,
+                notes: None,
+            }],
+            total_range: "800,00 - 1.200,00 EUR".to_string(),
+        };
+        let CostEstimateLines {
+            line_items: items,
+            total_range: total,
+            work_type_ids: ids,
+        } = resolve_cost_estimate_lines(Some(selection), true, &agency_interpreter_bindings())
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].localized_sections[0].0, "Gastroskopie");
+        assert!(
+            items
+                .iter()
+                .all(|item| item.description != "Interpreter support")
+        );
+        assert_eq!(items[0].line_gross, "800,00 - 1.200,00 EUR");
+        assert_eq!(total.as_deref(), Some("800,00 - 1.200,00 EUR"));
+        assert_eq!(ids, vec![work_type_id]);
+    }
+
+    #[test]
+    fn cost_estimate_keeps_medical_lines_entered_in_the_document_generator() {
+        let bindings = DocumentBindingOverrides {
+            estimate_total: Some("1.000,00 - 1.500,00 EUR".to_string()),
+            service_lines: vec![ServiceLineInput {
+                description: "Kardiologische Untersuchung".to_string(),
+                description_items: None,
+                fee: None,
+                quantity: None,
+                line_total: Some("1.000,00 - 1.500,00 EUR".to_string()),
+                vat_rate: None,
+                note: None,
+            }],
+            ..Default::default()
+        };
+        let CostEstimateLines {
+            line_items: items,
+            total_range: total,
+            work_type_ids: ids,
+        } = resolve_cost_estimate_lines(None, false, &bindings).unwrap();
+        assert_eq!(items[0].description, "Kardiologische Untersuchung");
+        assert_eq!(items[0].line_gross, "1.000,00 - 1.500,00 EUR");
+        assert_eq!(total.as_deref(), Some("1.000,00 - 1.500,00 EUR"));
+        assert!(ids.is_empty());
     }
 
     #[test]

@@ -229,6 +229,21 @@ async fn returning_patient_intake_preserves_history_and_guards_every_transition(
             .await
             .unwrap();
     assert_eq!(stored["data"]["facts"]["insurance_provider"], "New insurer");
+    // The VKS lists medical work types only; the agency's coordination line
+    // must not stand in for them.
+    let (status, estimate) = request(
+        &ctx.app,
+        &token,
+        "POST",
+        "/api/v1/documents/generate",
+        json!({"patient_id":patient,"order_id":id,"template_id":"cost_estimate","language":"de"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{estimate}");
+    assert_eq!(
+        estimate["message"],
+        "Select medical work types before creating the preliminary cost calculation"
+    );
     let mut changed = draft.clone();
     changed["needs_description"] = json!("Changed treatment purpose");
     let (status, next) = save(&ctx.app, &token, &ws, &changed, "prepare").await;

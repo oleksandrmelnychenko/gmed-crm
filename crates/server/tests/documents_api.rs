@@ -4564,12 +4564,17 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
             expected_category: "finance_cost_estimate",
             order_id: Some(order_id),
             appointment_id: None,
+            // The VKS lists medical services only, never the order's agency lines.
             bindings: json!({
-                "order_date": "2026-05-01"
+                "order_date": "2026-05-01",
+                "service_lines": [
+                    {"description": "Kardiologische Untersuchung", "line_total": "1.000,00 - 1.500,00 EUR"}
+                ],
+                "estimate_total": "1.000,00 - 1.500,00 EUR"
             }),
             text_block_keys: vec![],
             min_pdf_size: 800,
-            expected_pdf_text: "Koordination vor stationärer Aufnahme",
+            expected_pdf_text: "Kardiologische Untersuchung",
         },
         TemplateCase {
             template_id: "appointment_confirmation",
@@ -5031,7 +5036,7 @@ async fn appointment_confirmation_autofills_clinic_and_date_from_appointment() {
 }
 
 #[tokio::test]
-async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
+async fn cost_estimate_never_falls_back_to_the_order_quote_lines() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -5057,18 +5062,135 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "generate cost estimate: {body:?}");
-    assert_eq!(body["language"], "de");
-    let preview_html = body["preview_html"].as_str().unwrap();
-    assert!(preview_html.contains("Koordination vor stationärer Aufnahme"));
-    assert!(preview_html.contains(
-        "Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen"
-    ));
-    assert!(!preview_html.contains("Ориентировочный"));
-    // Quote total is now rendered in German currency format ("1.428,00 EUR").
-    assert!(preview_html.contains("1.428,00"));
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    assert_eq!(
+        body["message"],
+        "Enter the medical services before creating the preliminary cost calculation"
+    );
+    let generated: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM documents WHERE order_id = $1 AND generated_template_id = 'cost_estimate'",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(generated, 0);
+}
 
+#[tokio::test]
+async fn lead_cost_estimate_lists_only_the_selected_medical_work_types() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-cost-estimate-lead");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, date_of_birth, legal_sex, created_by
+           ) VALUES ('Anna', 'Kostenschaetzung', $1, DATE '1988-04-12', 'female', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.test"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // What the lead wizard used to send without work types: the agency's own line.
+    let agency_bindings = json!({
+        "estimate_total": "339,15 EUR",
+        "service_lines": [{
+            "description": "Interpreter support",
+            "quantity": "1",
+            "fee": "285,00 EUR / Std.",
+            "line_total": "285,00 EUR",
+            "vat_rate": "19"
+        }]
+    });
+    let generate = |bindings: Value| {
+        json!({
+            "template_id": "cost_estimate",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active",
+            "bindings": bindings
+        })
+    };
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(agency_bindings.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    assert_eq!(
+        body["message"],
+        "Select medical work types before creating the preliminary cost calculation"
+    );
+
+    let code = format!("vks_{}", tag.replace('-', "_"));
+    let specialization_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO medical_specializations (code, name_en, name_de, name_ru)
+           VALUES ($1, 'Gastroenterology', 'Gastroenterologie', 'Гастроэнтерология')
+           RETURNING id"#,
+    )
+    .bind(&code)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let work_type_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO medical_specialization_work_types (
+                specialization_id, code, name_de, name_ru, min_price_eur, max_price_eur, duration_hours
+           ) VALUES ($1, $2, 'Gastroskopie mit Biopsie', 'Гастроскопия с биопсией', 800, 1200, 2)
+           RETURNING id"#,
+    )
+    .bind(specialization_id)
+    .bind(&code)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO medical_specialization_work_type_assignments (work_type_id, specialization_id) VALUES ($1, $2)",
+    )
+    .bind(work_type_id)
+    .bind(specialization_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE leads SET wizard_state = jsonb_build_object('selected_specialization_work_type_ids', jsonb_build_array($2::text)) WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(work_type_id.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(agency_bindings)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        detail["generated_bindings"]["_cost_estimate_work_type_ids"],
+        json!([work_type_id])
+    );
+
     let (status, bytes) = bytes_request(
         &app,
         "GET",
@@ -5077,20 +5199,13 @@ async fn cost_estimate_uses_order_quote_when_manual_lines_are_omitted() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(bytes.starts_with(b"%PDF-"));
-    assert!(bytes.len() > 800);
     let pdf_text = extract_pdf_text(&bytes);
-    assert!(pdf_text.contains("MEDIZINISCHE LEISTUNGEN"), "{pdf_text}");
-    assert!(
-        pdf_text.contains("UNVERBINDLICHE KOSTENSCHÄTZUNG"),
-        "{pdf_text}"
-    );
-    assert!(
-        pdf_text.contains("Koordination vor stationärer Aufnahme"),
-        "{pdf_text}"
-    );
-    assert!(pdf_text.contains("1.428,00 EUR"), "{pdf_text}");
-    assert!(!pdf_text.contains("???"), "{pdf_text}");
+    assert!(pdf_text.contains("Gastroskopie mit Biopsie"), "{pdf_text}");
+    // The line and the total are the same catalog range.
+    assert!(pdf_text.contains("800,00 - 1.200,00 EUR"), "{pdf_text}");
+    assert!(!pdf_text.contains("Interpreter support"), "{pdf_text}");
+    assert!(!pdf_text.contains("285,00"), "{pdf_text}");
+    assert!(!pdf_text.contains("339,15"), "{pdf_text}");
 }
 
 #[tokio::test]
@@ -5126,6 +5241,7 @@ async fn cost_estimate_manual_lines_do_not_reuse_quote_total() {
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Manuelle Zusatzleistung"));
     assert!(!preview_html.contains("1428"));
+    assert!(!preview_html.contains("Koordination vor stationärer Aufnahme"));
 }
 
 #[tokio::test]
