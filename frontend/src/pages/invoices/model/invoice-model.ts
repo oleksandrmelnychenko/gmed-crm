@@ -277,7 +277,12 @@ export function formatDate(
 ) {
   if (!value) return emptyLabel;
   try {
-    return invoiceDateFormatter(locale).format(new Date(`${value}T00:00:00`));
+    // Date-only values are local calendar days; timestamps such as paid_at
+    // already carry a time and zone.
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
+      ? new Date(`${value}T00:00:00`)
+      : new Date(value);
+    return invoiceDateFormatter(locale).format(date);
   } catch {
     return value;
   }

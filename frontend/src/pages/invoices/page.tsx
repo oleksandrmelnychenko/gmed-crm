@@ -570,6 +570,7 @@ function useStaffInvoicesPageContent() {
         ? "Unveränderbares Journal einzelner Zahlungen und Stornierungen."
         : "Неизменяемый журнал отдельных платежей и их сторнирований.",
     recordPayment: lang === "de" ? "Zahlung erfassen" : "Записать платёж",
+    paymentEntry: lang === "de" ? "Zahlungseingang" : "Поступление",
     paymentAmount: lang === "de" ? "Eingang brutto" : "Сумма брутто",
     paymentMethod: lang === "de" ? "Zahlungsart" : "Способ оплаты",
     paymentReference: lang === "de" ? "Referenz" : "Референс",
@@ -591,6 +592,7 @@ function useStaffInvoicesPageContent() {
         ? "Tatsächlich an den Patienten ausgezahltes Guthaben. Eine Rückzahlung ist nur bis zur verfügbaren Bar-Gutschrift möglich."
         : "Фактически возвращённые пациенту деньги. Возврат возможен только в пределах доступной денежной переплаты.",
     recordRefund: lang === "de" ? "Rückzahlung erfassen" : "Записать возврат",
+    refundEntry: lang === "de" ? "Rückzahlung" : "Возврат",
     refundAmount: lang === "de" ? "Rückzahlung brutto" : "Сумма возврата брутто",
     refundDate: lang === "de" ? "Auszahlungsdatum" : "Дата возврата",
     refundReason: lang === "de" ? "Grund der Rückzahlung" : "Причина возврата",
@@ -2816,7 +2818,7 @@ function useStaffInvoicesPageContent() {
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className="font-semibold text-foreground">
-                                      {isReversal ? text.reversal : text.recordPayment}
+                                      {isReversal ? text.reversal : text.paymentEntry}
                                     </span>
                                     {payment.is_reversed ? (
                                       <StatusBadge tone="neutral">{text.reversed}</StatusBadge>
@@ -3210,7 +3212,7 @@ function useStaffInvoicesPageContent() {
                                 <div className="min-w-0">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className="font-semibold text-foreground">
-                                      {isReversal ? text.reversal : text.recordRefund}
+                                      {isReversal ? text.reversal : text.refundEntry}
                                     </span>
                                     {refund.is_reversed ? (
                                       <StatusBadge tone="neutral">{text.reversed}</StatusBadge>

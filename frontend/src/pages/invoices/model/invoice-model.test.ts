@@ -8,8 +8,16 @@ import {
   isInvoiceSelectionValid,
   isQuoteAvailableForInvoice,
   formatCurrency,
+  formatDate,
 } from "./invoice-model";
 import type { InvoiceLineItem, QuoteOption } from "./types";
+
+it("formats both date-only values and timestamps as a date", () => {
+  expect(formatDate("2026-10-01", "de-DE")).toBe(formatDate("2026-10-01T12:00:00", "de-DE"));
+  expect(formatDate("2026-09-25T12:00:00+00:00", "de-DE")).not.toContain("T");
+  expect(formatDate("2026-09-25T12:00:00+00:00", "de-DE")).toContain("2026");
+  expect(formatDate(null, "de-DE", "—")).toBe("—");
+});
 
 it("formats the invoice currency without converting or relabelling the amount", () => {
   expect(formatCurrency("1234.56", "de-DE", "USD")).toBe("1.234,56 $");
