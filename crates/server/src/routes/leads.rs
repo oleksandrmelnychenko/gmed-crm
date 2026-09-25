@@ -1787,6 +1787,7 @@ async fn load_lead_conversion_readiness(
                           SELECT status, total_gross
                           FROM quotes
                           WHERE order_id = o.id
+                            AND status <> 'superseded'
                           ORDER BY created_at DESC, id DESC
                           LIMIT 1
                       ) q ON true
@@ -1801,6 +1802,7 @@ async fn load_lead_conversion_readiness(
                           SELECT line_items
                           FROM quotes
                           WHERE order_id = o.id
+                            AND status <> 'superseded'
                           ORDER BY created_at DESC, id DESC
                           LIMIT 1
                       ) q ON true
@@ -1849,6 +1851,7 @@ async fn load_lead_conversion_readiness(
                                      )
                               FROM quotes q
                               WHERE q.order_id = o.id
+                                AND q.status <> 'superseded'
                               ORDER BY q.created_at DESC, q.id DESC
                               LIMIT 1
                           ), false)

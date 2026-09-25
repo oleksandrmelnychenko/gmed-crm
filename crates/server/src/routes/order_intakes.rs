@@ -749,7 +749,7 @@ async fn context_tx(conn: &mut PgConnection, id: Uuid) -> Result<Value, Response
         CASE WHEN fc.id IS NOT NULL THEN jsonb_build_object('id',fc.id,'number',fc.contract_number,
             'valid_from',fc.valid_from,'valid_to',fc.valid_to,'conditions',fc.conditions) END AS contract,
         (SELECT jsonb_build_object('id',q.id,'lines',q.line_items,'net',q.total_net,'vat',q.total_vat,'gross',q.total_gross,'valid_until',q.valid_until,'notes',q.notes)
-         FROM quotes q WHERE q.order_id=o.id ORDER BY q.created_at DESC,q.id DESC LIMIT 1) AS quote
+         FROM quotes q WHERE q.order_id=o.id AND q.status<>'superseded' ORDER BY q.created_at DESC,q.id DESC LIMIT 1) AS quote
         FROM order_intakes i JOIN orders o ON o.id=i.order_id JOIN patients p ON p.id=o.patient_id LEFT JOIN framework_contracts fc ON fc.id=o.contract_id
         WHERE i.order_id=$1")
         .bind(id).fetch_one(&mut *conn).await.map_err(db_error)?;

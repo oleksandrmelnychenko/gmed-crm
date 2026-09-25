@@ -9,7 +9,10 @@ import {
   validateContractStatusForm,
   canTerminateContractStatus,
   CONTRACT_MANUAL_STATUSES,
+  isQuoteSuperseded,
   isValidTerminationReason,
+  QUOTE_FILTER_STATUSES,
+  QUOTE_STATUSES,
   type ContractFormValidationMessages,
 } from "./contracts-model";
 import type { AgencyServiceItem } from "./types";
@@ -182,6 +185,16 @@ describe("framework contract termination", () => {
     expect(isValidTerminationReason(" abc ")).toBe(true);
     expect(isValidTerminationReason("x".repeat(1000))).toBe(true);
     expect(isValidTerminationReason("x".repeat(1001))).toBe(false);
+  });
+});
+
+describe("superseded quotes", () => {
+  it("can be filtered by but never chosen as a manual status", () => {
+    expect(QUOTE_STATUSES).not.toContain("superseded");
+    expect(QUOTE_FILTER_STATUSES).toContain("superseded");
+    expect(isQuoteSuperseded("superseded")).toBe(true);
+    expect(isQuoteSuperseded("rejected")).toBe(false);
+    expect(isQuoteSuperseded(undefined)).toBe(false);
   });
 });
 

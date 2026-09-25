@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import {
   invoiceCreationErrorMessage,
 } from "@/pages/invoices/model/billing-release";
+import { isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
 import { PatientTerminationSettlements } from "@/pages/invoices/termination-settlement/ui";
 
@@ -153,7 +154,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   }, [patientId, revision]);
 
   const order = workspace?.orders.find(item => item.id === orderId) ?? null;
-  const orderQuotes = quotes.filter(quote => quote.order_id === orderId && !["rejected", "expired"].includes(quote.status ?? ""));
+  const orderQuotes = quotes.filter(quote => quote.order_id === orderId && !isQuoteClosedForInvoicing(quote.status));
   const quote = orderQuotes.find(item => item.id === quoteId) ?? null;
   const serviceLines = quote?.line_items ?? [];
   const currencyOptions = Array.from(new Set(

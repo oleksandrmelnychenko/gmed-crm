@@ -240,6 +240,7 @@ export interface RevenueTranslations {
   revenue_quotes_version: string;
   revenue_quotes_version_snapshot: string;
   revenue_quotes_version_status_update: string;
+  revenue_quotes_version_superseded: string;
   revenue_quotes_line_items_count: string;
   revenue_contract_status_draft: string;
   revenue_contract_status_sent: string;
@@ -251,6 +252,7 @@ export interface RevenueTranslations {
   revenue_quote_status_accepted: string;
   revenue_quote_status_rejected: string;
   revenue_quote_status_expired: string;
+  revenue_quote_status_superseded: string;
 
   revenue_invoices_create_description: string;
   revenue_invoices_section_quote: string;
@@ -1088,6 +1090,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_quotes_version: "Версия",
   revenue_quotes_version_snapshot: "Снимок",
   revenue_quotes_version_status_update: "Обновление статуса",
+  revenue_quotes_version_superseded: "Заменено новым предложением",
   revenue_quotes_line_items_count: "позиций",
   revenue_contract_status_draft: "Черновик",
   revenue_contract_status_sent: "Отправлен",
@@ -1099,6 +1102,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_quote_status_accepted: "Принято",
   revenue_quote_status_rejected: "Отклонено",
   revenue_quote_status_expired: "Истекло",
+  revenue_quote_status_superseded: "Заменено",
 
   revenue_invoices_create_description:
     "Создайте счет из снимка предложения. Позиции и суммы фиксируются при создании.",
@@ -1457,6 +1461,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_quotes_version: "Version",
   revenue_quotes_version_snapshot: "Snapshot",
   revenue_quotes_version_status_update: "Statusaktualisierung",
+  revenue_quotes_version_superseded: "Durch neues Angebot ersetzt",
   revenue_quotes_line_items_count: "Positionen",
   revenue_contract_status_draft: "Entwurf",
   revenue_contract_status_sent: "Versendet",
@@ -1468,6 +1473,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_quote_status_accepted: "Angenommen",
   revenue_quote_status_rejected: "Abgelehnt",
   revenue_quote_status_expired: "Abgelaufen",
+  revenue_quote_status_superseded: "Ersetzt",
 
   revenue_invoices_create_description:
     "Erstellen Sie eine Rechnung aus einem Angebots-Snapshot. Positionen und Summen werden beim Erstellen fixiert.",

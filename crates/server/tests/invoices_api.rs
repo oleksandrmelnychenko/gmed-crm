@@ -1648,6 +1648,311 @@ async fn advance_invoice_does_not_consume_order_services() {
     assert_eq!(current_status, "approved");
 }
 
+/// A new quote for an order closes the order's older open quotes: nothing more
+/// can be invoiced from them, while an advance invoiced from the old quote stays
+/// creditable against the new quote's final invoice (prepayments are
+/// order-scoped). A quote settled by an active final invoice is left alone.
+#[tokio::test]
+async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditable() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-supersede");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    // 2.5 h interpreter planned (178.50 gross) and the organisation fee (119).
+    let interpreter_line: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Dolmetscherleistung', 2.5, 60, 19, 'planned')
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Organisation der Behandlung",
+        100.0,
+        "approved",
+    )
+    .await;
+
+    let first_quote = create_quote(&app, &pm_bearer, order_id).await;
+    let first_quote_id = first_quote["id"].as_str().unwrap().to_string();
+    assert_eq!(first_quote["superseded_quotes"], json!([]));
+
+    // An advance from the first quote, 100 of it paid.
+    let advance = create_sent_invoice(
+        &app,
+        &billing_bearer,
+        &first_quote_id,
+        "advance",
+        "2026-10-15",
+    )
+    .await;
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    let (status, payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_id}/payments"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "100",
+            "payment_method": "bank_transfer",
+            "payment_reference": "ADVANCE-SUPERSEDE",
+            "received_on": chrono::Utc::now().date_naive().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "advance payment: {payment}");
+
+    // The approved interpreter report replaced the planned 2.5 h by 1.5 h and a
+    // completed appointment added a treatment-organisation service.
+    sqlx::query("UPDATE order_leistungen SET quantity = 1.5, status = 'approved' WHERE id = $1")
+        .bind(interpreter_line)
+        .execute(&pool)
+        .await
+        .unwrap();
+    seed_order_leistung(
+        &pool,
+        order_id,
+        "Organisation der Behandlung (je 1 Arzt)",
+        50.0,
+        "approved",
+    )
+    .await;
+
+    let second_quote = create_quote(&app, &pm_bearer, order_id).await;
+    let second_quote_id = second_quote["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        second_quote["superseded_quotes"],
+        json!([{ "id": first_quote_id, "quote_number": first_quote["quote_number"] }])
+    );
+
+    let (status, first) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{first_quote_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "first quote: {first}");
+    assert_eq!(first["status"], "superseded");
+    assert_eq!(first["superseded_by_quote_id"], second_quote_id);
+    assert_eq!(
+        first["superseded_by_quote_number"],
+        second_quote["quote_number"]
+    );
+    assert!(first["superseded_at"].is_string(), "first quote: {first}");
+    // The advance issued from it stays on record.
+    assert_eq!(first["active_invoice_types"], json!(["advance"]));
+
+    // History is kept: the closed quote gets a superseded version snapshot.
+    let (status, versions) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{first_quote_id}/versions"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "versions: {versions}");
+    let versions = versions.as_array().unwrap();
+    assert_eq!(versions.len(), 2, "versions: {versions:?}");
+    assert_eq!(versions[0]["status"], "superseded");
+    assert_eq!(versions[0]["change_reason"], "superseded");
+    assert_eq!(versions[1]["status"], "draft");
+
+    // Audited in the quote creation transaction.
+    let (old_value, new_value, context): (Value, Value, Value) = sqlx::query_as(
+        r#"SELECT old_value, new_value, context FROM audit_log
+           WHERE action = 'supersede_quote' AND entity_id = $1"#,
+    )
+    .bind(Uuid::parse_str(&first_quote_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(old_value["status"], "draft");
+    assert_eq!(new_value["status"], "superseded");
+    assert_eq!(new_value["superseded_by_quote_id"], second_quote_id);
+    assert_eq!(context["order_id"], order_id.to_string());
+    let creation_context: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'create_quote' AND entity_id = $1",
+    )
+    .bind(Uuid::parse_str(&second_quote_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        creation_context["superseded_quote_ids"],
+        json!([first_quote_id])
+    );
+
+    // Nothing more can be invoiced from the superseded quote, on either path.
+    for invoice_type in ["final", "interim", "advance"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/quotes/{first_quote_id}/invoices"),
+            &billing_bearer,
+            Some(json!({ "invoice_type": invoice_type })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{invoice_type}: {body}"
+        );
+        assert!(
+            body["message"].as_str().unwrap().contains("superseded"),
+            "{invoice_type}: {body}"
+        );
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/billing-invoices"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "quote_id": first_quote_id,
+            "invoice_type": "interim",
+            "external_invoice_ids": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Only the new quote is offered for invoicing.
+    let (status, invoiceable) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?order_id={order_id}&invoiceable=true"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{invoiceable}");
+    let invoiceable_ids = invoiceable
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|quote| quote["id"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(invoiceable_ids, vec![second_quote_id.clone()]);
+    let (status, superseded_list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?order_id={order_id}&status=superseded"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{superseded_list}");
+    assert_eq!(superseded_list.as_array().unwrap().len(), 1);
+    assert_eq!(superseded_list[0]["id"], first_quote_id);
+
+    // 'superseded' is terminal and set only by the system.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{first_quote_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{second_quote_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "superseded" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Final invoice from the new quote (1.5 h 107.10 + 119 + 59.50), and the
+    // advance paid against the old quote is credited to it.
+    let final_invoice = create_sent_invoice(
+        &app,
+        &billing_bearer,
+        &second_quote_id,
+        "final",
+        "2026-10-31",
+    )
+    .await;
+    let final_invoice_id = final_invoice["id"].as_str().unwrap().to_string();
+    assert_money_close(
+        final_invoice["total_gross"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+        285.60,
+    );
+    let (status, applied) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice_id}/prepayment-allocations"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "advance_invoice_id": advance_id,
+            "amount_gross": "100",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "apply advance: {applied}");
+    assert_money_close(
+        applied["prepayment_applied_amount"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+        100.0,
+    );
+    assert_money_close(
+        applied["balance_due"].as_str().unwrap().parse().unwrap(),
+        185.60,
+    );
+
+    // Pricing the order again leaves the quote settled by its final invoice
+    // (and the already superseded one) as they are.
+    seed_order_leistung(&pool, order_id, "Nachbetreuung", 40.0, "approved").await;
+    let third_quote = create_quote(&app, &pm_bearer, order_id).await;
+    assert_eq!(third_quote["superseded_quotes"], json!([]));
+    let statuses: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT id, status FROM quotes WHERE order_id = $1 ORDER BY created_at, id")
+            .bind(order_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let status_of = |id: &str| {
+        statuses
+            .iter()
+            .find(|(quote_id, _)| quote_id.to_string() == id)
+            .map(|(_, status)| status.clone())
+            .unwrap()
+    };
+    assert_eq!(status_of(&first_quote_id), "superseded");
+    assert_eq!(status_of(&second_quote_id), "draft");
+    assert_eq!(status_of(third_quote["id"].as_str().unwrap()), "draft");
+}
+
 #[tokio::test]
 async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_items() {
     let Some((app, pool, admin_id)) = test_context().await else {

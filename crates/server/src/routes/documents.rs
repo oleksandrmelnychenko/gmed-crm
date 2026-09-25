@@ -13833,6 +13833,7 @@ async fn generate_document(
                               line_items, notes
                        FROM quotes
                        WHERE order_id = $1
+                         AND status <> 'superseded'
                        ORDER BY created_at DESC, id DESC
                        LIMIT 1"#,
                 )
@@ -19503,6 +19504,7 @@ async fn load_order_quote_summary(
                   line_items
            FROM quotes
            WHERE order_id = $1
+             AND status <> 'superseded'
            ORDER BY created_at DESC, id DESC
            LIMIT 1"#,
     )

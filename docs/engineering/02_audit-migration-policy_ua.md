@@ -46,7 +46,7 @@ Ratchet рухається тільки вниз. Кожен migration commit о
 
 ### `crates/server/src/routes/contracts.rs` (2)
 
-- `create_quote`
+- `create_quote` — один `INSERT ... SELECT` пише рядок `create_quote` і по рядку `supersede_quote` (зі старим і новим статусом) для кожного попереднього відкритого кошторису замовлення, який новий кошторис закрив статусом `superseded`
 - `update_quote_status`
 
 Та ж сама причина — обидва INSERT-и виконуються через `.execute(&mut *tx)` всередині транзакції з мутацією quote.

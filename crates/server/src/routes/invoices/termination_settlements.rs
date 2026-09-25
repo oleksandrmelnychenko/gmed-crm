@@ -1188,12 +1188,14 @@ async fn create_termination_final_invoice(
         })
         .collect::<BTreeMap<_, _>>();
 
-    // Bill through the latest quote that can still take a final invoice.
+    // Bill through the latest quote that can still take a final invoice. A
+    // superseded quote is closed for invoicing; the quote lock keeps a newer
+    // quote from closing it while this invoice is created.
     let anchor_quote_id = match sqlx::query_scalar::<_, Uuid>(
         r#"SELECT quote.id
            FROM quotes quote
            WHERE quote.order_id = $1
-             AND quote.status NOT IN ('rejected', 'expired')
+             AND quote.status NOT IN ('rejected', 'expired', 'superseded')
              AND NOT EXISTS (
                  SELECT 1 FROM invoices invoice
                  WHERE invoice.quote_id = quote.id
@@ -1201,7 +1203,8 @@ async fn create_termination_final_invoice(
                    AND invoice.status <> 'cancelled'
              )
            ORDER BY quote.created_at DESC, quote.id DESC
-           LIMIT 1"#,
+           LIMIT 1
+           FOR UPDATE OF quote"#,
     )
     .bind(order_id)
     .fetch_optional(&mut *transaction)

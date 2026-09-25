@@ -7,6 +7,7 @@ import {
   invoiceLineQuantityAvailable,
   isInvoiceSelectionValid,
   isQuoteAvailableForInvoice,
+  isQuoteClosedForInvoicing,
   formatCurrency,
   formatDate,
 } from "./invoice-model";
@@ -63,6 +64,19 @@ describe("quotes available for invoicing", () => {
   it("excludes rejected, expired and lead-only quotes", () => {
     for (const status of ["rejected", "expired"]) expect(isQuoteAvailableForInvoice({ ...quote, status }, "final")).toBe(false);
     expect(isQuoteAvailableForInvoice({ ...quote, patient_id: "" }, "final")).toBe(false);
+  });
+
+  it("excludes a quote superseded by a newer quote of the order for every invoice type", () => {
+    // Even with remaining quantity and only an advance issued, nothing more is
+    // invoiced from it; the advance is credited on the newer quote's invoice.
+    const superseded = { ...quote, status: "superseded", active_invoice_types: ["advance"] };
+    for (const type of ["advance", "interim", "final"] as const) {
+      expect(isQuoteAvailableForInvoice(superseded, type)).toBe(false);
+    }
+    expect(isQuoteClosedForInvoicing("superseded")).toBe(true);
+    for (const status of ["draft", "sent", "accepted", undefined]) {
+      expect(isQuoteClosedForInvoicing(status)).toBe(false);
+    }
   });
 });
 

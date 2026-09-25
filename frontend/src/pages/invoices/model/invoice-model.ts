@@ -185,10 +185,18 @@ export function isInvoiceSelectionValid(lines: InvoiceLineItem[], form: CreateFo
   );
 }
 
+// Nothing can be invoiced from these quotes any more. A quote is superseded when
+// a newer quote of the same order was created; its issued invoices stay valid.
+const CLOSED_QUOTE_STATUSES = new Set(["rejected", "expired", "superseded"]);
+
+export function isQuoteClosedForInvoicing(status: string | null | undefined) {
+  return CLOSED_QUOTE_STATUSES.has(status ?? "");
+}
+
 // Paid advances still need a settlement invoice. Availability is determined by
 // the unbilled scope and active invoice types, not the quote's payment total.
 export function isQuoteAvailableForInvoice(quote: QuoteOption, invoiceType: InvoiceType) {
-  if (!quote.patient_id || ["rejected", "expired"].includes(quote.status ?? "")) return false;
+  if (!quote.patient_id || isQuoteClosedForInvoicing(quote.status)) return false;
   if (quote.active_invoice_types?.includes("final")) return false;
   if (invoiceType === "advance" && quote.active_invoice_types?.includes("advance")) return false;
   return quote.line_items.some((line) => invoiceLineQuantityAvailable(line, "final") > 0);

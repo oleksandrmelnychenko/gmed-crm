@@ -3348,16 +3348,55 @@ async fn load_invoice_dunning_context(
     }))
 }
 
+/// Why nothing can be invoiced from a quote in this status any more, if so.
+/// A quote is superseded when a newer quote of the same order was created;
+/// invoices already issued from it stay valid.
+fn closed_quote_invoice_message(quote_status: &str) -> Option<&'static str> {
+    match quote_status {
+        "rejected" | "expired" => Some("Cannot invoice a rejected or expired quote"),
+        "superseded" => {
+            Some("Cannot invoice a superseded quote; invoice the quote that replaced it")
+        }
+        _ => None,
+    }
+}
+
+/// Re-checks the quote inside the invoice transaction under a row lock. A
+/// newer quote created concurrently closes this one in its own transaction,
+/// so the check made before the transaction alone could let an invoice from a
+/// just-superseded quote through.
+async fn lock_invoiceable_quote_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    quote_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let status =
+        sqlx::query_scalar::<_, String>("SELECT status FROM quotes WHERE id = $1 FOR UPDATE")
+            .bind(quote_id)
+            .fetch_optional(&mut **transaction)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, %quote_id, "lock quote for invoice creation");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                )
+            })?;
+    let Some(status) = status else {
+        return Err(err(StatusCode::NOT_FOUND, "Quote not found"));
+    };
+    if let Some(message) = closed_quote_invoice_message(&status) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
+    }
+    Ok(())
+}
+
 async fn validate_invoice_creation_for_quote(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
     invoice_type: &str,
 ) -> Result<(), axum::response::Response> {
-    if matches!(ctx.quote_status.as_str(), "rejected" | "expired") {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Cannot invoice a rejected or expired quote",
-        ));
+    if let Some(message) = closed_quote_invoice_message(&ctx.quote_status) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message));
     }
 
     let duplicate_exists: bool = if invoice_type == "advance" {
@@ -5092,6 +5131,9 @@ async fn create_patient_billing_invoice(
                 "Quote does not belong to the selected patient order",
             );
         }
+        if let Some(message) = closed_quote_invoice_message(&context.quote_status) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+        }
         Some(context)
     } else {
         if body
@@ -5209,6 +5251,12 @@ async fn create_patient_billing_invoice(
                 .try_get::<String, _>("currency")
                 .unwrap_or_else(|_| "EUR".to_string()),
         );
+        if let Some(context) = quote_context.as_ref()
+            && let Err(response) =
+                lock_invoiceable_quote_tx(&mut transaction, context.quote_id).await
+        {
+            return response;
+        }
     } else if body.quote_id.is_some() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -5586,6 +5634,9 @@ async fn create_invoice_from_quote(
     if !is_valid_invoice_type(&invoice_type) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice type");
     }
+    if let Some(message) = closed_quote_invoice_message(&ctx.quote_status) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+    }
 
     let due_date = match parse_optional_date(body.due_date.as_deref()) {
         Ok(value) => value,
@@ -5634,6 +5685,9 @@ async fn create_invoice_from_quote(
             );
         }
     };
+    if let Err(resp) = lock_invoiceable_quote_tx(&mut transaction, ctx.quote_id).await {
+        return resp;
+    }
 
     match sqlx::query(
         r#"INSERT INTO invoices (

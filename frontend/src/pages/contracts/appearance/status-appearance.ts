@@ -21,6 +21,9 @@ export function quoteStatusClassName(status: string) {
     case "rejected":
     case "expired":
       return "border-rose-200 bg-rose-50 text-rose-700";
+    case "superseded":
+      // Closed by a newer quote of the order: historical, not an error.
+      return "border-slate-200 bg-slate-50 text-slate-600";
     default:
       return "border-amber-200 bg-amber-50 text-amber-700";
   }

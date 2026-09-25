@@ -2449,3 +2449,144 @@ async fn rejected_quote_can_be_deleted_but_accepted_quote_is_preserved() {
             .unwrap();
     assert!(accepted_exists);
 }
+
+async fn create_order_quote(app: &axum::Router, bearer: &str, order_id: &str) -> String {
+    let (status, quote) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {quote}");
+    quote["id"].as_str().unwrap().to_string()
+}
+
+/// A new quote closes the order's older open quotes; rejected quotes stay
+/// rejected, and neither the closed quote nor the quote that replaced it can
+/// be deleted, so the replacement history stays complete.
+#[tokio::test]
+async fn new_quote_supersedes_open_quotes_and_the_replacement_history_is_kept() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-supersede-history");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Quote replacement history"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().unwrap().to_string();
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Replaced service",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "vat_rate": 19.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    let rejected_id = create_order_quote(&app, &pm_bearer, &order_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{rejected_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "rejected" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    let first_id = create_order_quote(&app, &pm_bearer, &order_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{first_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    let second_id = create_order_quote(&app, &pm_bearer, &order_id).await;
+
+    let statuses: Vec<(Uuid, String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, status, superseded_by_quote_id FROM quotes WHERE order_id = $1::uuid",
+    )
+    .bind(&order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let state_of = |id: &str| {
+        statuses
+            .iter()
+            .find(|(quote_id, _, _)| quote_id.to_string() == id)
+            .map(|(_, status, successor)| (status.clone(), successor.map(|v| v.to_string())))
+            .unwrap()
+    };
+    assert_eq!(state_of(&rejected_id), ("rejected".to_string(), None));
+    assert_eq!(
+        state_of(&first_id),
+        ("superseded".to_string(), Some(second_id.clone()))
+    );
+    assert_eq!(state_of(&second_id), ("draft".to_string(), None));
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{second_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {detail}");
+    assert_eq!(detail["superseded_quotes"][0]["id"], first_id);
+
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/quotes/{second_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(
+        body["message"],
+        "A quote that replaced earlier quotes cannot be deleted; reject it instead"
+    );
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/quotes/{first_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+
+    // The database keeps 'superseded' terminal even for direct writes.
+    let reopened = sqlx::query("UPDATE quotes SET status = 'sent' WHERE id = $1::uuid")
+        .bind(&first_id)
+        .execute(&pool)
+        .await;
+    assert!(reopened.is_err(), "a superseded quote must stay closed");
+}

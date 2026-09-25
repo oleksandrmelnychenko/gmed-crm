@@ -19,6 +19,7 @@ import type {
   QuoteItem,
   QuoteStatus,
   QuoteStatusFormState,
+  QuoteSystemStatus,
 } from "./types";
 import { formatEnumLabel, type Translations } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
@@ -69,6 +70,7 @@ export function isValidTerminationReason(reason: string) {
   return length >= TERMINATION_REASON_MIN && length <= TERMINATION_REASON_MAX;
 }
 
+/** Statuses staff may set on a quote. */
 export const QUOTE_STATUSES: QuoteStatus[] = [
   "draft",
   "sent",
@@ -76,6 +78,20 @@ export const QUOTE_STATUSES: QuoteStatus[] = [
   "rejected",
   "expired",
 ];
+
+/** Every status a quote row can carry (filters and labels). */
+export const QUOTE_FILTER_STATUSES: Array<QuoteStatus | QuoteSystemStatus> = [
+  ...QUOTE_STATUSES,
+  "superseded",
+];
+
+/**
+ * A newer quote of the same order closed this one: its status is final and
+ * nothing more can be invoiced from it.
+ */
+export function isQuoteSuperseded(status: string | null | undefined) {
+  return status === "superseded";
+}
 
 export const DEFAULT_CONTRACT_FILTERS: ContractFilters = {
   search: "",

@@ -333,10 +333,12 @@ async fn sync_patient_contract_status_tx(
     Ok(Some(status))
 }
 
+/// Quote statuses a list can filter by. `superseded` is set only by the system
+/// when a newer quote of the same order is created; staff cannot choose it.
 fn is_valid_quote_status(value: &str) -> bool {
     matches!(
         value,
-        "draft" | "sent" | "accepted" | "rejected" | "expired"
+        "draft" | "sent" | "accepted" | "rejected" | "expired" | "superseded"
     )
 }
 
@@ -692,6 +694,119 @@ async fn insert_quote_version_snapshot(
     .await?;
 
     Ok(version_number)
+}
+
+/// An earlier quote of an order closed by a newer quote.
+struct SupersededQuote {
+    id: Uuid,
+    quote_number: String,
+    previous_status: String,
+}
+
+impl SupersededQuote {
+    fn audit_json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "quote_number": self.quote_number,
+            "previous_status": self.previous_status,
+        })
+    }
+}
+
+/// Lock the order's open quotes before the order services are read, in the
+/// same order an invoice from a quote takes its locks (quote, then services).
+/// An invoice racing the new quote then either commits first or finds its
+/// quote closed.
+async fn lock_open_order_quotes_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"SELECT id FROM quotes
+           WHERE order_id = $1
+             AND status NOT IN ('rejected', 'expired', 'superseded')
+           ORDER BY id
+           FOR UPDATE"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// A new quote closes the order's older open quotes so nothing more can be
+/// invoiced from them (the same service would otherwise be billable twice).
+/// Quotes that are rejected, expired, already superseded or settled by an
+/// active final invoice stay as they are; invoices already issued from a
+/// closed quote remain valid. Every closed quote gets a version snapshot.
+/// Runs inside the quote creation transaction after
+/// [`lock_open_order_quotes_tx`].
+async fn supersede_open_order_quotes_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+    new_quote_id: Uuid,
+    actor_user_id: Uuid,
+) -> Result<Vec<SupersededQuote>, sqlx::Error> {
+    // A statement of its own after the locks were taken, so it sees final
+    // invoices committed while this transaction waited for them.
+    let rows = sqlx::query(
+        r#"UPDATE quotes quote
+           SET status = 'superseded',
+               superseded_by_quote_id = $2,
+               superseded_at = now()
+           FROM quotes previous
+           WHERE previous.id = quote.id
+             AND quote.order_id = $1
+             AND quote.id <> $2
+             AND quote.status NOT IN ('rejected', 'expired', 'superseded')
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoices final_invoice
+                 WHERE final_invoice.quote_id = quote.id
+                   AND final_invoice.invoice_type = 'final'
+                   AND final_invoice.status <> 'cancelled'
+             )
+           RETURNING quote.id, quote.quote_number, previous.status AS previous_status,
+                     quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
+                     order_recorded_cash_paid(quote.order_id) AS paid_amount,
+                     order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                     quote.line_items, quote.notes"#,
+    )
+    .bind(order_id)
+    .bind(new_quote_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut superseded = Vec::with_capacity(rows.len());
+    for row in rows {
+        let quote_id = row.try_get::<Uuid, _>("id")?;
+        let quote_number = row.try_get::<String, _>("quote_number")?;
+        let snapshot = QuoteVersionSnapshotInput {
+            quote_id,
+            order_id,
+            quote_number: quote_number.clone(),
+            status: "superseded".to_string(),
+            total_net: row.try_get::<Decimal, _>("total_net")?,
+            total_vat: row.try_get::<Decimal, _>("total_vat")?,
+            total_gross: row.try_get::<Decimal, _>("total_gross")?,
+            valid_until: row.try_get::<Option<NaiveDate>, _>("valid_until")?,
+            paid_amount: row
+                .try_get::<Option<Decimal>, _>("paid_amount")?
+                .unwrap_or(Decimal::ZERO),
+            paid_at: row.try_get::<Option<DateTime<Utc>>, _>("paid_at")?,
+            line_items: row.try_get::<Value, _>("line_items")?,
+            notes: row.try_get::<Option<String>, _>("notes")?,
+            change_reason: Some("superseded".to_string()),
+            created_by: actor_user_id,
+        };
+        insert_quote_version_snapshot(tx, &snapshot).await?;
+        superseded.push(SupersededQuote {
+            id: quote_id,
+            quote_number,
+            previous_status: row.try_get::<String, _>("previous_status")?,
+        });
+    }
+    superseded.sort_by(|a, b| a.quote_number.cmp(&b.quote_number));
+    Ok(superseded)
 }
 
 fn compute_quote_totals(items: &[QuoteLineItem]) -> QuoteTotals {
@@ -2845,12 +2960,23 @@ async fn load_quote_detail(
                   q.created_at, q.updated_at,
                   COALESCE((SELECT count(*)::bigint FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS version_count,
                   COALESCE((SELECT max(version_number) FROM quote_versions qv WHERE qv.quote_id = q.id), 0) AS current_version_number,
+                  q.superseded_by_quote_id, q.superseded_at,
+                  successor.quote_number AS superseded_by_quote_number,
+                  COALESCE((
+                      SELECT jsonb_agg(
+                          jsonb_build_object('id', replaced.id, 'quote_number', replaced.quote_number)
+                          ORDER BY replaced.quote_number
+                      )
+                      FROM quotes replaced
+                      WHERE replaced.superseded_by_quote_id = q.id
+                  ), '[]'::jsonb) AS superseded_quotes,
                   o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
+           LEFT JOIN quotes successor ON successor.id = q.superseded_by_quote_id
            LEFT JOIN patients p ON p.id = o.patient_id
            LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE q.id = $1"#,
@@ -2916,6 +3042,10 @@ async fn load_quote_detail(
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
         "version_count": row.try_get::<i64, _>("version_count").unwrap_or(0),
         "current_version_number": row.try_get::<i32, _>("current_version_number").unwrap_or(0),
+        "superseded_by_quote_id": row.try_get::<Option<Uuid>, _>("superseded_by_quote_id").unwrap_or_default(),
+        "superseded_by_quote_number": row.try_get::<Option<String>, _>("superseded_by_quote_number").unwrap_or_default(),
+        "superseded_at": row.try_get::<Option<DateTime<Utc>>, _>("superseded_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+        "superseded_quotes": row.try_get::<Value, _>("superseded_quotes").unwrap_or_else(|_| json!([])),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
     })))
@@ -2955,12 +3085,15 @@ async fn list_quotes(
                   ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,
                   q.created_at, q.updated_at,
+                  q.superseded_by_quote_id, q.superseded_at,
+                  successor.quote_number AS superseded_by_quote_number,
                   o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
+           LEFT JOIN quotes successor ON successor.id = q.superseded_by_quote_id
            LEFT JOIN patients p ON p.id = o.patient_id
            LEFT JOIN leads l ON l.id = o.source_lead_id
            WHERE ($1::text = '%%'
@@ -2977,7 +3110,7 @@ async fn list_quotes(
                 NOT $6::boolean
                 OR (
                     o.patient_id IS NOT NULL
-                    AND q.status NOT IN ('rejected', 'expired')
+                    AND q.status NOT IN ('rejected', 'expired', 'superseded')
                     AND NOT EXISTS (
                         SELECT 1 FROM invoices final_invoice
                         WHERE final_invoice.quote_id = q.id
@@ -3054,6 +3187,9 @@ async fn list_quotes(
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
                     ),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    "superseded_by_quote_id": row.try_get::<Option<Uuid>, _>("superseded_by_quote_id").unwrap_or_default(),
+                    "superseded_by_quote_number": row.try_get::<Option<String>, _>("superseded_by_quote_number").unwrap_or_default(),
+                    "superseded_at": row.try_get::<Option<DateTime<Utc>>, _>("superseded_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
@@ -3161,6 +3297,10 @@ async fn create_quote(
         }
     };
     let intake = intake || repeat_intake;
+    if let Err(error) = lock_open_order_quotes_tx(&mut tx, order_id).await {
+        tracing::error!(%error, %order_id, "lock open order quotes");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to prepare quote");
+    }
     let persisted_line_items = match load_quote_line_items_from_order_tx(&mut tx, order_id).await {
         Ok(items) if !items.is_empty() => items,
         Ok(_) => {
@@ -3195,8 +3335,8 @@ async fn create_quote(
     if intake {
         let replay = sqlx::query_scalar::<_,Value>("SELECT to_jsonb(q) FROM quotes q WHERE order_id=$1 AND line_items=$2
             AND valid_until IS NOT DISTINCT FROM $3 AND notes IS NOT DISTINCT FROM $4
-            AND q.id=(SELECT latest.id FROM quotes latest WHERE latest.order_id=$1 ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
-            AND status NOT IN ('rejected','expired') ORDER BY created_at DESC,id DESC LIMIT 1")
+            AND q.id=(SELECT latest.id FROM quotes latest WHERE latest.order_id=$1 AND latest.status<>'superseded' ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+            AND status NOT IN ('rejected','expired','superseded') ORDER BY created_at DESC,id DESC LIMIT 1")
             .bind(order_id).bind(serde_json::to_value(&line_items).unwrap_or_default()).bind(valid_until).bind(&body.notes)
             .fetch_optional(&mut *tx).await;
         match replay {
@@ -3326,20 +3466,50 @@ async fn create_quote(
         }
     }
 
-    // TODO(audit-migrate): transactional — coupled to quote creation via
-    // `.execute(&mut *tx)`. Migration would break rollback semantics.
+    let superseded =
+        match supersede_open_order_quotes_tx(&mut tx, order_id, quote_id, auth.user_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(%error, %quote_id, %order_id, "supersede older order quotes");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
+            }
+        };
+
+    // TODO(audit-migrate): transactional — coupled to quote creation and to
+    // closing the order's older quotes via `.execute(&mut *tx)`. Migration
+    // would break rollback semantics. One statement writes the creation row
+    // and one `supersede_quote` row per closed quote.
     if let Err(e) = sqlx::query(
-        "INSERT INTO audit_log (user_id, action, entity_type, entity_id, context) VALUES ($1, $2, 'quote', $3, $4)",
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, old_value, new_value, context)
+           SELECT $1, 'create_quote', 'quote', $2, NULL::jsonb, NULL::jsonb, $3
+           UNION ALL
+           SELECT $1, 'supersede_quote', 'quote', superseded.id,
+                  jsonb_build_object('status', superseded.previous_status),
+                  jsonb_build_object('status', 'superseded', 'superseded_by_quote_id', $2::uuid),
+                  jsonb_build_object(
+                      'quote_number', superseded.quote_number,
+                      'superseded_by_quote_number', $4::text,
+                      'order_id', $5::uuid,
+                      'order_number', $6::text
+                  )
+           FROM jsonb_to_recordset($7::jsonb)
+                AS superseded(id uuid, quote_number text, previous_status text)"#,
     )
     .bind(auth.user_id)
-    .bind("create_quote")
     .bind(quote_id)
     .bind(serde_json::json!({
         "quote_number": quote_number,
         "order_id": order_id,
         "order_number": order_ctx.order_number,
         "total_gross": decimal_to_string(totals.total_gross),
+        "superseded_quote_ids": superseded.iter().map(|quote| quote.id).collect::<Vec<_>>(),
     }))
+    .bind(&quote_number)
+    .bind(order_id)
+    .bind(&order_ctx.order_number)
+    .bind(Value::Array(
+        superseded.iter().map(SupersededQuote::audit_json).collect(),
+    ))
     .execute(&mut *tx)
     .await
     {
@@ -3366,9 +3536,26 @@ async fn create_quote(
             "status": "draft",
             "total_gross": decimal_to_string(totals.total_gross),
             "paid_amount": decimal_to_string(carried_paid_amount),
+            "superseded_quote_ids": superseded.iter().map(|quote| quote.id).collect::<Vec<_>>(),
         }),
     )
     .await;
+    for closed in &superseded {
+        crate::realtime::publish_quote_event(
+            &state,
+            Some(auth.user_id),
+            "quote.status_changed",
+            closed.id,
+            serde_json::json!({
+                "status": "superseded",
+                "previous_status": closed.previous_status,
+                "order_id": order_id,
+                "superseded_by_quote_id": quote_id,
+                "superseded_by_quote_number": quote_number.clone(),
+            }),
+        )
+        .await;
+    }
 
     (
         StatusCode::CREATED,
@@ -3390,6 +3577,13 @@ async fn create_quote(
             "notes": body.notes,
             "version_count": 1,
             "current_version_number": 1,
+            "superseded_by_quote_id": Value::Null,
+            "superseded_by_quote_number": Value::Null,
+            "superseded_at": Value::Null,
+            "superseded_quotes": superseded
+                .iter()
+                .map(|quote| json!({ "id": quote.id, "quote_number": quote.quote_number }))
+                .collect::<Vec<_>>(),
             "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
             "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         })),
@@ -3476,6 +3670,26 @@ async fn delete_quote(
         return err(
             StatusCode::CONFLICT,
             "A quote with linked invoices cannot be deleted",
+        );
+    }
+    // The quote that closed earlier quotes is part of their history.
+    let replaced_quotes = match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM quotes WHERE superseded_by_quote_id = $1)",
+    )
+    .bind(quote_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "check superseded quotes before deletion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete quote");
+        }
+    };
+    if replaced_quotes {
+        return err(
+            StatusCode::CONFLICT,
+            "A quote that replaced earlier quotes cannot be deleted; reject it instead",
         );
     }
 
@@ -3604,7 +3818,8 @@ async fn update_quote_status(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    if !is_valid_quote_status(&body.status) {
+    // `superseded` is set only when a newer quote of the order is created.
+    if !is_valid_quote_status(&body.status) || body.status == "superseded" {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
 
@@ -3634,7 +3849,7 @@ async fn update_quote_status(
     };
 
     let quote_context = match sqlx::query(
-        r#"SELECT q.order_id, q.total_gross, q.paid_amount, q.line_items, o.total_estimated
+        r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items, o.total_estimated
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            WHERE q.id = $1
@@ -3651,6 +3866,16 @@ async fn update_quote_status(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
         }
     };
+    if quote_context
+        .try_get::<String, _>("status")
+        .unwrap_or_default()
+        == "superseded"
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "A superseded quote is closed; use the quote that replaced it",
+        );
+    }
     let order_id = quote_context
         .try_get::<Uuid, _>("order_id")
         .unwrap_or_default();

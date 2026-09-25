@@ -3536,8 +3536,9 @@ export function LeadWizard({
     () => calculateServiceLineEstimate(orderServiceLines),
     [orderServiceLines],
   );
+  // A quote closed by a newer quote of the order is never the current one.
   const orderQuotes = useMemo(
-    () => quotes.filter((item) => !order || item.order_id === order.id),
+    () => quotes.filter((item) => (!order || item.order_id === order.id) && item.status !== "superseded"),
     [order, quotes],
   );
   const quote = orderQuotes[0] ?? null;
@@ -5261,7 +5262,9 @@ ${serviceCommentLines.join("\n")}`
         }));
         return;
       }
-      const latestOrderQuote = quotes.find((item) => item.order_id === commercial.orderId);
+      const latestOrderQuote = quotes.find(
+        (item) => item.order_id === commercial.orderId && item.status !== "superseded",
+      );
       const latestQuoteIsCurrent = Boolean(
         latestOrderQuote
         && quoteMatchesCurrentServices(

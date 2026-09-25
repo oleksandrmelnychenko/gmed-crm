@@ -74,6 +74,7 @@ import {
   DEFAULT_AGENCY_SERVICE_FILTERS,
   DEFAULT_CONTRACT_FILTERS,
   DEFAULT_QUOTE_FILTERS,
+  QUOTE_FILTER_STATUSES,
   QUOTE_STATUSES,
   agencyServiceToForm,
   hasAgencyServiceFormChanges,
@@ -93,6 +94,7 @@ import {
   formatDate,
   formatDateTime,
   isContractClosed,
+  isQuoteSuperseded,
   orderOptionLabel,
   patientOptionLabel,
   quoteToStatusForm,
@@ -186,11 +188,13 @@ const QUOTE_STATUS_LABEL_KEYS = {
   accepted: "revenue_quote_status_accepted",
   rejected: "revenue_quote_status_rejected",
   expired: "revenue_quote_status_expired",
+  superseded: "revenue_quote_status_superseded",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const QUOTE_VERSION_REASON_LABEL_KEYS = {
   initial_snapshot: "revenue_quotes_version_snapshot",
   status_update: "revenue_quotes_version_status_update",
+  superseded: "revenue_quotes_version_superseded",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 function useDebouncedValue<T>(value: T, delayMs: number) {
@@ -431,6 +435,14 @@ function useContractsPageContent() {
         lang === "de"
           ? "Nur Entwürfe sowie abgelehnte oder abgelaufene Angebote können gelöscht werden."
           : "Удалить можно только черновик, отклонённое или просроченное предложение.",
+      deleteQuoteReplacedError:
+        lang === "de"
+          ? "Dieses Angebot hat frühere Angebote ersetzt und kann nicht gelöscht werden. Lehnen Sie es stattdessen ab."
+          : "Это предложение заменило предыдущие и не может быть удалено. Вместо этого отклоните его.",
+      supersededBy: (quoteNumber: string) =>
+        lang === "de"
+          ? `Durch das neuere Angebot ${quoteNumber} ersetzt. Aus diesem Angebot kann nichts mehr abgerechnet werden; bereits erstellte Rechnungen bleiben gültig.`
+          : `Заменено более новым предложением ${quoteNumber}. По этому предложению больше нельзя выставлять счета; уже выставленные счета остаются в силе.`,
     }),
     [lang, t],
   );
@@ -1847,6 +1859,8 @@ function useContractsPageContent() {
 
   const contractStatusDirty = Boolean(contractDetail && hasFormChanges(contractStatusForm, contractToStatusForm(contractDetail)));
   const quoteStatusDirty = Boolean(quoteDetail && hasFormChanges(quoteStatusForm, quoteToStatusForm(quoteDetail)));
+  // A newer quote of the order closed this one; its status is final.
+  const quoteSuperseded = isQuoteSuperseded(quoteDetail?.status);
   const agencyServiceBaseline = agencyServices.find((service) => service.id === agencyServiceForm.id);
   const agencyServiceDirty = Boolean(agencyServiceBaseline && hasAgencyServiceFormChanges(agencyServiceForm, agencyServiceToForm(agencyServiceBaseline)));
 
@@ -1937,6 +1951,8 @@ function useContractsPageContent() {
         setQuoteStatusError(text.deleteQuoteLinkedInvoiceError);
       } else if (message.includes("draft, rejected, or expired")) {
         setQuoteStatusError(text.deleteQuoteStatusError);
+      } else if (message.includes("replaced earlier quotes")) {
+        setQuoteStatusError(text.deleteQuoteReplacedError);
       } else {
         setQuoteStatusError(message || t.common_error);
       }
@@ -2348,7 +2364,7 @@ function useContractsPageContent() {
                     className={cn(selectClassName, "w-[180px] min-w-[180px]")}
                   >
                     <option value="__all__">{t.providers_all}</option>
-                    {QUOTE_STATUSES.map((status) => (
+                    {QUOTE_FILTER_STATUSES.map((status) => (
                       <option key={status} value={status}>
                         {quoteStatusLabel(status)}
                       </option>
@@ -3114,10 +3130,16 @@ function useContractsPageContent() {
                     </div>
                     <div className="mt-5 space-y-4">
                       {quoteStatusError ? <ShellBanner tone="error">{quoteStatusError}</ShellBanner> : null}
+                      {quoteSuperseded ? (
+                        <ShellBanner tone="warning">
+                          {text.supersededBy(quoteDetail.superseded_by_quote_number || t.common_not_set)}
+                        </ShellBanner>
+                      ) : null}
                       <div className="grid gap-4 sm:grid-cols-3">
                         <Field label={t.users_status}>
                           <NativeComboboxSelect
                             value={quoteStatusForm.status}
+                            disabled={quoteSuperseded}
                             onChange={(event) =>
                               setQuoteStatusForm((current) => ({
                                 ...current,
@@ -3126,6 +3148,9 @@ function useContractsPageContent() {
                             }
                             className={selectClassName}
                           >
+                            {quoteSuperseded ? (
+                              <option value={quoteDetail.status}>{quoteStatusLabel(quoteDetail.status)}</option>
+                            ) : null}
                             {QUOTE_STATUSES.map((status) => (
                               <option key={status} value={status}>
                                 {quoteStatusLabel(status)}
@@ -3153,6 +3178,7 @@ function useContractsPageContent() {
                           <textarea
                             className={textareaClassName}
                             value={quoteStatusForm.notes}
+                            readOnly={quoteSuperseded}
                             onChange={(event) =>
                               setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
                             }
@@ -3160,7 +3186,8 @@ function useContractsPageContent() {
                         </Field>
                       </div>
                       <div className="flex items-center justify-between gap-3 pt-1">
-                        {(["draft", "rejected", "expired"] as string[]).includes(quoteDetail.status) ? (
+                        {(["draft", "rejected", "expired"] as string[]).includes(quoteDetail.status)
+                        && !quoteDetail.superseded_quotes?.length ? (
                           <Button
                             type="button"
                             variant="destructive"
@@ -3176,7 +3203,7 @@ function useContractsPageContent() {
                           type="button"
                           className="h-9 rounded-lg px-3.5"
                           onClick={() => void handleSaveQuoteStatus()}
-                          disabled={quoteStatusBusy || !permissions.canManageQuote || !quoteStatusDirty}
+                          disabled={quoteStatusBusy || !permissions.canManageQuote || !quoteStatusDirty || quoteSuperseded}
                         >
                           {quoteStatusBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                           {text.saveQuote}

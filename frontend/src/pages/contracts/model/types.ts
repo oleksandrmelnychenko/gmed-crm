@@ -1,6 +1,12 @@
 
 export type ContractStatus = "draft" | "sent" | "signed" | "expired" | "terminated";
+/** Statuses staff can set on a quote. */
 export type QuoteStatus = "draft" | "sent" | "accepted" | "rejected" | "expired";
+/**
+ * Set only by the server: a newer quote of the same order closed this one, so
+ * nothing more can be invoiced from it. Terminal.
+ */
+export type QuoteSystemStatus = "superseded";
 
 export type ContractItem = {
   id: string;
@@ -46,7 +52,7 @@ export type QuoteItem = {
   patient_name: string;
   patient_pid: string;
   quote_number: string;
-  status: QuoteStatus | string;
+  status: QuoteStatus | QuoteSystemStatus | string;
   total_net: unknown;
   total_vat: unknown;
   total_gross: unknown;
@@ -56,6 +62,12 @@ export type QuoteItem = {
   notes: string | null;
   version_count?: number;
   current_version_number?: number;
+  /** The newer quote of the order that closed this one. */
+  superseded_by_quote_id?: string | null;
+  superseded_by_quote_number?: string | null;
+  superseded_at?: string | null;
+  /** Earlier quotes of the order this quote closed (detail only). */
+  superseded_quotes?: Array<{ id: string; quote_number: string }>;
   created_at: string;
   updated_at: string;
   line_items?: QuoteLineItem[];
