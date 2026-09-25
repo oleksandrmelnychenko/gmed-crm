@@ -730,3 +730,174 @@ async fn terminating_a_contract_without_activity_closes_the_empty_settlement() {
             .unwrap();
     assert_eq!(settlement_status, "settled");
 }
+
+/// An unconfirmed intake draft (e.g. a repeat intake) linked to the contract is
+/// not stopped or settled on termination: it is detached from the contract so
+/// the intake continues and later needs a new contract.
+#[tokio::test]
+async fn contract_termination_detaches_unconfirmed_drafts_without_settling_them() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Draft', 'Detach', '1985-05-05', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let manager = auth_header(manager_id, "patient_manager");
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &manager,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "signed",
+            "valid_from": chrono::Utc::now().date_naive().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+
+    let running_order: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, status, currency, created_by)
+           VALUES ($1, $2, $3::uuid, 'active', 'EUR', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-RUN-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let running_planned = seed_service(
+        &pool,
+        running_order,
+        patient_id,
+        "Transfer",
+        1,
+        100,
+        "planned",
+        None,
+    )
+    .await;
+
+    let draft_order: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+               order_number, patient_id, contract_id, phase, status, currency,
+               intake_state, created_by
+           ) VALUES ($1, $2, $3::uuid, 'discovery', 'active', 'EUR', 'draft', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-DRAFT-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO order_intakes (order_id, data, prepared_data, baseline_facts)
+           VALUES ($1,
+                   jsonb_build_object('step', 3, 'contract_id', $2::uuid),
+                   jsonb_build_object('contract_id', $2::uuid),
+                   '{}'::jsonb)"#,
+    )
+    .bind(draft_order)
+    .bind(Uuid::parse_str(&contract_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let draft_planned = seed_service(
+        &pool,
+        draft_order,
+        patient_id,
+        "Organisation der Behandlung (je 1 Arzt)",
+        1,
+        100,
+        "planned",
+        None,
+    )
+    .await;
+
+    // The preview lists only the running order; the draft is not settled.
+    let (status, preview) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/framework-contracts/{contract_id}/termination-preview"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "preview: {preview:?}");
+    let open_orders = preview["open_orders"].as_array().unwrap();
+    assert_eq!(open_orders.len(), 1, "preview: {preview:?}");
+    assert_eq!(open_orders[0]["id"], running_order.to_string());
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/terminate"),
+        &manager,
+        Some(json!({ "reason": "Patient terminated the contract" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    let settlements = terminated["settlements"].as_array().unwrap();
+    assert_eq!(settlements.len(), 1, "terminate: {terminated:?}");
+    assert_eq!(settlements[0]["order_id"], running_order.to_string());
+    let detached = terminated["detached_draft_orders"].as_array().unwrap();
+    assert_eq!(detached.len(), 1, "terminate: {terminated:?}");
+    assert_eq!(detached[0]["order_id"], draft_order.to_string());
+
+    assert_eq!(service_status(&pool, running_planned).await, "cancelled");
+    let (draft_status, draft_state, draft_contract, draft_reason): (
+        String,
+        String,
+        Option<Uuid>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT status, intake_state, contract_id, cancellation_reason FROM orders WHERE id = $1",
+    )
+    .bind(draft_order)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(draft_status, "active");
+    assert_eq!(draft_state, "draft");
+    assert_eq!(draft_contract, None);
+    assert_eq!(draft_reason, None);
+    assert_eq!(service_status(&pool, draft_planned).await, "planned");
+    let draft_settlements: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM order_termination_settlements WHERE order_id = $1",
+    )
+    .bind(draft_order)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(draft_settlements, 0);
+    let (intake_data, prepared_data, revision): (Value, Value, i64) = sqlx::query_as(
+        "SELECT data, prepared_data, revision FROM order_intakes WHERE order_id = $1",
+    )
+    .bind(draft_order)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(intake_data["contract_id"].is_null(), "{intake_data}");
+    assert_eq!(intake_data["step"], 3);
+    assert!(prepared_data["contract_id"].is_null(), "{prepared_data}");
+    assert_eq!(revision, 1);
+}

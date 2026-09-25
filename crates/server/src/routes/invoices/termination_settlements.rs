@@ -486,7 +486,8 @@ pub(crate) async fn compute_order_settlement(
 }
 
 /// Settlement preview of every order still open under a contract; nothing is
-/// written.
+/// written. Unconfirmed intake drafts are not settled (they are only detached
+/// from the contract), so they are not part of the preview.
 pub(crate) async fn preview_open_orders(
     state: &AppState,
     contract_id: Uuid,
@@ -498,6 +499,7 @@ pub(crate) async fn preview_open_orders(
     let order_ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id FROM orders
            WHERE contract_id = $1 AND status IN ('active', 'paused')
+             AND intake_state <> 'draft'
            ORDER BY created_at, order_number"#,
     )
     .bind(contract_id)
@@ -548,8 +550,108 @@ impl TerminatedOrder {
     }
 }
 
+/// An unconfirmed intake draft (e.g. a repeat intake) that was linked to the
+/// terminated contract. It is not stopped or settled: it only loses the
+/// contract link and needs a new contract before it can be confirmed.
+pub(crate) struct DetachedDraftOrder {
+    order_id: Uuid,
+    order_number: String,
+    source_lead_id: Option<Uuid>,
+}
+
+impl DetachedDraftOrder {
+    pub fn summary_json(&self) -> Value {
+        json!({
+            "order_id": self.order_id,
+            "order_number": self.order_number,
+            "source_lead_id": self.source_lead_id,
+        })
+    }
+}
+
+/// Detach every unconfirmed intake draft from the contract being terminated.
+/// Runs inside the caller's termination transaction.
+pub(crate) async fn detach_draft_orders_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    contract_id: Uuid,
+) -> Result<Vec<DetachedDraftOrder>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"UPDATE orders
+           SET contract_id = NULL
+           WHERE contract_id = $1 AND intake_state = 'draft'
+           RETURNING id, order_number, source_lead_id"#,
+    )
+    .bind(contract_id)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut detached = Vec::with_capacity(rows.len());
+    for row in rows {
+        detached.push(DetachedDraftOrder {
+            order_id: row.try_get("id")?,
+            order_number: row.try_get("order_number").unwrap_or_default(),
+            source_lead_id: row.try_get("source_lead_id").unwrap_or_default(),
+        });
+    }
+    detached.sort_by(|a, b| a.order_number.cmp(&b.order_number));
+    if detached.is_empty() {
+        return Ok(detached);
+    }
+    // The patient order intake keeps the selected contract in its draft data;
+    // clear it there too so the draft asks for a new contract.
+    let order_ids: Vec<Uuid> = detached.iter().map(|order| order.order_id).collect();
+    sqlx::query(
+        r#"UPDATE order_intakes
+           SET data = jsonb_set(data, '{contract_id}', 'null'::jsonb),
+               prepared_data = CASE
+                   WHEN prepared_data ? 'contract_id'
+                   THEN jsonb_set(prepared_data, '{contract_id}', 'null'::jsonb)
+                   ELSE prepared_data
+               END,
+               revision = revision + 1,
+               updated_at = now()
+           WHERE order_id = ANY($1)
+             AND data->>'contract_id' = $2::uuid::text"#,
+    )
+    .bind(&order_ids)
+    .bind(contract_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(detached)
+}
+
+/// Audit and realtime events for drafts detached by a committed termination.
+pub(crate) async fn publish_detached_draft_orders(
+    state: &AppState,
+    actor_user_id: Uuid,
+    contract_id: Uuid,
+    orders: &[DetachedDraftOrder],
+) {
+    for order in orders {
+        let mut payload = order.summary_json();
+        payload["contract_id"] = json!(contract_id);
+        payload["reason"] = json!(CONTRACT_TERMINATED_REASON);
+        state.audit_sender.try_send(audit::domain_event(
+            "detach_draft_order_from_terminated_contract",
+            Some(actor_user_id),
+            "order",
+            Some(order.order_id),
+            payload.clone(),
+        ));
+        crate::realtime::publish_order_event(
+            state,
+            Some(actor_user_id),
+            "order.contract_detached",
+            order.order_id,
+            payload,
+        )
+        .await;
+    }
+}
+
 /// Stop every active/paused order under the contract and snapshot its final
-/// settlement. Runs inside the caller's termination transaction.
+/// settlement. Unconfirmed intake drafts are skipped; the caller detaches them
+/// with [`detach_draft_orders_tx`]. Runs inside the caller's termination
+/// transaction.
 pub(crate) async fn terminate_open_orders_tx(
     transaction: &mut Transaction<'_, Postgres>,
     contract_id: Uuid,
@@ -559,6 +661,7 @@ pub(crate) async fn terminate_open_orders_tx(
         r#"SELECT id, order_number, status
            FROM orders
            WHERE contract_id = $1 AND status IN ('active', 'paused')
+             AND intake_state <> 'draft'
            ORDER BY created_at, order_number
            FOR UPDATE"#,
     )

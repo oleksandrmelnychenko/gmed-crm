@@ -2449,6 +2449,13 @@ async fn terminate_framework_contract(
             Ok(value) => value,
             Err(e) => return failed(e),
         };
+    // Unconfirmed intake drafts (e.g. a repeat intake) are neither stopped nor
+    // settled: they lose the contract link and need a new contract later.
+    let detached_drafts =
+        match termination_settlements::detach_draft_orders_tx(&mut tx, contract_id).await {
+            Ok(value) => value,
+            Err(e) => return failed(e),
+        };
 
     if let Err(e) = sqlx::query(
         r#"UPDATE framework_contracts
@@ -2505,6 +2512,13 @@ async fn terminate_framework_contract(
         &terminated_orders,
     )
     .await;
+    termination_settlements::publish_detached_draft_orders(
+        &state,
+        auth.user_id,
+        contract_id,
+        &detached_drafts,
+    )
+    .await;
 
     match load_contract_detail(&state, contract_id, &auth).await {
         Ok(Some(mut value)) => {
@@ -2512,6 +2526,12 @@ async fn terminate_framework_contract(
                 terminated_orders
                     .iter()
                     .map(termination_settlements::TerminatedOrder::summary_json)
+                    .collect(),
+            );
+            value["detached_draft_orders"] = Value::Array(
+                detached_drafts
+                    .iter()
+                    .map(termination_settlements::DetachedDraftOrder::summary_json)
                     .collect(),
             );
             Json(value).into_response()
