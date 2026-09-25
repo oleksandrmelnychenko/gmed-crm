@@ -1026,9 +1026,8 @@ async fn seed_complete_lead_onboarding(
     .await
     .map_err(|error| format!("prepare lead onboarding fixture: {error}"))?;
 
-    // The lead wizard's prospect step reuses the intake case by source_lead_id;
-    // a case linked only through the legacy lead_id column would be created a
-    // second time and the conversion would hit idx_cases_source_lead_unique.
+    // Match POST /cases {lead_id}: a lead-bound case also records the lead as
+    // its provenance (source_lead_id), which the wizard's prospect step reuses.
     sqlx::query(
         r#"INSERT INTO cases (
                 case_id, lead_id, source_lead_id, manager_id, status, hauptanfragegrund,

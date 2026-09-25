@@ -774,12 +774,16 @@ async fn create_case(
 
     let retention_years = load_case_retention_years(&state, 30).await;
 
+    // A lead-bound case also records the lead as its provenance
+    // (source_lead_id), like every other lead case since the identity-first
+    // backfill. The wizard's prospect step and conversion find the lead's case
+    // through that column; leaving it empty made the wizard open a second case.
     let row = match sqlx::query(
         "INSERT INTO cases (
-            case_id, patient_id, lead_id, manager_id, hauptanfragegrund,
+            case_id, patient_id, lead_id, source_lead_id, manager_id, hauptanfragegrund,
             zuweiser_doctor_id, zuweiser, retention_until, last_clinical_update_at
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now() + ($8 * interval '1 year'), now())
+         VALUES ($1, $2, $3, $3, $4, $5, $6, $7, now() + ($8 * interval '1 year'), now())
          RETURNING id, case_id, created_at, retention_until",
     )
     .bind(&cid)

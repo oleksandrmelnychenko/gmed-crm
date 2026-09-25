@@ -4227,8 +4227,17 @@ async fn ensure_prospect_case(
     zuweiser: &str,
     retention_years: i64,
 ) -> Result<(Uuid, String), sqlx::Error> {
+    // The lead's intake case may be linked through either column: cases opened
+    // on the lead before the prospect step (older POST /cases rows) carry only
+    // lead_id. Reuse it instead of opening a second case; a row already holding
+    // the provenance wins so the update below cannot collide with
+    // idx_cases_source_lead_unique.
     let existing = sqlx::query(
-        "SELECT id, case_id FROM cases WHERE source_lead_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        r#"SELECT id, case_id
+           FROM cases
+           WHERE lead_id = $1 OR source_lead_id = $1
+           ORDER BY (source_lead_id IS NOT DISTINCT FROM $1) DESC, created_at DESC, id DESC
+           LIMIT 1"#,
     )
     .bind(lead_id)
     .fetch_optional(&mut **tx)
@@ -5726,16 +5735,27 @@ async fn convert_lead(
 
     if let Err(error) = sqlx::query(
         r#"WITH moved_cases AS (
+               -- A lead may still carry a legacy duplicate: a lead_id-only case
+               -- next to the prospect case that already holds the provenance.
+               -- Only one row may hold source_lead_id (idx_cases_source_lead_unique),
+               -- so the duplicate moves to the patient without it.
                UPDATE cases
                SET patient_id = $2,
-                   source_lead_id = COALESCE(source_lead_id, $1),
+                   source_lead_id = CASE
+                       WHEN source_lead_id IS NOT NULL THEN source_lead_id
+                       WHEN EXISTS (
+                           SELECT 1 FROM cases provenance
+                           WHERE provenance.source_lead_id = $1
+                       ) THEN NULL
+                       ELSE $1
+                   END,
                    lead_id = NULL,
                    notes = COALESCE(
                        NULLIF(btrim(notes), ''),
                        NULLIF(btrim($3), '')
                    )
                WHERE lead_id = $1 OR source_lead_id = $1
-               RETURNING id
+               RETURNING id, source_lead_id
            ), moved_documents AS (
                UPDATE documents
                SET patient_id = $2, lead_id = NULL
@@ -5752,7 +5772,9 @@ async fn convert_lead(
                    intake_state = CASE WHEN intake_state='draft' THEN 'confirmed' ELSE intake_state END,
                    case_id = COALESCE(
                        case_id,
-                       (SELECT mc.id FROM moved_cases mc LIMIT 1)
+                       (SELECT mc.id FROM moved_cases mc
+                        ORDER BY (mc.source_lead_id IS NOT DISTINCT FROM $1) DESC
+                        LIMIT 1)
                    )
                WHERE source_lead_id = $1
                RETURNING id

@@ -1920,6 +1920,209 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
     );
 }
 
+async fn insert_patient_first_wizard_lead(app: &TestApp, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, street_address, city, zip_code,
+                primary_concern_text, requested_specialties,
+                qualification_status, compliance_status,
+                consent_healthcare, consent_privacy_practices,
+                intake_source, intake_model, created_by
+           ) VALUES (
+                'Case', $1, $2, '+4915112345679', 'DE', 'de',
+                DATE '1988-03-14', 'male', 'Hauptstr. 2', 'Berlin', '10115',
+                'Chronic knee pain', '["orthopedics"]'::jsonb,
+                'qualified', 'signed', true, true,
+                'staff_wizard', 'patient_first', $3
+           ) RETURNING id"#,
+    )
+    .bind(format!("Link-{tag}"))
+    .bind(format!(
+        "case-link-{tag}-{}@example.com",
+        Uuid::new_v4().simple()
+    ))
+    .bind(app.patient_manager_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap()
+}
+
+async fn lead_cases(pool: &PgPool, lead_id: Uuid) -> Vec<(Uuid, Option<Uuid>, Option<Uuid>)> {
+    sqlx::query_as(
+        r#"SELECT id, patient_id, source_lead_id
+           FROM cases
+           WHERE lead_id = $1 OR source_lead_id = $1
+           ORDER BY created_at, id"#,
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn wizard_prospect(app: &TestApp, lead_id: Uuid) -> (Uuid, Uuid) {
+    let (status, prospect) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/prospect"),
+        &app.auth_header("patient_manager"),
+        Some(json!({
+            "hauptanfragegrund": "Chronic knee pain",
+            "zuweiser": "Self referral"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prospect}");
+    (
+        Uuid::parse_str(prospect["patient_id"].as_str().unwrap()).unwrap(),
+        Uuid::parse_str(prospect["case_id"].as_str().unwrap()).unwrap(),
+    )
+}
+
+async fn wizard_convert(app: &TestApp, lead_id: Uuid) -> Value {
+    let (status, converted) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/wizard-convert"),
+        &app.auth_header("patient_manager"),
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    converted
+}
+
+#[tokio::test]
+async fn wizard_reuses_the_lead_case_opened_through_the_cases_api() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let lead_id = insert_patient_first_wizard_lead(&app, "cases-api").await;
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/cases",
+        &app.auth_header("patient_manager"),
+        Some(json!({ "lead_id": lead_id, "hauptanfragegrund": "Chronic knee pain" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let case_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    let link: (Option<Uuid>, Option<Uuid>) =
+        sqlx::query_as("SELECT lead_id, source_lead_id FROM cases WHERE id = $1")
+            .bind(case_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(link, (Some(lead_id), Some(lead_id)));
+
+    let (patient_id, prospect_case_id) = wizard_prospect(&app, lead_id).await;
+    assert_eq!(
+        prospect_case_id, case_id,
+        "the prospect step must reuse the lead's case"
+    );
+    assert_eq!(
+        lead_cases(pool, lead_id).await,
+        vec![(case_id, Some(patient_id), Some(lead_id))]
+    );
+
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    assert_eq!(artifacts.case_id, case_id);
+    let converted = wizard_convert(&app, lead_id).await;
+    assert_eq!(converted["patient_id"], patient_id.to_string());
+    assert_eq!(
+        lead_cases(pool, lead_id).await,
+        vec![(case_id, Some(patient_id), Some(lead_id))],
+        "conversion must keep exactly one case for the lead"
+    );
+}
+
+#[tokio::test]
+async fn wizard_adopts_a_lead_case_linked_only_through_lead_id() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let lead_id = insert_patient_first_wizard_lead(&app, "legacy-link").await;
+    // Cases opened on a lead before POST /cases recorded the provenance.
+    let case_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO cases (case_id, lead_id, manager_id, hauptanfragegrund)
+           VALUES ($1, $2, $3, 'Chronic knee pain')
+           RETURNING id"#,
+    )
+    .bind(format!("C-LEGACY-{}", lead_id.simple()))
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let (patient_id, prospect_case_id) = wizard_prospect(&app, lead_id).await;
+    assert_eq!(prospect_case_id, case_id);
+    assert_eq!(
+        lead_cases(pool, lead_id).await,
+        vec![(case_id, Some(patient_id), Some(lead_id))]
+    );
+
+    seed_complete_lead_onboarding(&app, lead_id).await;
+    wizard_convert(&app, lead_id).await;
+    assert_eq!(
+        lead_cases(pool, lead_id).await,
+        vec![(case_id, Some(patient_id), Some(lead_id))]
+    );
+}
+
+#[tokio::test]
+async fn conversion_tolerates_a_legacy_duplicate_lead_case() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let lead_id = insert_patient_first_wizard_lead(&app, "legacy-duplicate").await;
+    let (patient_id, prospect_case_id) = wizard_prospect(&app, lead_id).await;
+    // Data left by the old prospect step: a second, lead_id-only case beside the
+    // prospect case that already holds the lead provenance.
+    let duplicate_case_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO cases (case_id, lead_id, manager_id, hauptanfragegrund)
+           VALUES ($1, $2, $3, 'Chronic knee pain')
+           RETURNING id"#,
+    )
+    .bind(format!("C-DUP-{}", lead_id.simple()))
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    wizard_convert(&app, lead_id).await;
+
+    for (case_id, expected_source) in [(prospect_case_id, Some(lead_id)), (duplicate_case_id, None)]
+    {
+        let link: (Option<Uuid>, Option<Uuid>, Option<Uuid>) =
+            sqlx::query_as("SELECT patient_id, lead_id, source_lead_id FROM cases WHERE id = $1")
+                .bind(case_id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            link,
+            (Some(patient_id), None, expected_source),
+            "the provenance stays on the prospect case and the duplicate moves to the patient"
+        );
+    }
+    let order_case_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT case_id FROM orders WHERE id = $1")
+            .bind(artifacts.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_case_id, Some(prospect_case_id));
+}
+
 #[tokio::test]
 async fn returning_patient_attach_reuses_identity_without_overwriting_master_data() {
     let Some(app) = test_app().await else {
