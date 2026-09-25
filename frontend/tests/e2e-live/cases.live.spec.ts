@@ -3,13 +3,17 @@ import { expect, test } from "@playwright/test";
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  loginViaApi,
   setGermanLanguage,
 } from "./support/live-helpers";
 
 test.describe("case live workflows", () => {
-  test("patient manager can create a reusable anamnesis text snippet and insert its rendered content into the narrative", async ({
+  // The clinical workflow moved from /cases to the patient's clinical tab; legacy
+  // case links only redirect there.
+  test("a legacy case link opens the patient clinical tab where the patient manager records a new anamnesis version", async ({
     page,
     request,
+    browser,
   }) => {
     await setGermanLanguage(page);
     const scenario = await bootstrapAndLogin(page, request, "pm");
@@ -19,108 +23,86 @@ test.describe("case live workflows", () => {
       scenario.credentials.password,
     );
 
-    const narrativeReason = `Belastungsdyspnoe ${scenario.tag}`;
     const createCaseResponse = await request.post(
       `${api.backendUrl}/api/v1/cases`,
       {
         headers: api.headers,
         data: {
           patient_id: scenario.patient.id,
-          hauptanfragegrund: narrativeReason,
+          hauptanfragegrund: `Belastungsdyspnoe ${scenario.tag}`,
           aktuelle_anamnese: "",
           zuweiser: "Dr. Live E2E",
         },
       },
     );
-    expect(createCaseResponse.ok()).toBeTruthy();
+    expect(createCaseResponse.ok(), await createCaseResponse.text()).toBeTruthy();
     const createdCase = (await createCaseResponse.json()) as { id: string };
 
-    const caseDetailResponse = await request.get(
-      `${api.backendUrl}/api/v1/cases/${createdCase.id}`,
-      { headers: api.headers },
+    // /cases is a CEO-only route; the CEO's legacy case link resolves the patient.
+    const ceoContext = await browser.newContext();
+    try {
+      const ceoPage = await ceoContext.newPage();
+      await setGermanLanguage(ceoPage);
+      await loginViaApi(
+        ceoPage,
+        request,
+        scenario.credentials.ceo.email,
+        scenario.credentials.password,
+      );
+      await ceoPage.goto(`/cases?case=${createdCase.id}`);
+      await expect
+        .poll(() => {
+          const url = new URL(ceoPage.url());
+          return `${url.pathname}?tab=${url.searchParams.get("tab") ?? ""}`;
+        })
+        .toBe(`/patients/${scenario.patient.id}?tab=clinical`);
+    } finally {
+      await ceoContext.close();
+    }
+
+    await page.goto(`/patients/${scenario.patient.id}?tab=clinical`);
+
+    const anamnesisHeading = page.getByRole("heading", {
+      name: /^Anamnese$/,
+      level: 3,
+    });
+    await expect(anamnesisHeading).toBeVisible();
+    const anamnesisBlock = anamnesisHeading.locator(
+      "xpath=ancestor::*[.//button[normalize-space()='Neue Version']][1]",
     );
-    expect(caseDetailResponse.ok()).toBeTruthy();
-    const caseDetail = (await caseDetailResponse.json()) as {
-      case_id: string;
-      aktuelle_anamnese: string | null;
-    };
-    expect(caseDetail.aktuelle_anamnese ?? "").toBe("");
+    await anamnesisBlock.getByRole("button", { name: "Neue Version" }).click();
 
-    const snippetLabel = `Live snippet ${scenario.tag}`;
-    const snippetBody =
-      "Patient {patient_name} ({patient_pid}) berichtet über {hauptanfragegrund}. Referenz {case_id}.";
-    const renderedSnippet = `Patient ${scenario.patient.name} (${scenario.patient.patient_id}) berichtet über ${narrativeReason}. Referenz ${caseDetail.case_id}.`;
-
-    await page.goto(`/cases?case=${createdCase.id}`);
-    const corePanel = page.locator("section").filter({
-      has: page.getByRole("heading", { name: "Kernanamnese" }),
-    }).first();
-    await expect(
-      page.getByRole("button", { name: "Bausteine verwalten" }),
-    ).toBeVisible();
-    await expect(page.getByText(caseDetail.case_id).first()).toBeVisible();
-
-    await page.getByRole("button", { name: "Bausteine verwalten" }).click();
-    const snippetDialog = page.getByRole("dialog", {
-      name: "Anamnese-Textbausteine",
+    const versionSheet = page.getByRole("dialog", {
+      name: "Neue Version: Anamnese",
     });
-    await expect(
-      snippetDialog.locator("[data-slot='sheet-title']", {
-        hasText: "Anamnese-Textbausteine",
-      }),
-    ).toBeVisible();
+    await expect(versionSheet).toBeVisible();
+    const narrative = `Patient ${scenario.patient.name} berichtet über Belastungsdyspnoe (${scenario.tag}).`;
+    await versionSheet
+      .getByRole("textbox", { name: "Aktuelle Anamnese" })
+      .fill(narrative);
+    const saved = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        response.url().includes(`/api/v1/patients/${scenario.patient.id}/narrative`),
+    );
+    await versionSheet.getByRole("button", { name: /^Speichern$/ }).click();
+    expect((await saved).ok()).toBe(true);
+    await expect(versionSheet).toBeHidden({ timeout: 15_000 });
 
-    const snippetEditor = snippetDialog.locator("form").last();
-    const snippetTextboxes = snippetEditor.getByRole("textbox");
-    await snippetTextboxes.nth(0).fill(snippetLabel);
-    await snippetTextboxes.nth(1).fill(snippetBody);
-    await snippetEditor.evaluate((form) => {
-      (form.querySelector('button[type="submit"]') as HTMLButtonElement | null)?.click();
-    });
-    await expect(snippetDialog).toBeHidden({ timeout: 15_000 });
-
-    const snippetCard = page
-      .getByText(snippetLabel, { exact: true })
-      .locator("xpath=ancestor::div[.//button[normalize-space()='In Anamnese einfügen']][1]");
-    await expect(snippetCard).toBeVisible();
-    await expect(snippetCard.getByText(renderedSnippet)).toBeVisible();
-
-    const narrativeField = corePanel.locator("textarea").first();
-    await snippetCard
-      .getByRole("button", { name: "In Anamnese einfügen" })
-      .first()
-      .click();
-    await expect(narrativeField).toHaveValue(renderedSnippet);
-
-    await corePanel.getByRole("button", { name: /Übersicht speichern|Save overview/i }).click();
+    await expect(page.getByText(narrative).first()).toBeVisible();
+    await expect(page.getByText("Aktive Version").first()).toBeVisible();
 
     await expect(async () => {
-      const caseResponse = await request.get(
-        `${api.backendUrl}/api/v1/cases/${createdCase.id}`,
+      const clinicalResponse = await request.get(
+        `${api.backendUrl}/api/v1/patients/${scenario.patient.id}/clinical`,
         { headers: api.headers },
       );
-      expect(caseResponse.ok()).toBe(true);
-      const savedCase = (await caseResponse.json()) as {
-        aktuelle_anamnese: string | null;
+      expect(clinicalResponse.ok()).toBe(true);
+      const clinical = (await clinicalResponse.json()) as {
+        narrative: { anamnese_aktuelle: string | null; is_active: boolean } | null;
       };
-      expect(savedCase.aktuelle_anamnese).toBe(renderedSnippet);
-
-      const snippetsResponse = await request.get(
-        `${api.backendUrl}/api/v1/cases/text-snippets`,
-        { headers: api.headers },
-      );
-      expect(snippetsResponse.ok()).toBe(true);
-      const snippets = (await snippetsResponse.json()) as Array<{
-        label: string;
-        category: string | null;
-        body: string;
-        is_active: boolean;
-      }>;
-      const snippet = snippets.find((item) => item.label === snippetLabel);
-      expect(snippet).toBeDefined();
-      expect(snippet!.category).toBe("general");
-      expect(snippet!.body).toBe(snippetBody);
-      expect(snippet!.is_active).toBe(true);
+      expect(clinical.narrative?.anamnese_aktuelle).toBe(narrative);
+      expect(clinical.narrative?.is_active).toBe(true);
     }).toPass({ timeout: 15_000 });
   });
 });

@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  authenticateApiClient,
   bootstrapFullSmokeScenario,
-  ensureLiveBackendHealthy,
   setGermanLanguage,
 } from "./support/live-helpers";
 
@@ -58,19 +58,18 @@ test.describe("login UI MFA pending poll", () => {
       { timeout: 15_000 },
     );
 
-    const state = await ensureLiveBackendHealthy();
-    const adminLogin = await request.post(`${state.backendUrl}/api/v1/auth/login`, {
-      data: { email: "admin@gmed.de", password: "admin123" },
-    });
-    expect(adminLogin.ok()).toBeTruthy();
-    const adminJson = (await adminLogin.json()) as { access_token: string };
-    const approve = await request.post(
-      `${state.backendUrl}/api/v1/admin/mfa/pending/${pendingId}/approve`,
-      {
-        headers: { Authorization: `Bearer ${adminJson.access_token}` },
-      },
+    // The legacy admin@gmed.de/admin123 seed account is disabled; the scenario IT
+    // admin holds the admin-security capability that approves pending logins.
+    const admin = await authenticateApiClient(
+      request,
+      scenario.credentials.it_admin.email,
+      scenario.credentials.password,
     );
-    expect(approve.ok()).toBeTruthy();
+    const approve = await request.post(
+      `${admin.backendUrl}/api/v1/admin/mfa/pending/${pendingId}/approve`,
+      { headers: admin.headers },
+    );
+    expect(approve.ok(), await approve.text()).toBeTruthy();
 
     await approvedPoll;
 
