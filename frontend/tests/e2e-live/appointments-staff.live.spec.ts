@@ -314,7 +314,7 @@ test.describe("staff appointments live workflows", () => {
     }).toPass({ timeout: 15_000 });
   });
 
-  test("a future appointment cannot be completed before its date in the UI or on the server", async ({
+  test("a future appointment cannot be completed or reported before its date in the UI or on the server", async ({
     page,
     request,
   }) => {
@@ -353,6 +353,32 @@ test.describe("staff appointments live workflows", () => {
     expect(
       (await fetchAppointmentDetail(request, api, futureAppointment.id)).status,
     ).toBe("confirmed");
+
+    // Approval bills interpreter hours, so the report waits for the date too.
+    const assignResponse = await request.post(
+      `${api.backendUrl}/api/v1/appointments/${futureAppointment.id}/assign-interpreter`,
+      {
+        headers: api.headers,
+        data: { interpreter_id: scenario.credentials.interpreter.user_id },
+      },
+    );
+    expect(assignResponse.ok(), await assignResponse.text()).toBe(true);
+    const interpreterApi = await authenticateApiClient(
+      request,
+      scenario.credentials.interpreter.email,
+      scenario.credentials.password,
+    );
+    const earlyReport = await request.post(
+      `${interpreterApi.backendUrl}/api/v1/appointments/${futureAppointment.id}/report`,
+      {
+        headers: interpreterApi.headers,
+        data: { hours: 1.5, report_text: "Live E2E report before the date" },
+      },
+    );
+    expect(earlyReport.status(), await earlyReport.text()).toBe(422);
+    expect(((await earlyReport.json()) as { code?: string }).code).toBe(
+      "appointment_report_before_date",
+    );
   });
 
   test("completing a medical appointment auto-creates the treatment-organization leistung and shows it in order detail", async ({

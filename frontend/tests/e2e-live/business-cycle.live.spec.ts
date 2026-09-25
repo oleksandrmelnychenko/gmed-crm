@@ -979,6 +979,10 @@ test.describe("business cycle (live API) - execution", () => {
     const pm = await actorFor(request, scenario, "pm");
     const interpreter = await actorFor(request, scenario, "interpreter");
     const date = isoDate(3);
+    // Reports, their approval and completion open on the appointment date
+    // (Europe/Berlin), so the delivered visits take place today; the UTC date
+    // is never later than the Berlin one.
+    const serviceDate = isoDate(0);
     const interpreterCatalog = await catalogService(pm, "interpreter_hours");
     const medicalCatalog = await catalogService(pm, "treatment_organization");
     expect(interpreterCatalog, "interpreter_hours catalog item").toBeTruthy();
@@ -1002,9 +1006,36 @@ test.describe("business cycle (live API) - execution", () => {
       orderId: onboarded.orderId,
       type: "medical",
       title: `Kardiologie mit Dolmetscher ${onboarded.tag}`,
-      date,
+      date: serviceDate,
       start: "09:00",
       end: "11:30",
+    });
+
+    await test.step("a report for a future appointment is rejected before its date", async () => {
+      const futureInterpreterAppointment = await createAppointment(pm, {
+        patientId: onboarded.patientId,
+        orderId: onboarded.orderId,
+        type: "medical",
+        title: `Nachkontrolle mit Dolmetscher ${onboarded.tag}`,
+        date,
+        start: "09:00",
+        end: "10:00",
+      });
+      await pm.ok("POST", `/appointments/${futureInterpreterAppointment}/assign-interpreter`, {
+        interpreter_id: scenario.credentials.interpreter.user_id,
+      });
+      await pm.ok("POST", `/appointments/${futureInterpreterAppointment}/status`, {
+        status: "confirmed",
+      });
+      const tooEarly = await interpreter.post(`/appointments/${futureInterpreterAppointment}/report`, {
+        hours: 2.5,
+        report_text: "vor dem Termin",
+      });
+      expect(tooEarly.status, `report before the date: ${describeResult(tooEarly)}`).toBe(422);
+      expect(tooEarly.body.code).toBe("appointment_report_before_date");
+      await pm.ok("POST", `/appointments/${futureInterpreterAppointment}/status`, {
+        status: "cancelled",
+      });
     });
 
     await test.step("assign interpreter, confirm, report 2.5h, approve -> approved service line", async () => {
@@ -1070,9 +1101,7 @@ test.describe("business cycle (live API) - execution", () => {
     });
 
     await test.step("complete a medical appointment -> delivered service line (idempotent)", async () => {
-      // Completion opens on the appointment date (Europe/Berlin), so the
-      // completed appointment takes place today; the UTC date is never later.
-      const medicalDate = isoDate(0);
+      const medicalDate = serviceDate;
       const futureMedicalAppointment = await createAppointment(pm, {
         patientId: onboarded.patientId,
         orderId: onboarded.orderId,

@@ -1348,12 +1348,18 @@ Covers:
   Covers:
   browser-level staff flow proves the medical path live: complete the medical appointment in UI, then see the delivered `Organisation der Behandlung` line materialized in order detail.
 
-- `a future appointment cannot be completed before its date in the UI or on the server`
+- `a future appointment cannot be completed or reported before its date in the UI or on the server`
   Source:
-  продуктове рішення 2026-09-25: прийом не можна завершити раніше його дати (Europe/Berlin)
+  продуктове рішення 2026-09-25: прийом не можна завершити раніше його дати (Europe/Berlin); звіт перекладача не можна подати чи затвердити раніше дати прийому
   `docs/requirements/03_product-backlog_ua.md:125`
   Covers:
-  live staff flow opens a future appointment, sees `Abgeschlossen` disabled with the date hint while `Läuft` stays available, and the server rejects the completion with 422 `appointment_completion_before_date`.
+  live staff flow opens a future appointment, sees `Abgeschlossen` disabled with the date hint while `Läuft` stays available, the server rejects the completion with 422 `appointment_completion_before_date`, and the assigned interpreter's report is rejected with 422 `appointment_report_before_date`.
+
+- `interpreter_reports_open_on_the_appointment_date`
+  Source:
+  продуктове рішення 2026-09-25: звіт перекладача не можна подати чи затвердити раніше дати прийому (Europe/Berlin)
+  Covers:
+  submitting and approving an interpreter report for an appointment dated after today return 422 `appointment_report_before_date`, the planned interpreter-hours line stays unbilled, a pending report can still be returned; on the appointment day submit and approval go through and consume the planned line.
 
 - `interpreter_report_billing_scheduler_backfills_after_catalog_setup_without_duplicates`
   Source:
