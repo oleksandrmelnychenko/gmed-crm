@@ -3265,8 +3265,10 @@ async fn ceo_assistant_can_review_translation_requests_but_cannot_mutate_them() 
     assert_eq!(body["message"], "Insufficient permissions");
 }
 
+/// The read-only CEO assistant may open the document but neither sees the
+/// share trail (recipients, cover message) nor changes it.
 #[tokio::test]
-async fn ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_shares() {
+async fn ceo_assistant_cannot_view_or_mutate_provider_share_trail() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -3311,7 +3313,7 @@ async fn ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_
         &app,
         "GET",
         &format!("/api/v1/documents/{document_id}/shares"),
-        &assistant_bearer,
+        &admin_bearer,
         None,
     )
     .await;
@@ -3320,6 +3322,20 @@ async fn ceo_assistant_can_view_provider_share_trail_but_cannot_mutate_provider_
     assert_eq!(list_body[0]["id"], share_id);
     assert_eq!(list_body[0]["provider_name"], format!("Clinic {tag}-med"));
     assert_eq!(list_body[0]["message"], cover_message);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &assistant_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(
+        !body.to_string().contains(cover_message),
+        "the cover message must not leak: {body}"
+    );
 
     let (status, body) = json_request(
         &app,
@@ -7443,10 +7459,12 @@ async fn patient_manager_cannot_mark_unassigned_document_signed() {
     assert_eq!(dsgvo_signed, None);
 }
 
-/// `GET /documents/{id}/shares` follows `documents.view` plus the document's own
-/// row-level rule; creating or revoking a share stays behind `documents.manage`.
+/// `GET /documents/{id}/shares` needs `documents.shares.view` (CEO, patient
+/// manager, interpreter team lead) plus the document's own row-level rule; an
+/// interpreter who may open the document does not see its recipients. Creating
+/// or revoking a share stays behind `documents.manage`.
 #[tokio::test]
-async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
+async fn document_share_trail_requires_shares_view_and_row_access() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
@@ -7470,11 +7488,16 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
-    let unassigned_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
-    let unassigned_bearer = auth_header_for(unassigned_id, "interpreter");
+    let teamlead_id = seed_user(&pool, &format!("{tag}-lead"), "teamlead_interpreter").await;
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
+    let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+    let unassigned_id =
+        seed_user(&pool, &format!("{tag}-other-lead"), "teamlead_interpreter").await;
+    let unassigned_bearer = auth_header_for(unassigned_id, "teamlead_interpreter");
     // A medical document can only be shared with a colleague who may see it.
     let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
     let (status, create_body) = json_request(
         &app,
@@ -7491,7 +7514,7 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     assert_eq!(status, StatusCode::OK);
     let share_id = create_body["id"].as_str().unwrap().to_string();
 
-    // The assigned interpreter can open the document, so the share trail is visible.
+    // The assigned interpreter can open the document but not its share trail.
     let (status, _) = json_request(
         &app,
         "GET",
@@ -7501,7 +7524,7 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    let (status, list_body) = json_request(
+    let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/documents/{document_id}/shares"),
@@ -7509,9 +7532,77 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // The assigned patient manager sees who received the document.
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list_body}");
     assert_eq!(list_body.as_array().unwrap().len(), 1);
     assert_eq!(list_body[0]["id"], share_id);
+    // The team lead holds the capability, but the row-level rule keeps medical
+    // documents closed to that role, so their trail stays closed too.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/shares"),
+        &teamlead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // On a document the team lead may open, the assigned team lead sees the trail.
+    let general_document_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        appointment_id,
+        "released_internal",
+        false,
+        "sonstiges",
+        &format!("{tag}-general"),
+    )
+    .await;
+    let (status, general_share) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{general_document_id}/shares"),
+        &admin_bearer,
+        Some(json!({
+            "shared_with_user_id": pm_id,
+            "channel": "email",
+            "requires_confirmation": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{general_share}");
+    let (status, list_body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{general_document_id}/shares"),
+        &teamlead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list_body}");
+    assert_eq!(list_body.as_array().unwrap().len(), 1);
+    assert_eq!(list_body[0]["id"], general_share["id"]);
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{general_document_id}/shares"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
     // `documents.manage` is still required to share or revoke.
     let (status, body) = json_request(
@@ -7539,11 +7630,11 @@ async fn document_share_trail_follows_documents_view_and_manage_capabilities() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // The capability alone is not enough: the row-level document rule still applies.
+    // The capability alone is not enough: an unassigned team lead is refused.
     let (status, _) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/documents/{document_id}/shares"),
+        &format!("/api/v1/documents/{general_document_id}/shares"),
         &unassigned_bearer,
         None,
     )

@@ -85,6 +85,10 @@ capabilities! {
     DocumentsManage => "documents.manage",
     DocumentsIntake => "documents.intake",
     DocumentsTranslate => "documents.translate",
+    // Share trail of a document (recipients, channel, cover message). Data
+    // minimisation: a role that may open a document does not automatically
+    // learn to whom and with which message it was sent.
+    DocumentsSharesView => "documents.shares.view",
     // Appointments
     AppointmentsView => "appointments.view",
     AppointmentsEdit => "appointments.edit",
@@ -255,6 +259,7 @@ const PATIENT_MANAGER: &[Capability] = &[
     C::DocumentsManage,
     C::DocumentsIntake,
     C::DocumentsTranslate,
+    C::DocumentsSharesView,
     C::AppointmentsView,
     C::AppointmentsEdit,
     C::AppointmentsDelete,
@@ -298,6 +303,7 @@ const TEAMLEAD_INTERPRETER: &[Capability] = &[
     C::PatientsMedicalView,
     C::DocumentsView,
     C::DocumentsUpload,
+    C::DocumentsSharesView,
     C::AppointmentsView,
     C::AppointmentsEdit,
     C::AppointmentsAssignInterpreter,
@@ -596,6 +602,21 @@ mod tests {
     }
 
     #[test]
+    fn only_ceo_patient_manager_and_teamlead_see_document_share_trails() {
+        for role in STAFF_ROLES {
+            assert_eq!(
+                role.can(C::DocumentsSharesView),
+                matches!(
+                    role,
+                    Role::Ceo | Role::PatientManager | Role::TeamleadInterpreter
+                ),
+                "{role:?}"
+            );
+        }
+        assert!(!C::DocumentsSharesView.is_write());
+    }
+
+    #[test]
     fn role_sets_match_the_product_matrix() {
         let expected: &[(Role, &[&str])] = &[
             (
@@ -677,6 +698,7 @@ mod tests {
                     "patients.medical.view",
                     "documents.view",
                     "documents.upload",
+                    "documents.shares.view",
                     "appointments.view",
                     "appointments.edit",
                     "appointments.assign_interpreter",
@@ -766,6 +788,7 @@ mod tests {
                     "documents.manage",
                     "documents.intake",
                     "documents.translate",
+                    "documents.shares.view",
                     "appointments.view",
                     "appointments.edit",
                     "appointments.delete",

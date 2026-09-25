@@ -99,9 +99,12 @@ export function canUpdateTranslations(actor?: Actor) {
   return hasCapability(actor, "documents.upload");
 }
 
-/** `GET /documents/{id}/shares` follows `documents.view`; the server still applies the row-level rule. */
+/**
+ * `GET /documents/{id}/shares` (recipients, channel, cover message) needs
+ * `documents.shares.view`; the server still applies the row-level rule.
+ */
 export function canViewDocumentShares(actor?: Actor) {
-  return hasCapability(actor, "documents.view");
+  return hasCapability(actor, "documents.shares.view");
 }
 
 export function buildDocumentsPath(filters: FiltersState) {

@@ -671,6 +671,25 @@ test.describe("staff live workflows", () => {
       expect(providerShare!.shared_by_name).toBe(scenario.credentials.pm.name);
       expect(providerShare!.revoked_at).not.toBeNull();
     }).toPass({ timeout: 15_000 });
+
+    // Data minimisation: the share trail needs documents.shares.view. The
+    // assigned interpreter and the read-only CEO assistant may open the
+    // document but do not learn its recipients or the cover message.
+    for (const role of ["interpreter", "assistant"] as const) {
+      const client = await authenticateApiClient(
+        request,
+        scenario.credentials[role].email,
+        scenario.credentials.password,
+      );
+      const denied = await request.get(
+        `${client.backendUrl}/api/v1/documents/${scenario.documents.provider_ready.id}/shares`,
+        { headers: client.headers },
+      );
+      expect(denied.status(), role).toBe(403);
+      expect(await denied.text(), role).not.toContain(
+        "Bitte fuer das Kardiologie-Team freigeben.",
+      );
+    }
   });
 
   test("patient manager can create and complete a document translation flow", async ({

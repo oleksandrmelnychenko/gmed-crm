@@ -33,6 +33,7 @@
 | `documents.manage` | x |   | x |   |   |   |   |   |   |
 | `documents.intake` | x |   | x |   |   |   |   |   |   |
 | `documents.translate` | x |   | x |   |   |   |   |   |   |
+| `documents.shares.view` | x |   | x | x |   |   |   |   |   |
 | `appointments.view` | x | x | x | x | x | x |   |   |   |
 | `appointments.edit` | x |   | x | x |   | x |   |   |   |
 | `appointments.delete` | x |   | x |   |   |   |   |   |   |

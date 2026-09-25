@@ -25800,12 +25800,16 @@ async fn revoke_document_from_patient_portal(
     .into_response()
 }
 
+/// The share trail (recipients, channel, cover message) is limited to
+/// `documents.shares.view` (CEO, patient manager, interpreter team lead) on
+/// top of the document's own row-level rule: opening a document does not
+/// entitle a role to learn to whom it was sent (data minimisation).
 async fn list_document_shares(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = auth.require_capability(Capability::DocumentsView) {
+    if let Err(resp) = auth.require_capability(Capability::DocumentsSharesView) {
         return resp;
     }
 

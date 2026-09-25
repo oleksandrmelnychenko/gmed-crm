@@ -232,7 +232,7 @@ describe("documents model", () => {
       expect(canRequestTranslations(actor)).toBe(has("documents.upload"));
       expect(canUpdateTranslations(actor)).toBe(has("documents.upload"));
       expect(canViewTranslationQueue(actor)).toBe(has("documents.view"));
-      expect(canViewDocumentShares(actor)).toBe(has("documents.view"));
+      expect(canViewDocumentShares(actor)).toBe(has("documents.shares.view"));
     });
   });
 });

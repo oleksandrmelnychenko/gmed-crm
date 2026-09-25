@@ -66,6 +66,14 @@ describe("capability mirror", () => {
     expect(actorRole(null)).toBeUndefined();
   });
 
+  it("limits document share trails to CEO, patient manager and interpreter team lead", () => {
+    for (const role of Object.keys(ROLE_CAPABILITIES)) {
+      expect(hasCapability({ role }, "documents.shares.view"), role).toBe(
+        ["ceo", "patient_manager", "teamlead_interpreter"].includes(role),
+      );
+    }
+  });
+
   it("keeps the cabinet decisions: CEO-only powers and read-only assistant", () => {
     for (const role of Object.keys(ROLE_CAPABILITIES)) {
       expect(hasCapability({ role }, "users.manage_ceo"), role).toBe(role === "ceo");
