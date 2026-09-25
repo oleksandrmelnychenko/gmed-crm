@@ -379,6 +379,23 @@ export function deliverOrderLeistung(orderId: string, leistungId: string) {
   return post(`/orders/${orderId}/leistungen/${leistungId}/deliver`);
 }
 
+export type CancelledOrderLeistung = {
+  id: string;
+  order_id: string;
+  status: "cancelled";
+  cancelled_at: string;
+  cancelled_by: string;
+  cancellation_reason: string;
+};
+
+/** Cancels a still-planned service line; the server keeps who, when and why. */
+export function cancelOrderLeistung(orderId: string, leistungId: string, reason: string) {
+  return postJson<CancelledOrderLeistung>(
+    `/orders/${orderId}/leistungen/${leistungId}/cancel`,
+    { reason },
+  );
+}
+
 export function createExternalInvoice(orderId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/external-invoices`, payload);
 }

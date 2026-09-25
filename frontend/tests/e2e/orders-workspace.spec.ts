@@ -450,6 +450,62 @@ test("a manual service requires an explicit unit price before saving", async ({p
   expect(writes.find(write => write.path.endsWith("/leistungen"))?.body).toMatchObject({description:"QA service", unit_price:100.5});
 });
 
+test("a planned service is cancelled with a required reason and shows it afterwards", async ({page}) => {
+  const {order} = await prepare(page);
+  const line: Record<string, unknown> = {id:"service-1", description:"QA interpreter block", quantity:"4", unit_price:"80", currency:"EUR", vat_rate:"19", status:"planned", notes:null};
+  order.leistungen.push(line, {id:"service-2", description:"QA delivered service", quantity:"1", unit_price:"100", currency:"EUR", vat_rate:"19", status:"delivered", delivered_at:"2026-09-10T09:00:00Z", notes:null});
+  const cancelBodies: unknown[] = [];
+  await page.route(`**/orders/${orderId}/leistungen/service-1/cancel`, route => {
+    const body = route.request().postDataJSON() as {reason: string};
+    cancelBodies.push(body);
+    Object.assign(line, {status:"cancelled", cancelled_at:"2026-09-25T10:15:00Z", cancellation_reason:body.reason});
+    return route.fulfill({json:{id:"service-1", order_id:orderId, status:"cancelled", cancelled_at:"2026-09-25T10:15:00Z", cancelled_by:"order-test-user", cancellation_reason:body.reason}});
+  });
+  await page.goto(`/orders/${orderId}?section=services`);
+  // Only the planned line offers the action.
+  await expect(page.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(1);
+  await page.getByRole("button", {name:"Отменить услугу", exact:true}).click();
+  const dialog = page.getByRole("dialog", {name:"Отменить услугу", exact:true});
+  await expect(dialog.getByText("QA interpreter block", {exact:true})).toBeVisible();
+  const submit = dialog.getByRole("button", {name:"Отменить услугу", exact:true});
+  const reason = dialog.getByLabel("Причина отмены");
+  await expect(submit).toBeDisabled();
+  await reason.fill("  ab  ");
+  await expect(submit).toBeDisabled();
+  await reason.fill("  Часы уже выставлены по отчёту переводчика  ");
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(dialog).toBeHidden();
+  expect(cancelBodies).toEqual([{reason:"Часы уже выставлены по отчёту переводчика"}]);
+  const note = page.getByTestId("leistung-cancellation-note");
+  await expect(note).toContainText("Отменено");
+  await expect(note).toContainText("Причина: Часы уже выставлены по отчёту переводчика");
+  await expect(page.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(0);
+});
+
+test("a cancellation conflict shows a localized error and reloads the line", async ({page}) => {
+  const {order} = await prepare(page, "de");
+  const line: Record<string, unknown> = {id:"service-1", description:"QA interpreter block", quantity:"4", unit_price:"80", currency:"EUR", vat_rate:"19", status:"planned", notes:null};
+  order.leistungen.push(line);
+  await page.route(`**/orders/${orderId}/leistungen/service-1/cancel`, route => {
+    // Someone delivered the line meanwhile.
+    Object.assign(line, {status:"delivered", delivered_at:"2026-09-25T10:00:00Z"});
+    return route.fulfill({status:409, json:{error:"Only a planned order service can be cancelled"}});
+  });
+  await page.goto(`/orders/${orderId}?section=services`);
+  await page.getByRole("button", {name:"Leistung stornieren", exact:true}).click();
+  const dialog = page.getByRole("dialog", {name:"Leistung stornieren", exact:true});
+  await dialog.getByLabel("Stornogrund").fill("Doppelt geplant");
+  await dialog.getByRole("button", {name:"Leistung stornieren", exact:true}).click();
+  await expect(dialog.getByRole("alert")).toContainText("Nur geplante Leistungen lassen sich stornieren");
+  await expect(dialog.getByRole("alert")).not.toContainText("Only a planned order service");
+  // The typed reason is unsaved input, so closing asks before discarding it.
+  await dialog.getByRole("button", {name:"Abbrechen", exact:true}).click();
+  await page.getByRole("button", {name:"Ohne Speichern schließen", exact:true}).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("button", {name:"Leistung stornieren", exact:true})).toHaveCount(0);
+});
+
 test("a rejected invoice-to-service link is visible on the invoice page", async ({page}) => {
   const {order} = await prepare(page);
   order.leistungen.push({id:"service-1", description:"QA service", quantity:"1", unit_price:"100", currency:"EUR", vat_rate:"19", status:"planned", notes:null});

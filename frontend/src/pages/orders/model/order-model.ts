@@ -101,6 +101,7 @@ export function orderPermissions(actor?: Actor): OrdersPermissions {
     canManagePhase: canEdit,
     canAddLeistung: canEdit,
     canApproveLeistung: canEdit,
+    canCancelLeistung: canEdit,
     // Provider (external) invoices: the order owner or finance.
     canManageExternalInvoices: canEdit || hasCapability(actor, "invoices.finance"),
     canManageEconomics: hasCapability(actor, "orders.economics"),
@@ -430,8 +431,10 @@ export function nextPhase(current: string) {
   return ORDER_PHASES[index + 1];
 }
 
+/** Net total of the order's service lines; cancelled lines no longer count. */
 export function sumLeistungTotals(items: Leistung[]) {
   return items.reduce((sum, item) => {
+    if (item.status === "cancelled") return sum;
     const quantity = numberFromUnknown(item.quantity) ?? 0;
     const unitPrice = numberFromUnknown(item.unit_price) ?? 0;
     return sum + quantity * unitPrice;

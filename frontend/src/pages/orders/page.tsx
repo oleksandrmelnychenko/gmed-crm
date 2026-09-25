@@ -18,6 +18,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowUpRight,
   AlertTriangle,
+  Ban,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
@@ -124,6 +125,10 @@ import {
 } from "./model/create-order-gate";
 import { mergeOrderDraft } from "./model/order-draft";
 import {
+  canCancelLeistung,
+  leistungCancellationNote,
+} from "./model/leistung-cancellation";
+import {
   approveOrderLeistung,
   deliverOrderLeistung,
   completeWorkflowChecklistItem,
@@ -224,6 +229,10 @@ import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
+  CancelLeistungDialog,
+  type CancelLeistungTarget,
+} from "./ui/cancel-leistung-dialog";
+import {
   OrderServiceGroupPanel,
   OrderServiceGroupWizard,
 } from "./ui/order-service-group-panel";
@@ -248,6 +257,7 @@ const ORDER_REALTIME_EVENTS = [
   "order.leistung_added",
   "order.leistung_planned_cost_updated",
   "order.leistung_approved",
+  "order.leistung_cancelled",
   "invoice.created",
   "invoice.status_changed",
   "invoice.prepayment_applied",
@@ -1124,6 +1134,8 @@ function useOrdersPageContent() {
   } | null>(null);
   const [plannedCostSaving, setPlannedCostSaving] = useState(false);
   const [plannedCostError, setPlannedCostError] = useState<string | null>(null);
+  const [cancelLeistungTarget, setCancelLeistungTarget] =
+    useState<CancelLeistungTarget | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
   const [agencyServicesLoaded, setAgencyServicesLoaded] = useState(false);
   const setOrdersPageField = <K extends keyof OrdersPageState>(
@@ -6870,6 +6882,8 @@ function useOrdersPageContent() {
                               leistung.billing_status ?? "not_invoiced";
                             const invoiceReferences =
                               leistung.invoice_references ?? [];
+                            const cancellation =
+                              leistungCancellationNote(leistung);
 
                             return (
                               <article
@@ -6913,6 +6927,25 @@ function useOrdersPageContent() {
                                             {leistungBillingStatusLabel(billingStatus)}
                                           </Badge>
                                         </div>
+                                        {cancellation ? (
+                                          <div
+                                            className="mt-2 max-w-3xl rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-relaxed text-rose-800"
+                                            data-testid="leistung-cancellation-note"
+                                          >
+                                            <p className="font-semibold">
+                                              {lang === "de" ? "Storniert" : "Отменено"}
+                                              {cancellation.cancelledAt
+                                                ? ` · ${formatDateTimeLabel(cancellation.cancelledAt)}`
+                                                : ""}
+                                            </p>
+                                            {cancellation.reason ? (
+                                              <p className="mt-0.5 whitespace-pre-wrap break-words">
+                                                {lang === "de" ? "Grund" : "Причина"}:{" "}
+                                                {cancellation.reason}
+                                              </p>
+                                            ) : null}
+                                          </div>
+                                        ) : null}
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           {leistung.is_cost_passthrough ? (
                                             <Badge
@@ -7009,6 +7042,30 @@ function useOrdersPageContent() {
                                           <CheckCircle2 className="size-4" />
                                         )}
                                         {lang === "de" ? "Als erbracht markieren" : "Отметить как оказанную"}
+                                      </Button>
+                                    ) : null}
+                                    {canCancelLeistung(
+                                      leistung,
+                                      permissions.canCancelLeistung,
+                                    ) ? (
+                                      <Button
+                                        type="button"
+                                        variant="destructive"
+                                        className="mt-2 h-auto min-h-8 w-full whitespace-normal rounded-lg px-3 text-center"
+                                        onClick={() =>
+                                          setCancelLeistungTarget({
+                                            id: leistung.id,
+                                            name: normalizeLeistungDescription(
+                                              leistung.description,
+                                            ),
+                                          })
+                                        }
+                                        disabled={
+                                          approvingLeistungId === leistung.id
+                                        }
+                                      >
+                                        <Ban className="size-4" />
+                                        {lang === "de" ? "Leistung stornieren" : "Отменить услугу"}
                                       </Button>
                                     ) : null}
                                     {permissions.canApproveLeistung &&
@@ -7850,6 +7907,18 @@ function useOrdersPageContent() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <CancelLeistungDialog
+        orderId={selectedOrderId}
+        leistung={cancelLeistungTarget}
+        lang={lang}
+        onClose={() => setCancelLeistungTarget(null)}
+        onCancelled={() => triggerReload()}
+        onStale={() => {
+          if (selectedOrderId) clearApiCache(`/orders/${selectedOrderId}`);
+          triggerReload();
+        }}
+      />
 
       <Sheet open={externalInvoiceOpen} onOpenChange={resetExternalInvoiceDialog}>
         <SheetContent

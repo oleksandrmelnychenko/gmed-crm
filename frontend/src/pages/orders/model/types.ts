@@ -87,6 +87,8 @@ export type Leistung = {
   status: LeistungStatus;
   delivered_at?: string | null;
   approved_at?: string | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
   notes: string | null;
   provider_id: string | null;
   provider_name: string | null;
@@ -793,6 +795,7 @@ export type OrdersPermissions = {
   canManagePhase: boolean;
   canAddLeistung: boolean;
   canApproveLeistung: boolean;
+  canCancelLeistung: boolean;
   canManageExternalInvoices: boolean;
   canManageEconomics: boolean;
 };
