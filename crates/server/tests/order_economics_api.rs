@@ -1031,3 +1031,100 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
             .is_some_and(|warnings| warnings.contains(&json!("order_service_currency_mismatch")))
     );
 }
+
+#[tokio::test]
+async fn economics_plan_skips_cancelled_services() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let manager = auth_header(manager_id, "patient_manager");
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut service_ids = Vec::new();
+    for (description, quantity, unit_price) in [
+        ("Kept coordination", Decimal::ONE, Decimal::new(100, 0)),
+        (
+            "Duplicate coordination",
+            Decimal::new(2, 0),
+            Decimal::new(50, 0),
+        ),
+    ] {
+        let id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO order_leistungen (
+                   order_id, patient_id, description, quantity, unit_price, currency,
+                   vat_rate, status
+               ) VALUES ($1, $2, $3, $4, $5, 'EUR', 19, 'planned')
+               RETURNING id"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(description)
+        .bind(quantity)
+        .bind(unit_price)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        service_ids.push(id);
+    }
+    let cancelled_id = service_ids[1];
+
+    let (cancel_status, cancel_body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen/{cancelled_id}/cancel"),
+        &manager,
+        Some(json!({ "reason": "Duplicate of the appointment line" })),
+    )
+    .await;
+    assert_eq!(cancel_status, StatusCode::OK, "cancel: {cancel_body:?}");
+
+    let (status, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "economics: {economics:?}");
+    assert_eq!(economics["planned"]["revenue_net"], "100");
+    assert_eq!(economics["planned"]["revenue_gross"], "119");
+    let services = economics["services"].as_array().expect("services");
+    let cancelled = services
+        .iter()
+        .find(|service| service["order_leistung_id"] == json!(cancelled_id))
+        .expect("cancelled service row stays listed");
+    assert_eq!(cancelled["cancelled"], true);
+    assert!(cancelled["planned_revenue_net"].is_null());
+    assert!(cancelled["planned_revenue_gross"].is_null());
+    let kept = services
+        .iter()
+        .find(|service| service["order_leistung_id"] == json!(service_ids[0]))
+        .expect("kept service row");
+    assert_eq!(kept["cancelled"], false);
+    assert_eq!(kept["planned_revenue_net"], "100");
+}

@@ -3095,7 +3095,9 @@ async fn get_order(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+    // Every role that lists orders (orders.view) may open the ones it can
+    // access; the order-scope check below applies to each of them.
+    if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
 
@@ -3582,8 +3584,7 @@ async fn get_order_economics(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing])
-    {
+    if let Err(response) = auth.require_capability(Capability::OrdersView) {
         return response;
     }
 
@@ -3905,6 +3906,7 @@ async fn get_order_economics(
            SELECT service.id,
                   COALESCE(service.agency_service_name_snapshot, service.description) AS name,
                   service.description,
+                  service.status,
                   UPPER(service.currency) AS currency,
                   CASE WHEN service.quantity > 0
                              AND service.quantity <= 1000000
@@ -4019,6 +4021,12 @@ async fn get_order_economics(
             let calculation_valid = row
                 .try_get::<bool, _>("calculation_valid")
                 .unwrap_or(false);
+            // A cancelled service stays on the order for the record but is no
+            // longer part of the plan (quotes, invoices and completion skip it).
+            let cancelled = row
+                .try_get::<String, _>("status")
+                .is_ok_and(|status| status == "cancelled");
+            let counts_as_planned = currency_matches_order && calculation_valid && !cancelled;
             let quantity = row
                 .try_get::<rust_decimal::Decimal, _>("quantity")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -4042,7 +4050,7 @@ async fn get_order_economics(
             let service_planned_cost_gross = row
                 .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_gross")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
-            if currency_matches_order && calculation_valid {
+            if counts_as_planned {
                 planned_revenue_net += service_planned_net;
                 planned_revenue_vat += service_planned_vat;
                 planned_cost_net += service_planned_cost_net;
@@ -4064,12 +4072,13 @@ async fn get_order_economics(
                 "currency": service_currency,
                 "currency_matches_order": currency_matches_order,
                 "calculation_valid": calculation_valid,
-                "planned_revenue_net": (currency_matches_order && calculation_valid).then(|| economics_money(service_planned_net)),
-                "planned_revenue_vat": (currency_matches_order && calculation_valid).then(|| economics_money(service_planned_vat)),
-                "planned_revenue_gross": (currency_matches_order && calculation_valid).then(|| economics_money(service_planned_gross)),
-                "planned_partner_cost_net": (margin_visible && currency_matches_order && calculation_valid).then(|| economics_money(service_planned_cost_net)),
-                "planned_partner_cost_vat": (margin_visible && currency_matches_order && calculation_valid).then(|| economics_money(service_planned_cost_vat)),
-                "planned_partner_cost_gross": (margin_visible && currency_matches_order && calculation_valid).then(|| economics_money(service_planned_cost_gross)),
+                "cancelled": cancelled,
+                "planned_revenue_net": counts_as_planned.then(|| economics_money(service_planned_net)),
+                "planned_revenue_vat": counts_as_planned.then(|| economics_money(service_planned_vat)),
+                "planned_revenue_gross": counts_as_planned.then(|| economics_money(service_planned_gross)),
+                "planned_partner_cost_net": (margin_visible && counts_as_planned).then(|| economics_money(service_planned_cost_net)),
+                "planned_partner_cost_vat": (margin_visible && counts_as_planned).then(|| economics_money(service_planned_cost_vat)),
+                "planned_partner_cost_gross": (margin_visible && counts_as_planned).then(|| economics_money(service_planned_cost_gross)),
                 "actual_revenue_net": economics_money(actual_revenue_net),
                 "actual_revenue_vat": economics_money(row.try_get::<rust_decimal::Decimal, _>("actual_revenue_vat").unwrap_or(rust_decimal::Decimal::ZERO)),
                 "actual_revenue_gross": economics_money(row.try_get::<rust_decimal::Decimal, _>("actual_revenue_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
@@ -7433,7 +7442,7 @@ async fn list_leistungen(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+    if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
     match can_access_order_preparation(&state, &auth, order_id, None).await {
@@ -8956,7 +8965,7 @@ async fn list_order_amendments(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+    if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
@@ -9274,8 +9283,11 @@ async fn order_group_payload(
     .await
     .unwrap_or_default();
 
+    // A cancelled order (e.g. stopped by a contract termination) stays listed
+    // in the group but no longer counts toward the group total.
     let rollup = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
-        "SELECT SUM(total_estimated) FROM orders WHERE id = $1 OR head_order_id = $1",
+        "SELECT SUM(total_estimated) FROM orders
+         WHERE (id = $1 OR head_order_id = $1) AND status <> 'cancelled'",
     )
     .bind(head_id)
     .fetch_one(db)
@@ -9346,7 +9358,7 @@ async fn get_order_group(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+    if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {

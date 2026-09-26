@@ -2096,6 +2096,99 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
 }
 
 #[tokio::test]
+async fn ceo_assistant_reads_the_orders_it_lists_but_cannot_change_them() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("assistant-orders");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+    let other_assistant_id = seed_user(&pool, &format!("{tag}-other"), "ceo_assistant").await;
+    let other_assistant = auth_header_for(other_assistant_id, "ceo_assistant");
+
+    let patient_id = create_patient(&app, &pm, &tag).await;
+    let order_id = insert_existing_order(&pool, patient_id, pm_id, &tag).await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(assistant_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The order the assistant can list opens read-only with its workspace data.
+    let (status, list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders?patient_id={patient_id}"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        list.as_array()
+            .unwrap()
+            .iter()
+            .any(|order| order["id"] == json!(order_id.to_string()))
+    );
+    for path in [
+        format!("/api/v1/orders/{order_id}"),
+        format!("/api/v1/orders/{order_id}/leistungen"),
+        format!("/api/v1/orders/{order_id}/economics"),
+        format!("/api/v1/orders/{order_id}/group"),
+        format!("/api/v1/orders/{order_id}/amendments"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    let (_, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(economics["margin_visible"], false);
+
+    // Writes stay closed for the read-only role.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &assistant,
+        Some(json!({ "status": "paused" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &assistant,
+        Some(json!({ "delta_amount": "10", "agreed_note": "Not allowed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // An assistant without access to the patient still gets nothing.
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &other_assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn new_order_endpoints_require_access_to_target_and_sources() {
     let Some((app, pool, _admin_id)) = test_context().await else {
         return;
@@ -2216,6 +2309,26 @@ async fn head_order_groups_subs_rolls_up_and_ungroups() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+
+    // A cancelled sub (e.g. stopped by a contract termination) stays listed
+    // but no longer counts toward the group total.
+    sqlx::query("UPDATE orders SET status = 'cancelled', cancelled_at = now() WHERE id = $1")
+        .bind(sub)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, with_cancelled_sub) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{head}/group"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(with_cancelled_sub["subs"].as_array().unwrap().len(), 1);
+    assert_eq!(with_cancelled_sub["subs"][0]["status"], "cancelled");
+    assert_eq!(with_cancelled_sub["rollup_total_estimated"], "1000");
 
     // Ungroup -> the head reverts to standalone and the rollup drops to 1000.
     let (status, _) = json_request(
