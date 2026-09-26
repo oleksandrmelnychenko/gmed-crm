@@ -106,6 +106,8 @@ export interface ClinicalTranslations {
   appointment_interpreter_reason_preferred_patient: string;
   appointment_interpreter_reason_worked_before: string;
   appointment_interpreter_reason_high_feedback: string;
+  appointment_interpreter_reason_good_feedback: string;
+  appointment_interpreter_reason_available: string;
   appointment_interpreter_reason_language_match: string;
   appointments_workspace_nav_overview: string;
   appointments_workspace_nav_timeline: string;
@@ -319,6 +321,8 @@ export const clinicalRu: ClinicalTranslations = {
   appointment_interpreter_reason_preferred_patient: "Предпочтителен для этого пациента",
   appointment_interpreter_reason_worked_before: "Работал ранее",
   appointment_interpreter_reason_high_feedback: "Высокая оценка",
+  appointment_interpreter_reason_good_feedback: "Хорошая оценка",
+  appointment_interpreter_reason_available: "Доступный переводчик",
   appointment_interpreter_reason_language_match: "Подходит по языку",
   appointments_workspace_nav_overview: "Обзор",
   appointments_workspace_nav_timeline: "Таймлайн",
@@ -536,6 +540,8 @@ export const clinicalDe: ClinicalTranslations = {
   appointment_interpreter_reason_preferred_patient: "Für diesen Patienten bevorzugt",
   appointment_interpreter_reason_worked_before: "Bereits zusammengearbeitet",
   appointment_interpreter_reason_high_feedback: "Hohe Bewertung",
+  appointment_interpreter_reason_good_feedback: "Gute Bewertung",
+  appointment_interpreter_reason_available: "Verfügbarer Dolmetscher",
   appointment_interpreter_reason_language_match: "Sprachlich passend",
   appointments_workspace_nav_overview: "Überblick",
   appointments_workspace_nav_timeline: "Timeline",

@@ -201,12 +201,19 @@ const INTERPRETER_LANGUAGE_STATUS_LABEL_KEYS = {
   "missing language": "appointment_interpreter_language_status_missing",
 } satisfies LabelKeyMap;
 
+/** Reasons `interpreter_suggestions.rs` sends (English, fixed texts). */
 const INTERPRETER_REASON_LABEL_KEYS = {
   "preferred for this patient": "appointment_interpreter_reason_preferred_patient",
   "worked before": "appointment_interpreter_reason_worked_before",
   "high feedback": "appointment_interpreter_reason_high_feedback",
+  "good feedback": "appointment_interpreter_reason_good_feedback",
   "language match": "appointment_interpreter_reason_language_match",
+  "language unknown": "appointment_interpreter_language_status_unknown",
+  "available interpreter": "appointment_interpreter_reason_available",
 } satisfies LabelKeyMap;
+
+/** The server appends the count: "worked before (2 appointments)". */
+const WORKED_BEFORE_REASON = /^worked before \((\d+) appointments?\)$/;
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
@@ -539,10 +546,14 @@ export function interpreterLanguageStatusLabel(value?: string | null) {
 }
 
 export function interpreterSuggestionReasonLabel(value: string) {
+  const tr = runtimeTranslations();
+  const workedBefore = WORKED_BEFORE_REASON.exec(value.trim());
+  if (workedBefore) {
+    return `${tr.appointment_interpreter_reason_worked_before} (${workedBefore[1]})`;
+  }
   const labelKey =
     INTERPRETER_REASON_LABEL_KEYS[
       value as keyof typeof INTERPRETER_REASON_LABEL_KEYS
     ];
-  const tr = runtimeTranslations();
   return labelKey ? tr[labelKey] : value;
 }
