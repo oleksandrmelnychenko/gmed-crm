@@ -23,11 +23,11 @@ describe("preliminary cost calculation work types", () => {
     expect(costEstimateWorkTypeStatus({ specializationCount: 1, availableWorkTypeCount: 0, selectedWorkTypeCount: 0, failed: true })).toBe("load_failed");
   });
 
-  it("explains a specialization without catalog work types instead of a silent dead end", () => {
+  it("says the calculation is not required while the catalog has no work types for the specializations", () => {
     const status = costEstimateWorkTypeStatus({ specializationCount: 2, availableWorkTypeCount: 0, selectedWorkTypeCount: 0 });
     expect(status).toBe("no_catalog_work_types");
-    expect(costEstimateWorkTypeHint(status, ru, step)).toContain("нет видов работ");
-    expect(costEstimateWorkTypeHint(status, de, step)).toContain("keine Leistungsarten");
+    expect(costEstimateWorkTypeHint(status, ru, step)).toContain("предварительный расчёт не требуется");
+    expect(costEstimateWorkTypeHint(status, de, step)).toContain("keine vorläufige Kostenkalkulation erforderlich");
   });
 
   it("states that agency services are not part of the calculation", () => {

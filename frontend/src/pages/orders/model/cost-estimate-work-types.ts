@@ -50,8 +50,8 @@ export function costEstimateWorkTypeHint(
       );
     case "no_catalog_work_types":
       return tx(
-        "Для выбранных специализаций в каталоге нет видов работ. Выберите другую специализацию или попросите CEO добавить виды работ в разделе «Специализации».",
-        "Für die gewählten Fachrichtungen sind im Katalog keine Leistungsarten hinterlegt. Wählen Sie eine andere Fachrichtung oder lassen Sie die Leistungsarten im Bereich „Spezialisierungen“ vom CEO ergänzen.",
+        "Для выбранных специализаций в каталоге пока нет медицинских видов работ, поэтому предварительный расчёт не требуется. Он станет обязательным, когда CEO добавит виды работ в разделе «Специализации».",
+        "Für die gewählten Fachrichtungen sind im Katalog noch keine medizinischen Leistungsarten hinterlegt, daher ist keine vorläufige Kostenkalkulation erforderlich. Sie wird Pflicht, sobald der CEO im Bereich „Spezialisierungen“ Leistungsarten ergänzt.",
       );
     case "not_selected":
       return tx(

@@ -1194,6 +1194,10 @@ struct LeadConversionReadinessInput {
     order_signed_patient: bool,
     order_signed_agency: bool,
     quote_accepted: bool,
+    /// The catalog has active medical work types for the requested
+    /// specialisations. Without any, the VKS has nothing to list and is not
+    /// required until the catalog is filled.
+    cost_estimate_catalog_available: bool,
     /// The wizard has medical work types selected for the VKS.
     cost_estimate_work_types_selected: bool,
     /// A VKS generated from medical work types exists (agency lines never count).
@@ -1257,8 +1261,8 @@ fn evaluate_lead_conversion_readiness(
             || (input.enhanced_due_diligence_document_generated
                 && input.enhanced_due_diligence_document_signed));
     // The VKS lists the selected medical work types, never the agency's services.
-    let cost_estimate_ready =
-        input.cost_estimate_work_types_selected && input.cost_estimate_document_generated;
+    let cost_estimate_ready = !input.cost_estimate_catalog_available
+        || (input.cost_estimate_work_types_selected && input.cost_estimate_document_generated);
     let commercial_ready = input.contract_signed
         && input.framework_document_generated
         && input.order_exists
@@ -1552,9 +1556,10 @@ fn evaluate_lead_conversion_readiness(
     if !input.package_covered && !input.quote_accepted {
         conversion_reasons.push("Quote is not accepted".to_string());
     }
-    if !input.package_covered && !input.cost_estimate_work_types_selected {
+    let cost_estimate_required = !input.package_covered && input.cost_estimate_catalog_available;
+    if cost_estimate_required && !input.cost_estimate_work_types_selected {
         conversion_reasons.push(COST_ESTIMATE_WORK_TYPES_MISSING.to_string());
-    } else if !input.package_covered && !input.cost_estimate_document_generated {
+    } else if cost_estimate_required && !input.cost_estimate_document_generated {
         conversion_reasons.push("Preliminary cost calculation document is missing".to_string());
     }
     if input.converted_patient_id.is_some() {
@@ -1644,6 +1649,9 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         order_signed_patient: row.try_get("order_signed_patient").unwrap_or(false),
         order_signed_agency: row.try_get("order_signed_agency").unwrap_or(false),
         quote_accepted: row.try_get("quote_accepted").unwrap_or(false) && quote_matches_order,
+        cost_estimate_catalog_available: row
+            .try_get("cost_estimate_catalog_available")
+            .unwrap_or(false),
         cost_estimate_work_types_selected: lead_cost_estimate_work_types_selected(&wizard_state),
         cost_estimate_document_generated: row
             .try_get("cost_estimate_document_generated")
@@ -1870,6 +1878,26 @@ async fn load_lead_conversion_readiness(
                         AND jsonb_typeof(d.generated_bindings -> '_cost_estimate_work_type_ids') = 'array'
                         AND d.generated_bindings -> '_cost_estimate_work_type_ids' <> '[]'::jsonb
                   ) AS cost_estimate_document_generated,
+                  -- The VKS is required only once the catalog has medical work
+                  -- types for one of the requested specialisations.
+                  EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(
+                               CASE WHEN jsonb_typeof(leads.requested_specialties) = 'array'
+                                    THEN leads.requested_specialties
+                                    ELSE '[]'::jsonb END
+                           ) requested(value)
+                      JOIN medical_specializations specialization
+                        ON specialization.is_active
+                       AND lower(COALESCE(requested.value ->> 'code', requested.value #>> '{}'))
+                           IN (lower(specialization.code), lower(specialization.name_en))
+                      JOIN medical_specialization_work_type_assignments assignment
+                        ON assignment.specialization_id = specialization.id
+                      JOIN medical_specialization_work_types work_type
+                        ON work_type.id = assignment.work_type_id
+                       AND work_type.is_active
+                       AND work_type.deleted_at IS NULL
+                  ) AS cost_estimate_catalog_available,
                   COALESCE((
                       SELECT CASE
                           WHEN NOT o.prepayment_required THEN true
@@ -7374,6 +7402,7 @@ mod lead_conversion_readiness_tests {
             order_signed_patient: true,
             order_signed_agency: true,
             quote_accepted: true,
+            cost_estimate_catalog_available: true,
             cost_estimate_work_types_selected: true,
             cost_estimate_document_generated: true,
             prepayment_ready: true,
@@ -7490,6 +7519,36 @@ mod lead_conversion_readiness_tests {
         assert_eq!(
             readiness.conversion_reasons,
             vec!["Order cost estimate document is missing".to_string()]
+        );
+    }
+
+    #[test]
+    fn preliminary_cost_calculation_is_not_required_without_catalog_work_types() {
+        // None of the requested specialisations has medical work types in the
+        // catalog yet: there is nothing for the VKS to list, so it does not block.
+        let mut input = ready_input();
+        input.cost_estimate_catalog_available = false;
+        input.cost_estimate_work_types_selected = false;
+        input.cost_estimate_document_generated = false;
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(
+            readiness.conversion_ready,
+            "{:?}",
+            readiness.conversion_reasons
+        );
+        let check = readiness.payload["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["key"] == "cost_estimate_document_generated")
+            .unwrap();
+        assert_eq!(check["passed"], true);
+
+        // Once the catalog has work types, the VKS is required again.
+        input.cost_estimate_catalog_available = true;
+        assert_eq!(
+            evaluate_lead_conversion_readiness(&input).conversion_reasons,
+            vec![COST_ESTIMATE_WORK_TYPES_MISSING.to_string()]
         );
     }
 
