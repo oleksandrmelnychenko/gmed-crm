@@ -2457,12 +2457,19 @@ fn extract_external_document_ids(line_items: &Value) -> Vec<Uuid> {
         return ids;
     };
 
+    // Order service lines carry `external_document_id`; supplier invoices billed
+    // on to the patient (patient billing constructor) carry the original as
+    // `source_document_id`. Both are the line's supporting document.
     for item in items {
-        let Some(raw) = item.get("external_document_id").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Ok(id) = Uuid::parse_str(raw) {
-            ids.push(id);
+        for key in ["external_document_id", "source_document_id"] {
+            if let Some(id) = item
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|raw| Uuid::parse_str(raw).ok())
+                && !ids.contains(&id)
+            {
+                ids.push(id);
+            }
         }
     }
 
@@ -2887,13 +2894,12 @@ async fn load_allocated_quote_quantities(
     state: &AppState,
     quote_id: Uuid,
 ) -> Result<BTreeMap<usize, Decimal>, axum::response::Response> {
+    // Includes what other quotes of the order (e.g. one this quote superseded)
+    // already invoiced for the same order service.
     let rows = sqlx::query(
-        r#"SELECT allocation.quote_line_index, COALESCE(SUM(allocation.quantity), 0) AS quantity
-           FROM invoice_order_line_allocations allocation
-           JOIN invoices invoice ON invoice.id = allocation.invoice_id
-           WHERE allocation.quote_id = $1
-             AND invoice.status <> 'cancelled'
-           GROUP BY allocation.quote_line_index"#,
+        r#"SELECT quote_line_index, quantity
+           FROM quote_line_invoiced_quantities($1)
+           WHERE quantity > 0"#,
     )
     .bind(quote_id)
     .fetch_all(&state.db)
@@ -3568,9 +3574,13 @@ async fn load_invoice_detail(
     let invoice_order_id = row
         .try_get::<Option<Uuid>, _>("order_id")
         .unwrap_or_default();
+    let invoice_status = row.try_get::<String, _>("status").unwrap_or_default();
+    // Advances are credited only against released invoices (see
+    // `apply_invoice_prepayment`), so a draft offers none.
     let available_prepayments = if row.try_get::<String, _>("invoice_type").unwrap_or_default()
         == "advance"
         || invoice_order_id.is_none()
+        || matches!(invoice_status.as_str(), "draft" | "cancelled")
     {
         Vec::new()
     } else {
@@ -6072,8 +6082,8 @@ async fn apply_invoice_prepayment(
         }
     };
 
-    let locked_invoice_ids = match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id
+    let locked_invoices = match sqlx::query_as::<_, (Uuid, String)>(
+        r#"SELECT id, status
            FROM invoices
            WHERE id = $1 OR id = $2
            ORDER BY id
@@ -6084,7 +6094,7 @@ async fn apply_invoice_prepayment(
     .fetch_all(&mut *transaction)
     .await
     {
-        Ok(ids) => ids,
+        Ok(rows) => rows,
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "lock invoices for prepayment");
             return err(
@@ -6093,10 +6103,21 @@ async fn apply_invoice_prepayment(
             );
         }
     };
-    if locked_invoice_ids.len() != 2 {
+    if locked_invoices.len() != 2 {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Prepayment requires distinct existing invoices",
+        );
+    }
+    // The database refuses allocations on drafts and cancelled invoices too;
+    // answering here keeps that from surfacing as a balance conflict.
+    if locked_invoices
+        .iter()
+        .any(|(_, status)| matches!(status.as_str(), "draft" | "cancelled"))
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Prepayments can only be applied between released invoices",
         );
     }
 
@@ -10507,8 +10528,14 @@ async fn update_invoice_status(
     }
 
     match sqlx::query(
+        // A draft is not issued yet: the invoice date is the day it is
+        // released, not the day the draft was prepared.
         r#"UPDATE invoices
            SET status = $2,
+               issued_at = CASE
+                   WHEN status = 'draft' AND $2 = 'sent' THEN now()
+                   ELSE issued_at
+               END,
                due_date = COALESCE($3, due_date),
                notes = COALESCE($4, notes)
            WHERE id = $1"#,

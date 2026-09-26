@@ -2948,14 +2948,8 @@ async fn load_quote_detail(
                   q.status, q.valid_until, order_recorded_cash_paid(q.order_id) AS paid_amount, order_recorded_cash_received_at(q.order_id) AS paid_at, q.line_items, q.notes,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
-                      FROM (
-                          SELECT allocation.quote_line_index, SUM(allocation.quantity) AS quantity
-                          FROM invoice_order_line_allocations allocation
-                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
-                          WHERE allocation.quote_id = q.id
-                            AND invoice.status <> 'cancelled'
-                          GROUP BY allocation.quote_line_index
-                      ) allocated
+                      FROM quote_line_invoiced_quantities(q.id) allocated
+                      WHERE allocated.quantity > 0
                   ), '{}'::jsonb) AS invoiced_quantities,
                   ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,
@@ -3075,14 +3069,8 @@ async fn list_quotes(
                   q.status, q.valid_until, order_recorded_cash_paid(q.order_id) AS paid_amount, order_recorded_cash_received_at(q.order_id) AS paid_at, q.line_items, q.notes,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
-                      FROM (
-                          SELECT allocation.quote_line_index, SUM(allocation.quantity) AS quantity
-                          FROM invoice_order_line_allocations allocation
-                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
-                          WHERE allocation.quote_id = q.id
-                            AND invoice.status <> 'cancelled'
-                          GROUP BY allocation.quote_line_index
-                      ) allocated
+                      FROM quote_line_invoiced_quantities(q.id) allocated
+                      WHERE allocated.quantity > 0
                   ), '{}'::jsonb) AS invoiced_quantities,
                   ARRAY(SELECT DISTINCT invoice.invoice_type FROM invoices invoice
                         WHERE invoice.quote_id = q.id AND invoice.status <> 'cancelled') AS active_invoice_types,

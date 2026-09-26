@@ -1953,6 +1953,251 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
     assert_eq!(status_of(third_quote["id"].as_str().unwrap()), "draft");
 }
 
+/// Advances are credited only against released invoices. A draft offers no
+/// advance and refuses one with a message saying why, instead of a balance
+/// conflict. Releasing the draft dates the invoice.
+#[tokio::test]
+async fn draft_invoice_offers_no_advance_and_is_dated_on_release() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("advance-draft-target");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Organisation", 100.0, "approved").await;
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+
+    let advance =
+        create_sent_invoice(&app, &billing_bearer, &quote_id, "advance", "2026-10-15").await;
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    let (status, payment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_id}/payments"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "50",
+            "payment_method": "bank_transfer",
+            "received_on": chrono::Utc::now().date_naive().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "advance payment: {payment}");
+
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "final draft: {draft}");
+    let draft_id = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(draft["status"], "draft");
+    assert_eq!(draft["available_prepayments"], json!([]));
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_id}/prepayment-allocations"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "advance_invoice_id": advance_id,
+            "amount_gross": "50",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["message"].as_str().unwrap().contains("released"),
+        "{body}"
+    );
+
+    // The draft was prepared ten days ago; the invoice is dated when released.
+    sqlx::query("UPDATE invoices SET issued_at = now() - interval '10 days' WHERE id = $1::uuid")
+        .bind(&draft_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let released = release_invoice(&app, &billing_bearer, &draft_id).await;
+    assert_eq!(
+        released["available_prepayments"][0]["invoice_id"],
+        advance_id
+    );
+    let issued_recently: bool = sqlx::query_scalar(
+        "SELECT issued_at > now() - interval '1 hour' FROM invoices WHERE id = $1::uuid",
+    )
+    .bind(&draft_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(issued_recently, "release must date the invoice");
+}
+
+/// A service partly invoiced from a quote stays on the order's next quote with
+/// its full quantity (only fully invoiced services leave the quotable lines).
+/// The replacing quote may bill only what was not invoiced yet: 10 h
+/// delivered, 4 h invoiced from the first quote, 6 h left on the second.
+#[tokio::test]
+async fn replacing_quote_does_not_bill_hours_already_invoiced_from_the_superseded_quote() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("quote-supersede-partial");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let hours_line: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Patientenbetreuung (Stunden)', 10, 95, 19, 'approved')
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let first_quote = create_quote(&app, &pm_bearer, order_id).await;
+    let first_quote_id = first_quote["id"].as_str().unwrap().to_string();
+    let (status, interim) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{first_quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 0, "quantity": "4" }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "interim: {interim}");
+    release_invoice(&app, &billing_bearer, interim["id"].as_str().unwrap()).await;
+
+    // Partly invoiced, so the service is still quotable and the new quote
+    // lists all 10 h again.
+    let second_quote = create_quote(&app, &pm_bearer, order_id).await;
+    let second_quote_id = second_quote["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        second_quote["superseded_quotes"][0]["id"], first_quote_id,
+        "{second_quote}"
+    );
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{second_quote_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let line = &detail["line_items"][0];
+    assert_eq!(line["source_order_leistung_id"], hours_line.to_string());
+    assert_money_close(line["quantity"].as_str().unwrap().parse().unwrap(), 10.0);
+    assert_money_close(
+        line["invoiced_quantity"].as_str().unwrap().parse().unwrap(),
+        4.0,
+    );
+    assert_money_close(
+        line["remaining_quantity"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+        6.0,
+    );
+
+    // Billing the 4 invoiced hours a second time is refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{second_quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({
+            "invoice_type": "interim",
+            "line_items": [{ "line_index": 0, "quantity": "10" }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // The final invoice settles the remaining 6 h: 570.00 + 108.30 VAT.
+    let final_invoice = create_sent_invoice(
+        &app,
+        &billing_bearer,
+        &second_quote_id,
+        "final",
+        "2026-10-31",
+    )
+    .await;
+    assert_money_close(
+        final_invoice["total_gross"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+        678.30,
+    );
+    let service_status: String =
+        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+            .bind(hours_line)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(service_status, "invoiced");
+
+    // The database enforces the same limit for any allocation of the service.
+    let extra_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               quote_id, order_id, patient_id, invoice_number, invoice_type, status,
+               total_net, total_vat, total_gross, line_items, created_by
+           ) VALUES ($1::uuid, $2, $3, $4, 'interim', 'draft', 95, 18.05, 113.05, '[]'::jsonb, $5)
+           RETURNING id"#,
+    )
+    .bind(&second_quote_id)
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-EXTRA"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let over_allocation = sqlx::query(
+        r#"INSERT INTO invoice_order_line_allocations (
+               invoice_id, quote_id, quote_line_index, order_leistung_id, quantity,
+               description_snapshot, unit_price_net_snapshot, vat_rate_snapshot,
+               amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot
+           ) VALUES ($1, $2::uuid, 0, $3, 1, 'Patientenbetreuung (Stunden)', 95, 19, 95, 18.05, 113.05)"#,
+    )
+    .bind(extra_invoice_id)
+    .bind(&second_quote_id)
+    .bind(hours_line)
+    .execute(&pool)
+    .await;
+    assert!(
+        over_allocation.is_err(),
+        "an allocation beyond the delivered hours must be refused"
+    );
+}
+
 #[tokio::test]
 async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_items() {
     let Some((app, pool, admin_id)) = test_context().await else {

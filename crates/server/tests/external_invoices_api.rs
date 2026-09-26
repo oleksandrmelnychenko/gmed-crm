@@ -290,6 +290,22 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
         .await
         .unwrap();
     let bearer = auth_header_for(admin_id, "ceo");
+    // The supplier's original invoice, filed on the source order.
+    let original_document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, version_root_document_id, auto_name, art, category, uploaded_by,
+               patient_id, order_id, is_medical
+           ) VALUES ($1, $1, $2, 'invoice_document', 'finance', $3, $4, $5, false)"#,
+    )
+    .bind(original_document_id)
+    .bind(format!("Rechnung LATE-{tag}.pdf"))
+    .bind(admin_id)
+    .bind(patient_id)
+    .bind(source_order)
+    .execute(&pool)
+    .await
+    .unwrap();
     let (status, created) = json_request(
         &app,
         "POST",
@@ -297,6 +313,7 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
         &bearer,
         Some(json!({
             "provider_id": provider_id,
+            "source_document_id": original_document_id,
             "external_invoice_number": format!("LATE-{tag}"),
             "amount_net": 250,
             "amount_vat": 0,
@@ -369,6 +386,15 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
         external_id.to_string()
     );
     assert_eq!(invoice["line_items"][0]["is_cost_passthrough"], true);
+    // The supplier's original backs the passthrough line on the patient invoice.
+    assert!(
+        invoice["supporting_documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|document| document["id"] == original_document_id.to_string()),
+        "{invoice}"
+    );
 
     let (status, replay) = json_request(&app, "POST", &create_path, &bearer, Some(payload)).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
