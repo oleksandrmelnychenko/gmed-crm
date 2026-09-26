@@ -448,6 +448,10 @@ struct InvoicePdfAgency {
     bank_name: Option<String>,
     bank_swift: Option<String>,
     bank_iban: Option<String>,
+    /// USt-IdNr.; an invoice must carry it or the tax number
+    /// (§ 14 Abs. 4 Nr. 2 UStG).
+    vat_id: Option<String>,
+    tax_number: Option<String>,
 }
 
 struct InvoicePdfContext {
@@ -2157,6 +2161,14 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "quote_number") => "Смета",
         ("en", "quote_number") => "Quote",
         (_, "quote_number") => "Angebot",
+        ("uk", "vat_id") => "ІПН ПДВ (USt-IdNr.)",
+        ("ru", "vat_id") => "ИНН НДС (USt-IdNr.)",
+        ("en", "vat_id") => "VAT ID",
+        (_, "vat_id") => "USt-IdNr.",
+        ("uk", "tax_number") => "Податковий номер",
+        ("ru", "tax_number") => "Налоговый номер",
+        ("en", "tax_number") => "Tax number",
+        (_, "tax_number") => "Steuernummer",
         ("uk", "status") => "Статус",
         ("ru", "status") => "Статус",
         ("en", "status") => "Status",
@@ -3801,7 +3813,9 @@ async fn load_invoice_pdf_context(
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_holder') AS agency_bank_holder,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
                   (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
            FROM invoices i
            LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
@@ -3958,6 +3972,14 @@ async fn load_invoice_pdf_context(
                 .try_get::<Option<String>, _>("agency_bank_iban")
                 .unwrap_or_default()
                 .filter(|value| !value.trim().is_empty()),
+            vat_id: row
+                .try_get::<Option<String>, _>("agency_vat_id")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
+            tax_number: row
+                .try_get::<Option<String>, _>("agency_tax_number")
+                .unwrap_or_default()
+                .filter(|value| !value.trim().is_empty()),
         },
     }))
 }
@@ -4037,6 +4059,16 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             invoice_pdf_label(&context.language, "quote_number"),
             quote_number.to_string(),
         ));
+    }
+    // The issuer's tax registration is a mandatory invoice item; the e-invoice
+    // XML already carries it from the same settings.
+    for (key, value) in [
+        ("vat_id", context.agency.vat_id.as_deref()),
+        ("tax_number", context.agency.tax_number.as_deref()),
+    ] {
+        if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+            meta_cells.push((invoice_pdf_label(&context.language, key), value.to_string()));
+        }
     }
     layout.meta_grid(&meta_cells);
 
@@ -10833,6 +10865,8 @@ mod tests {
                 bank_name: Some("Test Bank".to_string()),
                 bank_swift: Some("TESTDEFF".to_string()),
                 bank_iban: Some("DE02120300000000202051".to_string()),
+                vat_id: None,
+                tax_number: Some("143/999/00001".to_string()),
             },
         };
 
@@ -10867,6 +10901,10 @@ mod tests {
         assert!(extracted_text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
         assert!(extracted_text.contains("contact@gmed-health.com"));
         assert!(extracted_text.contains("DE02120300000000202051"));
+        // The issuer's tax number is printed (a VAT ID only when set).
+        assert!(extracted_text.contains("Налоговый номер"));
+        assert!(extracted_text.contains("143/999/00001"));
+        assert!(!extracted_text.contains("USt-IdNr."));
         assert!(extracted_text.contains("145"));
         assert!(extracted_text.contains("145,00 €"));
         assert_eq!(invoice_pdf_filename(&context), "RECHNUNG-INV-UNIT-1.pdf");
