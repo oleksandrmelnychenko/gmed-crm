@@ -5522,7 +5522,9 @@ function useOrdersPageContent() {
                             disabled={!permissions.canManagePhase}
                             className="mt-4 space-y-3"
                           >
+                            <Field label={l("orders_ankunft")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_ankunft")}
                               value={executionForm.arrivalStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -5536,7 +5538,10 @@ function useOrdersPageContent() {
                               <option value="arrived">{arrivalStatusLabel("arrived")}</option>
                               <option value="not_required">{arrivalStatusLabel("not_required")}</option>
                             </NativeComboboxSelect>
+                            </Field>
+                            <Field label={l("orders_medizinische_durchfuhrung")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_medizinische_durchfuhrung")}
                               value={executionForm.medicalExecutionStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -5557,7 +5562,10 @@ function useOrdersPageContent() {
                                 {executionStatusLabel("not_required")}
                               </option>
                             </NativeComboboxSelect>
+                            </Field>
+                            <Field label={l("orders_nicht_medizinische_durchfuhrung")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_nicht_medizinische_durchfuhrung")}
                               value={executionForm.nonMedicalExecutionStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -5583,7 +5591,10 @@ function useOrdersPageContent() {
                                 {executionStatusLabel("completed")}
                               </option>
                             </NativeComboboxSelect>
+                            </Field>
+                            <Field label={l("orders_dolmetscher_support")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_dolmetscher_support")}
                               value={executionForm.interpreterServiceStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -5609,7 +5620,10 @@ function useOrdersPageContent() {
                                 {executionStatusLabel("completed")}
                               </option>
                             </NativeComboboxSelect>
+                            </Field>
+                            <Field label={l("orders_abweichungen")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_abweichungen")}
                               value={executionForm.issueStatus}
                               onChange={(event) =>
                                 setExecutionForm((current) => ({
@@ -5626,6 +5640,7 @@ function useOrdersPageContent() {
                               <option value="resolved">{issueStatusLabel("resolved")}</option>
                               <option value="not_required">{issueStatusLabel("not_required")}</option>
                             </NativeComboboxSelect>
+                            </Field>
                             <textarea
                               value={executionForm.deviationNote}
                               onChange={(event) =>
@@ -5882,7 +5897,9 @@ function useOrdersPageContent() {
                             disabled={!permissions.canManagePhase}
                             className="mt-4 space-y-3"
                           >
+                            <Field label={l("orders_arztgesteuert")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_arztgesteuert")}
                               value={followupForm.doctorFollowupStatus}
                               onChange={(event) =>
                                 setFollowupForm((current) => ({
@@ -5905,6 +5922,7 @@ function useOrdersPageContent() {
                                 {followupStatusLabel("completed")}
                               </option>
                             </NativeComboboxSelect>
+                            </Field>
                             <div className="grid gap-3 md:grid-cols-3">
                               <NativeComboboxSelect
                                 value={followupForm.followup1wStatus}
@@ -5998,7 +6016,9 @@ function useOrdersPageContent() {
                                 </NativeComboboxSelect>
                               </Field>
                             </div>
+                            <Field label={l("orders_ergebnisubergabe")}>
                             <NativeComboboxSelect
+                              aria-label={l("orders_ergebnisubergabe")}
                               value={followupForm.resultsHandoffStatus}
                               onChange={(event) =>
                                 setFollowupForm((current) => ({
@@ -6018,6 +6038,7 @@ function useOrdersPageContent() {
                                 {resultsHandoffStatusLabel("not_required")}
                               </option>
                             </NativeComboboxSelect>
+                            </Field>
                             <textarea
                               value={followupForm.followupSummary}
                               onChange={(event) =>
