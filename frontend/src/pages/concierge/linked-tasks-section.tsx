@@ -21,6 +21,7 @@ import { ConciergeTaskDetailDialog } from "./task-detail-dialog";
 import {
   assignableConciergeTaskUsers,
   conciergeTaskCode,
+  conciergeTaskErrorMessage,
   filterConciergeTaskAssignees,
   isConciergeTaskActive,
   type ConciergeAssignee,
@@ -47,6 +48,7 @@ const copy = {
     noDate: "Ohne Termin",
     empty: "Mit diesem Profil sind noch keine Aufgaben verknüpft.",
     loadFailed: "Die verknüpften Aufgaben konnten nicht geladen werden.",
+    createFailed: "Die Aufgabe konnte nicht erstellt werden.",
     retry: "Erneut laden",
     openTask: "Aufgabe öffnen",
     open_status: "Offen",
@@ -69,6 +71,7 @@ const copy = {
     noDate: "Без срока",
     empty: "К этому профилю пока не привязано ни одной задачи.",
     loadFailed: "Не удалось загрузить связанные задачи.",
+    createFailed: "Не удалось создать задачу.",
     retry: "Повторить",
     openTask: "Открыть задачу",
     open_status: "Открыта",
@@ -81,6 +84,11 @@ const copy = {
     event_kind: "Событие",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
+
+/** Create failures from a profile card use the work-center wording, not the load error. */
+export function linkedTaskCreateErrorMessage(error: unknown, lang: Lang) {
+  return conciergeTaskErrorMessage(error, lang, copy[lang].createFailed);
+}
 
 export function linkedTaskOpenCount(tasks: ConciergeTask[]) {
   return tasks.filter(isConciergeTaskActive).length;
@@ -240,7 +248,7 @@ export function LinkedTasksSection({
       refresh();
       return saved;
     } catch (saveError) {
-      setCreateError(saveError instanceof Error ? saveError.message : labels.loadFailed);
+      setCreateError(linkedTaskCreateErrorMessage(saveError, lang));
       throw saveError;
     } finally {
       setSubmitting(false);

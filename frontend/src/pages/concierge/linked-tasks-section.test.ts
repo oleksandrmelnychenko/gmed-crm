@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { ConciergeTask } from "./model";
-import { linkedTaskOpenCount, linkedTasksRequestPath } from "./linked-tasks-section";
+import {
+  linkedTaskCreateErrorMessage,
+  linkedTaskOpenCount,
+  linkedTasksRequestPath,
+} from "./linked-tasks-section";
 
 function task(status: string): ConciergeTask {
   return { status } as ConciergeTask;
@@ -16,6 +20,13 @@ describe("linked profile tasks", () => {
       task("completed"),
       task("cancelled"),
     ])).toBe(3);
+  });
+
+  it("reports create failures as create failures in the staff language", () => {
+    expect(linkedTaskCreateErrorMessage(new Error(""), "ru")).toBe("Не удалось создать задачу.");
+    expect(linkedTaskCreateErrorMessage(null, "de")).toBe("Die Aufgabe konnte nicht erstellt werden.");
+    expect(linkedTaskCreateErrorMessage(new Error("due_at must be after starts_at"), "ru"))
+      .toBe("Окончание должно быть позже начала.");
   });
 
   it("builds a patient or provider filtered request", () => {
