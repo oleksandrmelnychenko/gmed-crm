@@ -1145,7 +1145,7 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
           currency: "EUR",
           vat_rate: "19.00",
           is_active: true,
-          valid_from: null,
+          valid_from: "2026-01-01", // a catalog price is only offered from its validity start
           valid_to: null,
           created_at: "2026-04-01T09:00:00Z",
           updated_at: "2026-04-01T09:00:00Z",
@@ -1696,7 +1696,7 @@ test.describe("staff smoke flows", () => {
 
     await page.goto("/patients");
     await expect(page).toHaveURL(/\/patients$/);
-    await expect(page.getByText("Anna Muster")).toBeVisible();
+    await expect(page.getByRole("table").getByText("Anna Muster")).toBeVisible();
 
     await page.goto("/appointments");
     await expect(page).toHaveURL(/\/appointments$/);
@@ -1704,20 +1704,20 @@ test.describe("staff smoke flows", () => {
 
     await page.goto("/documents");
     await expect(page).toHaveURL(/\/documents$/);
-    await expect(page.getByText("MRI report")).toBeVisible();
+    await expect(page.getByRole("table").getByText("MRI report")).toBeVisible();
 
     await page.goto("/invoices");
     await expect(page).toHaveURL(/\/invoices$/);
-    await expect(page.getByText("INV-001")).toBeVisible();
+    await expect(page.getByRole("table").getByText("INV-001")).toBeVisible();
   });
 
   test("staff can release and revoke a document from patient portal scope", async ({
     page,
   }) => {
     await page.goto("/documents");
-    await expect(page.getByText("MRI report")).toBeVisible();
+    await expect(page.getByRole("table").getByText("MRI report")).toBeVisible();
 
-    await page.getByText("MRI report").click();
+    await page.getByRole("table").getByText("MRI report").click();
     await expect(
       page.getByRole("button", {
         name: /Ins Patientenportal freigeben/i,
@@ -1749,7 +1749,7 @@ test.describe("staff smoke flows", () => {
 
   test("staff can generate a document from template", async ({ page }) => {
     await page.goto("/documents");
-    await expect(page.getByText("MRI report")).toBeVisible();
+    await expect(page.getByRole("table").getByText("MRI report")).toBeVisible();
 
     await page
       .getByRole("button", { name: /Aus Vorlage generieren/i })
@@ -1765,7 +1765,7 @@ test.describe("staff smoke flows", () => {
     );
     await chooseComboboxOption(
       page,
-      dialog.getByRole("combobox", { name: /Patient/i }),
+      dialog.getByRole("combobox", { name: /^Patient\s*\*?$/ }),
       /Anna Muster/i,
     );
     await dialog.getByLabel("Dateiname").first().fill("Behandlungsplan April");
@@ -1787,6 +1787,14 @@ test.describe("staff smoke flows", () => {
   test("staff sends typed bindings when generating a single order", async ({
     page,
   }) => {
+    // A single order is always generated for one of the patient's orders (3cffe0f2).
+    const orderId = "00000000-0000-0000-0000-000000000711";
+    await page.route("**/api/v1/orders?patient_id=00000000-0000-0000-0000-000000000301", (route) =>
+      json(route, [{
+        id: orderId, order_number: "A-BIND-ORDER", patient_id: "00000000-0000-0000-0000-000000000301",
+        patient_name: "Anna Muster", patient_pid: "PT-001", phase: "intake", status: "active",
+      }]),
+    );
     await page.goto("/documents");
 
     await page
@@ -1803,8 +1811,14 @@ test.describe("staff smoke flows", () => {
     );
     await chooseComboboxOption(
       page,
-      dialog.getByRole("combobox", { name: /Patient/i }),
+      // The single-order template also has a "Patient Land" combobox.
+      dialog.getByRole("combobox", { name: /^Patient\s*\*?$/ }),
       /Anna Muster/i,
+    );
+    await chooseComboboxOption(
+      page,
+      dialog.getByRole("combobox", { name: /^Aufträge?\s*\*?$/ }),
+      /A-BIND-ORDER/,
     );
 
     await dialog.getByLabel("Dateiname").first().fill("Einzelauftrag Mai");
@@ -1831,6 +1845,7 @@ test.describe("staff smoke flows", () => {
       template_id: "single_order",
       auto_name: "Einzelauftrag Mai",
       patient_id: "00000000-0000-0000-0000-000000000301",
+      order_id: orderId,
       bindings: {
         order_sequence: 5,
         party_email: "anna.binding@example.test",
@@ -1861,9 +1876,11 @@ test.describe("staff smoke flows", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("Reisepass-Nr.")).toHaveValue("MA1234567");
-    await expect(dialog.getByLabel("Reisepass gültig bis")).toHaveValue(
-      "2050-01-01",
-    );
+    // Date bindings use the segmented date picker, whose day/month/year fields sit next to the label.
+    const passportValidUntil = dialog.getByText("Reisepass gültig bis", { exact: true }).locator("..");
+    await expect(passportValidUntil.getByRole("spinbutton", { name: "Day", exact: true })).toHaveText("01");
+    await expect(passportValidUntil.getByRole("spinbutton", { name: "Month", exact: true })).toHaveText("01");
+    await expect(passportValidUntil.getByRole("spinbutton", { name: "Year", exact: true })).toHaveText("2050");
 
     await dialog.locator("form").evaluate((formElement) => {
       (formElement as HTMLFormElement).requestSubmit();
@@ -1883,9 +1900,9 @@ test.describe("staff smoke flows", () => {
     page,
   }) => {
     await page.goto("/documents");
-    await expect(page.getByText("MRI report")).toBeVisible();
+    await expect(page.getByRole("table").getByText("MRI report")).toBeVisible();
 
-    await page.getByText("MRI report").click();
+    await page.getByRole("table").getByText("MRI report").click();
     const sheet = page.getByRole("main");
     await expect(
       sheet.getByRole("heading", { name: "MRI report" }),
@@ -1928,9 +1945,9 @@ test.describe("staff smoke flows", () => {
     page,
   }) => {
     await page.goto("/documents");
-    await expect(page.getByText("MRI report")).toBeVisible();
+    await expect(page.getByRole("table").getByText("MRI report")).toBeVisible();
 
-    await page.getByText("MRI report").click();
+    await page.getByRole("table").getByText("MRI report").click();
     const sheet = page.getByRole("main");
     await expect(
       sheet.getByRole("heading", { name: "MRI report" }),
@@ -1958,9 +1975,9 @@ test.describe("staff smoke flows", () => {
     page,
   }) => {
     await page.goto("/documents");
-    await expect(page.getByText("MRI report")).toBeVisible();
+    await expect(page.getByRole("table").getByText("MRI report")).toBeVisible();
 
-    await page.getByText("MRI report").click();
+    await page.getByRole("table").getByText("MRI report").click();
     const sheet = page.getByRole("main");
     await expect(
       sheet.getByRole("heading", { name: "MRI report" }),
@@ -2129,7 +2146,10 @@ test.describe("staff smoke flows", () => {
   });
 });
 
-test.describe("patient inline order creation", () => {
+// Orders are no longer created inline from the patient page: since 8758abc2 the repeat intake
+// ("Erneute Anfrage") is the single patient entry to the order wizard. That flow is covered by
+// repeat-intake.spec.ts and "repeat examination is the single patient entry to the order wizard".
+test.describe("patient orders", () => {
   const patientId = "00000000-0000-0000-0000-000000000301";
   test.beforeEach(async ({page}) => {
     await page.addInitScript(() => localStorage.setItem("gmed_lang", "de"));
@@ -2163,82 +2183,6 @@ test.describe("patient inline order creation", () => {
     }
     await expect(page.getByRole("row").filter({hasText:"A-PATIENT-FIRST-001"})).toBeVisible();
     expect(requests.every(query => new URLSearchParams(query).get("patient_id") === patientId)).toBe(true);
-  });
-
-  for (const tab of ["profile", "orders"]) {
-    test(`creates an order from ${tab} without leaving the patient and refreshes the table`, async ({page}) => {
-      if (tab === "orders") await page.setViewportSize({width:390, height:844});
-      const orders: Record<string, unknown>[] = [];
-      const writes: unknown[] = [];
-      let release!: () => void;
-      const pending = new Promise<void>(resolve => { release = resolve; });
-      await page.route(`**/api/v1/patients/${patientId}/orders`, route => json(route, orders));
-      await page.route(`**/api/v1/patients/${patientId}/recheck`, route => json(route, {requires_recheck:false, can_create_order:true}));
-      await page.route("**/api/v1/orders", async route => {
-        if (route.request().method() !== "POST") return json(route, orders);
-        writes.push(route.request().postDataJSON());
-        await pending;
-        orders.push({id:"new-inline-order", order_number:"A-INLINE-001", phase:"discovery", status:"active", created_at:"2026-09-07T09:00:00Z"});
-        return json(route, {id:"new-inline-order"});
-      });
-      const patientUrl = `/patients/${patientId}${tab === "orders" ? "?tab=orders" : ""}`;
-      await page.goto(patientUrl);
-      const open = page.getByRole("button", {name:/Auftrag anlegen/});
-      await open.click();
-      const sheet = page.getByRole("dialog");
-      await expect(sheet.getByText("Anna Muster")).toBeVisible();
-      await expect(page).toHaveURL(new RegExp(`${patientUrl.replace("?", "\\?")}$`));
-      await sheet.getByRole("button", {name:"Abbrechen", exact:true}).click();
-      await expect(sheet).toHaveCount(0);
-      await open.click();
-      await sheet.locator("textarea").fill("Neue Untersuchung");
-      expect(await sheet.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-      await page.screenshot({path:`../artifacts/design-qa/patient-inline-order-${tab}.png`, animations:"disabled"});
-      const submit = sheet.getByRole("button", {name:/Auftrag anlegen/});
-      await submit.click();
-      const disabled = await submit.isDisabled();
-      release();
-      expect(disabled).toBe(true);
-      await expect(sheet).toHaveCount(0);
-      await expect(page).toHaveURL(new RegExp(`${patientUrl.replace("?", "\\?")}$`));
-      expect(writes).toEqual([{patient_id:patientId, contract_id:null, needs_description:"Neue Untersuchung"}]);
-      if (tab === "profile") await page.locator('a[href*="tab=orders"]').first().click();
-      await expect(page.getByText("A-INLINE-001", {exact:true}).filter({visible:true})).toBeVisible();
-    });
-  }
-
-  test("recheck blocks submission, retries and keeps a failed create error visible", async ({page}) => {
-    let allowed = false;
-    let attempts = 0;
-    await page.route(`**/api/v1/patients/${patientId}/recheck`, route => json(route, {
-      requires_recheck:true, can_create_order:allowed,
-      blocking_reasons:allowed ? [] : ["Primary contact is missing"],
-    }));
-    await page.route("**/api/v1/orders", route => {
-      attempts++;
-      return route.fulfill({status:409, json:{error:"Auftrag konnte nicht erstellt werden"}});
-    });
-    await page.goto(`/patients/${patientId}`);
-    await page.getByRole("button", {name:/Auftrag anlegen/}).click();
-    const sheet = page.getByRole("dialog");
-    const submit = sheet.getByRole("button", {name:/Auftrag anlegen/});
-    await expect(sheet.getByText("Blockiert", {exact:true})).toBeVisible();
-    await expect(submit).toBeDisabled();
-    expect(attempts).toBe(0);
-    allowed = true;
-    await sheet.getByRole("button", {name:"Erneut prüfen"}).click();
-    await expect(submit).toBeEnabled();
-    await sheet.locator("textarea").fill("Entwurf behalten");
-    await sheet.getByRole("button", {name:"Abbrechen", exact:true}).click();
-    await expect(page.getByRole("alertdialog")).toBeVisible();
-    await page.keyboard.press("Escape");
-    await expect(page.getByRole("alertdialog")).toHaveCount(0);
-    await submit.click();
-    await expect(sheet.getByRole("alert")).toContainText("Auftrag konnte nicht erstellt werden");
-    await expect(sheet.locator("textarea")).toHaveValue("Entwurf behalten");
-    await expect(page).toHaveURL(new RegExp(`/patients/${patientId}$`));
-    await expect(submit).toBeEnabled();
-    expect(attempts).toBe(1);
   });
 
   test("patient orders tab sorts the complete list before pagination", async ({page}) => {
@@ -2373,8 +2317,13 @@ test.describe("lead wizard UX", () => {
       await expect.poll(() => deadline).toBe(expected);
       await expect(input).toHaveValue("12.09.2026 15:30");
       await expect(wizard.getByText("Rechnung ausstehend", { exact: true })).toBeVisible();
-      // The field label also wraps the hint that the amount comes from the advance invoice payments.
-      await expect(wizard.getByRole("textbox", { name: /^Erhaltene Vorauszahlung\b/ })).toHaveAttribute("readonly", "");
+      // The field is named by its label alone; the hint that the amount comes from the
+      // advance invoice payments is its description.
+      const receivedPrepayment = wizard.getByRole("textbox", { name: "Erhaltene Vorauszahlung", exact: true });
+      await expect(receivedPrepayment).toHaveAttribute("readonly", "");
+      await expect(receivedPrepayment).toHaveAccessibleDescription(
+        "Der Betrag wird aus den Zahlungen der Vorauszahlungsrechnung übernommen.",
+      );
       expect(writes.every((payload) => !("paid_amount" in payload))).toBe(true);
       await field.scrollIntoViewIfNeeded();
       await page.screenshot({ path: test.info().outputPath(`prepayment-deadline-${width}.png`) });
@@ -4018,8 +3967,8 @@ test.describe("responsive staff workspace", () => {
   test("keeps onboarding steps labeled, localized, and reachable on mobile", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");
-    const readyRow = page.getByRole("row").filter({ hasText: "Ready Lead" });
-    const readyLeadCell = readyRow.getByText("Ready Lead", { exact: true });
+    // At phone width the leads list renders as cards rather than table rows.
+    const readyLeadCell = page.getByText("Ready Lead", { exact: true }).filter({ visible: true });
     await readyLeadCell.click();
 
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
@@ -4056,8 +4005,12 @@ test.describe("responsive staff workspace", () => {
     await firstNameInput.blur();
     await expect(wizard.getByText("Pflichtfeld", { exact: true }).first()).toBeVisible();
     await expect(wizard.getByText("Pflichtfelder ausfüllen", { exact: true })).toHaveCount(0);
+    // Step tabs navigate freely (8af89b04); the empty name keeps the personal data step open.
+    const masterStep = navigation.getByRole("tab", { name: /Personendaten/i });
+    await expect(masterStep).toHaveAccessibleName(/noch offen/);
     await navigation.getByRole("tab", { name: /Medizinische Merkmale/i }).click();
-    await expect(firstNameInput).toBeFocused();
+    await expect(navigation.getByRole("tab", { name: /Medizinische Merkmale/i })).toHaveAttribute("aria-current", "step");
+    await masterStep.click();
 
     const autosaveRequest = page.waitForRequest((request) => {
       if (
@@ -4139,6 +4092,15 @@ test.describe("responsive staff workspace", () => {
         service_comments: { driver: "Abholung am BER, Terminal 1" },
       },
     });
+    // The program period is entered with the service history.
+    await setDatePickerValue(
+      wizard.locator("#lead-wizard-program-date-from"),
+      "2026-09-01",
+    );
+    await setDatePickerValue(
+      wizard.locator("#lead-wizard-program-date-to"),
+      "2026-09-15",
+    );
 
     await navigation.getByRole("tab", { name: /Personendaten/i }).click();
     const discoverySourceRequest = page.waitForRequest((candidate) => {
@@ -4170,20 +4132,10 @@ test.describe("responsive staff workspace", () => {
       "Orthopädie",
     );
     await expect(wizard.getByText("Orthopädie", { exact: true })).toBeVisible();
-    await setDatePickerValue(
-      wizard.locator("#lead-wizard-program-date-from"),
-      "2026-09-01",
-    );
-    await setDatePickerValue(
-      wizard.locator("#lead-wizard-program-date-to"),
-      "2026-09-15",
-    );
 
     const commercialStep = navigation.getByRole("tab", { name: /Vertrag & Angebot/i });
     await commercialStep.click();
-    await expect(
-      wizard.getByRole("heading", { name: "Vertrag, Auftrag und Kostenvoranschlag" }),
-    ).toBeVisible();
+    await expect(wizard.getByRole("heading", { name: /^Rahmenvertrag/ })).toBeVisible();
     await expect.poll(async () => {
       const [navigationBox, stepBox] = await Promise.all([
         navigation.boundingBox(),
@@ -4213,10 +4165,12 @@ test.describe("responsive staff workspace", () => {
       return payload.wizard_state?.commercial_draft?.lines?.[0]?.description ===
         "Transport coordination";
     });
-    await wizard
-      .getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" })
-      .click();
-    await page.getByText("Transport coordination · 12.500,00 EUR", { exact: true }).click();
+    // Catalog options are grouped by service and list each price version ("12.500,00 EUR · … / unit").
+    await chooseComboboxOption(
+      page,
+      wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
+      /^12\.500,00 EUR/,
+    );
     const commercialRequest = await commercialAutosaveRequest;
     expect(commercialRequest.postDataJSON()).toMatchObject({
       wizard_state: {
@@ -4308,18 +4262,37 @@ test.describe("responsive staff workspace", () => {
         prepayment_required: prepaymentRequired,
       }] : []),
     );
+    // The wizard re-reads the order after saving and requires the saved service lines back.
+    const orderLeistungen: Record<string, unknown>[] = [];
     await page.route(`**/api/v1/orders/${orderId}`, (route) =>
       json(route, {
         id: orderId,
         signed_patient: signedPatient,
         signed_agency: signedAgency,
         prepayment_required: prepaymentRequired,
-        leistungen: [],
+        leistungen: orderLeistungen,
       }),
     );
-    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) =>
-      json(route, { id: "00000000-0000-0000-0000-000000000964" }, 201),
-    );
+    await page.route(`**/api/v1/orders/${orderId}/leistungen`, (route) => {
+      // Like the server, a repeated save with the same client reference updates the line.
+      const payload = route.request().postDataJSON() as Record<string, unknown>;
+      const existing = orderLeistungen.findIndex((line) => line.client_reference === payload.client_reference);
+      const id = existing >= 0
+        ? String(orderLeistungen[existing].id)
+        : `00000000-0000-0000-0000-00000000096${4 + orderLeistungen.length}`;
+      const saved = {
+        ...payload,
+        id,
+        unit_price_snapshot: String(payload.unit_price ?? "0"),
+        vat_rate_snapshot: String(payload.vat_rate ?? "0"),
+        currency: "EUR",
+        currency_snapshot: "EUR",
+        status: "planned",
+      };
+      if (existing >= 0) orderLeistungen[existing] = saved;
+      else orderLeistungen.push(saved);
+      return json(route, { id }, 201);
+    });
     await page.route(`**/api/v1/orders/${orderId}/commercial-basis`, async (route) => {
       const payload = route.request().postDataJSON() as {
         signed_patient?: boolean;
@@ -4337,31 +4310,37 @@ test.describe("responsive staff workspace", () => {
       if (payload.signed_agency === true) await agencyConfirmationGate;
       return json(route, { ok: true, order_id: orderId });
     });
+    // The quote mirrors the saved service line, so the wizard treats it as current.
+    const createdQuote = {
+      id: quoteId,
+      order_id: orderId,
+      contract_id: contractId,
+      patient_id: null,
+      lead_id: leadId,
+      quote_number: "KV-20260711-0099",
+      status: "draft",
+      total_net: "12500.00",
+      total_vat: "2375.00",
+      total_gross: "14875.00",
+      valid_until: null,
+      line_items: [{
+        description: "Transport coordination", quantity: "1", unit_price: "12500.00",
+        vat_rate: "19.00", is_cost_passthrough: false,
+        line_net: "12500.00", line_vat: "2375.00", line_gross: "14875.00",
+      }],
+      notes: null,
+      version_count: 1,
+      current_version_number: 1,
+      created_at: "2026-07-11T09:35:31Z",
+      updated_at: "2026-07-11T09:35:31Z",
+    };
     await page.route(`**/api/v1/orders/${orderId}/quotes`, (route) => {
       quoteCreated = true;
-      return json(route, {
-        id: quoteId,
-        order_id: orderId,
-        contract_id: contractId,
-        patient_id: null,
-        lead_id: leadId,
-        quote_number: "KV-20260711-0099",
-        status: "draft",
-        total_net: "12500.00",
-        total_vat: "2375.00",
-        total_gross: "14875.00",
-        valid_until: null,
-        line_items: [],
-        notes: null,
-        version_count: 1,
-        current_version_number: 1,
-        created_at: "2026-07-11T09:35:31Z",
-        updated_at: "2026-07-11T09:35:31Z",
-      }, 201);
+      return json(route, createdQuote, 201);
     });
     await page.route("**/api/v1/quotes?*", async (route) => {
       if (quoteCreated) await quoteReloadGate;
-      return json(route, []);
+      return json(route, quoteCreated ? [createdQuote] : []);
     });
 
     const patientSignatureToggle = wizard.getByRole("checkbox", {
@@ -4389,29 +4368,39 @@ test.describe("responsive staff workspace", () => {
     releaseCommercialBasis();
     await expect(patientSignatureToggle).toBeEnabled();
     await expect(patientSignatureToggle).toBeChecked();
-    expect(commercialBasisRequests).toBe(1);
+    // After the service lines are saved, the order total is recalculated from what the server kept.
+    await expect.poll(() => commercialBasisRequests).toBe(2);
+    expect(commercialBasisPayloads[1]).toEqual({ total_estimated: "14875.00" });
 
     const agencyConfirmationToggle = wizard.getByRole("checkbox", {
       name: "Auftrag von der Agentur bestätigt",
     });
     await agencyConfirmationToggle.check();
+    // The confirmation shows at once; since 3cffe0f2 the wizard stays busy until it is saved.
     await expect(agencyConfirmationToggle).toBeChecked();
+    await expect.poll(() => commercialBasisRequests).toBe(3);
+    expect(commercialBasisPayloads[2]).toEqual({ signed_agency: true });
+    await expect(agencyConfirmationToggle).toBeDisabled();
+    await expect(wizard.locator("footer").getByText("Wird gespeichert…", { exact: true })).toBeVisible();
+    releaseAgencyConfirmation();
     await expect(agencyConfirmationToggle).toBeEnabled();
+    await expect(agencyConfirmationToggle).toBeChecked();
     await expect(
       wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }),
     ).toBeEnabled();
-    await expect.poll(() => commercialBasisRequests).toBe(2);
-    expect(commercialBasisPayloads[1]).toEqual({ signed_agency: true });
-    releaseAgencyConfirmation();
 
     await wizard.getByRole("button", { name: "Kostenvoranschlag erstellen" }).click();
+    // The new quote shows at once; the wizard stays busy until the lead is reloaded.
     await expect(
-      wizard.getByText("Kostenvoranschlag erstellt, Annahme ausstehend", { exact: true }),
+      wizard.getByText("Kostenvoranschlag wartet auf Annahme", { exact: true }),
     ).toBeVisible();
-    await expect(
-      wizard.getByRole("button", { name: "Neuen Kostenvoranschlag erstellen" }),
-    ).toBeEnabled();
+    const recalculate = wizard.getByRole("button", { name: "Neu berechnen" });
+    await expect(recalculate).toBeDisabled();
     releaseQuoteReload();
+    await expect(recalculate).toBeEnabled();
+    await expect(
+      wizard.getByText("Kostenvoranschlag wartet auf Annahme", { exact: true }),
+    ).toBeVisible();
   });
 });
 
