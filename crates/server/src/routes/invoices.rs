@@ -466,6 +466,8 @@ struct InvoicePdfContext {
     total_vat: String,
     total_gross: String,
     credited_amount: String,
+    /// Advance payments credited against this invoice.
+    prepayment_applied_amount: String,
     paid_amount: String,
     balance_due: String,
     notes: Option<String>,
@@ -700,6 +702,22 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
 
 fn decimal_to_string(value: Decimal) -> String {
     money::money_string(value)
+}
+
+/// Amount still owed on an invoice. A cancelled invoice owes nothing, whatever
+/// its stored totals: the portal and the staff lists showed its full total as
+/// open.
+fn invoice_balance_due(
+    status: &str,
+    total_gross: Decimal,
+    credited_amount: Decimal,
+    paid_amount: Decimal,
+    prepayment_applied_amount: Decimal,
+) -> Decimal {
+    if status == "cancelled" {
+        return Decimal::ZERO;
+    }
+    (total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)
 }
 
 fn round_accounting_money(value: Decimal) -> Decimal {
@@ -2171,6 +2189,11 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "credited_amount") => "Кредит-ноты",
         ("en", "credited_amount") => "Credit notes",
         (_, "credited_amount") => "Gutschriften",
+        // Short: the summary label column truncates longer text.
+        ("uk", "prepayment_applied") => "Передоплата",
+        ("ru", "prepayment_applied") => "Предоплата",
+        ("en", "prepayment_applied") => "Advance payments",
+        (_, "prepayment_applied") => "Anzahlungen",
         ("uk", "balance_due") => "До сплати",
         ("ru", "balance_due") => "Остаток",
         ("en", "balance_due") => "Balance due",
@@ -2360,6 +2383,29 @@ fn format_invoice_pdf_deduction(raw: &str, currency: &str) -> String {
     format_invoice_pdf_money(&(-amount).to_string(), currency)
 }
 
+/// A quantity or rate as printed: stored values use a decimal point ("2.5",
+/// "7.00"); German, Russian and Ukrainian invoices write a decimal comma and
+/// no trailing zeros ("2,5", "7").
+fn format_invoice_pdf_number(language: &str, raw: &str) -> String {
+    let Ok(value) = Decimal::from_str_exact(raw.trim()) else {
+        return raw.trim().to_string();
+    };
+    let plain = value.normalize().to_string();
+    if language == "en" {
+        plain
+    } else {
+        plain.replace('.', ",")
+    }
+}
+
+/// Whether a stored amount prints as zero ("0,00") on the invoice.
+fn invoice_pdf_amount_is_zero(raw: &str) -> bool {
+    Decimal::from_str_exact(raw.trim())
+        .unwrap_or(Decimal::ZERO)
+        .round_cents()
+        .is_zero()
+}
+
 fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     let parsed = Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
     let cents = (parsed.abs().round_cents() * Decimal::from(100))
@@ -2386,10 +2432,17 @@ fn format_invoice_pdf_money(raw: &str, currency: &str) -> String {
     format!("{sign}{grouped},{:02} {unit}", cents % 100)
 }
 
+/// Calendar date of an invoice instant as printed on the document. The agency
+/// invoices from Germany, so an invoice released at 00:30 local time (22:30 UTC
+/// the evening before) carries the local day.
+fn invoice_document_date(value: DateTime<Utc>) -> NaiveDate {
+    value.with_timezone(&chrono_tz::Europe::Berlin).date_naive()
+}
+
 fn format_invoice_pdf_date(value: Option<NaiveDate>) -> String {
     value
         .map(|date| date.format("%d.%m.%Y").to_string())
-        .unwrap_or_else(|| "n/a".to_string())
+        .unwrap_or_else(|| "—".to_string())
 }
 
 fn invoice_pdf_brand(agency: &InvoicePdfAgency) -> PatientPdfBrand {
@@ -3690,7 +3743,7 @@ async fn load_invoice_detail(
         "adjusted_total_gross": decimal_to_string((total_gross - credited_amount).max(Decimal::ZERO)),
         "paid_amount": decimal_to_string(paid_amount),
         "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
-        "balance_due": decimal_to_string((total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
+        "balance_due": decimal_to_string(invoice_balance_due(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount, paid_amount, prepayment_applied_amount)),
         "credit_balance": decimal_to_string((paid_amount + prepayment_applied_amount - (total_gross - credited_amount)).max(Decimal::ZERO)),
         "refundable_cash_amount": decimal_to_string((
             paid_amount
@@ -3824,11 +3877,15 @@ async fn load_invoice_pdf_context(
         ),
         total_gross: decimal_to_string(total_gross),
         credited_amount: decimal_to_string(credited_amount),
+        prepayment_applied_amount: decimal_to_string(prepayment_applied_amount),
         paid_amount: decimal_to_string(paid_amount),
-        balance_due: decimal_to_string(
-            (total_gross - credited_amount - paid_amount - prepayment_applied_amount)
-                .max(Decimal::ZERO),
-        ),
+        balance_due: decimal_to_string(invoice_balance_due(
+            &row.try_get::<String, _>("status").unwrap_or_default(),
+            total_gross,
+            credited_amount,
+            paid_amount,
+            prepayment_applied_amount,
+        )),
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -3946,7 +4003,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     let mut meta_cells = vec![
         (
             invoice_pdf_label(&context.language, "issued_on"),
-            format_invoice_pdf_date(Some(context.issued_at.date_naive())),
+            format_invoice_pdf_date(Some(invoice_document_date(context.issued_at))),
         ),
         (
             invoice_pdf_label(&context.language, "patient_name"),
@@ -4043,14 +4100,18 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 description.push_str(invoice_pdf_label(&context.language, "cost_passthrough"));
             }
             let quantity = if item.quantity.trim().is_empty() {
-                "1"
+                "1".to_string()
             } else {
-                item.quantity.trim()
+                format_invoice_pdf_number(&context.language, &item.quantity)
             };
+            let quantity = quantity.as_str();
             let vat_rate = if item.vat_rate.trim().is_empty() {
-                "n/a".to_string()
+                "—".to_string()
             } else {
-                format!("{}%", item.vat_rate.trim())
+                format!(
+                    "{}%",
+                    format_invoice_pdf_number(&context.language, &item.vat_rate)
+                )
             };
             let unit_price = format_invoice_pdf_money(&item.unit_price, &context.currency);
             let total = format_invoice_pdf_money(&item.line_gross, &context.currency);
@@ -4094,6 +4155,16 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         false,
         false,
     );
+    // The balance below already nets out credited advances, so the printed
+    // summary has to show them for the arithmetic to add up.
+    if !invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+        layout.summary_row(
+            invoice_pdf_label(&context.language, "prepayment_applied"),
+            &format_invoice_pdf_deduction(&context.prepayment_applied_amount, &context.currency),
+            false,
+            false,
+        );
+    }
     layout.summary_row(
         invoice_pdf_label(&context.language, "paid_amount"),
         &format_invoice_pdf_money(&context.paid_amount, &context.currency),
@@ -4263,7 +4334,7 @@ async fn list_my_invoices(
                         "adjusted_total_gross": decimal_to_string((total_gross - credited_amount).max(Decimal::ZERO)),
                         "paid_amount": decimal_to_string(paid_amount),
                         "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
-                        "balance_due": decimal_to_string((total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
+                        "balance_due": decimal_to_string(invoice_balance_due(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount, paid_amount, prepayment_applied_amount)),
                         "credit_balance": decimal_to_string((paid_amount + prepayment_applied_amount - (total_gross - credited_amount)).max(Decimal::ZERO)),
                         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
@@ -4827,7 +4898,7 @@ async fn list_invoices(
                     "adjusted_total_gross": decimal_to_string((total_gross - credited_amount).max(Decimal::ZERO)),
                     "paid_amount": decimal_to_string(paid_amount),
                     "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
-                    "balance_due": decimal_to_string((total_gross - credited_amount - paid_amount - prepayment_applied_amount).max(Decimal::ZERO)),
+                    "balance_due": decimal_to_string(invoice_balance_due(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount, paid_amount, prepayment_applied_amount)),
                     "credit_balance": decimal_to_string((paid_amount + prepayment_applied_amount - (total_gross - credited_amount)).max(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
@@ -9467,7 +9538,7 @@ async fn load_einvoice(
     Ok(Some(zugferd::EInvoice {
         number: row.try_get("invoice_number").unwrap_or_default(),
         invoice_type: row.try_get("invoice_type").unwrap_or_default(),
-        issue_date: issued_at.date_naive(),
+        issue_date: invoice_document_date(issued_at),
         due_date: row.try_get("due_date").unwrap_or_default(),
         currency: row
             .try_get::<String, _>("currency")
@@ -10734,6 +10805,7 @@ mod tests {
             total_vat: "0.00".to_string(),
             total_gross: "145.00".to_string(),
             credited_amount: "0.00".to_string(),
+            prepayment_applied_amount: "0.00".to_string(),
             paid_amount: "0.00".to_string(),
             balance_due: "145.00".to_string(),
             notes: Some("Оплатить после получения счёта.".to_string()),
@@ -10810,6 +10882,17 @@ mod tests {
         let usd_text = pdf_extract::extract_text_from_mem(&usd_bytes).unwrap();
         assert!(usd_text.contains("145,00 USD"));
         assert!(!usd_text.contains("€"));
+        assert!(!extracted_text.contains("Предоплата"));
+        // A final invoice with a credited advance: 145 - 45 advance = 100 open.
+        context.currency = "EUR".to_string();
+        context.language = "de".to_string();
+        context.prepayment_applied_amount = "45.00".to_string();
+        context.balance_due = "100.00".to_string();
+        let prepaid_bytes = build_invoice_pdf(&context).unwrap();
+        let prepaid_text = pdf_extract::extract_text_from_mem(&prepaid_bytes).unwrap();
+        assert!(prepaid_text.contains("Anzahlungen"));
+        assert!(prepaid_text.contains("-45,00 €"));
+        assert!(prepaid_text.contains("100,00 €"));
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
@@ -10837,6 +10920,64 @@ mod invoice_pdf_money_tests {
         assert_eq!(format_invoice_pdf_money("-15.5", "EUR"), "-15,50 €");
         assert_eq!(format_invoice_pdf_money("99.999", "CHF"), "100,00 CHF");
         assert_eq!(format_invoice_pdf_money("garbage", "EUR"), "0,00 €");
+    }
+
+    #[test]
+    fn a_cancelled_invoice_owes_nothing() {
+        use super::invoice_balance_due;
+        use rust_decimal::Decimal;
+        let total = Decimal::new(113050, 2);
+        assert_eq!(
+            invoice_balance_due(
+                "cancelled",
+                total,
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::ZERO
+            ),
+            Decimal::ZERO
+        );
+        assert_eq!(
+            invoice_balance_due("sent", total, Decimal::ZERO, Decimal::ZERO, Decimal::ZERO),
+            total
+        );
+        // 1,000 final, 300 advance credited: 700 open.
+        assert_eq!(
+            invoice_balance_due(
+                "partially_paid",
+                Decimal::new(1000, 0),
+                Decimal::ZERO,
+                Decimal::ZERO,
+                Decimal::new(300, 0),
+            ),
+            Decimal::new(700, 0)
+        );
+    }
+
+    #[test]
+    fn prints_quantities_and_rates_with_the_invoice_language_decimal_mark() {
+        use super::format_invoice_pdf_number;
+        assert_eq!(format_invoice_pdf_number("de", "2.5"), "2,5");
+        assert_eq!(format_invoice_pdf_number("de", "7.00"), "7");
+        assert_eq!(format_invoice_pdf_number("ru", "1.25"), "1,25");
+        assert_eq!(format_invoice_pdf_number("en", "2.50"), "2.5");
+        assert_eq!(format_invoice_pdf_number("de", "10"), "10");
+    }
+
+    #[test]
+    fn dates_the_invoice_on_the_german_calendar_day() {
+        use chrono::{NaiveDate, TimeZone, Utc};
+        // 00:30 CEST on 1 July is 22:30 UTC on 30 June.
+        let issued_at = Utc.with_ymd_and_hms(2026, 6, 30, 22, 30, 0).unwrap();
+        assert_eq!(
+            super::invoice_document_date(issued_at),
+            NaiveDate::from_ymd_opt(2026, 7, 1).unwrap()
+        );
+        let midday = Utc.with_ymd_and_hms(2026, 1, 15, 12, 0, 0).unwrap();
+        assert_eq!(
+            super::invoice_document_date(midday),
+            NaiveDate::from_ymd_opt(2026, 1, 15).unwrap()
+        );
     }
 
     #[test]
