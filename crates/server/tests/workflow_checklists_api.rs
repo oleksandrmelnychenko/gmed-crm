@@ -401,3 +401,117 @@ async fn completing_linked_task_updates_workflow_item_state() {
         .unwrap();
     assert_eq!(refreshed_item["is_completed"], true);
 }
+
+async fn load_work_center_task(app: &axum::Router, bearer: &str, task_id: &str) -> Value {
+    let (status, detail) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{task_id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    detail["item"].clone()
+}
+
+async fn set_work_center_task_status(
+    app: &axum::Router,
+    bearer: &str,
+    task: &Value,
+    next_status: &str,
+) -> Value {
+    let task_id = task["id"].as_str().unwrap();
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/concierge-operational-items/{task_id}/status"),
+        bearer,
+        Some(json!({ "expected_updated_at": task["updated_at"], "status": next_status })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+#[tokio::test]
+async fn completing_linked_task_in_work_center_completes_order_checklist_item() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-work-center-sync");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let initial_open = checklist["open_count"].as_u64().unwrap();
+    let linked: Vec<(String, String)> = checklist["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["is_completed"] == false)
+        .filter_map(|item| {
+            Some((
+                item["id"].as_str()?.to_string(),
+                item["linked_task_id"].as_str()?.to_string(),
+            ))
+        })
+        .take(2)
+        .collect();
+    assert_eq!(linked.len(), 2, "{checklist}");
+
+    // Status endpoint: the work-center board and the patient-card task dialog.
+    let (first_item_id, first_task_id) = &linked[0];
+    let task = load_work_center_task(&app, &pm_bearer, first_task_id).await;
+    let task = set_work_center_task_status(&app, &pm_bearer, &task, "in_progress").await;
+    let task = set_work_center_task_status(&app, &pm_bearer, &task, "completed").await;
+    assert_eq!(task["status"], "completed");
+
+    // Edit endpoint: the task edit dialog with a changed status.
+    let (second_item_id, second_task_id) = &linked[1];
+    let task = load_work_center_task(&app, &pm_bearer, second_task_id).await;
+    let task = set_work_center_task_status(&app, &pm_bearer, &task, "in_progress").await;
+    let (status, edited) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-operational-items/{second_task_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "expected_updated_at": task["updated_at"],
+            "kind": task["kind"],
+            "title": task["title"],
+            "note": task["note"],
+            "due_at": task["due_at"],
+            "priority": task["priority"],
+            "status": "completed",
+            "patient_id": task["patient_id"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(edited["status"], "completed");
+
+    let (status, refreshed) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    for item_id in [first_item_id, second_item_id] {
+        let item = refreshed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"].as_str() == Some(item_id.as_str()))
+            .unwrap();
+        assert_eq!(item["is_completed"], true, "{item}");
+        assert_eq!(item["linked_task_status"], "completed", "{item}");
+        assert!(item["completed_at"].is_string(), "{item}");
+    }
+    assert_eq!(
+        refreshed["open_count"].as_u64().unwrap(),
+        initial_open - 2,
+        "{refreshed}"
+    );
+}

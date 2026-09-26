@@ -388,64 +388,22 @@ async fn update_status(
     {
         Ok(r) if r.rows_affected() > 0 => {
             if status == "completed" {
-                let checklist_row = sqlx::query(
-                    r#"UPDATE workflow_checklist_items
-                       SET is_completed = true,
-                           completed_by = $2,
-                           completed_at = COALESCE(completed_at, now()),
-                           updated_at = now()
-                       WHERE linked_task_id = $1
-                         AND is_completed = false
-                       RETURNING id, patient_id, order_id, scope_type, scope_id, item_text"#,
+                match crate::routes::workflow_checklists::complete_checklist_items_for_task(
+                    &state.db,
+                    task_id,
+                    auth.user_id,
                 )
-                .bind(task_id)
-                .bind(auth.user_id)
-                .fetch_optional(&state.db)
-                .await;
-
-                match checklist_row {
-                    Ok(Some(row)) => {
-                        let checklist_item_id: Option<Uuid> = row.try_get("id").ok();
-                        let patient_id: Option<Uuid> = row.try_get("patient_id").ok();
-                        let order_id: Option<Uuid> = row.try_get("order_id").unwrap_or_default();
-                        let scope_type: String = row.try_get("scope_type").unwrap_or_default();
-                        let scope_id: Option<Uuid> = row.try_get("scope_id").ok();
-                        let item_text: String = row.try_get("item_text").unwrap_or_default();
-                        if let Some(patient_id) = patient_id {
-                            state.audit_sender.try_send(audit::domain_event(
-                                "workflow_checklist_item_completed",
-                                Some(auth.user_id),
-                                "patient",
-                                Some(patient_id),
-                                serde_json::json!({
-                                    "scope_type": scope_type,
-                                    "scope_id": scope_id,
-                                    "order_id": order_id,
-                                    "task_id": task_id,
-                                    "item_text": item_text,
-                                    "completed_via": "task",
-                                }),
-                            ));
-                        }
-                        if let Some(checklist_item_id) = checklist_item_id {
-                            crate::realtime::publish_workflow_checklist_event(
-                                &state,
-                                Some(auth.user_id),
-                                "workflow_checklist_item.completed",
-                                checklist_item_id,
-                                serde_json::json!({
-                                    "scope_type": scope_type,
-                                    "scope_id": scope_id,
-                                    "order_id": order_id,
-                                    "task_id": task_id,
-                                    "item_text": item_text,
-                                    "completed_via": "task",
-                                }),
-                            )
-                            .await;
-                        }
+                .await
+                {
+                    Ok(items) => {
+                        crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+                            &state,
+                            auth.user_id,
+                            task_id,
+                            &items,
+                        )
+                        .await;
                     }
-                    Ok(None) => {}
                     Err(e) => {
                         tracing::error!(error = %e, task_id = %task_id, "sync workflow checklist from task");
                     }

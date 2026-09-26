@@ -1644,6 +1644,14 @@ async fn update_item(
         tracing::error!(error = %error, item_id = %item_id, "record concierge task update history");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    let completed_checklist_items = if existing_status == body.status {
+        Vec::new()
+    } else {
+        match complete_linked_checklist_items(&mut tx, item_id, &body.status, auth.user_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        }
+    };
     let creator_notification = if auth.user_id != assigned_by {
         let title = if existing_status != body.status {
             "Task status changed"
@@ -1670,6 +1678,13 @@ async fn update_item(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+        &state,
+        auth.user_id,
+        item_id,
+        &completed_checklist_items,
+    )
+    .await;
     state.audit_sender.try_send(audit::domain_event(
         "update_concierge_operational_item",
         Some(auth.user_id),
@@ -1847,6 +1862,11 @@ async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "record concierge task status history");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    let completed_checklist_items =
+        match complete_linked_checklist_items(&mut tx, item_id, &body.status, auth.user_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
     let creator_notification = if auth.user_id != assigned_by {
         match insert_task_notification(
             &mut tx,
@@ -1868,6 +1888,13 @@ async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task status update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+        &state,
+        auth.user_id,
+        item_id,
+        &completed_checklist_items,
+    )
+    .await;
     state.audit_sender.try_send(audit::domain_event(
         "update_concierge_operational_item_status",
         Some(auth.user_id),
@@ -4281,6 +4308,30 @@ async fn publish_operational_event(
         }),
     )
     .await;
+}
+
+/// Order and patient checklist items follow their linked task when it is
+/// completed from the work center or the patient card.
+async fn complete_linked_checklist_items(
+    tx: &mut Transaction<'_, Postgres>,
+    item_id: Uuid,
+    status: &str,
+    actor_id: Uuid,
+) -> Result<
+    Vec<crate::routes::workflow_checklists::TaskCompletedChecklistItem>,
+    axum::response::Response,
+> {
+    if status != "completed" {
+        return Ok(Vec::new());
+    }
+    crate::routes::workflow_checklists::complete_checklist_items_for_task(
+        &mut **tx, item_id, actor_id,
+    )
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, item_id = %item_id, "complete workflow checklist items for task");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })
 }
 
 async fn insert_task_notification(

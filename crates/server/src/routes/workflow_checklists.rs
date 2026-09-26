@@ -1219,6 +1219,94 @@ async fn insert_workflow_task(
     })
 }
 
+/// A workflow checklist item closed because its linked task was completed.
+pub(crate) struct TaskCompletedChecklistItem {
+    id: Uuid,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+    scope_type: String,
+    scope_id: Uuid,
+    item_text: String,
+}
+
+/// Completes the open workflow checklist items linked to `task_id`.
+///
+/// Every task surface (work center, patient card, appointment tasks) must keep
+/// the order/patient checklist in step with its linked task; otherwise the
+/// checklist keeps counting a finished task as open and blocks order
+/// completion. Run it in the same transaction as the task status change and
+/// pass the result to [`publish_task_completed_checklist_items`] after commit.
+pub(crate) async fn complete_checklist_items_for_task<'e, E>(
+    executor: E,
+    task_id: Uuid,
+    actor_id: Uuid,
+) -> Result<Vec<TaskCompletedChecklistItem>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let rows = sqlx::query(
+        r#"UPDATE workflow_checklist_items
+           SET is_completed = true,
+               completed_by = $2,
+               completed_at = COALESCE(completed_at, now()),
+               updated_at = now()
+           WHERE linked_task_id = $1
+             AND is_completed = false
+           RETURNING id, patient_id, order_id, scope_type, scope_id, item_text"#,
+    )
+    .bind(task_id)
+    .bind(actor_id)
+    .fetch_all(executor)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(TaskCompletedChecklistItem {
+                id: row.try_get("id")?,
+                patient_id: row.try_get("patient_id")?,
+                order_id: row.try_get("order_id")?,
+                scope_type: row.try_get("scope_type")?,
+                scope_id: row.try_get("scope_id")?,
+                item_text: row.try_get("item_text")?,
+            })
+        })
+        .collect()
+}
+
+/// Audits and broadcasts checklist items closed by a completed task.
+pub(crate) async fn publish_task_completed_checklist_items(
+    state: &AppState,
+    actor_id: Uuid,
+    task_id: Uuid,
+    items: &[TaskCompletedChecklistItem],
+) {
+    for item in items {
+        let payload = json!({
+            "scope_type": item.scope_type,
+            "scope_id": item.scope_id,
+            "order_id": item.order_id,
+            "checklist_item_id": item.id,
+            "task_id": task_id,
+            "item_text": item.item_text,
+            "completed_via": "task",
+        });
+        state.audit_sender.try_send(audit::domain_event(
+            "workflow_checklist_item_completed",
+            Some(actor_id),
+            "patient",
+            Some(item.patient_id),
+            payload.clone(),
+        ));
+        crate::realtime::publish_workflow_checklist_event(
+            state,
+            Some(actor_id),
+            "workflow_checklist_item.completed",
+            item.id,
+            payload,
+        )
+        .await;
+    }
+}
+
 fn can_complete_workflow_item(
     auth: &AuthUser,
     owner_user_id: Option<Uuid>,
