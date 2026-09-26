@@ -2,6 +2,7 @@ import { apiFetch } from "@/lib/api";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
+import { localizeTaskTitle } from "@/lib/task-labels";
 
 export interface Notification {
   id: string;
@@ -54,7 +55,33 @@ export function localizedNotificationCopy(
           body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
         };
   }
+  const taskTitle = taskNotificationTitle(item, lang);
+  if (taskTitle) {
+    return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
+  }
   return { title: item.title, body: item.body };
+}
+
+// The server stores task notification titles as English templates; the body
+// carries the task title, which may itself be a generated checklist template.
+const TASK_NOTIFICATION_TITLES: Record<string, { de: string; ru: string }> = {
+  "New task": { de: "Neue Aufgabe", ru: "Новая задача" },
+  "Task updated": { de: "Aufgabe aktualisiert", ru: "Задача обновлена" },
+  "Task status changed": { de: "Aufgabenstatus geändert", ru: "Статус задачи изменён" },
+  "Task attachment added": { de: "Anhang zur Aufgabe hinzugefügt", ru: "К задаче добавлен файл" },
+  "Task attachment deleted": { de: "Anhang der Aufgabe gelöscht", ru: "Файл задачи удалён" },
+  "Task archived": { de: "Aufgabe archiviert", ru: "Задача перенесена в архив" },
+  "Task restored from archive": { de: "Aufgabe aus dem Archiv wiederhergestellt", ru: "Задача восстановлена из архива" },
+  "Task deleted": { de: "Aufgabe gelöscht", ru: "Задача удалена" },
+  "New task comment": { de: "Neuer Kommentar zur Aufgabe", ru: "Новый комментарий к задаче" },
+  "Task reminder": { de: "Aufgabenerinnerung", ru: "Напоминание о задаче" },
+};
+
+function taskNotificationTitle(item: Notification, lang: "ru" | "de"): string | null {
+  if (!item.kind.startsWith("operational_task_") && item.kind !== "concierge_task_reminder") {
+    return null;
+  }
+  return TASK_NOTIFICATION_TITLES[item.title]?.[lang] ?? null;
 }
 
 export interface ActiveSession {

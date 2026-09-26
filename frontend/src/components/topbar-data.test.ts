@@ -24,6 +24,37 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(localizedNotificationCopy(notice,"ru").title).toContain("Срок оплаты истёк");
 });
 
+describe("task notifications", () => {
+  const taskNotice = (kind: string, title: string, body: string | null) =>
+    ({ id: "n-1", kind, title, body, entity_type: "concierge_task", entity_id: "task-1", is_read: false, created_at: "2026-09-26T10:00:00Z" }) as Notification;
+
+  it("localizes the stored English task titles for staff", () => {
+    expect(localizedNotificationCopy(taskNotice("operational_task_assigned", "New task", "Flowers"), "ru"))
+      .toEqual({ title: "Новая задача", body: "Flowers" });
+    expect(localizedNotificationCopy(taskNotice("operational_task_updated", "Task status changed", "Flowers"), "de").title)
+      .toBe("Aufgabenstatus geändert");
+    expect(localizedNotificationCopy(taskNotice("operational_task_comment_added", "New task comment", "Flowers"), "ru").title)
+      .toBe("Новый комментарий к задаче");
+    expect(localizedNotificationCopy(taskNotice("concierge_task_reminder", "Task reminder", "Flowers"), "de").title)
+      .toBe("Aufgabenerinnerung");
+  });
+
+  it("localizes generated checklist task titles in the body", () => {
+    const copy = localizedNotificationCopy(
+      taskNotice("operational_task_assigned", "New task", "Order checklist: Review order scope and convert needs into service blocks"),
+      "ru",
+    );
+    expect(copy.body).not.toContain("Order checklist");
+  });
+
+  it("keeps unknown titles and other notification kinds unchanged", () => {
+    expect(localizedNotificationCopy(taskNotice("operational_task_updated", "Something new", "Flowers"), "ru").title)
+      .toBe("Something new");
+    expect(localizedNotificationCopy(taskNotice("update", "New task", "Body"), "ru"))
+      .toEqual({ title: "New task", body: "Body" });
+  });
+});
+
 describe("oldestNewLead", () => {
   it("selects the earliest unprocessed lead for FIFO handling", () => {
     expect(
