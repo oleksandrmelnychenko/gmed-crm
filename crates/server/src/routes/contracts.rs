@@ -2560,7 +2560,8 @@ async fn terminate_framework_contract(
     }
 
     // Termination is possible during a running order: every open order stops
-    // and receives its final settlement in the same transaction.
+    // and receives its final settlement in the same transaction. Completed
+    // orders (final follow-up phase) keep their status and are not settled.
     let terminated_orders =
         match termination_settlements::terminate_open_orders_tx(&mut tx, contract_id, auth.user_id)
             .await
@@ -2662,7 +2663,8 @@ async fn terminate_framework_contract(
 
 /// What terminating the contract would do to the orders still open under it:
 /// accrued, invoiced and paid amounts per order and the services that would be
-/// cancelled. Nothing is written.
+/// cancelled. Completed orders are not listed; termination leaves them alone.
+/// Nothing is written.
 async fn preview_framework_contract_termination(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,

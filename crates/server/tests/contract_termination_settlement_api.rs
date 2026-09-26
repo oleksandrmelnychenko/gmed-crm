@@ -731,6 +731,179 @@ async fn terminating_a_contract_without_activity_closes_the_empty_settlement() {
     assert_eq!(settlement_status, "settled");
 }
 
+/// A completed order (already in the final follow-up phase, or with a terminal
+/// status) is left alone by the termination: it is neither previewed nor
+/// stopped nor settled and keeps its status, phase and services. Running
+/// orders are stopped and settled as before.
+#[tokio::test]
+async fn contract_termination_leaves_completed_orders_untouched() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Completed', 'Order', '1985-05-05', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let manager = auth_header(manager_id, "patient_manager");
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &manager,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "signed",
+            "valid_from": chrono::Utc::now().date_naive().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+
+    let seed_order = |number: String, phase: &'static str, status: &'static str| {
+        let pool = pool.clone();
+        let contract_id = contract_id.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, currency, created_by)
+                   VALUES ($1, $2, $3::uuid, $4, $5, 'EUR', $6)
+                   RETURNING id"#,
+            )
+            .bind(number)
+            .bind(patient_id)
+            .bind(&contract_id)
+            .bind(phase)
+            .bind(status)
+            .bind(admin_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    // Finished and paid, stage 5/5 "follow-up": still `active`.
+    let followup_order = seed_order(format!("ORD-FUP-{tag}"), "followup", "active").await;
+    let followup_billed = seed_service(
+        &pool,
+        followup_order,
+        patient_id,
+        "Dolmetscher-/Betreuungsleistung",
+        2,
+        60,
+        "invoiced",
+        None,
+    )
+    .await;
+    let followup_planned = seed_service(
+        &pool,
+        followup_order,
+        patient_id,
+        "Nachsorge-Telefonat",
+        1,
+        30,
+        "planned",
+        None,
+    )
+    .await;
+    let completed_order = seed_order(format!("ORD-DONE-{tag}"), "followup", "completed").await;
+    let running_order = seed_order(format!("ORD-RUN-{tag}"), "execution", "active").await;
+    let running_planned = seed_service(
+        &pool,
+        running_order,
+        patient_id,
+        "Transfer",
+        1,
+        100,
+        "planned",
+        None,
+    )
+    .await;
+
+    let (status, preview) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/framework-contracts/{contract_id}/termination-preview"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "preview: {preview:?}");
+    let open_orders = preview["open_orders"].as_array().unwrap();
+    assert_eq!(open_orders.len(), 1, "preview: {preview:?}");
+    assert_eq!(open_orders[0]["id"], running_order.to_string());
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/terminate"),
+        &manager,
+        Some(json!({ "reason": "Patient terminated after the treatment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    let settlements = terminated["settlements"].as_array().unwrap();
+    assert_eq!(settlements.len(), 1, "terminate: {terminated:?}");
+    assert_eq!(settlements[0]["order_id"], running_order.to_string());
+
+    let order_state = |order_id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, String, Option<String>, Option<Uuid>)>(
+                "SELECT phase, status, cancellation_reason, contract_id FROM orders WHERE id = $1",
+            )
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let contract_uuid = Uuid::parse_str(&contract_id).unwrap();
+    assert_eq!(
+        order_state(followup_order).await,
+        (
+            "followup".to_string(),
+            "active".to_string(),
+            None,
+            Some(contract_uuid)
+        )
+    );
+    assert_eq!(
+        order_state(completed_order).await,
+        (
+            "followup".to_string(),
+            "completed".to_string(),
+            None,
+            Some(contract_uuid)
+        )
+    );
+    let (_, running_status, running_reason, _) = order_state(running_order).await;
+    assert_eq!(running_status, "cancelled");
+    assert_eq!(running_reason.as_deref(), Some("contract_terminated"));
+
+    assert_eq!(service_status(&pool, followup_billed).await, "invoiced");
+    assert_eq!(service_status(&pool, followup_planned).await, "planned");
+    assert_eq!(service_status(&pool, running_planned).await, "cancelled");
+    let settled_orders: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT order_id FROM order_termination_settlements WHERE contract_id = $1",
+    )
+    .bind(contract_uuid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(settled_orders, vec![running_order]);
+}
+
 /// An unconfirmed intake draft (e.g. a repeat intake) linked to the contract is
 /// not stopped or settled on termination: it is detached from the contract so
 /// the intake continues and later needs a new contract.

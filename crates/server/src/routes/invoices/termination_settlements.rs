@@ -18,6 +18,11 @@
 //! `balance = accrued - paid` and `uninvoiced = accrued - invoiced`.
 //! The settlement row keeps the snapshot taken at termination; every read also
 //! returns the live values billing works against.
+//!
+//! Completed orders are left alone: an order with a terminal status
+//! (`completed`/`cancelled`) or in the final `followup` phase (stage 5/5, its
+//! services delivered) keeps its status and phase and gets no settlement;
+//! cancelling it would misreport a finished order.
 
 use axum::{
     Json, Router,
@@ -487,7 +492,8 @@ pub(crate) async fn compute_order_settlement(
 
 /// Settlement preview of every order still open under a contract; nothing is
 /// written. Unconfirmed intake drafts are not settled (they are only detached
-/// from the contract), so they are not part of the preview.
+/// from the contract) and completed orders (final `followup` phase) are left
+/// alone, so neither is part of the preview.
 pub(crate) async fn preview_open_orders(
     state: &AppState,
     contract_id: Uuid,
@@ -496,10 +502,12 @@ pub(crate) async fn preview_open_orders(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *transaction)
         .await?;
+    // Same selection as `terminate_open_orders_tx`.
     let order_ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id FROM orders
            WHERE contract_id = $1 AND status IN ('active', 'paused')
              AND intake_state <> 'draft'
+             AND phase <> 'followup'
            ORDER BY created_at, order_number"#,
     )
     .bind(contract_id)
@@ -650,18 +658,22 @@ pub(crate) async fn publish_detached_draft_orders(
 
 /// Stop every active/paused order under the contract and snapshot its final
 /// settlement. Unconfirmed intake drafts are skipped; the caller detaches them
-/// with [`detach_draft_orders_tx`]. Runs inside the caller's termination
+/// with [`detach_draft_orders_tx`]. Completed orders — already in the final
+/// `followup` phase — are skipped too: they keep their status, phase and
+/// services and get no settlement. Runs inside the caller's termination
 /// transaction.
 pub(crate) async fn terminate_open_orders_tx(
     transaction: &mut Transaction<'_, Postgres>,
     contract_id: Uuid,
     actor_user_id: Uuid,
 ) -> Result<Vec<TerminatedOrder>, sqlx::Error> {
+    // Same selection as `preview_open_orders`.
     let orders = sqlx::query(
         r#"SELECT id, order_number, status
            FROM orders
            WHERE contract_id = $1 AND status IN ('active', 'paused')
              AND intake_state <> 'draft'
+             AND phase <> 'followup'
            ORDER BY created_at, order_number
            FOR UPDATE"#,
     )
