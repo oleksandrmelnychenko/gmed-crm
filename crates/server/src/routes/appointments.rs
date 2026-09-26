@@ -7066,8 +7066,7 @@ async fn sync_completed_medical_appointment_to_billing(
         .try_get::<Option<String>, _>("doctor_name")
         .unwrap_or_default();
 
-    let mut notes = vec![
-        format!("Automatisch aus abgeschlossenem medizinischem Termin {appointment_id} erstellt"),
+    let mut context_notes = vec![
         format!("Termin: {appointment_title}"),
         format!("Datum: {appointment_date}"),
         format!("Katalogschlüssel: {}", catalog_item.service_key),
@@ -7075,13 +7074,50 @@ async fn sync_completed_medical_appointment_to_billing(
     if let Some(provider_name) = provider_name.as_deref()
         && !provider_name.trim().is_empty()
     {
-        notes.push(format!("Anbieter: {provider_name}"));
+        context_notes.push(format!("Anbieter: {provider_name}"));
     }
     if let Some(doctor_name) = doctor_name.as_deref()
         && !doctor_name.trim().is_empty()
     {
-        notes.push(format!("Arzt: {doctor_name}"));
+        context_notes.push(format!("Arzt: {doctor_name}"));
     }
+
+    // The completed appointment delivers the treatment organisation the order
+    // already planned (e.g. from the quote): the oldest unlinked planned
+    // single-unit line becomes this appointment's delivered line, so the same
+    // service is not counted twice. A planned line with more units stays for
+    // later appointments; only without a planned line is a new one added.
+    if let Some(leistung_id) = consume_planned_treatment_organization_line(
+        state,
+        order_id,
+        appointment_id,
+        provider_id,
+        doctor_id,
+        &context_notes,
+    )
+    .await?
+    {
+        state.audit_sender.try_send(audit::domain_event(
+            "consume_planned_medical_order_leistung".to_string(),
+            Some(created_by),
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "patient_id": patient_id,
+                "appointment_id": appointment_id,
+                "order_leistung_id": leistung_id,
+                "service_key": MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
+                "provider_id": provider_id,
+                "doctor_id": doctor_id,
+            }),
+        ));
+        return Ok(());
+    }
+
+    let mut notes = vec![format!(
+        "Automatisch aus abgeschlossenem medizinischem Termin {appointment_id} erstellt"
+    )];
+    notes.extend(context_notes);
 
     let result = sqlx::query(
         r#"INSERT INTO order_leistungen (
@@ -7130,6 +7166,84 @@ async fn sync_completed_medical_appointment_to_billing(
     }
 
     Ok(())
+}
+
+/// Links a completed medical appointment to the order's oldest planned
+/// treatment-organisation line that is not linked yet, has one unit, does not
+/// come from a doctor service group and is not planned for another provider
+/// or doctor: the line becomes delivered, carries the appointment (and its
+/// provider/doctor when the line had none) and records the change in its
+/// notes. Returns the
+/// consumed line, or `None` when the appointment is already billed or no such
+/// planned line exists. Runs in one transaction so a concurrent completion of
+/// another appointment cannot consume the same line.
+async fn consume_planned_treatment_organization_line(
+    state: &AppState,
+    order_id: Uuid,
+    appointment_id: Uuid,
+    provider_id: Option<Uuid>,
+    doctor_id: Option<Uuid>,
+    context_notes: &[String],
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    let already_linked = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM order_leistungen WHERE source_medical_appointment_id = $1)",
+    )
+    .bind(appointment_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if already_linked {
+        return Ok(None);
+    }
+    let planned = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT ol.id
+           FROM order_leistungen ol
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           WHERE ol.order_id = $1
+             AND ol.status = 'planned'
+             AND ol.quantity <= 1
+             AND ol.source_interpreter_report_id IS NULL
+             AND ol.source_medical_appointment_id IS NULL
+             AND ol.source_service_group_id IS NULL
+             AND (ol.provider_id IS NULL OR ol.provider_id = $3)
+             AND (ol.doctor_id IS NULL OR ol.doctor_id = $4)
+             AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) = $2
+           ORDER BY ol.created_at, ol.id
+           LIMIT 1
+           FOR UPDATE OF ol SKIP LOCKED"#,
+    )
+    .bind(order_id)
+    .bind(MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(leistung_id) = planned else {
+        return Ok(None);
+    };
+    let mut notes = vec![format!(
+        "Geplante Leistung durch abgeschlossenen medizinischen Termin {appointment_id} erbracht"
+    )];
+    notes.extend(context_notes.iter().cloned());
+    sqlx::query(
+        r#"UPDATE order_leistungen
+           SET status = 'delivered',
+               delivered_at = COALESCE(delivered_at, now()),
+               source_medical_appointment_id = $2,
+               provider_id = COALESCE(provider_id, $3),
+               doctor_id = CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
+               notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $5)
+           WHERE id = $1 AND status = 'planned'"#,
+    )
+    .bind(leistung_id)
+    .bind(appointment_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .bind(notes.join("\n"))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Some(leistung_id))
 }
 
 async fn load_interpreter_report_billing_candidates(

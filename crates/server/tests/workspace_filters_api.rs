@@ -3776,6 +3776,183 @@ async fn completed_medical_appointment_auto_creates_order_leistung_from_agency_c
 }
 
 #[tokio::test]
+async fn completed_medical_appointment_consumes_the_planned_treatment_organization_line() {
+    let Some((app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("medical-billing-planned");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        pm_id,
+        &format!("ORD-MEDP-{tag}"),
+        "execution",
+        "active",
+        "Treatment coordination",
+    )
+    .await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let agency_service_id = seed_agency_service_catalog_item(
+        &pool,
+        admin_id,
+        "treatment_organization",
+        "Organisation der Behandlung",
+        "2026-01-01",
+    )
+    .await;
+    // The quote planned one treatment organisation and, separately, a block of
+    // three for later visits; an unrelated planned line must stay untouched.
+    let planned_single = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(agency_service_id),
+        "Organisation der Behandlung",
+        "1",
+        2,
+    )
+    .await;
+    let planned_block = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        Some(agency_service_id),
+        "Organisation der Behandlung (Folgetermine)",
+        "3",
+        1,
+    )
+    .await;
+    let unrelated = seed_planned_order_service(
+        &pool,
+        order_id,
+        patient_id,
+        None,
+        "Airport transfer",
+        "1",
+        3,
+    )
+    .await;
+
+    let mut appointment_ids = Vec::new();
+    for (suffix, date) in [("first", "2026-04-23"), ("second", "2026-04-24")] {
+        let appointment_id = seed_appointment(
+            &pool,
+            patient_id,
+            provider_id,
+            doctor_id,
+            pm_id,
+            &format!("Medical planned {suffix} {tag}"),
+            "confirmed",
+            date,
+        )
+        .await;
+        sqlx::query("UPDATE appointments SET order_id = $2 WHERE id = $1")
+            .bind(appointment_id)
+            .bind(order_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        appointment_ids.push(appointment_id);
+    }
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{}/status", appointment_ids[0]),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The planned single line is delivered by the appointment; nothing is added.
+    let consumed = sqlx::query(
+        r#"SELECT status, quantity::text AS quantity, source_medical_appointment_id,
+                  provider_id, doctor_id, notes
+           FROM order_leistungen WHERE id = $1"#,
+    )
+    .bind(planned_single)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(consumed.get::<String, _>("status"), "delivered");
+    assert_eq!(consumed.get::<String, _>("quantity"), "1");
+    assert_eq!(
+        consumed.get::<Option<Uuid>, _>("source_medical_appointment_id"),
+        Some(appointment_ids[0])
+    );
+    assert_eq!(
+        consumed.get::<Option<Uuid>, _>("provider_id"),
+        Some(provider_id)
+    );
+    assert_eq!(
+        consumed.get::<Option<Uuid>, _>("doctor_id"),
+        Some(doctor_id)
+    );
+    assert!(
+        consumed
+            .get::<Option<String>, _>("notes")
+            .unwrap_or_default()
+            .contains("Geplante Leistung durch abgeschlossenen medizinischen Termin")
+    );
+    let line_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM order_leistungen WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(line_count, 3);
+    support::wait_until("planned medical line consumption audit", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'consume_planned_medical_order_leistung'
+                     AND entity_id = $1
+                     AND context->>'order_leistung_id' = $2)"#,
+        )
+        .bind(order_id)
+        .bind(planned_single.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    })
+    .await;
+
+    // The next appointment finds no single planned line: the multi-unit block
+    // stays planned for later visits and a delivered line is added as before.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{}/status", appointment_ids[1]),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
+    assert_eq!(block_status, "planned");
+    assert_eq!(block_quantity, "3");
+    let (unrelated_status, _, _) = order_service_state(&pool, unrelated).await;
+    assert_eq!(unrelated_status, "planned");
+    let second_line: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM order_leistungen
+           WHERE order_id = $1 AND source_medical_appointment_id = $2 AND status = 'delivered'"#,
+    )
+    .bind(order_id)
+    .bind(appointment_ids[1])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(second_line, 1);
+}
+
+#[tokio::test]
 async fn interpreter_report_billing_scheduler_backfills_after_catalog_setup_without_duplicates() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
         return;
