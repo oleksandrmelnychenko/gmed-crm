@@ -29,7 +29,10 @@ import {
   appointmentPreviewInfoCardClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
-import { isInterpreterReportTooEarly } from "@/pages/appointments/model/completion-rules";
+import {
+  isInterpreterReportStatusOpen,
+  isInterpreterReportTooEarly,
+} from "@/pages/appointments/model/completion-rules";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   blankReportForm,
@@ -334,8 +337,14 @@ function useAppointmentReportSectionContent({
   const canOpenReportEditor = canSubmitInterpreterReport || showReportReviewActions;
   // Approval bills the reported hours, so submitting and approving a report
   // open on the appointment date (Europe/Berlin); returning it stays possible.
-  const reportTooEarly = isInterpreterReportTooEarly(detail.date);
-  const reportTooEarlyHint = appointmentText("appointments_report_not_before_date");
+  // Reports also wait for the coordinator to confirm the appointment; the
+  // interpreter cannot change the status, so say who has to act.
+  const reportStatusClosed = !isInterpreterReportStatusOpen(detail.status);
+  const reportTooEarly =
+    isInterpreterReportTooEarly(detail.date) || reportStatusClosed;
+  const reportTooEarlyHint = reportStatusClosed
+    ? appointmentText("appointments_report_requires_confirmed_appointment")
+    : appointmentText("appointments_report_not_before_date");
   const showReportDateHint =
     reportTooEarly &&
     (canSubmitInterpreterReport || (showReportReviewActions && canApproveReport));

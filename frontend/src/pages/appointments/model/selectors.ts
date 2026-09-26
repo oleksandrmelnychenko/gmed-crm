@@ -78,6 +78,45 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
 }
 
 /**
+ * A concierge sees a medical appointment only as a blocked slot. The server
+ * refuses to reschedule it, to manage its checklist or communications and to
+ * assign an interpreter there, so the detail view offers none of that.
+ */
+export function blockedSlotPermissions(
+  permissions: AppointmentPermissions,
+): AppointmentPermissions {
+  return {
+    ...permissions,
+    canEditSchedule: false,
+    canDelete: false,
+    canManageStatus: false,
+    canAssignInterpreter: false,
+    canManageChecklist: false,
+    canManageReminders: false,
+    canViewNotes: false,
+    canViewCommunications: false,
+    canManageCommunications: false,
+  };
+}
+
+/**
+ * The server completes a reminder for the coordinating roles (CEO, Patient
+ * Manager) or for the user it is addressed to; everyone else gets a 404, so
+ * the "mark complete" action is only offered to them.
+ */
+export function canCompleteAppointmentReminder(
+  reminder: { user_id: string; is_completed: boolean },
+  canManageReminders: boolean,
+  currentUserId?: string,
+): boolean {
+  if (reminder.is_completed) return false;
+  return (
+    canManageReminders ||
+    (Boolean(currentUserId) && reminder.user_id === currentUserId)
+  );
+}
+
+/**
  * The appointments page is read-only without `appointments.edit`, but the
  * interpreter can still respond to assignments and submit visit reports on
  * it, so a "view only" banner above those working buttons would be wrong.

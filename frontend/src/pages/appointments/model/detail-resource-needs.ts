@@ -56,16 +56,25 @@ const DETAIL_RESOURCE_GROUP_PERMISSIONS: Record<
   communications: (permissions) => permissions.canViewCommunications,
 };
 
+/** Groups the server refuses for a blocked medical slot (concierge view). */
+const BLOCKED_SLOT_HIDDEN_GROUPS = new Set<AppointmentDetailResourceGroup>([
+  "checklist",
+  "communications",
+]);
+
 export function getRequiredAppointmentDetailResourceGroups(
   detailTab: AppointmentWorkspaceTab,
   isMobile: boolean,
   permissions: AppointmentDetailResourcePermissions,
+  isBlockedSlot = false,
 ) {
   const groups = isMobile
     ? APPOINTMENT_DETAIL_RESOURCE_GROUPS
     : DESKTOP_TAB_RESOURCE_GROUPS[detailTab];
 
-  return groups.filter((group) =>
-    DETAIL_RESOURCE_GROUP_PERMISSIONS[group](permissions),
+  return groups.filter(
+    (group) =>
+      DETAIL_RESOURCE_GROUP_PERMISSIONS[group](permissions) &&
+      !(isBlockedSlot && BLOCKED_SLOT_HIDDEN_GROUPS.has(group)),
   );
 }

@@ -38,7 +38,10 @@ import {
 } from "@/lib/api/clinical";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { buildAppointmentWorkflowSummary } from "@/pages/appointments/model/selectors";
+import {
+  buildAppointmentWorkflowSummary,
+  canCompleteAppointmentReminder,
+} from "@/pages/appointments/model/selectors";
 import { InterpreterSuggestionsPanel } from "@/pages/appointments/ui/sections/interpreter-suggestions-panel";
 import {
   appointmentSelectControlClassName,
@@ -439,6 +442,7 @@ function AppointmentWorkflowTab({
                     reminders={reminders}
                     staff={staff}
                     canManageReminders={permissions.canManageReminders}
+                    currentUserId={currentUserId}
                     onRefresh={onRefresh}
                     onError={onError}
                   />
@@ -1360,6 +1364,7 @@ function AppointmentRemindersSection({
   reminders,
   staff,
   canManageReminders,
+  currentUserId,
   onRefresh,
   onError,
 }: {
@@ -1367,6 +1372,7 @@ function AppointmentRemindersSection({
   reminders: ReminderEntry[];
   staff: StaffOption[];
   canManageReminders: boolean;
+  currentUserId?: string;
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
@@ -1478,7 +1484,7 @@ function AppointmentRemindersSection({
         ) : undefined
       }
       rowActions={(item) =>
-        item.is_completed ? null : (
+        !canCompleteAppointmentReminder(item, canManageReminders, currentUserId) ? null : (
           <Button
             variant="outline"
             size="xs"

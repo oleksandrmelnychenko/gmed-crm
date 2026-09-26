@@ -337,6 +337,8 @@ export function useAppointmentDetail({
     canViewReport,
     canViewTasks,
   } = permissions;
+  const selectedDetailIsBlocked =
+    Boolean(detail?.is_blocked) && detail?.id === selectedId;
   const requiredDetailResourceGroups = useMemo(
     () =>
       getRequiredAppointmentDetailResourceGroups(
@@ -350,6 +352,7 @@ export function useAppointmentDetail({
           canViewReport,
           canViewTasks,
         },
+        selectedDetailIsBlocked,
       ),
     [
       canManageChecklist,
@@ -360,6 +363,7 @@ export function useAppointmentDetail({
       canViewTasks,
       detailTab,
       isMobile,
+      selectedDetailIsBlocked,
     ],
   );
   const missingDetailResourceGroups = useMemo(

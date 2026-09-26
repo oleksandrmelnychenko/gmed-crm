@@ -34,6 +34,7 @@ import {
 import {
   appointmentPermissions,
   appointmentsReadOnlyScope,
+  blockedSlotPermissions,
   linkedPatientPermissions,
 } from "@/pages/appointments/model/selectors";
 import {
@@ -419,6 +420,9 @@ function useStaffAppointmentsPageContent() {
   });
   const requiresExtendedDetailResources =
     detailOpen && isMobile && Boolean(selectedId);
+  const detailPermissions = detail?.is_blocked
+    ? blockedSlotPermissions(permissions)
+    : permissions;
   const {
     linkedPreviewOpen,
     linkedPreviewKind,
@@ -1580,7 +1584,7 @@ function useStaffAppointmentsPageContent() {
             taxonomyNodes={taxonomyNodes}
             staff={staff}
             interpreters={interpreters}
-            permissions={permissions}
+            permissions={detailPermissions}
             currentUserId={user?.id}
             currentUserRole={user?.role}
             detailDefaultAssigneeId={detailDefaultAssigneeId}
@@ -1928,7 +1932,7 @@ function useStaffAppointmentsPageContent() {
           taxonomyNodes={taxonomyNodes}
           staff={staff}
           interpreters={interpreters}
-          permissions={permissions}
+          permissions={detailPermissions}
           currentUserId={user?.id}
           currentUserRole={user?.role}
           detailDefaultAssigneeId={detailDefaultAssigneeId}

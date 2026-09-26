@@ -10,6 +10,19 @@ export const APPOINTMENT_REPORT_BEFORE_DATE_CODE = "appointment_report_before_da
 /** Error code the server returns when a reported appointment is moved to a future date. */
 export const APPOINTMENT_REPORTED_FUTURE_DATE_CODE = "appointment_reported_future_date";
 
+/** Error code the server returns when a report is sent for an unconfirmed appointment. */
+export const APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE = "appointment_report_status_not_open";
+
+/**
+ * Interpreter reports (submit and approve) open once the coordinator has
+ * confirmed the appointment; planned or cancelled appointments take none.
+ */
+export function isInterpreterReportStatusOpen(
+  status: string | null | undefined,
+): boolean {
+  return status === "confirmed" || status === "in_progress" || status === "completed";
+}
+
 /**
  * Completion counts as delivery (billing lines, order execution), so it only
  * opens on the appointment's own day in Europe/Berlin. Same day is allowed.

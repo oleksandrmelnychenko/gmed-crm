@@ -58,6 +58,23 @@ describe("appointmentActionErrorMessage", () => {
     expect(message).toBe(appointmentText("appointments_report_not_before_date"));
   });
 
+  it("localizes the server rejection of a report for an unconfirmed appointment", () => {
+    const error = new ApiRequestError(
+      "Interpreter reports are only available for confirmed, in-progress or completed appointments",
+      {
+        status: 409,
+        body: { code: "appointment_report_status_not_open" },
+      },
+    );
+
+    expect(appointmentActionErrorMessage(error, "Fallback")).toBe(
+      appointmentText("appointments_report_requires_confirmed_appointment"),
+    );
+    expect(
+      appointmentText("appointments_report_requires_confirmed_appointment"),
+    ).not.toBe("appointments_report_requires_confirmed_appointment");
+  });
+
   it("localizes the server rejection of moving a reported appointment to a future date", () => {
     const error = new ApiRequestError(
       "An appointment with an interpreter report cannot be moved to a future date",

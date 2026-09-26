@@ -4,6 +4,8 @@ import {
   appointmentPermissions,
   appointmentReportActions,
   appointmentsReadOnlyScope,
+  blockedSlotPermissions,
+  canCompleteAppointmentReminder,
   linkedPatientPermissions,
 } from "./selectors";
 import { getRequiredAppointmentDetailResourceGroups } from "./detail-resource-needs";
@@ -246,6 +248,81 @@ describe("appointment report actions", () => {
         interpreterId,
         report: reportFor("pending"),
       }).showReportReviewActions,
+    ).toBe(false);
+  });
+});
+
+describe("concierge view of a blocked medical slot", () => {
+  it("drops the controls the server refuses on a blocked slot", () => {
+    const concierge = appointmentPermissions("concierge");
+    expect(concierge.canEditSchedule).toBe(true);
+    expect(concierge.canManageChecklist).toBe(true);
+
+    const blocked = blockedSlotPermissions(concierge);
+    expect(blocked).toEqual(
+      expect.objectContaining({
+        canEditSchedule: false,
+        canDelete: false,
+        canAssignInterpreter: false,
+        canManageChecklist: false,
+        canManageReminders: false,
+        canViewCommunications: false,
+        canManageCommunications: false,
+      }),
+    );
+    expect(blocked.canViewReminders).toBe(true);
+    expect(blocked.canViewTasks).toBe(concierge.canViewTasks);
+  });
+
+  it("does not request the checklist or communications of a blocked slot", () => {
+    const concierge = appointmentPermissions("concierge");
+    const open = getRequiredAppointmentDetailResourceGroups("workflow", true, concierge);
+    expect(open).toEqual(expect.arrayContaining(["checklist", "communications"]));
+
+    const blocked = getRequiredAppointmentDetailResourceGroups(
+      "workflow",
+      true,
+      concierge,
+      true,
+    );
+    expect(blocked).not.toContain("checklist");
+    expect(blocked).not.toContain("communications");
+    expect(blocked).toContain("reminders");
+  });
+});
+
+describe("appointment reminder completion", () => {
+  const reminder = { user_id: "pm-1", is_completed: false };
+
+  it("offers the action to coordinators for any open reminder", () => {
+    expect(
+      canCompleteAppointmentReminder(
+        reminder,
+        appointmentPermissions("patient_manager").canManageReminders,
+        "pm-2",
+      ),
+    ).toBe(true);
+  });
+
+  it("offers the action to other roles only for their own reminders", () => {
+    const { canManageReminders } = appointmentPermissions("interpreter");
+    expect(canManageReminders).toBe(false);
+    expect(
+      canCompleteAppointmentReminder(reminder, canManageReminders, "interpreter-1"),
+    ).toBe(false);
+    expect(
+      canCompleteAppointmentReminder(
+        { user_id: "interpreter-1", is_completed: false },
+        canManageReminders,
+        "interpreter-1",
+      ),
+    ).toBe(true);
+    expect(canCompleteAppointmentReminder(reminder, false, undefined)).toBe(false);
+  });
+
+  it("hides the action once the reminder is completed", () => {
+    expect(
+      canCompleteAppointmentReminder({ ...reminder, is_completed: true }, true, "pm-1"),
     ).toBe(false);
   });
 });

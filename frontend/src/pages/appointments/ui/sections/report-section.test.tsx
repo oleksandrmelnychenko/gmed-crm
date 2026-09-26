@@ -33,7 +33,11 @@ vi.mock("@/pages/appointments/ui/shared/workspace-primitives", async (importOrig
   };
 });
 
-const detail = { id: "appointment-1" } as AppointmentDetail;
+const detail = {
+  id: "appointment-1",
+  status: "confirmed",
+  date: "2026-09-01",
+} as AppointmentDetail;
 
 function report(overrides: Partial<ReportSummary> = {}): ReportSummary {
   return {
@@ -62,11 +66,12 @@ const noActions = {
 function renderReadOnly(
   detailReport: ReportSummary | null,
   reportActions: typeof noActions,
+  appointment: AppointmentDetail = detail,
 ) {
   return renderToStaticMarkup(
     <ReadOnlyScope banner={false}>
       <MemoizedAppointmentReportSection
-        detail={detail}
+        detail={appointment}
         detailReport={detailReport}
         reportReviewMeta=""
         reportActions={reportActions}
@@ -119,6 +124,20 @@ describe("AppointmentReportSection on the read-only interpreter page", () => {
     expect(input).toContain('value="2.5"');
     expect(tagDisabled(submitButton(html))).toBe(false);
     expect(html).toContain("Повторно отправить отчёт");
+  });
+
+  it("explains that an unconfirmed appointment takes no report yet", () => {
+    const html = renderReadOnly(
+      null,
+      { ...noActions, canSubmitInterpreterReport: true },
+      { ...detail, status: "planned" },
+    );
+
+    expect(html).toContain('data-testid="appointment-report-date-hint"');
+    expect(html).toContain(
+      uiText("appointments_report_requires_confirmed_appointment", "ru"),
+    );
+    expect(tagDisabled(submitButton(html))).toBe(true);
   });
 
   it("does not render the submission form for read-only viewers", () => {

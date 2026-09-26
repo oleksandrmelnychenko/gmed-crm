@@ -435,6 +435,7 @@ function useAppointmentMobileDetailSheetContentContent({
                       reminders={detailReminders}
                       staff={staff}
                       canManageReminders={permissions.canManageReminders}
+                      currentUserId={currentUserId}
                       onRefresh={onRefresh}
                       onError={onError}
                     />
