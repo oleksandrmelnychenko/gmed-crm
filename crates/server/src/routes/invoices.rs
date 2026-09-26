@@ -643,7 +643,52 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
     )
 }
 
+/// Staff working context in the invoice detail that the patient portal must
+/// not receive: internal visibility notes, advances available for crediting,
+/// the supporting documents list and the contract link.
+const STAFF_ONLY_INVOICE_KEYS: [&str; 4] = [
+    "visibility_note",
+    "available_prepayments",
+    "supporting_documents",
+    "contract_id",
+];
+
+/// Internal pricing and sourcing fields of an invoice line (VAT source
+/// explanation, tax profile, provider/doctor and source record ids).
+const STAFF_ONLY_INVOICE_LINE_KEYS: [&str; 15] = [
+    "vat_source",
+    "vat_source_explanation",
+    "tax_profile_id",
+    "tax_profile_key",
+    "tax_profile_name",
+    "tax_profile_vat_rate",
+    "doctor_id",
+    "provider_id",
+    "source_order_leistung_id",
+    "source_order_id",
+    "source_document_id",
+    "source_external_invoice_id",
+    "external_document_id",
+    "quote_line_index",
+    "quoted_quantity",
+];
+
 fn redact_patient_invoice_payload(invoice: &mut Value) {
+    if let Some(map) = invoice.as_object_mut() {
+        for key in STAFF_ONLY_INVOICE_KEYS {
+            map.remove(key);
+        }
+        if let Some(payer) = map.get_mut("payer").and_then(Value::as_object_mut) {
+            payer.remove("notes");
+        }
+        if let Some(items) = map.get_mut("line_items").and_then(Value::as_array_mut) {
+            for item in items.iter_mut().filter_map(Value::as_object_mut) {
+                for key in STAFF_ONLY_INVOICE_LINE_KEYS {
+                    item.remove(key);
+                }
+            }
+        }
+    }
     let Some(visibility) = invoice.get("portal_visibility").cloned() else {
         return;
     };
@@ -675,6 +720,8 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
         ] {
             map.insert(key.to_string(), Value::Null);
         }
+        // Each credited advance carries its amount.
+        map.insert("prepayment_allocations".to_string(), serde_json::json!([]));
     }
 
     if !line_items_visible {
@@ -10933,6 +10980,68 @@ mod tests {
         assert!(prepaid_text.contains("100,00 €"));
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod patient_invoice_redaction_tests {
+    use super::redact_patient_invoice_payload;
+    use serde_json::json;
+
+    #[test]
+    fn portal_payload_drops_staff_context_but_keeps_what_the_patient_sees() {
+        let mut invoice = json!({
+            "invoice_number": "INV-1",
+            "total_gross": "1612",
+            "visibility_note": "internal",
+            "available_prepayments": [{ "invoice_number": "INV-A", "available_amount": "700" }],
+            "supporting_documents": [{ "auto_name": "Hotel original.pdf" }],
+            "contract_id": "c",
+            "payer": { "contact_name": "Ivan", "notes": "calls after 6pm" },
+            "prepayment_allocations": [{ "amount_gross": "300" }],
+            "portal_visibility": {
+                "amounts_visible_to_patient": true,
+                "line_items_visible_to_patient": true
+            },
+            "line_items": [{
+                "description": "Hotel · HI-1",
+                "quantity": "1",
+                "unit_price": "481.5",
+                "vat_rate": "0",
+                "line_gross": "481.5",
+                "is_cost_passthrough": true,
+                "source_document_id": "d",
+                "source_external_invoice_id": "e",
+                "vat_source_explanation": "VAT is a legacy snapshot",
+                "provider_id": "p"
+            }]
+        });
+        redact_patient_invoice_payload(&mut invoice);
+
+        for key in [
+            "visibility_note",
+            "available_prepayments",
+            "supporting_documents",
+            "contract_id",
+        ] {
+            assert!(invoice.get(key).is_none(), "{key}");
+        }
+        assert!(invoice["payer"].get("notes").is_none());
+        assert_eq!(invoice["payer"]["contact_name"], "Ivan");
+        assert_eq!(invoice["total_gross"], "1612");
+        assert_eq!(invoice["prepayment_allocations"][0]["amount_gross"], "300");
+        let line = &invoice["line_items"][0];
+        assert_eq!(line["description"], "Hotel · HI-1");
+        assert_eq!(line["line_gross"], "481.5");
+        assert_eq!(line["is_cost_passthrough"], true);
+        for key in [
+            "source_document_id",
+            "source_external_invoice_id",
+            "vat_source_explanation",
+            "provider_id",
+        ] {
+            assert!(line.get(key).is_none(), "{key}");
         }
     }
 }

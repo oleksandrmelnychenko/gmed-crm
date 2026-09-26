@@ -686,6 +686,19 @@ async fn patient_invoice_amount_redaction_hides_api_amounts_and_blocks_pdf() {
     assert_eq!(status, StatusCode::OK);
     assert!(detail["total_net"].is_null());
     assert_eq!(detail["line_items"].as_array().unwrap().len(), 0);
+    // Staff working context stays in the staff workspace: the internal
+    // visibility note ("paid by family"), advances available for crediting
+    // and the supporting documents list.
+    for key in [
+        "visibility_note",
+        "available_prepayments",
+        "supporting_documents",
+        "contract_id",
+    ] {
+        assert!(detail.get(key).is_none(), "{key} leaked: {detail}");
+    }
+    assert!(!detail.to_string().contains("paid by family"));
+    assert_eq!(detail["prepayment_allocations"], json!([]));
 
     let (status, _, _) = binary_request(
         &app,
