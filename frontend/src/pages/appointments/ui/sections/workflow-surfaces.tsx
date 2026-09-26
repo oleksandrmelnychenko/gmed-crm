@@ -1537,7 +1537,7 @@ function AppointmentRemindersSection({
         <WorkflowSheetBody>
           <WorkflowSheetSection title={t.appointments_add_reminder}>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field compact label={t.patients_assign_owner}>
+          <Field compact label={appointmentText("patients_owner")}>
             <NativeComboboxSelect
               value={form.userId}
               onChange={(event) =>
@@ -1810,7 +1810,7 @@ function AppointmentCompletionSectionContent({
             </Button>
           }
         >
-          <Field compact label={tr.patients_assign_owner}>
+          <Field compact label={appointmentText("patients_owner")}>
             <NativeComboboxSelect
               value={followUpAssigneeId}
               onChange={(event) => setFollowUpAssigneeId(event.target.value)}
@@ -2423,7 +2423,7 @@ function AppointmentTaskEditorSheet({
                 required
               />
             </Field>
-            <Field compact label={tr.patients_assign_owner}>
+            <Field compact label={appointmentText("patients_owner")}>
               <NativeComboboxSelect
                 value={form.assignedTo}
                 onChange={(event) =>
@@ -2443,7 +2443,7 @@ function AppointmentTaskEditorSheet({
                 ))}
               </NativeComboboxSelect>
             </Field>
-            <Field compact label={tr.invoices_due_at}>
+            <Field compact label={appointmentText("patients_due_date")}>
               <Input
                 type="datetime-local"
                 value={form.dueDate}
@@ -2456,7 +2456,7 @@ function AppointmentTaskEditorSheet({
                 className={appointmentSlateInputClassName}
               />
             </Field>
-            <Field compact label={t.users_status}>
+            <Field compact label={appointmentText("patients_priority")}>
               <NativeComboboxSelect
                 value={form.priority}
                 onChange={(event) =>

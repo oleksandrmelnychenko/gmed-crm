@@ -127,7 +127,7 @@ export function AppointmentRemindersTable({
       },
       {
         id: "user",
-        label: tr.patients_owner ?? tr.users_role,
+        label: appointmentText("patients_owner"),
         accessor: (item) => item.user_name,
         filterType: "text",
         sortable: true,
@@ -256,7 +256,7 @@ export function AppointmentTasksTable({
       },
       {
         id: "assignee",
-        label: tr.patients_owner ?? tr.users_role,
+        label: appointmentText("patients_owner"),
         accessor: (item) =>
           `${item.assigned_to_name} · ${roleLabel(item.assigned_to_role)}`,
         filterType: "text",
@@ -316,7 +316,7 @@ export function AppointmentTasksTable({
       },
       {
         id: "due_date",
-        label: tr.orders_due ?? tr.appointments_date,
+        label: appointmentText("patients_due_date"),
         accessor: (item) => item.due_date ?? "",
         filterType: "date",
         sortable: true,
