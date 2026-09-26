@@ -161,9 +161,13 @@ function PdfPreview({ documentId, packageDocuments, onReady, onRetry }: Props & 
     if (!viewport || !container || rendering) return;
 
     const updateCurrentPage = () => {
+      const pages = container.querySelectorAll<HTMLElement>("[data-pdf-page]");
+      // A zoom change empties the container before the new render starts;
+      // reading it then would reset the page to restore to page 1.
+      if (pages.length === 0) return;
       const marker = viewport.getBoundingClientRect().top + Math.min(120, viewport.clientHeight * 0.25);
       let nextPage = 1;
-      for (const page of container.querySelectorAll<HTMLElement>("[data-pdf-page]")) {
+      for (const page of pages) {
         if (page.getBoundingClientRect().top <= marker) {
           nextPage = Number(page.dataset.pdfPage) || nextPage;
         } else {

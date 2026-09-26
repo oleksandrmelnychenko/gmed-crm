@@ -814,6 +814,28 @@ test("PDF pages and zoom render without a browser PDF plugin or native iterator 
   expect(errors).toEqual([]);
 });
 
+test("quick zoom changes keep the reader on the current page", async ({ page }) => {
+  await prepare(page);
+  const multipagePdf = readFileSync(new URL("./fixtures/signature-preview-multipage.pdf", import.meta.url));
+  await page.route(`**/api/v1/documents/${documentId}/download`, route => route.fulfill({ contentType: "application/pdf", body: multipagePdf }));
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  const counter = dialog.getByLabel("PDF zur Unterschrift", { exact: true });
+  const zoomIn = dialog.getByRole("button", { name: "Vergrößern", exact: true });
+  const zoomOut = dialog.getByRole("button", { name: "Verkleinern", exact: true });
+  await expect(dialog.getByRole("img", { name: "PDF, Seite 1", exact: true })).toHaveAccessibleDescription(/GMED/);
+  await dialog.getByRole("button", { name: "Nächste Seite", exact: true }).click();
+  await expect(counter.getByText("2 / 2", { exact: true })).toBeVisible();
+  // Two zoom changes before the first render finishes used to restore page 1.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await zoomIn.click();
+    await zoomOut.click();
+    await expect(dialog.getByRole("img", { name: "PDF, Seite 2", exact: true })).toHaveAccessibleDescription(/GMED/);
+    await expect(counter.getByText("2 / 2", { exact: true })).toBeVisible();
+  }
+});
+
 test("preview failures block sending until a successful retry and completed DEMO hides the new composer", async ({ page }) => {
   const fixture = await prepare(page);
   const signers = [
