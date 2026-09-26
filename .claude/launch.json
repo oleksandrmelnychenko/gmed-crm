@@ -12,6 +12,12 @@
       "runtimeExecutable": "fnm",
       "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5174"],
       "port": 5174
+    },
+    {
+      "name": "frontend-local-stack",
+      "runtimeExecutable": "fnm",
+      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4174", "--strictPort"],
+      "port": 4174
     }
   ]
 }
