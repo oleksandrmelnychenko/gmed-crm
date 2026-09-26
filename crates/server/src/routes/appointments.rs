@@ -2747,6 +2747,26 @@ fn is_allowed_appointment_status_transition(current: &str, target: &str) -> bool
 const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE: &str = "appointment_completion_before_date";
 const APPOINTMENT_REPORT_BEFORE_DATE_CODE: &str = "appointment_report_before_date";
 const APPOINTMENT_REPORTED_FUTURE_DATE_CODE: &str = "appointment_reported_future_date";
+const APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE: &str = "appointment_report_status_not_open";
+
+/// Interpreter reports open once the appointment is confirmed (or already in
+/// progress / completed). The code lets the client explain that the
+/// coordinator still has to confirm the appointment.
+fn report_status_not_open(
+    appointment_id: Uuid,
+    appointment_status: &str,
+    message: &str,
+) -> axum::response::Response {
+    err_with_details(
+        StatusCode::CONFLICT,
+        message,
+        serde_json::json!({
+            "code": APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE,
+            "appointment_id": appointment_id,
+            "appointment_status": appointment_status,
+        }),
+    )
+}
 
 /// Completion counts as delivery (billing lines, order execution evidence), so
 /// it only opens on the appointment's own day in the business timezone. The
@@ -6235,6 +6255,28 @@ async fn list_reminders(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    // A concierge sees a medical appointment only as a blocked slot, so the
+    // reminders other staff keep on it (free-text titles and descriptions
+    // about the visit) stay hidden; only reminders addressed to the concierge
+    // are listed.
+    let only_own_reminders = if auth.role == Role::Concierge {
+        match sqlx::query_scalar::<_, String>(
+            "SELECT appointment_type FROM appointments WHERE id = $1",
+        )
+        .bind(apt_id)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(Some(appointment_type)) => is_blocked_slot(&auth, &appointment_type),
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "load appointment type for reminders");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        false
+    };
 
     match sqlx::query(
         r#"SELECT r.id, r.user_id, r.remind_at, r.title, r.description, r.is_completed,
@@ -6242,9 +6284,12 @@ async fn list_reminders(
            FROM reminders r
            JOIN users u ON u.id = r.user_id
            WHERE r.appointment_id = $1
+             AND ($2::bool = false OR r.user_id = $3)
            ORDER BY r.is_completed, r.remind_at, r.created_at"#,
     )
     .bind(apt_id)
+    .bind(only_own_reminders)
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     {
@@ -6801,8 +6846,9 @@ async fn submit_report(
         appointment_status.as_str(),
         "confirmed" | "in_progress" | "completed"
     ) {
-        return err(
-            StatusCode::CONFLICT,
+        return report_status_not_open(
+            apt_id,
+            &appointment_status,
             "Interpreter reports are only available for confirmed, in-progress or completed appointments",
         );
     }
@@ -7632,8 +7678,9 @@ async fn approve_report(
         appointment_status.as_str(),
         "confirmed" | "in_progress" | "completed"
     ) {
-        return err(
-            StatusCode::CONFLICT,
+        return report_status_not_open(
+            apt_id,
+            &appointment_status,
             "Reports can only be approved for confirmed, in-progress or completed appointments",
         );
     }
@@ -8141,6 +8188,17 @@ fn berlin_today() -> chrono::NaiveDate {
         .date_naive()
 }
 
+/// Receipts are collected once the non-medical service is over: the task is
+/// due at 18:00 on the service day, or when a later service ends.
+fn concierge_receipts_due_at(
+    date: chrono::NaiveDate,
+    time_end: Option<chrono::NaiveTime>,
+) -> chrono::DateTime<chrono::Utc> {
+    let evening = chrono::NaiveTime::from_hms_opt(18, 0, 0).unwrap_or_default();
+    let due_time = time_end.filter(|end| *end > evening).unwrap_or(evening);
+    appointment_due_at(date, Some(due_time), 18)
+}
+
 fn appointment_due_at(
     date: chrono::NaiveDate,
     time_start: Option<chrono::NaiveTime>,
@@ -8172,6 +8230,7 @@ fn appointment_due_at(
     unreachable!("Europe/Berlin must have a valid local instant within three hours")
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn bootstrap_concierge_workflow(
     state: &AppState,
     assigned_by: Uuid,
@@ -8180,6 +8239,7 @@ async fn bootstrap_concierge_workflow(
     title: &str,
     date: chrono::NaiveDate,
     time_start: Option<chrono::NaiveTime>,
+    time_end: Option<chrono::NaiveTime>,
 ) -> Result<(), axum::response::Response> {
     let concierges = load_active_patient_role_users(state, patient_id, "concierge").await?;
     if concierges.is_empty() {
@@ -8192,7 +8252,7 @@ async fn bootstrap_concierge_workflow(
 
     let reminder_at = appointment_due_at(date, time_start, 9);
     let prep_due = appointment_due_at(date, time_start, 8);
-    let followup_due = appointment_due_at(date, None, 18);
+    let followup_due = concierge_receipts_due_at(date, time_end);
 
     for concierge_id in concierges {
         create_reminder_record(
@@ -8349,7 +8409,7 @@ async fn reconcile_auto_concierge_schedule_in_tx(
 ) -> Result<(), axum::response::Response> {
     let reminder_at = appointment_due_at(date, time_start, 9);
     let prep_due = appointment_due_at(date, time_start, 8);
-    let followup_due = appointment_due_at(date, None, 18);
+    let followup_due = concierge_receipts_due_at(date, time_end);
     let starts_at = time_start.map(|value| appointment_due_at(date, Some(value), 9));
     let ends_at = time_end.map(|value| appointment_due_at(date, Some(value), 18));
 
@@ -8486,6 +8546,7 @@ async fn bootstrap_non_medical_artifacts(
         title,
         date,
         time_start,
+        time_end,
     )
     .await
     .err();
@@ -10000,5 +10061,24 @@ mod tests {
 
         assert_eq!(summer.to_rfc3339(), "2026-07-17T07:00:00+00:00");
         assert_eq!(winter.to_rfc3339(), "2026-01-17T08:00:00+00:00");
+    }
+
+    #[test]
+    fn concierge_receipts_are_due_after_the_service_ends() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 9, 26).expect("valid date");
+        // A dinner from 19:00 to 21:30 cannot have its receipts collected at 18:00.
+        assert_eq!(
+            concierge_receipts_due_at(date, Some(time(21, 30))).to_rfc3339(),
+            "2026-09-26T19:30:00+00:00"
+        );
+        // Daytime services and services without a time keep the 18:00 deadline.
+        assert_eq!(
+            concierge_receipts_due_at(date, Some(time(11, 0))).to_rfc3339(),
+            "2026-09-26T16:00:00+00:00"
+        );
+        assert_eq!(
+            concierge_receipts_due_at(date, None).to_rfc3339(),
+            "2026-09-26T16:00:00+00:00"
+        );
     }
 }

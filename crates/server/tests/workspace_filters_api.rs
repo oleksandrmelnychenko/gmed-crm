@@ -7638,6 +7638,113 @@ async fn concierge_cannot_access_communications_for_blocked_medical_slots() {
 }
 
 #[tokio::test]
+async fn concierge_sees_only_own_reminders_on_blocked_medical_slots() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("reminders-blocked");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+
+    let medical_id = seed_appointment_with_type(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        "Oncology second opinion",
+        "confirmed",
+        "2026-05-04",
+        "medical",
+        Some("Clinic room B"),
+    )
+    .await;
+    let non_medical_id = seed_appointment_with_type(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        "Opera tickets",
+        "confirmed",
+        "2026-05-05",
+        "non_medical",
+        None,
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    for (appointment_id, user_id, title) in [
+        (medical_id, pm_id, "Bring the MRI CD for the oncologist"),
+        (medical_id, concierge_id, "Car at the clinic entrance"),
+        (non_medical_id, pm_id, "Confirm the opera seats"),
+    ] {
+        let (status, _) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/appointments/{appointment_id}/reminders"),
+            &pm_bearer,
+            Some(json!({
+                "user_id": user_id,
+                "remind_at": "2026-05-03T08:00:00Z",
+                "title": title,
+                "description": "Synthetic reminder"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "reminder: {title}");
+    }
+
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{medical_id}/reminders"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let titles: Vec<&str> = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(titles, vec!["Car at the clinic entrance"]);
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{non_medical_id}/reminders"),
+        &concierge_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body[0]["title"], "Confirm the opera seats");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{medical_id}/reminders"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn ceo_can_load_and_manage_appointment_workflow_resources() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -8376,6 +8483,76 @@ async fn reported_appointments_cannot_be_moved_to_a_future_date() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn interpreter_reports_need_a_confirmed_appointment_and_say_so() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("interp-report-status-gate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Planned interpreting {tag}"),
+        "planned",
+        &berlin_today().to_string(),
+    )
+    .await;
+    sqlx::query(
+        "UPDATE appointments
+         SET interpreter_id = $2, interpreter_response = 'accepted'
+         WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/report"),
+        &auth_header_for(interpreter_id, "interpreter"),
+        Some(json!({ "hours": 1.5, "report_text": "planned only" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "appointment_report_status_not_open");
+    assert_eq!(body["appointment_status"], "planned");
+
+    sqlx::query(
+        r#"INSERT INTO interpreter_reports (appointment_id, interpreter_id, hours, report_text)
+           VALUES ($1, $2, 1.5, 'submitted while confirmed')"#,
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/report/approve"),
+        &auth_header_for(pm_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "appointment_report_status_not_open");
 }
 
 #[tokio::test]
