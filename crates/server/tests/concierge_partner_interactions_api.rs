@@ -371,6 +371,115 @@ async fn assigned_concierge_records_non_medical_partner_booking_history() {
 }
 
 #[tokio::test]
+async fn concierge_keeps_vendor_details_of_services_without_a_provider() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("vendor-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("vendor-{tag}")).await;
+    let medical_provider_id = seed_provider(&ctx.pool, "medical", &format!("clinic-{tag}")).await;
+    let direct_service_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_services (
+               patient_id, assigned_concierge_id, service_kind, title, vendor_name,
+               vendor_contact, booking_reference, service_notes, created_by
+           ) VALUES ($1, $2, 'other', 'Restaurant dinner', 'Synthetic Bistro',
+                     '+49 30 0000000', 'TABLE-7', 'Window seat', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(concierge_id)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let clinic_service_id = seed_concierge_service(
+        &ctx.pool,
+        patient_id,
+        medical_provider_id,
+        concierge_id,
+        ctx.admin_id,
+        "Sensitive clinic coordination",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE concierge_services
+         SET vendor_name = 'Clinic desk', booking_reference = 'CLINIC-1', service_notes = 'Clinical context'
+         WHERE id = $1",
+    )
+    .bind(clinic_service_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let bearer = auth_header_for(concierge_id, "concierge");
+
+    // A service booked without a provider is the concierge's own data.
+    let (status, service) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-services/{direct_service_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{service}");
+    assert_eq!(service["title"], "Restaurant dinner");
+    assert_eq!(service["vendor_name"], "Synthetic Bistro");
+    assert_eq!(service["vendor_contact"], "+49 30 0000000");
+    assert_eq!(service["booking_reference"], "TABLE-7");
+    assert_eq!(service["service_notes"], "Window seat");
+
+    let (status, updated) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{direct_service_id}/update"),
+        &bearer,
+        Some(json!({ "vendor_name": "Synthetic Brasserie", "service_notes": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["vendor_name"], "Synthetic Brasserie");
+    assert!(updated["service_notes"].is_null());
+
+    // The redacted editor of a medical-provider service sends its hidden
+    // fields back empty; a status change must not wipe them.
+    let (status, updated) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{clinic_service_id}/update"),
+        &bearer,
+        Some(json!({
+            "status": "in_service",
+            "vendor_name": null,
+            "vendor_contact": null,
+            "booking_reference": null,
+            "service_notes": null
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["title"], "Service request");
+    assert!(updated["vendor_name"].is_null());
+    let (vendor_name, booking_reference, service_notes, service_status): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    ) = sqlx::query_as(
+        "SELECT vendor_name, booking_reference, service_notes, status
+         FROM concierge_services WHERE id = $1",
+    )
+    .bind(clinic_service_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(vendor_name.as_deref(), Some("Clinic desk"));
+    assert_eq!(booking_reference.as_deref(), Some("CLINIC-1"));
+    assert_eq!(service_notes.as_deref(), Some("Clinical context"));
+    assert_eq!(service_status, "in_service");
+}
+
+#[tokio::test]
 async fn concierge_partner_workflow_rejects_and_redacts_medical_provider() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;

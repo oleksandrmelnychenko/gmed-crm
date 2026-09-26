@@ -3999,8 +3999,16 @@ async fn update_concierge_service(
         }
     }
 
+    // Fields the caller's role receives redacted come back from its editor
+    // as empty values; saving them must not wipe what was stored.
+    let redaction = service_redaction_for_role(&existing, auth.role);
+    let unchanged = NullablePatchValue::Missing;
     let booking_reference = match parse_optional_text_patch(
-        &body.booking_reference,
+        visible_patch(
+            &body.booking_reference,
+            redaction.medical_provider,
+            &unchanged,
+        ),
         existing
             .try_get::<Option<String>, _>("booking_reference")
             .unwrap_or_default(),
@@ -4010,7 +4018,7 @@ async fn update_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let vendor_name = match parse_optional_text_patch(
-        &body.vendor_name,
+        visible_patch(&body.vendor_name, redaction.medical_provider, &unchanged),
         existing
             .try_get::<Option<String>, _>("vendor_name")
             .unwrap_or_default(),
@@ -4020,7 +4028,7 @@ async fn update_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let vendor_contact = match parse_optional_text_patch(
-        &body.vendor_contact,
+        visible_patch(&body.vendor_contact, redaction.medical_provider, &unchanged),
         existing
             .try_get::<Option<String>, _>("vendor_contact")
             .unwrap_or_default(),
@@ -4030,7 +4038,11 @@ async fn update_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let service_address = match parse_optional_text_patch(
-        &body.service_address,
+        visible_patch(
+            &body.service_address,
+            redaction.medical_provider,
+            &unchanged,
+        ),
         existing
             .try_get::<Option<String>, _>("service_address")
             .unwrap_or_default(),
@@ -4067,7 +4079,7 @@ async fn update_concierge_service(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let service_notes = match parse_optional_text_patch(
-        &body.service_notes,
+        visible_patch(&body.service_notes, redaction.hides_notes(), &unchanged),
         existing
             .try_get::<Option<String>, _>("service_notes")
             .unwrap_or_default(),
@@ -5475,25 +5487,63 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     })
 }
 
-fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde_json::Value {
-    let mut value = build_service_json(row);
-    if role.can_see_medical_data() {
-        return value;
-    }
+/// What a role without medical access must not see of a service: the
+/// context of a linked medical appointment, and the details of a linked
+/// medical provider. A service without a provider (a restaurant or florist
+/// booked directly) keeps its vendor and booking details visible.
+#[derive(Clone, Copy, Default)]
+struct ServiceRedaction {
+    medical_appointment: bool,
+    medical_provider: bool,
+}
 
-    let Some(service) = value.as_object_mut() else {
-        return value;
-    };
+impl ServiceRedaction {
+    fn hides_notes(self) -> bool {
+        self.medical_appointment || self.medical_provider
+    }
+}
+
+/// The patch of a field the caller only sees redacted is ignored.
+fn visible_patch<'a>(
+    patch: &'a NullablePatchValue,
+    hidden: bool,
+    unchanged: &'a NullablePatchValue,
+) -> &'a NullablePatchValue {
+    if hidden { unchanged } else { patch }
+}
+
+fn service_redaction_for_role(row: &sqlx::postgres::PgRow, role: Role) -> ServiceRedaction {
+    if role.can_see_medical_data() {
+        return ServiceRedaction::default();
+    }
     let has_appointment = row
         .try_get::<Option<Uuid>, _>("appointment_id")
         .unwrap_or_default()
         .is_some();
-    let appointment_is_non_medical = row
+    let appointment_type = row
         .try_get::<Option<String>, _>("linked_appointment_type")
+        .unwrap_or_default();
+    let has_provider = row
+        .try_get::<Option<Uuid>, _>("provider_id")
         .unwrap_or_default()
-        .as_deref()
-        == Some("non_medical");
-    if has_appointment && !appointment_is_non_medical {
+        .is_some();
+    let provider_type = row
+        .try_get::<Option<String>, _>("linked_provider_type")
+        .unwrap_or_default();
+    ServiceRedaction {
+        medical_appointment: has_appointment && appointment_type.as_deref() != Some("non_medical"),
+        medical_provider: has_provider && provider_type.as_deref() != Some("non_medical"),
+    }
+}
+
+fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde_json::Value {
+    let mut value = build_service_json(row);
+    let redaction = service_redaction_for_role(row, role);
+
+    let Some(service) = value.as_object_mut() else {
+        return value;
+    };
+    if redaction.medical_appointment {
         service.insert(
             "title".to_string(),
             serde_json::Value::String("Service request".to_string()),
@@ -5502,12 +5552,7 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
         service.insert("service_notes".to_string(), serde_json::Value::Null);
     }
 
-    let provider_is_non_medical = row
-        .try_get::<Option<String>, _>("linked_provider_type")
-        .unwrap_or_default()
-        .as_deref()
-        == Some("non_medical");
-    if !provider_is_non_medical {
+    if redaction.medical_provider {
         service.insert(
             "title".to_string(),
             serde_json::Value::String("Service request".to_string()),
