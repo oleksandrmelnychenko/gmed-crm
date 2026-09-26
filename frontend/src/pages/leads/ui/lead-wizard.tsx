@@ -7786,8 +7786,9 @@ ${serviceCommentLines.join("\n")}`
                       />
                     </Field>
                   ) : null}
-                  <Field className="w-full sm:w-64" label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
-                    <div className="space-y-2">
+                  {/* Hint and link stay outside the <label> so the field is named only by its label. */}
+                  <div className="w-full space-y-2 sm:w-64">
+                    <Field className="block" label={tx("Полученная предоплата", "Erhaltene Vorauszahlung")}>
                       <Input
                         className={cn(inputClass, "font-mono tabular-nums")}
                         inputMode="decimal"
@@ -7798,8 +7799,10 @@ ${serviceCommentLines.join("\n")}`
                         readOnly
                         disabled={!prepayment || isBusy}
                         placeholder="0.00"
+                        aria-describedby={prepayment ? "lead-wizard-received-prepayment-hint" : undefined}
                       />
-                      {prepayment ? <p className="text-xs leading-5 text-muted-foreground">{tx(
+                    </Field>
+                      {prepayment ? <p id="lead-wizard-received-prepayment-hint" className="text-xs leading-5 text-muted-foreground">{tx(
                         "Сумма обновляется из оплат авансового счёта.",
                         "Der Betrag wird aus den Zahlungen der Vorauszahlungsrechnung übernommen.",
                       )}</p> : null}
@@ -7814,8 +7817,7 @@ ${serviceCommentLines.join("\n")}`
                           {tx("Внести предоплату", "Vorauszahlung erfassen")}
                         </StaffLink>
                       ) : null}
-                    </div>
-                  </Field>
+                  </div>
                   {!acceptedQuote ? (
                     <Button
                       type="button"
