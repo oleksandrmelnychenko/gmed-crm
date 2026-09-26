@@ -19,7 +19,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -45,6 +45,11 @@ import {
   recommendationTypeLabel,
 } from "@/pages/patients/model/portal-shared";
 import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
+import {
+  formatNextActionKind,
+  nextActionButtonLabel,
+  nextActionDescription,
+} from "@/pages/patients/model/portal-next-actions";
 import type {
   PortalAppointmentItem,
   PortalConciergeServiceItem,
@@ -119,22 +124,6 @@ function compareNextActions(a: PortalNextActionItem, b: PortalNextActionItem) {
   const aDue = a.due_at ? Date.parse(a.due_at) : Number.POSITIVE_INFINITY;
   const bDue = b.due_at ? Date.parse(b.due_at) : Number.POSITIVE_INFINITY;
   return aDue - bDue;
-}
-
-const NEXT_ACTION_KIND_LABEL_KEYS = {
-  invoice_payment: "portal_dashboard_next_action_invoice_payment",
-  package_approval: "portal_dashboard_next_action_package_approval",
-  document_confirmation: "portal_dashboard_next_action_document_confirmation",
-  recommendation_decision: "portal_dashboard_next_action_recommendation_decision",
-  appointment_request: "portal_dashboard_next_action_appointment_request",
-  privacy_request: "portal_dashboard_next_action_privacy_request",
-  feedback_request: "portal_dashboard_next_action_feedback_request",
-  concierge_service: "portal_dashboard_next_action_concierge_service",
-} satisfies Partial<Record<string, keyof Translations>>;
-
-function formatNextActionKind(kind: string, translations: Translations) {
-  const labelKey = NEXT_ACTION_KIND_LABEL_KEYS[kind as keyof typeof NEXT_ACTION_KIND_LABEL_KEYS];
-  return labelKey ? translations[labelKey] : formatUnknownValue(kind, translations);
 }
 
 function formatPortalCountLabel(template: string, count: number) {
@@ -538,7 +527,9 @@ function usePatientDashboardPageContent() {
                         <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
                       </div>
                       <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
-                      {item.description ? <p className={cn("mt-1", tokens.text.muted)}>{item.description}</p> : null}
+                      {nextActionDescription(item, t) ? (
+                        <p className={cn("mt-1", tokens.text.muted)}>{nextActionDescription(item, t)}</p>
+                      ) : null}
                     </div>
                   </div>
                   {(item.due_at || item.amount) ? (
@@ -553,7 +544,7 @@ function usePatientDashboardPageContent() {
                   ) : null}
                   <div className="flex justify-end">
                     <a href={item.action_url} className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">
-                      {item.action_label}
+                      {nextActionButtonLabel(item, t)}
                     </a>
                   </div>
                 </ListItem>

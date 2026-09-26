@@ -726,6 +726,9 @@ const PORTAL_DOCUMENT_VALUE_LABEL_KEYS = {
   medical: "portal_document_label_medical",
   medical_report: "portal_document_label_medical_report",
   payment_proof: "portal_document_label_payment_proof",
+  // Preparation sheets generated from a provider template on confirmation.
+  provider_template: "portal_document_label_provider_instructions",
+  provider_template_instruction: "portal_document_label_provider_instructions",
   report: "portal_document_label_medical_report",
   translated_letter: "portal_document_label_translation",
   translations: "portal_document_label_translation",

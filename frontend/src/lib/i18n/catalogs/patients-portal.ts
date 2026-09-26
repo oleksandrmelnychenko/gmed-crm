@@ -48,6 +48,7 @@ export interface PatientsPortalTranslations {
   portal_document_label_medical: string;
   portal_document_label_medical_report: string;
   portal_document_label_payment_proof: string;
+  portal_document_label_provider_instructions: string;
   portal_document_label_translation: string;
   portal_document_source_patient_portal: string;
   portal_document_source_portal_release: string;
@@ -418,6 +419,13 @@ export interface PatientsPortalTranslations {
   portal_dashboard_next_action_privacy_request: string;
   portal_dashboard_next_action_feedback_request: string;
   portal_dashboard_next_action_concierge_service: string;
+  portal_dashboard_next_action_upcoming_appointment: string;
+  portal_dashboard_next_action_invoice_payment_hint: string;
+  portal_dashboard_next_action_document_confirmation_hint: string;
+  portal_dashboard_open_appointments: string;
+  portal_dashboard_open_invoices: string;
+  portal_dashboard_open_recommendations: string;
+  portal_dashboard_contact_care_team: string;
   portal_dashboard_priority: string;
   portal_dashboard_recommendations: string;
   portal_dashboard_a_consolidated_block_from_appointments_recommendations_documents: string;
@@ -990,6 +998,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_document_label_medical: "Медицинский",
   portal_document_label_medical_report: "Медицинский отчет",
   portal_document_label_payment_proof: "Подтверждение оплаты",
+  portal_document_label_provider_instructions: "Памятка клиники",
   portal_document_label_translation: "Перевод",
   portal_document_source_patient_portal: "Портал пациента",
   portal_document_source_portal_release: "Публикация в портале",
@@ -1360,6 +1369,13 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_dashboard_next_action_privacy_request: "Запрос приватности",
   portal_dashboard_next_action_feedback_request: "Оставить отзыв",
   portal_dashboard_next_action_concierge_service: "Дополнительная услуга",
+  portal_dashboard_next_action_upcoming_appointment: "Предстоящий визит",
+  portal_dashboard_next_action_invoice_payment_hint: "Открытый остаток по счёту.",
+  portal_dashboard_next_action_document_confirmation_hint: "Подтвердите, пожалуйста, получение документа.",
+  portal_dashboard_open_appointments: "Открыть визиты",
+  portal_dashboard_open_invoices: "Открыть счета",
+  portal_dashboard_open_recommendations: "Открыть рекомендации",
+  portal_dashboard_contact_care_team: "Связаться с командой",
   portal_dashboard_priority: "Приоритет",
   portal_dashboard_recommendations: "Рекомендации",
   portal_dashboard_a_consolidated_block_from_appointments_recommendations_documents: "Единый блок из визитов, рекомендаций, документов и видимых счетов.",
@@ -1923,6 +1939,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_document_label_medical: "Medizinisch",
   portal_document_label_medical_report: "Medizinischer Bericht",
   portal_document_label_payment_proof: "Zahlungsnachweis",
+  portal_document_label_provider_instructions: "Hinweisblatt der Klinik",
   portal_document_label_translation: "Übersetzung",
   portal_document_source_patient_portal: "Patientenportal",
   portal_document_source_portal_release: "Portalfreigabe",
@@ -2293,6 +2310,13 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_dashboard_next_action_privacy_request: "Datenschutzanfrage",
   portal_dashboard_next_action_feedback_request: "Feedback abgeben",
   portal_dashboard_next_action_concierge_service: "Zusatzservice",
+  portal_dashboard_next_action_upcoming_appointment: "Anstehender Termin",
+  portal_dashboard_next_action_invoice_payment_hint: "Offener Rechnungsbetrag.",
+  portal_dashboard_next_action_document_confirmation_hint: "Bitte bestätigen Sie den Erhalt dieses Dokuments.",
+  portal_dashboard_open_appointments: "Termine öffnen",
+  portal_dashboard_open_invoices: "Rechnungen öffnen",
+  portal_dashboard_open_recommendations: "Empfehlungen öffnen",
+  portal_dashboard_contact_care_team: "Care-Team kontaktieren",
   portal_dashboard_priority: "Priorität",
   portal_dashboard_recommendations: "Empfehlungen",
   portal_dashboard_a_consolidated_block_from_appointments_recommendations_documents: "Ein konsolidierter Block aus Terminen, Empfehlungen, Dokumenten und sichtbaren Rechnungen.",
