@@ -2082,6 +2082,50 @@ function readinessReasonStep(reason: string): StepId {
   return steps[reason] ?? "release";
 }
 
+export type CommercialSaveFeedback = {
+  tone: "error" | "success" | "warning";
+  message: string;
+  /** The message follows the lead's live readiness instead of the save moment. */
+  followsReadiness?: boolean;
+};
+
+/**
+ * What the "Договор и смета" step still needs, from the lead's current
+ * readiness. The hint shown after "Сохранить договор и заказ" is recomputed
+ * from it, so creating or signing the contract, the order document or the
+ * quote afterwards removes the finished items instead of leaving a stale list.
+ */
+export function commercialReadinessFeedback(
+  readiness: Pick<LeadDetail["readiness"], "blocking_reasons" | "steps"> | null | undefined,
+  tx: Tx,
+): CommercialSaveFeedback {
+  const commercialReady = readiness?.steps.some(
+    (item) => item.key === "commercial" && item.ready,
+  ) ?? false;
+  if (commercialReady) {
+    return {
+      tone: "success",
+      message: tx(
+        "Договор и заказ сохранены и завершены",
+        "Vertrag und Auftrag wurden gespeichert und abgeschlossen",
+      ),
+    };
+  }
+  const remaining = (readiness?.blocking_reasons ?? [])
+    .filter((reason) => readinessReasonStep(reason) === "commercial" || reason === COST_ESTIMATE_WORK_TYPES_REASON)
+    .map((reason) => readinessReasonLabel(reason, tx));
+  return {
+    tone: "warning",
+    message: remaining.length > 0
+      ? tx("Данные сохранены. Для завершения: ", "Daten gespeichert. Zum Abschluss: ")
+        + remaining.join("; ")
+      : tx(
+          "Данные сохранены. Этап ещё не завершён — проверьте документы, подписи и смету.",
+          "Daten gespeichert. Der Schritt ist noch nicht abgeschlossen – prüfen Sie Dokumente, Unterschriften und Kostenvoranschlag.",
+        ),
+  };
+}
+
 function readinessReasonFieldId(reason: string, draft: Draft | null) {
   const fields: Record<string, string> = {
     "Birth date is missing": MASTER_FIELD_IDS.birthDate,
@@ -2658,10 +2702,8 @@ export function LeadWizard({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [commercialSaveFeedback, setCommercialSaveFeedback] = useState<{
-    tone: "error" | "success" | "warning";
-    message: string;
-  } | null>(null);
+  const [commercialSaveFeedback, setCommercialSaveFeedback] =
+    useState<CommercialSaveFeedback | null>(null);
   const [commercialDocumentErrors, setCommercialDocumentErrors] = useState<
     Partial<Record<CommercialDocumentKind, string>>
   >({});
@@ -5002,32 +5044,11 @@ ${serviceCommentLines.join("\n")}`
     try {
       await ensureCommercial();
       const nextLead = await reload(false, true);
-      const commercialReady = nextLead?.readiness.steps.some(
-        (item) => item.key === "commercial" && item.ready,
-      ) ?? false;
-      if (commercialReady) {
-        setCommercialSaveFeedback({
-          tone: "success",
-          message: tx(
-            "Договор и заказ сохранены и завершены",
-            "Vertrag und Auftrag wurden gespeichert und abgeschlossen",
-          ),
-        });
-      } else {
-        const remaining = (nextLead?.readiness.blocking_reasons ?? [])
-          .filter((reason) => readinessReasonStep(reason) === "commercial" || reason === COST_ESTIMATE_WORK_TYPES_REASON)
-          .map((reason) => readinessReasonLabel(reason, tx));
-        setCommercialSaveFeedback({
-          tone: "warning",
-          message: remaining.length > 0
-            ? tx("Данные сохранены. Для завершения: ", "Daten gespeichert. Zum Abschluss: ")
-              + remaining.join("; ")
-            : tx(
-                "Данные сохранены. Этап ещё не завершён — проверьте документы, подписи и смету.",
-                "Daten gespeichert. Der Schritt ist noch nicht abgeschlossen – prüfen Sie Dokumente, Unterschriften und Kostenvoranschlag.",
-              ),
-        });
-      }
+      const feedback = commercialReadinessFeedback(nextLead?.readiness, tx);
+      // A pending list keeps following the lead's readiness (see render).
+      setCommercialSaveFeedback(
+        feedback.tone === "warning" ? { ...feedback, followsReadiness: true } : feedback,
+      );
     } catch (nextError) {
       setCommercialSaveFeedback({ tone: "error", message: errorText(nextError, tx) });
       setValidationContext(null);
@@ -5729,6 +5750,9 @@ ${serviceCommentLines.join("\n")}`
   const nextStep = STEPS[stepIndex + 1];
   const commercialReady = Boolean(readiness.get("commercial")) && quoteAndPrepaymentReady;
   const conversionReady = Boolean(lead?.readiness.conversion_ready) && quoteAndPrepaymentReady;
+  const visibleCommercialSaveFeedback = commercialSaveFeedback?.followsReadiness
+    ? commercialReadinessFeedback(lead?.readiness, tx)
+    : commercialSaveFeedback;
   const completionBlockerCount = (lead?.readiness.blocking_reasons.length ?? 0)
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
@@ -8101,10 +8125,10 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
               </div>
             ) : null}
-            {step === "commercial" && commercialSaveFeedback ? (
-              <div role={commercialSaveFeedback.tone === "error" ? "alert" : "status"} className="mb-3 max-h-28 overflow-y-auto text-xs">
-                <div className={cn("rounded-lg border px-3 py-2", commercialSaveFeedback.tone === "error" ? "border-destructive/30 bg-destructive/10 text-destructive" : commercialSaveFeedback.tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
-                  {commercialSaveFeedback.message}
+            {step === "commercial" && visibleCommercialSaveFeedback ? (
+              <div role={visibleCommercialSaveFeedback.tone === "error" ? "alert" : "status"} className="mb-3 max-h-28 overflow-y-auto text-xs">
+                <div className={cn("rounded-lg border px-3 py-2", visibleCommercialSaveFeedback.tone === "error" ? "border-destructive/30 bg-destructive/10 text-destructive" : visibleCommercialSaveFeedback.tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700")}>
+                  {visibleCommercialSaveFeedback.message}
                 </div>
               </div>
             ) : null}

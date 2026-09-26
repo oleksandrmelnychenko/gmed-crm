@@ -5,6 +5,7 @@ import type { Leistung } from "@/pages/orders/model/types";
 
 import {
   calculateServiceLineEstimate,
+  commercialReadinessFeedback,
   isEstimatedOutlaysLine,
   mergeCommercialQuoteReadiness,
   preferPersistedCommercialLines,
@@ -149,5 +150,44 @@ describe("lead wizard commercial source of truth", () => {
     expect(mergeCommercialQuoteReadiness(true, true, false)).toBe(true);
     expect(mergeCommercialQuoteReadiness(true, true, true)).toBe(true);
     expect(mergeCommercialQuoteReadiness(true, undefined, undefined)).toBe(true);
+  });
+});
+
+describe("commercialReadinessFeedback", () => {
+  const tx = (...texts: [ru: string, de: string]) => texts[0];
+  const steps = (commercialReady: boolean) => [
+    { key: "master_data", label: "Stammdaten", ready: true },
+    { key: "commercial", label: "Vertrag & Auftrag", ready: commercialReady },
+  ];
+
+  it("lists only what the contract step still misses right now", () => {
+    const afterSave = commercialReadinessFeedback(
+      {
+        steps: steps(false),
+        blocking_reasons: [
+          "Framework contract is not signed",
+          "Order document is missing",
+          "Birth date is missing",
+        ],
+      },
+      tx,
+    );
+    expect(afterSave.tone).toBe("warning");
+    expect(afterSave.message).toContain("Данные сохранены. Для завершения:");
+    expect(afterSave.message).not.toContain("дату рождения");
+
+    // The contract was signed afterwards: the same lead readiness no longer lists it.
+    const afterSigning = commercialReadinessFeedback(
+      { steps: steps(false), blocking_reasons: ["Order document is missing"] },
+      tx,
+    );
+    expect(afterSigning.message).not.toBe(afterSave.message);
+    expect(afterSigning.message.split(";")).toHaveLength(1);
+  });
+
+  it("turns into the success message once the step is ready", () => {
+    expect(
+      commercialReadinessFeedback({ steps: steps(true), blocking_reasons: [] }, tx),
+    ).toEqual({ tone: "success", message: "Договор и заказ сохранены и завершены" });
   });
 });
