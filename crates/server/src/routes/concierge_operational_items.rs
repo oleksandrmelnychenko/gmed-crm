@@ -1652,7 +1652,29 @@ async fn update_item(
             Err(response) => return response,
         }
     };
-    let creator_notification = if auth.user_id != assigned_by {
+    // A reassigned task is new work for its next assignee, exactly like a
+    // newly created one; without this they only find it by chance.
+    let reassignment_notification =
+        if existing_assignee != assigned_to && assigned_to != auth.user_id {
+            match insert_task_notification(
+                &mut tx,
+                assigned_to,
+                "operational_task_assigned",
+                "New task",
+                &fields.title,
+                item_id,
+            )
+            .await
+            {
+                Ok(value) => Some(value),
+                Err(response) => return response,
+            }
+        } else {
+            None
+        };
+    let creator_notified_as_assignee =
+        reassignment_notification.is_some() && assigned_to == assigned_by;
+    let creator_notification = if auth.user_id != assigned_by && !creator_notified_as_assignee {
         let title = if existing_status != body.status {
             "Task status changed"
         } else {
@@ -1707,6 +1729,9 @@ async fn update_item(
         &body.status,
     )
     .await;
+    if let Some(notification) = reassignment_notification {
+        publish_pending_notification(&state, notification, item_id).await;
+    }
     if let Some(notification) = creator_notification {
         publish_pending_notification(&state, notification, item_id).await;
     }

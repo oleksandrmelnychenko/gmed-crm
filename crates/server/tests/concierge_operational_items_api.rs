@@ -2501,6 +2501,105 @@ async fn ceo_assigns_tasks_and_task_detail_keeps_idempotent_comments_checklist_h
 }
 
 #[tokio::test]
+async fn reassigned_task_notifies_its_new_assignee() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let creator_id = seed_user(&ctx.pool, "patient_manager", &format!("notify-pm-{tag}")).await;
+    let first_id = seed_user(&ctx.pool, "concierge", &format!("notify-first-{tag}")).await;
+    let second_id = seed_user(&ctx.pool, "concierge", &format!("notify-second-{tag}")).await;
+    let creator_bearer = auth_header_for(creator_id, "patient_manager");
+    let ceo_bearer = auth_header_for(ctx.admin_id, "ceo");
+    let base_path = "/api/v1/concierge-operational-items";
+
+    let (status, task) = json_request(
+        &ctx.app,
+        "POST",
+        base_path,
+        &creator_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": format!("Book restaurant {tag}"),
+            "assigned_to": first_id,
+            "priority": "normal"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
+    let update_path = format!("{base_path}/{task_id}/update");
+
+    let (status, reassigned) = json_request(
+        &ctx.app,
+        "POST",
+        &update_path,
+        &creator_bearer,
+        Some(json!({
+            "expected_updated_at": task["updated_at"],
+            "kind": "task",
+            "title": format!("Book restaurant {tag}"),
+            "assigned_to": second_id,
+            "priority": "normal",
+            "status": "open"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reassigned}");
+
+    let (status, back_to_creator) = json_request(
+        &ctx.app,
+        "POST",
+        &update_path,
+        &ceo_bearer,
+        Some(json!({
+            "expected_updated_at": reassigned["updated_at"],
+            "kind": "task",
+            "title": format!("Book restaurant {tag}"),
+            "assigned_to": creator_id,
+            "priority": "normal",
+            "status": "open"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{back_to_creator}");
+
+    let notifications = |user_id: Uuid, kind: &'static str| {
+        let pool = ctx.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                r#"SELECT count(*) FROM user_notifications
+                   WHERE user_id = $1 AND kind = $2 AND entity_id = $3"#,
+            )
+            .bind(user_id)
+            .bind(kind)
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(
+        notifications(first_id, "operational_task_assigned").await,
+        1
+    );
+    assert_eq!(
+        notifications(second_id, "operational_task_assigned").await,
+        1
+    );
+    // The creator gets one "new task" notice, not a second "task updated" one.
+    assert_eq!(
+        notifications(creator_id, "operational_task_assigned").await,
+        1
+    );
+    assert_eq!(
+        notifications(creator_id, "operational_task_updated").await,
+        0
+    );
+}
+
+#[tokio::test]
 async fn reassignment_serializes_and_revokes_former_assignee_child_access() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
