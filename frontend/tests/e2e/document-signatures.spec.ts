@@ -85,17 +85,27 @@ for (const lang of ["ru", "de"] as const) {
       await page.goto(`/documents/${documentId}`);
       await page.getByRole("button", { name: lang === "ru" ? "Электронная подпись: vertrag.pdf" : "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: lang === "ru" ? "Электронная подпись" : "Elektronische Unterschrift", exact: true });
-      await expect(dialog.getByRole("img")).toBeVisible();
-      const send = dialog.getByRole("button", { name: lang === "ru" ? "Отправить на подпись" : "Zur Unterschrift senden", exact: true });
-      await dialog.getByRole("checkbox").last().check();
+      // The whole package renders as one scroll (3501e757): the signing document, then the attachment.
+      const pageLabel = lang === "ru" ? "PDF, страница" : "PDF, Seite";
+      await expect(dialog.getByRole("img", { name: `vertrag.pdf. ${pageLabel} 1`, exact: true })).toBeVisible();
+      const attachmentPage = dialog.getByRole("img", { name: `Information PDF. ${pageLabel} 2`, exact: true });
+      await expect(attachmentPage).toBeAttached();
+      await expect(dialog.getByRole("navigation", { name: lang === "ru" ? "Документы пакета" : "Dokumente des Pakets", exact: true }))
+        .toContainText(lang === "ru" ? "Information PDF · для ознакомления" : "Information PDF · zur Kenntnisnahme");
+      const sendLabel = lang === "ru" ? "Отправить пакет на подпись" : "Paket zur Unterschrift senden";
+      const send = dialog.getByRole("button", { name: sendLabel, exact: true });
+      // Sending needs the explicit confirmation that every PDF of the package was checked.
       await expect(send).toBeDisabled();
+      // Reviewing the attachment opens it on its own, with a way back to the whole package.
       await dialog.getByRole("button", { name: lang === "ru" ? "Проверить приложение" : "Anlage prüfen", exact: true }).click();
-      await expect(dialog.getByRole("img")).toBeVisible();
+      await expect(dialog.getByRole("img", { name: `${pageLabel} 1`, exact: true })).toBeVisible();
+      await expect(dialog.getByRole("button", { name: lang === "ru" ? "Ко всему пакету" : "Zum gesamten Paket", exact: true })).toBeVisible();
+      await dialog.getByRole("checkbox").last().check();
       await expect(send).toBeEnabled();
       await send.click();
       await expect.poll(() => sent.length).toBe(1);
       expect(sent[0]).toEqual({ signers, attachment_document_id: attachment });
-      await expect(dialog.getByRole("button", { name: lang === "ru" ? "Отправить на подпись" : "Zur Unterschrift senden", exact: true })).toHaveCount(0);
+      await expect(dialog.getByRole("button", { name: sendLabel, exact: true })).toHaveCount(0);
     });
   }
 }
@@ -777,17 +787,28 @@ test("PDF pages and zoom render without a browser PDF plugin or native iterator 
   await expect(first).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
   await expect(previous).toBeDisabled();
   await expect(dialog.getByLabel("PDF zur Unterschrift", { exact: true }).getByText("1 / 2", { exact: true })).toBeVisible();
-  const fittedWidth = (await first.boundingBox())!.width;
-  await dialog.getByRole("button", { name: "Vergrößern", exact: true }).click();
-  await expect.poll(async () => (await first.boundingBox())?.width ?? 0).toBeGreaterThan(fittedWidth * 1.2);
+  // Pages open at 85 % of the width and zoom in 15 % steps; the zoom label resets to page width (df5d4d8e).
+  const zoomIn = dialog.getByRole("button", { name: "Vergrößern", exact: true });
+  await expect(dialog.getByRole("button", { name: "85%", exact: true })).toBeVisible();
+  const defaultWidth = (await first.boundingBox())!.width;
+  await zoomIn.click();
+  await expect.poll(async () => (await first.boundingBox())?.width ?? 0).toBeGreaterThan(defaultWidth * 1.15);
+  await expect(dialog.getByRole("button", { name: "Seitenbreite", exact: true })).toBeVisible();
+  const pageWidth = (await first.boundingBox())!.width;
   await next.click();
   await expect(dialog.getByRole("img", { name: "PDF, Seite 2", exact: true })).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
   await expect(next).toBeDisabled();
   await expect(dialog.getByLabel("PDF zur Unterschrift", { exact: true }).getByText("2 / 2", { exact: true })).toBeVisible();
-  await dialog.getByRole("button", { name: "125%", exact: true }).click();
+  const second = dialog.getByRole("img", { name: "PDF, Seite 2", exact: true });
+  await zoomIn.click();
+  // Let the 115 % render finish before resetting, as a reader would.
+  await expect.poll(async () => (await second.boundingBox())?.width ?? 0).toBeGreaterThan(pageWidth * 1.1);
+  await dialog.getByRole("button", { name: "115%", exact: true }).click();
+  await expect(dialog.getByLabel("PDF zur Unterschrift", { exact: true }).getByText("2 / 2", { exact: true })).toBeVisible();
+  await expect.poll(async () => Math.round((await second.boundingBox())?.width ?? 0)).toBe(Math.round(pageWidth));
   await previous.click();
   await expect(first).toHaveAccessibleDescription(/GMED.*DEMO SIGNATURE TEST/);
-  await expect.poll(async () => Math.round((await first.boundingBox())?.width ?? 0)).toBe(Math.round(fittedWidth));
+  await expect.poll(async () => Math.round((await first.boundingBox())?.width ?? 0)).toBe(Math.round(pageWidth));
   await page.keyboard.press("Escape");
   await expect(dialog).toHaveCount(0);
   expect(errors).toEqual([]);
