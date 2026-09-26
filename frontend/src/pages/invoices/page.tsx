@@ -68,6 +68,7 @@ import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
+import { describeCashMovement } from "@/pages/company-finance/table-model";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { IncomingInvoices } from "./ui/incoming-invoices";
 import { TerminationSettlementQueue } from "./termination-settlement/queue";
@@ -141,6 +142,7 @@ import {
   invoiceToPayerForm,
   invoiceToVisibilityForm,
   invoicesPermissions,
+  isCoveredByPrepaymentOnly,
   nextDunningLevel,
 } from "./model/invoice-model";
 import type {
@@ -1282,16 +1284,18 @@ function useStaffInvoicesPageContent() {
     {
       id: "description",
       label: text.ledgerEntry,
-      accessor: (row) => row.description,
+      accessor: (row) => `${describeCashMovement(row.description, lang).label} ${row.description}`,
       filterType: "text",
       group: "accounting",
       sortable: true,
       searchable: true,
       pinned: "left",
       width: 260,
+      // Postings store a technical text ("invoice_payment payment INV-…");
+      // show the operation the way the company finance page does.
       render: (row) => (
-        <span className="block truncate font-mono text-xs text-foreground">
-          {row.description}
+        <span className="block truncate text-xs text-foreground" title={row.description}>
+          {describeCashMovement(row.description, lang).label}
         </span>
       ),
     },
@@ -2653,7 +2657,9 @@ function useStaffInvoicesPageContent() {
                       <SummaryLine
                         label={t.invoices_paid}
                         value={
-                          Number(detail.paid_amount) === 0 && Number(detail.prepayment_applied_amount ?? 0) > 0
+                          // Only an invoice the advance settled in full is "covered";
+                          // a partly credited one still shows the cash received (0,00).
+                          isCoveredByPrepaymentOnly(detail)
                             ? (lang === "de" ? "Durch Vorauszahlung gedeckt" : "Зачтено предоплатой")
                             : formatMoney(detail.paid_amount, detail?.currency)
                         }

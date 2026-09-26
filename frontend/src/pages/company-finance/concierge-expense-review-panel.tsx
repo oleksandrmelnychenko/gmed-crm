@@ -17,6 +17,7 @@ import {
 
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
+import { formatMoneyAmount } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -326,14 +327,10 @@ const textByLanguage = {
   },
 } as const;
 
-function formatMoney(value: string, currency: string, locale: string) {
-  const parsed = Number(value);
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(parsed) ? parsed : 0);
+// One money style app-wide ("1.234,56 €", see lib/money), whatever the UI language.
+function formatMoney(value: string, currency: string, _locale: string) {
+  void _locale;
+  return formatMoneyAmount(value, currency);
 }
 
 function formatDate(value: string | null, locale: string, withTime = false) {

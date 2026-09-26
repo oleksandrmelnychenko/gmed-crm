@@ -8,10 +8,19 @@ import {
   isInvoiceSelectionValid,
   isQuoteAvailableForInvoice,
   isQuoteClosedForInvoicing,
+  isCoveredByPrepaymentOnly,
   formatCurrency,
   formatDate,
 } from "./invoice-model";
 import type { InvoiceLineItem, QuoteOption } from "./types";
+
+it("calls an invoice covered by prepayment only when the credited advance settled it", () => {
+  // 1,000 final invoice, 300 advance credited, 700 still open: not covered.
+  expect(isCoveredByPrepaymentOnly({ paid_amount: "0", prepayment_applied_amount: "300", balance_due: "700" })).toBe(false);
+  expect(isCoveredByPrepaymentOnly({ paid_amount: "0", prepayment_applied_amount: "1000", balance_due: "0" })).toBe(true);
+  expect(isCoveredByPrepaymentOnly({ paid_amount: "0", prepayment_applied_amount: "0", balance_due: "0" })).toBe(false);
+  expect(isCoveredByPrepaymentOnly({ paid_amount: "200", prepayment_applied_amount: "800", balance_due: "0" })).toBe(false);
+});
 
 it("formats both date-only values and timestamps as a date", () => {
   expect(formatDate("2026-10-01", "de-DE")).toBe(formatDate("2026-10-01T12:00:00", "de-DE"));

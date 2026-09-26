@@ -825,6 +825,11 @@ function usePatientInvoicesPageContent() {
                     {invoiceAmountsVisible(detail) && Number(detail.credited_amount ?? 0) > 0 ? (
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Gutschriften" : "Кредит-ноты"} value={`−${formatPortalCurrency(detail.credited_amount, detail.currency)}`} />
                     ) : null}
+                    {/* The open balance nets out credited advances; without this row the
+                        patient cannot tell why it is lower than the total. */}
+                    {invoiceAmountsVisible(detail) && Number(detail.prepayment_applied_amount ?? 0) > 0 ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Angerechnete Vorauszahlung" : "Зачтённая предоплата"} value={`−${formatPortalCurrency(detail.prepayment_applied_amount, detail.currency)}`} />
+                    ) : null}
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
                   </div>
                   {detail.notes ? (

@@ -361,7 +361,7 @@ export function AdvancePaymentHint({ lang }: { lang: Lang }) {
   return (
     <p className="text-xs leading-5 text-muted-foreground">
       {tx(
-        "Предоплаты не зачитываются автоматически: выпустите черновик финального счёта и зачтите аванс в самом счёте («Зачесть предоплату»). При переплате оформите кредит-ноту и возврат в счёте.",
+        "Предоплаты не зачитываются автоматически: отправьте черновик финального счёта (статус «Отправлен») и затем зачтите аванс в самом счёте («Зачесть предоплату»). При переплате оформите кредит-ноту и возврат в счёте.",
         "Vorauszahlungen werden nicht automatisch angerechnet: Schlussrechnungsentwurf freigeben und die Vorauszahlung in der Rechnung anrechnen („Vorauszahlung anrechnen“). Bei Überzahlung Gutschrift und Erstattung in der Rechnung erfassen.",
       )}
     </p>

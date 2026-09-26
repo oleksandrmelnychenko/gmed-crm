@@ -1,4 +1,4 @@
-import { formatMoneyAmount, moneyLineAmounts, roundCents } from "@/lib/money";
+import { formatMoneyAmount, moneyLineAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
@@ -312,6 +312,20 @@ export function formatDateTime(
 export function formatCurrency(value: unknown, _locale = "de-DE", currency = "EUR") {
   void _locale;
   return formatMoneyAmount(value, currency);
+}
+
+/**
+ * Whether credited advances alone settled the invoice: no cash on the invoice
+ * itself and nothing left to pay. A partly credited invoice is not "covered".
+ */
+export function isCoveredByPrepaymentOnly(
+  invoice: Pick<InvoiceItem, "paid_amount" | "prepayment_applied_amount" | "balance_due">,
+) {
+  return (
+    toCents(Number(invoice.paid_amount ?? 0)) === 0 &&
+    toCents(Number(invoice.prepayment_applied_amount ?? 0)) > 0 &&
+    toCents(Number(invoice.balance_due ?? 0)) <= 0
+  );
 }
 
 export function nextDunningLevel(events: DunningEvent[]) {

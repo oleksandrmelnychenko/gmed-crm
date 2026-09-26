@@ -26,6 +26,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
+import { formatMoneyAmount } from "@/lib/money";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { cn } from "@/lib/utils";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
@@ -248,13 +249,10 @@ function parseAmount(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function formatMoney(value: string | null | undefined, currency: string, locale: string) {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(parseAmount(value));
+// One money style app-wide ("1.234,56 €", see lib/money), whatever the UI language.
+function formatMoney(value: string | null | undefined, currency: string, _locale: string) {
+  void _locale;
+  return formatMoneyAmount(parseAmount(value), currency);
 }
 
 function formatDate(value: string | null, locale: string) {

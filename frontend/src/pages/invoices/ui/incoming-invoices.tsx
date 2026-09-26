@@ -16,8 +16,10 @@ import { fetchCompanyFinancialAccounts } from "@/pages/company-finance/data";
 import { ProviderSettlementDialog } from "@/pages/company-finance/provider-settlement-dialog";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 import type { CompanyFinancialAccount, CompanyProviderLiability } from "@/pages/company-finance/types";
+import { formatMoneyAmount } from "@/lib/money";
 import {
   canMarkInvoicePaidByPatient,
+  patientBillingState,
   patientPaymentErrorReason,
   type PatientPaymentErrorReason,
 } from "@/pages/invoices/model/incoming-invoice-payment";
@@ -95,7 +97,8 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     catch { popup.close(); setError(tx("Не удалось открыть оригинал счёта.", "Das Rechnungsoriginal konnte nicht geöffnet werden.")); }
     finally { setOpening(null); }
   }
-  const money = (amount: string, currency: string) => new Intl.NumberFormat(locale, { style: "currency", currency }).format(Number(amount));
+  // One money style app-wide ("1.400,00 €"), not the UI locale's.
+  const money = (amount: string, currency: string) => formatMoneyAmount(amount, currency);
   const statusLabel = (row: IncomingInvoice) => {
     if (row.status === "cancelled") return tx("Отменён", "Storniert");
     if (row.status === "expected") return tx("Ожидается", "Erwartet");
@@ -112,14 +115,13 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       ? Number(row.remaining_gross) > 0 ? tx("GMed, частично", "GMed, teilweise") : "GMed"
       : tx("Не оплачен", "Unbezahlt");
   const patientBillingLabel = (row: IncomingInvoice) => {
-    const receivable = Number(row.patient_receivable_gross);
-    const allocated = Number(row.allocated_receivable_gross);
-    const remaining = Number(row.remaining_receivable_gross);
-    if (!row.patient_id || row.paid_by === "patient" || receivable <= 0) return tx("Не требуется", "Nicht erforderlich");
-    if (remaining <= 0) return tx("Выставлено / в черновике", "Berechnet / im Entwurf");
-    if (allocated > 0) return tx("Частично выставлено", "Teilweise berechnet");
-    if (row.paid_by === "agency" && Number(row.remaining_gross) <= 0) return tx("Не выставлено", "Nicht berechnet");
-    return tx("После оплаты", "Nach Zahlung");
+    switch (patientBillingState(row)) {
+      case "not_required": return tx("Не требуется", "Nicht erforderlich");
+      case "billed": return tx("Выставлено / в черновике", "Berechnet / im Entwurf");
+      case "partially_billed": return tx("Частично выставлено", "Teilweise berechnet");
+      case "not_billed": return tx("Не выставлено", "Nicht berechnet");
+      case "after_payment": return tx("После оплаты", "Nach Zahlung");
+    }
   };
   const paymentErrorLabel = (reason: PatientPaymentErrorReason | null) => {
     if (reason === "company_invoice") return tx("Этот счёт не привязан к пациенту. Для него доступна только оплата GMed.", "Diese Rechnung ist keinem Patienten zugeordnet. Dafür ist nur eine Zahlung durch GMed möglich.");

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Banner as ShellBanner } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 
@@ -78,14 +79,10 @@ const copy = {
   },
 } as const;
 
-function formatMoney(value: string | null | undefined, currency: string, locale: string) {
-  const parsed = Number(value ?? 0);
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(parsed) ? parsed : 0);
+// One money style app-wide ("1.234,56 €", see lib/money), whatever the UI language.
+function formatMoney(value: string | null | undefined, currency: string, _locale: string) {
+  void _locale;
+  return formatMoneyAmount(value ?? 0, currency);
 }
 
 function formatDate(value: string, locale: string) {

@@ -125,6 +125,7 @@ export type PortalInvoiceItem = {
   credited_amount?: unknown;
   adjusted_total_gross?: unknown;
   paid_amount: unknown;
+  prepayment_applied_amount?: unknown;
   balance_due: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
