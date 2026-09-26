@@ -58,6 +58,23 @@ describe("appointmentActionErrorMessage", () => {
     expect(message).toBe(appointmentText("appointments_report_not_before_date"));
   });
 
+  it("localizes the server rejection of moving a reported appointment to a future date", () => {
+    const error = new ApiRequestError(
+      "An appointment with an interpreter report cannot be moved to a future date",
+      {
+        status: 422,
+        body: { code: "appointment_reported_future_date" },
+      },
+    );
+
+    expect(appointmentActionErrorMessage(error, "Fallback")).toBe(
+      appointmentText("appointments_reported_not_to_future_date"),
+    );
+    expect(appointmentText("appointments_reported_not_to_future_date")).not.toBe(
+      "appointments_reported_not_to_future_date",
+    );
+  });
+
   it("keeps the fallback for unknown or inherited body codes", () => {
     for (const code of ["constructor", "something_else", 42]) {
       const error = new ApiRequestError("Rejected", {

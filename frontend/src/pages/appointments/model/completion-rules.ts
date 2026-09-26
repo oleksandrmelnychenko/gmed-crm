@@ -7,6 +7,9 @@ export const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE =
 /** Error code the server returns when a report is submitted or approved too early. */
 export const APPOINTMENT_REPORT_BEFORE_DATE_CODE = "appointment_report_before_date";
 
+/** Error code the server returns when a reported appointment is moved to a future date. */
+export const APPOINTMENT_REPORTED_FUTURE_DATE_CODE = "appointment_reported_future_date";
+
 /**
  * Completion counts as delivery (billing lines, order execution), so it only
  * opens on the appointment's own day in Europe/Berlin. Same day is allowed.

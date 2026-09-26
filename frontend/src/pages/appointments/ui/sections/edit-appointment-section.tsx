@@ -23,7 +23,9 @@ import {
   textareaClass,
   tokens,
 } from "@/components/ui-shell";
-import { apiFetch } from "@/lib/api";
+import { ApiRequestError, apiFetch } from "@/lib/api";
+import { APPOINTMENT_REPORTED_FUTURE_DATE_CODE } from "@/pages/appointments/model/completion-rules";
+import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { usePatientOrderOptions } from "@/pages/appointments/data/use-patient-order-options";
 import { useLang } from "@/lib/i18n";
 import {
@@ -198,6 +200,12 @@ function formatEditAppointmentError(
   translations: { uiText: Record<string, string> },
   fallback: string,
 ) {
+  if (
+    error instanceof ApiRequestError &&
+    error.body?.code === APPOINTMENT_REPORTED_FUTURE_DATE_CODE
+  ) {
+    return appointmentActionErrorMessage(error, fallback);
+  }
   const message = error instanceof Error ? error.message : "";
   if (message.includes("recurrence rule updates require following or series scope")) {
     return translations.uiText.appointments_recurring_scope_required ?? message;

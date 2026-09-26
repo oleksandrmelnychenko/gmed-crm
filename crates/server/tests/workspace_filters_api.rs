@@ -8251,6 +8251,134 @@ async fn appointment_completion_opens_on_the_appointment_date() {
 }
 
 #[tokio::test]
+async fn reported_appointments_cannot_be_moved_to_a_future_date() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-reported-reschedule");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let today = berlin_today();
+    let yesterday = (today - chrono::Duration::days(1)).to_string();
+    let future_date = (today + chrono::Duration::days(5)).to_string();
+    let update_body = |date: &str| {
+        json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "owner_user_id": pm_id,
+            "interpreter_id": Value::Null,
+            "title": format!("Visit {tag}"),
+            "date": date,
+            "time_start": "09:00",
+            "time_end": "10:00",
+        })
+    };
+
+    // Completed appointments keep the existing rule: no rescheduling at all.
+    let completed_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Completed visit {tag}"),
+        "completed",
+        &(today - chrono::Duration::days(3)).to_string(),
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{completed_id}/update"),
+        &pm_bearer,
+        Some(update_body(&future_date)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // An in-progress appointment with a submitted interpreter report counts as
+    // delivered: it may not move to a day that has not come yet.
+    let reported_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Reported visit {tag}"),
+        "in_progress",
+        &today.to_string(),
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO interpreter_reports (appointment_id, interpreter_id, hours, report_text)
+           VALUES ($1, $2, 1.5, 'Interpreted the consultation')"#,
+    )
+    .bind(reported_id)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let reported_path = format!("/api/v1/appointments/{reported_id}/update");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &reported_path,
+        &pm_bearer,
+        Some(update_body(&future_date)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "appointment_reported_future_date");
+    let stored_date: chrono::NaiveDate =
+        sqlx::query_scalar("SELECT date FROM appointments WHERE id = $1")
+            .bind(reported_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_date, today);
+
+    // Correcting a reported appointment within the past stays possible.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &reported_path,
+        &pm_bearer,
+        Some(update_body(&yesterday)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A planned appointment can still be moved into the future.
+    let planned_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Planned visit {tag}"),
+        "planned",
+        &(today - chrono::Duration::days(2)).to_string(),
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{planned_id}/update"),
+        &pm_bearer,
+        Some(update_body(&future_date)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
 async fn interpreter_reports_open_on_the_appointment_date() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

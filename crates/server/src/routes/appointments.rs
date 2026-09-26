@@ -2746,6 +2746,7 @@ fn is_allowed_appointment_status_transition(current: &str, target: &str) -> bool
 
 const APPOINTMENT_COMPLETION_BEFORE_DATE_CODE: &str = "appointment_completion_before_date";
 const APPOINTMENT_REPORT_BEFORE_DATE_CODE: &str = "appointment_report_before_date";
+const APPOINTMENT_REPORTED_FUTURE_DATE_CODE: &str = "appointment_reported_future_date";
 
 /// Completion counts as delivery (billing lines, order execution evidence), so
 /// it only opens on the appointment's own day in the business timezone. The
@@ -4776,6 +4777,26 @@ async fn update_appointment(
     let mut cancelled_target_ids = Vec::new();
     let mut archived_series_id = None;
     let target_ids: Vec<Uuid> = targets.iter().map(|target| target.id).collect();
+    // Completed appointments cannot be rescheduled at all. One with a
+    // submitted or approved interpreter report counts as delivered too; moving
+    // it to a day that has not come yet would undo the report date rule.
+    let reported_target_ids: std::collections::HashSet<Uuid> = match sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT DISTINCT report.appointment_id
+           FROM interpreter_reports report
+           WHERE report.appointment_id = ANY($1)
+             AND report.approval_status IN ('pending', 'approved')"#,
+    )
+    .bind(&target_ids)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(rows) => rows.into_iter().collect(),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "load reported appointment targets");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let today = berlin_today();
     for (index, target) in targets.iter().take(keep_count).enumerate() {
         let target_date = if let Some(value) = recurrence_dates.get(index).copied() {
             value
@@ -4795,6 +4816,21 @@ async fn update_appointment(
         } else {
             date
         };
+        if target_date != target.date
+            && reported_target_ids.contains(&target.id)
+            && completion_precedes_appointment_date(target_date, today)
+        {
+            return err_with_details(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "An appointment with an interpreter report cannot be moved to a future date",
+                serde_json::json!({
+                    "code": APPOINTMENT_REPORTED_FUTURE_DATE_CODE,
+                    "appointment_id": target.id,
+                    "appointment_date": target_date,
+                    "today": today,
+                }),
+            );
+        }
         let schedule_changed = target.provider_id != body.provider_id
             || target.doctor_id != body.doctor_id
             || target.date != target_date
