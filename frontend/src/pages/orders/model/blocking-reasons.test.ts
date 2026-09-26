@@ -87,6 +87,20 @@ describe("orderBlockingReasonSection", () => {
     }
   });
 
+  it("sends completion blockers of the last phase to where they are closed", () => {
+    for (const reason of [
+      "Follow-up state has not been prepared",
+      "1-week follow-up must be completed or marked not required",
+      "6-month follow-up must be completed or marked not required",
+      "Package-end follow-up must be completed or marked not required",
+      "Results handoff must be completed or marked not required",
+    ]) {
+      expect(orderBlockingReasonSection(reason), reason).toBe("followup");
+    }
+    expect(orderBlockingReasonSection("4 workflow checklist item(s) are still open")).toBe("workflow");
+    expect(orderBlockingReasonSection("2 service item(s) are not approved or invoiced")).toBe("services");
+  });
+
   it("sends planning blockers to planning and everything else to the gates", () => {
     expect(orderBlockingReasonSection("Assigned interpreter has not confirmed yet")).toBe("planning");
     expect(orderBlockingReasonSection("Treatment plan must be finalized before execution")).toBe("planning");

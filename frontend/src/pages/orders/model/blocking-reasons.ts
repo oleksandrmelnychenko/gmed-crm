@@ -190,6 +190,18 @@ const FOLLOWUP_REASONS = new Set([
   "No follow-up reminder, task or appointment has been launched yet",
 ]);
 
+// Completion blockers of the last phase: the follow-up milestones are closed
+// in the follow-up section as well.
+const COMPLETION_FOLLOWUP_REASONS = new Set([
+  "Follow-up state has not been prepared",
+  "Doctor follow-up must be completed or marked not required",
+  "1-week follow-up must be completed or marked not required",
+  "1-month follow-up must be completed or marked not required",
+  "6-month follow-up must be completed or marked not required",
+  "Package-end follow-up must be completed or marked not required",
+  "Results handoff must be completed or marked not required",
+]);
+
 /**
  * Order workspace section where a lifecycle blocker is resolved; the "Open"
  * link of the blocker list navigates there. Reasons are the server's texts.
@@ -201,11 +213,21 @@ export function orderBlockingReasonSection(reason: string): OrderSectionKey {
   ) {
     return "planning";
   }
-  // Execution checklist items are worked off in the order task list ("Задачи").
-  if (/^\d+ execution checklist item\(s\) remain open$/.test(reason)) {
+  // Checklist items are worked off in the order task list ("Задачи").
+  if (
+    /^\d+ execution checklist item\(s\) remain open$/.test(reason) ||
+    /^\d+ workflow checklist item\(s\) are still open$/.test(reason)
+  ) {
     return "workflow";
   }
+  // Services still planned or delivered are approved, invoiced or cancelled
+  // in the service list.
+  if (/^\d+ service item\(s\) are not approved or invoiced$/.test(reason)) {
+    return "services";
+  }
   if (EXECUTION_REASONS.has(reason)) return "execution";
-  if (FOLLOWUP_REASONS.has(reason)) return "followup";
+  if (FOLLOWUP_REASONS.has(reason) || COMPLETION_FOLLOWUP_REASONS.has(reason)) {
+    return "followup";
+  }
   return "gates";
 }

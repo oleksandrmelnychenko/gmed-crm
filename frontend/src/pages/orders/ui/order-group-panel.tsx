@@ -14,6 +14,7 @@ import {
   ungroupOrder,
   type OrderGroup,
 } from "../data/order-api";
+import { formatCurrency } from "../model/order-model";
 import type { OrderSummary } from "../model/types";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -30,15 +31,65 @@ function roleLabel(role: string, tx: Bilingual): string {
 }
 
 function money(value: string | null, currency: string): string {
-  return value ? `${value} ${currency}` : "—";
+  return value ? formatCurrency(value, currency || "EUR") : "—";
+}
+
+export function orderGroupStatusLabel(status: string, tx: Bilingual): string {
+  switch (status) {
+    case "active":
+      return tx("Активен", "Aktiv");
+    case "paused":
+      return tx("Приостановлен", "Pausiert");
+    case "completed":
+      return tx("Завершён", "Abgeschlossen");
+    case "cancelled":
+      return tx("Отменён", "Storniert");
+    default:
+      return status;
+  }
+}
+
+/** The server's grouping errors in the staff language; unknown texts pass through. */
+export function localizedOrderGroupError(message: string, tx: Bilingual): string {
+  switch (message) {
+    case "Only a standalone order can be grouped under a head":
+      return tx(
+        "В группу можно добавить только отдельный заказ.",
+        "Nur ein Einzelauftrag kann einer Gruppe hinzugefügt werden.",
+      );
+    case "Cannot group under a sub-order (one level only)":
+    case "Target cannot be a sub-order (one level only)":
+      return tx(
+        "Подчинённый заказ не может быть главным (только один уровень).",
+        "Ein Unterauftrag kann kein Hauptauftrag sein (nur eine Ebene).",
+      );
+    case "An order cannot be grouped under itself":
+      return tx("Заказ нельзя добавить в собственную группу.", "Ein Auftrag kann nicht sich selbst untergeordnet werden.");
+    case "Order is not grouped":
+      return tx("Заказ не входит в группу.", "Der Auftrag gehört zu keiner Gruppe.");
+    case "No orders to merge":
+      return tx("Выберите заказы для объединения.", "Wählen Sie Aufträge zum Zusammenführen.");
+    case "Insufficient permissions":
+    case "Forbidden":
+      return tx("Недостаточно прав для этого действия.", "Für diese Aktion fehlen die Berechtigungen.");
+    default:
+      return message;
+  }
 }
 
 /**
  * Head / multi-patient order group (#1/#3/#4/#7): shows the group rollup and the
  * covered patients, lets a manager fold more orders in (attach one or merge many),
- * detach subs, and designate who pays for the whole group.
+ * detach subs, and designate who pays for the whole group. Read-only roles only
+ * see the group.
  */
-export function OrderGroupPanel({ orderId }: { orderId: string }) {
+export function OrderGroupPanel({
+  orderId,
+  canManage = true,
+}: {
+  orderId: string;
+  canManage?: boolean;
+}) {
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
 
@@ -75,7 +126,7 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
         if (active) {
           setError(
             nextError instanceof Error
-              ? nextError.message
+              ? localizedOrderGroupError(nextError.message, tx)
               : tx("Не удалось загрузить группу", "Gruppe konnte nicht geladen werden"),
           );
         }
@@ -98,7 +149,7 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
     } catch (nextError) {
       setError(
         nextError instanceof Error
-          ? nextError.message
+          ? localizedOrderGroupError(nextError.message, tx)
           : tx("Действие не удалось", "Aktion fehlgeschlagen"),
       );
     } finally {
@@ -169,16 +220,18 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
             {tx("Этот заказ входит в группу", "Dieser Auftrag gehört zur Gruppe")}{" "}
             <span className="font-mono text-foreground">{group.head.order_number}</span>
           </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="mt-2 rounded-lg"
-            disabled={busy}
-            onClick={() => void run(() => ungroupOrder(orderId), true)}
-          >
-            {tx("Вывести из группы", "Aus Gruppe lösen")}
-          </Button>
+          {canManage ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2 rounded-lg"
+              disabled={busy}
+              onClick={() => void run(() => ungroupOrder(orderId), true)}
+            >
+              {tx("Вывести из группы", "Aus Gruppe lösen")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -190,26 +243,39 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
               className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
             >
               <span className="font-mono text-foreground">{sub.order_number}</span>
-              <span className="text-muted-foreground">{sub.status}</span>
-              <span className="font-semibold text-foreground">
+              <span className="text-muted-foreground">{orderGroupStatusLabel(sub.status, tx)}</span>
+              <span
+                className={
+                  sub.status === "cancelled"
+                    ? "font-semibold text-muted-foreground line-through"
+                    : "font-semibold text-foreground"
+                }
+                title={
+                  sub.status === "cancelled"
+                    ? tx("Отменённый заказ не входит в итог группы.", "Stornierte Aufträge zählen nicht zur Gruppensumme.")
+                    : undefined
+                }
+              >
                 {money(sub.total_estimated, group.head.currency)}
               </span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="rounded-lg"
-                disabled={busy}
-                onClick={() => void run(() => ungroupOrder(sub.id), true)}
-              >
-                {tx("Отвязать", "Lösen")}
-              </Button>
+              {canManage ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-lg"
+                  disabled={busy}
+                  onClick={() => void run(() => ungroupOrder(sub.id), true)}
+                >
+                  {tx("Отвязать", "Lösen")}
+                </Button>
+              ) : null}
             </li>
           ))}
         </ul>
       ) : null}
 
-      {viewingHead ? (
+      {viewingHead && canManage ? (
         <div className="mt-4 space-y-3 border-t border-border/60 pt-3">
           <div>
             <p className="text-xs font-medium text-muted-foreground">
@@ -255,7 +321,9 @@ export function OrderGroupPanel({ orderId }: { orderId: string }) {
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">
                           {candidate.patient_name}
                         </span>
-                        <span className="text-muted-foreground">{candidate.status}</span>
+                        <span className="text-muted-foreground">
+                          {orderGroupStatusLabel(candidate.status, tx)}
+                        </span>
                       </label>
                     </li>
                   );

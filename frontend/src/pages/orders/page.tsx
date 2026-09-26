@@ -125,6 +125,7 @@ import {
   resolveCreateOrderSubmitBlock,
 } from "./model/create-order-gate";
 import { mergeOrderDraft } from "./model/order-draft";
+import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
 import {
   canCancelLeistung,
   leistungCancellationNote,
@@ -600,6 +601,11 @@ function useOrdersPageContent() {
   const patientContextId = searchParams.get("patient") ?? "";
   const activeOrderSection = normalizeOrderSectionKey(searchParams.get("section"));
   const permissions = orderPermissions(user);
+  // Grouping, the group payer and amount amendments are open to the order
+  // owner and finance (the server allows PM, billing and CEO); read-only roles
+  // such as the CEO assistant only see them.
+  const canManageOrderGroupAndAmendments =
+    permissions.canManagePhase || hasCapability(user, "invoices.finance");
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const l = useCallback(
     (key: string, values?: UiTextValues) =>
@@ -907,6 +913,14 @@ function useOrdersPageContent() {
       return lang === "de"
         ? `${unsettledServices[1]} Leistung(en) sind noch nicht freigegeben oder abgerechnet.`
         : `Не согласовано или не выставлено в счёт услуг: ${unsettledServices[1]}.`;
+    }
+    const blockingStatus = parseOrderStatusBlocker(reason);
+    if (blockingStatus) {
+      const statusLabel =
+        orderStatusLabels[blockingStatus as keyof typeof orderStatusLabels] ?? blockingStatus;
+      return lang === "de"
+        ? `Der Auftrag muss aktiv sein (aktuell: ${statusLabel}). Den Status ändern Sie unter „Auftrag verwalten“.`
+        : `Заказ должен быть активным (сейчас: ${statusLabel}). Статус меняется в «Управление заказом».`;
     }
     const translation = resolveOrderBlockingReason(reason);
     if (translation) return l(translation.key, translation.values);
@@ -1532,6 +1546,22 @@ function useOrdersPageContent() {
     () => orderDetail?.lifecycle?.allowed_transitions?.[0] ?? null,
     [orderDetail?.lifecycle],
   );
+  // The header shows one next step: the next phase, completion in the last
+  // phase, or nothing for a cancelled/completed order.
+  const orderNextStep = useMemo(
+    () =>
+      orderDetail
+        ? resolveOrderNextStep({ status: orderDetail.status, lifecycle: orderDetail.lifecycle })
+        : null,
+    [orderDetail],
+  );
+  const orderNextStepBlocked =
+    (orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion") &&
+    orderNextStep.blocked;
+  const orderNextStepReasons =
+    orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion"
+      ? orderNextStep.reasons
+      : [];
   const currentLifecyclePhaseIndex = orderDetail
     ? ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number])
     : -1;
@@ -3954,12 +3984,18 @@ function useOrdersPageContent() {
                         <span
                           className={cn(
                             "flex size-10 shrink-0 items-center justify-center rounded-lg",
-                            nextLifecycleTransition?.blocked
-                              ? "bg-amber-100 text-amber-800"
-                              : "bg-emerald-100 text-emerald-700",
+                            orderNextStep?.kind === "terminal" &&
+                              orderNextStep.status === "cancelled"
+                              ? "bg-muted text-muted-foreground"
+                              : orderNextStepBlocked
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-emerald-100 text-emerald-700",
                           )}
                         >
-                          {nextLifecycleTransition?.blocked ? (
+                          {orderNextStep?.kind === "terminal" &&
+                          orderNextStep.status === "cancelled" ? (
+                            <X className="size-5" />
+                          ) : orderNextStepBlocked ? (
                             <AlertTriangle className="size-5" />
                           ) : (
                             <CheckCircle2 className="size-5" />
@@ -3980,32 +4016,49 @@ function useOrdersPageContent() {
                             </StatusBadge>
                           </div>
                           <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">
-                            {nextLifecycleTransition?.blocked
-                              ? lang === "de"
-                                ? nextLifecycleTransition.reasons.length + " Aufgaben vor dem nächsten Schritt"
-                                : "До следующего этапа осталось: " + nextLifecycleTransition.reasons.length
-                              : orderDetail.lifecycle?.next_stage
+                            {orderNextStep?.kind === "terminal"
+                              ? orderNextStep.status === "cancelled"
                                 ? lang === "de"
-                                  ? "Bereit für den nächsten Schritt"
-                                  : "Можно переходить к следующему этапу"
+                                  ? "Auftrag storniert"
+                                  : "Заказ отменён"
                                 : lang === "de"
                                   ? "Auftrag abgeschlossen"
-                                  : "Заказ завершён"}
+                                  : "Заказ завершён"
+                              : orderNextStep?.kind === "completion"
+                                ? orderNextStep.blocked
+                                  ? lang === "de"
+                                    ? orderNextStep.reasons.length + " Aufgaben bis zum Abschluss"
+                                    : "До завершения заказа осталось: " + orderNextStep.reasons.length
+                                  : lang === "de"
+                                    ? "Auftrag kann abgeschlossen werden"
+                                    : "Заказ можно завершить"
+                                : orderNextStepBlocked
+                                  ? lang === "de"
+                                    ? orderNextStepReasons.length + " Aufgaben vor dem nächsten Schritt"
+                                    : "До следующего этапа осталось: " + orderNextStepReasons.length
+                                  : lang === "de"
+                                    ? "Bereit für den nächsten Schritt"
+                                    : "Можно переходить к следующему этапу"}
                           </h2>
                           <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                            {orderDetail.lifecycle?.next_stage
+                            {orderNextStep?.kind === "phase"
                               ? lang === "de"
-                                ? "Als Nächstes: " + phaseLabel(orderDetail.lifecycle.next_stage)
-                                : "Следующий этап: " + phaseLabel(orderDetail.lifecycle.next_stage)
-                              : lang === "de"
-                                ? "Für diesen Auftrag ist keine weitere Phase erforderlich."
-                                : "Для этого заказа больше нет обязательных этапов."}
+                                ? "Als Nächstes: " + phaseLabel(orderNextStep.nextPhase)
+                                : "Следующий этап: " + phaseLabel(orderNextStep.nextPhase)
+                              : orderNextStep?.kind === "completion"
+                                ? lang === "de"
+                                  ? "Letzte Phase erreicht. Abschließen unter „Auftrag verwalten“."
+                                  : "Последний этап. Завершить заказ можно в «Управление заказом»."
+                                : lang === "de"
+                                  ? "Phasen und Aufgaben dieses Auftrags ändern sich nicht mehr."
+                                  : "Этапы и задачи этого заказа больше не меняются."}
                           </p>
                         </div>
                       </div>
 
                       {permissions.canManagePhase &&
                       !detailRequiresPatient &&
+                      orderNextStep?.kind === "phase" &&
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
                           type="button"
@@ -4077,7 +4130,7 @@ function useOrdersPageContent() {
                       })}
                     </div>
 
-                    {nextLifecycleTransition?.blocked ? (
+                    {orderNextStepBlocked ? (
                       <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-card">
                         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-200 bg-amber-50/70 px-4 py-3">
                           <div>
@@ -4097,11 +4150,11 @@ function useOrdersPageContent() {
                             variant="outline"
                             className="rounded-full border-amber-300 bg-white text-amber-900"
                           >
-                            {nextLifecycleTransition.reasons.length}
+                            {orderNextStepReasons.length}
                           </Badge>
                         </div>
                         <ol className="divide-y divide-border/60">
-                          {nextLifecycleTransition.reasons.map((reason, index) => {
+                          {orderNextStepReasons.map((reason, index) => {
                             const targetSection = orderBlockingReasonSection(reason);
                             return (
                               <li key={reason}>
@@ -4137,12 +4190,16 @@ function useOrdersPageContent() {
                           })}
                         </ol>
                       </div>
-                    ) : orderDetail.lifecycle?.next_stage ? (
+                    ) : orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion" ? (
                       <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
                         <CheckCircle2 className="size-4 shrink-0" />
-                        {lang === "de"
-                          ? "Alle erforderlichen Aufgaben für den nächsten Schritt sind erledigt."
-                          : "Все обязательные пункты для перехода выполнены."}
+                        {orderNextStep.kind === "completion"
+                          ? lang === "de"
+                            ? "Alle erforderlichen Aufgaben für den Abschluss sind erledigt."
+                            : "Все обязательные пункты для завершения заказа выполнены."
+                          : lang === "de"
+                            ? "Alle erforderlichen Aufgaben für den nächsten Schritt sind erledigt."
+                            : "Все обязательные пункты для перехода выполнены."}
                       </div>
                     ) : null}
                   </div>
@@ -6729,7 +6786,10 @@ function useOrdersPageContent() {
                     <SectionCard
                       title={lang === "de" ? "Auftragsgruppe" : "Групповой заказ"}
                     >
-                      <OrderGroupPanel orderId={orderDetail.id} />
+                      <OrderGroupPanel
+                        orderId={orderDetail.id}
+                        canManage={canManageOrderGroupAndAmendments}
+                      />
                     </SectionCard>
 
                     <SectionCard
@@ -6737,7 +6797,14 @@ function useOrdersPageContent() {
                         lang === "de" ? "Betragsänderungen" : "Изменения суммы"
                       }
                     >
-                      <OrderAmendmentsPanel key={orderDetail.id} orderId={orderDetail.id} refreshKey={reloadNonce} onChanged={triggerReload} />
+                      <OrderAmendmentsPanel
+                        key={orderDetail.id}
+                        orderId={orderDetail.id}
+                        refreshKey={reloadNonce}
+                        onChanged={triggerReload}
+                        currentUserId={user?.id ?? null}
+                        canManage={canManageOrderGroupAndAmendments}
+                      />
                     </SectionCard>
 
                     <SectionCard title={tx.providers_services}>
