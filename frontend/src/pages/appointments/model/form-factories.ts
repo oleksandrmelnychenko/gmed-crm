@@ -75,6 +75,43 @@ export function blankAppointmentFormForCurrentUser(
   };
 }
 
+/**
+ * Where a new appointment is started from: the calendar opened for a patient
+ * (`?patient=`) or from an order workspace (`?order=&patient=`).
+ */
+export type AppointmentCreateContext = {
+  patientId?: string | null;
+  orderId?: string | null;
+};
+
+export function appointmentCreateContextFromSearch(
+  searchParams: URLSearchParams,
+): { patientId: string; orderId: string } {
+  return {
+    patientId: searchParams.get("patient")?.trim() ?? "",
+    orderId: searchParams.get("order")?.trim() ?? "",
+  };
+}
+
+/**
+ * Preselects the patient and order of the calling context. An order is only
+ * taken over together with its patient: the order select lists the orders of
+ * the chosen patient, and an appointment always belongs to a patient.
+ */
+export function applyAppointmentCreateContext(
+  form: AppointmentFormState,
+  context: AppointmentCreateContext,
+): AppointmentFormState {
+  const patientId = context.patientId?.trim() ?? "";
+  if (!patientId) return form;
+  const orderId = context.orderId?.trim() ?? "";
+  return {
+    ...form,
+    patientId,
+    orderId: orderId || (form.patientId === patientId ? form.orderId : ""),
+  };
+}
+
 const APPOINTMENT_FORM_DIRTY_FIELDS: Array<keyof AppointmentFormState> = [
   "patientId",
   "providerId",

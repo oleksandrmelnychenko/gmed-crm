@@ -10,7 +10,10 @@ import type FullCalendar from "@fullcalendar/react";
 import type { DateClickArg } from "@fullcalendar/interaction";
 import type { DatesSetArg } from "@fullcalendar/core";
 
-import { blankAppointmentFormForCurrentUser } from "@/pages/appointments/model/form-factories";
+import {
+  applyAppointmentCreateContext,
+  blankAppointmentFormForCurrentUser,
+} from "@/pages/appointments/model/form-factories";
 import {
   inclusiveCalendarVisibleRange,
   toDateInput,
@@ -43,6 +46,9 @@ type UseAppointmentSchedulerControlsOptions = {
   }) => void;
   syncQuery: (next: Record<string, string | null>) => void;
   onRefreshAppointments: () => void;
+  /** Patient and order the calendar was opened for (`?patient=&order=`). */
+  createContextPatientId?: string;
+  createContextOrderId?: string;
   onOpenCreateSeed: (seed: AppointmentFormState) => void;
   onDismissQuickActionMenu: () => void;
 };
@@ -63,9 +69,19 @@ export function useAppointmentSchedulerControls({
   onVisibleDateRangeChange,
   syncQuery,
   onRefreshAppointments,
+  createContextPatientId = "",
+  createContextOrderId = "",
   onOpenCreateSeed,
   onDismissQuickActionMenu,
 }: UseAppointmentSchedulerControlsOptions) {
+  const blankCreateSeed = useCallback(
+    () =>
+      applyAppointmentCreateContext(
+        blankAppointmentFormForCurrentUser(currentUserId, currentUserRole),
+        { patientId: createContextPatientId, orderId: createContextOrderId },
+      ),
+    [createContextOrderId, createContextPatientId, currentUserId, currentUserRole],
+  );
   const syncCalendar = useCallback(
     (nextView?: CalendarView, nextDate?: string) => {
       const api = calendarRef.current?.getApi();
@@ -240,6 +256,7 @@ export function useAppointmentSchedulerControls({
     syncCalendar("timeGridWeek", todayDate);
     syncQuery({
       patient: null,
+      order: null,
       provider: null,
       doctor: null,
       appointment: null,
@@ -257,10 +274,7 @@ export function useAppointmentSchedulerControls({
   const openCreateSheetFromDate = useCallback(
     (info?: DateClickArg) => {
       if (!canCreate) return;
-      const next = blankAppointmentFormForCurrentUser(
-        currentUserId,
-        currentUserRole,
-      );
+      const next = blankCreateSeed();
       if (info) {
         next.date = toDateInput(info.date);
         if (!info.allDay) {
@@ -272,7 +286,7 @@ export function useAppointmentSchedulerControls({
       }
       onOpenCreateSeed(next);
     },
-    [canCreate, currentUserId, currentUserRole, onOpenCreateSeed],
+    [blankCreateSeed, canCreate, onOpenCreateSeed],
   );
 
   useEffect(() => {
@@ -281,9 +295,7 @@ export function useAppointmentSchedulerControls({
     };
     const handleCreateRequest = () => {
       if (!canCreate) return;
-      onOpenCreateSeed(
-        blankAppointmentFormForCurrentUser(currentUserId, currentUserRole),
-      );
+      onOpenCreateSeed(blankCreateSeed());
     };
 
     window.addEventListener(
@@ -305,13 +317,7 @@ export function useAppointmentSchedulerControls({
         handleCreateRequest as EventListener,
       );
     };
-  }, [
-    canCreate,
-    currentUserId,
-    currentUserRole,
-    onOpenCreateSeed,
-    onRefreshAppointments,
-  ]);
+  }, [blankCreateSeed, canCreate, onOpenCreateSeed, onRefreshAppointments]);
 
   return {
     handleDatesSet,

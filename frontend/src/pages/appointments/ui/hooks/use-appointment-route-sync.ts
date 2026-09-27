@@ -5,6 +5,7 @@ import {
   type SetStateAction,
 } from "react";
 
+import type { AppointmentCreateContext } from "@/pages/appointments/model/form-factories";
 import type {
   FiltersState,
   OperationalScope,
@@ -36,7 +37,7 @@ type UseAppointmentRouteHydrationOptions = {
   closeDetailWorkspace: (clearQuery?: boolean) => void;
   setFilters: Dispatch<SetStateAction<FiltersState>>;
   openDetailWorkspace: (appointmentId: string) => void;
-  onOpenCreateFromPatient: (patientId: string) => void;
+  onOpenCreateFromRoute: (context: AppointmentCreateContext) => void;
 };
 
 export function useAppointmentQueryActions({
@@ -66,6 +67,7 @@ export function useAppointmentQueryActions({
     setFilters(defaultFilters);
     syncQuery({
       patient: null,
+      order: null,
       provider: null,
       doctor: null,
       appointment: null,
@@ -76,9 +78,15 @@ export function useAppointmentQueryActions({
   const handleSearchPatientChange = useCallback(
     (patientId: string) => {
       setFilters((current) => ({ ...current, patientId }));
-      syncQuery({ patient: patientId || null });
+      // The order context belongs to the previous patient.
+      const keepOrder =
+        Boolean(patientId) && searchParams.get("patient") === patientId;
+      syncQuery({
+        patient: patientId || null,
+        ...(keepOrder ? {} : { order: null }),
+      });
     },
-    [setFilters, syncQuery],
+    [searchParams, setFilters, syncQuery],
   );
 
   const handleSearchProviderChange = useCallback(
@@ -122,10 +130,11 @@ export function useAppointmentRouteHydration({
   closeDetailWorkspace,
   setFilters,
   openDetailWorkspace,
-  onOpenCreateFromPatient,
+  onOpenCreateFromRoute,
 }: UseAppointmentRouteHydrationOptions) {
   useEffect(() => {
     const patientParam = searchParams.get("patient") ?? "";
+    const orderParam = searchParams.get("order") ?? "";
     const providerParam = searchParams.get("provider") ?? "";
     const doctorParam = searchParams.get("doctor") ?? "";
     const appointmentParam = searchParams.get("appointment") ?? "";
@@ -156,7 +165,7 @@ export function useAppointmentRouteHydration({
     }
 
     if (createParam && canCreate) {
-      onOpenCreateFromPatient(patientParam);
+      onOpenCreateFromRoute({ patientId: patientParam, orderId: orderParam });
       const params = new URLSearchParams(searchParams);
       params.delete("create");
       setSearchParams(params, { replace: true });
@@ -165,7 +174,7 @@ export function useAppointmentRouteHydration({
     canCreate,
     closeDetailWorkspace,
     detailOpen,
-    onOpenCreateFromPatient,
+    onOpenCreateFromRoute,
     openDetailWorkspace,
     searchParams,
     selectedId,

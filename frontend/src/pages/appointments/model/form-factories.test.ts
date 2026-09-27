@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  appointmentCreateContextFromSearch,
+  applyAppointmentCreateContext,
+  blankAppointmentForm,
   buildEditAppointmentForm,
   blankAppointmentFormForCurrentUser,
   defaultAppointmentOwnerUserId,
@@ -158,5 +161,48 @@ describe("appointment form factories", () => {
     expect(restored.repeatEndMode).toBe("count");
     expect(restored.repeatCount).toBe("5");
     expect(restored.repeatUntil).toBe("");
+  });
+});
+
+describe("appointment create context", () => {
+  it("reads the patient and order the calendar was opened for", () => {
+    expect(
+      appointmentCreateContextFromSearch(
+        new URLSearchParams("order=order-1&patient=patient-1&view=week"),
+      ),
+    ).toEqual({ patientId: "patient-1", orderId: "order-1" });
+    expect(appointmentCreateContextFromSearch(new URLSearchParams())).toEqual({
+      patientId: "",
+      orderId: "",
+    });
+  });
+
+  it("preselects patient and order of the order workspace", () => {
+    const form = applyAppointmentCreateContext(
+      blankAppointmentFormForCurrentUser("user-1", "patient_manager"),
+      { patientId: "patient-1", orderId: "order-1" },
+    );
+
+    expect(form.patientId).toBe("patient-1");
+    expect(form.orderId).toBe("order-1");
+    expect(form.ownerUserId).toBe("user-1");
+  });
+
+  it("preselects only the patient when no order is in context", () => {
+    const form = applyAppointmentCreateContext(
+      { ...blankAppointmentForm(), patientId: "patient-2", orderId: "order-2" },
+      { patientId: "patient-1" },
+    );
+
+    expect(form.patientId).toBe("patient-1");
+    expect(form.orderId).toBe("");
+  });
+
+  it("does not take over an order without its patient", () => {
+    const blank = blankAppointmentForm();
+
+    expect(applyAppointmentCreateContext(blank, { orderId: "order-1" })).toBe(
+      blank,
+    );
   });
 });
