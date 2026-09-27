@@ -94,6 +94,8 @@ type AppointmentDesktopDetailWorkspaceContentProps = {
   providersError?: string;
   taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
+  /** Active assignees of the appointment's patient (reminder recipients). */
+  patientAssigneeIds: ReadonlySet<string>;
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
   currentUserId?: string;
@@ -169,6 +171,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
   providersError,
   taxonomyNodes,
   staff,
+  patientAssigneeIds,
   interpreters,
   permissions,
   currentUserId,
@@ -364,6 +367,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
               providers={providers}
               taxonomyNodes={taxonomyNodes}
               staff={staff}
+              patientAssigneeIds={patientAssigneeIds}
               interpreters={interpreters}
               permissions={permissions}
               currentUserId={currentUserId}
@@ -438,6 +442,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
                 detail={detail}
                 detailReport={detailReport}
                 staff={staff}
+                patientAssigneeIds={patientAssigneeIds}
                 interpreters={interpreters}
                 currentUserId={currentUserId}
                 permissions={permissions}

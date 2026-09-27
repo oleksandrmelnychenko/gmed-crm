@@ -61,7 +61,11 @@ import {
 } from "@/pages/appointments/model/query-builders";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { formatScheduleConflictError } from "@/pages/appointments/model/schedule-warnings";
-import { isAppointmentTaskAssignableRole } from "@/pages/appointments/model/staff-roles";
+import {
+  activePatientAssigneeIds,
+  canRemindAboutAppointment,
+  isAppointmentTaskAssignableRole,
+} from "@/pages/appointments/model/staff-roles";
 import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
 import { renderStaticCalendarEventContent } from "@/pages/appointments/model/calendar-event-content";
 import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
@@ -629,6 +633,11 @@ function useStaffAppointmentsPageContent() {
     () => staff.filter((member) => member.role === "billing"),
     [staff],
   );
+  // Reminder pickers offer only people who can work on the appointment.
+  const patientAssigneeIds = useMemo(
+    () => activePatientAssigneeIds(detailAssignments),
+    [detailAssignments],
+  );
   const conciergeStaff = useMemo(
     () => staff.filter((member) => member.role === "concierge"),
     [staff],
@@ -863,11 +872,14 @@ function useStaffAppointmentsPageContent() {
       }
     }
 
+    // The follow-up flows always remind the chosen person, so they offer only
+    // people the server accepts a reminder about this appointment for.
     const doctorFollowUpAssigneeMap = new Map<
       string,
       { id: string; name: string; role: string }
     >();
     for (const item of handoffStakeholders) {
+      if (!item.canReceiveReminder) continue;
       doctorFollowUpAssigneeMap.set(item.id, {
         id: item.id,
         name: item.name,
@@ -875,7 +887,11 @@ function useStaffAppointmentsPageContent() {
       });
     }
     for (const item of taskAssignableStaff) {
-      if (!doctorFollowUpAssigneeMap.has(item.id)) {
+      if (
+        detail &&
+        !doctorFollowUpAssigneeMap.has(item.id) &&
+        canRemindAboutAppointment(item, detail, patientAssigneeIds)
+      ) {
         doctorFollowUpAssigneeMap.set(item.id, {
           id: item.id,
           name: item.name,
@@ -985,6 +1001,7 @@ function useStaffAppointmentsPageContent() {
     detailReport?.billing_sync_status,
     detailServices,
     detailTasks,
+    patientAssigneeIds,
     permissions.canManageConciergeBilling,
       taskAssignableStaff,
       tr.patients_title,
@@ -1596,6 +1613,7 @@ function useStaffAppointmentsPageContent() {
             providersError={providersError}
             taxonomyNodes={taxonomyNodes}
             staff={staff}
+            patientAssigneeIds={patientAssigneeIds}
             interpreters={interpreters}
             permissions={detailPermissions}
             currentUserId={user?.id}
@@ -1944,6 +1962,7 @@ function useStaffAppointmentsPageContent() {
           providersError={providersError}
           taxonomyNodes={taxonomyNodes}
           staff={staff}
+          patientAssigneeIds={patientAssigneeIds}
           interpreters={interpreters}
           permissions={detailPermissions}
           currentUserId={user?.id}

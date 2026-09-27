@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activePatientAssigneeIds,
+  canRemindAboutAppointment,
   filterAppointmentOwnerOptions,
   isAppointmentReminderRecipient,
   isAppointmentTaskAssignableRole,
@@ -12,6 +14,52 @@ describe("appointment reminder recipients", () => {
     expect(isAppointmentReminderRecipient("billing", "medical")).toBe(true);
     expect(isAppointmentReminderRecipient("it_admin", "medical")).toBe(false);
     expect(isAppointmentReminderRecipient("concierge", "non_medical")).toBe(true);
+  });
+
+  const visit = {
+    type: "medical",
+    status: "confirmed",
+    interpreter_id: "interpreter-1",
+    interpreter_response: "accepted",
+    owner_user_id: "pm-owner",
+  };
+  const assignees = activePatientAssigneeIds([
+    { user_id: "pm-1", revoked_at: null },
+    { user_id: "concierge-1", revoked_at: null },
+    { user_id: "interpreter-2", revoked_at: null },
+    { user_id: "concierge-2", revoked_at: "2026-09-01T10:00:00Z" },
+  ]);
+  const remindable = (id: string, role: string, appointment = visit) =>
+    canRemindAboutAppointment({ id, role }, appointment, assignees);
+
+  it("offers an interpreter only while booked on the appointment", () => {
+    expect(remindable("interpreter-1", "interpreter")).toBe(true);
+    // Linked to the patient through another visit, but not booked on this one.
+    expect(remindable("interpreter-2", "interpreter")).toBe(false);
+    expect(
+      remindable("interpreter-1", "interpreter", {
+        ...visit,
+        interpreter_response: "declined",
+      }),
+    ).toBe(false);
+    expect(
+      remindable("interpreter-1", "interpreter", { ...visit, status: "cancelled" }),
+    ).toBe(false);
+  });
+
+  it("offers other roles only with access to the appointment", () => {
+    expect(remindable("pm-1", "patient_manager")).toBe(true);
+    expect(remindable("pm-owner", "patient_manager")).toBe(true);
+    expect(remindable("pm-2", "patient_manager")).toBe(false);
+    expect(remindable("concierge-1", "concierge")).toBe(true);
+    expect(remindable("concierge-2", "concierge")).toBe(false);
+    expect(remindable("interpreter-1", "teamlead_interpreter")).toBe(true);
+    expect(remindable("teamlead-9", "teamlead_interpreter")).toBe(false);
+    expect(remindable("ceo-1", "ceo")).toBe(true);
+    expect(remindable("billing-1", "billing")).toBe(true);
+    expect(remindable("billing-1", "billing", { ...visit, type: "non_medical" })).toBe(false);
+    expect(remindable("it-1", "it_admin")).toBe(false);
+    expect(remindable("sales-1", "sales")).toBe(false);
   });
 });
 

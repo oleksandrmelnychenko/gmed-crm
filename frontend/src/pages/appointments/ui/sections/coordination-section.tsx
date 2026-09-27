@@ -47,6 +47,7 @@ type AppointmentCoordinationSectionProps = {
   providers: ProviderSummary[];
   taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
+  patientAssigneeIds: ReadonlySet<string>;
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
   currentUserId?: string;
@@ -79,6 +80,7 @@ function AppointmentCoordinationSection({
   providers,
   taxonomyNodes,
   staff,
+  patientAssigneeIds,
   interpreters,
   permissions,
   currentUserId,
@@ -129,6 +131,7 @@ function AppointmentCoordinationSection({
           staff={staff}
           interpreters={interpreters}
           defaultReminderUserId={detailDefaultAssigneeId}
+          patientAssigneeIds={patientAssigneeIds}
           currentUserId={currentUserId}
           currentUserRole={currentUserRole}
           onCreated={onFollowUpVisitCreated}

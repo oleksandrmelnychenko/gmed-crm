@@ -69,6 +69,8 @@ export type AppointmentMobileDetailSheetContentProps = {
   providersError?: string;
   taxonomyNodes: ProviderTaxonomyNode[];
   staff: StaffOption[];
+  /** Active assignees of the appointment's patient (reminder recipients). */
+  patientAssigneeIds: ReadonlySet<string>;
   interpreters: InterpreterOption[];
   permissions: AppointmentPermissions;
   currentUserId?: string;
@@ -140,6 +142,7 @@ function useAppointmentMobileDetailSheetContentContent({
   providersError,
   taxonomyNodes,
   staff,
+  patientAssigneeIds,
   interpreters,
   permissions,
   currentUserId,
@@ -289,6 +292,7 @@ function useAppointmentMobileDetailSheetContentContent({
                   staff={staff}
                   interpreters={interpreters}
                   defaultReminderUserId={detailDefaultAssigneeId}
+                  patientAssigneeIds={patientAssigneeIds}
                   currentUserId={currentUserId}
                   currentUserRole={currentUserRole}
                   onCreated={onFollowUpVisitCreated}
@@ -434,6 +438,7 @@ function useAppointmentMobileDetailSheetContentContent({
                       detail={detail}
                       reminders={detailReminders}
                       staff={staff}
+                      patientAssigneeIds={patientAssigneeIds}
                       canManageReminders={permissions.canManageReminders}
                       currentUserId={currentUserId}
                       onRefresh={onRefresh}

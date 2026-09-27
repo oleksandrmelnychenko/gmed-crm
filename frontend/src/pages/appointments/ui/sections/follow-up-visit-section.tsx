@@ -61,7 +61,10 @@ import {
 import {
   toRfc3339,
 } from "@/pages/appointments/model/workflow-helpers";
-import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
+import {
+  canRemindAboutAppointment,
+  filterAppointmentOwnerOptions,
+} from "@/pages/appointments/model/staff-roles";
 import type {
   AppointmentCarePathKind,
   AppointmentDetail,
@@ -101,6 +104,8 @@ type AppointmentFollowUpVisitSectionProps = {
   staff: StaffOption[];
   interpreters: InterpreterOption[];
   defaultReminderUserId: string;
+  /** Active assignees of the patient: the reminder goes to someone who can work on the new visit. */
+  patientAssigneeIds: ReadonlySet<string>;
   currentUserId?: string;
   currentUserRole?: string;
   onCreated: (result: { id?: string; notice: string }) => void;
@@ -143,6 +148,7 @@ function useAppointmentFollowUpVisitSectionContent({
   staff,
   interpreters,
   defaultReminderUserId,
+  patientAssigneeIds,
   currentUserId,
   currentUserRole,
   onCreated,
@@ -181,6 +187,26 @@ function useAppointmentFollowUpVisitSectionContent({
     }),
   );
   const { form, doctors, conflicts, error, busy } = sectionState;
+  // Mirrors the server: the reminder recipient must be able to work on the
+  // new visit (an interpreter only when booked on it).
+  const reminderRecipients = staff.filter((member) =>
+    canRemindAboutAppointment(
+      member,
+      {
+        type: form.appointmentType,
+        status: "planned",
+        interpreter_id: form.interpreterId || null,
+        interpreter_response: form.interpreterId ? "pending" : null,
+        owner_user_id: form.ownerUserId || null,
+      },
+      patientAssigneeIds,
+    ),
+  );
+  const reminderUserId = reminderRecipients.some(
+    (member) => member.id === form.reminderUserId,
+  )
+    ? form.reminderUserId
+    : "";
   const setForm = (nextValue: SetStateAction<FollowUpVisitFormState>) => {
     dispatchSectionState((current) => ({
       form:
@@ -421,12 +447,12 @@ function useAppointmentFollowUpVisitSectionContent({
         }),
       });
 
-      if (result.id && form.createReminder && form.reminderUserId && form.reminderAt) {
+      if (result.id && form.createReminder && reminderUserId && form.reminderAt) {
         const followUpTitle = form.title.trim();
         await apiFetch<{ id: string }>(`/appointments/${result.id}/reminders`, {
           method: "POST",
           body: JSON.stringify({
-            user_id: form.reminderUserId,
+            user_id: reminderUserId,
             remind_at: toRfc3339(form.reminderAt),
             title: formatUiText(t.appointments_follow_up_visit_reminder_title, {
               title: followUpTitle,
@@ -895,7 +921,7 @@ function useAppointmentFollowUpVisitSectionContent({
           </label>
           <Field label={tr.patients_assign_owner}>
             <NativeComboboxSelect
-              value={form.reminderUserId}
+              value={reminderUserId}
               onChange={(event) =>
                 setForm((current) => ({
                   ...current,
@@ -906,7 +932,7 @@ function useAppointmentFollowUpVisitSectionContent({
               disabled={!form.createReminder}
             >
               <option value="">{tr.common_not_set}</option>
-              {staff.map((member) => (
+              {reminderRecipients.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name} · {roleLabel(member.role)}
                 </option>

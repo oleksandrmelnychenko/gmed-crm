@@ -230,11 +230,13 @@ function AppointmentHandoffSectionContent({
                 className="h-8 w-full rounded-md bg-field text-xs"
               >
                 <option value="">{tr.common_not_set}</option>
-                {handoffStakeholders.map((peer) => (
-                  <option key={peer.id} value={peer.id}>
-                    {peer.name} · {roleLabel(peer.role)}
-                  </option>
-                ))}
+                {handoffStakeholders
+                  .filter((peer) => peer.canReceiveReminder)
+                  .map((peer) => (
+                    <option key={peer.id} value={peer.id}>
+                      {peer.name} · {roleLabel(peer.role)}
+                    </option>
+                  ))}
               </NativeComboboxSelect>
             </ToolbarField>
             {FOLLOW_UP_PRESETS.map((preset) => (

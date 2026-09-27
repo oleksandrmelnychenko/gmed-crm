@@ -30,7 +30,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { localizeTaskTitle } from "@/lib/task-labels";
-import { isAppointmentReminderRecipient } from "@/pages/appointments/model/staff-roles";
+import { canRemindAboutAppointment } from "@/pages/appointments/model/staff-roles";
 import {
   fetchPatientInterpreterHistory,
   fetchInterpreterSuggestions,
@@ -230,6 +230,7 @@ type AppointmentWorkflowTabProps = {
   detail: AppointmentDetail;
   detailReport: ReportSummary | null;
   staff: StaffOption[];
+  patientAssigneeIds: ReadonlySet<string>;
   interpreters: InterpreterOption[];
   currentUserId?: string;
   permissions: AppointmentPermissions;
@@ -281,6 +282,7 @@ function AppointmentWorkflowTab({
   detail,
   detailReport,
   staff,
+  patientAssigneeIds,
   interpreters,
   currentUserId,
   permissions,
@@ -447,6 +449,7 @@ function AppointmentWorkflowTab({
                     detail={detail}
                     reminders={reminders}
                     staff={staff}
+                    patientAssigneeIds={patientAssigneeIds}
                     canManageReminders={permissions.canManageReminders}
                     currentUserId={currentUserId}
                     onRefresh={onRefresh}
@@ -1410,6 +1413,7 @@ function AppointmentRemindersSection({
   detail,
   reminders,
   staff,
+  patientAssigneeIds,
   canManageReminders,
   currentUserId,
   onRefresh,
@@ -1418,12 +1422,20 @@ function AppointmentRemindersSection({
   detail: AppointmentDetail;
   reminders: ReminderEntry[];
   staff: StaffOption[];
+  patientAssigneeIds: ReadonlySet<string>;
   canManageReminders: boolean;
   currentUserId?: string;
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
   const { t } = useLang();
+  const recipients = useMemo(
+    () =>
+      staff.filter((member) =>
+        canRemindAboutAppointment(member, detail, patientAssigneeIds),
+      ),
+    [detail, patientAssigneeIds, staff],
+  );
   const [form, setForm] = useState<ReminderFormState>(() => blankReminderForm());
   const [sheetOpen, setSheetOpen] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
@@ -1603,13 +1615,11 @@ function AppointmentRemindersSection({
               required
             >
               <option value="">{t.common_not_set}</option>
-              {staff
-                .filter((member) => isAppointmentReminderRecipient(member.role, detail.type))
-                .map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.name} · {roleLabel(member.role)}
-                  </option>
-                ))}
+              {recipients.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.name} · {roleLabel(member.role)}
+                </option>
+              ))}
             </NativeComboboxSelect>
           </Field>
           <Field compact label={t.appointments_date}>
@@ -1872,11 +1882,13 @@ function AppointmentCompletionSectionContent({
               className={selectClassName}
             >
               <option value="">{tr.common_not_set}</option>
-              {handoffStakeholders.map((peer) => (
-                <option key={peer.id} value={peer.id}>
-                  {peer.name} · {roleLabel(peer.role)}
-                </option>
-              ))}
+              {handoffStakeholders
+                .filter((peer) => peer.canReceiveReminder)
+                .map((peer) => (
+                  <option key={peer.id} value={peer.id}>
+                    {peer.name} · {roleLabel(peer.role)}
+                  </option>
+                ))}
             </NativeComboboxSelect>
           </Field>
           <div className="flex flex-wrap gap-2">

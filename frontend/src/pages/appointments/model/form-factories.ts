@@ -1,5 +1,6 @@
 import { FOLLOW_UP_PRESETS } from "./constants";
 import { currentDateInput, shiftLocalDateTime } from "./date-time";
+import { activePatientAssigneeIds, canRemindAboutAppointment } from "./staff-roles";
 import type {
   AppointmentDetail,
   AppointmentFormState,
@@ -308,19 +309,28 @@ export function blankExternalHandoffForm(
   };
 }
 
+/**
+ * The default recipient of follow-up reminders: the patient's manager, else
+ * the appointment owner, else another assignee, each only if the server
+ * accepts a reminder about this appointment for them.
+ */
 export function resolveFollowUpDefaultAssignee(
   detail: AppointmentDetail,
   assignments: PatientAssignment[],
 ): string {
+  const active = assignments.filter((item) => !item.revoked_at && item.user_active);
+  const assigneeIds = activePatientAssigneeIds(active);
+  const remindable = (id: string, role: string) =>
+    canRemindAboutAppointment({ id, role }, detail, assigneeIds);
+  const eligible = active.filter((item) => remindable(item.user_id, item.user_role));
+  const owner =
+    detail.owner_user_id && remindable(detail.owner_user_id, detail.owner_role ?? "")
+      ? detail.owner_user_id
+      : undefined;
   return (
-    assignments.find(
-      (item) =>
-        !item.revoked_at &&
-        item.user_active &&
-        item.user_role === "patient_manager",
-    )?.user_id ??
-    detail.owner_user_id ??
-    assignments.find((item) => !item.revoked_at && item.user_active)?.user_id ??
+    eligible.find((item) => item.user_role === "patient_manager")?.user_id ??
+    owner ??
+    eligible[0]?.user_id ??
     ""
   );
 }

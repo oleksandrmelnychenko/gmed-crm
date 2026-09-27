@@ -7894,6 +7894,108 @@ async fn reminders_can_be_created_by_pm_and_completed_by_assignee() {
 }
 
 #[tokio::test]
+async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("reminder-recipients");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let booked_interpreter = seed_user(&pool, &format!("{tag}-booked"), "interpreter").await;
+    let other_interpreter = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let assigned_concierge = seed_user(&pool, &format!("{tag}-c1"), "concierge").await;
+    let unassigned_concierge = seed_user(&pool, &format!("{tag}-c2"), "concierge").await;
+    for user_id in [
+        pm_id,
+        booked_interpreter,
+        other_interpreter,
+        assigned_concierge,
+    ] {
+        seed_patient_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Visit {tag}"),
+        "confirmed",
+        "2026-11-02",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'accepted' WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .bind(booked_interpreter)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let remind = |user_id: Uuid| {
+        let app = app.clone();
+        let bearer = pm_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/appointments/{appointment_id}/reminders"),
+                &bearer,
+                Some(json!({
+                    "user_id": user_id,
+                    "remind_at": "2026-11-01T08:00:00Z",
+                    "title": "Prepare the visit"
+                })),
+            )
+            .await
+        }
+    };
+
+    let (status, body) = remind(booked_interpreter).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = remind(assigned_concierge).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // Linked to the patient but not booked on this visit: the interpreter
+    // could neither see nor complete the reminder.
+    let (status, body) = remind(other_interpreter).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "An interpreter can only be reminded of an appointment they are booked on"
+    );
+    let (status, body) = remind(unassigned_concierge).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "The selected user has no access to this appointment or its patient"
+    );
+
+    // A declined booking no longer counts.
+    sqlx::query("UPDATE appointments SET interpreter_response = 'declined' WHERE id = $1")
+        .bind(appointment_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = remind(booked_interpreter).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let stored: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT user_id FROM reminders WHERE appointment_id = $1 ORDER BY created_at",
+    )
+    .bind(appointment_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, vec![booked_interpreter, assigned_concierge]);
+}
+
+#[tokio::test]
 async fn patient_manager_can_log_and_close_appointment_communication() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
