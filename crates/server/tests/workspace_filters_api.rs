@@ -15390,3 +15390,150 @@ async fn concierge_and_interpreter_team_lead_read_only_their_part_of_an_order() 
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+async fn seed_agency_service(pool: &PgPool, service_key: &str, created_by: Uuid) {
+    sqlx::query(
+        r#"INSERT INTO agency_service_catalog (
+               service_key, service_name, unit_label, unit_price, currency,
+               vat_rate, is_active, valid_from, created_by
+           ) VALUES ($1, $1, 'unit', 120, 'EUR', 19, true, CURRENT_DATE, $2)"#,
+    )
+    .bind(service_key)
+    .bind(created_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn concierge_marks_only_service_lines_delivered() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("concierge-deliver");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let clinic_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let partner_id =
+        seed_provider_with_type(&pool, &format!("{tag}-partner"), "non_medical", "Germany").await;
+    let transfer_key = format!("airport_transfer-{tag}");
+    let organisation_key = format!("organisation_treatment_5doc-{tag}");
+    seed_agency_service(&pool, &transfer_key, admin_id).await;
+    seed_agency_service(&pool, &organisation_key, admin_id).await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-DELIVER-{tag}"),
+        "execution",
+        "active",
+        "Treatment",
+    )
+    .await;
+    let medical_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(clinic_id),
+        None,
+        &format!("Consultation {tag}"),
+        "",
+    )
+    .await;
+    let partner_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(partner_id),
+        None,
+        &format!("Hotel {tag}"),
+        "",
+    )
+    .await;
+    // The agency's own transfer has no partner; it is a service line too.
+    let agency_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some(&transfer_key),
+        &format!("Airport transfer {tag}"),
+        "",
+    )
+    .await;
+    let interpreter_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some("interpreter_hours"),
+        &format!("Interpreter hours {tag}"),
+        "",
+    )
+    .await;
+    let organisation_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some(&organisation_key),
+        &format!("Treatment organisation {tag}"),
+        "",
+    )
+    .await;
+
+    let concierge_id = seed_user(&pool, &format!("{tag}-c"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let concierge = auth_header_for(concierge_id, "concierge");
+
+    // The concierge's order part lists both service lines.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        line_ids(&detail),
+        vec![partner_line.to_string(), agency_line.to_string()]
+    );
+
+    let deliver = |line: Uuid| format!("/api/v1/orders/{order_id}/leistungen/{line}/deliver");
+    for line in [medical_line, interpreter_line, organisation_line] {
+        let (status, body) = json_request(&app, "POST", &deliver(line), &concierge, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{line}: {body}");
+        assert_eq!(
+            body["message"],
+            "A concierge can mark only service and logistics lines as delivered, not medical services"
+        );
+    }
+    for line in [partner_line, agency_line] {
+        let (status, body) = json_request(&app, "POST", &deliver(line), &concierge, None).await;
+        assert_eq!(status, StatusCode::OK, "{line}: {body}");
+    }
+    let (status, _) = json_request(&app, "POST", &deliver(Uuid::new_v4()), &concierge, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The patient manager keeps delivering any line.
+    let manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &deliver(medical_line),
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let delivered: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM order_leistungen WHERE order_id = $1 AND delivered_at IS NOT NULL",
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let mut delivered = delivered;
+    delivered.sort();
+    let mut expected = vec![medical_line, partner_line, agency_line];
+    expected.sort();
+    assert_eq!(delivered, expected);
+}

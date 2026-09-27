@@ -9171,7 +9171,8 @@ async fn update_leistung_planned_cost(
 
 /// Staff records that a service was actually provided. A service may already be
 /// invoiced (approval is no longer a step), so only the delivery timestamp gates
-/// this; a planned service also moves to delivered.
+/// this; a planned service also moves to delivered. The concierge records only
+/// the service and logistics lines of its order part, never a medical line.
 async fn deliver_leistung(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -9184,6 +9185,39 @@ async fn deliver_leistung(
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
+    }
+    if auth.role == Role::Concierge {
+        let sql = format!(
+            r#"SELECT {CONCIERGE_SERVICE_LINE_SQL}
+               FROM order_leistungen ol
+               LEFT JOIN providers pr ON pr.id = ol.provider_id
+               LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+               WHERE ol.id = $1 AND ol.order_id = $2"#
+        );
+        match sqlx::query_scalar::<_, bool>(&sql)
+            .bind(leistung_id)
+            .bind(order_id)
+            .fetch_optional(&state.db)
+            .await
+        {
+            Ok(Some(true)) => {}
+            Ok(Some(false)) => {
+                return err(
+                    StatusCode::FORBIDDEN,
+                    "A concierge can mark only service and logistics lines as delivered, not medical services",
+                );
+            }
+            Ok(None) => {
+                return err(
+                    StatusCode::NOT_FOUND,
+                    "Leistung not found or already delivered",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, %order_id, %leistung_id, "classify leistung for concierge delivery");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
     }
 
     match sqlx::query(
@@ -11332,7 +11366,7 @@ async fn ensure_patient_access(
 pub(crate) enum OrderReadScope {
     Full,
     /// Concierge: period, status and the service lines of non-medical
-    /// providers (transfer, hotel, VIP …).
+    /// providers and of the agency itself (see [`CONCIERGE_SERVICE_LINE_SQL`]).
     ConciergeServices,
     /// Interpreter team lead: period, status and the interpreter-hours lines.
     InterpreterTeam,
@@ -11426,6 +11460,30 @@ async fn can_access_scoped_order(
     })
 }
 
+/// The concierge's part of an order, over `ol` (`order_leistungen`), `pr` (its
+/// provider) and `catalog` (its agency service): lines of non-medical partners
+/// (transfer, hotel, VIP …) and the agency's own service lines without a
+/// partner (a transfer, concierge support …). Lines of medical providers or
+/// doctors, lines created from a medical appointment or an interpreter report,
+/// interpreter hours and the treatment-organisation fees are medical.
+const CONCIERGE_SERVICE_LINE_SQL: &str = r#"COALESCE(
+    ol.source_medical_appointment_id IS NULL
+    AND ol.source_interpreter_report_id IS NULL
+    AND (
+        (ol.provider_id IS NOT NULL AND pr.provider_type = 'non_medical')
+        OR (
+            ol.provider_id IS NULL
+            AND ol.doctor_id IS NULL
+            AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key) IS NOT NULL
+            AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                NOT IN ('interpreter_hours', 'treatment_organization')
+            AND COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                NOT LIKE 'organisation\_treatment%' ESCAPE '\'
+        )
+    ),
+    false
+)"#;
+
 /// The read-only projection of an order for the concierge and the interpreter
 /// team lead (see [`OrderReadScope`]).
 async fn scoped_order_detail(
@@ -11434,7 +11492,7 @@ async fn scoped_order_detail(
     order_id: Uuid,
     scope: OrderReadScope,
 ) -> Result<serde_json::Value, axum::response::Response> {
-    let lines = sqlx::query(
+    let lines_sql = format!(
         r#"SELECT ol.id, ol.description, ol.quantity, ol.currency, ol.status,
                   ol.delivered_at, ol.approved_at, ol.cancelled_at,
                   ol.provider_id, pr.name AS provider_name,
@@ -11447,29 +11505,26 @@ async fn scoped_order_detail(
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            WHERE ol.order_id = $1
              AND (
-                 ($2::text = 'concierge_services'
-                  AND ol.provider_id IS NOT NULL
-                  AND pr.provider_type = 'non_medical'
-                  AND ol.source_medical_appointment_id IS NULL
-                  AND ol.source_interpreter_report_id IS NULL)
+                 ($2::text = 'concierge_services' AND {CONCIERGE_SERVICE_LINE_SQL})
                  OR ($2::text = 'interpreter_team'
                      AND (ol.source_interpreter_report_id IS NOT NULL
                           OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
                              = 'interpreter_hours'))
              )
-           ORDER BY ol.created_at, ol.id"#,
-    )
-    .bind(order_id)
-    .bind(scope.wire_name())
-    .fetch_all(&state.db)
-    .await
-    .map_err(|error| {
-        tracing::error!(%error, %order_id, "load scoped order services");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load order services",
-        )
-    })?;
+           ORDER BY ol.created_at, ol.id"#
+    );
+    let lines = sqlx::query(&lines_sql)
+        .bind(order_id)
+        .bind(scope.wire_name())
+        .fetch_all(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %order_id, "load scoped order services");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order services",
+            )
+        })?;
     let period = sqlx::query("SELECT date_from, date_to FROM orders WHERE id = $1")
         .bind(order_id)
         .fetch_one(&state.db)
