@@ -1,3 +1,4 @@
+import { addDaysToDateKey, appDateKey, appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { formatMoneyAmount, moneyLineAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
@@ -70,16 +71,9 @@ export function invoiceDisplayNumber(
   return invoice.invoice_number?.trim() || draftLabel;
 }
 
-function isoDate(value: Date) {
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${value.getFullYear()}-${month}-${day}`;
-}
-
-/** Due date the server sets on release when none is given: today + payment term. */
+/** Due date the server sets on release when none is given: today (Berlin) + payment term. */
 export function defaultReleaseDueDate(today: Date, termDays = DEFAULT_INVOICE_PAYMENT_TERM_DAYS) {
-  const due = new Date(today.getFullYear(), today.getMonth(), today.getDate() + termDays);
-  return isoDate(due);
+  return addDaysToDateKey(appDateKey(today), termDays);
 }
 
 /**
@@ -92,7 +86,7 @@ export function invoiceStatusFormProblem(
   today: Date,
 ): "due_date_before_invoice_date" | "due_date_locked" | null {
   const releasing = invoice.status === "draft" && form.status === "sent";
-  if (releasing && form.dueDate && form.dueDate < isoDate(today)) {
+  if (releasing && form.dueDate && form.dueDate < appDateKey(today)) {
     return "due_date_before_invoice_date";
   }
   if (
@@ -148,14 +142,14 @@ const INVOICE_DATE_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 
 const dateFormatters = new Map<string, Intl.DateTimeFormat>([
-  ["de-DE", new Intl.DateTimeFormat("de-DE", INVOICE_DATE_FORMAT_OPTIONS)],
-  ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_FORMAT_OPTIONS)],
-  ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["de-DE", appDateTimeFormat("de-DE", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["ru-RU", appDateTimeFormat("ru-RU", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["en-GB", appDateTimeFormat("en-GB", INVOICE_DATE_FORMAT_OPTIONS)],
 ]);
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>([
-  ["de-DE", new Intl.DateTimeFormat("de-DE", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-  ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-  ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["de-DE", appDateTimeFormat("de-DE", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["ru-RU", appDateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["en-GB", appDateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
 ]);
 
 function invoiceDateFormatter(locale: string) {
@@ -495,12 +489,9 @@ export function formatDate(
 ) {
   if (!value) return emptyLabel;
   try {
-    // Date-only values are local calendar days; timestamps such as paid_at
-    // already carry a time and zone.
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
-      ? new Date(`${value}T00:00:00`)
-      : new Date(value);
-    return invoiceDateFormatter(locale).format(date);
+    // Date-only values are calendar days; timestamps such as paid_at are
+    // instants shown on their Berlin date.
+    return invoiceDateFormatter(locale).format(dateOrInstant(value));
   } catch {
     return value;
   }

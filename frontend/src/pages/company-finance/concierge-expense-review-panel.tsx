@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { StaffLink } from "@/components/staff-link";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
+import { appDateKey, appDateTimeFormat, dateKeyToDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
@@ -337,11 +338,11 @@ function formatMoney(value: string, currency: string, _locale: string) {
 
 function formatDate(value: string | null, locale: string, withTime = false) {
   if (!value) return "—";
-  const date = new Date(withTime ? value : `${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
+  const date = withTime ? new Date(value) : dateKeyToDate(value);
+  if (!date || Number.isNaN(date.getTime())) return value;
   return withTime
-    ? date.toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })
-    : date.toLocaleDateString(locale);
+    ? appDateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date)
+    : appDateTimeFormat(locale, { year: "numeric", month: "numeric", day: "numeric" }).format(date);
 }
 
 function formatFileSize(value: number | null) {
@@ -376,7 +377,7 @@ export function ConciergeExpenseReviewPanel({
   const [form, setForm] = useState<ExpensePostForm>(emptyForm);
   const [rejectReason, setRejectReason] = useState("");
   const [reverseReason, setReverseReason] = useState("");
-  const [reversedOn, setReversedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reversedOn, setReversedOn] = useState(() => appDateKey());
   const [mutationBusy, setMutationBusy] = useState<"post" | "reject" | "reverse" | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -566,7 +567,7 @@ export function ConciergeExpenseReviewPanel({
     setSuccessMessage(null);
     setRejectReason("");
     setReverseReason("");
-    setReversedOn(new Date().toISOString().slice(0, 10));
+    setReversedOn(appDateKey());
     setReceiptError(null);
     const defaultAccount = accounts.find((account) => (
       account.is_active && account.currency.toLocaleUpperCase() === row.currency.toLocaleUpperCase()
@@ -575,7 +576,7 @@ export function ConciergeExpenseReviewPanel({
       ...emptyForm,
       orderId: row.order_id ?? "",
       orderLeistungId: row.order_leistung_id ?? "",
-      paidOn: row.paid_by === "agency" ? new Date().toISOString().slice(0, 10) : "",
+      paidOn: row.paid_by === "agency" ? appDateKey() : "",
       financialAccountId: row.paid_by === "agency" ? defaultAccount?.id ?? "" : "",
     });
     try {
@@ -677,7 +678,7 @@ export function ConciergeExpenseReviewPanel({
       context,
       accounts,
       form,
-      new Date().toISOString().slice(0, 10),
+      appDateKey(),
     );
     if (validation.length) {
       setMutationError(validation.map((code) => text.validation[code]).join(" "));
@@ -751,7 +752,7 @@ export function ConciergeExpenseReviewPanel({
       setMutationError(text.reverseReasonRequired);
       return;
     }
-    if (!reversedOn || reversedOn < selected.expense_date || reversedOn > new Date().toISOString().slice(0, 10)) {
+    if (!reversedOn || reversedOn < selected.expense_date || reversedOn > appDateKey()) {
       setMutationError(text.reverseDateInvalid);
       return;
     }
@@ -772,7 +773,7 @@ export function ConciergeExpenseReviewPanel({
       );
       requestIdsRef.current.delete(`reverse:${selected.id}`);
       setReverseReason("");
-      setReversedOn(new Date().toISOString().slice(0, 10));
+      setReversedOn(appDateKey());
       replaceReviewedItem({ ...response.item, service: selected.service });
       setSuccessMessage(text.reversedSuccess);
       onChanged();
@@ -790,7 +791,7 @@ export function ConciergeExpenseReviewPanel({
   const availableAccounts = selected ? accounts.filter((account) => (
     account.is_active && account.currency.toLocaleUpperCase() === selected.currency.toLocaleUpperCase()
   )) : [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = appDateKey();
   const postValidation: ExpensePostValidationError[] = selected && context
     ? validateExpensePostForm(
       selected,
@@ -1087,7 +1088,7 @@ export function ConciergeExpenseReviewPanel({
                             <div className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
                               <label className="block text-xs font-medium">
                                 {text.paidOn} <span className="text-destructive">*</span>
-                                <Input type="date" className="mt-1 h-9 bg-field text-xs" min={selected.expense_date} max={new Date().toISOString().slice(0, 10)} value={form.paidOn} disabled={mutationBusy !== null} onChange={(event) => setForm((current) => ({ ...current, paidOn: event.target.value }))} />
+                                <Input type="date" className="mt-1 h-9 bg-field text-xs" min={selected.expense_date} max={appDateKey()} value={form.paidOn} disabled={mutationBusy !== null} onChange={(event) => setForm((current) => ({ ...current, paidOn: event.target.value }))} />
                               </label>
                               <label className="block text-xs font-medium">
                                 {text.financialAccount} <span className="text-destructive">*</span>

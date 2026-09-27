@@ -68,6 +68,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 import { roundCents, toCents } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -3231,7 +3232,7 @@ function useOrdersPageContent() {
         owner_user_id: optString(workflowForm.ownerUserId),
         priority: workflowForm.priority,
         due_date: workflowForm.dueDate
-          ? new Date(workflowForm.dueDate).toISOString()
+          ? berlinLocalInputToIso(workflowForm.dueDate)
           : null,
       });
       setWorkflowForm((current) => ({

@@ -16,6 +16,7 @@ import {
   Banner as ShellBanner,
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
+import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -122,7 +123,7 @@ const copy = {
 } as const;
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return appDateKey();
 }
 
 // One money style app-wide ("1.234,56 €", see lib/money), whatever the UI language.
@@ -132,8 +133,7 @@ function formatMoney(value: string | null | undefined, currency: string, _locale
 }
 
 function formatDate(value: string, locale: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale);
+  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
 }
 
 const paymentFieldClassName = "grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground";

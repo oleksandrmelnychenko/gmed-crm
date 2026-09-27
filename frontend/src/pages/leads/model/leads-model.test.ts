@@ -5,6 +5,7 @@ import { t as translateCatalog } from "@/lib/i18n";
 import {
   LEAD_QUESTIONNAIRE_SERVICE_OPTIONS,
   LEAD_WIZARD_SERVICE_OPTIONS,
+  formatDate,
   formatDateTime,
   leadErrorBlockingReasons,
   leadErrorMessage,
@@ -212,9 +213,18 @@ describe("lead questionnaire services", () => {
 
 describe("lead received timestamp", () => {
   it("formats both the date and minute-level time", () => {
-    expect(formatDateTime("2026-04-02T09:45:00", "de-DE", "-")).toBe(
+    // 09:45 in Berlin (CEST, UTC+2).
+    expect(formatDateTime("2026-04-02T07:45:00Z", "de-DE", "-")).toBe(
       "02.04.2026, 09:45",
     );
+  });
+
+  it("shows Berlin time whatever the browser zone", () => {
+    // 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(formatDateTime("2026-09-27T21:30:00Z", "de-DE", "-")).toBe("27.09.2026, 23:30");
+    // 00:30 in Berlin, still 27 Sep in UTC.
+    expect(formatDateTime("2026-09-27T22:30:00Z", "de-DE", "-")).toBe("28.09.2026, 00:30");
+    expect(formatDate("2026-09-27T22:30:00Z", "de-DE", "-")).toBe(formatDate("2026-09-28", "de-DE", "-"));
   });
 
   it("keeps the configured fallback for a missing value", () => {

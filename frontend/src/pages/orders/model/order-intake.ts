@@ -1,4 +1,5 @@
 import { money } from "./order-service-presentation";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import { moneyLineAmounts, roundCents } from "@/lib/money";
 import type { ContractItem } from "@/pages/contracts/model/types";
 
@@ -49,7 +50,8 @@ export function isContractUsable(contract: Pick<ContractItem, "status">) {
 }
 export function formatIntakeDate(value: string | null | undefined) {
   if (!value) return "—";
-  const [year, month, day] = value.slice(0, 10).split("-");
+  // A timestamp (signed_at, created_at) shows its Berlin date.
+  const [year, month, day] = (appDateKeyOf(value) || value.slice(0, 10)).split("-");
   return day && month && year ? `${day}.${month}.${year}` : value;
 }
 /** Gross order total, rounded per line like the server (`order_intakes::sync_services`). */

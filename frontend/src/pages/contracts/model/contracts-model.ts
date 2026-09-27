@@ -1,3 +1,4 @@
+import { appDateKey, appDateTimeFormat, dateOrInstant, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { serviceDescriptionItems } from "@/lib/service-description";
 import { hasFormChanges } from "@/lib/form-changes";
 import { hasCapability, type Actor } from "@/lib/permissions";
@@ -150,10 +151,7 @@ export function buildAgencyServicesPath(filters: AgencyServiceFilters) {
 }
 
 function localTodayInputDate() {
-  const today = new Date();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-  return `${today.getFullYear()}-${month}-${day}`;
+  return appDateKey();
 }
 
 export function resolveAgencyServicePrice(
@@ -415,10 +413,7 @@ export function valueToInput(value: unknown) {
 }
 
 function toDateTimeLocal(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return isoToBerlinLocalInput(value);
 }
 
 const CONTRACT_DATE_TIME_FORMAT_OPTIONS = {
@@ -436,15 +431,15 @@ const CONTRACT_DATE_FORMAT_OPTIONS = {
 } satisfies Intl.DateTimeFormatOptions;
 
 const contractDateTimeFormatters: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
-  "en-GB": new Intl.DateTimeFormat("en-GB", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
+  "de-DE": appDateTimeFormat("de-DE", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
+  "ru-RU": appDateTimeFormat("ru-RU", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
+  "en-GB": appDateTimeFormat("en-GB", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
 };
 
 const contractDateFormatters: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", CONTRACT_DATE_FORMAT_OPTIONS),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", CONTRACT_DATE_FORMAT_OPTIONS),
-  "en-GB": new Intl.DateTimeFormat("en-GB", CONTRACT_DATE_FORMAT_OPTIONS),
+  "de-DE": appDateTimeFormat("de-DE", CONTRACT_DATE_FORMAT_OPTIONS),
+  "ru-RU": appDateTimeFormat("ru-RU", CONTRACT_DATE_FORMAT_OPTIONS),
+  "en-GB": appDateTimeFormat("en-GB", CONTRACT_DATE_FORMAT_OPTIONS),
 };
 
 function contractDateTimeFormatter(locale: string) {
@@ -475,7 +470,7 @@ export function formatDate(
 ) {
   if (!value) return emptyLabel;
   try {
-    return contractDateFormatter(locale).format(new Date(`${value}T00:00:00`));
+    return contractDateFormatter(locale).format(dateOrInstant(value));
   } catch {
     return value;
   }

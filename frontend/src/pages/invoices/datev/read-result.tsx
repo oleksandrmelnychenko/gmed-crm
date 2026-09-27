@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { DatevActionButton } from "./action-button";
 import { downloadDatevResult, type ReadResult } from "./live-api";
 import { operationDescription } from "./operation-text";
@@ -21,7 +22,7 @@ export function DatevReadResult({ result, disabled, de }: { result: ReadResult; 
   const [page, setPage] = useState(0); const size = 20;
   const pages = Math.max(1, Math.ceil(result.records.length / size));
   const kind = { "fiscal-years": t.fiscal, "terms-of-payment": t.terms, "sums-and-balances": t.balances }[result.kind];
-  const retrieved = new Date(result.retrieved_at).toLocaleString(de ? "de-DE" : "ru-RU");
+  const retrieved = appDateTimeFormat(de ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).format(new Date(result.retrieved_at));
   const field = (key: string) => labels[key]?.[de ? 1 : 0] ?? key.replaceAll("_", " ").replace(/([a-z])([A-Z])/g, "$1 $2");
   const value = (item: unknown): string => item == null ? "—" : typeof item === "boolean" ? item ? de ? "Ja" : "Да" : de ? "Nein" : "Нет" : typeof item === "object" ? JSON.stringify(item, null, 2) : String(item);
   return <div className="min-w-0 space-y-3" data-testid="datev-read-result">

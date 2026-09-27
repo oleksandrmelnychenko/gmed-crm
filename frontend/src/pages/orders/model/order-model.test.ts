@@ -7,12 +7,14 @@ import {
   formatDateOnly,
   formatDateTime,
   formatOptionalCurrency,
+  inputDateTimeToApiValue,
   leistungLineAmounts,
+  orderProcessGatesToForm,
   sumLeistungGross,
   summarizeLeistungMetrics,
   sumLeistungTotals,
 } from "./order-model";
-import type { Leistung } from "./types";
+import type { Leistung, OrderProcessGates } from "./types";
 
 describe("externalInvoiceStatusTransitions", () => {
   it("keeps incoming invoices on the explicit approval path", () => {
@@ -40,9 +42,41 @@ describe("order workspace dates", () => {
   it("shows every date as DD.MM.YYYY, whatever the staff language", () => {
     expect(formatDate("2026-09-27", "ru-RU")).toBe("27.09.2026");
     expect(formatDateOnly("2026-09-27", "ru-RU")).toBe("27.09.2026");
-    const timestamp = new Date(2026, 8, 27, 14, 5);
-    expect(formatDateTime(timestamp.toISOString(), "ru-RU")).toBe("27.09.2026, 14:05");
-    expect(formatDateOnly(timestamp.toISOString(), "de-DE")).toBe("27.09.2026");
+    // 14:05 in Berlin (CEST, UTC+2).
+    const timestamp = "2026-09-27T12:05:00Z";
+    expect(formatDateTime(timestamp, "ru-RU")).toBe("27.09.2026, 14:05");
+    expect(formatDateOnly(timestamp, "de-DE")).toBe("27.09.2026");
+  });
+
+  it("shows timestamps in Berlin time whatever the browser zone", () => {
+    // 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(formatDateTime("2026-09-27T21:30:00Z", "ru-RU")).toBe("27.09.2026, 23:30");
+    expect(formatDate("2026-09-27T21:30:00Z")).toBe("27.09.2026");
+    // 00:30 in Berlin, still 27 Sep in UTC.
+    expect(formatDateTime("2026-09-27T22:30:00Z", "de-DE")).toBe("28.09.2026, 00:30");
+    expect(formatDateOnly("2026-09-27T22:30:00Z", "de-DE")).toBe("28.09.2026");
+  });
+
+  it("reads datetime-local values as Berlin time", () => {
+    expect(inputDateTimeToApiValue("2026-09-27T23:30")).toBe("2026-09-27T21:30:00.000Z");
+    expect(inputDateTimeToApiValue("2026-12-01T09:00")).toBe("2026-12-01T08:00:00.000Z");
+    expect(inputDateTimeToApiValue("")).toBeNull();
+    expect(inputDateTimeToApiValue("  ")).toBeNull();
+    expect(inputDateTimeToApiValue("not a date")).toBeNull();
+  });
+
+  it("prefills debt follow-up times in Berlin time", () => {
+    const form = orderProcessGatesToForm({
+      billing_release_status: "pending",
+      package_coverage_status: "not_required",
+      debt_management: {
+        status: "in_follow_up",
+        next_review_at: "2026-09-27T21:30:00Z",
+        last_contact_at: "2026-09-27T22:30:00Z",
+      },
+    } as unknown as OrderProcessGates);
+    expect(form.debtNextReviewAt).toBe("2026-09-27T23:30");
+    expect(form.debtLastContactAt).toBe("2026-09-28T00:30");
   });
 
   it("does not show a time for date-only values", () => {

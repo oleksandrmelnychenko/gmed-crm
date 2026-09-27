@@ -73,6 +73,7 @@ import { Input } from "@/components/ui/input";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
+import { appDateKey, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -467,7 +468,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
     continuousMonitoring: "",
     additionalMeasures: "",
     reviewerName: "",
-    reviewDate: new Date().toISOString().slice(0, 10),
+    reviewDate: appDateKey(),
   };
 }
 
@@ -1879,11 +1880,9 @@ function validMoneyInput(value: string) {
   return Number.isFinite(parsed) && parsed >= 0;
 }
 
+/** The `datetime-local` value of a deadline, in Berlin time. */
 function localDeadline(value: string | null | undefined) {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime())
-    ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-    : "";
+  return isoToBerlinLocalInput(value);
 }
 
 function lineFromOrderLeistung(item: Leistung): ServiceLine {
@@ -2342,7 +2341,7 @@ function validateMasterDraft(
   if (!draft.lastName.trim()) errors.lastName = required;
   if (!draft.birthDate) {
     errors.birthDate = required;
-  } else if (draft.birthDate > new Date().toISOString().slice(0, 10)) {
+  } else if (draft.birthDate > appDateKey()) {
     errors.birthDate = tx(
       "Дата рождения не может быть в будущем",
       "Das Geburtsdatum darf nicht in der Zukunft liegen",
@@ -6191,7 +6190,7 @@ ${serviceCommentLines.join("\n")}`
                     name="birth_date"
                     autoComplete="bday"
                     type="date"
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={appDateKey()}
                     required
                     aria-invalid={Boolean(visibleMasterError("birthDate"))}
                     aria-describedby={visibleMasterError("birthDate") ? `${MASTER_FIELD_IDS.birthDate}-error` : undefined}
@@ -7828,8 +7827,8 @@ ${serviceCommentLines.join("\n")}`
                         className={inputClass}
                         onChange={(event) => setPrepaymentDeadline(event.target.value)}
                         onBlur={() => {
-                          const deadline = prepaymentDeadline ? new Date(prepaymentDeadline) : null;
-                          if (deadline && !Number.isFinite(deadline.getTime())) return;
+                          const deadline = prepaymentDeadline ? parseBerlinLocalInput(prepaymentDeadline) : null;
+                          if (prepaymentDeadline && !deadline) return;
                           const nextDueAt = deadline?.toISOString() ?? "";
                           if (localDeadline(order?.prepayment_due_at) === prepaymentDeadline) return;
                           void saveFlags(
@@ -8562,7 +8561,7 @@ ${serviceCommentLines.join("\n")}`
                     <Input
                       className={inputClass}
                       type="date"
-                      max={new Date().toISOString().slice(0, 10)}
+                      max={appDateKey()}
                       value={trustedContactEditor.birthDate}
                       onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
                     />

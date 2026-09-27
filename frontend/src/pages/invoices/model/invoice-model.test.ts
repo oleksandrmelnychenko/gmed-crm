@@ -11,6 +11,7 @@ import {
   isCoveredByPrepaymentOnly,
   formatCurrency,
   formatDate,
+  formatDateTime,
   canEditInvoiceDueDate,
   canPickInvoiceStatus,
   defaultReleaseDueDate,
@@ -44,8 +45,17 @@ it("formats both date-only values and timestamps as a date", () => {
   expect(formatDate(null, "de-DE", "—")).toBe("—");
 });
 
+it("formats dates and timestamps on their Berlin day", () => {
+  expect(formatDate("2026-09-27", "de-DE")).toBe("27. Sept. 2026");
+  // 23:30 in Berlin, already 28 Sep in Kyiv.
+  expect(formatDate("2026-09-27T21:30:00Z", "de-DE")).toBe("27. Sept. 2026");
+  // 00:30 in Berlin, still 27 Sep in UTC.
+  expect(formatDate("2026-09-27T22:30:00Z", "de-DE")).toBe("28. Sept. 2026");
+  expect(formatDateTime("2026-09-27T21:30:00Z", "de-DE")).toBe("27. Sept. 2026, 23:30");
+});
+
 describe("invoice release and numbering", () => {
-  const today = new Date(2026, 8, 27);
+  const today = new Date("2026-09-27T10:00:00Z");
 
   it("never offers a way back to draft once an invoice is released", () => {
     expect(canPickInvoiceStatus("draft", "sent")).toBe(true);
@@ -75,6 +85,22 @@ describe("invoice release and numbering", () => {
     // Only the release checks the date; a draft may keep an old one until then.
     expect(invoiceStatusFormProblem(draft, { status: "draft", dueDate: "2026-09-01" }, today)).toBeNull();
     expect(defaultReleaseDueDate(today)).toBe("2026-10-11");
+  });
+
+  it("takes the invoice date from the Berlin calendar", () => {
+    const draft = { status: "draft", released_at: null, due_date: null };
+    // 00:30 on 28 Sep in Berlin while UTC still shows 27 Sep.
+    const afterBerlinMidnight = new Date("2026-09-27T22:30:00Z");
+    expect(
+      invoiceStatusFormProblem(draft, { status: "sent", dueDate: "2026-09-27" }, afterBerlinMidnight),
+    ).toBe("due_date_before_invoice_date");
+    expect(defaultReleaseDueDate(afterBerlinMidnight)).toBe("2026-10-12");
+    // 23:30 on 27 Sep in Berlin while Kyiv already shows 28 Sep.
+    const beforeBerlinMidnight = new Date("2026-09-27T21:30:00Z");
+    expect(
+      invoiceStatusFormProblem(draft, { status: "sent", dueDate: "2026-09-27" }, beforeBerlinMidnight),
+    ).toBeNull();
+    expect(defaultReleaseDueDate(beforeBerlinMidnight)).toBe("2026-10-11");
   });
 
   it("tells a draft preview from the archived document", () => {

@@ -1,10 +1,11 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import type { TranslationKey } from "@/lib/i18n";
 import type { InvoiceItem } from "./types";
 
-// Keep the preflight in sync with create_dunning_event. The server uses UTC dates.
+// Keep the preflight in sync with create_dunning_event. The server uses Berlin dates.
 export function dunningBlockReason(
   invoice: Pick<InvoiceItem, "status" | "balance_due" | "due_date"> | null,
-  today = new Date().toISOString().slice(0, 10),
+  today = appDateKey(),
 ): TranslationKey | null {
   if (!invoice) return "invoices_workspace_dunning_unavailable";
   const balance = Number(invoice.balance_due);

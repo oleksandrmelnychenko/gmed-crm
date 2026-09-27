@@ -51,6 +51,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
+import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { deNormalize } from "@/components/data-table/search";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
@@ -1755,7 +1756,7 @@ function useContractsPageContent() {
         patient_id: createContractForm.patientId,
         status: createContractForm.status,
         signed_at: toOptional(createContractForm.signedAt)
-          ? new Date(createContractForm.signedAt).toISOString()
+          ? berlinLocalInputToIso(createContractForm.signedAt)
           : null,
         conditions,
       };
@@ -1894,7 +1895,7 @@ function useContractsPageContent() {
       await updateContractStatus(selectedContractId, {
         status: contractStatusForm.status,
         signed_at: toOptional(contractStatusForm.signedAt)
-          ? new Date(contractStatusForm.signedAt).toISOString()
+          ? berlinLocalInputToIso(contractStatusForm.signedAt)
           : null,
         conditions,
       });

@@ -3,6 +3,7 @@
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect } from "react";
 
+import { formatDateKey } from "@/lib/app-time-zone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -164,10 +165,7 @@ function formatCountMessage(template: string, count: number) {
 }
 
 function formatCatalogDate(value: string, locale: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(locale).format(date);
+  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
 }
 
 export function serviceGroupPriceChoiceLabel(

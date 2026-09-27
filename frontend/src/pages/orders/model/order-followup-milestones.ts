@@ -1,3 +1,12 @@
+import {
+  addDaysToDateKey,
+  addMonthsToDateKey,
+  appDateKey,
+  appDateKeyOf,
+  appWallClockToInstant,
+  parseDateKey,
+} from "@/lib/app-time-zone";
+
 import type { FollowupStatus, OrderFollowupFlow, OrderFollowupFormState } from "./types";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -59,35 +68,22 @@ export function followupMilestoneKeys(milestone: FollowupMilestone): MilestoneKe
   return MILESTONE_KEYS[milestone];
 }
 
-function isoLocalDate(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
 /**
- * Date (YYYY-MM-DD) a milestone should be planned for: the closure anchor
- * plus one week / one month / six months, or from today when the order has no
- * closure anchor yet.
+ * Date (YYYY-MM-DD) a milestone should be planned for: the Berlin date of the
+ * closure anchor plus one week / one month / six months, or from today when
+ * the order has no closure anchor yet.
  */
 export function recommendedFollowupDate(
   flow: Pick<OrderFollowupFlow, "closure_anchor_at"> | null | undefined,
   milestone: FollowupMilestone,
   today: Date = new Date(),
 ): string {
-  const anchor = flow?.closure_anchor_at ? new Date(flow.closure_anchor_at) : today;
-  const base = Number.isNaN(anchor.getTime()) ? today : anchor;
+  const base = appDateKeyOf(flow?.closure_anchor_at) || appDateKey(today);
   const { offset } = MILESTONE_KEYS[milestone];
-  const target = new Date(base.getFullYear(), base.getMonth(), base.getDate());
-  if (offset.days) target.setDate(target.getDate() + offset.days);
-  if (offset.months) {
-    const day = target.getDate();
-    target.setDate(1);
-    target.setMonth(target.getMonth() + offset.months);
-    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-    target.setDate(Math.min(day, lastDay));
-  }
-  return isoLocalDate(target);
+  let target = base;
+  if (offset.days) target = addDaysToDateKey(target, offset.days);
+  if (offset.months) target = addMonthsToDateKey(target, offset.months);
+  return target;
 }
 
 /** Title of a follow-up reminder or visit; the follow-up gate recognizes it. */
@@ -113,12 +109,10 @@ export function followupMilestoneLabel(milestone: FollowupMilestone, tx: Bilingu
   }
 }
 
-/** Reminder time on the planned date: 09:00 local time, as an API timestamp. */
+/** Reminder time on the planned date: 09:00 Berlin time, as an API timestamp. */
 export function followupReminderAt(date: string): string | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  if (!match) return null;
-  const local = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 9, 0, 0);
-  return Number.isNaN(local.getTime()) ? null : local.toISOString();
+  const parts = parseDateKey(date);
+  return parts ? appWallClockToInstant(parts.year, parts.month, parts.day, 9).toISOString() : null;
 }
 
 /**

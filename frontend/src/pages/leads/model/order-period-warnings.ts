@@ -1,3 +1,4 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import { formatIntakeDate } from "@/pages/orders/model/order-intake";
 
 export type OrderPeriodWarning = { key: "past" | "started"; ru: string; de: string };
@@ -11,7 +12,7 @@ export type OrderPeriodWarning = { key: "past" | "started"; ru: string; de: stri
 export function orderPeriodWarnings(
   dateFrom: string | null | undefined,
   dateTo: string | null | undefined,
-  today = new Date().toISOString().slice(0, 10),
+  today = appDateKey(),
 ): OrderPeriodWarning[] {
   const warnings: OrderPeriodWarning[] = [];
   if (dateTo && dateTo < today) {

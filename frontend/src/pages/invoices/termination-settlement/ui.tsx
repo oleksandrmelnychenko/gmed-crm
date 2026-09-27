@@ -14,6 +14,7 @@ import {
 import { toast } from "@/components/ui/toast";
 import { Banner, Field, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { ApiRequestError } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { t as translations, type Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { useCan } from "@/lib/permissions";
@@ -53,7 +54,7 @@ function formatDate(value: string | null | undefined, lang: Lang) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU");
+    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(date);
 }
 
 function Figure({ label, value, className }: { label: string; value: string; className?: string }) {

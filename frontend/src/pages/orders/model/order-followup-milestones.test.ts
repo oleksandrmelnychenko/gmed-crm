@@ -26,7 +26,22 @@ describe("recommendedFollowupDate", () => {
     expect(recommendedFollowupDate({ closure_anchor_at: "2026-01-31T12:00:00Z" }, "post_1m")).toBe(
       "2026-02-28",
     );
-    expect(recommendedFollowupDate(null, "post_1w", new Date(2026, 8, 27))).toBe("2026-10-04");
+    expect(recommendedFollowupDate(null, "post_1w", new Date("2026-09-27T10:00:00Z"))).toBe("2026-10-04");
+  });
+
+  it("counts from the Berlin date of the closure anchor and of today", () => {
+    // 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(recommendedFollowupDate({ closure_anchor_at: "2026-09-27T21:30:00Z" }, "post_1w")).toBe(
+      "2026-10-04",
+    );
+    // 00:30 in Berlin, still 27 Sep in UTC.
+    expect(recommendedFollowupDate({ closure_anchor_at: "2026-09-27T22:30:00Z" }, "post_1m")).toBe(
+      "2026-10-28",
+    );
+    expect(recommendedFollowupDate(null, "post_1w", new Date("2026-09-27T22:30:00Z"))).toBe("2026-10-05");
+    expect(recommendedFollowupDate({ closure_anchor_at: "invalid" }, "post_1w", new Date("2026-09-27T21:30:00Z"))).toBe(
+      "2026-10-04",
+    );
   });
 });
 
@@ -63,14 +78,12 @@ describe("follow-up milestone reminders", () => {
     expect(followupMilestoneTitle("post_6m", txDe)).toBe("Nachsorge nach 6 Monaten");
   });
 
-  it("reminds at 09:00 local time on the planned date", () => {
-    const at = followupReminderAt("2026-10-05");
-    expect(at).not.toBeNull();
-    const local = new Date(at ?? "");
-    expect([local.getFullYear(), local.getMonth(), local.getDate(), local.getHours()]).toEqual([
-      2026, 9, 5, 9,
-    ]);
+  it("reminds at 09:00 Berlin time on the planned date", () => {
+    // Summer time (UTC+2) and winter time (UTC+1).
+    expect(followupReminderAt("2026-10-05")).toBe("2026-10-05T07:00:00.000Z");
+    expect(followupReminderAt("2026-11-05")).toBe("2026-11-05T08:00:00.000Z");
     expect(followupReminderAt("05.10.2026")).toBeNull();
+    expect(followupReminderAt("2026-02-30")).toBeNull();
   });
 });
 
