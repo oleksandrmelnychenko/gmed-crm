@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { pickerSection } from "./helpers";
 import { setup, confirm, expectedTarget } from "./datev-fixture";
 import { readFile } from "node:fs/promises";
 
@@ -51,10 +52,10 @@ test("German mobile view uses explicit fiscal year and has no overflow", async (
   await panel.getByLabel("Daten auswählen", { exact: true }).selectOption("sums-and-balances");
   await expect(panel.getByRole("button", { name: "Aus DATEV abrufen" })).toBeDisabled();
   // The shared MUI picker exposes editable date sections, not a native date input.
-  await panel.getByRole("spinbutton", { name: "Day", exact: true }).fill("01");
-  await panel.getByRole("spinbutton", { name: "Month", exact: true }).fill("04");
-  await panel.getByRole("spinbutton", { name: "Year", exact: true }).fill("2026");
-  await panel.getByRole("spinbutton", { name: "Year", exact: true }).press("Tab");
+  await panel.getByRole("spinbutton", { name: pickerSection.day }).fill("01");
+  await panel.getByRole("spinbutton", { name: pickerSection.month }).fill("04");
+  await panel.getByRole("spinbutton", { name: pickerSection.year }).fill("2026");
+  await panel.getByRole("spinbutton", { name: pickerSection.year }).press("Tab");
   await confirm(page, panel, "Aus DATEV abrufen");
   await expect(panel.getByTestId("datev-read-result")).toBeVisible();
   expect(calls.at(-1)?.payload).toEqual({ expected: expectedTarget, kind: "sums-and-balances", fiscal_year: 20260401 });

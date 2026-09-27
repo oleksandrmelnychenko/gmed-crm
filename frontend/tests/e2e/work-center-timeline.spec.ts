@@ -1,4 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import { pickerSection } from "./helpers";
 
 const parentId = "10000000-0000-0000-0000-000000000001";
 async function mockWorkCenter(page: Page, lang: "ru" | "de" = "ru", role = "ceo") {
@@ -158,6 +159,24 @@ for (const kind of ["task", "event"] as const) {
   });
 }
 
+for (const role of ["ceo", "concierge"] as const) {
+  test(`generated order work links back to its order for ${role}`, async ({ page }) => {
+    const state = await mockWorkCenter(page, "ru", role);
+    Object.assign(state.tasks[0], { order_id: "order-1", order_number: "ORD-2026-0001" });
+    await page.goto(`/task-manager?task=${parentId}`);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Данные задачи");
+    const link = dialog.getByTestId("task-detail-order-link");
+    if (role === "ceo") {
+      await expect(link).toContainText("ORD-2026-0001");
+      await expect(link).toHaveAttribute("href", "/orders?order=order-1");
+    } else {
+      // Only people who may open orders get the link.
+      await expect(link).toHaveCount(0);
+    }
+  });
+}
+
 test("completing a parent in the edit form asks about its open sub-tasks first", async ({ page }) => {
   const state = await mockWorkCenter(page);
   Object.assign(state.tasks[0], { child_count: 1, child_open_count: 1 });
@@ -192,14 +211,14 @@ test("task form rejects equal dates and preserves a legacy empty start on edit",
   await page.goto("/task-manager");
   await page.getByRole("button", { name: "Изменить", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel("Начало", { exact: true })).toHaveValue("");
+  await expect(dialog.getByLabel("Начало", { exact: true }).locator("input")).toHaveValue("");
   for (const label of ["Начало", "Окончание"]) {
-    const field = dialog.locator(".MuiFormControl-root").filter({ has: page.locator(`input[aria-label="${label}"]`) });
-    for (const [name, value] of [["Year", "2026"], ["Month", "09"], ["Hours", "10"], ["Minutes", "00"], ["Day", "10"]]) {
-      await field.getByRole("spinbutton", { name, exact: true }).fill(value);
+    const field = dialog.getByRole("group", { name: label, exact: true });
+    for (const [section, value] of [["year", "2026"], ["month", "09"], ["hours", "10"], ["minutes", "00"], ["day", "10"]] as const) {
+      await field.getByRole("spinbutton", { name: pickerSection[section] }).fill(value);
     }
-    await field.getByRole("spinbutton", { name: "Minutes", exact: true }).press("Tab");
-    await expect(field.getByRole("spinbutton", { name: "Day", exact: true })).toHaveText("10");
+    await field.getByRole("spinbutton", { name: pickerSection.minutes }).press("Tab");
+    await expect(field.getByRole("spinbutton", { name: pickerSection.day })).toHaveText("10");
   }
   await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Окончание должно быть позже начала");
@@ -362,12 +381,12 @@ test("realtime refresh cannot clear a half-written subtask or create it twice", 
   await dialog.getByRole("button", { name: "Подзадача", exact: true }).click();
   const title = dialog.getByRole("textbox", { name: "Название", exact: true });
   await title.fill("Draft survives realtime");
-  const start = await dialog.getByLabel("Начало", { exact: true }).inputValue();
+  const start = await dialog.getByLabel("Начало", { exact: true }).locator("input").inputValue();
   const reads = state.listReads;
   state.emit("concierge_operational_item.updated");
   await expect.poll(() => state.listReads).toBeGreaterThan(reads);
   await expect(title).toHaveValue("Draft survives realtime");
-  await expect(dialog.getByLabel("Начало", { exact: true })).toHaveValue(start);
+  await expect(dialog.getByLabel("Начало", { exact: true }).locator("input")).toHaveValue(start);
   await dialog.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(dialog.getByRole("button", { name: /Draft survives realtime/ })).toBeVisible();
   expect(state.saves).toHaveLength(1);

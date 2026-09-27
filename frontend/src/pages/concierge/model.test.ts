@@ -388,7 +388,10 @@ function provider(overrides: Partial<ConciergeProvider> = {}): ConciergeProvider
 
 describe("concierge workspace model", () => {
   it("builds a stable human-readable task code", () => {
-    expect(conciergeTaskCode(task({ id: "cba1c6d0-e03d-4087-88d0-9eb825893864" }))).toBe("TASK-CBA1C6D0");
+    expect(conciergeTaskCode(task({ id: "cba1c6d0-e03d-4087-88d0-9eb825893864" }))).toBe("TASK-CBA1-25893864");
+    // Seeded ids share their start; their codes must still differ.
+    expect(conciergeTaskCode(task({ id: "12900000-0000-0000-0000-000000000001" })))
+      .not.toBe(conciergeTaskCode(task({ id: "12900000-0000-0000-0000-000000000002" })));
   });
 
   it("filters task-manager rows by assignee, timing and plain-language search", () => {

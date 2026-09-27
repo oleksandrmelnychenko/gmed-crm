@@ -1,5 +1,25 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+/**
+ * Accessible names of the sections of an MUI date/time field. The pickers
+ * speak the UI language (Russian or German), so these match both.
+ */
+export const pickerSection = {
+  day: /^(День|Tag)$/,
+  month: /^(Месяц|Monat)$/,
+  year: /^(Год|Jahr)$/,
+  hours: /^(Часы|Stunden)$/,
+  minutes: /^(Минуты|Minuten)$/,
+} as const;
+
+/**
+ * The value input of an MUI date/time field. The field's name sits on the
+ * group of spin buttons; the value lives in the hidden input inside it.
+ */
+export function pickerValueInput(scope: Page | Locator, name: string | RegExp): Locator {
+  return scope.getByRole("group", { name }).locator("input");
+}
+
 export async function chooseComboboxOption(
   page: Page,
   combobox: Locator,

@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Circle,
   CircleSlash,
+  ClipboardList,
   ExternalLink,
   FolderKanban,
   ListChecks,
@@ -33,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import type { Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
 import { cn } from "@/lib/utils";
@@ -125,6 +127,7 @@ const copy = {
     patient: "Patient / Kunde",
     provider: "Provider",
     project: "Projekt",
+    order: "Auftrag",
     birthDate: "Geburtsdatum",
     externalAssignee: "Externer Ausführender",
     open: "Offen",
@@ -229,6 +232,7 @@ const copy = {
     patient: "Пациент / клиент",
     provider: "Провайдер",
     project: "Проект",
+    order: "Заказ",
     birthDate: "Дата рождения",
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
@@ -477,6 +481,8 @@ export function ConciergeTaskDetailDialog({
 }) {
   const labels = copy[lang];
   const { user } = useAuth();
+  // The order link only helps people who may open orders.
+  const canOpenOrders = hasCapability(user, "orders.view");
   const [detail, setDetail] = useState<ConciergeTaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -1038,7 +1044,7 @@ export function ConciergeTaskDetailDialog({
           icon={ListChecks}
           tone="dot"
           title={detail ? localizeTaskTitle(detail.item.title, lang) : labels.loading}
-          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
+          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full" data-testid="task-detail-checklist-progress" title={`${labels.checklist}: ${detail.item.checklist_completed}/${detail.item.checklist_total}`}>{labels.checklist}: {detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
@@ -1104,9 +1110,17 @@ export function ConciergeTaskDetailDialog({
                 </div>
               </TaskDetailSection>
 
-              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
+              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.order_id && canOpenOrders) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
                 <TaskDetailSection title={labels.links}>
                   <div className="divide-y divide-border/60">
+                    {/* Generated order work (checklist, appointment concierge tasks) links back to its order. */}
+                    {detail.item.order_id && canOpenOrders ? (
+                      <StaffLink to={`/orders?order=${detail.item.order_id}`} data-testid="task-detail-order-link" className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><ClipboardList className="size-4" /></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.order}</span><strong className="block truncate text-sm">{detail.item.order_number || "—"}</strong></span>
+                        <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
+                      </StaffLink>
+                    ) : null}
                     {detail.item.patient_id && detail.item.patient_name ? (
                       <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date, lang)}</span></span>

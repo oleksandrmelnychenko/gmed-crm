@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { chooseComboboxOption } from "./helpers";
+import { chooseComboboxOption, pickerValueInput } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -877,8 +877,8 @@ test.describe("patient portal smoke flows", () => {
       .filter({ hasText: /Termin anfragen|Request a visit/i });
     await expect(requestSheet).toBeVisible();
 
-    await requestSheet.getByLabel(/Bevorzugt ab|Preferred from/i).fill("2026-05-10");
-    await requestSheet.getByLabel(/Bevorzugt bis|Preferred to/i).fill("2026-05-12");
+    await pickerValueInput(requestSheet, /Bevorzugt ab|Preferred from/i).fill("2026-05-10");
+    await pickerValueInput(requestSheet, /Bevorzugt bis|Preferred to/i).fill("2026-05-12");
     await requestSheet
       .getByLabel(/Fachgebiet oder Thema|Specialty or topic/i)
       .fill("Cardiology follow-up");

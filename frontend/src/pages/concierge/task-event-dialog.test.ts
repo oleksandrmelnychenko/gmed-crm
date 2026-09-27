@@ -10,21 +10,28 @@ const assignees: ConciergeAssignee[] = [
 ];
 
 describe("selectTaskAssigneeId", () => {
-  it("does not submit the current CEO as the Concierge assignee", () => {
-    expect(selectTaskAssigneeId(null, "ceo-1", assignees)).toBe("concierge-1");
+  it("never preselects the alphabetically first Concierge", () => {
+    expect(selectTaskAssigneeId(null, "ceo-1", assignees)).not.toBe("concierge-1");
+    expect(selectTaskAssigneeId(null, "someone-else", assignees)).toBe("");
   });
 
-  it("keeps the current Concierge or an existing active assignee", () => {
+  it("starts with the current user when they may take the task", () => {
+    expect(selectTaskAssigneeId(null, "ceo-1", assignees)).toBe("ceo-1");
     expect(selectTaskAssigneeId(null, "concierge-2", assignees)).toBe("concierge-2");
+  });
+
+  it("keeps an existing active assignee and the Concierge of the source request", () => {
     expect(selectTaskAssigneeId("concierge-2", "ceo-1", assignees)).toBe("concierge-2");
+    expect(selectTaskAssigneeId("concierge-1", "ceo-1", assignees, { serviceLinked: true })).toBe("concierge-1");
   });
 
-  it("prefills the Concierge assigned to the source request", () => {
-    expect(selectTaskAssigneeId("concierge-1", "ceo-1", assignees)).toBe("concierge-1");
+  it("does not submit the current CEO as the assignee of a Concierge service task", () => {
+    expect(selectTaskAssigneeId(null, "ceo-1", assignees, { serviceLinked: true })).toBe("");
+    expect(selectTaskAssigneeId(null, "concierge-2", assignees, { serviceLinked: true })).toBe("concierge-2");
   });
 
-  it("does not keep an assignee that is absent from the active Concierge list", () => {
-    expect(selectTaskAssigneeId("inactive-concierge", "ceo-1", assignees)).toBe("concierge-1");
+  it("does not keep an assignee that is absent from the active list", () => {
+    expect(selectTaskAssigneeId("inactive-concierge", "ceo-1", assignees)).toBe("ceo-1");
   });
 });
 

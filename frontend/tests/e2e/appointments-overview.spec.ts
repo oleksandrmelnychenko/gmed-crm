@@ -240,7 +240,8 @@ test.describe("appointments overview detail", () => {
     await expect(summarySection).toBeVisible();
     await expect(summarySection).toContainText("Arzt");
     await expect(summarySection).toContainText("Claudia Neumann");
-    await expect(summarySection).toContainText("Mitarbeitender");
+    // Appointments name interpreters by their job, not the generic staff role.
+    await expect(summarySection).toContainText("Dolmetscher");
     await expect(summarySection).toContainText("Marina Sokolova");
     await expect(summarySection).not.toContainText(/Arzt\s*Marina Sokolova/);
 

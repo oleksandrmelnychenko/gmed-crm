@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { pickerSection } from "./helpers";
 
 
 const patientId = "00000000-0000-0000-0000-000000000301";
@@ -95,7 +96,7 @@ test("currency, invalid periods and slow old requests never show mismatched bala
   await expect(page.getByTestId("finance-closing")).toContainText("25,00");
   await expect(page.getByTestId("finance-closing")).toContainText("Переплата");
   await expect(page.getByTestId("finance-closing")).toContainText("$");
-  await page.getByRole("spinbutton", { name: "Month", exact: true }).first().fill("10");
+  await page.getByRole("spinbutton", { name: pickerSection.month }).first().fill("10");
   await expect(page.getByTestId("finance-closing")).toHaveCount(0);
   await expect(page.getByText(/начало периода не должно быть позже/)).toBeVisible();
   const release = api.hold("2026-08-01");

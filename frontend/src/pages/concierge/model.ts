@@ -738,9 +738,15 @@ export function conciergeTaskDisplayTitle(task: ConciergeTask, lang: "de" | "ru"
   return localizeTaskTitle(task.title, lang);
 }
 
+/**
+ * Short human code of a task. The first 8 characters alone are not unique:
+ * seeded and imported ids share their prefix (all demo tasks read
+ * TASK-12900000), so the code keeps the start and the end of the id.
+ */
 export function conciergeTaskCode(task: Pick<ConciergeTask, "id">): string {
   const compactId = task.id.replace(/[^a-z0-9]/gi, "").toUpperCase();
-  return `TASK-${compactId.slice(0, 8)}`;
+  if (compactId.length <= 12) return `TASK-${compactId}`;
+  return `TASK-${compactId.slice(0, 4)}-${compactId.slice(-8)}`;
 }
 
 export function conciergeWorkspaceStats(

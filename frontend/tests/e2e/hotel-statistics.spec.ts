@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { pickerSection } from "./helpers";
 import { emptyBreakfast, type HotelDirectoryItem, type HotelStay } from "../../src/pages/reports/hotels/model";
 import { breakfastCopy } from "../../src/pages/reports/hotels/breakfast-copy";
 import { createHotelCopy } from "../../src/pages/reports/hotels/copy";
@@ -122,7 +123,7 @@ for (const lang of ["ru", "de"] as const) {
     await chooseFilter(page, lang === "ru" ? "Валюта" : "Währung", "USD");
     await expect(page.getByTestId("hotel-kpis").getByText("1", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: lang === "ru" ? "Сбросить фильтры" : "Filter zurücksetzen" }).click();
-    await page.getByRole("spinbutton", { name: "Month", exact: true }).nth(1).fill("03");
+    await page.getByRole("spinbutton", { name: pickerSection.month }).nth(1).fill("03");
     await page.getByRole("button", { name: lang === "ru" ? "Применить период" : "Zeitraum anwenden" }).click();
     await expect(page.getByTestId("hotel-kpis").getByText("75", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });

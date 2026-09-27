@@ -262,6 +262,12 @@ export function appointmentPluralText(
 export function roleLabel(role?: string | null) {
   const tr = runtimeTranslations();
   if (!role) return "";
+  // On appointments interpreters are named by their job ("Переводчик"), not
+  // by the generic staff role name ("Сотрудник").
+  if (role === "interpreter") return appointmentText("appointments_interpreter");
+  if (role === "teamlead_interpreter") {
+    return appointmentText("appointments_role_teamlead_interpreter");
+  }
   const translated = tr[`role_${role}` as keyof typeof tr];
   return typeof translated === "string"
     ? translated

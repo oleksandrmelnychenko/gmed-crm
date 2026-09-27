@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { pickerSection } from "../e2e/helpers";
 
 import {
   authenticateApiClient,
@@ -228,9 +229,9 @@ async function saveLeadGateData(
  */
 async function fillLeadGateDate(sheet: Locator, value: string) {
   const [year, month, day] = value.split("-");
-  const dayField = sheet.getByRole("spinbutton", { name: "Day" });
-  const monthField = sheet.getByRole("spinbutton", { name: "Month" });
-  const yearField = sheet.getByRole("spinbutton", { name: "Year" });
+  const dayField = sheet.getByRole("spinbutton", { name: pickerSection.day });
+  const monthField = sheet.getByRole("spinbutton", { name: pickerSection.month });
+  const yearField = sheet.getByRole("spinbutton", { name: pickerSection.year });
   await yearField.fill(year, { timeout: 5_000 });
   await monthField.fill(month, { timeout: 5_000 });
   await dayField.fill(day, { timeout: 5_000 });

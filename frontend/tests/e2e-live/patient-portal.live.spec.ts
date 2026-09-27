@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { pickerSection } from "../e2e/helpers";
 
 import {
   authenticateApiClient,
@@ -56,9 +57,9 @@ async function fillMuiDate(container: Locator, selector: string, value: string) 
   const field = container
     .locator(selector)
     .locator("xpath=ancestor::*[.//*[@role='spinbutton']][1]");
-  const yearField = field.getByRole("spinbutton", { name: "Year" });
-  const monthField = field.getByRole("spinbutton", { name: "Month" });
-  const dayField = field.getByRole("spinbutton", { name: "Day" });
+  const yearField = field.getByRole("spinbutton", { name: pickerSection.year });
+  const monthField = field.getByRole("spinbutton", { name: pickerSection.month });
+  const dayField = field.getByRole("spinbutton", { name: pickerSection.day });
   await yearField.fill(year);
   await monthField.fill(month);
   await dayField.fill(day);

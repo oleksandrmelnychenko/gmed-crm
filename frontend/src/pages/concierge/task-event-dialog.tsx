@@ -285,17 +285,25 @@ function commentDateTime(value: string, lang: Lang) {
   }).format(date);
 }
 
+/**
+ * The assignee a new task starts with: the given one (e.g. the concierge of
+ * the source request), otherwise the current user when they may take the
+ * task, otherwise nobody. Never some other person picked by list order: a
+ * task silently assigned to the alphabetically first concierge goes to the
+ * wrong person.
+ */
 export function selectTaskAssigneeId(
   itemAssignedTo: string | null | undefined,
   currentUserId: string | null,
   assignees: ConciergeAssignee[],
+  { serviceLinked = false }: { serviceLinked?: boolean } = {},
 ) {
   const itemAssignee = assignees.find((assignee) => assignee.id === itemAssignedTo);
   if (itemAssignee) return itemAssignee.id;
   const currentUserAssignee = assignees.find((assignee) => assignee.id === currentUserId);
-  if (currentUserAssignee?.role === "concierge") return currentUserAssignee.id;
-  const firstConcierge = assignees.find((assignee) => assignee.role === "concierge");
-  return firstConcierge?.id ?? currentUserAssignee?.id ?? assignees[0]?.id ?? "";
+  // A concierge service task belongs to a concierge.
+  if (serviceLinked) return currentUserAssignee?.role === "concierge" ? currentUserAssignee.id : "";
+  return currentUserAssignee?.id ?? "";
 }
 
 function parseTaskDate(value: string | null | undefined): Date | null {
@@ -470,7 +478,9 @@ export function ConciergeTaskEventDialog({
     setLocation(item?.location ?? "");
     setPriority(item?.priority ?? "normal");
     setStatus(item?.status ?? "open");
-    setAssigneeId(selectTaskAssigneeId(item?.assigned_to ?? initialAssigneeId, currentUserId, assignees));
+    setAssigneeId(selectTaskAssigneeId(item?.assigned_to ?? initialAssigneeId, currentUserId, assignees, {
+      serviceLinked: Boolean(item?.concierge_service_id ?? initialServiceId),
+    }));
     setReminderAt(localDateTimeValue(item?.reminder_at ?? null));
     setAudience(item?.task_audience ?? "internal");
     setPatientId(item?.patient_id ?? initialPatientId ?? "");

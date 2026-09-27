@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { pickerSection } from "../e2e/helpers";
 
 import {
   authenticateApiClient,
@@ -54,17 +55,17 @@ async function openClinicalAddSheet(page: Page, heading: string, sheetName: RegE
 
 async function fillMuiDate(container: Locator, value: string, index = 0) {
   const [year = "", month = "", day = ""] = value.split("-");
-  await container.getByRole("spinbutton", { name: "Year" }).nth(index).fill(year);
-  await container.getByRole("spinbutton", { name: "Month" }).nth(index).fill(month);
-  await container.getByRole("spinbutton", { name: "Day" }).nth(index).fill(day);
+  await container.getByRole("spinbutton", { name: pickerSection.year }).nth(index).fill(year);
+  await container.getByRole("spinbutton", { name: pickerSection.month }).nth(index).fill(month);
+  await container.getByRole("spinbutton", { name: pickerSection.day }).nth(index).fill(day);
 }
 
 async function fillMuiDateTime(container: Locator, value: string, index = 0) {
   const [date = "", time = ""] = value.split("T");
   const [hours = "", minutes = ""] = time.split(":");
   await fillMuiDate(container, date, index);
-  await container.getByRole("spinbutton", { name: "Hours" }).nth(index).fill(hours);
-  await container.getByRole("spinbutton", { name: "Minutes" }).nth(index).fill(minutes);
+  await container.getByRole("spinbutton", { name: pickerSection.hours }).nth(index).fill(hours);
+  await container.getByRole("spinbutton", { name: pickerSection.minutes }).nth(index).fill(minutes);
 }
 
 async function saveOpenDialog(page: Page) {

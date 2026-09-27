@@ -60,7 +60,7 @@ export function buildHandoffStakeholders(
 ): HandoffStakeholder[] {
   const patientBadge = tr?.patients_title ?? appointmentText("appointments_patient");
   const ownerBadge = tr?.patients_assign_owner ?? appointmentText("appointments_handoff_appointment_owner");
-  const interpreterBadge = tr?.role_interpreter ?? appointmentText("appointments_schedule_scope_interpreter");
+  const interpreterBadge = appointmentText("appointments_schedule_scope_interpreter");
   const items = new Map<string, HandoffStakeholder>();
   const activeAssignments = assignments.filter(
     (item) => item.user_active && !item.revoked_at,
