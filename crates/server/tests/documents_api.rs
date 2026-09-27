@@ -1157,6 +1157,125 @@ async fn manual_intake_upload_stays_unlinked_and_skips_text_extraction_until_rev
 }
 
 #[tokio::test]
+async fn patient_manager_keeps_own_manual_intake_until_it_is_linked() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("pm-manual-intake");
+    let uploader_id = seed_user(&pool, &format!("{tag}-uploader"), "patient_manager").await;
+    let uploader = auth_header_for(uploader_id, "patient_manager");
+    let colleague_id = seed_user(&pool, &format!("{tag}-colleague"), "patient_manager").await;
+    let colleague = auth_header_for(colleague_id, "patient_manager");
+
+    let upload = |bearer: String, name: String| {
+        let app = app.clone();
+        async move {
+            let (status, body) = multipart_upload(
+                &app,
+                "/api/v1/documents/upload",
+                &bearer,
+                &[("manual_intake", "true".to_string())],
+                &name,
+                "application/pdf",
+                b"%PDF-scan-station%",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+        }
+    };
+    let in_queue = |bearer: String, document_id: Uuid| {
+        let app = app.clone();
+        async move {
+            let (status, body) =
+                json_request(&app, "GET", "/api/v1/documents/intake-queue", &bearer, None).await;
+            assert_eq!(status, StatusCode::OK);
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == document_id.to_string())
+        }
+    };
+
+    let own_scan = upload(uploader.clone(), format!("scan-{tag}.pdf")).await;
+    let ceo_scan = upload(admin_bearer.clone(), format!("ceo-scan-{tag}.pdf")).await;
+
+    // The uploader sees, opens and downloads its own unlinked scan ...
+    assert!(in_queue(uploader.clone(), own_scan).await);
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{own_scan}"),
+        &uploader,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["status"], "draft");
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{own_scan}/download"),
+        &uploader,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(String::from_utf8_lossy(&bytes).contains("%PDF-scan-station%"));
+
+    // ... but neither another manager's view of it nor someone else's scan.
+    assert!(!in_queue(uploader.clone(), ceo_scan).await);
+    assert!(!in_queue(colleague.clone(), own_scan).await);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{own_scan}"),
+        &colleague,
+        None,
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+
+    // Review links it to the uploader's patient; from then on the usual
+    // patient assignment decides.
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, uploader_id, admin_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{own_scan}/update"),
+        &uploader,
+        Some(json!({
+            "patient_id": patient_id,
+            "art": "medical_report",
+            "category": "medical",
+            "is_medical": true,
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!in_queue(uploader.clone(), own_scan).await);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{own_scan}"),
+        &uploader,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{own_scan}"),
+        &colleague,
+        None,
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn concierge_multipart_upload_requires_all_allow_and_stays_nonmedical_internal() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

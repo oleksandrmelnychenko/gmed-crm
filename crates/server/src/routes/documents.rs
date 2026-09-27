@@ -11407,7 +11407,25 @@ pub(crate) fn can_view_document_row(
     }
     let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
     let lead_id: Option<Uuid> = row.try_get("lead_id").unwrap_or_default();
-    let is_assigned = if explicit_share || (lead_id.is_some() && auth.role == Role::PatientManager)
+    // A manual intake upload (the scan station, drag-and-drop "for review")
+    // belongs to no patient until it is reviewed, so "own patients" would hide
+    // it from the patient manager who uploaded it. That manager keeps it until
+    // it is linked; afterwards the usual patient assignment applies.
+    let own_unlinked_intake = auth.role == Role::PatientManager
+        && patient_id.is_none()
+        && lead_id.is_none()
+        && row
+            .try_get::<Option<String>, _>("ursprung")
+            .unwrap_or_default()
+            .as_deref()
+            == Some("manual_intake")
+        && row
+            .try_get::<Option<Uuid>, _>("uploaded_by")
+            .unwrap_or_default()
+            == Some(auth.user_id);
+    let is_assigned = if explicit_share
+        || own_unlinked_intake
+        || (lead_id.is_some() && auth.role == Role::PatientManager)
     {
         true
     } else if access::requires_patient_assignment(auth.role) {
