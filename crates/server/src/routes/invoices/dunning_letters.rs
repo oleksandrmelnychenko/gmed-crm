@@ -604,7 +604,8 @@ pub(super) async fn dunning_letter_pdf(
         let bytes = stored_documents::read_bytes(&document).await?;
         return Ok(Some((bytes, document.file_name, "stored")));
     }
-    let Some(letter) = store_dunning_letter(conn, invoice_id, dunning_event_id, Some(actor)).await?
+    let Some(letter) =
+        store_dunning_letter(conn, invoice_id, dunning_event_id, Some(actor)).await?
     else {
         return Ok(None);
     };

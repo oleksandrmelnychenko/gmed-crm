@@ -3718,7 +3718,11 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
     assert!(text.contains("119,00 €"), "{text}");
     assert!(text.contains("Neue Zahlungsfrist"), "{text}");
     assert!(
-        text.contains(&(today + chrono::Duration::days(14)).format("%d.%m.%Y").to_string()),
+        text.contains(
+            &(today + chrono::Duration::days(14))
+                .format("%d.%m.%Y")
+                .to_string()
+        ),
         "{text}"
     );
     assert!(text.contains("Hauptstraße 1"), "{text}");
@@ -3778,7 +3782,11 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
     assert_eq!(status, StatusCode::OK);
     let events = events.as_array().unwrap();
     assert_eq!(events.len(), 3);
-    assert!(events.iter().all(|event| event["letter"]["file_name"].is_string()));
+    assert!(
+        events
+            .iter()
+            .all(|event| event["letter"]["file_name"].is_string())
+    );
 
     // The patient sees the letters in the portal.
     let (status, letters) = json_request(
@@ -3796,7 +3804,10 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
         .iter()
         .map(|item| item["title"].as_str().unwrap().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(titles, vec!["Zahlungserinnerung", "1. Mahnung", "2. Mahnung"]);
+    assert_eq!(
+        titles,
+        vec!["Zahlungserinnerung", "1. Mahnung", "2. Mahnung"]
+    );
     let (status, _, portal_bytes) = binary_request(
         &app,
         "GET",

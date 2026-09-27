@@ -9,7 +9,10 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
 -- Existing invoices keep their numbers, including numbered drafts. Everything
 -- outside draft was issued; a cancelled invoice counts as issued only with
 -- evidence that it left draft (a status change, dunning, payments or credit
--- notes). A draft cancelled before release stays unreleased.
+-- notes). A draft cancelled before release stays unreleased. The backfill
+-- does not touch updated_at.
+ALTER TABLE invoices DISABLE TRIGGER set_updated_at_invoices;
+
 UPDATE invoices
 SET released_at = issued_at
 WHERE released_at IS NULL
@@ -36,6 +39,8 @@ WHERE invoice.released_at IS NULL
       OR EXISTS (SELECT 1 FROM invoice_payment_transactions payment WHERE payment.invoice_id = invoice.id)
       OR EXISTS (SELECT 1 FROM invoice_credit_note_transactions credit WHERE credit.invoice_id = invoice.id)
   );
+
+ALTER TABLE invoices ENABLE TRIGGER set_updated_at_invoices;
 
 CREATE INDEX IF NOT EXISTS idx_invoices_patient_released
     ON invoices(patient_id, released_at)
