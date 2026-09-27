@@ -1,0 +1,154 @@
+name: Scan Agent
+
+# Cross-platform build of the gmed-scan station agent (crates/scan-agent)
+# and its installers: a Windows MSI, a macOS package (universal binary plus
+# the "GMED Scan" app) and a plain Linux binary, kept as workflow artifacts.
+# Linux clippy and tests also run in the CI `rust` job as part of the
+# workspace. This workflow builds only this crate and never touches the
+# server images or any deployment.
+#
+# Optional repository variable GMED_SCAN_DEFAULT_SERVER (e.g. the production
+# GMED address) is compiled in as the default offered at the first sign-in.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - crates/scan-agent/**
+      - Cargo.lock
+      - .github/workflows/scan-agent.yml
+  pull_request:
+    paths:
+      - crates/scan-agent/**
+      - Cargo.lock
+      - .github/workflows/scan-agent.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GMED_SCAN_DEFAULT_SERVER: ${{ vars.GMED_SCAN_DEFAULT_SERVER }}
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: scan-agent-linux
+
+      - name: Test
+        run: cargo test -p gmed-scan --locked
+
+      - name: Build release binary
+        run: cargo build -p gmed-scan --locked --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmed-scan-linux-x86_64
+          path: target/release/gmed-scan
+          if-no-files-found: error
+          retention-days: 30
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      # aws-lc-sys (rustls crypto) uses its prebuilt NASM objects.
+      AWS_LC_SYS_PREBUILT_NASM: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: scan-agent-windows
+
+      - name: Test
+        run: cargo test -p gmed-scan --locked
+
+      - name: Build release binary
+        run: cargo build -p gmed-scan --locked --release
+
+      - name: Build MSI
+        run: |
+          version="$(grep -m1 '^version' crates/scan-agent/Cargo.toml | cut -d'"' -f2)"
+          dotnet tool install --global wix --version 5.0.2
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          # WiX is a Windows program: hand it Windows paths.
+          wix build "$(cygpath -w crates/scan-agent/packaging/windows/gmed-scan.wxs)" \
+            -arch x64 \
+            -d Version="$version" \
+            -d BinaryPath="$(cygpath -w "$PWD/target/release/gmed-scan.exe")" \
+            -o "gmed-scan-$version-windows-x64.msi"
+          ls -l gmed-scan-*.msi
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmed-scan-windows-x64
+          path: |
+            gmed-scan-*-windows-x64.msi
+            target/release/gmed-scan.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: scan-agent-macos
+
+      - name: Test
+        run: cargo test -p gmed-scan --locked
+
+      - name: Build release binaries
+        run: |
+          cargo build -p gmed-scan --locked --release --target aarch64-apple-darwin
+          cargo build -p gmed-scan --locked --release --target x86_64-apple-darwin
+
+      - name: Build installer package
+        run: |
+          version="$(grep -m1 '^version' crates/scan-agent/Cargo.toml | cut -d'"' -f2)"
+          bash crates/scan-agent/packaging/macos/build-pkg.sh "$version" \
+            target/aarch64-apple-darwin/release/gmed-scan \
+            target/x86_64-apple-darwin/release/gmed-scan \
+            "gmed-scan-$version-macos-universal.pkg"
+          ls -l gmed-scan-*.pkg
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmed-scan-macos-universal
+          path: gmed-scan-*-macos-universal.pkg
+          if-no-files-found: error
+          retention-days: 30
