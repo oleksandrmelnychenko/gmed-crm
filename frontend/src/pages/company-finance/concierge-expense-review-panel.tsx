@@ -178,6 +178,7 @@ const textByLanguage = {
     decisionBlocked: "Финансовое решение доступно только после полной загрузки очереди и контекста.",
     balance: "Финансовые последствия",
     patientReceivable: "К оплате пациентом",
+    afterDelivery: "начисляется после оказания услуги",
     companyPaid: "Оплачено GMED",
     providerLiability: "Долг поставщику",
     postingPending: "Будет создано после подтверждения",
@@ -293,6 +294,7 @@ const textByLanguage = {
     decisionBlocked: "Eine Finanzentscheidung ist erst nach vollständigem Laden von Prüfliste und Kontext möglich.",
     balance: "Finanzielle Auswirkungen",
     patientReceivable: "Patientenforderung",
+    afterDelivery: "wird nach Erbringung der Leistung gebucht",
     companyPaid: "Von GMED bezahlt",
     providerLiability: "Anbieterverbindlichkeit",
     postingPending: "Wird erst nach Bestätigung erzeugt",
@@ -732,6 +734,7 @@ export function ConciergeExpenseReviewPanel({
       );
       requestIdsRef.current.delete(`reject:${selected.id}`);
       replaceReviewedItem({ ...response.item, service: selected.service });
+      setRejectReason("");
       setSuccessMessage(text.rejectedSuccess);
       onChanged();
     } catch (error) {
@@ -917,7 +920,13 @@ export function ConciergeExpenseReviewPanel({
         </>
       )}
 
-      <Dialog open={Boolean(selected)} onOpenChange={(open) => { if (!open) closeExpense(); }}>
+      {/* Once decided, nothing on the sheet is editable any more: closing it
+          discards nothing, so it must not ask to. */}
+      <Dialog
+        open={Boolean(selected)}
+        dirty={selected && selected.status !== "pending_review" ? false : undefined}
+        onOpenChange={(open) => { if (!open) closeExpense(); }}
+      >
         <DialogContent className="flex max-h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[min(96vw,72rem)] sm:max-w-[72rem]">
           {selected ? (
             <>
@@ -1021,6 +1030,11 @@ export function ConciergeExpenseReviewPanel({
                           <div key={label} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
                             <span className="block text-[10px] text-muted-foreground">{label}</span>
                             <span className="font-semibold tabular-nums">{formatMoney(value, selected.currency, locale)}</span>
+                            {label === text.patientReceivable
+                              && selected.balance_consequence.posting_pending
+                              && selected.balance_consequence.patient_receivable_after_delivery
+                              ? <span className="block text-[10px] text-muted-foreground">{text.afterDelivery}</span>
+                              : null}
                           </div>
                         ))}
                       </div>

@@ -303,7 +303,12 @@ function usePatientDashboardPageContent() {
   );
   const recentFeedback = useMemo(() => feedback.slice(0, 4), [feedback]);
   const recentDocuments = useMemo(() => documents.slice(0, 4), [documents]);
-  const recentAppointments = useMemo(() => appointments.slice(0, 4), [appointments]);
+  // "Upcoming visits" lists only visits still ahead: not completed,
+  // cancelled or past ones.
+  const recentAppointments = useMemo(
+    () => appointments.filter((item) => isUpcomingPortalAppointment(item)).slice(0, 4),
+    [appointments],
+  );
   const recentServices = useMemo(() => services.slice(0, 4), [services]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
   const topNextActions = useMemo(

@@ -749,6 +749,11 @@ export const ru = {
   settings_clinical_data_hint:
     "Управляет сроком хранения медицинских кейсов и append-only истории анамнеза.",
   settings_clinical_retention_years: "Срок хранения медкейсов (лет)",
+  settings_concierge_preparation: "Подготовка консьерж-услуг",
+  settings_concierge_preparation_hint:
+    "За сколько часов до начала консьерж-услуги приходит напоминание и истекает срок задачи на подготовку.",
+  settings_concierge_reminder_lead_hours: "Напоминание о предстоящей услуге, часов до начала",
+  settings_concierge_prep_lead_hours: "Срок задачи на подготовку, часов до начала",
   settings_sessions: "Управление сессиями",
   settings_active_sessions: "Активные сессии",
   settings_logout_user: "Завершить сессии",

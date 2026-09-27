@@ -1755,3 +1755,152 @@ async fn finance_review_queue_is_global_paginated_and_finance_only() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_page}");
 }
+
+#[tokio::test]
+async fn receipts_of_an_appointment_task_land_on_its_order_and_gmed_paid_ones_need_no_partner() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("vendor-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("vendor-review-{tag}")).await;
+    let (patient_id, _provider_id, service_id, order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    // A restaurant booking of the order's appointment, with a vendor that is
+    // no registered partner.
+    let appointment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+               patient_id, order_id, appointment_type, title, date, status, created_by
+           ) VALUES ($1, $2, 'non_medical', 'Dinner', CURRENT_DATE - 1, 'completed', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(context.admin_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE concierge_services SET provider_id = NULL, appointment_id = $2 WHERE id = $1",
+    )
+    .bind(service_id)
+    .bind(appointment_id)
+    .execute(&context.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE tasks SET provider_id = NULL, appointment_id = $2 WHERE concierge_service_id = $1",
+    )
+    .bind(service_id)
+    .bind(appointment_id)
+    .execute(&context.pool)
+    .await
+    .unwrap();
+    let account_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO company_financial_accounts (
+               name, account_type, currency, opening_balance, opening_balance_on,
+               is_default, is_active, created_by
+           ) VALUES ($1, 'bank', 'EUR', 0, '2020-01-01', false, true, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Vendor receipts {tag}"))
+    .bind(context.admin_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    let concierge = auth_header(concierge_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+    let expense_date = Utc::now().date_naive() - Duration::days(1);
+
+    let (status, created) = submit_fixture_expense(
+        &context.app,
+        &concierge,
+        service_id,
+        Uuid::new_v4(),
+        "agency",
+        true,
+        expense_date,
+        &format!("{tag}-agency"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["item"]["order_id"], json!(order_id), "{created}");
+    let expense_id = Uuid::parse_str(created["item"]["id"].as_str().unwrap()).unwrap();
+
+    // The finance notification carries the receipt facts for the staff UI.
+    let body: String = sqlx::query_scalar(
+        r#"SELECT body FROM user_notifications
+           WHERE user_id = $1 AND kind = 'concierge_expense_submitted' AND entity_id = $2"#,
+    )
+    .bind(billing_id)
+    .bind(expense_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["vendor"], "Berlin Driver GmbH");
+    assert_eq!(body["amount_gross"], "119.00");
+    assert_eq!(body["currency"], "EUR");
+
+    let (status, posted) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "financial_account_id": account_id,
+            "paid_on": expense_date,
+            "payment_method": "bank_transfer",
+            "payment_reference": "VENDOR-1",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{posted}");
+    assert_eq!(posted["item"]["status"], "posted");
+    let external_invoice_id =
+        Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
+    let (provider_id, supplier_name): (Option<Uuid>, Option<String>) =
+        sqlx::query_as("SELECT provider_id, supplier_name FROM external_invoices WHERE id = $1")
+            .bind(external_invoice_id)
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert!(provider_id.is_none());
+    // Without a partner the receipt's vendor is the supplier of the payable.
+    assert_eq!(supplier_name.as_deref(), Some("Berlin Driver GmbH"));
+
+    // A receipt nobody has paid yet stays owed to a partner, so it needs one;
+    // its patient share is the full amount, booked once delivered.
+    let (status, unpaid) = submit_fixture_expense(
+        &context.app,
+        &concierge,
+        service_id,
+        Uuid::new_v4(),
+        "unpaid",
+        false,
+        expense_date,
+        &format!("{tag}-unpaid"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{unpaid}");
+    assert_eq!(
+        unpaid["item"]["balance_consequence"]["intended_patient_receivable_gross"],
+        "119.00"
+    );
+    assert_eq!(
+        unpaid["item"]["balance_consequence"]["patient_receivable_after_delivery"],
+        true
+    );
+    let unpaid_id = unpaid["item"]["id"].as_str().unwrap();
+    let (status, refused) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/expenses/{unpaid_id}/post"),
+        &billing,
+        Some(json!({ "request_id": Uuid::new_v4(), "order_id": order_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+}

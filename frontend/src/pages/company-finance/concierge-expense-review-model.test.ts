@@ -195,6 +195,28 @@ describe("Concierge expense finance review model", () => {
       });
   });
 
+  it("posts a GMED-paid receipt of an unregistered vendor but keeps a partner for unpaid ones", () => {
+    const form = {
+      orderId: "",
+      orderLeistungId: "",
+      financialAccountId: "account-1",
+      paidOn: "2026-08-19",
+      paymentMethod: "bank_transfer" as const,
+      paymentReference: "",
+    };
+    const partnerless = {
+      ...context,
+      task: { ...context.task!, provider_id: null },
+    };
+    const restaurant = expense({ vendor: "Ristorante Da Mario" });
+    expect(validateExpensePostForm(restaurant, partnerless, [account], form, "2026-08-20"))
+      .not.toContain("provider_required");
+    expect(validateExpensePostForm(expense({ vendor: "  " }), partnerless, [account], form, "2026-08-20"))
+      .toContain("provider_required");
+    expect(validateExpensePostForm(expense({ paid_by: "unpaid" }), partnerless, [account], form, "2026-08-20"))
+      .toContain("provider_required");
+  });
+
   it("reuses request ids only for an identical retry payload", () => {
     const registry = new Map();
     let counter = 0;

@@ -752,6 +752,11 @@ export const de = {
   settings_clinical_data_hint:
     "Steuert die Aufbewahrungsfrist für medizinische Fälle und die append-only Anamnese-Historie.",
   settings_clinical_retention_years: "Aufbewahrung medizinischer Fälle (Jahre)",
+  settings_concierge_preparation: "Vorbereitung von Concierge-Services",
+  settings_concierge_preparation_hint:
+    "Wie viele Stunden vor Beginn eines Concierge-Services die Erinnerung kommt und die Vorbereitungsaufgabe fällig ist.",
+  settings_concierge_reminder_lead_hours: "Erinnerung an den anstehenden Service, Stunden vorher",
+  settings_concierge_prep_lead_hours: "Fälligkeit der Vorbereitungsaufgabe, Stunden vorher",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
   settings_logout_user: "Sitzungen beenden",

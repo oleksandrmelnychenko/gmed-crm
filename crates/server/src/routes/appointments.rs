@@ -6481,8 +6481,8 @@ async fn add_reminder(
         }
     };
 
-    match load_active_user_role(&state, body.user_id).await {
-        Ok(Some(_)) => {}
+    let target_role = match load_active_user_role(&state, body.user_id).await {
+        Ok(Some(role)) => role,
         Ok(None) => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -6490,6 +6490,26 @@ async fn add_reminder(
             );
         }
         Err(resp) => return resp,
+    };
+    let appointment_type = match sqlx::query_scalar::<_, String>(
+        "SELECT appointment_type FROM appointments WHERE id = $1",
+    )
+    .bind(apt_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "load appointment type for reminder");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if !reminder_recipient_allowed(&target_role, &appointment_type) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "This role does not take part in this appointment's preparation",
+        );
     }
 
     match create_reminder_record(
@@ -8678,12 +8698,18 @@ async fn insert_task_record(
         return Ok(());
     }
 
+    // Generated appointment tasks carry the appointment's order, so the work
+    // center links back to it and their expenses land on the order.
     let updated = sqlx::query(
         r#"UPDATE tasks
            SET description = $4,
                due_date = $5,
                priority = $6,
                assigned_by = $7,
+               order_id = COALESCE(
+                   order_id,
+                   (SELECT appointment.order_id FROM appointments appointment WHERE appointment.id = $1)
+               ),
                updated_at = now()
            WHERE appointment_id = $1
              AND assigned_to = $2
@@ -8707,9 +8733,11 @@ async fn insert_task_record(
         sqlx::query(
             r#"INSERT INTO tasks (
                     title, description, assigned_to, assigned_by, patient_id, appointment_id,
-                    due_date, priority
+                    order_id, due_date, priority
                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8
+                    $1, $2, $3, $4, $5, $6,
+                    (SELECT appointment.order_id FROM appointments appointment WHERE appointment.id = $6),
+                    $7, $8
                )"#,
         )
         .bind(title)
@@ -8737,6 +8765,78 @@ fn berlin_today() -> chrono::NaiveDate {
     chrono::Utc::now()
         .with_timezone(&chrono_tz::Europe::Berlin)
         .date_naive()
+}
+
+/// Default lead times of the automatic concierge preparation: the concierge is
+/// reminded a day before the service and prepares it until two hours before.
+/// Admins change them in the system settings.
+const DEFAULT_CONCIERGE_REMINDER_LEAD_HOURS: i64 = 24;
+const DEFAULT_CONCIERGE_PREP_LEAD_HOURS: i64 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConciergeLeadTimes {
+    reminder_hours: i64,
+    prep_hours: i64,
+}
+
+impl Default for ConciergeLeadTimes {
+    fn default() -> Self {
+        Self {
+            reminder_hours: DEFAULT_CONCIERGE_REMINDER_LEAD_HOURS,
+            prep_hours: DEFAULT_CONCIERGE_PREP_LEAD_HOURS,
+        }
+    }
+}
+
+async fn load_concierge_lead_times<'e, E>(executor: E) -> ConciergeLeadTimes
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let rows = sqlx::query_as::<_, (String, String)>(
+        r#"SELECT key, value::text
+           FROM system_settings
+           WHERE key IN ('concierge_reminder_lead_hours', 'concierge_prep_lead_hours')"#,
+    )
+    .fetch_all(executor)
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "load concierge lead times; using defaults");
+        Vec::new()
+    });
+    let mut leads = ConciergeLeadTimes::default();
+    for (key, value) in rows {
+        let Some(hours) = value
+            .trim_matches('"')
+            .parse::<i64>()
+            .ok()
+            .filter(|hours| (0..=336).contains(hours))
+        else {
+            continue;
+        };
+        match key.as_str() {
+            "concierge_reminder_lead_hours" => leads.reminder_hours = hours,
+            "concierge_prep_lead_hours" => leads.prep_hours = hours,
+            _ => {}
+        }
+    }
+    leads
+}
+
+/// When the "Upcoming concierge service" reminder and the preparation task
+/// of a concierge service are due: their lead time before the service start
+/// (09:00 without a start time). A service booked at short notice is not
+/// given a due time in the past; neither falls after the service start.
+fn concierge_preparation_due(
+    date: chrono::NaiveDate,
+    time_start: Option<chrono::NaiveTime>,
+    leads: ConciergeLeadTimes,
+    now: chrono::DateTime<chrono::Utc>,
+) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+    let start = appointment_due_at(date, time_start, 9);
+    let earliest = now.min(start);
+    let reminder_at = (start - chrono::Duration::hours(leads.reminder_hours)).max(earliest);
+    let prep_due = (start - chrono::Duration::hours(leads.prep_hours)).max(earliest);
+    (reminder_at, prep_due)
 }
 
 /// Receipts are collected once the non-medical service is over: the task is
@@ -8801,8 +8901,9 @@ async fn bootstrap_concierge_workflow(
         insert_checklist_item(state, appointment_id, phase, item_text, index as i32 + 1).await?;
     }
 
-    let reminder_at = appointment_due_at(date, time_start, 9);
-    let prep_due = appointment_due_at(date, time_start, 8);
+    let leads = load_concierge_lead_times(&state.db).await;
+    let (reminder_at, prep_due) =
+        concierge_preparation_due(date, time_start, leads, chrono::Utc::now());
     let followup_due = concierge_receipts_due_at(date, time_end);
 
     for concierge_id in concierges {
@@ -8958,8 +9059,9 @@ async fn reconcile_auto_concierge_schedule_in_tx(
     time_end: Option<chrono::NaiveTime>,
     reactivate_service: bool,
 ) -> Result<(), axum::response::Response> {
-    let reminder_at = appointment_due_at(date, time_start, 9);
-    let prep_due = appointment_due_at(date, time_start, 8);
+    let leads = load_concierge_lead_times(&mut **tx).await;
+    let (reminder_at, prep_due) =
+        concierge_preparation_due(date, time_start, leads, chrono::Utc::now());
     let followup_due = concierge_receipts_due_at(date, time_end);
     let starts_at = time_start.map(|value| appointment_due_at(date, Some(value), 9));
     let ends_at = time_end.map(|value| appointment_due_at(date, Some(value), 18));
@@ -9454,6 +9556,18 @@ fn build_appointment_detail_json(
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
     })
+}
+
+/// Who may be reminded about an appointment. IT administration does not work
+/// on appointments, and billing has nothing to prepare for a non-medical
+/// (concierge) booking; billing learns about medical visits through the
+/// billing handoff instead.
+fn reminder_recipient_allowed(role: &str, appointment_type: &str) -> bool {
+    match role {
+        "it_admin" => false,
+        "billing" => appointment_type != "non_medical",
+        _ => true,
+    }
 }
 
 async fn load_active_interpreter_role(
@@ -10516,6 +10630,66 @@ mod tests {
 
     fn time(hour: u32, minute: u32) -> chrono::NaiveTime {
         chrono::NaiveTime::from_hms_opt(hour, minute, 0).expect("valid test time")
+    }
+
+    #[test]
+    fn concierge_preparation_is_due_ahead_of_the_service() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        let long_before = chrono::DateTime::parse_from_rfc3339("2026-10-01T08:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (reminder_at, prep_due) = concierge_preparation_due(
+            date,
+            Some(time(19, 30)),
+            ConciergeLeadTimes::default(),
+            long_before,
+        );
+        // 19:30 Berlin summer time is 17:30 UTC.
+        assert_eq!(reminder_at.to_rfc3339(), "2026-10-13T17:30:00+00:00");
+        assert_eq!(prep_due.to_rfc3339(), "2026-10-14T15:30:00+00:00");
+
+        // Without a start time the service is expected at 09:00.
+        let (reminder_at, prep_due) = concierge_preparation_due(
+            date,
+            None,
+            ConciergeLeadTimes {
+                reminder_hours: 48,
+                prep_hours: 0,
+            },
+            long_before,
+        );
+        assert_eq!(reminder_at.to_rfc3339(), "2026-10-12T07:00:00+00:00");
+        assert_eq!(prep_due.to_rfc3339(), "2026-10-14T07:00:00+00:00");
+
+        // Booked at short notice: due now, never in the past or after the start.
+        let short_notice = chrono::DateTime::parse_from_rfc3339("2026-10-14T16:45:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (reminder_at, prep_due) = concierge_preparation_due(
+            date,
+            Some(time(19, 30)),
+            ConciergeLeadTimes::default(),
+            short_notice,
+        );
+        assert_eq!(reminder_at, short_notice);
+        assert_eq!(prep_due, short_notice);
+        let after_start = short_notice + chrono::Duration::hours(3);
+        let (reminder_at, _) = concierge_preparation_due(
+            date,
+            Some(time(19, 30)),
+            ConciergeLeadTimes::default(),
+            after_start,
+        );
+        assert_eq!(reminder_at.to_rfc3339(), "2026-10-14T17:30:00+00:00");
+    }
+
+    #[test]
+    fn concierge_bookings_do_not_remind_billing_or_it() {
+        assert!(!reminder_recipient_allowed("billing", "non_medical"));
+        assert!(reminder_recipient_allowed("billing", "medical"));
+        assert!(!reminder_recipient_allowed("it_admin", "medical"));
+        assert!(reminder_recipient_allowed("concierge", "non_medical"));
+        assert!(reminder_recipient_allowed("patient_manager", "non_medical"));
     }
 
     #[test]

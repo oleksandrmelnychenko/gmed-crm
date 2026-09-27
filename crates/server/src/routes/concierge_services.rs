@@ -4493,7 +4493,7 @@ pub(crate) async fn ensure_task_for_service(
     let task_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO tasks (
                title, description, assigned_to, assigned_by, patient_id,
-               appointment_id, provider_id, due_date, priority, status,
+               appointment_id, order_id, provider_id, due_date, priority, status,
                completed_at, task_scope, task_kind, concierge_service_id,
                starts_at, ends_at, location, task_audience, service_kind,
                service_status, provider_service_id, taxonomy_node_id,
@@ -4505,7 +4505,10 @@ pub(crate) async fn ensure_task_for_service(
            )
            SELECT title, service_notes,
                   COALESCE(assigned_concierge_id, created_by), created_by,
-                  patient_id, appointment_id, provider_id,
+                  patient_id, appointment_id,
+                  (SELECT appointment.order_id FROM appointments appointment
+                   WHERE appointment.id = concierge_services.appointment_id),
+                  provider_id,
                   CASE WHEN starts_at IS NULL THEN ends_at ELSE NULL END,
                   'normal',
                   CASE status

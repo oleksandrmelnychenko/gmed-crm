@@ -30,6 +30,7 @@ import {
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { localizeTaskTitle } from "@/lib/task-labels";
+import { isAppointmentReminderRecipient } from "@/pages/appointments/model/staff-roles";
 import {
   fetchPatientInterpreterHistory,
   fetchInterpreterSuggestions,
@@ -1602,11 +1603,13 @@ function AppointmentRemindersSection({
               required
             >
               <option value="">{t.common_not_set}</option>
-              {staff.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name} · {roleLabel(member.role)}
-                </option>
-              ))}
+              {staff
+                .filter((member) => isAppointmentReminderRecipient(member.role, detail.type))
+                .map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} · {roleLabel(member.role)}
+                  </option>
+                ))}
             </NativeComboboxSelect>
           </Field>
           <Field compact label={t.appointments_date}>

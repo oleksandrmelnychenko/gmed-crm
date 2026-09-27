@@ -280,7 +280,7 @@ function useAppointmentMobileDetailSheetContentContent({
                 />
               ) : null}
 
-              {!detail.is_blocked && permissions.canCreate ? (
+              {!detail.is_blocked && detail.type === "medical" && permissions.canCreate ? (
                 <MemoizedAppointmentFollowUpVisitSection
                   detail={detail}
                   appointments={appointments}
@@ -295,7 +295,7 @@ function useAppointmentMobileDetailSheetContentContent({
                 />
               ) : null}
 
-              {!detail.is_blocked && permissions.canViewReminders ? (
+              {!detail.is_blocked && detail.type === "medical" && permissions.canViewReminders ? (
                 <MemoizedAppointmentDoctorFollowUpSection
                   detail={detail}
                   reminders={doctorDirectedReminders}
@@ -309,7 +309,7 @@ function useAppointmentMobileDetailSheetContentContent({
                 />
               ) : null}
 
-              {!detail.is_blocked &&
+              {!detail.is_blocked && detail.type === "medical" &&
               permissions.canManageChecklist &&
               permissions.canViewReminders ? (
                 <MemoizedAppointmentIncomingDataSection
@@ -325,7 +325,7 @@ function useAppointmentMobileDetailSheetContentContent({
                 />
               ) : null}
 
-              {!detail.is_blocked &&
+              {!detail.is_blocked && detail.type === "medical" &&
               permissions.canViewReminders &&
               detail.order_id ? (
                 <MemoizedAppointmentPackageEndSection

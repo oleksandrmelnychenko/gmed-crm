@@ -59,8 +59,11 @@ function AppointmentClinicalSection({
   onError,
 }: AppointmentClinicalSectionProps) {
   const clinicalEmpty = appointmentText("appointments_no_clinical_surfaces_are_available_for_this_appointment");
+  // Incoming results and findings belong to medical visits, not to a
+  // restaurant, transfer or other non-medical booking.
   const showClinicalIncomingSection =
     !detail.is_blocked &&
+    detail.type === "medical" &&
     permissions.canManageChecklist &&
     permissions.canViewReminders;
   const showClinicalFindingsSection =

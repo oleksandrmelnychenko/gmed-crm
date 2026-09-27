@@ -99,8 +99,11 @@ export function validateExpensePostForm(
   if (expense.order_leistung_id && form.orderLeistungId !== expense.order_leistung_id) {
     errors.push("order_service_locked");
   }
+  // An unpaid expense stays owed to a partner. A receipt GMED already paid
+  // may name a vendor that is no registered partner (restaurant, florist).
   if (
-    expense.paid_by !== "patient"
+    (expense.paid_by === "unpaid"
+      || (expense.paid_by === "agency" && !expense.vendor?.trim()))
     && !(context.task?.provider_id ?? context.service?.provider_id)
     && !orderService?.provider_id
   ) {

@@ -1463,6 +1463,41 @@ async fn submit_expense_for_scope(
         }
     }
 
+    // A receipt for an order's concierge work (e.g. the automatic tasks of an
+    // appointment) belongs to that order unless the concierge chose another.
+    if input.order_id.is_none() {
+        input.order_id = match sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT linked_order.id
+               FROM tasks task
+               LEFT JOIN appointments appointment ON appointment.id = task.appointment_id
+               LEFT JOIN concierge_services service ON service.id = task.concierge_service_id
+               LEFT JOIN appointments service_appointment
+                 ON service_appointment.id = service.appointment_id
+               JOIN orders linked_order
+                 ON linked_order.id = COALESCE(
+                     task.order_id, appointment.order_id, service_appointment.order_id
+                 )
+               WHERE task.id = $1
+                 AND linked_order.patient_id = $2
+                 AND UPPER(linked_order.currency) = $3
+                 AND linked_order.status <> 'cancelled'"#,
+        )
+        .bind(task_id)
+        .bind(patient_id)
+        .bind(&currency)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, task_id = %task_id, "derive concierge expense order");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to submit expense",
+                );
+            }
+        };
+    }
     if let Some(order_id) = input.order_id {
         let order = match sqlx::query(
             r#"SELECT patient_id, UPPER(currency) AS currency, status
@@ -1829,11 +1864,15 @@ async fn load_expense_item_for_scope(
         .unwrap_or_else(|_| "unpaid".to_string());
     let service_delivered = row.try_get::<bool, _>("service_delivered").unwrap_or(false);
     let posted = status == "posted";
-    let intended_receivable = if paid_by == "agency" || (paid_by == "unpaid" && service_delivered) {
+    // The patient's share of an agency-paid or not yet paid receipt is the
+    // whole amount; for a not yet paid one it is booked once the service is
+    // delivered, which the flag below tells the reviewer.
+    let intended_receivable = if paid_by == "agency" || paid_by == "unpaid" {
         amount_gross
     } else {
         Decimal::ZERO
     };
+    let receivable_after_delivery = paid_by == "unpaid" && !service_delivered;
     let intended_company_paid = if paid_by == "agency" {
         amount_gross
     } else {
@@ -1959,6 +1998,7 @@ async fn load_expense_item_for_scope(
             "company_paid_gross": company_paid.round_cents().to_string(),
             "provider_liability_gross": provider_liability.round_cents().to_string(),
             "intended_patient_receivable_gross": intended_receivable.round_cents().to_string(),
+            "patient_receivable_after_delivery": receivable_after_delivery,
             "intended_company_paid_gross": intended_company_paid.round_cents().to_string(),
             "intended_provider_liability_gross": intended_liability.round_cents().to_string(),
         },
@@ -2622,7 +2662,13 @@ async fn post_expense_for_scope(
         );
     }
     let provider_id = line_provider_id.or(context.provider_id);
-    if expense.paid_by != "patient" && provider_id.is_none() {
+    // An unpaid expense stays owed to a partner, so it needs one. A receipt
+    // GMED already paid (a restaurant or florist that is no registered
+    // partner) is posted against the vendor named on the receipt.
+    if provider_id.is_none()
+        && (expense.paid_by == "unpaid"
+            || (expense.paid_by == "agency" && expense.vendor_name.trim().is_empty()))
+    {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "A non-medical partner or service provider is required before posting",
@@ -2741,14 +2787,14 @@ async fn post_expense_for_scope(
                external_invoice_number, invoice_date,
                amount_net, amount_vat, amount_gross, currency,
                status, paid_by, service_delivered, received_at, paid_at,
-               notes, created_by
+               notes, created_by, supplier_name
            ) VALUES (
                $1, $2, $3, $4, $5,
                $6,
                $7, $8,
                $9, $10, $11, $12,
                $13, $14, $15, now(), $16::date + TIME '12:00',
-               $17, $18
+               $17, $18, $19
            )"#,
     )
     .bind(external_invoice_id)
@@ -2778,6 +2824,12 @@ async fn post_expense_for_scope(
             .unwrap_or_default(),
     ))
     .bind(auth.user_id)
+    // Without a partner the receipt's vendor is the invoice's supplier.
+    .bind(
+        provider_id
+            .is_none()
+            .then(|| expense.vendor_name.trim().to_string()),
+    )
     .execute(&mut *transaction)
     .await
     {

@@ -223,6 +223,11 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
                 "Password expiration cannot exceed 3650 days".into(),
             ));
         }
+        "concierge_reminder_lead_hours" | "concierge_prep_lead_hours" if parsed > 336 => {
+            return Err(UpdateError::InvalidValue(
+                "Concierge lead time cannot exceed 336 hours (14 days)".into(),
+            ));
+        }
         _ => {}
     }
 

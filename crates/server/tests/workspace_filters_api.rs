@@ -6004,6 +6004,98 @@ async fn non_medical_appointment_bootstraps_concierge_checklists_tasks_and_remin
 }
 
 #[tokio::test]
+async fn concierge_preparation_is_due_ahead_of_the_service_and_skips_billing() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-lead-times");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Austria").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let service_date = (chrono::Utc::now().date_naive() + chrono::Duration::days(20)).to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "appointment_type": "non_medical",
+            "title": "Dinner at the restaurant",
+            "date": service_date,
+            "time_start": "19:30",
+            "time_end": "21:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let appointment_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let reminder_lead: f64 = sqlx::query_scalar(
+        r#"SELECT EXTRACT(EPOCH FROM (
+               ((a.date + a.time_start) AT TIME ZONE 'Europe/Berlin') - r.remind_at
+           ))::float8 / 3600
+           FROM reminders r JOIN appointments a ON a.id = r.appointment_id
+           WHERE a.id = $1 AND r.title LIKE 'Upcoming concierge service:%'"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reminder_lead, 24.0);
+    let prep_lead: f64 = sqlx::query_scalar(
+        r#"SELECT EXTRACT(EPOCH FROM (
+               ((a.date + a.time_start) AT TIME ZONE 'Europe/Berlin') - t.due_date
+           ))::float8 / 3600
+           FROM tasks t JOIN appointments a ON a.id = t.appointment_id
+           WHERE a.id = $1 AND t.title LIKE 'Coordinate concierge service:%'"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(prep_lead, 2.0);
+
+    // Billing has nothing to prepare for a concierge booking.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders"),
+        &pm_bearer,
+        Some(json!({
+            "user_id": billing_id,
+            "title": "Prepare the dinner",
+            "remind_at": format!("{service_date}T08:00:00Z"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders"),
+        &pm_bearer,
+        Some(json!({
+            "user_id": concierge_id,
+            "title": "Prepare the dinner",
+            "remind_at": format!("{service_date}T08:00:00Z"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
+#[tokio::test]
 async fn non_medical_appointment_bootstraps_concierge_service_record() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
