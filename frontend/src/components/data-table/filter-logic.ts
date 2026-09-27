@@ -1,3 +1,5 @@
+import { appDateKey } from "@/lib/app-time-zone";
+
 import type { FilterPredicate, FilterValue } from "./types";
 
 type FieldAccessor<T> = (row: T) => unknown;
@@ -37,6 +39,31 @@ function parseDate(raw: unknown): number | null {
     return Number.isFinite(ms) ? ms : null;
   }
   return null;
+}
+
+const DATE_OPERAND = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Date filters take calendar days ("YYYY-MM-DD" from a date field). Values
+ * are compared by their German calendar day, so a timestamp from 00:30 Berlin
+ * time belongs to that day and not to the previous UTC day.
+ */
+function compareByDay(fieldValue: unknown, operand: string): number | null {
+  const ms = parseDate(fieldValue);
+  if (ms == null) return null;
+  const day =
+    typeof fieldValue === "string" && DATE_OPERAND.test(fieldValue.trim())
+      ? fieldValue.trim()
+      : appDateKey(ms);
+  return day < operand ? -1 : day > operand ? 1 : 0;
+}
+
+function compareDates(fieldValue: unknown, operand: string): number | null {
+  if (DATE_OPERAND.test(operand)) return compareByDay(fieldValue, operand);
+  const operandMs = parseDate(operand);
+  const fieldMs = parseDate(fieldValue);
+  if (fieldMs == null || operandMs == null) return null;
+  return Math.sign(fieldMs - operandMs);
 }
 
 function asStringArray(value: FilterValue): string[] {
@@ -128,28 +155,23 @@ export function evaluatePredicate<T>(
     }
 
     case "before": {
-      const operandMs = parseDate(operand as string);
-      if (operandMs == null) return true;
-      const fieldMs = parseDate(fieldValue);
-      if (fieldMs == null || operandMs == null) return false;
-      return fieldMs < operandMs;
+      if (parseDate(operand as string) == null) return true;
+      const order = compareDates(fieldValue, operand as string);
+      return order != null && order < 0;
     }
     case "after": {
-      const operandMs = parseDate(operand as string);
-      if (operandMs == null) return true;
-      const fieldMs = parseDate(fieldValue);
-      if (fieldMs == null || operandMs == null) return false;
-      return fieldMs > operandMs;
+      if (parseDate(operand as string) == null) return true;
+      const order = compareDates(fieldValue, operand as string);
+      return order != null && order > 0;
     }
     case "between": {
       const range = (operand ?? {}) as { from?: string; to?: string };
-      const fromMs = range.from ? parseDate(range.from) : null;
-      const toMs = range.to ? parseDate(range.to) : null;
-      if (fromMs == null && toMs == null) return true;
-      const fieldMs = parseDate(fieldValue);
-      if (fieldMs == null) return false;
-      if (fromMs != null && fieldMs < fromMs) return false;
-      if (toMs != null && fieldMs > toMs) return false;
+      const from = range.from && parseDate(range.from) != null ? range.from : null;
+      const to = range.to && parseDate(range.to) != null ? range.to : null;
+      if (from == null && to == null) return true;
+      if (parseDate(fieldValue) == null) return false;
+      if (from != null && (compareDates(fieldValue, from) ?? -1) < 0) return false;
+      if (to != null && (compareDates(fieldValue, to) ?? 1) > 0) return false;
       return true;
     }
     case "last_n_days": {

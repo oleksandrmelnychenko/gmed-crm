@@ -1,3 +1,4 @@
+import { formatDateKey } from "./app-time-zone";
 import { uiText, type Lang } from "./i18n";
 import { localizeTimelineTitle } from "./timeline-labels";
 
@@ -22,15 +23,13 @@ export function localizeTaskNote(note: string | null | undefined, lang: Lang): s
   if (generatedKey) return uiText(generatedKey, lang);
   const preparation = trimmed.match(/^Prepare non-medical support for appointment on (\d{4}-\d{2}-\d{2})$/);
   if (preparation) {
-    const date = new Date(`${preparation[1]}T00:00:00`);
     return uiText("generated_reminder_note_prepare_concierge_service", lang, {
-      date: Number.isFinite(date.getTime())
-        ? date.toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU", {
-            day: "2-digit",
-            month: "2-digit",
-            year: "numeric",
-          })
-        : preparation[1],
+      date:
+        formatDateKey(preparation[1], lang === "de" ? "de-DE" : "ru-RU", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        }) || preparation[1],
     });
   }
   return note ?? "";

@@ -1,3 +1,4 @@
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 export function adminLocale(lang: Lang) {
@@ -5,14 +6,14 @@ export function adminLocale(lang: Lang) {
 }
 
 const ADMIN_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "short",
     year: "numeric",

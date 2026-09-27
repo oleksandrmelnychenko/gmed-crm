@@ -4,6 +4,7 @@ import { CountBadge } from "@/components/ui-shell";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { formatEnumLabelFromKeys, useLang } from "@/lib/i18n";
 import { CASE_HISTORY_SECTION_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
 import { cn } from "@/lib/utils";
@@ -17,9 +18,9 @@ function localeCode(lang: string) {
 }
 
 const HISTORY_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }),
+  "de-DE": appDateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }),
+  "ru-RU": appDateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }),
+  "en-GB": appDateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }),
 };
 
 function formatDateTime(lang: string, value: string | null | undefined) {

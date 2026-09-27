@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -24,7 +25,7 @@ export function localizedNotificationCopy(
       const data = JSON.parse(item.body ?? "{}");
       const due = data.due_at ? new Date(data.due_at) : null;
       const deadline = due && Number.isFinite(due.getTime())
-        ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${due.toLocaleString(lang === "de" ? "de-DE" : "ru-RU")}` : "";
+        ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" }).format(due)}` : "";
       return {
         title: `${data.order_number ?? ""} · ${paymentStatusLabel(data.payment_status ?? "awaiting_payment", lang)}`,
         body: `${lang === "de" ? "Erhalten" : "Получено"}: ${formatMoneyAmount(data.received_amount, data.currency)} · ${lang === "de" ? "Offen" : "Остаток"}: ${formatMoneyAmount(data.remaining_amount, data.currency)}${deadline}`,
@@ -156,7 +157,7 @@ function conciergeServiceRequestNotificationCopy(
   if (!data) return { title, body: item.body };
   const start = data.starts_at ? new Date(data.starts_at) : null;
   const slot = start && Number.isFinite(start.getTime())
-    ? start.toLocaleString(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium", timeStyle: "short" })
+    ? appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(start)
     : lang === "de" ? "ohne Wunschtermin" : "без желаемого времени";
   const kind = SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
   return { title, body: [kind, data.title, slot].filter(Boolean).join(" · ") };
@@ -207,9 +208,9 @@ function interpreterWorkNotificationCopy(
     data = {};
   }
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const date = data.appointment_date ? new Date(`${data.appointment_date}T00:00:00`) : null;
+  const date = formatDateKey(data.appointment_date, locale, { year: "numeric", month: "2-digit", day: "2-digit" });
   const when = [
-    date && Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale) : null,
+    date || null,
     data.time_start,
   ].filter(Boolean).join(" ");
   const parts = [[data.appointment_title, when].filter(Boolean).join(" · ")];

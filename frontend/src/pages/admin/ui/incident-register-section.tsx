@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, Field, Section, selectClass, textareaClass } from "@/components/ui-shell";
+import { isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   fetchSecurityIncidents,
@@ -18,7 +19,8 @@ const STATUSES = ["open", "contained", "resolved", "closed"] as const;
 const RISKS = ["pending", "no_risk", "risk", "high_risk"] as const;
 
 function dateTime(value: string | null) {
-  return value ? value.replace("T", " ").slice(0, 16) : "—";
+  // Stored as UTC instants; the register reads in German time.
+  return value ? isoToBerlinLocalInput(value).replace("T", " ") || value : "—";
 }
 
 function hoursLeft(deadline: string) {

@@ -22,6 +22,9 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(copy.title).toContain("Zahlungsfrist überschritten");
   expect(copy.body).toContain("60,00 $");
   expect(localizedNotificationCopy(notice,"ru").title).toContain("Срок оплаты истёк");
+  // The deadline is German time: 22:30Z is already 28.09 00:30 in Berlin.
+  const due = { ...notice, body: JSON.stringify({ order_number: "A-1", payment_status: "overdue", received_amount: "40", remaining_amount: "60", currency: "EUR", due_at: "2026-09-27T22:30:00Z" }) };
+  expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.26, 00:30");
 });
 
 describe("task notifications", () => {
@@ -64,7 +67,7 @@ describe("interpreter work notifications", () => {
       appointment_title: "Kardiologie", appointment_date: "2026-09-26", time_start: "09:30", interpreter_name: "Iwan", hours: "2.50",
     }), "ru");
     expect(submitted.title).toBe("Отчёт переводчика ждёт проверки");
-    expect(submitted.body).toContain("Kardiologie");
+    expect(submitted.body).toContain("Kardiologie · 26.09.2026 09:30");
     expect(submitted.body).toContain("Iwan · 2,5 ч");
 
     const rejected = localizedNotificationCopy(notice("interpreter_report_rejected", {

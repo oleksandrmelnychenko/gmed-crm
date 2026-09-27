@@ -1,3 +1,4 @@
+import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
 import { formatUnknownValue, type Translations } from "@/lib/i18n";
 import type { Message } from "./types";
 
@@ -14,17 +15,18 @@ export function roleDisplay(role: string, translations: Translations) {
   return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
-export function timeAgo(iso: string, lang: "de" | "ru" = "de") {
+export function timeAgo(iso: string, lang: "de" | "ru" = "de", now = new Date()) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  const now = new Date();
   const options: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
-  if (chatMessageDateKey(iso) !== chatMessageDateKey(now.toISOString())) {
+  const day = chatMessageDateKey(iso);
+  const today = appDateKey(now);
+  if (day !== today) {
     options.day = "2-digit";
     options.month = "2-digit";
-    if (date.getFullYear() !== now.getFullYear()) options.year = "numeric";
+    if (day.slice(0, 4) !== today.slice(0, 4)) options.year = "numeric";
   }
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", options).format(date);
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", options).format(date);
 }
 
 // The API uses descending (created_at, id) cursors. Match that order even when
@@ -77,14 +79,11 @@ export function formatSize(bytes: number) {
 
 export const CHAT_MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
 
+/** The German calendar day a message belongs to. */
 export function chatMessageDateKey(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
+  return appDateKey(date);
 }
 
 export function isSameChatMessageGroup(

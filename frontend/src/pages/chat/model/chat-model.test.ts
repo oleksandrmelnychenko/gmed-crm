@@ -67,10 +67,13 @@ describe("chat synchronization", () => {
     expect(merged[0].is_read).toBe(true);
   });
 
-  it("uses the viewer's local time instead of slicing the UTC timestamp", () => {
-    const date = new Date();
-    const iso = date.toISOString();
-    expect(timeAgo(iso)).toBe(new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(date));
+  it("shows German time instead of slicing the UTC timestamp or using the browser zone", () => {
+    const now = new Date("2026-09-27T21:45:00Z");
+    // 21:30Z is 23:30 on 27 Sep in Berlin (already 28 Sep in Kyiv): same day, time only.
+    expect(timeAgo("2026-09-27T21:30:00Z", "de", now)).toBe("23:30");
+    // 22:30Z is already 28 Sep in Berlin (still 27 Sep in UTC): another day.
+    expect(timeAgo("2026-09-27T22:30:00Z", "de", now)).toBe("28.09., 00:30");
+    expect(timeAgo("2025-12-31T22:30:00Z", "de", now)).toBe("31.12.2025, 23:30");
     expect(timeAgo("invalid")).toBe("—");
   });
 });
@@ -108,7 +111,9 @@ describe("chat message grouping", () => {
     ).toBe(false);
   });
 
-  it("creates a stable local date key", () => {
-    expect(chatMessageDateKey("2026-08-23T10:00:00Z")).toMatch(/^2026-08-(22|23)$/);
+  it("keys messages by the German calendar day", () => {
+    expect(chatMessageDateKey("2026-08-23T10:00:00Z")).toBe("2026-08-23");
+    expect(chatMessageDateKey("2026-09-27T21:30:00Z")).toBe("2026-09-27");
+    expect(chatMessageDateKey("2026-09-27T22:30:00Z")).toBe("2026-09-28");
   });
 });

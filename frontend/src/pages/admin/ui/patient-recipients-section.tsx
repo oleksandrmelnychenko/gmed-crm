@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Banner, Section } from "@/components/ui-shell";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { fetchPatientRecipients, type PatientRecipient } from "@/pages/admin/data/admin-api";
 
 function day(value: string | null) {
-  return value ? (value.split("T")[0] ?? value) : "";
+  return value ? appDateKeyOf(value) || value : "";
 }
 
 /**
