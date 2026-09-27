@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateTimeFormat, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "./use-task-realtime";
@@ -259,7 +260,7 @@ function formatDateTime(value: string | null, lang: Lang, fallback: string) {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -771,13 +772,16 @@ export function ConciergeWorkspacePage() {
     setSubmittingKeyAction(action);
     setKeyError("");
     try {
+      // The dialog time is Berlin wall-clock time.
+      const occurredAtIso = berlinLocalInputToIso(occurredAt);
+      if (!occurredAtIso) throw new RangeError("Invalid time value");
       const response = await apiFetch<RecordConciergeKeyEventResponse>(
         `/concierge-services/${keyService.id}/key-events`,
         {
           method: "POST",
           body: JSON.stringify({
             action,
-            occurred_at: new Date(occurredAt).toISOString(),
+            occurred_at: occurredAtIso,
             note: note.trim() || null,
           }),
         },

@@ -1,3 +1,4 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import { hasCapability } from "@/lib/permissions";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
@@ -709,14 +710,14 @@ export function isConciergeServiceOverdue(service: ConciergeService, now: Date):
   return Boolean(startsAt && startsAt < now && !TERMINAL_STATUSES.has(service.status));
 }
 
+/** Whether two instants fall on the same Berlin calendar day. */
+function isSameAppDay(left: Date, right: Date): boolean {
+  return appDateKey(left) === appDateKey(right);
+}
+
 export function isConciergeServiceToday(service: ConciergeService, now: Date): boolean {
   const startsAt = validDate(service.starts_at);
-  return Boolean(
-    startsAt &&
-      startsAt.getFullYear() === now.getFullYear() &&
-      startsAt.getMonth() === now.getMonth() &&
-      startsAt.getDate() === now.getDate(),
-  );
+  return Boolean(startsAt && isSameAppDay(startsAt, now));
 }
 
 export function isConciergeTaskOverdue(task: ConciergeTask, now: Date): boolean {
@@ -939,10 +940,7 @@ export function filterConciergeTasks(
     const scheduled = conciergeTaskScheduledAt(task);
     if (filters.timing === "overdue" && !isConciergeTaskOverdue(task, now)) return false;
     if (filters.timing === "today") {
-      if (!scheduled
-        || scheduled.getFullYear() !== now.getFullYear()
-        || scheduled.getMonth() !== now.getMonth()
-        || scheduled.getDate() !== now.getDate()) return false;
+      if (!scheduled || !isSameAppDay(scheduled, now)) return false;
     }
     if (filters.timing === "upcoming") {
       if (!scheduled || scheduled < now || TERMINAL_STATUSES.has(task.status)) return false;
@@ -966,9 +964,7 @@ export function conciergeTaskWorkload(
         const scheduled = conciergeTaskScheduledAt(task);
         return Boolean(
           scheduled
-          && scheduled.getFullYear() === now.getFullYear()
-          && scheduled.getMonth() === now.getMonth()
-          && scheduled.getDate() === now.getDate()
+          && isSameAppDay(scheduled, now)
           && isConciergeTaskActive(task)
         );
       }).length,
@@ -1180,10 +1176,7 @@ export function conciergeServiceRouteAddress(
 function localDateKey(value: string): string | null {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKey(date);
 }
 
 export function buildConciergeRouteStops(

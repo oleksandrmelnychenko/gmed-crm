@@ -10,6 +10,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import {
+  appDateTimeFormat,
+  appWallClock,
+  appWallClockToInstant,
+  berlinLocalInputToIso,
+  isoToBerlinLocalInput,
+  parseBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
@@ -265,21 +273,17 @@ export type ConciergeTaskProjectOption = {
 };
 
 function localDateTimeValue(value: Date | string | null) {
-  if (!value) return "";
-  const date = typeof value === "string" ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
 function toIso(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return berlinLocalInputToIso(value);
 }
 
 function commentDateTime(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -315,8 +319,8 @@ function parseTaskDate(value: string | null | undefined): Date | null {
 /**
  * Start and end/due of a new task or event. A sub-task starts inside its
  * parent's window: the parent's start and due (or, for an event, its end).
- * Without a parent a calendar click starts at 09:00 that day, otherwise in an
- * hour; either way it lasts an hour.
+ * Without a parent a calendar click starts at 09:00 Berlin time on that Berlin
+ * day, otherwise in an hour; either way it lasts an hour.
  */
 export function initialTaskWindow(
   initialDate: Date | null | undefined,
@@ -336,8 +340,11 @@ export function initialTaskWindow(
       : new Date(start.getTime() + hour);
     return { start, end };
   }
-  const start = initialDate ? new Date(initialDate) : new Date(now + hour);
-  if (initialDate) start.setHours(9, 0, 0, 0);
+  let start = new Date(now + hour);
+  if (initialDate) {
+    const { year, month, day } = appWallClock(initialDate);
+    start = appWallClockToInstant(year, month, day, 9);
+  }
   return { start, end: new Date(start.getTime() + hour) };
 }
 
@@ -558,7 +565,9 @@ export function ConciergeTaskEventDialog({
     event.preventDefault();
     if (uploadingPending) return;
     const endValue = kind === "task" ? dueAt : endsAt;
-    if (startsAt && endValue && new Date(endValue) <= new Date(startsAt)) {
+    const startInstant = parseBerlinLocalInput(startsAt);
+    const endInstant = parseBerlinLocalInput(endValue);
+    if (startInstant && endInstant && endInstant <= startInstant) {
       setScheduleError(lang === "ru" ? "Окончание должно быть позже начала." : "Das Ende muss nach dem Beginn liegen.");
       return;
     }

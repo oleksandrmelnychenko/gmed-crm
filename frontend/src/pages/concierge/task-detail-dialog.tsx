@@ -33,6 +33,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import type { Lang } from "@/lib/i18n";
@@ -301,7 +302,7 @@ function dateTime(value: string | null, lang: Lang) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -309,9 +310,7 @@ function dateTime(value: string | null, lang: Lang) {
 
 function dateOnly(value: string | null, lang: Lang) {
   if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(date);
+  return formatDateKey(value, lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }) || value;
 }
 
 function expenseMoney(value: string, currency: string, lang: Lang) {
@@ -369,7 +368,7 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
     if (!value) return <span className="text-muted-foreground">—</span>;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return <span className="text-muted-foreground">—</span>;
-    return <Badge variant="outline" className={cn("text-[10px] font-normal", overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "bg-muted/15")} title={overdue ? labels.overdue : undefined}><time dateTime={date.toISOString()}>{new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)}</time></Badge>;
+    return <Badge variant="outline" className={cn("text-[10px] font-normal", overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "bg-muted/15")} title={overdue ? labels.overdue : undefined}><time dateTime={date.toISOString()}>{appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)}</time></Badge>;
   };
   const columns: ColumnDef<ConciergeTask>[] = [
     {

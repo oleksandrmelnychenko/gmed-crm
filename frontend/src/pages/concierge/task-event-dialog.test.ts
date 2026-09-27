@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { appDayStart } from "@/lib/app-time-zone";
+
 import type { ConciergeAssignee, ConciergeService } from "./model";
 import { initialTaskWindow, isConciergeServiceSelectableForTask, selectTaskAssigneeId } from "./task-event-dialog";
 
@@ -88,5 +90,14 @@ describe("initialTaskWindow", () => {
     const window = initialTaskWindow(null, null, now);
     expect(iso(window.start)).toBe("2026-09-27T11:00:00.000Z");
     expect(iso(window.end)).toBe("2026-09-27T12:00:00.000Z");
+  });
+
+  it("starts a calendar click at 09:00 Berlin time on the clicked Berlin day", () => {
+    // The calendar passes Berlin midnight of 28 Sep (27 Sep 22:00 UTC, 01:00 in Kyiv).
+    const window = initialTaskWindow(appDayStart("2026-09-28"), null, now);
+    expect(iso(window.start)).toBe("2026-09-28T07:00:00.000Z");
+    expect(iso(window.end)).toBe("2026-09-28T08:00:00.000Z");
+    // Winter time: 09:00 CET is 08:00 UTC.
+    expect(iso(initialTaskWindow(appDayStart("2026-11-02"), null, now).start)).toBe("2026-11-02T08:00:00.000Z");
   });
 });

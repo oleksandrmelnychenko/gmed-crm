@@ -20,6 +20,7 @@ import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { appDateKey, appDateKeyOf, appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -196,7 +197,7 @@ function dateTime(value: string | null, lang: Lang, fallback = "—") {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -205,7 +206,7 @@ function dateTime(value: string | null, lang: Lang, fallback = "—") {
 function dayHeading(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     weekday: "long",
     day: "numeric",
     month: "long",
@@ -214,10 +215,7 @@ function dayHeading(value: string, lang: Lang) {
 }
 
 function localDateInputValue(value: Date) {
-  const year = value.getFullYear();
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const day = String(value.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKey(value);
 }
 
 function taskStatusLabel(status: string, lang: Lang) {
@@ -394,7 +392,7 @@ export function ConciergeAgendaView({
   const grouped = useMemo(() => {
     const result: Array<{ date: string; items: ConciergeAgendaItem[] }> = [];
     for (const item of agenda) {
-      const key = item.date.slice(0, 10);
+      const key = appDateKeyOf(item.date);
       const current = result.at(-1);
       if (!current || current.date !== key) result.push({ date: key, items: [item] });
       else current.items.push(item);
@@ -651,7 +649,7 @@ export function ConciergeMapView({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <time className="font-mono text-[11px] text-muted-foreground" dateTime={stop.scheduledAt}>
-                          {new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { hour: "2-digit", minute: "2-digit" }).format(new Date(stop.scheduledAt))}
+                          {appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { hour: "2-digit", minute: "2-digit" }).format(new Date(stop.scheduledAt))}
                         </time>
                         <Badge variant="outline" className="rounded-full text-[10px]">{labels[stop.kind]}</Badge>
                       </div>

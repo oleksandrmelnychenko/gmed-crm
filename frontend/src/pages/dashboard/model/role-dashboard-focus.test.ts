@@ -80,4 +80,12 @@ describe("role dashboard focus", () => {
       starts_at: "2026-08-24T13:00:00.000Z",
     }), now)).toBe(true);
   });
+
+  it("decides 'due today' by the Berlin calendar day, whatever the browser zone", () => {
+    // 27 Sep 23:30 in Berlin, already 28 Sep in Kyiv.
+    const lateEvening = new Date("2026-09-27T21:30:00Z");
+    // 27 Sep 00:30 in Berlin (26 Sep in UTC) and 28 Sep 00:30 in Berlin (27 Sep in UTC).
+    expect(isConciergeTaskDueToday(task({ due_at: "2026-09-26T22:30:00Z" }), lateEvening)).toBe(true);
+    expect(isConciergeTaskDueToday(task({ due_at: "2026-09-27T22:30:00Z" }), lateEvening)).toBe(false);
+  });
 });

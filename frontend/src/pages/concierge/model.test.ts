@@ -560,6 +560,44 @@ describe("concierge workspace model", () => {
     expect(stats).toEqual({ active: 2, today: 2, overdue: 1, readyForBilling: 1 });
   });
 
+  it("decides 'today' by the Berlin calendar day, whatever the browser zone", () => {
+    // 27 Sep 23:30 in Berlin, already 28 Sep in Kyiv.
+    const now = new Date("2026-09-27T21:30:00Z");
+    // 27 Sep 00:30 in Berlin (still 26 Sep in UTC) and 28 Sep 00:30 in Berlin (still 27 Sep in UTC).
+    const berlinToday = "2026-09-26T22:30:00Z";
+    const berlinTomorrow = "2026-09-27T22:30:00Z";
+
+    expect(conciergeWorkspaceStats([
+      service({ id: "today", starts_at: berlinToday }),
+      service({ id: "tomorrow", starts_at: berlinTomorrow }),
+    ], now).today).toBe(1);
+
+    const rows = [
+      task({ id: "today", due_at: berlinToday }),
+      task({ id: "tomorrow", due_at: berlinTomorrow }),
+    ];
+    expect(filterConciergeTasks(rows, {
+      query: "",
+      assignee: "all",
+      status: "all",
+      priority: "all",
+      kind: "all",
+      audience: "all",
+      timing: "today",
+      archive: "active",
+    }, now).map((item) => item.id)).toEqual(["today"]);
+
+    const [workload] = conciergeTaskWorkload(rows.map((row) => ({ ...row, assigned_to: "concierge-1" })), [
+      { id: "concierge-1", name: "Hans", email: "hans@example.test", role: "concierge", is_active: true },
+    ], now);
+    expect(workload.today).toBe(1);
+
+    const providers = new Map<string, ConciergeProvider>();
+    const services = [service({ id: "late", starts_at: "2026-09-27T21:30:00Z" }), service({ id: "early", starts_at: berlinTomorrow })];
+    expect(buildConciergeRouteStops(services, [], providers, "2026-09-27").map((stop) => stop.id)).toEqual(["service:late"]);
+    expect(buildConciergeRouteStops(services, [], providers, "2026-09-28").map((stop) => stop.id)).toEqual(["service:early"]);
+  });
+
   it("calculates actual cost variance only when both amounts are valid", () => {
     expect(
       conciergeServiceCostVariance(

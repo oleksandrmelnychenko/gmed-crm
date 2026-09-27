@@ -1,4 +1,5 @@
 import { countryNameForGermanDocument } from "@/components/ui/country-select";
+import { appDateKey } from "@/lib/app-time-zone";
 import type { ServiceDescriptionItem } from "@/lib/service-description";
 
 export type BindingFieldKind =
@@ -184,7 +185,7 @@ export function enhancedDueDiligenceBindingDefaults(): DocumentBindingForm {
     unusualComplexOrLarge: "false",
     unusualPattern: "false",
     noLawfulPurpose: "false",
-    reviewDate: new Date().toISOString().slice(0, 10),
+    reviewDate: appDateKey(),
   };
 }
 

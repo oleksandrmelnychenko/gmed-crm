@@ -2,11 +2,12 @@ import { useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { conciergeTaskInterval, type ConciergeTask, type ConciergeTaskStatus } from "./model";
-import { addTaskCalendarDays, orderedTaskHierarchy, taskCalendarDays, taskTimelineColumns, taskTimelineSpan } from "./task-calendar";
+import { addTaskCalendarDays, isSameTaskCalendarDay, orderedTaskHierarchy, taskCalendarDays, taskTimelineColumns, taskTimelineSpan } from "./task-calendar";
 
 const copy = {
   ru: { today: "Сегодня", previous: "Предыдущая неделя", next: "Следующая неделя", start: "Начало", end: "Окончание", unplanned: "Без дат", open: "Открыто", in_progress: "В работе", on_hold: "На паузе", review: "На проверке", completed: "Выполнено", cancelled: "Отменено", pause: "На паузу", resume: "Продолжить", launch: "Начать", outside: "Вне этой недели", task: "Задача", running: "продолжается", sinceCreated: "с момента создания" },
@@ -27,7 +28,7 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
   const rows = useMemo(() => orderedTaskHierarchy(tasks), [tasks]);
   const labels = copy[lang];
   const locale = lang === "ru" ? "ru-RU" : "de-DE";
-  const format = (date: Date | null) => date ? new Intl.DateTimeFormat(locale, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date) : "—";
+  const format = (date: Date | null) => date ? appDateTimeFormat(locale, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date) : "—";
   return (
     <section className="min-w-0 rounded-xl border bg-card shadow-sm" aria-label={lang === "ru" ? "Таймлайн задач" : "Aufgabenzeitplan"}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
@@ -36,14 +37,14 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
           <Button size="sm" variant="outline" onClick={() => setFocus(now)}>{labels.today}</Button>
           <Button size="icon-sm" variant="ghost" aria-label={labels.next} onClick={() => setFocus(addTaskCalendarDays(focus, 7))}><ChevronRight /></Button>
         </div>
-        <span className="text-sm font-medium">{new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).formatRange(days[0], days[6])}</span>
+        <span className="text-sm font-medium">{appDateTimeFormat(locale, { dateStyle: "medium" }).formatRange(days[0], days[6])}</span>
       </div>
       <div className="overflow-x-auto">
         <div className="min-w-[980px]">
           <div className="grid grid-cols-[230px_minmax(0,1fr)] border-b bg-muted/30 text-xs sm:grid-cols-[360px_minmax(0,1fr)]">
             <div className="p-3 font-medium">{labels.task} · {labels.start} — {labels.end}</div>
-            <div className="grid grid-cols-7">{days.map((day) => <div key={day.toISOString()} className={cn("border-l p-3 text-center", day.toDateString() === now.toDateString() && "bg-orange-50 font-semibold text-orange-700")}>
-              {new Intl.DateTimeFormat(locale, { weekday: "short", day: "2-digit", month: "2-digit" }).format(day)}
+            <div className="grid grid-cols-7">{days.map((day) => <div key={day.toISOString()} className={cn("border-l p-3 text-center", isSameTaskCalendarDay(day, now) && "bg-orange-50 font-semibold text-orange-700")}>
+              {appDateTimeFormat(locale, { weekday: "short", day: "2-digit", month: "2-digit" }).format(day)}
             </div>)}</div>
           </div>
           {rows.map(({ task, depth }) => {
@@ -66,7 +67,7 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
                 {actionable ? <Button size="icon-sm" variant={task.status === "in_progress" ? "outline" : "default"} disabled={updatingTaskId === task.id} aria-label={task.status === "in_progress" ? labels.pause : task.status === "on_hold" ? labels.resume : labels.launch} onClick={() => onStatusChange(task, target)}>{task.status === "in_progress" ? <Pause /> : <Play />}</Button> : null}
               </div>
               <div className="relative grid grid-cols-7 items-center">
-                <div className="pointer-events-none absolute inset-0 grid grid-cols-7">{days.map((day) => <div key={day.toISOString()} className={cn("border-l", day.toDateString() === now.toDateString() && "bg-orange-50/40")} />)}</div>
+                <div className="pointer-events-none absolute inset-0 grid grid-cols-7">{days.map((day) => <div key={day.toISOString()} className={cn("border-l", isSameTaskCalendarDay(day, now) && "bg-orange-50/40")} />)}</div>
                 {span && columns ? <button onClick={() => onOpen(task)} title={`${task.title}: ${format(span.start)} — ${span.running ? labels.running : format(span.end)}`} className={cn("relative mx-1 flex items-center gap-1 rounded-md border px-2 py-2 text-left text-xs font-medium", columns.continuesBefore && "ml-0 rounded-l-none border-l-0", columns.continuesAfter && "mr-0 rounded-r-none border-r-0", task.archived_at ? "border-border bg-muted text-muted-foreground" : task.status === "on_hold" ? "border-dashed border-amber-400 bg-amber-50 text-amber-800" : task.status === "completed" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : task.status === "cancelled" ? "border-border bg-muted text-muted-foreground line-through" : span.running && task.status !== "in_progress" ? "border-red-200 bg-red-50 text-red-800" : "border-orange-200 bg-orange-100 text-orange-900")} style={{ gridColumn: `${columns.from + 1} / ${columns.to + 2}` }}>{columns.continuesBefore ? <ChevronLeft className="size-3 shrink-0 opacity-60" aria-hidden /> : null}<span className="block min-w-0 truncate">{statusLabel}{span.impliedStart ? ` · ${labels.sinceCreated}` : ""}{span.running ? ` · ${labels.running}` : ""}</span>{columns.continuesAfter || span.running ? <ChevronRight className="size-3 shrink-0 opacity-60" aria-hidden /> : null}</button> : <span className="relative col-span-7 px-3 text-center text-xs text-muted-foreground">{span ? labels.outside : labels.unplanned}</span>}
               </div>
             </div>;

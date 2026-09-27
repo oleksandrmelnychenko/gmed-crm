@@ -7,6 +7,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField, type SelectFieldOption } from "@/components/ui/select-field";
+import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -100,11 +101,7 @@ export type UpdateConciergeServiceInput = {
 };
 
 function localDateTimeValue(value: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
 function optional(value: string) {
@@ -192,8 +189,8 @@ export function ConciergeServiceRequestDialog({
       ...(nextStatus ? { status: nextStatus } : {}),
       vendor_name: optional(vendorName),
       vendor_contact: optional(vendorContact),
-      starts_at: startsAt ? new Date(startsAt).toISOString() : null,
-      ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+      starts_at: berlinLocalInputToIso(startsAt),
+      ends_at: berlinLocalInputToIso(endsAt),
       service_address: optional(address),
       actual_cost: actualCost.trim() ? Number(actualCost) : null,
       service_notes: optional(notes),

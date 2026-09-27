@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -156,11 +157,7 @@ const selectClass = "h-9 w-full rounded-md border border-input bg-field px-3 tex
 const MANUAL_VENDOR_VALUE = "__manual_vendor__";
 
 function todayInputValue() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKey();
 }
 
 function formatMoney(value: string, currency: string, lang: Lang) {
@@ -175,7 +172,7 @@ function formatMoney(value: string, currency: string, lang: Lang) {
 function formatDate(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);

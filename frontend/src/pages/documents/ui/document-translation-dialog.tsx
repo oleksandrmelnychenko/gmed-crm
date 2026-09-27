@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   createDocumentPreviewObjectUrl,
@@ -405,7 +406,7 @@ export function DocumentTranslationDialog({ documentId, title, open, onOpenChang
                               : tx("вручную", "manuell")}
                           {item.created_by_name ? ` · ${item.created_by_name}` : ""}
                           {" · "}
-                          {new Date(item.created_at).toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU")}
+                          {appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(new Date(item.created_at))}
                         </span>
                       </span>
                       {item.translated_document_id ? (

@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { SelectField } from "@/components/ui/select-field";
 import { Section } from "@/components/ui-shell";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
@@ -50,7 +51,10 @@ import {
   type ConciergeTaskStatus,
 } from "./model";
 import {
+  isSameTaskCalendarMonth,
   isoWeekNumber,
+  shiftTaskCalendarFocus,
+  taskCalendarDayKey,
   taskCalendarDays,
   taskCalendarWeeks,
   taskOccursOnDay,
@@ -217,15 +221,12 @@ const copy = {
 const statuses = ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const;
 
 function dateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return taskCalendarDayKey(date);
 }
 
 function formatDateTime(value: Date | null, lang: Lang) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
@@ -560,7 +561,8 @@ export function ConciergeTaskManager({
   const calendarWeeks = useMemo(() => taskCalendarWeeks(days), [days]);
   const calendarLocale = lang === "de" ? "de-DE" : "ru-RU";
   const weekdayLabels = useMemo(() => {
-    return Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(calendarLocale, { weekday: "short" }).format(new Date(2026, 0, 5 + index)));
+    // 5 Jan 2026 is a Monday; noon UTC is the same day in Berlin.
+    return Array.from({ length: 7 }, (_, index) => appDateTimeFormat(calendarLocale, { weekday: "short" }).format(new Date(Date.UTC(2026, 0, 5 + index, 12))));
   }, [calendarLocale]);
   const visibleStatuses = filters.archive === "archived"
     ? statuses.filter((status) => status === "completed" || status === "cancelled")
@@ -587,10 +589,7 @@ export function ConciergeTaskManager({
   }, []);
 
   function shiftCalendar(direction: number) {
-    const next = new Date(focusDate);
-    if (calendarScale === "month") next.setMonth(next.getMonth() + direction);
-    else next.setDate(next.getDate() + direction * (calendarScale === "week" ? 7 : 1));
-    setFocusDate(next);
+    setFocusDate(shiftTaskCalendarFocus(focusDate, calendarScale, direction));
   }
 
   function toggleCalendarDay(key: string) {
@@ -717,7 +716,7 @@ export function ConciergeTaskManager({
             <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="rounded-md tabular-nums">{labels.calendarWeekShort} {isoWeekNumber(focusDate)}</Badge>
-              <h3 className="text-sm font-semibold">{new Intl.DateTimeFormat(calendarLocale, { month: "long", year: "numeric" }).format(focusDate)}</h3>
+              <h3 className="text-sm font-semibold">{appDateTimeFormat(calendarLocale, { month: "long", year: "numeric" }).format(focusDate)}</h3>
             </div>
             <div className="flex gap-1">{(["day", "week", "month"] as const).map((scale) => <Button key={scale} type="button" size="sm" variant={calendarScale === scale ? "secondary" : "ghost"} className="h-8 text-xs" onClick={() => setCalendarScale(scale)}>{labels[scale]}</Button>)}</div>
           </div>
@@ -734,7 +733,7 @@ export function ConciergeTaskManager({
                   return (
                     <div key={day.toISOString()} className="min-h-28 border-b p-1.5">
                       <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
-                        {new Intl.DateTimeFormat(calendarLocale, { weekday: "short", day: "2-digit", month: "long" }).format(day)}
+                        {appDateTimeFormat(calendarLocale, { weekday: "short", day: "2-digit", month: "long" }).format(day)}
                       </button>
                       <div className="space-y-1">
                         {visibleRows.map((task) => (
@@ -768,11 +767,11 @@ export function ConciergeTaskManager({
                       const hiddenCount = Math.max(0, rows.length - visibleLimit);
                       const expanded = expandedCalendarDays.has(key);
                       const visibleRows = expanded ? rows : rows.slice(0, visibleLimit);
-                      const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
+                      const outsideMonth = calendarScale === "month" && !isSameTaskCalendarMonth(day, focusDate);
                       return (
                         <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5 last:border-r-0", outsideMonth && "bg-muted/30 text-muted-foreground")}>
                           <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
-                            {new Intl.DateTimeFormat(calendarLocale, { day: "2-digit" }).format(day)}
+                            {appDateTimeFormat(calendarLocale, { day: "2-digit" }).format(day)}
                           </button>
                           <div className="space-y-1">
                             {visibleRows.map((task) => (

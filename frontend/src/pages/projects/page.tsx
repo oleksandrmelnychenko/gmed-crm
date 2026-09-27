@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -175,8 +176,7 @@ function displayApiError(error: unknown, fallback: string, apiUnavailable: strin
 
 function dateLabel(value: string | null, lang: Lang) {
   if (!value) return null;
-  const date = new Date(`${value}T12:00:00`);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(date);
+  return formatDateKey(value, lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }) || value;
 }
 
 export function ProjectsPage() {
@@ -547,7 +547,7 @@ export function ProjectsPage() {
             {selected.patient_name ? <button type="button" className="mt-2 w-full rounded-lg border px-3 py-2 text-left text-sm transition-colors hover:border-orange-300 hover:bg-orange-50/40" onClick={() => staffGo(`/patients/${selected.patient_id}`)}><span className="text-muted-foreground">{labels.patient}: </span><span className="break-words font-medium">{selected.patient_name}</span></button> : null}
             <div className="mt-4"><h3 className="text-sm font-semibold">{labels.team} <Badge variant="secondary">{selected.member_count}</Badge></h3><div className="mt-2 flex flex-wrap gap-1.5">{selected.members?.length ? selected.members.map((member) => <Badge key={member.id} variant="outline" className={cn("max-w-full", member.id === selected.owner_id ? "border-orange-200 bg-orange-50 text-orange-700" : "bg-background")} title={member.name}><UsersRound className="mr-1 size-3 shrink-0" /><span className="truncate">{member.name}</span></Badge>) : <span className="text-sm text-muted-foreground">—</span>}</div></div>
             <div className="mt-5 flex items-center justify-between"><h3 className="font-semibold">{labels.tasks} <Badge variant="secondary">{selected.task_total}</Badge></h3><Button size="sm" onClick={openCreateTask}><Plus />{labels.newTask}</Button></div>
-            <div className="mt-3 space-y-2">{detailLoading ? <div className="py-8 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></div> : tasks.length ? tasks.map((task) => <button key={task.id} type="button" className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:border-orange-300" onClick={() => staffGo(`/task-manager?task=${task.id}`)}><CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${task.status === "completed" ? "text-emerald-600" : "text-muted-foreground"}`} /><span className="min-w-0 flex-1"><span className="block break-words font-medium text-foreground">{localizeTaskTitle(task.title, lang)}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{task.assigned_to_name}{task.due_at ? ` · ${new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(new Date(task.due_at))}` : ""}</span></span><Badge variant="outline" className={`shrink-0 text-[10px] ${taskStatusClass(task.status)}`}>{labels[task.status as keyof typeof labels] ?? task.status}</Badge></button>) : <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{labels.noTasks}</p>}</div>
+            <div className="mt-3 space-y-2">{detailLoading ? <div className="py-8 text-center"><LoaderCircle className="mx-auto size-5 animate-spin text-muted-foreground" /></div> : tasks.length ? tasks.map((task) => <button key={task.id} type="button" className="flex w-full items-start gap-3 rounded-lg border p-3 text-left hover:border-orange-300" onClick={() => staffGo(`/task-manager?task=${task.id}`)}><CheckCircle2 className={`mt-0.5 size-4 shrink-0 ${task.status === "completed" ? "text-emerald-600" : "text-muted-foreground"}`} /><span className="min-w-0 flex-1"><span className="block break-words font-medium text-foreground">{localizeTaskTitle(task.title, lang)}</span><span className="mt-1 block break-words text-xs text-muted-foreground">{task.assigned_to_name}{task.due_at ? ` · ${appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(new Date(task.due_at))}` : ""}</span></span><Badge variant="outline" className={`shrink-0 text-[10px] ${taskStatusClass(task.status)}`}>{labels[task.status as keyof typeof labels] ?? task.status}</Badge></button>) : <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{labels.noTasks}</p>}</div>
             <p className="mt-4 break-words text-xs text-muted-foreground">{labels.createdBy}: {selected.created_by_name}</p>
           </> : <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center text-sm text-muted-foreground"><FolderKanban className="mb-3 size-9 text-orange-400" />{labels.selectHint}</div>}
         </aside>
