@@ -219,6 +219,10 @@ export type InvoiceItem = {
   paid_amount: unknown;
   prepayment_applied_amount?: unknown;
   balance_due: unknown;
+  /** Paid advance of the order not applied yet that would cover this invoice. */
+  advance_credit_available?: unknown;
+  /** Balance due net of `advance_credit_available`. */
+  amount_to_pay?: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
   credit_transfers?: InvoiceCreditTransfer[];

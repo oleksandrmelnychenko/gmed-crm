@@ -1191,6 +1191,14 @@ function useStaffInvoicesPageContent() {
         render: (row) => (
           <span className="block text-right tabular-nums text-foreground">
             {formatMoney(row.balance_due, row.currency)}
+            {Number(row.advance_credit_available ?? 0) > 0 ? (
+              <span
+                className="block text-xs text-muted-foreground"
+                title={t.finance_invoice_advance_credit}
+              >
+                {t.finance_invoice_amount_to_pay}: {formatMoney(row.amount_to_pay, row.currency)}
+              </span>
+            ) : null}
           </span>
         ),
       },
@@ -2694,6 +2702,18 @@ function useStaffInvoicesPageContent() {
                         value={formatMoney(detail.prepayment_applied_amount ?? 0, detail?.currency)}
                       />
                       <SummaryLine label={text.balanceDue} value={formatMoney(detail.balance_due, detail?.currency)} />
+                      {Number(detail.advance_credit_available ?? 0) > 0 ? (
+                        <>
+                          <SummaryLine
+                            label={t.finance_invoice_advance_credit}
+                            value={formatMoney(detail.advance_credit_available, detail?.currency)}
+                          />
+                          <SummaryLine
+                            label={t.finance_invoice_amount_to_pay}
+                            value={formatMoney(detail.amount_to_pay, detail?.currency)}
+                          />
+                        </>
+                      ) : null}
                       {Number(detail.credit_balance ?? 0) > 0 ? (
                         <SummaryLine
                           label={lang === "de" ? "Guthaben des Patienten" : "Переплата пациента"}

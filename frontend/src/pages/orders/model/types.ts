@@ -291,6 +291,13 @@ export type OrderEconomics = {
     credited_gross: string;
     invoice_settled_gross: string;
     invoice_outstanding_gross: string;
+    /** Paid advances not applied to a settlement invoice yet. */
+    advance_available_gross?: string;
+    advance_applied_gross?: string;
+    /** Cash beyond what the order's invoices ask for (overpayments, credits). */
+    patient_credit_gross?: string;
+    /** Still to receive: open balances net of unapplied advances and credit. */
+    patient_open_gross?: string;
     patient_cash_received_gross: string;
     patient_cash_refunded_gross: string;
     patient_cash_collected_gross: string;

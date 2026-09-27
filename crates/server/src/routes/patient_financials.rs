@@ -812,8 +812,13 @@ async fn load_patient_account_statement(
     let mut cash_paid = Decimal::ZERO;
     let mut prepayment_applied = Decimal::ZERO;
     let mut available_prepayment = Decimal::ZERO;
+    let mut credit_balance = Decimal::ZERO;
     let mut invoice_due = Decimal::ZERO;
     let mut hidden_amount_count = 0_u64;
+    // Open balances are netted against paid advances not applied yet and
+    // credit balances, like the order card and the invoice list.
+    let mut open_invoices = Vec::new();
+    let mut open_item_indexes = Vec::new();
 
     for row in invoice_rows {
         let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
@@ -859,12 +864,34 @@ async fn load_patient_account_statement(
             "unpaid"
         };
 
+        let invoice_credit = if status == "draft" {
+            Decimal::ZERO
+        } else {
+            (paid + applied - (total_gross - credited)).max(Decimal::ZERO)
+        };
         if amounts_visible {
             invoiced_gross += (total_gross - credited).max(Decimal::ZERO);
             cash_paid += paid;
             prepayment_applied += applied;
             available_prepayment += advance_available;
+            credit_balance += invoice_credit;
             invoice_due += due;
+            if status != "draft" {
+                open_item_indexes.push(items.len());
+                open_invoices.push(crate::routes::invoices::advance_application::OpenInvoice {
+                    order_id: row
+                        .try_get::<Option<Uuid>, _>("order_id")
+                        .unwrap_or_default(),
+                    is_advance: invoice_type == "advance",
+                    due,
+                    advance_available,
+                    credit_balance: invoice_credit,
+                    issued_at: row
+                        .try_get::<chrono::DateTime<Utc>, _>("issued_at")
+                        .unwrap_or_else(|_| Utc::now()),
+                    id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                });
+            }
         } else {
             hidden_amount_count += 1;
         }
@@ -891,6 +918,34 @@ async fn load_patient_account_statement(
             "amount_due": if amounts_visible { serde_json::json!(decimal_to_string(due)) } else { Value::Null },
             "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
         }));
+    }
+
+    let net_dues = crate::routes::invoices::advance_application::net_open_balances(&open_invoices);
+    let mut amount_to_pay = Decimal::ZERO;
+    for ((item_index, open), net) in open_item_indexes
+        .iter()
+        .zip(open_invoices.iter())
+        .zip(net_dues.iter())
+    {
+        amount_to_pay += net.to_pay;
+        if let Some(item) = items.get_mut(*item_index).and_then(Value::as_object_mut) {
+            item.insert(
+                "invoice_balance_due".to_string(),
+                serde_json::json!(decimal_to_string(open.due)),
+            );
+            item.insert(
+                "advance_credit".to_string(),
+                serde_json::json!(decimal_to_string(net.advance_credit)),
+            );
+            item.insert(
+                "credit_applied".to_string(),
+                serde_json::json!(decimal_to_string(net.credit_applied)),
+            );
+            item.insert(
+                "amount_due".to_string(),
+                serde_json::json!(decimal_to_string(net.to_pay)),
+            );
+        }
     }
 
     let credit_rows = sqlx::query(
@@ -1203,7 +1258,9 @@ async fn load_patient_account_statement(
             .and_then(Value::as_str)
             .cmp(&left.get("entry_date").and_then(Value::as_str))
     });
-    let total_due = invoice_due + external_receivable;
+    // Still to pay: open invoices net of unapplied advances and credit
+    // balances, plus external receivables not yet on a patient invoice.
+    let total_due = amount_to_pay + external_receivable;
     let settlement =
         load_patient_settlement_ledger(state, patient_id, query, portal_scope, &currency, from, to)
             .await?;
@@ -1232,7 +1289,9 @@ async fn load_patient_account_statement(
             "cash_paid": decimal_to_string(cash_paid),
             "prepayment_applied": decimal_to_string(prepayment_applied),
             "available_prepayment": decimal_to_string(available_prepayment),
+            "credit_balance": decimal_to_string(credit_balance),
             "invoice_due": decimal_to_string(invoice_due),
+            "amount_to_pay": decimal_to_string(amount_to_pay),
             "external_receivable": if portal_scope { Value::Null } else { serde_json::json!(decimal_to_string(external_receivable)) },
             "total_due": if reconciliation_required || (portal_scope && (hidden_amount_count > 0 || external_item_count > 0)) { Value::Null } else { serde_json::json!(decimal_to_string(total_due)) },
             "reconciliation_required": reconciliation_required,

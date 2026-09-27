@@ -4471,11 +4471,26 @@ function useOrdersPageContent() {
                             <OrderFinancialMetric
                               label={lang === "de" ? "Noch vom Patienten zu erhalten" : "Осталось получить"}
                               value={formatMoney(
-                                orderEconomics.actual.invoice_outstanding_gross,
+                                orderEconomics.actual.patient_open_gross ??
+                                  orderEconomics.actual.invoice_outstanding_gross,
                                 orderEconomics.currency,
                               )}
                             />
                           </dl>
+                          {Number(orderEconomics.actual.advance_available_gross ?? 0) > 0 ||
+                          Number(orderEconomics.actual.patient_credit_gross ?? 0) > 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {t.finance_order_held_hint
+                                .replace(
+                                  "{advance}",
+                                  formatMoney(orderEconomics.actual.advance_available_gross ?? 0, orderEconomics.currency),
+                                )
+                                .replace(
+                                  "{credit}",
+                                  formatMoney(orderEconomics.actual.patient_credit_gross ?? 0, orderEconomics.currency),
+                                )}
+                            </p>
+                          ) : null}
 
                           {orderEconomics.warnings.length > 0 ? (
                             <Banner tone="warning" withIcon>
@@ -4607,7 +4622,29 @@ function useOrdersPageContent() {
                                     <OrderFinancialMetric
                                       label={lang === "de" ? "Offen beim Patienten" : "Осталось получить"}
                                       value={formatMoney(
+                                        orderEconomics.actual.patient_open_gross ??
+                                          orderEconomics.actual.invoice_outstanding_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={t.finance_order_open_invoices}
+                                      value={formatMoney(
                                         orderEconomics.actual.invoice_outstanding_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={t.finance_order_advance_available}
+                                      value={formatMoney(
+                                        orderEconomics.actual.advance_available_gross ?? 0,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={t.finance_order_patient_credit}
+                                      value={formatMoney(
+                                        orderEconomics.actual.patient_credit_gross ?? 0,
                                         orderEconomics.currency,
                                       )}
                                     />

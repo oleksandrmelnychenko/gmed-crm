@@ -31,6 +31,7 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+pub(crate) mod advance_application;
 mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
@@ -823,6 +824,8 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
             "paid_amount",
             "prepayment_applied_amount",
             "balance_due",
+            "advance_credit_available",
+            "amount_to_pay",
             "credit_balance",
             "refundable_cash_amount",
         ] {
@@ -3967,6 +3970,21 @@ async fn load_invoice_detail(
     let refundable_cash_amount = (paid_amount
         - (total_gross - credited_amount - prepayment_applied_amount).max(Decimal::ZERO))
     .max(Decimal::ZERO);
+    // Paid advances of the order not applied yet reduce what this invoice
+    // still needs from the patient (same rule as the account statement).
+    let advance_credit_available = if balance_due > Decimal::ZERO {
+        advance_application::advance_credit_shares(&state.db, &[invoice_id])
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice advance credit");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?
+            .get(&invoice_id)
+            .copied()
+            .unwrap_or(Decimal::ZERO)
+    } else {
+        Decimal::ZERO
+    };
     let credit_transfers_history = credit_transfers::load_invoice_credit_transfers(
         state, invoice_id,
     )
@@ -4021,6 +4039,8 @@ async fn load_invoice_detail(
         "paid_amount": decimal_to_string(paid_amount),
         "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
         "balance_due": decimal_to_string(balance_due),
+        "advance_credit_available": decimal_to_string(advance_credit_available),
+        "amount_to_pay": decimal_to_string((balance_due - advance_credit_available).max(Decimal::ZERO)),
         "credit_balance": decimal_to_string(credit_balance),
         "refundable_cash_amount": decimal_to_string(refundable_cash_amount),
         "credit_transfers": credit_transfers_history,
@@ -5214,11 +5234,53 @@ async fn list_invoices(
             let total_pages = total.div_ceil(per_page).max(1);
             let page = page.min(total_pages);
             let offset = (page - 1) * per_page;
-            let items = items
+            let mut items = items
                 .into_iter()
                 .skip(offset)
                 .take(per_page)
                 .collect::<Vec<_>>();
+            // "To pay" net of the order's paid advances not applied yet.
+            let open_ids = items
+                .iter()
+                .filter(|item| {
+                    item["invoice_type"] != "advance"
+                        && item["balance_due"]
+                            .as_str()
+                            .and_then(|value| Decimal::from_str(value).ok())
+                            .is_some_and(|value| value > Decimal::ZERO)
+                })
+                .filter_map(|item| item["id"].as_str().and_then(|id| Uuid::parse_str(id).ok()))
+                .collect::<Vec<_>>();
+            let shares = match advance_application::advance_credit_shares(&state.db, &open_ids)
+                .await
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::error!(error = %e, "load invoice advance credit");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list invoices");
+                }
+            };
+            for item in &mut items {
+                let share = item["id"]
+                    .as_str()
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                    .and_then(|id| shares.get(&id).copied())
+                    .unwrap_or(Decimal::ZERO);
+                let balance = item["balance_due"]
+                    .as_str()
+                    .and_then(|value| Decimal::from_str(value).ok())
+                    .unwrap_or(Decimal::ZERO);
+                if let Some(map) = item.as_object_mut() {
+                    map.insert(
+                        "advance_credit_available".to_string(),
+                        json!(decimal_to_string(share)),
+                    );
+                    map.insert(
+                        "amount_to_pay".to_string(),
+                        json!(decimal_to_string((balance - share).max(Decimal::ZERO))),
+                    );
+                }
+            }
 
             Json(json!({
                 "items": items,
@@ -7625,6 +7687,23 @@ async fn create_invoice_payment(
             "Failed to record payment",
         );
     }
+    // An advance paid after the final invoice was released settles it now.
+    let applied_advances = match apply_advances_to_open_final_invoices(
+        &mut transaction,
+        invoice_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "apply paid advance to final invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice payment");
         return err(
@@ -7634,6 +7713,13 @@ async fn create_invoice_payment(
     }
 
     run_paid_invoice_follow_up(&state, &auth, invoice_id, payment_id).await;
+    advance_application::follow_up_applied_advances(
+        &state,
+        &auth,
+        "advance_paid",
+        &applied_advances,
+    )
+    .await;
 
     write_invoice_audit(
         &state,
@@ -7679,6 +7765,32 @@ async fn create_invoice_payment(
         Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(resp) => resp,
     }
+}
+
+/// After cash reaches an advance invoice: credit the order's paid advances
+/// against its released final invoices that still ask for money.
+async fn apply_advances_to_open_final_invoices(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    advance_invoice_id: Uuid,
+    actor_id: Uuid,
+) -> Result<Vec<advance_application::AppliedAdvance>, sqlx::Error> {
+    let mut applied = Vec::new();
+    for final_invoice_id in
+        advance_application::open_final_invoices_for_advance_tx(transaction, advance_invoice_id)
+            .await?
+    {
+        let credited = advance_application::apply_available_advances_tx(
+            transaction,
+            final_invoice_id,
+            actor_id,
+        )
+        .await?;
+        if !credited.is_empty() {
+            recompute_invoice_settlement_status(transaction, final_invoice_id).await?;
+        }
+        applied.extend(credited);
+    }
+    Ok(applied)
 }
 
 async fn reverse_invoice_payment(
@@ -11137,6 +11249,41 @@ async fn update_invoice_status(
                 );
             }
 
+            // Releasing the final invoice credits the order's paid advances.
+            let applied_advances = if locked_status == "draft"
+                && requested_status == "sent"
+                && locked_invoice_type == "final"
+            {
+                match advance_application::apply_available_advances_tx(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(applied) => applied,
+                    Err(e) => {
+                        tracing::error!(error = %e, invoice_id = %invoice_id, "apply advances to released final invoice");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to update invoice",
+                        );
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            if !applied_advances.is_empty()
+                && let Err(e) =
+                    recompute_invoice_settlement_status(&mut transaction, invoice_id).await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after applying advances");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+
             let settlement = match sqlx::query(
                 r#"SELECT status, paid_amount, prepayment_applied_amount, paid_at
                    FROM invoices
@@ -11176,6 +11323,13 @@ async fn update_invoice_status(
                     "Failed to update invoice",
                 );
             }
+            advance_application::publish_applied_advances(
+                &state,
+                auth.user_id,
+                "final_invoice_released",
+                &applied_advances,
+            )
+            .await;
             if let Some(paid_at) = paid_at
                 && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
                     &state,

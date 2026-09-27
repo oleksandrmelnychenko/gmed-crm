@@ -485,8 +485,8 @@ function usePatientInvoicesPageContent() {
           ) : null}
           <p className="mt-4 text-sm text-muted-foreground">
             {lang === "de"
-              ? "„Bezahlt“ sind eingegangene Zahlungen. „Vorauszahlung verrechnet“ wurde bereits einer Rechnung zugeordnet. „Noch zu zahlen“ ist der verbleibende Betrag der sichtbaren Rechnungen."
-              : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам."}
+              ? "„Bezahlt“ sind eingegangene Zahlungen. „Vorauszahlung verrechnet“ wurde bereits einer Rechnung zugeordnet. „Noch zu zahlen“ ist der verbleibende Betrag der sichtbaren Rechnungen, abzüglich bereits bezahlter Anzahlungen und Guthaben – bitte nichts doppelt überweisen."
+              : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам за вычетом уже оплаченных авансов и переплат, чтобы ничего не оплачивать дважды."}
           </p>
           {accountStatement.movements.some((movement) =>
             movement.kind === "balance_adjustment" ||
@@ -832,6 +832,9 @@ function usePatientInvoicesPageContent() {
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Angerechnete Vorauszahlung" : "Зачтённая предоплата"} value={`−${formatPortalCurrency(detail.prepayment_applied_amount, detail.currency)}`} />
                     ) : null}
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
+                    {invoiceAmountsVisible(detail) && Number(detail.advance_credit_available ?? 0) > 0 ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.finance_invoice_amount_to_pay} value={formatPortalCurrency(detail.amount_to_pay, detail.currency)} />
+                    ) : null}
                   </div>
                   {detail.notes ? (
                     <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>

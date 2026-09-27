@@ -127,6 +127,10 @@ export type PortalInvoiceItem = {
   paid_amount: unknown;
   prepayment_applied_amount?: unknown;
   balance_due: unknown;
+  /** Paid advance of the order not applied yet that covers this invoice. */
+  advance_credit_available?: unknown;
+  /** Balance due net of the covering advance: what is still to transfer. */
+  amount_to_pay?: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
   paid_at: string | null;
@@ -248,7 +252,11 @@ export type PortalAccountStatement = {
     cash_paid: string;
     prepayment_applied: string;
     available_prepayment: string;
+    /** Cash beyond what invoices ask for (overpayments, credit notes after payment). */
+    credit_balance?: string;
     invoice_due: string;
+    /** Open invoices net of unapplied paid advances and credit balances. */
+    amount_to_pay?: string;
     external_receivable: null;
     total_due: string | null;
     reconciliation_required: boolean;

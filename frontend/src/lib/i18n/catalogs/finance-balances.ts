@@ -64,6 +64,14 @@ export interface FinanceBalancesTranslations {
   finance_payment_method_credit_transfer: string;
   finance_payment_credit_transfer_from: string;
   finance_refund_credit_transfer_to: string;
+  finance_order_patient_credit: string;
+  finance_order_advance_available: string;
+  finance_order_open_invoices: string;
+  finance_order_held_hint: string;
+  finance_invoice_advance_credit: string;
+  finance_invoice_amount_to_pay: string;
+  finance_statement_credit_balance: string;
+  finance_statement_amount_to_pay: string;
 }
 
 export const financeBalancesRu: FinanceBalancesTranslations = {
@@ -131,6 +139,15 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_payment_method_credit_transfer: "Зачёт переплаты",
   finance_payment_credit_transfer_from: "Зачёт переплаты из счёта {number}",
   finance_refund_credit_transfer_to: "Зачтено в счёт {number}",
+  finance_order_patient_credit: "Переплата пациента",
+  finance_order_advance_available: "Аванс, ещё не зачтённый",
+  finance_order_open_invoices: "Остаток по счетам",
+  finance_order_held_hint:
+    "«Осталось получить» уже учитывает оплаченный, но не зачтённый аванс ({advance}) и переплату ({credit}).",
+  finance_invoice_advance_credit: "Будет покрыто авансом",
+  finance_invoice_amount_to_pay: "К оплате с учётом аванса",
+  finance_statement_credit_balance: "Переплата по счетам",
+  finance_statement_amount_to_pay: "К оплате с учётом авансов и переплат",
 };
 
 export const financeBalancesDe: FinanceBalancesTranslations = {
@@ -200,4 +217,13 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_payment_method_credit_transfer: "Guthabenverrechnung",
   finance_payment_credit_transfer_from: "Guthaben aus Rechnung {number}",
   finance_refund_credit_transfer_to: "Verrechnet mit Rechnung {number}",
+  finance_order_patient_credit: "Patientenguthaben",
+  finance_order_advance_available: "Noch nicht verrechnete Anzahlung",
+  finance_order_open_invoices: "Offene Rechnungsbeträge",
+  finance_order_held_hint:
+    "„Noch zu erhalten“ berücksichtigt bereits bezahlte, noch nicht verrechnete Anzahlungen ({advance}) und Guthaben ({credit}).",
+  finance_invoice_advance_credit: "Durch Anzahlung gedeckt",
+  finance_invoice_amount_to_pay: "Zu zahlen nach Anzahlung",
+  finance_statement_credit_balance: "Guthaben aus Rechnungen",
+  finance_statement_amount_to_pay: "Zu zahlen nach Anzahlungen und Guthaben",
 };

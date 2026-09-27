@@ -966,3 +966,214 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
         vec![("service_revenue".to_string(), Decimal::new(100, 0))]
     );
 }
+
+/// Paid advances settle the final invoice as soon as it is released (oldest
+/// first, up to its balance), and an advance paid later still reaches a
+/// released final invoice. Every "to pay" figure is net of advances: before,
+/// the portal asked for the full final invoice next to a balance that already
+/// counted the advance, so the patient could pay twice.
+#[tokio::test]
+async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("advance-application");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    for user_id in [billing_id, manager_id] {
+        seed_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let first_advance = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-adv1"),
+        "advance",
+        500,
+        false,
+    )
+    .await;
+    let second_advance = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-adv2"),
+        "advance",
+        300,
+        false,
+    )
+    .await;
+    let late_advance = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-adv3"),
+        "advance",
+        100,
+        false,
+    )
+    .await;
+    sqlx::query("UPDATE invoices SET issued_at = now() - interval '3 days' WHERE id = $1")
+        .bind(first_advance)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let final_invoice = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-final"),
+        "final",
+        1000,
+        false,
+    )
+    .await;
+    sqlx::query("UPDATE invoices SET status = 'draft' WHERE id = $1")
+        .bind(final_invoice)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let manager = auth_header_for(manager_id, "patient_manager");
+    record_payment(&app, &billing, first_advance, Uuid::new_v4(), 500, "ADV-1").await;
+    record_payment(&app, &billing, second_advance, Uuid::new_v4(), 300, "ADV-2").await;
+
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+    assert_eq!(released["prepayment_applied_amount"], "800");
+    assert_eq!(released["balance_due"], "200");
+    assert_eq!(released["status"], "partially_paid");
+    let allocations = released["prepayment_allocations"].as_array().unwrap();
+    assert_eq!(allocations.len(), 2);
+    assert_eq!(
+        allocations[0]["advance_invoice_id"],
+        first_advance.to_string()
+    );
+    assert_eq!(allocations[0]["amount_gross"], "500");
+    support::wait_until("automatic advance audit", || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                r#"SELECT COUNT(*) FROM audit_log
+                   WHERE entity_id = $1 AND action = 'apply_invoice_prepayment'
+                     AND context ->> 'automatic' = 'true'"#,
+            )
+            .bind(final_invoice)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+                >= 2
+        }
+    })
+    .await;
+
+    // Paid after the release: credited against the open final invoice.
+    let late = record_payment(&app, &billing, late_advance, Uuid::new_v4(), 100, "ADV-3").await;
+    assert_eq!(late["invoice"]["status"], "paid");
+    let (_, final_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{final_invoice}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(final_detail["prepayment_applied_amount"], "900");
+    assert_eq!(final_detail["balance_due"], "100");
+
+    // One "to pay" figure everywhere: order card, invoice list, statement.
+    let (status, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economics:?}");
+    assert_eq!(economics["actual"]["invoice_outstanding_gross"], "100");
+    assert_eq!(economics["actual"]["advance_available_gross"], "0");
+    assert_eq!(economics["actual"]["patient_open_gross"], "100");
+    let (status, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    assert_eq!(statement["summary"]["amount_to_pay"], "100");
+    assert_eq!(statement["summary"]["total_due"], "100");
+    assert_eq!(statement["summary"]["calculated_balance"], "100");
+
+    // Released manually: an advance still unapplied is netted, not demanded.
+    let (status, released_allocation) = json_request(
+        &app,
+        "DELETE",
+        &format!(
+            "/api/v1/invoices/{final_invoice}/prepayment-allocations/{}",
+            allocations[1]["id"].as_str().unwrap()
+        ),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released_allocation:?}");
+    assert_eq!(released_allocation["balance_due"], "400");
+    let (_, list) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices?order_id={order_id}&invoice_type=final"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(list["items"][0]["balance_due"], "400");
+    assert_eq!(list["items"][0]["advance_credit_available"], "300");
+    assert_eq!(list["items"][0]["amount_to_pay"], "100");
+    let (_, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(economics["actual"]["invoice_outstanding_gross"], "400");
+    assert_eq!(economics["actual"]["advance_available_gross"], "300");
+    assert_eq!(economics["actual"]["patient_open_gross"], "100");
+    let (_, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(statement["summary"]["invoice_due"], "400");
+    assert_eq!(statement["summary"]["amount_to_pay"], "100");
+    assert_eq!(statement["summary"]["total_due"], "100");
+    let final_item = statement["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == final_invoice.to_string())
+        .unwrap();
+    assert_eq!(final_item["invoice_balance_due"], "400");
+    assert_eq!(final_item["advance_credit"], "300");
+    assert_eq!(final_item["amount_due"], "100");
+}

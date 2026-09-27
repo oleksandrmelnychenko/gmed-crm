@@ -3874,6 +3874,58 @@ async fn get_order_economics(
         }
     };
 
+    // Money the patient already paid that no invoice has taken yet: paid
+    // advances not applied to a settlement invoice, and cash beyond what an
+    // invoice asks for (overpayments, credit notes after payment). What is
+    // still to be received from the patient is net of both.
+    let held = match sqlx::query(
+        r#"SELECT
+               COALESCE(SUM(GREATEST(
+                   LEAST(invoice.paid_amount, invoice.total_gross - invoice.credited_amount)
+                   - COALESCE((
+                       SELECT SUM(allocation.amount_gross)
+                       FROM invoice_prepayment_allocations allocation
+                       WHERE allocation.advance_invoice_id = invoice.id
+                   ), 0),
+                   0
+               )) FILTER (WHERE invoice.invoice_type = 'advance'), 0) AS advance_available_gross,
+               COALESCE(SUM(invoice.prepayment_applied_amount)
+                   FILTER (WHERE invoice.invoice_type <> 'advance'), 0) AS advance_applied_gross,
+               COALESCE(SUM(GREATEST(
+                   invoice.paid_amount + invoice.prepayment_applied_amount
+                   - (invoice.total_gross - invoice.credited_amount),
+                   0
+               )), 0) AS patient_credit_gross
+           FROM invoices invoice
+           WHERE invoice.order_id = $1
+             AND invoice.status NOT IN ('draft', 'cancelled')"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *economics_transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order patient credit");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
+        }
+    };
+    let advance_available_gross = held
+        .try_get::<rust_decimal::Decimal, _>("advance_available_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let patient_credit_gross = held
+        .try_get::<rust_decimal::Decimal, _>("patient_credit_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let patient_open_gross = (invoice
+        .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        - advance_available_gross
+        - patient_credit_gross)
+        .max(rust_decimal::Decimal::ZERO);
+
     let external = match sqlx::query(
         r#"SELECT
                COALESCE(SUM(amount_net) FILTER (
@@ -4280,6 +4332,10 @@ async fn get_order_economics(
             "credited_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "invoice_settled_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_settled_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "invoice_outstanding_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
+            "advance_available_gross": economics_money(advance_available_gross),
+            "advance_applied_gross": economics_money(held.try_get::<rust_decimal::Decimal, _>("advance_applied_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
+            "patient_credit_gross": economics_money(patient_credit_gross),
+            "patient_open_gross": economics_money(patient_open_gross),
             "patient_cash_received_gross": economics_money(cash.try_get::<rust_decimal::Decimal, _>("received_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "patient_cash_refunded_gross": economics_money(cash.try_get::<rust_decimal::Decimal, _>("refunded_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "patient_cash_collected_gross": economics_money(cash.try_get::<rust_decimal::Decimal, _>("collected_gross").unwrap_or(rust_decimal::Decimal::ZERO)),

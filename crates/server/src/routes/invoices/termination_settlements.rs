@@ -1106,9 +1106,8 @@ async fn list_termination_settlements(
 /// normal allocation path, with the "every remaining line" rule relaxed for
 /// terminated orders); services outside any quote are billed from the order
 /// line itself; agency-paid third-party costs are re-invoiced like in the
-/// patient billing constructor. Paid advances are applied after release through
-/// the regular prepayment allocation endpoint (the draft lists them under
-/// `available_prepayments`).
+/// patient billing constructor. Paid advances are credited automatically when
+/// the final invoice is released (see `advance_application`).
 async fn create_termination_final_invoice(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,

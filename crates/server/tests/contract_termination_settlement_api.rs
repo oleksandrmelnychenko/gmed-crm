@@ -580,19 +580,12 @@ async fn contract_termination_stops_open_orders_and_settles_what_accrued() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "send final invoice: {sent:?}");
-    let (status, applied) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/invoices/{final_invoice_id}/prepayment-allocations"),
-        &billing,
-        Some(json!({
-            "request_id": Uuid::new_v4(),
-            "advance_invoice_id": advance_id,
-            "amount_gross": "200.00",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "apply advance: {applied:?}");
+    // Releasing the final invoice credits the paid advance automatically.
+    assert_eq!(money(&sent["prepayment_applied_amount"]), paid);
+    assert_eq!(
+        sent["prepayment_allocations"][0]["advance_invoice_id"],
+        advance_id.to_string()
+    );
     let remaining = accrued - paid;
     record_payment(&app, &billing, &final_invoice_id, &remaining.to_string()).await;
 

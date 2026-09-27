@@ -2309,6 +2309,8 @@ function usePatientInvoicesTabContent({
               [lang === "de" ? "Offene Rechnungen" : "Открытые счета", accountStatement.summary.invoice_due],
               [lang === "de" ? "Zahlungen erhalten" : "Получено оплат", accountStatement.summary.cash_paid],
               [lang === "de" ? "Vorauszahlung verfügbar" : "Доступно предоплаты", accountStatement.summary.available_prepayment],
+              [t.finance_statement_credit_balance, accountStatement.summary.credit_balance ?? null],
+              [t.finance_statement_amount_to_pay, accountStatement.summary.amount_to_pay ?? null],
               [lang === "de" ? "Externe Restforderung" : "Остаток внешнего долга", accountStatement.summary.external_receivable],
             ].map(([label, value]) => (
               <div
