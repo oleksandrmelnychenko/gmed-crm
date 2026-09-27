@@ -1599,13 +1599,7 @@ async fn list_appointments(
     }
     let (calendar_window, row_cap) = appointment_list_window(date_from, date_to);
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
-    let requires_assignment = access::requires_patient_assignment(auth.role);
-    let can_access_as_interpreter =
-        matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter);
-    let can_access_as_owner = matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    );
+    let scope = access::AppointmentScope::for_role(auth.role);
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
@@ -1675,16 +1669,16 @@ async fn list_appointments(
                 )
              )
              AND (
-                $13::boolean = false
+                $13::boolean
                 OR ($14::boolean AND a.interpreter_id = $16)
                 OR ($15::boolean AND a.owner_user_id = $16)
-                OR EXISTS (
+                OR ($19::boolean AND EXISTS (
                     SELECT 1
                     FROM patient_assignments scoped_assignment
                     WHERE scoped_assignment.patient_id = a.patient_id
                       AND scoped_assignment.user_id = $16
                       AND scoped_assignment.revoked_at IS NULL
-                )
+                ))
              )
            ORDER BY CASE WHEN $17::boolean THEN a.date END ASC,
                     CASE WHEN $17::boolean THEN a.time_start END ASC,
@@ -1704,12 +1698,13 @@ async fn list_appointments(
     .bind(date_from)
     .bind(date_to)
     .bind(query.provider_taxonomy_node_id)
-    .bind(requires_assignment)
-    .bind(can_access_as_interpreter)
-    .bind(can_access_as_owner)
+    .bind(scope.all)
+    .bind(scope.as_interpreter)
+    .bind(scope.as_owner)
     .bind(auth.user_id)
     .bind(calendar_window)
     .bind(row_cap)
+    .bind(scope.via_patient_assignment)
     .fetch_all(&state.db)
     .await
     {
@@ -1777,13 +1772,7 @@ async fn list_attention_items(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let today = berlin_today();
     let preparation_window_end = today + chrono::Days::new(2);
-    let requires_assignment = access::requires_patient_assignment(auth.role);
-    let can_access_as_interpreter =
-        matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter);
-    let can_access_as_owner = matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    );
+    let scope = access::AppointmentScope::for_role(auth.role);
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
@@ -1932,16 +1921,16 @@ async fn list_attention_items(
                 )
              )
              AND (
-                $13::boolean = false
+                $13::boolean
                 OR ($14::boolean AND a.interpreter_id = $16)
                 OR ($15::boolean AND a.owner_user_id = $16)
-                OR EXISTS (
+                OR ($21::boolean AND EXISTS (
                     SELECT 1
                     FROM patient_assignments scoped_assignment
                     WHERE scoped_assignment.patient_id = a.patient_id
                       AND scoped_assignment.user_id = $16
                       AND scoped_assignment.revoked_at IS NULL
-                )
+                ))
              )
            ORDER BY CASE WHEN $19::boolean THEN a.date END ASC,
                     CASE WHEN $19::boolean THEN a.time_start END ASC,
@@ -1961,14 +1950,15 @@ async fn list_attention_items(
     .bind(date_from)
     .bind(date_to)
     .bind(query.provider_taxonomy_node_id)
-    .bind(requires_assignment)
-    .bind(can_access_as_interpreter)
-    .bind(can_access_as_owner)
+    .bind(scope.all)
+    .bind(scope.as_interpreter)
+    .bind(scope.as_owner)
     .bind(auth.user_id)
     .bind(today)
     .bind(preparation_window_end)
     .bind(calendar_window)
     .bind(row_cap)
+    .bind(scope.via_patient_assignment)
     .fetch_all(&state.db)
     .await
     {
@@ -8817,33 +8807,19 @@ pub(crate) fn is_blocked_slot(auth: &AuthUser, appointment_type: &str) -> bool {
 }
 
 fn can_view_conflict_row(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> bool {
-    if auth.role.has_full_access() {
-        return true;
-    }
-    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-        && row
-            .try_get::<Option<Uuid>, _>("interpreter_id")
-            .unwrap_or_default()
-            == Some(auth.user_id)
-    {
-        return true;
-    }
-    if matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    ) && row
-        .try_get::<Option<Uuid>, _>("owner_user_id")
-        .unwrap_or_default()
-        == Some(auth.user_id)
-    {
-        return true;
-    }
-    if access::requires_patient_assignment(auth.role) {
-        return row
+    let scope = access::AppointmentScope::for_role(auth.role);
+    match scope.admits_directly(
+        auth.user_id,
+        row.try_get::<Option<Uuid>, _>("interpreter_id")
+            .unwrap_or_default(),
+        row.try_get::<Option<Uuid>, _>("owner_user_id")
+            .unwrap_or_default(),
+    ) {
+        Some(decision) => decision,
+        None => row
             .try_get::<bool, _>("caller_has_assignment")
-            .unwrap_or(false);
+            .unwrap_or(false),
     }
-    true
 }
 
 fn build_conflict_item_json(
@@ -9867,87 +9843,53 @@ async fn can_access_appointment(
         return Ok(true);
     }
 
-    let Some(patient_id) = patient_id else {
-        let row = sqlx::query("SELECT patient_id, interpreter_id, owner_user_id FROM appointments WHERE id = $1")
-            .bind(appointment_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to load appointment access context");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-            })?;
-
-        let Some(row) = row else {
-            return Ok(false);
-        };
-
-        let row_interpreter_id: Option<Uuid> = row.try_get("interpreter_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode appointment access context",
-            )
-        })?;
-        if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-            && row_interpreter_id == Some(auth.user_id)
-        {
-            return Ok(true);
-        }
-        let row_owner_user_id: Option<Uuid> = row.try_get("owner_user_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode appointment access context",
-            )
-        })?;
-        if matches!(
-            auth.role,
-            Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-        ) && row_owner_user_id == Some(auth.user_id)
-        {
-            return Ok(true);
-        }
-
-        let patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode appointment access context",
-            )
-        })?;
-
-        if access::requires_patient_assignment(auth.role) {
-            return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+    let (patient_id, interpreter_id, owner_user_id) = match patient_id {
+        Some(patient_id) => (patient_id, interpreter_id, owner_user_id),
+        None => {
+            let row = sqlx::query("SELECT patient_id, interpreter_id, owner_user_id FROM appointments WHERE id = $1")
+                .bind(appointment_id)
+                .fetch_optional(&state.db)
                 .await
                 .map_err(|e| {
-                    tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to validate appointment assignment");
+                    tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to load appointment access context");
                     err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-                });
-        }
+                })?;
 
-        return Ok(true);
+            let Some(row) = row else {
+                return Ok(false);
+            };
+            let decode = |_| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode appointment access context",
+                )
+            };
+            (
+                row.try_get::<Uuid, _>("patient_id").map_err(decode)?,
+                row.try_get::<Option<Uuid>, _>("interpreter_id")
+                    .map_err(decode)?,
+                row.try_get::<Option<Uuid>, _>("owner_user_id")
+                    .map_err(decode)?,
+            )
+        }
     };
 
-    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-        && interpreter_id == Some(auth.user_id)
-    {
-        return Ok(true);
-    }
-    if matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    ) && owner_user_id == Some(auth.user_id)
-    {
-        return Ok(true);
-    }
-
-    if access::requires_patient_assignment(auth.role) {
-        access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate appointment assignment");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-            })
-    } else {
-        Ok(true)
-    }
+    access::can_view_appointment_row(
+        &state.db,
+        access::AppointmentRow {
+            role: auth.role,
+            user_id: auth.user_id,
+            appointment_id,
+            patient_id,
+            interpreter_id,
+            owner_user_id,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, patient_id = %patient_id, "Failed to validate appointment assignment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
+    })
 }
 
 async fn ensure_appointment_order_link_allowed(

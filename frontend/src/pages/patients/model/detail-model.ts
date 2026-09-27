@@ -239,23 +239,27 @@ const PATIENT_RECORD_SERVER_ROLES: ReadonlySet<string> = new Set([
   "concierge",
 ]);
 
-/** `/patients/{id}/orders`, `/timeline`, `/document-alerts`. */
+/**
+ * `/patients/{id}/orders` and `/timeline`. The interpreter is not listed: its
+ * scope is its own appointments, not the patient's whole history.
+ */
 const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
   "patient_manager",
   "billing",
   "teamlead_interpreter",
-  "interpreter",
 ]);
 
 /**
  * `/patients/{id}/appointments`: the care-history roles plus the concierge,
  * who reads a patient's appointments (medical ones as blocked slots) but not
- * the orders or the timeline.
+ * the orders or the timeline, and the interpreter, who gets only the
+ * appointments it runs or owns.
  */
 const PATIENT_APPOINTMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
   ...PATIENT_CARE_HISTORY_SERVER_ROLES,
   "concierge",
+  "interpreter",
 ]);
 
 /** `/patients/{id}/assignments` (the curators tab). */

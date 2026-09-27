@@ -127,8 +127,9 @@ describe("patient detail model", () => {
   // Server role lists of the patient sub-resources (crates/server/src/routes/patients.rs,
   // workflow_checklists.rs): narrower than the capabilities, e.g. no CEO assistant.
   const RECORD_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter", "concierge"];
-  const CARE_HISTORY_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter"];
-  const APPOINTMENT_ROLES = [...CARE_HISTORY_ROLES, "concierge"];
+  // The interpreter reads only its own appointments: no orders, no timeline.
+  const CARE_HISTORY_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter"];
+  const APPOINTMENT_ROLES = [...CARE_HISTORY_ROLES, "concierge", "interpreter"];
   const ASSIGNMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
 
   it.each(STAFF_ROLES)("derives every surface from capabilities and server role lists for %s", (role) => {

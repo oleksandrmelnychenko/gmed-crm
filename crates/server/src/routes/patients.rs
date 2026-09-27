@@ -6640,12 +6640,13 @@ async fn list_patient_orders(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    // The interpreter works on its own appointments only; the patient's
+    // orders (and their totals) are not part of that scope.
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
-        Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -6714,6 +6715,10 @@ async fn list_patient_appointments(
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
+    // A visible patient opens its calendar only for roles whose appointment
+    // scope follows the patient; an interpreter linked to the patient through
+    // one booking still sees only the visits it runs or owns.
+    let scope = crate::access::AppointmentScope::for_role(auth.role);
     let rows = sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.appointment_type, a.care_path_kind, a.status,
                   p.name AS provider_name, d.name AS doctor_name
@@ -6721,9 +6726,18 @@ async fn list_patient_appointments(
            LEFT JOIN providers p ON p.id = a.provider_id
            LEFT JOIN provider_doctors d ON d.id = a.doctor_id
            WHERE a.patient_id = $1
+             AND (
+                 $2::boolean
+                 OR ($3::boolean AND a.interpreter_id = $5)
+                 OR ($4::boolean AND a.owner_user_id = $5)
+             )
            ORDER BY a.date DESC, a.time_start DESC NULLS LAST, a.created_at DESC"#,
     )
     .bind(patient_uuid)
+    .bind(scope.all || scope.via_patient_assignment)
+    .bind(scope.as_interpreter)
+    .bind(scope.as_owner)
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -6786,6 +6800,10 @@ async fn list_patient_documents(
                   d.document_number,
                   d.generated_template_id,
                   d.order_id,
+                  d.appointment_id,
+                  (SELECT linked_appointment.interpreter_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
                   d.version_root_document_id,
                   d.replaces_document_id,
                   d.version_number,
@@ -7217,6 +7235,10 @@ async fn load_staff_visible_patient_document_ids(
         r#"SELECT d.id,
                   d.patient_id,
                   d.lead_id,
+                  d.appointment_id,
+                  (SELECT linked_appointment.interpreter_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
                   d.is_medical,
                   d.art,
                   d.category,
@@ -8485,12 +8507,13 @@ async fn get_patient_timeline(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientTimelineQuery>,
 ) -> Result<Json<Value>, axum::response::Response> {
+    // The timeline replays the patient's whole history (every appointment,
+    // order and document); the interpreter's scope is its own appointments.
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
-        Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 

@@ -346,6 +346,12 @@ async fn can_receive_event(
             }
         }
         "task" => can_receive_task_event(state, auth, event).await,
+        // Checklist and reminder events belong to one appointment: they follow
+        // the appointment row scope, not the patient scope.
+        "appointment_checklist" | "reminder" if payload_appointment_id(event).is_some() => {
+            let appointment_id = payload_appointment_id(event).unwrap_or_default();
+            can_receive_appointment_event(state, auth, appointment_id).await
+        }
         "document"
         | "invoice"
         | "privacy_request"
@@ -383,6 +389,14 @@ async fn can_receive_event(
         "notification" => Ok(false),
         _ => Ok(false),
     }
+}
+
+fn payload_appointment_id(event: &RealtimeEvent) -> Option<Uuid> {
+    event
+        .payload
+        .get("appointment_id")
+        .and_then(|value| value.as_str())
+        .and_then(|value| Uuid::parse_str(value).ok())
 }
 
 fn requires_current_entity_authorization(event: &RealtimeEvent) -> bool {
@@ -496,21 +510,7 @@ async fn can_receive_appointment_event(
     };
 
     let interpreter_id: Option<Uuid> = row.try_get("interpreter_id").unwrap_or_default();
-    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-        && interpreter_id == Some(auth.user_id)
-    {
-        return Ok(true);
-    }
-
     let owner_user_id: Option<Uuid> = row.try_get("owner_user_id").unwrap_or_default();
-    if matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    ) && owner_user_id == Some(auth.user_id)
-    {
-        return Ok(true);
-    }
-
     let patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -522,16 +522,24 @@ async fn can_receive_appointment_event(
         return can_receive_patient_event(state, auth, patient_id).await;
     }
 
-    if access::requires_patient_assignment(auth.role) {
-        access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, appointment_id = %appointment_id, "check realtime appointment assignment");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
-            })
-    } else {
-        Ok(false)
-    }
+    // Same row scope as the appointment API: an interpreter hears only about
+    // the visits it runs or owns, not about the patient's other appointments.
+    access::can_view_appointment_row(
+        &state.db,
+        access::AppointmentRow {
+            role: auth.role,
+            user_id: auth.user_id,
+            appointment_id,
+            patient_id,
+            interpreter_id,
+            owner_user_id,
+        },
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, "check realtime appointment assignment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate event access")
+    })
 }
 
 async fn can_receive_concierge_service_event(

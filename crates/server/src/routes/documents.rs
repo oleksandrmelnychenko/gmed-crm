@@ -10593,6 +10593,7 @@ async fn fetch_document_row(
                   trim(concat_ws(' ', l.first_name, l.last_name)) AS lead_name,
                   o.order_number,
                   a.title AS appointment_title,
+                  a.interpreter_id AS appointment_interpreter_id,
                   u.name AS uploaded_by_name,
                   u.role AS uploaded_by_role,
                   extractor.name AS text_extracted_by_name,
@@ -11393,6 +11394,23 @@ pub(crate) fn can_view_document_row(
         || row
             .try_get::<bool, _>("translation_assigned_to_current")
             .unwrap_or(false);
+    // A document filed on an appointment belongs to that visit. The patient
+    // link an interpreter gets from one booking does not open the documents of
+    // another interpreter's visit; only the interpreter of that appointment
+    // (or an explicit share / translation assignment) does.
+    if auth.role == Role::Interpreter
+        && !explicit_share
+        && row
+            .try_get::<Option<Uuid>, _>("appointment_id")
+            .unwrap_or_default()
+            .is_some()
+        && row
+            .try_get::<Option<Uuid>, _>("appointment_interpreter_id")
+            .unwrap_or_default()
+            != Some(auth.user_id)
+    {
+        return false;
+    }
     // Match the provider-document view contract for general commercial files.
     // There is no patient to assign, and Billing must be able to read contracts
     // stored as internal documents. Explicit document ACLs are checked by callers.
@@ -19801,6 +19819,7 @@ async fn list_documents(
                   trim(concat_ws(' ', l.first_name, l.last_name)) AS lead_name,
                   o.order_number,
                   a.title AS appointment_title,
+                  a.interpreter_id AS appointment_interpreter_id,
                   u.name AS uploaded_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
@@ -20005,6 +20024,7 @@ async fn list_document_intake_queue(
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
+                  a.interpreter_id AS appointment_interpreter_id,
                   u.name AS uploaded_by_name,
                   u.role AS uploaded_by_role,
                   deleter.name AS file_deleted_by_name,
@@ -20381,6 +20401,7 @@ async fn list_document_versions(
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
                   a.title AS appointment_title,
+                  a.interpreter_id AS appointment_interpreter_id,
                   u.name AS uploaded_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,

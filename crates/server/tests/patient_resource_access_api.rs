@@ -791,3 +791,219 @@ async fn concierge_reads_patient_appointments_but_not_orders_or_timeline() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
     }
 }
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_interpreter_appointment(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    interpreter_id: Uuid,
+    created_by: Uuid,
+    title: &str,
+    notes: &str,
+    date: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, provider_id, interpreter_id, appointment_type, title,
+                date, time_start, time_end, location, notes, status, created_by
+           ) VALUES ($1, $2, $3, 'medical', $4, $5::date, '09:00', '10:00',
+                     'Clinic entrance B', $6, 'confirmed', $7)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(provider_id)
+    .bind(interpreter_id)
+    .bind(title)
+    .bind(date)
+    .bind(notes)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn seed_appointment_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    appointment_id: Uuid,
+    uploaded_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    let document_id = seed_document(pool, patient_id, uploaded_by, tag, false).await;
+    sqlx::query("UPDATE documents SET appointment_id = $2 WHERE id = $1")
+        .bind(document_id)
+        .bind(appointment_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    document_id
+}
+
+#[tokio::test]
+async fn interpreter_sees_only_its_own_appointments_of_an_assigned_patient() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("interpreter-own-appointments");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let interpreter_id = seed_staff_user(&pool, &format!("{tag}-a"), "interpreter").await;
+    let other_interpreter_id = seed_staff_user(&pool, &format!("{tag}-b"), "interpreter").await;
+    // Booking an interpreter links it to the patient; both interpreters hold
+    // that link, which must not open each other's visits.
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, other_interpreter_id, admin_id).await;
+
+    let own_notes = format!("Own briefing {tag}");
+    let other_notes = format!("Other interpreter note {tag}");
+    let own_appointment_id = seed_interpreter_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        interpreter_id,
+        admin_id,
+        &format!("Own visit {tag}"),
+        &own_notes,
+        "2026-05-04",
+    )
+    .await;
+    let other_appointment_id = seed_interpreter_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        other_interpreter_id,
+        admin_id,
+        &format!("Other visit {tag}"),
+        &other_notes,
+        "2026-05-05",
+    )
+    .await;
+    let own_document_id = seed_appointment_document(
+        &pool,
+        patient_id,
+        own_appointment_id,
+        admin_id,
+        &format!("{tag}-own"),
+    )
+    .await;
+    let other_document_id = seed_appointment_document(
+        &pool,
+        patient_id,
+        other_appointment_id,
+        admin_id,
+        &format!("{tag}-other"),
+    )
+    .await;
+    let bearer = auth_header_for(interpreter_id, "interpreter");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments?patient_id={patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        response_contains_resource(&body, own_appointment_id),
+        "{body}"
+    );
+    assert!(
+        !response_contains_resource(&body, other_appointment_id),
+        "{body}"
+    );
+
+    // What the interpreter needs for its own visit stays available.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{own_appointment_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["patient_name"], format!("First {tag} Last {tag}"));
+    assert_eq!(detail["location"], "Clinic entrance B");
+    assert_eq!(detail["time_start"], "09:00");
+    assert_eq!(detail["notes"], own_notes);
+
+    for path in [
+        format!("/api/v1/appointments/{other_appointment_id}"),
+        format!("/api/v1/appointments/{other_appointment_id}/report"),
+        format!("/api/v1/appointments/{other_appointment_id}/communications"),
+        format!("/api/v1/appointments/{other_appointment_id}/reminders"),
+        format!("/api/v1/patients/{patient_id}/timeline"),
+        format!("/api/v1/patients/{patient_id}/orders"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert!(!body.to_string().contains(&other_notes), "{path}: {body}");
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        response_contains_resource(&body, own_appointment_id),
+        "{body}"
+    );
+    assert!(
+        !response_contains_resource(&body, other_appointment_id),
+        "{body}"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/documents"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(response_contains_resource(&body, own_document_id), "{body}");
+    assert!(
+        !response_contains_resource(&body, other_document_id),
+        "{body}"
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{other_document_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // A patient manager of the same patient still sees the whole calendar.
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments?patient_id={patient_id}"),
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        response_contains_resource(&body, own_appointment_id),
+        "{body}"
+    );
+    assert!(
+        response_contains_resource(&body, other_appointment_id),
+        "{body}"
+    );
+}
