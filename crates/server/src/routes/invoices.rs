@@ -9488,7 +9488,7 @@ async fn reverse_invoice_credit_note(
         r#"SELECT credit.amount_net, credit.amount_vat, credit.amount_gross,
                   credit.issued_on AS credit_issued_on,
                   credit.currency, credit.transaction_type, credit.portal_visible,
-                  credit.credit_mode, credit.line_items,
+                  credit.credit_mode, credit.line_items AS credit_line_items,
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
@@ -9588,12 +9588,14 @@ async fn reverse_invoice_credit_note(
     .bind(row.try_get::<bool, _>("portal_visible").unwrap_or(false))
     .bind(auth.user_id)
     // The reversal mirrors the credited lines, so VAT per rate reverses too.
+    // `credit_line_items` are the credit note's lines; the row also carries
+    // the invoice's `line_items`, which must not end up on the reversal.
     .bind(
         row.try_get::<String, _>("credit_mode")
             .unwrap_or_else(|_| credit_notes::CREDIT_MODE_LEGACY.to_string()),
     )
     .bind(
-        row.try_get::<Option<Value>, _>("line_items")
+        row.try_get::<Option<Value>, _>("credit_line_items")
             .unwrap_or_default(),
     )
     .fetch_one(&mut *transaction)
