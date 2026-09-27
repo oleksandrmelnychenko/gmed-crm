@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { pickerSection } from "../e2e/helpers";
 
 import {
   authenticateApiClient,
@@ -69,11 +70,11 @@ async function fillMuiDateTime(locator: Locator, value: string) {
   const [year = "", month = "", day = ""] = date.split("-");
   const [hours = "", minutes = ""] = time.split(":");
 
-  await locator.getByRole("spinbutton", { name: "Year" }).fill(year);
-  await locator.getByRole("spinbutton", { name: "Month" }).fill(month);
-  await locator.getByRole("spinbutton", { name: "Day" }).fill(day);
-  await locator.getByRole("spinbutton", { name: "Hours" }).fill(hours);
-  await locator.getByRole("spinbutton", { name: "Minutes" }).fill(minutes);
+  await locator.getByRole("spinbutton", { name: pickerSection.year }).fill(year);
+  await locator.getByRole("spinbutton", { name: pickerSection.month }).fill(month);
+  await locator.getByRole("spinbutton", { name: pickerSection.day }).fill(day);
+  await locator.getByRole("spinbutton", { name: pickerSection.hours }).fill(hours);
+  await locator.getByRole("spinbutton", { name: pickerSection.minutes }).fill(minutes);
 }
 
 const assignInterpreterButtonName = /Dolmetscher zuweisen|Assign interpreter/i;
@@ -427,8 +428,9 @@ test.describe("staff appointments live workflows", () => {
             item.agency_service_key === "treatment_organization" &&
             item.source_medical_appointment_id === scenario.appointment.id &&
             (item.notes ?? "").includes(
-              `Automatisch aus abgeschlossenem medizinischem Termin ${scenario.appointment.id} erstellt`,
-            ),
+              "Automatisch aus dem abgeschlossenen medizinischen Termin erstellt",
+            ) &&
+            !(item.notes ?? "").includes(scenario.appointment.id),
         ),
       ).toBe(true);
     }).toPass({ timeout: 15_000 });

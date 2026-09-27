@@ -63,14 +63,16 @@ describe("Concierge expense receipt model", () => {
       companyPaidGross: "119.00",
     });
     expect(conciergeExpenseConsequencePreview("unpaid", false, "119.00")).toEqual({
-      patientReceivableGross: "0.00",
+      patientReceivableGross: "119.00",
       providerLiabilityGross: "119.00",
       companyPaidGross: "0.00",
+      patientReceivableAfterDelivery: true,
     });
     expect(conciergeExpenseConsequencePreview("unpaid", true, "119.00")).toEqual({
       patientReceivableGross: "119.00",
       providerLiabilityGross: "119.00",
       companyPaidGross: "0.00",
+      patientReceivableAfterDelivery: false,
     });
   });
 });

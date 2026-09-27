@@ -33,6 +33,7 @@ import {
   fetchPortalInvoiceCreditNotes,
   fetchPortalInvoicePayments,
   fetchPortalInvoiceRefunds,
+  fetchPortalInvoiceDunningLetters,
   fetchPortalInvoices,
   uploadPortalPaymentProof,
 } from "@/pages/patients/data/portal-api";
@@ -41,12 +42,15 @@ import {
   formatPortalDate,
   formatPortalDateTime,
   invoiceTypeLabel,
+  downloadPortalCreditNotePdf,
   downloadPortalInvoicePdf,
+  downloadPortalDunningLetter,
   openPortalInvoicePdf,
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalAccountStatement,
+  PortalDunningLetter,
   PortalInvoiceItem,
   PortalInvoiceCreditNoteTransaction,
   PortalInvoiceLineItem,
@@ -128,6 +132,7 @@ interface PatientInvoicesState {
   detailPayments: PortalInvoicePaymentTransaction[];
   detailCreditNotes: PortalInvoiceCreditNoteTransaction[];
   detailRefunds: PortalInvoiceRefundTransaction[];
+  detailDunningLetters: PortalDunningLetter[];
   detailBusy: boolean;
   detailError: string;
   uploadOpen: boolean;
@@ -154,6 +159,7 @@ const INITIAL_PATIENT_INVOICES_STATE: PatientInvoicesState = {
   detailPayments: [],
   detailCreditNotes: [],
   detailRefunds: [],
+  detailDunningLetters: [],
   detailBusy: false,
   detailError: "",
   uploadOpen: false,
@@ -187,6 +193,7 @@ function usePatientInvoicesPageContent() {
     detailPayments,
     detailCreditNotes,
     detailRefunds,
+    detailDunningLetters,
     detailBusy,
     detailError,
     error,
@@ -270,7 +277,14 @@ function usePatientInvoicesPageContent() {
 
   useEffect(() => {
     if (!selectedInvoiceId) {
-      dispatchInvoicesState({ detail: null, detailPayments: [], detailCreditNotes: [], detailRefunds: [], detailError: "" });
+      dispatchInvoicesState({
+        detail: null,
+        detailPayments: [],
+        detailCreditNotes: [],
+        detailRefunds: [],
+        detailDunningLetters: [],
+        detailError: "",
+      });
       return;
     }
 
@@ -280,13 +294,18 @@ function usePatientInvoicesPageContent() {
       dispatchInvoicesState({ detailBusy: true });
       try {
         const invoice = await fetchPortalInvoiceDetail(selectedInvoiceId);
-        const [payments, creditNotes, refunds] = await Promise.all([
+        const [payments, creditNotes, refunds, dunningLetters] = await Promise.all([
           invoiceAmountsVisible(invoice)
             ? fetchPortalInvoicePayments(selectedInvoiceId).then((response) => response.items)
             : Promise.resolve([]),
           fetchPortalInvoiceCreditNotes(selectedInvoiceId).then((response) => response.items),
           invoiceAmountsVisible(invoice)
             ? fetchPortalInvoiceRefunds(selectedInvoiceId).then((response) => response.items)
+            : Promise.resolve([]),
+          invoicePdfVisible(invoice)
+            ? fetchPortalInvoiceDunningLetters(selectedInvoiceId)
+                .then((response) => (Array.isArray(response?.items) ? response.items : []))
+                .catch(() => [])
             : Promise.resolve([]),
         ]);
         if (cancelled) return;
@@ -295,6 +314,7 @@ function usePatientInvoicesPageContent() {
           detailPayments: payments,
           detailCreditNotes: creditNotes,
           detailRefunds: refunds,
+          detailDunningLetters: dunningLetters,
           detailError: "",
           detailBusy: false,
         });
@@ -484,8 +504,8 @@ function usePatientInvoicesPageContent() {
           ) : null}
           <p className="mt-4 text-sm text-muted-foreground">
             {lang === "de"
-              ? "„Bezahlt“ sind eingegangene Zahlungen. „Vorauszahlung verrechnet“ wurde bereits einer Rechnung zugeordnet. „Noch zu zahlen“ ist der verbleibende Betrag der sichtbaren Rechnungen."
-              : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам."}
+              ? "„Bezahlt“ sind eingegangene Zahlungen. „Vorauszahlung verrechnet“ wurde bereits einer Rechnung zugeordnet. „Noch zu zahlen“ ist der verbleibende Betrag der sichtbaren Rechnungen, abzüglich bereits bezahlter Anzahlungen und Guthaben – bitte nichts doppelt überweisen."
+              : "«Оплачено» — поступившие платежи. «Зачтено предоплат» — сумма, уже применённая к счетам. «Требуется доплатить» — остаток по доступным вам счетам за вычетом уже оплаченных авансов и переплат, чтобы ничего не оплачивать дважды."}
           </p>
           {accountStatement.movements.some((movement) =>
             movement.kind === "balance_adjustment" ||
@@ -831,6 +851,9 @@ function usePatientInvoicesPageContent() {
                       <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={lang === "de" ? "Angerechnete Vorauszahlung" : "Зачтённая предоплата"} value={`−${formatPortalCurrency(detail.prepayment_applied_amount, detail.currency)}`} />
                     ) : null}
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_invoices_open_balance} value={invoiceAmountsVisible(detail) ? formatPortalCurrency(detail.balance_due, detail.currency) : t.portal_invoices_hidden} />
+                    {invoiceAmountsVisible(detail) && Number(detail.advance_credit_available ?? 0) > 0 ? (
+                      <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.finance_invoice_amount_to_pay} value={formatPortalCurrency(detail.amount_to_pay, detail.currency)} />
+                    ) : null}
                   </div>
                   {detail.notes ? (
                     <div className={cn("mt-4 rounded-xl px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
@@ -843,7 +866,7 @@ function usePatientInvoicesPageContent() {
                   <section className={cn("rounded-xl p-5", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                       <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-                      <span>{lang === "de" ? "Rechnungskorrekturen" : "Корректировки счета"}</span>
+                      <span>{t.finance_credit_note_portal_title}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {lang === "de" ? "Hier sehen Sie freigegebene Gutschriften und Stornierungen." : "Здесь показаны доступные вам кредит-ноты и их отмены."}
@@ -853,12 +876,34 @@ function usePatientInvoicesPageContent() {
                         const isReversal = credit.transaction_type === "reversal";
                         return (
                           <div key={credit.id} className={cn("flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3", credit.is_reversed && "opacity-70")}>
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-sm font-semibold text-foreground">{credit.document_number}</div>
                               <div className="mt-1 text-xs text-muted-foreground">{formatPortalDate(credit.issued_on)} · {credit.reason}</div>
+                              {(credit.line_items ?? []).map((line, index) => (
+                                <div key={`${index}-${line.description}`} className="mt-1 text-xs text-muted-foreground">
+                                  {line.description} · {line.vat_rate} % · {formatPortalCurrency(line.line_gross, detail.currency)}
+                                </div>
+                              ))}
                             </div>
-                            <div className="font-mono font-semibold tabular-nums text-emerald-700">
-                              {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross, detail.currency)}` : t.portal_invoices_hidden}
+                            <div className="text-right">
+                              <div className="font-mono font-semibold tabular-nums text-emerald-700">
+                                {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross, detail.currency)}` : t.portal_invoices_hidden}
+                              </div>
+                              {credit.pdf_available ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="mt-1 h-7 px-2 text-xs"
+                                  onClick={() => {
+                                    void downloadPortalCreditNotePdf(detail.id, credit.id, credit.document_number).catch(() => {
+                                      dispatchInvoicesState({ detailError: t.finance_credit_note_pdf_error });
+                                    });
+                                  }}
+                                >
+                                  {t.finance_credit_note_pdf}
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
                         );
@@ -986,6 +1031,59 @@ function usePatientInvoicesPageContent() {
                           </div>
                         );
                       })}
+                    </div>
+                  </section>
+                ) : null}
+
+                {detailDunningLetters.length > 0 ? (
+                  <section
+                    className={cn("rounded-xl p-5", tokens.surface.card)}
+                    data-testid="portal-dunning-letters"
+                  >
+                    <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</span>
+                    </h2>
+                    <p className={cn("mt-1", tokens.text.muted)}>
+                      {lang === "de"
+                        ? "Jedes Schreiben nennt den offenen Betrag und die neue Zahlungsfrist."
+                        : "В каждом письме указаны сумма к оплате и новый срок оплаты."}
+                    </p>
+                    <div className="mt-5 space-y-2">
+                      {detailDunningLetters.map((letter) => (
+                        <div
+                          key={letter.id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-foreground">{letter.title}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {formatPortalDate(letter.sent_at)}
+                              {letter.payment_due_date
+                                ? ` · ${lang === "de" ? "zahlbar bis" : "оплатить до"} ${formatPortalDate(letter.payment_due_date)}`
+                                : ""}
+                              {` · ${formatPortalCurrency(letter.balance_due, detail.currency)}`}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg"
+                            onClick={() => {
+                              void downloadPortalDunningLetter(detail.id, letter).catch((err) => {
+                                dispatchInvoicesState({
+                                  detailError:
+                                    err instanceof Error ? err.message : t.portal_invoices_failed_to_download_invoice_pdf,
+                                });
+                              });
+                            }}
+                          >
+                            <Download className="size-3.5" />
+                            PDF
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </section>
                 ) : null}

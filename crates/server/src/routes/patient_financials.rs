@@ -191,6 +191,66 @@ struct SettlementMovement {
     credit: Decimal,
 }
 
+/// Accrued, not yet invoiced amounts of the patient's open termination
+/// settlements, as debit movements of the account statement.
+async fn load_open_termination_uninvoiced_movements(
+    state: &AppState,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+    currency: &str,
+) -> Result<Vec<SettlementMovement>, sqlx::Error> {
+    let settlements = sqlx::query(
+        r#"SELECT settlement.order_id, settlement.terminated_at, orders.order_number
+           FROM order_termination_settlements settlement
+           JOIN orders ON orders.id = settlement.order_id
+           WHERE settlement.patient_id = $1
+             AND settlement.status = 'open'
+             AND UPPER(settlement.currency) = $2
+             AND ($3::uuid IS NULL OR settlement.order_id = $3)
+           ORDER BY settlement.terminated_at, settlement.order_id"#,
+    )
+    .bind(patient_id)
+    .bind(currency)
+    .bind(order_id)
+    .fetch_all(&state.db)
+    .await?;
+    if settlements.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut connection = state.db.acquire().await?;
+    let mut movements = Vec::new();
+    for row in settlements {
+        let order_id = row.try_get::<Uuid, _>("order_id")?;
+        let Some(settlement) =
+            crate::routes::invoices::termination_settlements::compute_order_settlement(
+                &mut connection,
+                order_id,
+            )
+            .await?
+        else {
+            continue;
+        };
+        let debit = settlement.statement_uninvoiced_gross();
+        if debit <= Decimal::ZERO {
+            continue;
+        }
+        let terminated_at = row.try_get::<DateTime<Utc>, _>("terminated_at")?;
+        movements.push(SettlementMovement {
+            id: format!("termination-uninvoiced:{order_id}"),
+            kind: "termination_uninvoiced".to_string(),
+            entry_date: crate::app_time::date_of(terminated_at),
+            occurred_at: terminated_at,
+            order_id: Some(order_id),
+            order_number: row.try_get("order_number")?,
+            document_number: None,
+            description: "Termination settlement: accrued, not yet invoiced".to_string(),
+            debit,
+            credit: Decimal::ZERO,
+        });
+    }
+    Ok(movements)
+}
+
 struct SettlementLedger {
     opening_balance: Decimal,
     debit_total: Decimal,
@@ -572,7 +632,7 @@ async fn load_patient_settlement_ledger(
                 .unwrap_or_default(),
             entry_date: row
                 .try_get::<NaiveDate, _>("entry_date")
-                .unwrap_or_else(|_| Utc::now().date_naive()),
+                .unwrap_or_else(|_| crate::app_time::today()),
             occurred_at: row
                 .try_get::<DateTime<Utc>, _>("occurred_at")
                 .unwrap_or_else(|_| Utc::now()),
@@ -590,6 +650,17 @@ async fn load_patient_settlement_ledger(
             credit: row.try_get::<Decimal, _>("credit").unwrap_or(Decimal::ZERO),
         })
         .collect::<Vec<_>>();
+    // An open termination settlement bills what accrued up to the
+    // termination. Until its final invoice is released, the accrued services
+    // not invoiced yet (and drafts) are part of what the patient owes, so the
+    // staff balance and the settlement show the same figure. Third-party costs
+    // are already here as external receivables; the portal shows invoices only.
+    if !portal_scope && to.is_none() && query.package_id.is_none() {
+        source_movements.extend(
+            load_open_termination_uninvoiced_movements(state, patient_id, query.order_id, currency)
+                .await?,
+        );
+    }
     source_movements.sort_by(|left, right| {
         left.entry_date
             .cmp(&right.entry_date)
@@ -812,8 +883,13 @@ async fn load_patient_account_statement(
     let mut cash_paid = Decimal::ZERO;
     let mut prepayment_applied = Decimal::ZERO;
     let mut available_prepayment = Decimal::ZERO;
+    let mut credit_balance = Decimal::ZERO;
     let mut invoice_due = Decimal::ZERO;
     let mut hidden_amount_count = 0_u64;
+    // Open balances are netted against paid advances not applied yet and
+    // credit balances, like the order card and the invoice list.
+    let mut open_invoices = Vec::new();
+    let mut open_item_indexes = Vec::new();
 
     for row in invoice_rows {
         let invoice_type = row.try_get::<String, _>("invoice_type").unwrap_or_default();
@@ -859,12 +935,34 @@ async fn load_patient_account_statement(
             "unpaid"
         };
 
+        let invoice_credit = if status == "draft" {
+            Decimal::ZERO
+        } else {
+            (paid + applied - (total_gross - credited)).max(Decimal::ZERO)
+        };
         if amounts_visible {
             invoiced_gross += (total_gross - credited).max(Decimal::ZERO);
             cash_paid += paid;
             prepayment_applied += applied;
             available_prepayment += advance_available;
+            credit_balance += invoice_credit;
             invoice_due += due;
+            if status != "draft" {
+                open_item_indexes.push(items.len());
+                open_invoices.push(crate::routes::invoices::advance_application::OpenInvoice {
+                    order_id: row
+                        .try_get::<Option<Uuid>, _>("order_id")
+                        .unwrap_or_default(),
+                    is_advance: invoice_type == "advance",
+                    due,
+                    advance_available,
+                    credit_balance: invoice_credit,
+                    issued_at: row
+                        .try_get::<chrono::DateTime<Utc>, _>("issued_at")
+                        .unwrap_or_else(|_| Utc::now()),
+                    id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                });
+            }
         } else {
             hidden_amount_count += 1;
         }
@@ -872,7 +970,7 @@ async fn load_patient_account_statement(
         items.push(serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "kind": if invoice_type == "advance" { "prepayment" } else { "invoice" },
-            "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("issued_at").map(|value| value.date_naive().to_string()).unwrap_or_default(),
+            "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("issued_at").map(|value| crate::app_time::date_of(value).to_string()).unwrap_or_default(),
             "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
             "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
             "document_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
@@ -891,6 +989,34 @@ async fn load_patient_account_statement(
             "amount_due": if amounts_visible { serde_json::json!(decimal_to_string(due)) } else { Value::Null },
             "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
         }));
+    }
+
+    let net_dues = crate::routes::invoices::advance_application::net_open_balances(&open_invoices);
+    let mut amount_to_pay = Decimal::ZERO;
+    for ((item_index, open), net) in open_item_indexes
+        .iter()
+        .zip(open_invoices.iter())
+        .zip(net_dues.iter())
+    {
+        amount_to_pay += net.to_pay;
+        if let Some(item) = items.get_mut(*item_index).and_then(Value::as_object_mut) {
+            item.insert(
+                "invoice_balance_due".to_string(),
+                serde_json::json!(decimal_to_string(open.due)),
+            );
+            item.insert(
+                "advance_credit".to_string(),
+                serde_json::json!(decimal_to_string(net.advance_credit)),
+            );
+            item.insert(
+                "credit_applied".to_string(),
+                serde_json::json!(decimal_to_string(net.credit_applied)),
+            );
+            item.insert(
+                "amount_due".to_string(),
+                serde_json::json!(decimal_to_string(net.to_pay)),
+            );
+        }
     }
 
     let credit_rows = sqlx::query(
@@ -1078,8 +1204,8 @@ async fn load_patient_account_statement(
                 };
             let created_at = row
                 .try_get::<chrono::DateTime<Utc>, _>("created_at")
-                .map(|value| value.date_naive())
-                .unwrap_or_else(|_| Utc::now().date_naive());
+                .map(crate::app_time::date_of)
+                .unwrap_or_else(|_| crate::app_time::today());
             let entry_date = row
                 .try_get::<Option<NaiveDate>, _>("invoice_date")
                 .unwrap_or_default()
@@ -1182,7 +1308,7 @@ async fn load_patient_account_statement(
             items.push(serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "kind": "service",
-                "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| value.date_naive().to_string()).unwrap_or_default(),
+                "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| crate::app_time::date_of(value).to_string()).unwrap_or_default(),
                 "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
                 "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
                 "description": row.try_get::<String, _>("service_name").unwrap_or_default(),
@@ -1203,7 +1329,9 @@ async fn load_patient_account_statement(
             .and_then(Value::as_str)
             .cmp(&left.get("entry_date").and_then(Value::as_str))
     });
-    let total_due = invoice_due + external_receivable;
+    // Still to pay: open invoices net of unapplied advances and credit
+    // balances, plus external receivables not yet on a patient invoice.
+    let total_due = amount_to_pay + external_receivable;
     let settlement =
         load_patient_settlement_ledger(state, patient_id, query, portal_scope, &currency, from, to)
             .await?;
@@ -1232,7 +1360,9 @@ async fn load_patient_account_statement(
             "cash_paid": decimal_to_string(cash_paid),
             "prepayment_applied": decimal_to_string(prepayment_applied),
             "available_prepayment": decimal_to_string(available_prepayment),
+            "credit_balance": decimal_to_string(credit_balance),
             "invoice_due": decimal_to_string(invoice_due),
+            "amount_to_pay": decimal_to_string(amount_to_pay),
             "external_receivable": if portal_scope { Value::Null } else { serde_json::json!(decimal_to_string(external_receivable)) },
             "total_due": if reconciliation_required || (portal_scope && (hidden_amount_count > 0 || external_item_count > 0)) { Value::Null } else { serde_json::json!(decimal_to_string(total_due)) },
             "reconciliation_required": reconciliation_required,
@@ -1600,7 +1730,7 @@ async fn get_patient_financial_summary(
     let mut overdue_amount = Decimal::ZERO;
     let mut order_breakdown = Vec::new();
     let mut service_breakdown = std::collections::BTreeMap::<String, (Decimal, Decimal)>::new();
-    let as_of_date = to.unwrap_or_else(|| Utc::now().date_naive());
+    let as_of_date = to.unwrap_or_else(crate::app_time::today);
 
     for row in invoice_rows {
         let total_net = row
@@ -2037,7 +2167,7 @@ async fn create_patient_balance_adjustment(
         }
     };
     let effective_on = match parse_query_date(Some(body.effective_on.as_str()), "effective_on") {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment date"),
     };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
@@ -2261,8 +2391,8 @@ async fn reverse_patient_balance_adjustment(
         }
     };
     let effective_on = match parse_query_date(body.effective_on.as_deref(), "effective_on") {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
 

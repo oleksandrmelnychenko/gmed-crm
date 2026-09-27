@@ -73,6 +73,7 @@ export type OrderSummary = {
   date_from?: string | null;
   date_to?: string | null;
   created_at: string;
+  read_scope?: OrderReadScope;
 };
 
 export type Leistung = {
@@ -100,6 +101,7 @@ export type Leistung = {
   doctor_name: string | null;
   source_interpreter_report_id?: string | null;
   source_medical_appointment_id?: string | null;
+  source_order_amendment_id?: string | null;
   agency_service_id?: string | null;
   agency_service_price_version_id?: string | null;
   agency_service_key?: string | null;
@@ -231,12 +233,25 @@ export type OrderDetail = {
   execution_flow?: OrderExecutionFlow | null;
   followup_flow?: OrderFollowupFlow | null;
   lifecycle?: OrderLifecycle | null;
-  /** "contract_terminated" when the framework contract termination stopped the order. */
+  /**
+   * "contract_terminated" when the framework contract termination stopped the
+   * order; otherwise the reason staff gave when cancelling it.
+   */
   cancellation_reason?: string | null;
   cancelled_at?: string | null;
+  /** A cancelled order (not a termination): who cancelled it and the billing basis. */
+  cancellation?: {
+    reason: string | null;
+    cancelled_at: string | null;
+    cancelled_by: string | null;
+    cancelled_by_name: string | null;
+    settlement: unknown;
+  } | null;
   termination_settlement?: { id: string; status: "open" | "settled" } | null;
   created_at: string;
   updated_at: string;
+  /** Present when the server returned a partial projection of the order. */
+  read_scope?: OrderReadScope;
 };
 
 export type OrderEconomicsAmounts = {
@@ -288,6 +303,21 @@ export type OrderEconomics = {
     credited_gross: string;
     invoice_settled_gross: string;
     invoice_outstanding_gross: string;
+    /** Paid advances not applied to a settlement invoice yet. */
+    advance_available_gross?: string;
+    advance_applied_gross?: string;
+    /** Cash beyond what the order's invoices ask for (overpayments, credits). */
+    patient_credit_gross?: string;
+    /** Still to receive: open balances net of unapplied advances and credit. */
+    patient_open_gross?: string;
+    /** Issued advance invoices (net of credit notes). */
+    advance_invoiced_gross?: string;
+    /** Advances credited into settlement invoices. */
+    prepayment_applied_gross?: string;
+    /** Settlement invoices plus issued advances, each advance counted once. */
+    billed_to_patient_gross?: string;
+    /** Open settlement invoices plus the unpaid part of issued advances. */
+    patient_outstanding_gross?: string;
     patient_cash_received_gross: string;
     patient_cash_refunded_gross: string;
     patient_cash_collected_gross: string;
@@ -437,6 +467,12 @@ export type OrderFollowupFlow = {
   followup_1w_status: FollowupStatus;
   followup_1m_status: FollowupStatus;
   followup_6m_status: FollowupStatus;
+  /** Planned dates of milestones marked scheduled (YYYY-MM-DD). */
+  followup_1w_date?: string | null;
+  followup_1m_date?: string | null;
+  followup_6m_date?: string | null;
+  /** Order appointment that follow-up reminders created from the order are attached to. */
+  reminder_anchor_appointment_id?: string | null;
   package_end_date: string | null;
   suggested_package_end_date: string | null;
   package_end_status: FollowupStatus;
@@ -512,8 +548,13 @@ export type WorkflowChecklistItem = {
   due_date: string | null;
   linked_task_id: string | null;
   linked_task_status: string | null;
+  linked_task_deleted?: boolean;
   is_completed: boolean;
+  /** Closed as "не требуется" rather than done; `is_completed` is true too. */
+  not_required?: boolean;
+  not_required_reason?: "manual" | "phase_passed" | "task_cancelled" | null;
   completed_at: string | null;
+  completed_by_name?: string | null;
   sort_order: number;
   created_at: string;
 };
@@ -523,6 +564,7 @@ export type WorkflowChecklistResponse = {
   scope_id: string;
   open_count: number;
   completed_count: number;
+  not_required_count?: number;
   blocked_reason?: string | null;
   items: WorkflowChecklistItem[];
 };
@@ -572,6 +614,9 @@ export type OrderFollowupFormState = {
   followup1wStatus: FollowupStatus;
   followup1mStatus: FollowupStatus;
   followup6mStatus: FollowupStatus;
+  followup1wDate: string;
+  followup1mDate: string;
+  followup6mDate: string;
   packageEndDate: string;
   packageEndStatus: FollowupStatus;
   resultsHandoffStatus: ResultsHandoffStatus;
@@ -798,4 +843,14 @@ export type OrdersPermissions = {
   canCancelLeistung: boolean;
   canManageExternalInvoices: boolean;
   canManageEconomics: boolean;
+  /**
+   * The role reads only its part of an order (concierge: service lines,
+   * interpreter team lead: interpreter lines). The server answers with a
+   * projection (`read_scope`) and refuses economics, amendments, group,
+   * pipeline and provider/doctor filters.
+   */
+  readsOnlyOrderPart: boolean;
 };
+
+/** Server projection name of a partial order read (`OrderReadScope`). */
+export type OrderReadScope = "full" | "concierge_services" | "interpreter_team";

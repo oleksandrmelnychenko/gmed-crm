@@ -71,22 +71,34 @@ export function resolveServiceDescriptionItems(
   return items.map((item) => ({ ...item, text: resolveServiceDescriptionTemplate(item.text, context) }));
 }
 
-type ServiceBillingUnitKind = "hour" | "day" | "unit" | "other";
+type ServiceBillingUnitKind =
+  | "hour"
+  | "day"
+  | "unit"
+  | "item"
+  | "ride"
+  | "appointment"
+  | "package"
+  | "other";
+
+// Catalog unit labels are free text: English keys from the seed catalog
+// ("ride", "item"), German or Russian labels typed by staff.
+const SERVICE_BILLING_UNIT_PATTERNS: ReadonlyArray<[Exclude<ServiceBillingUnitKind, "other">, RegExp]> = [
+  ["hour", /^(std\.?|stunde(?:n)?|hour(?:s)?|ч\.?|час(?:а|ов)?)$/u],
+  ["day", /^(tag(?:e)?\.?|day(?:s)?|день|дня|дней)$/u],
+  ["unit", /^(einheit(?:en)?|unit(?:s)?|ед\.?|единиц(?:а|ы)?)$/u],
+  ["item", /^(item(?:s)?|piece(?:s)?|pcs\.?|stk\.?|stück|шт\.?|штук(?:а|и)?)$/u],
+  ["ride", /^(ride(?:s)?|trip(?:s)?|fahrt(?:en)?|поездк(?:а|и)|поездок)$/u],
+  ["appointment", /^(appointment(?:s)?|termin(?:e)?|при[её]м(?:а|ов)?)$/u],
+  ["package", /^(package(?:s)?|paket(?:e)?|пакет(?:а|ов)?)$/u],
+];
 
 function serviceBillingUnitKind(unitLabel: string | null | undefined): ServiceBillingUnitKind {
   const normalized = unitLabel?.trim().toLocaleLowerCase("de-DE") ?? "";
-  if (/^(std\.?|stunde(?:n)?|hour(?:s)?|ч\.?|час(?:а|ов)?)$/u.test(normalized)) {
-    return "hour";
-  }
-  if (/^(tag(?:e)?\.?|day(?:s)?|день|дня|дней)$/u.test(normalized)) {
-    return "day";
-  }
-  if (/^(einheit(?:en)?|unit(?:s)?|ед\.?|единиц(?:а|ы)?)$/u.test(normalized)) {
-    return "unit";
-  }
-  return "other";
+  return SERVICE_BILLING_UNIT_PATTERNS.find(([, pattern]) => pattern.test(normalized))?.[0] ?? "other";
 }
 
+/** Localized billing unit of a catalog service; unknown custom labels stay as typed. */
 export function serviceBillingUnitLabel(
   unitLabel: string | null | undefined,
   tx: Tx,
@@ -98,6 +110,14 @@ export function serviceBillingUnitLabel(
       return tx("день", "Tag");
     case "unit":
       return tx("единица", "Einheit");
+    case "item":
+      return tx("шт.", "Stk.");
+    case "ride":
+      return tx("поездка", "Fahrt");
+    case "appointment":
+      return tx("приём", "Termin");
+    case "package":
+      return tx("пакет", "Paket");
     default:
       return unitLabel?.trim() || tx("единица", "Einheit");
   }
@@ -110,6 +130,7 @@ export function serviceBillingUnitBadgeClass(unitLabel: string | null | undefine
     case "day":
       return "border-violet-200 bg-violet-50 text-violet-700";
     case "unit":
+    case "item":
       return "border-sky-200 bg-sky-50 text-sky-700";
     default:
       return "border-border/70 bg-muted/40 text-muted-foreground";

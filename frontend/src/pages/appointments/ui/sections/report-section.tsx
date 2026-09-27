@@ -570,6 +570,15 @@ function useAppointmentReportSectionContent({
             {canResubmitRejectedReport ? (
               <Banner tone="warning" withIcon>
                 {appointmentText("appointments_the_latest_report_was_returned_update_the_hours_or_text")}
+                {/* The reviewer's reason is what the revision has to address. */}
+                {detailReport?.notes ? (
+                  <span className="mt-1 block" data-testid="appointment-report-revision-note">
+                    <span className="font-medium">
+                      {t.appointments_report_reviewer_notes}:
+                    </span>{" "}
+                    {detailReport.notes}
+                  </span>
+                ) : null}
               </Banner>
             ) : null}
 

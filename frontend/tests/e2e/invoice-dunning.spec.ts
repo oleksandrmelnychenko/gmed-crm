@@ -58,8 +58,8 @@ test("draft reminders are blocked before opening the form, with a Russian explan
 test("eligible reminders use clear labels and advance through the sequence only once", async ({ page }, testInfo) => {
   const state = await prepare(page);
   await page.goto(`/invoices?invoice=${invoiceId}`);
-  for (const [index, label] of ["Первое напоминание", "Второе напоминание", "Передача на взыскание"].entries()) {
-    const action = index === 2 ? "Зафиксировать передачу на взыскание" : "Добавить напоминание";
+  for (const [index, label] of ["Напоминание об оплате", "1-е требование об оплате", "2-е (последнее) требование"].entries()) {
+    const action = index === 2 ? "Отправить последнее требование" : "Добавить напоминание";
     await page.getByRole("button", { name: action, exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Контроль оплаты", exact: true });
     await expect(dialog).toBeVisible();

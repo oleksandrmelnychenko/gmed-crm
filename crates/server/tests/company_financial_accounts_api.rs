@@ -270,7 +270,7 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
         "request_id": request_id,
         "direction": "outflow",
         "amount": "5.00",
-        "effective_on": chrono::Utc::now().date_naive().to_string(),
+        "effective_on": gmed_server::app_time::today().to_string(),
         "reason": "Cash count correction",
         "note": "Internal reconciliation"
     });
@@ -327,7 +327,7 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     );
     let reversal_body = json!({
         "request_id": Uuid::new_v4(),
-        "effective_on": chrono::Utc::now().date_naive().to_string(),
+        "effective_on": gmed_server::app_time::today().to_string(),
         "reason": "Correction was entered by mistake"
     });
     let (reverse_status, reversed) = request_json(

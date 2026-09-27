@@ -36,6 +36,39 @@ export default defineConfig([
     },
   },
   {
+    // GMED works in German time only: every date and time is formatted in
+    // Europe/Berlin, whatever time zone the browser runs in. Intl date
+    // formatters and Date#toLocale(Date|Time)String default to the browser
+    // zone, so they go through the app time-zone helpers instead.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: [
+      'src/lib/app-time-zone.ts',
+      'src/lib/intl-cache.ts',
+      'src/**/*.test.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        {
+          object: 'Intl',
+          property: 'DateTimeFormat',
+          message:
+            'Use appDateTimeFormat from @/lib/app-time-zone (German time, Europe/Berlin).',
+        },
+        {
+          property: 'toLocaleDateString',
+          message:
+            'Use appDateTimeFormat(locale, options).format(date) from @/lib/app-time-zone (German time, Europe/Berlin).',
+        },
+        {
+          property: 'toLocaleTimeString',
+          message:
+            'Use appDateTimeFormat(locale, options).format(date) from @/lib/app-time-zone (German time, Europe/Berlin).',
+        },
+      ],
+    },
+  },
+  {
     files: ['src/pages/**/*.tsx', 'src/components/**/*.tsx'],
     ignores: [
       'src/pages/login.tsx',

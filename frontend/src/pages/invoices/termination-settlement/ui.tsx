@@ -14,7 +14,8 @@ import {
 import { toast } from "@/components/ui/toast";
 import { Banner, Field, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { ApiRequestError } from "@/lib/api";
-import type { Lang } from "@/lib/i18n";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { t as translations, type Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { useCan } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -30,7 +31,9 @@ import {
 } from "./api";
 import {
   canCreateFinalInvoice,
+  finalInvoiceAmount,
   finalInvoiceStatusLabel,
+  isPositiveAmount,
   isValidForceNote,
   FORCE_SETTLE_NOTE_MIN,
   settlementActionErrorMessage,
@@ -39,6 +42,7 @@ import {
   settlementBalanceTone,
   settlementLineStatusLabel,
   settlementStatusLabel,
+  toAmount,
 } from "./model";
 
 function txFor(lang: Lang) {
@@ -50,7 +54,7 @@ function formatDate(value: string | null | undefined, lang: Lang) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU");
+    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(date);
 }
 
 function Figure({ label, value, className }: { label: string; value: string; className?: string }) {
@@ -69,13 +73,32 @@ export function SettlementFigures({
   lang,
   className,
 }: {
-  figures: Pick<TerminationFigures, "accrued_gross" | "invoiced_gross" | "paid_gross" | "balance_gross" | "uninvoiced_gross">;
+  figures: Pick<
+    TerminationFigures,
+    | "accrued_gross"
+    | "invoiced_gross"
+    | "paid_gross"
+    | "balance_gross"
+    | "uninvoiced_gross"
+    | "draft_gross"
+    | "billable_gross"
+    | "unmatched_invoiced_gross"
+  >;
   currency: string;
   lang: Lang;
   className?: string;
 }) {
   const tx = txFor(lang);
+  const text = translations(lang);
   const money = (value: unknown) => formatMoneyAmount(value, currency || "EUR");
+  const notes = [
+    isPositiveAmount(figures.draft_gross)
+      ? text.finance_settlement_in_drafts.replace("{amount}", money(figures.draft_gross))
+      : null,
+    figures.billable_gross != null && toAmount(figures.billable_gross) !== toAmount(figures.uninvoiced_gross)
+      ? text.finance_settlement_billable_now.replace("{amount}", money(figures.billable_gross))
+      : null,
+  ].filter((note): note is string => Boolean(note));
   return (
     <div className={cn("grid gap-3", className)}>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -84,9 +107,16 @@ export function SettlementFigures({
         <Figure label={tx("Оплачено", "Bezahlt")} value={money(figures.paid_gross)} />
         <Figure label={tx("Не выставлено", "Nicht berechnet")} value={money(figures.uninvoiced_gross)} />
       </div>
+      {notes.length ? <p className="text-xs text-muted-foreground">{notes.join(" · ")}</p> : null}
+      {isPositiveAmount(figures.unmatched_invoiced_gross) ? (
+        <p className="text-xs text-amber-700">
+          {text.finance_settlement_unmatched_lines.replace("{amount}", money(figures.unmatched_invoiced_gross))}
+        </p>
+      ) : null}
       <p className={cn("text-sm font-semibold", settlementBalanceClass(figures.balance_gross))}>
         {settlementBalanceLabel(figures.balance_gross, currency, lang)}
       </p>
+      <p className="text-xs text-muted-foreground">{text.finance_settlement_basis}</p>
     </div>
   );
 }
@@ -248,8 +278,11 @@ export function SettlementActions({
       const invoice = await createTerminationFinalInvoice(settlement.order_id);
       toast.success(
         invoice.idempotent_replay
-          ? tx(`Черновик ${invoice.invoice_number} уже существует.`, `Entwurf ${invoice.invoice_number} existiert bereits.`)
-          : tx(`Черновик финального счёта ${invoice.invoice_number} создан.`, `Entwurf der Schlussrechnung ${invoice.invoice_number} erstellt.`),
+          ? tx("Черновик финального счёта уже существует.", "Der Entwurf der Schlussrechnung existiert bereits.")
+          : tx(
+              "Черновик финального счёта создан. Номер он получит при выпуске.",
+              "Entwurf der Schlussrechnung erstellt. Die Nummer erhält er bei der Ausstellung.",
+            ),
       );
       onChanged();
       onInvoiceCreated?.(invoice.id);
@@ -282,6 +315,7 @@ export function SettlementActions({
   }
 
   const invoiceAllowed = canCreateFinalInvoice(settlement);
+  const invoiceAmount = finalInvoiceAmount(settlement);
   return (
     <div className="grid gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -297,6 +331,9 @@ export function SettlementActions({
           >
             {busy === "invoice" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FilePlus2 className="size-3.5" />}
             {tx("Создать финальный счёт", "Schlussrechnung erstellen")}
+            {invoiceAllowed && invoiceAmount > 0 && settlement.final_invoice?.status !== "draft"
+              ? ` · ${formatMoneyAmount(invoiceAmount, settlement.currency || "EUR")}`
+              : null}
           </Button>
         ) : null}
         {canFinance ? (
@@ -345,7 +382,7 @@ export function FinalInvoiceLink({
         className="font-mono text-xs font-semibold text-primary hover:underline"
         to={`/invoices?invoice=${encodeURIComponent(invoice.id)}`}
       >
-        {invoice.invoice_number}
+        {invoice.invoice_number || (lang === "de" ? "Entwurf" : "Черновик")}
       </StaffLink>
       <StatusBadge status={invoice.status}>{finalInvoiceStatusLabel(invoice.status, lang)}</StatusBadge>
       <span className="font-mono text-xs tabular-nums text-muted-foreground">

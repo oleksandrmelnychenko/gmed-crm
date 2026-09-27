@@ -763,7 +763,7 @@ function useQueueSheetContent({
                         </label>
                         <label className="flex flex-col gap-1.5">
                           <span className="text-[11.5px] font-medium leading-tight text-muted-foreground">
-                            {tr.role_interpreter ?? appointmentText("appointments_interpreter")}
+                            {appointmentText("appointments_interpreter")}
                           </span>
                           <NativeComboboxSelect
                             value={visibleScheduleForm.interpreterId}

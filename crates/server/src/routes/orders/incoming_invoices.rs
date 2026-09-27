@@ -132,7 +132,7 @@ async fn update_patient_payment(
         return response.into_response();
     }
     let paid_on = match chrono::NaiveDate::parse_from_str(body.paid_on.trim(), "%Y-%m-%d") {
-        Ok(value) if value <= chrono::Utc::now().date_naive() => value,
+        Ok(value) if value <= crate::app_time::today() => value,
         _ => {
             return super::err(
                 StatusCode::UNPROCESSABLE_ENTITY,

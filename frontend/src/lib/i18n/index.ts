@@ -6,6 +6,7 @@ import type { AdminSystemTranslations } from "./catalogs/admin-system";
 import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
 import type { ExtractedUiTranslations } from "./catalogs/extracted-ui";
+import type { FinanceBalancesTranslations } from "./catalogs/finance-balances";
 import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
 import type { RevenueTranslations } from "./catalogs/revenue";
@@ -18,6 +19,7 @@ export interface Translations
     CasesClinicalTranslations,
     ClinicalTranslations,
     ExtractedUiTranslations,
+    FinanceBalancesTranslations,
     OperationsTranslations,
     PatientsPortalTranslations,
     RevenueTranslations,
@@ -628,6 +630,10 @@ export interface Translations
   settings_clinical_data: string;
   settings_clinical_data_hint: string;
   settings_clinical_retention_years: string;
+  settings_concierge_preparation: string;
+  settings_concierge_preparation_hint: string;
+  settings_concierge_reminder_lead_hours: string;
+  settings_concierge_prep_lead_hours: string;
   settings_sessions: string;
   settings_active_sessions: string;
   settings_logout_user: string;

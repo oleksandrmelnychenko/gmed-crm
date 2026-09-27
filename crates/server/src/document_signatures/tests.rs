@@ -533,7 +533,7 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
         .unwrap();
     let pool = PgPoolOptions::new()
         .max_connections(5)
-        .connect_with(options.database(&database))
+        .connect_with(gmed_db::with_session_settings(options.database(&database)))
         .await
         .unwrap();
     // Old seeded invoices have lines absent from their seeded quotes. The

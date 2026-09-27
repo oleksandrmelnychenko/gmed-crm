@@ -14,6 +14,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
 import { getLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -679,7 +680,10 @@ function usePatientProfileTabContent({
           />
           <ProfileSummaryLine
             label={t.patients_residence_country}
-            value={fieldValue(detail.residence_country, t.common_not_set)}
+            value={fieldValue(
+              countryNameForDisplay(detail.residence_country, getLang()),
+              t.common_not_set,
+            )}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_residence_country, t.patient_profile_edit_field_aria)}
           />
@@ -772,7 +776,10 @@ function usePatientProfileTabContent({
           />
           <ProfileSummaryLine
             label={t.patients_address_country}
-            value={fieldValue(detail.address_country, t.common_not_set)}
+            value={fieldValue(
+              countryNameForDisplay(detail.address_country, getLang()),
+              t.common_not_set,
+            )}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_address_country, t.patient_profile_edit_field_aria)}
           />

@@ -30,9 +30,10 @@ import {
 } from "@/components/ui/dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { ConciergeTask, ConciergeTaskStatus } from "@/pages/concierge/model";
+import { conciergeTaskCode, type ConciergeTask, type ConciergeTaskStatus } from "@/pages/concierge/model";
 
 import type { Project, ProjectWorkflowDependency } from "./model";
 import {
@@ -224,9 +225,9 @@ type ProjectWorkflowViewProps = {
 
 function formatDate(value: string | null, lang: Lang) {
   if (!value) return null;
-  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  const date = dateOrInstant(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "short",
     year: value.length === 10 ? "numeric" : undefined,
@@ -251,10 +252,6 @@ function statusAccent(status: ConciergeTaskStatus) {
   if (status === "in_progress") return "bg-sky-500";
   if (status === "cancelled") return "bg-rose-500";
   return "bg-orange-500";
-}
-
-function taskCode(task: ConciergeTask) {
-  return `TASK-${task.id.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
 }
 
 function localizeWorkflowError(error: unknown, labels: WorkflowLabels, fallback: string) {
@@ -287,7 +284,7 @@ function WorkflowTaskCard({
   return (
     <button
       type="button"
-      aria-label={`${taskCode(task)}: ${localizeTaskTitle(task.title, lang)}. ${statusLabel(task.status, labels)}${unresolvedCount ? `. ${labels.blocked}: ${unresolvedCount}` : ""}`}
+      aria-label={`${conciergeTaskCode(task)}: ${localizeTaskTitle(task.title, lang)}. ${statusLabel(task.status, labels)}${unresolvedCount ? `. ${labels.blocked}: ${unresolvedCount}` : ""}`}
       className={cn(
         "group overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-[border-color,box-shadow] hover:border-orange-300 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400",
         selected && "border-orange-400 ring-2 ring-orange-100",
@@ -299,7 +296,7 @@ function WorkflowTaskCard({
       <span className={cn("absolute inset-y-0 left-0 w-1", statusAccent(task.status))} />
       <span className="flex h-full flex-col px-4 py-3 pl-5">
         <span className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] font-medium tracking-wide text-muted-foreground">{taskCode(task)}</span>
+          <span className="font-mono text-[10px] font-medium tracking-wide text-muted-foreground">{conciergeTaskCode(task)}</span>
           <Badge variant="outline" className={cn("h-6 text-[10px]", statusTone(task.status))}>
             {statusLabel(task.status, labels)}
           </Badge>
@@ -578,7 +575,7 @@ export function ProjectWorkflowView({
     const normalizedQuery = taskQuery.trim().toLocaleLowerCase();
     const now = Date.now();
     return tasks.filter((task) => {
-      const matchesQuery = !normalizedQuery || [task.title, localizeTaskTitle(task.title, lang), task.assigned_to_name, taskCode(task), task.id]
+      const matchesQuery = !normalizedQuery || [task.title, localizeTaskTitle(task.title, lang), task.assigned_to_name, conciergeTaskCode(task), task.id]
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
       if (!matchesQuery) return false;
       if (taskFilter === "active") return task.status !== "completed" && task.status !== "cancelled";
@@ -652,7 +649,7 @@ export function ProjectWorkflowView({
                   {selected.patient_name ? <span className="truncate text-xs text-muted-foreground">{selected.patient_name}</span> : null}
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                  <span><span className="text-foreground">{labels.owner}:</span> {selected.owner_name}</span>
+                  <span className="min-w-0 max-w-full break-words" title={selected.owner_name}><span className="text-foreground">{labels.owner}:</span> {selected.owner_name}</span>
                   <span><span className="text-foreground">{labels.deadline}:</span> {formatDate(selected.due_on, lang) ?? labels.noDeadline}</span>
                 </div>
               </div>
@@ -713,13 +710,13 @@ export function ProjectWorkflowView({
               onSelectTask={setSelectedTaskId}
             />
 
-            <aside className="rounded-2xl border bg-card p-4 2xl:sticky 2xl:top-3 2xl:self-start">
+            <aside className="min-w-0 rounded-2xl border bg-card p-4 2xl:sticky 2xl:top-3 2xl:self-start">
               {selectedTask ? (
                 <>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="font-mono text-[10px] text-muted-foreground">{taskCode(selectedTask)}</p>
-                      <h3 className="mt-1 text-sm font-semibold leading-5">{localizeTaskTitle(selectedTask.title, lang)}</h3>
+                      <p className="font-mono text-[10px] text-muted-foreground">{conciergeTaskCode(selectedTask)}</p>
+                      <h3 className="mt-1 break-words text-sm font-semibold leading-5">{localizeTaskTitle(selectedTask.title, lang)}</h3>
                     </div>
                     <Badge variant="outline" className={cn("shrink-0 text-[10px]", statusTone(selectedTask.status))}>{statusLabel(selectedTask.status, labels)}</Badge>
                   </div>

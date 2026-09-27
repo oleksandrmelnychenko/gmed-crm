@@ -30,6 +30,14 @@ pub fn router() -> Router<AppState> {
             post(complete_patient_workflow_item),
         )
         .route(
+            "/patients/{patient_id}/workflow-checklist/{item_id}/not-required",
+            post(mark_patient_workflow_item_not_required),
+        )
+        .route(
+            "/patients/{patient_id}/workflow-checklist/{item_id}/reopen",
+            post(reopen_patient_workflow_item),
+        )
+        .route(
             "/orders/{order_id}/workflow-checklist",
             get(list_order_workflow_checklist).post(add_order_workflow_item),
         )
@@ -37,6 +45,62 @@ pub fn router() -> Router<AppState> {
             "/orders/{order_id}/workflow-checklist/{item_id}/complete",
             post(complete_order_workflow_item),
         )
+        .route(
+            "/orders/{order_id}/workflow-checklist/{item_id}/not-required",
+            post(mark_order_workflow_item_not_required),
+        )
+        .route(
+            "/orders/{order_id}/workflow-checklist/{item_id}/reopen",
+            post(reopen_order_workflow_item),
+        )
+}
+
+/// Why a checklist item was resolved as "not required" instead of completed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NotRequiredReason {
+    /// Marked on the order or patient page.
+    Manual,
+    /// The order moved past the item's stage while it was still open.
+    PhasePassed,
+    /// Its linked task was cancelled in the work center.
+    TaskCancelled,
+}
+
+impl NotRequiredReason {
+    fn as_str(self) -> &'static str {
+        match self {
+            NotRequiredReason::Manual => "manual",
+            NotRequiredReason::PhasePassed => "phase_passed",
+            NotRequiredReason::TaskCancelled => "task_cancelled",
+        }
+    }
+}
+
+/// How a checklist item changed together with its linked task.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChecklistItemChange {
+    Completed,
+    NotRequired(NotRequiredReason),
+    Reopened,
+}
+
+impl ChecklistItemChange {
+    fn audit_action(self) -> &'static str {
+        match self {
+            ChecklistItemChange::Completed => "workflow_checklist_item_completed",
+            ChecklistItemChange::NotRequired(_) => "workflow_checklist_item_not_required",
+            ChecklistItemChange::Reopened => "workflow_checklist_item_reopened",
+        }
+    }
+
+    fn realtime_event(self) -> &'static str {
+        match self {
+            ChecklistItemChange::Completed => "workflow_checklist_item.completed",
+            ChecklistItemChange::NotRequired(_) | ChecklistItemChange::Reopened => {
+                "workflow_checklist_item.updated"
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -213,15 +277,18 @@ pub(crate) async fn ensure_default_order_workflow(
         return Ok(());
     }
     let context = load_order_scope_context(state, order_id).await?;
+    let current_rank = order_phase_rank(context.phase.as_deref().unwrap_or("discovery"));
     for item in ORDER_WORKFLOW_TEMPLATE {
         let Some(phase) = item.phase else {
             continue;
         };
-        if order_phase_rank(phase)
-            > order_phase_rank(context.phase.as_deref().unwrap_or("discovery"))
-        {
+        let rank = order_phase_rank(phase);
+        if rank > current_rank {
             continue;
         }
+        // Items of stages the order has already passed are created closed as
+        // "not required" and without a task, so a first look at an order in a
+        // later stage does not open work nobody is meant to do any more.
         ensure_template_item(
             state,
             WorkflowScope::Order,
@@ -229,9 +296,82 @@ pub(crate) async fn ensure_default_order_workflow(
             &context,
             item,
             fallback_user_id,
+            rank < current_rank,
         )
         .await?;
     }
+    Ok(())
+}
+
+/// Resolves the still-open template items of the stages before `phase` as
+/// "not required" and cancels their linked tasks, so a passed stage shows no
+/// open work and no longer blocks the order. Custom items are not tied to a
+/// stage and stay open. Reopening an item brings it (and its task) back.
+pub(crate) async fn resolve_passed_phase_items(
+    state: &AppState,
+    order_id: Uuid,
+    phase: &str,
+    actor_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let current_rank = order_phase_rank(phase);
+    let passed_keys = ORDER_WORKFLOW_TEMPLATE
+        .iter()
+        .filter(|item| {
+            item.phase
+                .is_some_and(|item_phase| order_phase_rank(item_phase) < current_rank)
+        })
+        .map(|item| item.checklist_key.to_string())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if passed_keys.is_empty() {
+        return Ok(());
+    }
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, order_id = %order_id, "resolve passed-stage checklist items");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update the order checklist",
+        )
+    };
+    let mut tx = state.db.begin().await.map_err(failed)?;
+    let rows = sqlx::query(
+        r#"UPDATE workflow_checklist_items
+           SET is_completed = true,
+               not_required = true,
+               not_required_reason = 'phase_passed',
+               completed_by = $3,
+               completed_at = now(),
+               updated_at = now()
+           WHERE scope_type = 'order'
+             AND order_id = $1
+             AND checklist_key = ANY($2)
+             AND metadata @> '{"template": true}'::jsonb
+             AND NOT is_completed
+           RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
+    )
+    .bind(order_id)
+    .bind(&passed_keys)
+    .bind(actor_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(failed)?;
+    let mut changed = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let item = checklist_sync_from_row(
+            row,
+            ChecklistItemChange::NotRequired(NotRequiredReason::PhasePassed),
+        )
+        .map_err(failed)?;
+        if let Some(task_id) = item.task_id {
+            cancel_linked_task(&mut tx, task_id, actor_id, NotRequiredReason::PhasePassed)
+                .await
+                .map_err(failed)?;
+        }
+        changed.push(item);
+    }
+    tx.commit().await.map_err(failed)?;
+    publish_checklist_item_changes(state, actor_id, &changed).await;
     Ok(())
 }
 
@@ -324,6 +464,7 @@ async fn list_order_workflow_checklist(
             "scope_id": order_id,
             "open_count": 0,
             "completed_count": 0,
+            "not_required_count": 0,
             "blocked_reason": "patient_required",
             "items": [],
         }))
@@ -377,6 +518,342 @@ async fn complete_order_workflow_item(
         return resp;
     }
     complete_workflow_item(&state, &auth, WorkflowScope::Order, order_id, item_id).await
+}
+
+async fn mark_patient_workflow_item_not_required(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, item_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = require_workflow_manage_role(&auth) {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
+        return resp;
+    }
+    change_workflow_item_resolution(
+        &state,
+        &auth,
+        WorkflowScope::Patient,
+        patient_id,
+        item_id,
+        ResolutionChange::NotRequired,
+    )
+    .await
+}
+
+async fn reopen_patient_workflow_item(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, item_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = require_workflow_manage_role(&auth) {
+        return resp;
+    }
+    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
+        return resp;
+    }
+    change_workflow_item_resolution(
+        &state,
+        &auth,
+        WorkflowScope::Patient,
+        patient_id,
+        item_id,
+        ResolutionChange::Reopen,
+    )
+    .await
+}
+
+async fn mark_order_workflow_item_not_required(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, item_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    order_workflow_item_resolution(
+        state,
+        auth,
+        order_id,
+        item_id,
+        ResolutionChange::NotRequired,
+    )
+    .await
+}
+
+async fn reopen_order_workflow_item(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, item_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    order_workflow_item_resolution(state, auth, order_id, item_id, ResolutionChange::Reopen).await
+}
+
+async fn order_workflow_item_resolution(
+    state: AppState,
+    auth: AuthUser,
+    order_id: Uuid,
+    item_id: Uuid,
+    change: ResolutionChange,
+) -> axum::response::Response {
+    if let Err(resp) = require_workflow_manage_role(&auth) {
+        return resp;
+    }
+    let context = match load_order_scope_context(&state, order_id).await {
+        Ok(context) => context,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_patient_scope_visible(&state, &auth, context.patient_id).await {
+        return resp;
+    }
+    change_workflow_item_resolution(
+        &state,
+        &auth,
+        WorkflowScope::Order,
+        order_id,
+        item_id,
+        change,
+    )
+    .await
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ResolutionChange {
+    NotRequired,
+    Reopen,
+}
+
+/// Marks an open checklist item "not required" (cancelling its linked task)
+/// or reopens a not-required item (reopening a cancelled linked task).
+async fn change_workflow_item_resolution(
+    state: &AppState,
+    auth: &AuthUser,
+    scope: WorkflowScope,
+    scope_id: Uuid,
+    item_id: Uuid,
+    change: ResolutionChange,
+) -> axum::response::Response {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, item_id = %item_id, "change workflow checklist item resolution");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update checklist item",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return failed(error),
+    };
+    let row = match sqlx::query(
+        r#"SELECT owner_user_id, owner_role, is_completed, not_required
+           FROM workflow_checklist_items
+           WHERE id = $1
+             AND scope_type = $2
+             AND scope_id = $3
+           FOR UPDATE"#,
+    )
+    .bind(item_id)
+    .bind(scope.as_str())
+    .bind(scope_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Checklist item not found"),
+        Err(error) => return failed(error),
+    };
+    let owner_user_id: Option<Uuid> = row.try_get("owner_user_id").unwrap_or_default();
+    let owner_role: String = row.try_get("owner_role").unwrap_or_default();
+    if !can_complete_workflow_item(auth, owner_user_id, owner_role.as_str()) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let is_completed: bool = row.try_get("is_completed").unwrap_or(false);
+    let not_required: bool = row.try_get("not_required").unwrap_or(false);
+
+    let updated = match change {
+        ResolutionChange::NotRequired => {
+            if not_required {
+                None
+            } else if is_completed {
+                return err(
+                    StatusCode::CONFLICT,
+                    "A completed checklist item cannot be marked as not required",
+                );
+            } else {
+                let row = sqlx::query(
+                    r#"UPDATE workflow_checklist_items
+                       SET is_completed = true,
+                           not_required = true,
+                           not_required_reason = 'manual',
+                           completed_by = $2,
+                           completed_at = now(),
+                           updated_at = now()
+                       WHERE id = $1
+                       RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
+                )
+                .bind(item_id)
+                .bind(auth.user_id)
+                .fetch_one(&mut *tx)
+                .await;
+                let row = match row {
+                    Ok(row) => row,
+                    Err(error) => return failed(error),
+                };
+                let item = match checklist_sync_from_row(
+                    &row,
+                    ChecklistItemChange::NotRequired(NotRequiredReason::Manual),
+                ) {
+                    Ok(item) => item,
+                    Err(error) => return failed(error),
+                };
+                if let Some(task_id) = item.task_id
+                    && let Err(error) = cancel_linked_task(
+                        &mut tx,
+                        task_id,
+                        auth.user_id,
+                        NotRequiredReason::Manual,
+                    )
+                    .await
+                {
+                    return failed(error);
+                }
+                Some(item)
+            }
+        }
+        ResolutionChange::Reopen => {
+            if !is_completed {
+                None
+            } else if !not_required {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Only a checklist item marked as not required can be reopened",
+                );
+            } else {
+                let row = sqlx::query(
+                    r#"UPDATE workflow_checklist_items
+                       SET is_completed = false,
+                           not_required = false,
+                           not_required_reason = NULL,
+                           completed_by = NULL,
+                           completed_at = NULL,
+                           updated_at = now()
+                       WHERE id = $1
+                       RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
+                )
+                .bind(item_id)
+                .fetch_one(&mut *tx)
+                .await;
+                let row = match row {
+                    Ok(row) => row,
+                    Err(error) => return failed(error),
+                };
+                let item = match checklist_sync_from_row(&row, ChecklistItemChange::Reopened) {
+                    Ok(item) => item,
+                    Err(error) => return failed(error),
+                };
+                if let Some(task_id) = item.task_id
+                    && let Err(error) = reopen_linked_task(&mut tx, task_id, auth.user_id).await
+                {
+                    return failed(error);
+                }
+                Some(item)
+            }
+        }
+    };
+    if let Err(error) = tx.commit().await {
+        return failed(error);
+    }
+    if let Some(item) = updated {
+        publish_checklist_item_changes(state, auth.user_id, std::slice::from_ref(&item)).await;
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// Cancels the open task behind a checklist item that is no longer required
+/// and records why in the task history. Deleted and finished tasks are left
+/// alone.
+async fn cancel_linked_task(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
+    actor_id: Uuid,
+    reason: NotRequiredReason,
+) -> Result<(), sqlx::Error> {
+    let previous_status: Option<String> = sqlx::query_scalar(
+        r#"WITH previous AS (
+               SELECT id, status FROM tasks
+               WHERE id = $1
+                 AND deleted_at IS NULL
+                 AND status NOT IN ('completed', 'cancelled')
+               FOR UPDATE
+           )
+           UPDATE tasks task
+           SET status = 'cancelled', completed_at = NULL, updated_at = now()
+           FROM previous
+           WHERE task.id = previous.id
+           RETURNING previous.status"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(previous_status) = previous_status {
+        sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(task_id)
+        .bind(actor_id)
+        .bind(json!({
+            "status": "cancelled",
+            "previous_status": previous_status,
+            "reason": "checklist_item_not_required",
+            "not_required_reason": reason.as_str(),
+        }))
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Reopens the cancelled task of a checklist item that is required again.
+async fn reopen_linked_task(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
+    actor_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    // An archived cancelled task leaves the archive: open work must be visible.
+    let was_archived: Option<bool> = sqlx::query_scalar(
+        r#"WITH previous AS (
+               SELECT id, archived_at IS NOT NULL AS was_archived FROM tasks
+               WHERE id = $1
+                 AND deleted_at IS NULL
+                 AND status = 'cancelled'
+               FOR UPDATE
+           )
+           UPDATE tasks task
+           SET status = 'open', completed_at = NULL, archived_at = NULL, archived_by = NULL,
+               updated_at = now()
+           FROM previous
+           WHERE task.id = previous.id
+           RETURNING previous.was_archived"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if let Some(was_archived) = was_archived {
+        sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(task_id)
+        .bind(actor_id)
+        .bind(json!({
+            "status": "open",
+            "previous_status": "cancelled",
+            "reason": "checklist_item_reopened",
+            "restored_from_archive": was_archived,
+        }))
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 fn require_workflow_view_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
@@ -525,6 +1002,7 @@ fn order_phase_rank(phase: &str) -> i32 {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn ensure_template_item(
     state: &AppState,
     scope: WorkflowScope,
@@ -532,6 +1010,7 @@ async fn ensure_template_item(
     context: &ScopeContext,
     template: WorkflowTemplateItem,
     fallback_user_id: Option<Uuid>,
+    stage_passed: bool,
 ) -> Result<(), axum::response::Response> {
     let preferred_owner = fallback_user_id.or(Some(context.created_by));
     let owner_user_id = resolve_default_assignee(
@@ -546,10 +1025,12 @@ async fn ensure_template_item(
     let row = sqlx::query(
         r#"INSERT INTO workflow_checklist_items (
                 scope_type, scope_id, patient_id, order_id, checklist_key, item_key, item_text,
-                owner_role, owner_user_id, created_by, priority, due_date, sort_order, metadata
+                owner_role, owner_user_id, created_by, priority, due_date, sort_order, metadata,
+                is_completed, not_required, not_required_reason, completed_at
            ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7,
-                $8, $9, $10, $11, $12, $13, $14::jsonb
+                $8, $9, $10, $11, $12, $13, $14::jsonb,
+                $15, $15, CASE WHEN $15 THEN 'phase_passed' END, CASE WHEN $15 THEN now() END
            )
            ON CONFLICT (scope_type, scope_id, checklist_key, item_key)
            DO UPDATE SET updated_at = workflow_checklist_items.updated_at
@@ -572,6 +1053,7 @@ async fn ensure_template_item(
         "template": true,
         "phase": template.phase,
     }))
+    .bind(stage_passed)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -900,6 +1382,7 @@ async fn complete_workflow_item(
                    completed_at = COALESCE(completed_at, now()),
                    updated_at = now()
                WHERE id = $1
+                 AND deleted_at IS NULL
                  AND status != 'completed'"#,
         )
         .bind(linked_task_id)
@@ -967,9 +1450,13 @@ async fn list_workflow_scope(
         r#"SELECT w.id, w.checklist_key, w.item_key, w.item_text, w.owner_role, w.owner_user_id,
                   owner.name AS owner_name, owner.role AS owner_user_role,
                   w.priority, w.due_date, w.linked_task_id, t.status AS linked_task_status,
-                  w.is_completed, w.completed_at, w.sort_order, w.metadata, w.created_at
+                  (t.deleted_at IS NOT NULL) AS linked_task_deleted,
+                  w.is_completed, w.not_required, w.not_required_reason, w.completed_at,
+                  completer.name AS completed_by_name,
+                  w.sort_order, w.metadata, w.created_at
            FROM workflow_checklist_items w
            LEFT JOIN users owner ON owner.id = w.owner_user_id
+           LEFT JOIN users completer ON completer.id = w.completed_by
            LEFT JOIN tasks t ON t.id = w.linked_task_id
            WHERE w.scope_type = $1
              AND w.scope_id = $2
@@ -1007,7 +1494,14 @@ async fn list_workflow_scope(
         .iter()
         .filter(|row| !row.try_get::<bool, _>("is_completed").unwrap_or(false))
         .count();
-    let completed_count = rows.len().saturating_sub(open_count);
+    let not_required_count = rows
+        .iter()
+        .filter(|row| row.try_get::<bool, _>("not_required").unwrap_or(false))
+        .count();
+    let completed_count = rows
+        .len()
+        .saturating_sub(open_count)
+        .saturating_sub(not_required_count);
     let items = rows
         .into_iter()
         .map(|row| {
@@ -1024,8 +1518,12 @@ async fn list_workflow_scope(
                 "due_date": row.try_get::<Option<chrono::DateTime<Utc>>, _>("due_date").unwrap_or_default().map(|value| value.to_rfc3339()),
                 "linked_task_id": row.try_get::<Option<Uuid>, _>("linked_task_id").unwrap_or_default(),
                 "linked_task_status": row.try_get::<Option<String>, _>("linked_task_status").unwrap_or_default(),
+                "linked_task_deleted": row.try_get::<Option<bool>, _>("linked_task_deleted").unwrap_or_default().unwrap_or(false),
                 "is_completed": row.try_get::<bool, _>("is_completed").unwrap_or(false),
+                "not_required": row.try_get::<bool, _>("not_required").unwrap_or(false),
+                "not_required_reason": row.try_get::<Option<String>, _>("not_required_reason").unwrap_or_default(),
                 "completed_at": row.try_get::<Option<chrono::DateTime<Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                "completed_by_name": row.try_get::<Option<String>, _>("completed_by_name").unwrap_or_default(),
                 "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
                 "metadata": row.try_get::<Value, _>("metadata").unwrap_or_else(|_| json!({})),
                 "created_at": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
@@ -1038,6 +1536,7 @@ async fn list_workflow_scope(
         "scope_id": scope_id,
         "open_count": open_count,
         "completed_count": completed_count,
+        "not_required_count": not_required_count,
         "items": items,
     }))
     .into_response()
@@ -1219,14 +1718,35 @@ async fn insert_workflow_task(
     })
 }
 
-/// A workflow checklist item closed because its linked task was completed.
-pub(crate) struct TaskCompletedChecklistItem {
+/// A workflow checklist item that changed together with its linked task.
+pub(crate) struct ChecklistItemSync {
     id: Uuid,
     patient_id: Uuid,
     order_id: Option<Uuid>,
     scope_type: String,
     scope_id: Uuid,
     item_text: String,
+    task_id: Option<Uuid>,
+    change: ChecklistItemChange,
+}
+
+/// A workflow checklist item closed because its linked task was completed.
+pub(crate) type TaskCompletedChecklistItem = ChecklistItemSync;
+
+fn checklist_sync_from_row(
+    row: &sqlx::postgres::PgRow,
+    change: ChecklistItemChange,
+) -> Result<ChecklistItemSync, sqlx::Error> {
+    Ok(ChecklistItemSync {
+        id: row.try_get("id")?,
+        patient_id: row.try_get("patient_id")?,
+        order_id: row.try_get("order_id")?,
+        scope_type: row.try_get("scope_type")?,
+        scope_id: row.try_get("scope_id")?,
+        item_text: row.try_get("item_text")?,
+        task_id: row.try_get("linked_task_id")?,
+        change,
+    })
 }
 
 /// Completes the open workflow checklist items linked to `task_id`.
@@ -1235,7 +1755,7 @@ pub(crate) struct TaskCompletedChecklistItem {
 /// the order/patient checklist in step with its linked task; otherwise the
 /// checklist keeps counting a finished task as open and blocks order
 /// completion. Run it in the same transaction as the task status change and
-/// pass the result to [`publish_task_completed_checklist_items`] after commit.
+/// pass the result to [`publish_checklist_item_changes`] after commit.
 pub(crate) async fn complete_checklist_items_for_task<'e, E>(
     executor: E,
     task_id: Uuid,
@@ -1252,45 +1772,113 @@ where
                updated_at = now()
            WHERE linked_task_id = $1
              AND is_completed = false
-           RETURNING id, patient_id, order_id, scope_type, scope_id, item_text"#,
+           RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
     )
     .bind(task_id)
     .bind(actor_id)
     .fetch_all(executor)
     .await?;
     rows.iter()
-        .map(|row| {
-            Ok(TaskCompletedChecklistItem {
-                id: row.try_get("id")?,
-                patient_id: row.try_get("patient_id")?,
-                order_id: row.try_get("order_id")?,
-                scope_type: row.try_get("scope_type")?,
-                scope_id: row.try_get("scope_id")?,
-                item_text: row.try_get("item_text")?,
-            })
-        })
+        .map(|row| checklist_sync_from_row(row, ChecklistItemChange::Completed))
         .collect()
 }
 
-/// Audits and broadcasts checklist items closed by a completed task.
-pub(crate) async fn publish_task_completed_checklist_items(
+/// Keeps the checklist items linked to a work-center task in step with a
+/// status change of that task: completing the task completes them, cancelling
+/// it resolves them as "not required", and reopening a finished or cancelled
+/// task reopens them. Run it in the transaction of the status change and pass
+/// the result to [`publish_checklist_item_changes`] after commit.
+pub(crate) async fn sync_checklist_items_for_task_status(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
+    previous_status: &str,
+    status: &str,
+    actor_id: Uuid,
+) -> Result<Vec<ChecklistItemSync>, sqlx::Error> {
+    if previous_status == status {
+        return Ok(Vec::new());
+    }
+    match status {
+        "completed" => complete_checklist_items_for_task(&mut **tx, task_id, actor_id).await,
+        "cancelled" => {
+            let rows = sqlx::query(
+                r#"UPDATE workflow_checklist_items
+                   SET is_completed = true,
+                       not_required = true,
+                       not_required_reason = 'task_cancelled',
+                       completed_by = $2,
+                       completed_at = now(),
+                       updated_at = now()
+                   WHERE linked_task_id = $1
+                     AND NOT is_completed
+                   RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
+            )
+            .bind(task_id)
+            .bind(actor_id)
+            .fetch_all(&mut **tx)
+            .await?;
+            rows.iter()
+                .map(|row| {
+                    checklist_sync_from_row(
+                        row,
+                        ChecklistItemChange::NotRequired(NotRequiredReason::TaskCancelled),
+                    )
+                })
+                .collect()
+        }
+        _ if matches!(previous_status, "completed" | "cancelled") => {
+            let rows = sqlx::query(
+                r#"UPDATE workflow_checklist_items
+                   SET is_completed = false,
+                       not_required = false,
+                       not_required_reason = NULL,
+                       completed_by = NULL,
+                       completed_at = NULL,
+                       updated_at = now()
+                   WHERE linked_task_id = $1
+                     AND is_completed
+                   RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
+            )
+            .bind(task_id)
+            .fetch_all(&mut **tx)
+            .await?;
+            rows.iter()
+                .map(|row| checklist_sync_from_row(row, ChecklistItemChange::Reopened))
+                .collect()
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Audits and broadcasts checklist items that changed with their task.
+pub(crate) async fn publish_checklist_item_changes(
     state: &AppState,
     actor_id: Uuid,
-    task_id: Uuid,
-    items: &[TaskCompletedChecklistItem],
+    items: &[ChecklistItemSync],
 ) {
     for item in items {
-        let payload = json!({
+        let mut payload = json!({
             "scope_type": item.scope_type,
             "scope_id": item.scope_id,
             "order_id": item.order_id,
             "checklist_item_id": item.id,
-            "task_id": task_id,
+            "task_id": item.task_id,
             "item_text": item.item_text,
-            "completed_via": "task",
         });
+        match item.change {
+            ChecklistItemChange::Completed => {
+                payload["completed_via"] = json!("task");
+            }
+            ChecklistItemChange::NotRequired(reason) => {
+                payload["change"] = json!("not_required");
+                payload["not_required_reason"] = json!(reason.as_str());
+            }
+            ChecklistItemChange::Reopened => {
+                payload["change"] = json!("reopened");
+            }
+        }
         state.audit_sender.try_send(audit::domain_event(
-            "workflow_checklist_item_completed",
+            item.change.audit_action(),
             Some(actor_id),
             "patient",
             Some(item.patient_id),
@@ -1299,11 +1887,29 @@ pub(crate) async fn publish_task_completed_checklist_items(
         crate::realtime::publish_workflow_checklist_event(
             state,
             Some(actor_id),
-            "workflow_checklist_item.completed",
+            item.change.realtime_event(),
             item.id,
             payload,
         )
         .await;
+        if let Some(task_id) = item.task_id
+            && item.change != ChecklistItemChange::Completed
+        {
+            crate::realtime::publish_task_event(
+                state,
+                Some(actor_id),
+                "task.status_changed",
+                task_id,
+                json!({
+                    "source": "workflow_checklist",
+                    "scope_type": item.scope_type,
+                    "scope_id": item.scope_id,
+                    "order_id": item.order_id,
+                    "checklist_item_id": item.id,
+                }),
+            )
+            .await;
+        }
     }
 }
 

@@ -16,7 +16,10 @@ import {
   formatCurrency,
   invoiceLineQuantityAvailable,
   isInvoiceSelectionValid,
+  effectiveAdvanceBasis,
   isQuoteAvailableForInvoice,
+  prepaymentAdvanceSplit,
+  quoteRequiredPrepayment,
 } from "../model/invoice-model";
 import type { CreateForm, InvoiceType, QuoteOption } from "../model/types";
 
@@ -61,10 +64,25 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
     onSubmit(event);
   }
   const lines = selectedQuote?.line_items ?? [];
-  const totals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
-  const valid = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType)) && isInvoiceSelectionValid(lines, form) && totals.gross > 0;
+  const requiredPrepayment = quoteRequiredPrepayment(selectedQuote);
+  const advanceBasis = effectiveAdvanceBasis(form, selectedQuote);
+  const prepaymentBasis = advanceBasis === "prepayment";
+  const prepaymentSplit = prepaymentBasis && requiredPrepayment != null
+    ? prepaymentAdvanceSplit(lines, requiredPrepayment)
+    : null;
+  const selectionTotals = calculateInvoiceSelectionTotals(lines, form.selectedLineIndexes, form.lineQuantities);
+  const totals = prepaymentSplit
+    ? { ...selectionTotals, net: prepaymentSplit.net, vat: prepaymentSplit.vat, gross: prepaymentSplit.gross }
+    : selectionTotals;
+  const quoteAvailable = Boolean(selectedQuote && isQuoteAvailableForInvoice(selectedQuote, form.invoiceType));
+  const valid = prepaymentSplit
+    ? quoteAvailable && !prepaymentSplit.exceedsQuote && prepaymentSplit.gross > 0
+    : quoteAvailable && isInvoiceSelectionValid(lines, form) && totals.gross > 0;
   const footerMessage = error || optionsError || (selectedQuote && !valid
-    ? (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.") : null);
+    ? prepaymentSplit?.exceedsQuote
+      ? (de ? "Die erforderliche Vorauszahlung übersteigt die Angebotssumme. Wählen Sie Positionen." : "Требуемая предоплата больше суммы предложения. Выберите позиции.")
+      : (de ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.")
+    : null);
   const footerError = Boolean(error || optionsError);
   const final = form.invoiceType === "final";
   const typeLabels = {
@@ -74,8 +92,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   };
   const typeHints = {
     advance: de
-      ? "Vorauszahlung für ausgewählte Positionen. Der Bruttobetrag kann später auf Folgerechnungen angerechnet werden."
-      : "Предоплата по выбранным позициям. Сумму с НДС можно будет зачесть в следующих счетах.",
+      ? "Vorauszahlung in Höhe der erforderlichen Vorauszahlung des Auftrags oder für ausgewählte Positionen. Der Bruttobetrag kann später auf Folgerechnungen angerechnet werden."
+      : "Предоплата на требуемую по заказу сумму или по выбранным позициям. Сумму с НДС можно будет зачесть в следующих счетах.",
     interim: de
       ? "Wählen Sie die Positionen und Mengen für diese Teilrechnung aus."
       : "Выберите позиции и количество для частичного выставления счёта.",
@@ -153,7 +171,55 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </FormField>
                 </div>
                 <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">{typeHints[form.invoiceType]}</p>
+                <p className="text-xs leading-5 text-muted-foreground" data-testid="invoice-draft-numbering-hint">
+                  {de
+                    ? "Die Rechnung wird als Entwurf ohne Nummer angelegt. Nummer und Rechnungsdatum erhält sie erst bei der Ausstellung; das Fälligkeitsdatum darf dann nicht vor dem Rechnungsdatum liegen."
+                    : "Счёт создаётся черновиком без номера. Номер и дату счёта он получает только при выпуске; срок оплаты тогда не может быть раньше даты счёта."}
+                </p>
 
+                {form.invoiceType === "advance" && selectedQuote && requiredPrepayment != null ? (
+                  <fieldset className="grid gap-2 rounded-xl border border-border bg-card p-3">
+                    <legend className="px-1 text-xs font-medium text-muted-foreground">{de ? "Grundlage der Vorauszahlungsrechnung" : "Основание счёта на предоплату"}</legend>
+                    {([
+                      ["prepayment", de ? `Erforderliche Vorauszahlung · ${money(requiredPrepayment)}` : `Требуемая предоплата · ${money(requiredPrepayment)}`],
+                      ["positions", de ? "Ausgewählte Angebotspositionen" : "Выбранные позиции предложения"],
+                    ] as const).map(([basis, label]) => (
+                      <label key={basis} className="flex items-center gap-2 text-sm text-foreground">
+                        <input type="radio" name="advance-basis" value={basis} checked={advanceBasis === basis} disabled={formBusy}
+                          onChange={() => onFormChange((current) => ({ ...current, advanceBasis: basis }))} />
+                        {label}
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : null}
+
+                {prepaymentSplit ? (
+                  <section aria-label={de ? "Anzahlung" : "Предоплата"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card" data-testid="invoice-prepayment-advance">
+                    <div className="border-b border-border px-3 py-2.5">
+                      <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{de ? "Anzahlung" : "Предоплата"}</h3>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        {de
+                          ? `Anzahlung gemäß Angebot ${selectedQuote?.quote_number ?? ""}. Die Umsatzsteuer wird wie im Angebot anteilig aufgeteilt.`
+                          : `Предоплата по предложению ${selectedQuote?.quote_number ?? ""}. НДС распределяется пропорционально позициям предложения.`}
+                      </p>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {prepaymentSplit.lines.map((line) => (
+                        <div key={`${line.isCostPassthrough}-${line.vatRate}`} className="flex flex-wrap items-baseline justify-between gap-3 p-3 text-sm">
+                          <span>
+                            {line.isCostPassthrough
+                              ? (de ? "Anteil Auslagen (ohne USt.)" : "Доля перевыставляемых расходов (без НДС)")
+                              : (de ? `Anteil ${line.vatRate} % USt.` : `Доля с НДС ${line.vatRate} %`)}
+                            <span className="ml-2 text-xs text-muted-foreground">{de ? "netto" : "нетто"} {money(line.net)} · {t.invoices_vat} {money(line.vat)}</span>
+                          </span>
+                          <span className="font-mono tabular-nums">{money(line.gross)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
+                {prepaymentSplit ? null : (
                 <section aria-label={de ? "Rechnungspositionen" : "Позиции счёта"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">
                     <h3 className={cn(tokens.text.sectionTitle, "flex items-center gap-2")}><span aria-hidden className="size-2 shrink-0 rounded-full bg-primary" />{de ? "Rechnungspositionen" : "Позиции счёта"}
@@ -227,6 +293,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     </div>
                   )}
                 </section>
+                )}
                 <FormField label={t.invoices_workspace_notes}>
                   <textarea rows={2} className={cn(textareaClass, "min-h-20")} value={form.notes}
                     onChange={(event) => onFormChange((current) => ({ ...current, notes: event.target.value }))}
@@ -251,7 +318,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     <div className="flex justify-between gap-3 border-t border-border pt-3 font-semibold"><dt>{t.invoices_total}</dt><dd className="text-lg">{money(totals.gross)}</dd></div>
                   </dl>
                   <p className="text-xs leading-5 text-muted-foreground">{de ? "Die Rechnung wird als Entwurf erstellt. Bereits geleistete Vorauszahlungen können nach dem Versand der Rechnung angerechnet werden." : "Счёт будет создан как черновик. Полученные предоплаты можно зачесть после отправки счёта."}</p>
-                  {selectedQuote && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
+                  {selectedQuote && !prepaymentSplit && availableCount > 0 && !form.selectedLineIndexes.length ? <p role="status" className="text-xs text-destructive">{de ? "Wählen Sie mindestens eine Position." : "Выберите хотя бы одну позицию."}</p> : null}
                 </div>
               </aside>
             </div>

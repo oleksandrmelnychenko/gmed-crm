@@ -22,6 +22,9 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(copy.title).toContain("Zahlungsfrist überschritten");
   expect(copy.body).toContain("60,00 $");
   expect(localizedNotificationCopy(notice,"ru").title).toContain("Срок оплаты истёк");
+  // The deadline is German time: 22:30Z is already 28.09 00:30 in Berlin.
+  const due = { ...notice, body: JSON.stringify({ order_number: "A-1", payment_status: "overdue", received_amount: "40", remaining_amount: "60", currency: "EUR", due_at: "2026-09-27T22:30:00Z" }) };
+  expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.26, 00:30");
 });
 
 describe("task notifications", () => {
@@ -52,6 +55,67 @@ describe("task notifications", () => {
       .toBe("Something new");
     expect(localizedNotificationCopy(taskNotice("update", "New task", "Body"), "ru"))
       .toEqual({ title: "New task", body: "Body" });
+  });
+});
+
+describe("interpreter work notifications", () => {
+  const notice = (kind: string, body: Record<string, unknown>) =>
+    ({ id: "n-2", kind, title: "English fallback", body: JSON.stringify(body), entity_type: "appointment", entity_id: "apt-1", is_read: false, created_at: "2026-09-26T10:00:00Z" }) as Notification;
+
+  it("tells approvers which report waits and interpreters how it was decided", () => {
+    const submitted = localizedNotificationCopy(notice("interpreter_report_submitted", {
+      appointment_title: "Kardiologie", appointment_date: "2026-09-26", time_start: "09:30", interpreter_name: "Iwan", hours: "2.50",
+    }), "ru");
+    expect(submitted.title).toBe("Отчёт переводчика ждёт проверки");
+    expect(submitted.body).toContain("Kardiologie · 26.09.2026 09:30");
+    expect(submitted.body).toContain("Iwan · 2,5 ч");
+
+    const rejected = localizedNotificationCopy(notice("interpreter_report_rejected", {
+      appointment_title: "Kardiologie", appointment_date: "2026-09-26", notes: "Stunden prüfen",
+    }), "de");
+    expect(rejected.title).toBe("Dolmetscherbericht zur Überarbeitung zurückgegeben");
+    expect(rejected.body).toContain("Hinweis: Stunden prüfen");
+
+    expect(localizedNotificationCopy(notice("interpreter_report_approved", { reviewer_name: "Anna" }), "ru").body)
+      .toBe("Подтвердил(а): Anna");
+    expect(localizedNotificationCopy(notice("interpreter_clarification_requested", { interpreter_name: "Iwan", comment: "Adresse?" }), "de").body)
+      .toBe("Iwan: Adresse?");
+  });
+
+  it("survives a body that is not JSON", () => {
+    const broken = { ...notice("interpreter_report_approved", {}), body: "plain text" };
+    expect(localizedNotificationCopy(broken, "ru")).toEqual({ title: "Отчёт переводчика подтверждён", body: null });
+  });
+});
+
+describe("concierge expense and service request notifications", () => {
+  const notice = (kind: string, body: string | null, title = "English fallback") =>
+    ({ id: "n-3", kind, title, body, entity_type: "concierge_expense", entity_id: "e-1", is_read: false, created_at: "2026-09-26T10:00:00Z" }) as Notification;
+
+  it("words receipt decisions in the staff language", () => {
+    const submitted = localizedNotificationCopy(notice("concierge_expense_submitted", JSON.stringify({ vendor: "Blumen Koch", amount_gross: "45.50", currency: "EUR" })), "de");
+    expect(submitted.title).toBe("Concierge-Beleg wartet auf Prüfung");
+    expect(submitted.body).toContain("Blumen Koch");
+    expect(submitted.body).toContain("45,50");
+    expect(localizedNotificationCopy(notice("concierge_expense_rejected", JSON.stringify({ reason: "Unleserlich" })), "ru"))
+      .toEqual({ title: "Чек консьержа отклонён", body: "Причина: Unleserlich" });
+  });
+
+  it("recovers the facts of receipts notified before the change", () => {
+    const legacy = localizedNotificationCopy(notice("concierge_expense_submitted", "A new receipt from Blumen Koch for 45.50 EUR is waiting for financial review."), "ru");
+    expect(legacy.title).toBe("Чек консьержа ждёт проверки");
+    expect(legacy.body).toContain("Blumen Koch");
+    expect(localizedNotificationCopy(notice("concierge_expense_reversed", "The posted expense was reversed. Reason: Doppelt"), "de").body)
+      .toBe("Grund: Doppelt");
+  });
+
+  it("names the requested service kind and slot", () => {
+    const copy = localizedNotificationCopy(
+      notice("concierge_service_request", JSON.stringify({ patient_label: "PT-1 · Anna", service_kind: "transfer", title: "Airport pickup", starts_at: null }), "Patient service request: PT-1 · Anna"),
+      "ru",
+    );
+    expect(copy.title).toBe("Запрос услуги от пациента: PT-1 · Anna");
+    expect(copy.body).toBe("Трансфер · Airport pickup · без желаемого времени");
   });
 });
 

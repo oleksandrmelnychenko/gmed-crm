@@ -125,7 +125,7 @@ async fn balance_adjustments_are_append_only_idempotent_and_portal_safe() {
     let admin = auth_header_for(admin_id, "ceo");
     let manager = auth_header_for(manager_id, "patient_manager");
     let patient = auth_header_for(patient_user_id, "patient");
-    let today = chrono::Utc::now().date_naive().to_string();
+    let today = gmed_server::app_time::today().to_string();
     let request_id = Uuid::new_v4();
     let adjustment_body = json!({
         "request_id": request_id,

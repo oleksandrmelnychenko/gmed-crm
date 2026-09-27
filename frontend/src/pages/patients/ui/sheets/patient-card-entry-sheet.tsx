@@ -11,6 +11,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { FormSection } from "../shared/patient-form-primitives";
@@ -51,11 +52,6 @@ function categoryLabel(
   }
 }
 
-function toLocalDateTimeInput(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 type CategoryValue = (typeof CATEGORY_OPTIONS)[number];
 type FormState = {
   entryDate: string;
@@ -66,7 +62,7 @@ type FormState = {
 
 function blankForm(): FormState {
   return {
-    entryDate: toLocalDateTimeInput(new Date()),
+    entryDate: isoToBerlinLocalInput(new Date()),
     category: CATEGORY_OPTIONS[0],
     source: "",
     content: "",
@@ -115,8 +111,8 @@ function PatientCardEntrySheetContent({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const entryDate = new Date(form.entryDate);
-    if (Number.isNaN(entryDate.getTime())) {
+    const entryDate = berlinLocalInputToIso(form.entryDate);
+    if (!entryDate) {
       toast.error(l("patients_invalid_date"));
       return;
     }
@@ -130,7 +126,7 @@ function PatientCardEntrySheetContent({
       await apiFetch(`/patients/${patientId}/card-entries`, {
         method: "POST",
         body: JSON.stringify({
-          entry_date: entryDate.toISOString(),
+          entry_date: entryDate,
           category: form.category,
           source: form.source.trim() || null,
           content: form.content.trim(),

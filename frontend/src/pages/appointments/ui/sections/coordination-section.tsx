@@ -120,7 +120,7 @@ function AppointmentCoordinationSection({
         onRefresh={onRefresh}
         onError={onError}
       />
-      {permissions.canCreate ? (
+      {permissions.canCreate && detail.type === "medical" ? (
         <MemoizedAppointmentFollowUpVisitSection
           detail={detail}
           appointments={appointments}
@@ -134,7 +134,7 @@ function AppointmentCoordinationSection({
           onCreated={onFollowUpVisitCreated}
         />
       ) : null}
-      {permissions.canViewReminders ? (
+      {permissions.canViewReminders && detail.type === "medical" ? (
         <MemoizedAppointmentDoctorFollowUpSection
           detail={detail}
           reminders={doctorDirectedReminders}
@@ -147,7 +147,7 @@ function AppointmentCoordinationSection({
           onError={onError}
         />
       ) : null}
-      {permissions.canViewReminders && detail.order_id ? (
+      {permissions.canViewReminders && detail.order_id && detail.type === "medical" ? (
         <MemoizedAppointmentPackageEndSection
           detail={detail}
           reminders={packageEndReminders}

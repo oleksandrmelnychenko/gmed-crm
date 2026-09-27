@@ -318,11 +318,34 @@ async fn seed_appointment(
     created_by: Uuid,
     tag: &str,
 ) -> Uuid {
+    seed_appointment_on(
+        pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        created_by,
+        tag,
+        "2026-04-15",
+    )
+    .await
+}
+
+/// An all-day visit on `date`. Visits of one patient or doctor must not
+/// overlap, so a second visit of the same patient needs another day.
+async fn seed_appointment_on(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    date: &str,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO appointments (
                 patient_id, provider_id, doctor_id, appointment_type, title, date, status, created_by
            ) VALUES (
-                $1, $2, $3, 'medical', $4, '2026-04-15', 'planned', $5
+                $1, $2, $3, 'medical', $4, $6::date, 'planned', $5
            ) RETURNING id"#,
     )
     .bind(patient_id)
@@ -330,6 +353,7 @@ async fn seed_appointment(
     .bind(doctor_id)
     .bind(format!("Visit {tag}"))
     .bind(created_by)
+    .bind(date)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -1860,6 +1884,13 @@ async fn interpreter_sees_only_released_medical_documents_for_assigned_patient()
         seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    // Documents filed on an appointment open for that appointment's interpreter.
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
 
     let internal_id = seed_document(
@@ -1907,6 +1938,56 @@ async fn interpreter_sees_only_released_medical_documents_for_assigned_patient()
         &app,
         "GET",
         &format!("/api/v1/documents/{internal_id}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A released document of another interpreter's visit of the same patient
+    // stays closed: the patient link does not widen the appointment scope.
+    let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let other_appointment_id = seed_appointment_on(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-other"),
+        "2026-04-16",
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(other_appointment_id)
+        .bind(other_interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other_released_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        other_appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-other-released"),
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.to_string().contains(&other_released_id.to_string()));
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{other_released_id}"),
         &interpreter_bearer,
         None,
     )
@@ -7722,6 +7803,14 @@ async fn document_share_trail_requires_shares_view_and_row_access() {
     .await;
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    // A document filed on an appointment opens for that appointment's
+    // interpreter only, not for every interpreter linked to the patient.
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
     let teamlead_id = seed_user(&pool, &format!("{tag}-lead"), "teamlead_interpreter").await;
     seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;

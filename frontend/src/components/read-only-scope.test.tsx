@@ -40,11 +40,15 @@ function render(node: ReactNode) {
   );
 }
 
-/** Whether the element carrying `aria-label` renders the `disabled` attribute. */
+/**
+ * Whether the control carrying `aria-label` renders as disabled. A date field
+ * carries the label on its group of spin buttons, which MUI marks with the
+ * `Mui-disabled` class; its hidden value input carries `disabled`.
+ */
 function isDisabled(html: string, ariaLabel: string) {
   const match = new RegExp(`<[^>]*aria-label="${ariaLabel}"[^>]*>`).exec(html);
   if (!match) throw new Error(`no element with aria-label="${ariaLabel}"`);
-  return /\sdisabled(=""|\s|>|\/)/.test(match[0]);
+  return /\sdisabled(=""|\s|>|\/)/.test(match[0]) || /class="[^"]*\bMui-disabled\b/.test(match[0]);
 }
 
 function isButtonDisabled(html: string, text: string) {

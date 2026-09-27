@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::{Datelike, TimeZone};
+use chrono::Datelike;
 use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -68,7 +68,6 @@ struct InterpreterReportBillingCandidate {
     appointment_date: chrono::NaiveDate,
     interpreter_name: String,
     hours: rust_decimal::Decimal,
-    report_text: Option<String>,
     approved_by: Option<Uuid>,
     approved_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -290,7 +289,12 @@ struct AssignInterpreter {
 #[derive(Deserialize)]
 struct InterpreterResponseReq {
     response: String,
+    /// Why the interpreter needs clarification or declines; shown to the
+    /// patient manager. Ignored for an acceptance.
+    comment: Option<String>,
 }
+
+const INTERPRETER_RESPONSE_COMMENT_MAX_CHARS: usize = 1000;
 
 #[derive(Deserialize)]
 struct ChecklistItem {
@@ -1599,13 +1603,7 @@ async fn list_appointments(
     }
     let (calendar_window, row_cap) = appointment_list_window(date_from, date_to);
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
-    let requires_assignment = access::requires_patient_assignment(auth.role);
-    let can_access_as_interpreter =
-        matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter);
-    let can_access_as_owner = matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    );
+    let scope = access::AppointmentScope::for_role(auth.role);
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
@@ -1675,16 +1673,23 @@ async fn list_appointments(
                 )
              )
              AND (
-                $13::boolean = false
+                $13::boolean
                 OR ($14::boolean AND a.interpreter_id = $16)
                 OR ($15::boolean AND a.owner_user_id = $16)
-                OR EXISTS (
+                OR ($19::boolean AND EXISTS (
                     SELECT 1
                     FROM patient_assignments scoped_assignment
                     WHERE scoped_assignment.patient_id = a.patient_id
                       AND scoped_assignment.user_id = $16
                       AND scoped_assignment.revoked_at IS NULL
-                )
+                ))
+                OR ($20::boolean AND (
+                    a.interpreter_id IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM interpreter_reports team_report
+                        WHERE team_report.appointment_id = a.id
+                    )
+                ))
              )
            ORDER BY CASE WHEN $17::boolean THEN a.date END ASC,
                     CASE WHEN $17::boolean THEN a.time_start END ASC,
@@ -1704,12 +1709,14 @@ async fn list_appointments(
     .bind(date_from)
     .bind(date_to)
     .bind(query.provider_taxonomy_node_id)
-    .bind(requires_assignment)
-    .bind(can_access_as_interpreter)
-    .bind(can_access_as_owner)
+    .bind(scope.all)
+    .bind(scope.as_interpreter)
+    .bind(scope.as_owner)
     .bind(auth.user_id)
     .bind(calendar_window)
     .bind(row_cap)
+    .bind(scope.via_patient_assignment)
+    .bind(scope.interpreter_team)
     .fetch_all(&state.db)
     .await
     {
@@ -1777,13 +1784,7 @@ async fn list_attention_items(
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let today = berlin_today();
     let preparation_window_end = today + chrono::Days::new(2);
-    let requires_assignment = access::requires_patient_assignment(auth.role);
-    let can_access_as_interpreter =
-        matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter);
-    let can_access_as_owner = matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    );
+    let scope = access::AppointmentScope::for_role(auth.role);
 
     match sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.time_end, a.appointment_type, a.care_path_kind, a.followup_milestone, a.status,
@@ -1932,16 +1933,20 @@ async fn list_attention_items(
                 )
              )
              AND (
-                $13::boolean = false
+                $13::boolean
                 OR ($14::boolean AND a.interpreter_id = $16)
                 OR ($15::boolean AND a.owner_user_id = $16)
-                OR EXISTS (
+                OR ($21::boolean AND EXISTS (
                     SELECT 1
                     FROM patient_assignments scoped_assignment
                     WHERE scoped_assignment.patient_id = a.patient_id
                       AND scoped_assignment.user_id = $16
                       AND scoped_assignment.revoked_at IS NULL
-                )
+                ))
+                OR ($22::boolean AND (
+                    a.interpreter_id IS NOT NULL
+                    OR latest_report.approval_status IS NOT NULL
+                ))
              )
            ORDER BY CASE WHEN $19::boolean THEN a.date END ASC,
                     CASE WHEN $19::boolean THEN a.time_start END ASC,
@@ -1961,14 +1966,16 @@ async fn list_attention_items(
     .bind(date_from)
     .bind(date_to)
     .bind(query.provider_taxonomy_node_id)
-    .bind(requires_assignment)
-    .bind(can_access_as_interpreter)
-    .bind(can_access_as_owner)
+    .bind(scope.all)
+    .bind(scope.as_interpreter)
+    .bind(scope.as_owner)
     .bind(auth.user_id)
     .bind(today)
     .bind(preparation_window_end)
     .bind(calendar_window)
     .bind(row_cap)
+    .bind(scope.via_patient_assignment)
+    .bind(scope.interpreter_team)
     .fetch_all(&state.db)
     .await
     {
@@ -2890,6 +2897,83 @@ async fn reject_pending_reports_for_cancelled_appointments_in_tx(
     Ok(())
 }
 
+/// Cancels an order's upcoming appointments (planned or confirmed, dated
+/// today or later) inside the caller's order-cancellation transaction, with
+/// the side effects of a manual cancellation: pending interpreter reports are
+/// rejected, checklists, tasks and reminders close and automatic concierge
+/// artifacts are closed. Returns the cancelled appointments; the caller
+/// publishes them with [`publish_cancelled_order_appointments`] after commit.
+pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    cancelled_by: Uuid,
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let appointment_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM appointments
+           WHERE order_id = $1
+             AND status IN ('planned', 'confirmed')
+             AND date >= $2
+           ORDER BY date, id
+           FOR UPDATE"#,
+    )
+    .bind(order_id)
+    .bind(berlin_today())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, %order_id, "load upcoming appointments of a cancelled order");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if appointment_ids.is_empty() {
+        return Ok(appointment_ids);
+    }
+
+    if let Err(e) = sqlx::query(
+        "UPDATE appointments SET status = 'cancelled', updated_at = now() WHERE id = ANY($1)",
+    )
+    .bind(&appointment_ids)
+    .execute(&mut **tx)
+    .await
+    {
+        if let Some(resp) = appointment_write_error_response(&e) {
+            return Err(resp);
+        }
+        tracing::error!(error = %e, %order_id, "cancel upcoming appointments of a cancelled order");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+    }
+    reject_pending_reports_for_cancelled_appointments_in_tx(tx, &appointment_ids, cancelled_by)
+        .await?;
+    close_terminal_appointment_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
+    close_auto_concierge_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
+    Ok(appointment_ids)
+}
+
+/// Realtime events for appointments cancelled together with their order.
+pub(crate) async fn publish_cancelled_order_appointments(
+    state: &AppState,
+    actor_user_id: Uuid,
+    order_id: Uuid,
+    appointment_ids: &[Uuid],
+) {
+    for appointment_id in appointment_ids {
+        crate::realtime::publish_appointment_event(
+            state,
+            Some(actor_user_id),
+            "appointment.status_changed",
+            *appointment_id,
+            serde_json::json!({
+                "status": "cancelled",
+                "recurrence_scope": "single",
+                "affected_count": 1,
+                "reason": "order_cancelled",
+                "order_id": order_id,
+            }),
+        )
+        .await;
+    }
+}
+
 fn is_valid_checklist_phase(value: &str) -> bool {
     matches!(value, "preparation" | "execution" | "followup" | "done")
 }
@@ -3743,7 +3827,8 @@ async fn get_appointment(
         r#"SELECT a.id, a.patient_id, a.provider_id, a.doctor_id, a.order_id, o.order_number, a.interpreter_id,
                   a.owner_user_id,
                   a.appointment_type, a.care_path_kind, a.followup_milestone, a.title, a.date, a.time_start, a.time_end, a.location,
-                  a.category, a.status, a.interpreter_response, a.checklist_phase,
+                  a.category, a.status, a.interpreter_response, a.interpreter_response_comment,
+                  a.checklist_phase,
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
                   a.recurrence_count, a.recurrence_until, a.recurrence_end_mode, a.recurrence_index,
@@ -3919,7 +4004,7 @@ async fn delete_appointment(
         current.try_get("recurrence_series_id").unwrap_or_default();
     let recurrence_index: i32 = current.try_get("recurrence_index").unwrap_or_default();
 
-    match can_access_appointment(
+    match can_change_appointment(
         &state,
         &auth,
         apt_id,
@@ -4313,7 +4398,7 @@ async fn update_appointment(
         );
     }
 
-    match can_access_appointment(
+    match can_change_appointment(
         &state,
         &auth,
         apt_id,
@@ -4904,6 +4989,10 @@ async fn update_appointment(
                    time_end = $9,
                    location = $10,
                    interpreter_response = $11,
+                   interpreter_response_comment = CASE
+                       WHEN $11::text IS DISTINCT FROM interpreter_response THEN NULL
+                       ELSE interpreter_response_comment
+                   END,
                    care_path_kind = $12,
                    recurrence_frequency = $13,
                    recurrence_interval = $14,
@@ -5338,7 +5427,7 @@ async fn update_status(
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -5760,7 +5849,7 @@ async fn assign_interpreter(
     {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -5860,6 +5949,10 @@ async fn assign_interpreter(
                     WHEN interpreter_id IS DISTINCT FROM $2 THEN 'pending'
                     ELSE interpreter_response
                 END,
+                interpreter_response_comment = CASE
+                    WHEN interpreter_id IS DISTINCT FROM $2 THEN NULL
+                    ELSE interpreter_response_comment
+                END,
                 updated_at = now()
           WHERE id = $1",
     )
@@ -5957,6 +6050,24 @@ async fn interpreter_response(
             );
         }
     }
+    let comment = if body.response == "accepted" {
+        None
+    } else {
+        body.comment
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    if comment
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > INTERPRETER_RESPONSE_COMMENT_MAX_CHARS)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The comment must not exceed 1000 characters",
+        );
+    }
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
         Err(e) => {
@@ -5993,6 +6104,7 @@ async fn interpreter_response(
     let result = sqlx::query(
         r#"UPDATE appointments
            SET interpreter_response = $2,
+               interpreter_response_comment = $4,
                updated_at = now()
            WHERE id = $1
              AND interpreter_id = $3"#,
@@ -6000,6 +6112,7 @@ async fn interpreter_response(
     .bind(apt_id)
     .bind(&body.response)
     .bind(auth.user_id)
+    .bind(comment.as_deref())
     .execute(&mut *tx)
     .await;
     match result {
@@ -6010,10 +6123,30 @@ async fn interpreter_response(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let notifications = if body.response == "discussion_requested" {
+        match insert_interpreter_work_notifications(
+            &mut tx,
+            InterpreterWorkNotice::ClarificationRequested,
+            apt_id,
+            None,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "notify about interpreter clarification");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -6056,7 +6189,7 @@ async fn add_checklist_item(
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
         return resp;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6164,7 +6297,7 @@ async fn complete_checklist(
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
         return resp;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6325,7 +6458,7 @@ async fn add_reminder(
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6348,8 +6481,8 @@ async fn add_reminder(
         }
     };
 
-    match load_active_user_role(&state, body.user_id).await {
-        Ok(Some(_)) => {}
+    let target_role = match load_active_user_role(&state, body.user_id).await {
+        Ok(Some(role)) => role,
         Ok(None) => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -6357,6 +6490,26 @@ async fn add_reminder(
             );
         }
         Err(resp) => return resp,
+    };
+    let appointment_type = match sqlx::query_scalar::<_, String>(
+        "SELECT appointment_type FROM appointments WHERE id = $1",
+    )
+    .bind(apt_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment not found"),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, "load appointment type for reminder");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if !reminder_recipient_allowed(&target_role, &appointment_type) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "This role does not take part in this appointment's preparation",
+        );
     }
 
     match create_reminder_record(
@@ -6405,7 +6558,7 @@ async fn complete_reminder(
     ]) {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6918,10 +7071,26 @@ async fn submit_report(
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "accept interpreter assignment on report submission");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    let notifications = match insert_interpreter_work_notifications(
+        &mut tx,
+        InterpreterWorkNotice::ReportSubmitted,
+        apt_id,
+        Some(report_id),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "notify report approvers");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "submit report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
 
     tracing::info!(by = %auth.user_id, apt = %apt_id, hours = %hours, "Interpreter report submitted");
     (
@@ -6929,6 +7098,174 @@ async fn submit_report(
         Json(serde_json::json!({"id": report_id})),
     )
         .into_response()
+}
+
+/// A change of an interpreter report or of the interpreter's response that
+/// someone else has to act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterpreterWorkNotice {
+    /// A report waits for approval: notify the approvers.
+    ReportSubmitted,
+    /// The report was approved: notify its interpreter.
+    ReportApproved,
+    /// The report was returned for revision: notify its interpreter.
+    ReportRejected,
+    /// The interpreter needs clarification: notify the approvers.
+    ClarificationRequested,
+}
+
+impl InterpreterWorkNotice {
+    fn kind(self) -> &'static str {
+        match self {
+            InterpreterWorkNotice::ReportSubmitted => "interpreter_report_submitted",
+            InterpreterWorkNotice::ReportApproved => "interpreter_report_approved",
+            InterpreterWorkNotice::ReportRejected => "interpreter_report_rejected",
+            InterpreterWorkNotice::ClarificationRequested => "interpreter_clarification_requested",
+        }
+    }
+
+    /// Stored fallback; the staff UI renders the notification from its kind
+    /// and JSON body in the user's language.
+    fn title(self) -> &'static str {
+        match self {
+            InterpreterWorkNotice::ReportSubmitted => "Interpreter report submitted",
+            InterpreterWorkNotice::ReportApproved => "Interpreter report approved",
+            InterpreterWorkNotice::ReportRejected => "Interpreter report returned for revision",
+            InterpreterWorkNotice::ClarificationRequested => "Interpreter needs clarification",
+        }
+    }
+}
+
+/// Inserts the notifications of an interpreter report change inside the
+/// caller's transaction and returns `(notification_id, user_id)` pairs to
+/// publish after commit. Approvers are the patient managers and interpreter
+/// team leads who can open the appointment (its owner or assigned to the
+/// patient), falling back to the CEO; report decisions go to the report's
+/// interpreter. The actor is never notified about their own action.
+async fn insert_interpreter_work_notifications(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    notice: InterpreterWorkNotice,
+    appointment_id: Uuid,
+    report_id: Option<Uuid>,
+    actor_id: Uuid,
+) -> Result<Vec<(Uuid, Uuid)>, sqlx::Error> {
+    let body: serde_json::Value = sqlx::query_scalar(
+        r#"SELECT jsonb_build_object(
+                   'appointment_title', a.title,
+                   'appointment_date', a.date,
+                   'time_start', left(a.time_start::text, 5),
+                   'interpreter_name', interpreter.name,
+                   'hours', report.hours::text,
+                   'reviewer_name', reviewer.name,
+                   'notes', CASE WHEN report.approval_status = 'rejected' THEN report.notes END,
+                   'comment', CASE WHEN $2::uuid IS NULL THEN a.interpreter_response_comment END,
+                   'report_id', report.id
+               )
+           FROM appointments a
+           LEFT JOIN interpreter_reports report ON report.id = $2
+           LEFT JOIN users interpreter ON interpreter.id = COALESCE(report.interpreter_id, a.interpreter_id)
+           LEFT JOIN users reviewer ON reviewer.id = report.approved_by
+           WHERE a.id = $1"#,
+    )
+    .bind(appointment_id)
+    .bind(report_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let body = body.to_string();
+    let rows = match notice {
+        InterpreterWorkNotice::ReportSubmitted | InterpreterWorkNotice::ClarificationRequested => {
+            let rows = sqlx::query(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   SELECT recipient.id, $2, $3, $4, 'appointment', a.id
+                   FROM appointments a
+                   JOIN users recipient
+                     ON recipient.is_active
+                    AND recipient.role IN ('patient_manager', 'teamlead_interpreter')
+                    AND recipient.id <> $5
+                    AND (
+                        recipient.id = a.owner_user_id
+                        OR EXISTS (
+                            SELECT 1 FROM patient_assignments assignment
+                            WHERE assignment.patient_id = a.patient_id
+                              AND assignment.user_id = recipient.id
+                              AND assignment.revoked_at IS NULL
+                        )
+                    )
+                   WHERE a.id = $1
+                   RETURNING id, user_id"#,
+            )
+            .bind(appointment_id)
+            .bind(notice.kind())
+            .bind(notice.title())
+            .bind(&body)
+            .bind(actor_id)
+            .fetch_all(&mut **tx)
+            .await?;
+            if rows.is_empty() {
+                sqlx::query(
+                    r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                       SELECT recipient.id, $2, $3, $4, 'appointment', $1
+                       FROM users recipient
+                       WHERE recipient.is_active
+                         AND recipient.role = 'ceo'
+                         AND recipient.id <> $5
+                       RETURNING id, user_id"#,
+                )
+                .bind(appointment_id)
+                .bind(notice.kind())
+                .bind(notice.title())
+                .bind(&body)
+                .bind(actor_id)
+                .fetch_all(&mut **tx)
+                .await?
+            } else {
+                rows
+            }
+        }
+        InterpreterWorkNotice::ReportApproved | InterpreterWorkNotice::ReportRejected => {
+            sqlx::query(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   SELECT interpreter.id, $2, $3, $4, 'appointment', $1
+                   FROM interpreter_reports report
+                   JOIN users interpreter ON interpreter.id = report.interpreter_id
+                   WHERE report.id = $6
+                     AND interpreter.is_active
+                     AND interpreter.id <> $5
+                   RETURNING id, user_id"#,
+            )
+            .bind(appointment_id)
+            .bind(notice.kind())
+            .bind(notice.title())
+            .bind(&body)
+            .bind(actor_id)
+            .bind(report_id)
+            .fetch_all(&mut **tx)
+            .await?
+        }
+    };
+    rows.iter()
+        .map(|row| Ok((row.try_get("id")?, row.try_get("user_id")?)))
+        .collect()
+}
+
+async fn publish_interpreter_work_notifications(
+    state: &AppState,
+    appointment_id: Uuid,
+    notifications: &[(Uuid, Uuid)],
+) {
+    for (notification_id, user_id) in notifications {
+        crate::realtime::publish_notification_event(
+            state,
+            *user_id,
+            "notification.created",
+            Some(*notification_id),
+            serde_json::json!({
+                "entity_type": "appointment",
+                "entity_id": appointment_id,
+            }),
+        )
+        .await;
+    }
 }
 
 async fn load_interpreter_hours_catalog_item(
@@ -7066,10 +7403,11 @@ async fn sync_completed_medical_appointment_to_billing(
         .try_get::<Option<String>, _>("doctor_name")
         .unwrap_or_default();
 
+    // Readable text only: the appointment stays linked by reference
+    // (source_medical_appointment_id), not by raw IDs or catalog keys here.
     let mut context_notes = vec![
         format!("Termin: {appointment_title}"),
-        format!("Datum: {appointment_date}"),
-        format!("Katalogschlüssel: {}", catalog_item.service_key),
+        format!("Datum: {}", appointment_date.format("%d.%m.%Y")),
     ];
     if let Some(provider_name) = provider_name.as_deref()
         && !provider_name.trim().is_empty()
@@ -7083,11 +7421,12 @@ async fn sync_completed_medical_appointment_to_billing(
     }
 
     // The completed appointment delivers the treatment organisation the order
-    // already planned (e.g. from the quote): the oldest unlinked planned
-    // single-unit line becomes this appointment's delivered line, so the same
-    // service is not counted twice. A planned line with more units stays for
-    // later appointments; only without a planned line is a new one added.
-    if let Some(leistung_id) = consume_planned_treatment_organization_line(
+    // already planned (e.g. from the quote): one unit of the oldest unlinked
+    // planned line becomes this appointment's delivered line, so the same
+    // service is not counted twice. A multi-unit block keeps its remaining
+    // units for later appointments; only without a planned line is a new one
+    // added.
+    if let Some(consumed) = consume_planned_treatment_organization_line(
         state,
         order_id,
         appointment_id,
@@ -7105,7 +7444,11 @@ async fn sync_completed_medical_appointment_to_billing(
             serde_json::json!({
                 "patient_id": patient_id,
                 "appointment_id": appointment_id,
-                "order_leistung_id": leistung_id,
+                "order_leistung_id": consumed.leistung_id,
+                "split_from_order_leistung_id": consumed.split_from,
+                "remaining_planned_quantity": consumed
+                    .remaining_planned_quantity
+                    .map(|value| value.normalize().to_string()),
                 "service_key": MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
                 "provider_id": provider_id,
                 "doctor_id": doctor_id,
@@ -7114,9 +7457,8 @@ async fn sync_completed_medical_appointment_to_billing(
         return Ok(());
     }
 
-    let mut notes = vec![format!(
-        "Automatisch aus abgeschlossenem medizinischem Termin {appointment_id} erstellt"
-    )];
+    let mut notes =
+        vec!["Automatisch aus dem abgeschlossenen medizinischen Termin erstellt".to_string()];
     notes.extend(context_notes);
 
     let result = sqlx::query(
@@ -7168,15 +7510,28 @@ async fn sync_completed_medical_appointment_to_billing(
     Ok(())
 }
 
+/// The planned treatment-organisation unit a completed medical appointment
+/// delivered.
+struct ConsumedPlannedLine {
+    /// The delivered line linked to the appointment.
+    leistung_id: Uuid,
+    /// The planned multi-unit line the delivered unit was split from.
+    split_from: Option<Uuid>,
+    /// Units still planned on that line afterwards.
+    remaining_planned_quantity: Option<rust_decimal::Decimal>,
+}
+
 /// Links a completed medical appointment to the order's oldest planned
-/// treatment-organisation line that is not linked yet, has one unit, does not
-/// come from a doctor service group and is not planned for another provider
-/// or doctor: the line becomes delivered, carries the appointment (and its
+/// treatment-organisation line that is not linked yet, does not come from a
+/// doctor service group and is not planned for another provider or doctor.
+/// A single-unit line becomes delivered, carries the appointment (and its
 /// provider/doctor when the line had none) and records the change in its
-/// notes. Returns the
-/// consumed line, or `None` when the appointment is already billed or no such
-/// planned line exists. Runs in one transaction so a concurrent completion of
-/// another appointment cannot consume the same line.
+/// notes. A line with more units delivers one of them: it keeps the remaining
+/// units planned and a new delivered one-unit line with the same commercial
+/// terms and catalog wording is linked to the appointment. Returns `None`
+/// when the appointment is already billed or no such planned line exists.
+/// Runs in one transaction so a concurrent completion of another appointment
+/// cannot consume the same unit.
 async fn consume_planned_treatment_organization_line(
     state: &AppState,
     order_id: Uuid,
@@ -7184,7 +7539,7 @@ async fn consume_planned_treatment_organization_line(
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     context_notes: &[String],
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<ConsumedPlannedLine>, sqlx::Error> {
     let mut tx = state.db.begin().await?;
     let already_linked = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM order_leistungen WHERE source_medical_appointment_id = $1)",
@@ -7195,13 +7550,13 @@ async fn consume_planned_treatment_organization_line(
     if already_linked {
         return Ok(None);
     }
-    let planned = sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT ol.id
+    let planned = sqlx::query(
+        r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            WHERE ol.order_id = $1
              AND ol.status = 'planned'
-             AND ol.quantity <= 1
+             AND ol.quantity > 0
              AND ol.source_interpreter_report_id IS NULL
              AND ol.source_medical_appointment_id IS NULL
              AND ol.source_service_group_id IS NULL
@@ -7218,32 +7573,96 @@ async fn consume_planned_treatment_organization_line(
     .bind(doctor_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(leistung_id) = planned else {
+    let Some(planned) = planned else {
         return Ok(None);
     };
-    let mut notes = vec![format!(
-        "Geplante Leistung durch abgeschlossenen medizinischen Termin {appointment_id} erbracht"
-    )];
+    let planned_id: Uuid = planned.try_get("id")?;
+    let planned_quantity: rust_decimal::Decimal = planned.try_get("quantity")?;
+    let mut notes = vec![
+        "Geplante Leistung durch den abgeschlossenen medizinischen Termin erbracht".to_string(),
+    ];
     notes.extend(context_notes.iter().cloned());
-    sqlx::query(
-        r#"UPDATE order_leistungen
-           SET status = 'delivered',
-               delivered_at = COALESCE(delivered_at, now()),
-               source_medical_appointment_id = $2,
-               provider_id = COALESCE(provider_id, $3),
-               doctor_id = CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
-               notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $5)
-           WHERE id = $1 AND status = 'planned'"#,
+
+    if planned_quantity <= rust_decimal::Decimal::ONE {
+        sqlx::query(
+            r#"UPDATE order_leistungen
+               SET status = 'delivered',
+                   delivered_at = COALESCE(delivered_at, now()),
+                   source_medical_appointment_id = $2,
+                   provider_id = COALESCE(provider_id, $3),
+                   doctor_id = CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
+                   notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $5)
+               WHERE id = $1 AND status = 'planned'"#,
+        )
+        .bind(planned_id)
+        .bind(appointment_id)
+        .bind(provider_id)
+        .bind(doctor_id)
+        .bind(notes.join("\n"))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(Some(ConsumedPlannedLine {
+            leistung_id: planned_id,
+            split_from: None,
+            remaining_planned_quantity: None,
+        }));
+    }
+
+    // One unit of a planned block: the block keeps the remaining units, the
+    // delivered unit gets a line of its own with the same terms.
+    let remaining = planned_quantity - rust_decimal::Decimal::ONE;
+    sqlx::query("UPDATE order_leistungen SET quantity = $2 WHERE id = $1 AND status = 'planned'")
+        .bind(planned_id)
+        .bind(remaining)
+        .execute(&mut *tx)
+        .await?;
+    let delivered_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO order_leistungen (
+                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+                is_cost_passthrough, provider_id, doctor_id, status, delivered_at, notes,
+                source_medical_appointment_id, agency_service_id, agency_service_price_version_id,
+                tax_profile_id, vat_source
+           )
+           SELECT order_id, patient_id, description, 1, unit_price, currency, vat_rate,
+                  is_cost_passthrough, COALESCE(provider_id, $3),
+                  CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
+                  'delivered', now(), $5,
+                  $2, agency_service_id, agency_service_price_version_id,
+                  tax_profile_id, vat_source
+           FROM order_leistungen
+           WHERE id = $1
+           RETURNING id"#,
     )
-    .bind(leistung_id)
+    .bind(planned_id)
     .bind(appointment_id)
     .bind(provider_id)
     .bind(doctor_id)
     .bind(notes.join("\n"))
+    .fetch_one(&mut *tx)
+    .await?;
+    // Inserting refreshes the catalog wording; keep the wording the order was
+    // planned with.
+    sqlx::query(
+        r#"UPDATE order_leistungen delivered
+           SET agency_service_key_snapshot = planned.agency_service_key_snapshot,
+               agency_service_name_snapshot = planned.agency_service_name_snapshot,
+               agency_service_description_snapshot = planned.agency_service_description_snapshot,
+               agency_service_unit_label_snapshot = planned.agency_service_unit_label_snapshot,
+               agency_service_description_items_snapshot = planned.agency_service_description_items_snapshot
+           FROM order_leistungen planned
+           WHERE delivered.id = $1 AND planned.id = $2"#,
+    )
+    .bind(delivered_id)
+    .bind(planned_id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Some(leistung_id))
+    Ok(Some(ConsumedPlannedLine {
+        leistung_id: delivered_id,
+        split_from: Some(planned_id),
+        remaining_planned_quantity: Some(remaining),
+    }))
 }
 
 async fn load_interpreter_report_billing_candidates(
@@ -7259,7 +7678,6 @@ async fn load_interpreter_report_billing_candidates(
                   a.date AS appointment_date,
                   u.name AS interpreter_name,
                   ir.hours,
-                  ir.report_text,
                   ir.approved_by,
                   ir.approved_at
            FROM interpreter_reports ir
@@ -7297,9 +7715,6 @@ async fn load_interpreter_report_billing_candidates(
             hours: row
                 .try_get::<rust_decimal::Decimal, _>("hours")
                 .unwrap_or(rust_decimal::Decimal::ZERO),
-            report_text: row
-                .try_get::<Option<String>, _>("report_text")
-                .unwrap_or_default(),
             approved_by: row
                 .try_get::<Option<Uuid>, _>("approved_by")
                 .unwrap_or_default(),
@@ -7391,23 +7806,30 @@ enum InterpreterReportBillingOutcome {
     },
 }
 
+/// Billing notes of an order line created from an approved interpreter report.
+///
+/// The line references the report (id, hours, visit date) instead of copying
+/// its free text: the report describes the visit and can carry medical
+/// content, while order lines are read by billing. The text itself stays on
+/// the report, behind the appointment's access rules.
 fn interpreter_report_billing_notes(
     candidate: &InterpreterReportBillingCandidate,
     headline: String,
 ) -> String {
-    let mut parts = vec![
+    // Readable text and a report reference only: the report text stays on the
+    // report, and no appointment IDs or catalog keys appear in the notes.
+    [
         headline,
         format!("Dolmetscher: {}", candidate.interpreter_name),
         format!("Stunden: {}", candidate.hours.normalize()),
-        format!("Termin: {}", candidate.appointment_id),
-        format!("Katalogschlüssel: {INTERPRETER_HOURS_SERVICE_KEY}"),
-    ];
-    if let Some(text) = candidate.report_text.as_ref().map(|value| value.trim())
-        && !text.is_empty()
-    {
-        parts.push(format!("Report: {text}"));
-    }
-    parts.join("\n")
+        format!(
+            "Termin: {} am {}",
+            candidate.appointment_title,
+            candidate.appointment_date.format("%d.%m.%Y")
+        ),
+        format!("Bericht: {}", candidate.report_id),
+    ]
+    .join("\n")
 }
 
 /// Bills one approved interpreter report. The report consumes the order's
@@ -7468,9 +7890,8 @@ async fn sync_interpreter_report_billing_candidate(
         let notes = interpreter_report_billing_notes(
             candidate,
             format!(
-                "Geplante Leistung ({} Std.) durch freigegebenen Dolmetscherbericht {} mit den tatsächlichen Stunden ersetzt",
-                planned_quantity.normalize(),
-                candidate.report_id
+                "Geplante Leistung ({} Std.) durch den freigegebenen Dolmetscherbericht mit den tatsächlichen Stunden ersetzt",
+                planned_quantity.normalize()
             ),
         );
         sqlx::query(
@@ -7506,14 +7927,13 @@ async fn sync_interpreter_report_billing_candidate(
     };
     let description = format!(
         "{} · {} · {}",
-        catalog_item.service_name, candidate.appointment_title, candidate.appointment_date
+        catalog_item.service_name,
+        candidate.appointment_title,
+        candidate.appointment_date.format("%d.%m.%Y")
     );
     let notes = interpreter_report_billing_notes(
         candidate,
-        format!(
-            "Automatisch aus freigegebenem Dolmetscherbericht {} erstellt",
-            candidate.report_id
-        ),
+        "Automatisch aus dem freigegebenen Dolmetscherbericht erstellt".to_string(),
     );
     let inserted = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO order_leistungen (
@@ -7843,10 +8263,26 @@ async fn approve_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let notifications = match insert_interpreter_work_notifications(
+        &mut tx,
+        InterpreterWorkNotice::ReportApproved,
+        apt_id,
+        Some(report_id),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "notify interpreter about approval");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "approve report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
 
     let sync_summary = match sync_interpreter_report_billing_candidates(&state, Some(apt_id)).await
     {
@@ -7946,10 +8382,26 @@ async fn reject_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let notifications = match insert_interpreter_work_notifications(
+        &mut tx,
+        InterpreterWorkNotice::ReportRejected,
+        apt_id,
+        Some(report_id),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "notify interpreter about rejection");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "reject report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
     Json(serde_json::json!({"ok": true, "report_id": report_id})).into_response()
 }
 
@@ -8055,13 +8507,18 @@ async fn ensure_appointment_communication_access(
         return Err(err(StatusCode::NOT_FOUND, "Appointment not found"));
     };
 
-    match can_access_appointment(
+    match appointment_in_scope(
         state,
         auth,
         appointment_id,
         Some(context.patient_id),
         context.interpreter_id,
         context.owner_user_id,
+        if manage {
+            access::AppointmentAccess::Change
+        } else {
+            access::AppointmentAccess::Read
+        },
     )
     .await
     {
@@ -8241,12 +8698,18 @@ async fn insert_task_record(
         return Ok(());
     }
 
+    // Generated appointment tasks carry the appointment's order, so the work
+    // center links back to it and their expenses land on the order.
     let updated = sqlx::query(
         r#"UPDATE tasks
            SET description = $4,
                due_date = $5,
                priority = $6,
                assigned_by = $7,
+               order_id = COALESCE(
+                   order_id,
+                   (SELECT appointment.order_id FROM appointments appointment WHERE appointment.id = $1)
+               ),
                updated_at = now()
            WHERE appointment_id = $1
              AND assigned_to = $2
@@ -8270,9 +8733,11 @@ async fn insert_task_record(
         sqlx::query(
             r#"INSERT INTO tasks (
                     title, description, assigned_to, assigned_by, patient_id, appointment_id,
-                    due_date, priority
+                    order_id, due_date, priority
                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8
+                    $1, $2, $3, $4, $5, $6,
+                    (SELECT appointment.order_id FROM appointments appointment WHERE appointment.id = $6),
+                    $7, $8
                )"#,
         )
         .bind(title)
@@ -8297,9 +8762,79 @@ async fn insert_task_record(
 }
 
 fn berlin_today() -> chrono::NaiveDate {
-    chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive()
+    crate::app_time::today()
+}
+
+/// Default lead times of the automatic concierge preparation: the concierge is
+/// reminded a day before the service and prepares it until two hours before.
+/// Admins change them in the system settings.
+const DEFAULT_CONCIERGE_REMINDER_LEAD_HOURS: i64 = 24;
+const DEFAULT_CONCIERGE_PREP_LEAD_HOURS: i64 = 2;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ConciergeLeadTimes {
+    reminder_hours: i64,
+    prep_hours: i64,
+}
+
+impl Default for ConciergeLeadTimes {
+    fn default() -> Self {
+        Self {
+            reminder_hours: DEFAULT_CONCIERGE_REMINDER_LEAD_HOURS,
+            prep_hours: DEFAULT_CONCIERGE_PREP_LEAD_HOURS,
+        }
+    }
+}
+
+async fn load_concierge_lead_times<'e, E>(executor: E) -> ConciergeLeadTimes
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let rows = sqlx::query_as::<_, (String, String)>(
+        r#"SELECT key, value::text
+           FROM system_settings
+           WHERE key IN ('concierge_reminder_lead_hours', 'concierge_prep_lead_hours')"#,
+    )
+    .fetch_all(executor)
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "load concierge lead times; using defaults");
+        Vec::new()
+    });
+    let mut leads = ConciergeLeadTimes::default();
+    for (key, value) in rows {
+        let Some(hours) = value
+            .trim_matches('"')
+            .parse::<i64>()
+            .ok()
+            .filter(|hours| (0..=336).contains(hours))
+        else {
+            continue;
+        };
+        match key.as_str() {
+            "concierge_reminder_lead_hours" => leads.reminder_hours = hours,
+            "concierge_prep_lead_hours" => leads.prep_hours = hours,
+            _ => {}
+        }
+    }
+    leads
+}
+
+/// When the "Upcoming concierge service" reminder and the preparation task
+/// of a concierge service are due: their lead time before the service start
+/// (09:00 without a start time). A service booked at short notice is not
+/// given a due time in the past; neither falls after the service start.
+fn concierge_preparation_due(
+    date: chrono::NaiveDate,
+    time_start: Option<chrono::NaiveTime>,
+    leads: ConciergeLeadTimes,
+    now: chrono::DateTime<chrono::Utc>,
+) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+    let start = appointment_due_at(date, time_start, 9);
+    let earliest = now.min(start);
+    let reminder_at = (start - chrono::Duration::hours(leads.reminder_hours)).max(earliest);
+    let prep_due = (start - chrono::Duration::hours(leads.prep_hours)).max(earliest);
+    (reminder_at, prep_due)
 }
 
 /// Receipts are collected once the non-medical service is over: the task is
@@ -8320,28 +8855,7 @@ fn appointment_due_at(
 ) -> chrono::DateTime<chrono::Utc> {
     let default_hour = if fallback_hour < 24 { fallback_hour } else { 9 };
     let default_time = chrono::NaiveTime::from_hms_opt(default_hour, 0, 0).unwrap_or_default();
-    let local = date.and_time(time_start.unwrap_or(default_time));
-    if let Some(value) = chrono_tz::Europe::Berlin
-        .from_local_datetime(&local)
-        .earliest()
-    {
-        return value.with_timezone(&chrono::Utc);
-    }
-
-    // Spring-forward local times between 02:00 and 03:00 do not exist. Move to
-    // the first valid local instant instead of accidentally treating the value
-    // as UTC.
-    for minutes in 1..=180 {
-        let candidate = local + chrono::Duration::minutes(minutes);
-        if let Some(value) = chrono_tz::Europe::Berlin
-            .from_local_datetime(&candidate)
-            .earliest()
-        {
-            return value.with_timezone(&chrono::Utc);
-        }
-    }
-
-    unreachable!("Europe/Berlin must have a valid local instant within three hours")
+    crate::app_time::from_local(date.and_time(time_start.unwrap_or(default_time)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8364,8 +8878,9 @@ async fn bootstrap_concierge_workflow(
         insert_checklist_item(state, appointment_id, phase, item_text, index as i32 + 1).await?;
     }
 
-    let reminder_at = appointment_due_at(date, time_start, 9);
-    let prep_due = appointment_due_at(date, time_start, 8);
+    let leads = load_concierge_lead_times(&state.db).await;
+    let (reminder_at, prep_due) =
+        concierge_preparation_due(date, time_start, leads, chrono::Utc::now());
     let followup_due = concierge_receipts_due_at(date, time_end);
 
     for concierge_id in concierges {
@@ -8521,8 +9036,9 @@ async fn reconcile_auto_concierge_schedule_in_tx(
     time_end: Option<chrono::NaiveTime>,
     reactivate_service: bool,
 ) -> Result<(), axum::response::Response> {
-    let reminder_at = appointment_due_at(date, time_start, 9);
-    let prep_due = appointment_due_at(date, time_start, 8);
+    let leads = load_concierge_lead_times(&mut **tx).await;
+    let (reminder_at, prep_due) =
+        concierge_preparation_due(date, time_start, leads, chrono::Utc::now());
     let followup_due = concierge_receipts_due_at(date, time_end);
     let starts_at = time_start.map(|value| appointment_due_at(date, Some(value), 9));
     let ends_at = time_end.map(|value| appointment_due_at(date, Some(value), 18));
@@ -8817,33 +9333,19 @@ pub(crate) fn is_blocked_slot(auth: &AuthUser, appointment_type: &str) -> bool {
 }
 
 fn can_view_conflict_row(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> bool {
-    if auth.role.has_full_access() {
-        return true;
-    }
-    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-        && row
-            .try_get::<Option<Uuid>, _>("interpreter_id")
-            .unwrap_or_default()
-            == Some(auth.user_id)
-    {
-        return true;
-    }
-    if matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    ) && row
-        .try_get::<Option<Uuid>, _>("owner_user_id")
-        .unwrap_or_default()
-        == Some(auth.user_id)
-    {
-        return true;
-    }
-    if access::requires_patient_assignment(auth.role) {
-        return row
+    let scope = access::AppointmentScope::for_role(auth.role);
+    match scope.admits_directly(
+        auth.user_id,
+        row.try_get::<Option<Uuid>, _>("interpreter_id")
+            .unwrap_or_default(),
+        row.try_get::<Option<Uuid>, _>("owner_user_id")
+            .unwrap_or_default(),
+    ) {
+        Some(decision) => decision,
+        None => row
             .try_get::<bool, _>("caller_has_assignment")
-            .unwrap_or(false);
+            .unwrap_or(false),
     }
-    true
 }
 
 fn build_conflict_item_json(
@@ -8997,6 +9499,7 @@ fn build_appointment_detail_json(
         "interpreter_id": if blocked { None::<Uuid> } else { interpreter_id },
         "interpreter_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default() },
         "interpreter_response": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response").unwrap_or_default() },
+        "interpreter_response_comment": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response_comment").unwrap_or_default() },
         "checklist_phase": if blocked { String::new() } else { row.try_get::<String, _>("checklist_phase").unwrap_or_default() },
         "preparation_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("preparation_notes").unwrap_or_default() },
         "followup_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("followup_notes").unwrap_or_default() },
@@ -9030,6 +9533,18 @@ fn build_appointment_detail_json(
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
     })
+}
+
+/// Who may be reminded about an appointment. IT administration does not work
+/// on appointments, and billing has nothing to prepare for a non-medical
+/// (concierge) booking; billing learns about medical visits through the
+/// billing handoff instead.
+fn reminder_recipient_allowed(role: &str, appointment_type: &str) -> bool {
+    match role {
+        "it_admin" => false,
+        "billing" => appointment_type != "non_medical",
+        _ => true,
+    }
 }
 
 async fn load_active_interpreter_role(
@@ -9855,6 +10370,8 @@ async fn ensure_patient_access(
     }
 }
 
+/// Read access to one appointment (detail, report, reminders, communication),
+/// including the interpreter team lead's team context.
 async fn can_access_appointment(
     state: &AppState,
     auth: &AuthUser,
@@ -9863,91 +10380,102 @@ async fn can_access_appointment(
     interpreter_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
 ) -> Result<bool, axum::response::Response> {
+    appointment_in_scope(
+        state,
+        auth,
+        appointment_id,
+        patient_id,
+        interpreter_id,
+        owner_user_id,
+        access::AppointmentAccess::Read,
+    )
+    .await
+}
+
+/// Change access to one appointment. The team lead's team context is a read
+/// and report-review scope; changing an appointment keeps the previous rule
+/// (own appointment, owner, or patient assignment).
+async fn can_change_appointment(
+    state: &AppState,
+    auth: &AuthUser,
+    appointment_id: Uuid,
+    patient_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    appointment_in_scope(
+        state,
+        auth,
+        appointment_id,
+        patient_id,
+        interpreter_id,
+        owner_user_id,
+        access::AppointmentAccess::Change,
+    )
+    .await
+}
+
+async fn appointment_in_scope(
+    state: &AppState,
+    auth: &AuthUser,
+    appointment_id: Uuid,
+    patient_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    mode: access::AppointmentAccess,
+) -> Result<bool, axum::response::Response> {
     if auth.role == Role::Ceo {
         return Ok(true);
     }
 
-    let Some(patient_id) = patient_id else {
-        let row = sqlx::query("SELECT patient_id, interpreter_id, owner_user_id FROM appointments WHERE id = $1")
-            .bind(appointment_id)
-            .fetch_optional(&state.db)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to load appointment access context");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-            })?;
-
-        let Some(row) = row else {
-            return Ok(false);
-        };
-
-        let row_interpreter_id: Option<Uuid> = row.try_get("interpreter_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode appointment access context",
-            )
-        })?;
-        if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-            && row_interpreter_id == Some(auth.user_id)
-        {
-            return Ok(true);
-        }
-        let row_owner_user_id: Option<Uuid> = row.try_get("owner_user_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode appointment access context",
-            )
-        })?;
-        if matches!(
-            auth.role,
-            Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-        ) && row_owner_user_id == Some(auth.user_id)
-        {
-            return Ok(true);
-        }
-
-        let patient_id: Uuid = row.try_get("patient_id").map_err(|_| {
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to decode appointment access context",
-            )
-        })?;
-
-        if access::requires_patient_assignment(auth.role) {
-            return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
+    let (patient_id, interpreter_id, owner_user_id) = match patient_id {
+        Some(patient_id) => (patient_id, interpreter_id, owner_user_id),
+        None => {
+            let row = sqlx::query("SELECT patient_id, interpreter_id, owner_user_id FROM appointments WHERE id = $1")
+                .bind(appointment_id)
+                .fetch_optional(&state.db)
                 .await
                 .map_err(|e| {
-                    tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to validate appointment assignment");
+                    tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to load appointment access context");
                     err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-                });
-        }
+                })?;
 
-        return Ok(true);
+            let Some(row) = row else {
+                return Ok(false);
+            };
+            let decode = |_| {
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to decode appointment access context",
+                )
+            };
+            (
+                row.try_get::<Uuid, _>("patient_id").map_err(decode)?,
+                row.try_get::<Option<Uuid>, _>("interpreter_id")
+                    .map_err(decode)?,
+                row.try_get::<Option<Uuid>, _>("owner_user_id")
+                    .map_err(decode)?,
+            )
+        }
     };
 
-    if matches!(auth.role, Role::Interpreter | Role::TeamleadInterpreter)
-        && interpreter_id == Some(auth.user_id)
-    {
-        return Ok(true);
-    }
-    if matches!(
-        auth.role,
-        Role::PatientManager | Role::TeamleadInterpreter | Role::Concierge
-    ) && owner_user_id == Some(auth.user_id)
-    {
-        return Ok(true);
-    }
-
-    if access::requires_patient_assignment(auth.role) {
-        access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, patient_id = %patient_id, "Failed to validate appointment assignment");
-                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
-            })
-    } else {
-        Ok(true)
-    }
+    access::can_view_appointment_row(
+        &state.db,
+        access::AppointmentRow {
+            role: auth.role,
+            user_id: auth.user_id,
+            appointment_id,
+            patient_id,
+            interpreter_id,
+            owner_user_id,
+        },
+        mode,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, appointment_id = %appointment_id, patient_id = %patient_id, "Failed to validate appointment assignment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate appointment access")
+    })
 }
 
 async fn ensure_appointment_order_link_allowed(
@@ -10079,6 +10607,66 @@ mod tests {
 
     fn time(hour: u32, minute: u32) -> chrono::NaiveTime {
         chrono::NaiveTime::from_hms_opt(hour, minute, 0).expect("valid test time")
+    }
+
+    #[test]
+    fn concierge_preparation_is_due_ahead_of_the_service() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 14).unwrap();
+        let long_before = chrono::DateTime::parse_from_rfc3339("2026-10-01T08:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (reminder_at, prep_due) = concierge_preparation_due(
+            date,
+            Some(time(19, 30)),
+            ConciergeLeadTimes::default(),
+            long_before,
+        );
+        // 19:30 Berlin summer time is 17:30 UTC.
+        assert_eq!(reminder_at.to_rfc3339(), "2026-10-13T17:30:00+00:00");
+        assert_eq!(prep_due.to_rfc3339(), "2026-10-14T15:30:00+00:00");
+
+        // Without a start time the service is expected at 09:00.
+        let (reminder_at, prep_due) = concierge_preparation_due(
+            date,
+            None,
+            ConciergeLeadTimes {
+                reminder_hours: 48,
+                prep_hours: 0,
+            },
+            long_before,
+        );
+        assert_eq!(reminder_at.to_rfc3339(), "2026-10-12T07:00:00+00:00");
+        assert_eq!(prep_due.to_rfc3339(), "2026-10-14T07:00:00+00:00");
+
+        // Booked at short notice: due now, never in the past or after the start.
+        let short_notice = chrono::DateTime::parse_from_rfc3339("2026-10-14T16:45:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (reminder_at, prep_due) = concierge_preparation_due(
+            date,
+            Some(time(19, 30)),
+            ConciergeLeadTimes::default(),
+            short_notice,
+        );
+        assert_eq!(reminder_at, short_notice);
+        assert_eq!(prep_due, short_notice);
+        let after_start = short_notice + chrono::Duration::hours(3);
+        let (reminder_at, _) = concierge_preparation_due(
+            date,
+            Some(time(19, 30)),
+            ConciergeLeadTimes::default(),
+            after_start,
+        );
+        assert_eq!(reminder_at.to_rfc3339(), "2026-10-14T17:30:00+00:00");
+    }
+
+    #[test]
+    fn concierge_bookings_do_not_remind_billing_or_it() {
+        assert!(!reminder_recipient_allowed("billing", "non_medical"));
+        assert!(reminder_recipient_allowed("billing", "medical"));
+        assert!(!reminder_recipient_allowed("it_admin", "medical"));
+        assert!(reminder_recipient_allowed("concierge", "non_medical"));
+        assert!(reminder_recipient_allowed("patient_manager", "non_medical"));
     }
 
     #[test]

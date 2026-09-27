@@ -54,3 +54,13 @@ export function filterAppointmentOwnerOptions<T extends StaffLike>(
     canSelectAppointmentOwner(currentUserRole, currentUserId, member),
   );
 }
+
+/**
+ * Who may be reminded about an appointment (mirrors the server): IT
+ * administration never, billing not for a non-medical (concierge) booking.
+ */
+export function isAppointmentReminderRecipient(role: string, appointmentType: string) {
+  if (role === "it_admin") return false;
+  if (role === "billing") return appointmentType !== "non_medical";
+  return true;
+}

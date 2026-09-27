@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { appDateTimeFormat, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -119,10 +120,7 @@ const selectClass =
 
 function localDateTimeValue(value: string | Date | null, fallbackToNextHour = false) {
   if (!value && !fallbackToNextHour) return "";
-  const date = value ? new Date(value) : new Date(Date.now() + 60 * 60 * 1000);
-  if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value || new Date(Date.now() + 60 * 60 * 1000));
 }
 
 function optional(value: string) {
@@ -134,7 +132,7 @@ export function bookingServiceOptionLabel(service: ConciergeService, lang: Lang,
   const startsAt = service.starts_at ? new Date(service.starts_at) : null;
   const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null;
   const date = validStartsAt
-    ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+    ? appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
         dateStyle: "short",
         timeStyle: "short",
       }).format(validStartsAt)
@@ -221,7 +219,8 @@ export function ConciergeProviderBookingDialog({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!provider || !canSubmit) return;
+    const startsAtIso = berlinLocalInputToIso(startsAt);
+    if (!provider || !canSubmit || !startsAtIso) return;
     await onSave(serviceId, {
       request_id: requestId,
       provider_id: provider.id,
@@ -230,8 +229,8 @@ export function ConciergeProviderBookingDialog({
       contact_person: optional(contactPerson),
       vendor_contact: optional(vendorContact),
       booking_reference: optional(bookingReference),
-      starts_at: new Date(startsAt).toISOString(),
-      ends_at: endsAt ? new Date(endsAt).toISOString() : null,
+      starts_at: startsAtIso,
+      ends_at: berlinLocalInputToIso(endsAt),
       service_address: serviceAddress.trim(),
       note: optional(note),
     });

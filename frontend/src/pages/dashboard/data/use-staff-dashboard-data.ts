@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useMemo, useReducer, useRef, type SetStateAction } from "react";
 
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateKey, appDateKeyOf, startOfMonthKey } from "@/lib/app-time-zone";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchCompanyFinancialAccounts,
@@ -119,6 +120,7 @@ const STAFF_DASHBOARD_REALTIME_EVENTS = [
   "user.deactivated",
   "workflow_checklist_item.created",
   "workflow_checklist_item.completed",
+  "workflow_checklist_item.updated",
 ] as const;
 
 function clearStaffDashboardCache() {
@@ -141,21 +143,14 @@ export function dashboardTaskFromOperationalItem(task: ConciergeTask): TaskItem 
   };
 }
 
-function localIsoDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 async function fetchExecutiveFinanceSnapshot(): Promise<ExecutiveFinanceSnapshot | null> {
-  const today = new Date();
-  const from = new Date(today.getFullYear(), today.getMonth(), 1);
+  // This Berlin month so far.
+  const today = appDateKey();
   try {
     const [position, accounts] = await Promise.all([
       fetchCompanyFinancialPosition({
-        from: localIsoDate(from),
-        to: localIsoDate(today),
+        from: startOfMonthKey(today),
+        to: today,
         currency: "EUR",
         movement: "all",
         search: "",
@@ -381,14 +376,8 @@ export function useStaffDashboardData(period: Period) {
   }, 300);
 
   const newPatientsThisMonth = useMemo(() => {
-    const now = new Date();
-    return patients.filter((patient) => {
-      const createdAt = new Date(patient.created_at);
-      return (
-        createdAt.getFullYear() === now.getFullYear() &&
-        createdAt.getMonth() === now.getMonth()
-      );
-    }).length;
+    const currentMonth = appDateKey().slice(0, 7);
+    return patients.filter((patient) => appDateKeyOf(patient.created_at).slice(0, 7) === currentMonth).length;
   }, [patients]);
 
   const openTasksCount = useMemo(

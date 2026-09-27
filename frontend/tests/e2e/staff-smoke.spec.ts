@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { chooseComboboxOption } from "./helpers";
+import { chooseComboboxOption, pickerSection } from "./helpers";
 
 // A real one-page PDF: the lead wizard renders previews with pdf.js.
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
@@ -1878,9 +1878,9 @@ test.describe("staff smoke flows", () => {
     await expect(dialog.getByLabel("Reisepass-Nr.")).toHaveValue("MA1234567");
     // Date bindings use the segmented date picker, whose day/month/year fields sit next to the label.
     const passportValidUntil = dialog.getByText("Reisepass gültig bis", { exact: true }).locator("..");
-    await expect(passportValidUntil.getByRole("spinbutton", { name: "Day", exact: true })).toHaveText("01");
-    await expect(passportValidUntil.getByRole("spinbutton", { name: "Month", exact: true })).toHaveText("01");
-    await expect(passportValidUntil.getByRole("spinbutton", { name: "Year", exact: true })).toHaveText("2050");
+    await expect(passportValidUntil.getByRole("spinbutton", { name: pickerSection.day })).toHaveText("01");
+    await expect(passportValidUntil.getByRole("spinbutton", { name: pickerSection.month })).toHaveText("01");
+    await expect(passportValidUntil.getByRole("spinbutton", { name: pickerSection.year })).toHaveText("2050");
 
     await dialog.locator("form").evaluate((formElement) => {
       (formElement as HTMLFormElement).requestSubmit();
@@ -2309,10 +2309,10 @@ test.describe("lead wizard UX", () => {
       const field = wizard.getByText("Vorauszahlung fällig bis", { exact: true }).locator("..");
       const input = wizard.locator("#lead-wizard-prepayment-deadline");
       await expect(field).toBeVisible();
-      await field.getByRole("spinbutton", { name: "Day", exact: true }).fill("12");
-      await field.getByRole("spinbutton", { name: "Hours", exact: true }).fill("15");
-      await field.getByRole("spinbutton", { name: "Minutes", exact: true }).fill("30");
-      await field.getByRole("spinbutton", { name: "Minutes", exact: true }).press("Tab");
+      await field.getByRole("spinbutton", { name: pickerSection.day }).fill("12");
+      await field.getByRole("spinbutton", { name: pickerSection.hours }).fill("15");
+      await field.getByRole("spinbutton", { name: pickerSection.minutes }).fill("30");
+      await field.getByRole("spinbutton", { name: pickerSection.minutes }).press("Tab");
       const expected = await page.evaluate(() => new Date("2026-09-12T15:30").toISOString());
       await expect.poll(() => deadline).toBe(expected);
       await expect(input).toHaveValue("12.09.2026 15:30");
@@ -2327,7 +2327,7 @@ test.describe("lead wizard UX", () => {
       expect(writes.every((payload) => !("paid_amount" in payload))).toBe(true);
       await field.scrollIntoViewIfNeeded();
       await page.screenshot({ path: test.info().outputPath(`prepayment-deadline-${width}.png`) });
-      const day = field.getByRole("spinbutton", { name: "Day", exact: true });
+      const day = field.getByRole("spinbutton", { name: pickerSection.day });
       await day.click();
       await day.press("ControlOrMeta+A");
       await page.keyboard.press("Backspace");

@@ -13,9 +13,21 @@
 //!   patient receivable) unless a delivered pass-through order line already
 //!   represents them.
 //!
-//! `paid` is patient cash on the order's invoices minus refunds and `invoiced`
-//! is released non-advance invoices minus credit notes, so
-//! `balance = accrued - paid` and `uninvoiced = accrued - invoiced`.
+//! One basis, the same as the patient's account statement:
+//!
+//! * `invoiced` — released non-advance invoices minus credit notes;
+//! * `uninvoiced` — what accrued but is not on a released invoice yet: the
+//!   service quantities no invoice line bills yet (`billable`), third-party
+//!   costs still to re-invoice and amounts on draft invoices;
+//! * `paid` — patient cash on the order's invoices, advances included, minus
+//!   refunds (applied advances are part of that cash, not counted twice);
+//! * `balance = invoiced + uninvoiced - paid`.
+//!
+//! Credit notes lower `invoiced` and never reopen a service for billing.
+//! Which service an invoice line bills is decided line by line, legacy quote
+//! lines without a service link included (see [`invoiced_lines`]), so "create
+//! final invoice" bills exactly the uninvoiced service amount.
+//!
 //! The settlement row keeps the snapshot taken at termination; every read also
 //! returns the live values billing works against.
 //!
@@ -43,7 +55,7 @@ use super::{
     CreateInvoiceLineSelection, InvoiceCreationSnapshot, MoneyInput,
     build_selected_invoice_snapshot, can_access_patient, can_create_invoices,
     can_manage_invoice_finance, can_read_invoices, compute_invoice_line_parts, decimal_to_string,
-    ensure_patient_access, err, gen_invoice_number, inherited_invoice_payer, invoice_json_decimal,
+    ensure_patient_access, err, inherited_invoice_payer, invoice_json_decimal,
     load_allocated_quote_quantities, load_invoice_detail, load_quote_invoice_context,
     write_invoice_audit,
 };
@@ -52,6 +64,10 @@ use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
+
+pub(crate) mod invoiced_lines;
+
+use invoiced_lines::{InvoicedLine, ServiceKey, attribute_invoiced_lines, normalize_name};
 
 /// `orders.cancellation_reason` of an order stopped by contract termination.
 pub(crate) const CONTRACT_TERMINATED_REASON: &str = "contract_terminated";
@@ -150,6 +166,10 @@ pub(crate) struct OrderSettlement {
     pub accrued_gross: Decimal,
     pub invoiced_gross: Decimal,
     pub paid_gross: Decimal,
+    /// Non-advance draft invoices of the order: billed, not released yet.
+    pub draft_gross: Decimal,
+    /// Invoice lines that bill no accrued service or third-party cost.
+    pub unmatched_invoiced_gross: Decimal,
     lines: Vec<SettlementLine>,
     cancelled_lines: Vec<SettlementLine>,
     warnings: Vec<&'static str>,
@@ -157,11 +177,59 @@ pub(crate) struct OrderSettlement {
 
 impl OrderSettlement {
     pub fn balance_gross(&self) -> Decimal {
-        (self.accrued_gross - self.paid_gross).round_cents()
+        (self.invoiced_gross + self.uninvoiced_gross() - self.paid_gross).round_cents()
     }
 
+    /// Service amounts no invoice line bills yet: what "create final invoice"
+    /// puts on the invoice.
+    pub fn service_uninvoiced_gross(&self) -> Decimal {
+        self.lines
+            .iter()
+            .filter(|line| {
+                line.source == "order_service" && line.uninvoiced_quantity > Decimal::ZERO
+            })
+            .map(|line| {
+                compute_invoice_line_parts(line.uninvoiced_quantity, line.unit_price, line.vat_rate)
+                    .2
+            })
+            .sum::<Decimal>()
+            .round_cents()
+    }
+
+    /// Third-party costs still to re-invoice to the patient.
+    pub fn third_party_uninvoiced_gross(&self) -> Decimal {
+        self.lines
+            .iter()
+            .filter(|line| line.source == "third_party_cost")
+            .map(|line| line.remaining_receivable_gross)
+            .sum::<Decimal>()
+            .round_cents()
+    }
+
+    /// What the next final invoice bills now: uninvoiced services and the
+    /// third-party costs the agency already paid.
+    pub fn billable_gross(&self) -> Decimal {
+        (self.service_uninvoiced_gross()
+            + self
+                .lines
+                .iter()
+                .filter(|line| line.source == "third_party_cost" && line.billable_now)
+                .map(|line| line.remaining_receivable_gross)
+                .sum::<Decimal>())
+        .round_cents()
+    }
+
+    /// Accrued but not on a released invoice: uninvoiced services, third-party
+    /// costs still to re-invoice and draft invoices.
     pub fn uninvoiced_gross(&self) -> Decimal {
-        (self.accrued_gross - self.invoiced_gross).round_cents()
+        (self.service_uninvoiced_gross() + self.third_party_uninvoiced_gross() + self.draft_gross)
+            .round_cents()
+    }
+
+    /// Part of `uninvoiced` the patient's account statement does not already
+    /// carry: its external receivables are the third-party costs.
+    pub fn statement_uninvoiced_gross(&self) -> Decimal {
+        (self.service_uninvoiced_gross() + self.draft_gross).round_cents()
     }
 
     fn is_balanced(&self) -> bool {
@@ -180,11 +248,14 @@ impl OrderSettlement {
             "paid_gross": decimal_to_string(self.paid_gross),
             "balance_gross": decimal_to_string(self.balance_gross()),
             "uninvoiced_gross": decimal_to_string(self.uninvoiced_gross()),
+            "draft_gross": decimal_to_string(self.draft_gross),
+            "billable_gross": decimal_to_string(self.billable_gross()),
+            "unmatched_invoiced_gross": decimal_to_string(self.unmatched_invoiced_gross),
         })
     }
 
     /// Preview/termination view of an open order.
-    fn preview_json(&self) -> Value {
+    pub(crate) fn preview_json(&self) -> Value {
         json!({
             "id": self.order_id,
             "order_number": self.order_number,
@@ -196,6 +267,9 @@ impl OrderSettlement {
             "paid_gross": decimal_to_string(self.paid_gross),
             "balance_gross": decimal_to_string(self.balance_gross()),
             "uninvoiced_gross": decimal_to_string(self.uninvoiced_gross()),
+            "draft_gross": decimal_to_string(self.draft_gross),
+            "billable_gross": decimal_to_string(self.billable_gross()),
+            "unmatched_invoiced_gross": decimal_to_string(self.unmatched_invoiced_gross),
             "lines": self.lines_json(),
             "cancelled_lines": self.cancelled_lines.iter().map(SettlementLine::to_json).collect::<Vec<_>>(),
             "warnings": self.warnings,
@@ -232,20 +306,14 @@ pub(crate) async fn compute_order_settlement(
         r#"SELECT service.id,
                   COALESCE(NULLIF(BTRIM(service.agency_service_name_snapshot), ''), service.description)
                       AS description,
+                  service.description AS raw_description,
                   service.agency_service_unit_label_snapshot AS unit_label,
                   service.status, service.quantity,
                   service.unit_price_snapshot AS unit_price,
                   service.vat_rate_snapshot AS vat_rate,
                   service.is_cost_passthrough,
                   UPPER(service.currency) AS currency,
-                  COALESCE(catalog.due_in_full_on_termination, false) AS due_in_full,
-                  COALESCE((
-                      SELECT SUM(allocation.quantity)
-                      FROM invoice_order_line_allocations allocation
-                      JOIN invoices invoice ON invoice.id = allocation.invoice_id
-                      WHERE allocation.order_leistung_id = service.id
-                        AND invoice.status <> 'cancelled'
-                  ), 0) AS allocated_quantity
+                  COALESCE(catalog.due_in_full_on_termination, false) AS due_in_full
            FROM order_leistungen service
            LEFT JOIN agency_service_catalog catalog ON catalog.id = service.agency_service_id
            WHERE service.order_id = $1
@@ -254,6 +322,57 @@ pub(crate) async fn compute_order_settlement(
     .bind(order_id)
     .fetch_all(&mut *conn)
     .await?;
+
+    // What the order's non-cancelled settlement invoices (drafts included)
+    // already bill, line by line; legacy lines without a service link are
+    // matched by name, price and VAT rate.
+    let invoiced_lines = sqlx::query_scalar::<_, Value>(
+        r#"SELECT item.value
+           FROM invoices invoice
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                    THEN invoice.line_items ELSE '[]'::jsonb END
+           ) WITH ORDINALITY AS item(value, position)
+           WHERE invoice.order_id = $1
+             AND invoice.invoice_type <> 'advance'
+             AND invoice.status <> 'cancelled'
+           ORDER BY invoice.issued_at, invoice.created_at, invoice.id, item.position"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut *conn)
+    .await?
+    .iter()
+    .map(InvoicedLine::from_json)
+    .collect::<Vec<_>>();
+    let service_keys = service_rows
+        .iter()
+        .map(|row| {
+            let is_cost_passthrough = row
+                .try_get::<bool, _>("is_cost_passthrough")
+                .unwrap_or(false);
+            ServiceKey {
+                id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                names: ["description", "raw_description"]
+                    .iter()
+                    .filter_map(|column| row.try_get::<Option<String>, _>(*column).ok().flatten())
+                    .map(|name| normalize_name(&name))
+                    .collect(),
+                quantity: row
+                    .try_get::<Decimal, _>("quantity")
+                    .unwrap_or(Decimal::ZERO),
+                unit_price: row
+                    .try_get::<Decimal, _>("unit_price")
+                    .unwrap_or(Decimal::ZERO),
+                vat_rate: if is_cost_passthrough {
+                    Decimal::ZERO
+                } else {
+                    row.try_get::<Decimal, _>("vat_rate")
+                        .unwrap_or(Decimal::ZERO)
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    let invoiced_quantities = attribute_invoiced_lines(&service_keys, &invoiced_lines);
 
     let mut lines = Vec::new();
     let mut cancelled_lines = Vec::new();
@@ -299,7 +418,9 @@ pub(crate) async fn compute_order_settlement(
         }
         let (net, vat, gross) = compute_invoice_line_parts(quantity, unit_price, vat_rate);
         let allocated = row
-            .try_get::<Decimal, _>("allocated_quantity")
+            .try_get::<Uuid, _>("id")
+            .ok()
+            .and_then(|id| invoiced_quantities.by_service.get(&id).copied())
             .unwrap_or(Decimal::ZERO);
         let line = SettlementLine {
             source: "order_service",
@@ -470,6 +591,20 @@ pub(crate) async fn compute_order_settlement(
     .fetch_one(&mut *conn)
     .await?;
 
+    let draft_gross = sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(GREATEST(total_gross - credited_amount, 0)), 0)
+           FROM invoices
+           WHERE order_id = $1
+             AND invoice_type <> 'advance'
+             AND status = 'draft'"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if invoiced_quantities.unmatched_gross > Decimal::ZERO {
+        warnings.push("unmatched_invoice_lines");
+    }
+
     Ok(Some(OrderSettlement {
         order_id,
         order_number: order
@@ -484,6 +619,8 @@ pub(crate) async fn compute_order_settlement(
         accrued_gross: accrued_gross.round_cents(),
         invoiced_gross: invoiced_gross.round_cents(),
         paid_gross: paid_gross.round_cents(),
+        draft_gross: draft_gross.round_cents(),
+        unmatched_invoiced_gross: invoiced_quantities.unmatched_gross.round_cents(),
         lines,
         cancelled_lines,
         warnings,
@@ -730,6 +867,7 @@ pub(crate) async fn terminate_open_orders_tx(
         // settle, so the settlement is closed right away.
         let nothing_to_settle = settlement.accrued_gross.is_zero()
             && settlement.invoiced_gross.is_zero()
+            && settlement.draft_gross.is_zero()
             && settlement.paid_gross.is_zero();
         let (settlement_id, settlement_status) = match settlement.patient_id {
             Some(patient_id) => {
@@ -990,10 +1128,9 @@ async fn get_order_termination_settlement(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if !auth
-        .role
-        .can_any(&[Capability::OrdersView, Capability::InvoicesView])
-    {
+    // A settlement is a financial record: `orders.view` alone (the concierge's
+    // and the interpreter team lead's read-only part of an order) is not enough.
+    if !auth.role.can(Capability::InvoicesView) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let patient_id = match load_settlement_patient(&state, order_id).await {
@@ -1107,9 +1244,8 @@ async fn list_termination_settlements(
 /// normal allocation path, with the "every remaining line" rule relaxed for
 /// terminated orders); services outside any quote are billed from the order
 /// line itself; agency-paid third-party costs are re-invoiced like in the
-/// patient billing constructor. Paid advances are applied after release through
-/// the regular prepayment allocation endpoint (the draft lists them under
-/// `available_prepayments`).
+/// patient billing constructor. Paid advances are credited automatically when
+/// the final invoice is released (see `advance_application`).
 async fn create_termination_final_invoice(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1387,29 +1523,21 @@ async fn create_termination_final_invoice(
     invoiced_service_ids.sort();
     invoiced_service_ids.dedup();
 
-    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
-        .fetch_one(&mut *transaction)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => return failed(error),
-    };
-    let invoice_number = gen_invoice_number(seq);
+    // The draft gets its invoice number when it is released.
     let payer = inherited_invoice_payer(&state.db, order_id, patient_id).await;
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
-                quote_id, order_id, patient_id, invoice_number, invoice_type, status,
+                quote_id, order_id, patient_id, invoice_type, status,
                 total_net, total_vat, total_gross, line_items, notes, created_by,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
-           ) VALUES ($1, $2, $3, $4, 'final', 'draft', $5, $6, $7, $8, $9, $10,
-                     $11, $12, $13, $14, $15, $16)
+           ) VALUES ($1, $2, $3, 'final', 'draft', $4, $5, $6, $7, $8, $9,
+                     $10, $11, $12, $13, $14, $15)
            RETURNING id"#,
     )
     .bind(invoice_quote_id)
     .bind(order_id)
     .bind(patient_id)
-    .bind(&invoice_number)
     .bind(snapshot.total_net)
     .bind(snapshot.total_vat)
     .bind(snapshot.total_gross)
@@ -1540,7 +1668,7 @@ async fn create_termination_final_invoice(
         "invoice.created",
         invoice_id,
         json!({
-            "invoice_number": invoice_number,
+            "invoice_number": null,
             "invoice_type": "final",
             "order_id": order_id,
             "patient_id": patient_id,
@@ -1729,5 +1857,14 @@ mod tests {
         assert!(Role::Billing.can(Capability::InvoicesFinance));
         assert!(!Role::PatientManager.can(Capability::InvoicesFinance));
         assert!(!Role::Interpreter.can_any(&[Capability::OrdersView, Capability::InvoicesView]));
+        // Every role that read settlements through `orders.view` also holds
+        // `invoices.view`; the order-part readers do not.
+        for role in [Role::PatientManager, Role::Billing, Role::CeoAssistant] {
+            assert!(role.can(Capability::InvoicesView), "{role:?}");
+        }
+        for role in [Role::Concierge, Role::TeamleadInterpreter] {
+            assert!(role.can(Capability::OrdersView), "{role:?}");
+            assert!(!role.can(Capability::InvoicesView), "{role:?}");
+        }
     }
 }

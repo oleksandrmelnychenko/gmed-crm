@@ -10,6 +10,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import {
+  appDateTimeFormat,
+  appWallClock,
+  appWallClockToInstant,
+  berlinLocalInputToIso,
+  isoToBerlinLocalInput,
+  parseBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
@@ -38,6 +46,7 @@ import {
   taskAttachmentFileKey,
   uploadConciergeTaskAttachment,
 } from "./task-attachments";
+import { closeOpenSubtasks, ParentCloseChoiceDialog, type ParentCloseRequest } from "./subtask-flow";
 
 const copy = {
   de: {
@@ -105,6 +114,7 @@ const copy = {
     partner: "Partner",
     other: "Andere",
     attachmentUploadFailed: "Die Aufgabe wurde angelegt, aber nicht alle Dateien konnten hochgeladen werden. Bitte erneut versuchen.",
+    closeChildrenFailed: "Die offenen Unteraufgaben konnten nicht geschlossen werden. Die Aufgabe wurde nicht gespeichert.",
     comments: "Kommentare",
     commentPlaceholder: "Kommentar oder Arbeitsergebnis hinzufügen",
     addComment: "Kommentar hinzufügen",
@@ -178,6 +188,7 @@ const copy = {
     partner: "Партнёр",
     other: "Другое",
     attachmentUploadFailed: "Задача создана, но не все файлы удалось загрузить. Повторите попытку.",
+    closeChildrenFailed: "Не удалось закрыть открытые подзадачи. Задача не сохранена.",
     comments: "Комментарии",
     commentPlaceholder: "Добавить комментарий или результат работы",
     addComment: "Добавить комментарий",
@@ -262,37 +273,79 @@ export type ConciergeTaskProjectOption = {
 };
 
 function localDateTimeValue(value: Date | string | null) {
-  if (!value) return "";
-  const date = typeof value === "string" ? new Date(value) : value;
-  if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
 function toIso(value: string) {
-  return value ? new Date(value).toISOString() : null;
+  return berlinLocalInputToIso(value);
 }
 
 function commentDateTime(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
 }
 
+/**
+ * The assignee a new task starts with: the given one (e.g. the concierge of
+ * the source request), otherwise the current user when they may take the
+ * task, otherwise nobody. Never some other person picked by list order: a
+ * task silently assigned to the alphabetically first concierge goes to the
+ * wrong person.
+ */
 export function selectTaskAssigneeId(
   itemAssignedTo: string | null | undefined,
   currentUserId: string | null,
   assignees: ConciergeAssignee[],
+  { serviceLinked = false }: { serviceLinked?: boolean } = {},
 ) {
   const itemAssignee = assignees.find((assignee) => assignee.id === itemAssignedTo);
   if (itemAssignee) return itemAssignee.id;
   const currentUserAssignee = assignees.find((assignee) => assignee.id === currentUserId);
-  if (currentUserAssignee?.role === "concierge") return currentUserAssignee.id;
-  const firstConcierge = assignees.find((assignee) => assignee.role === "concierge");
-  return firstConcierge?.id ?? currentUserAssignee?.id ?? assignees[0]?.id ?? "";
+  // A concierge service task belongs to a concierge.
+  if (serviceLinked) return currentUserAssignee?.role === "concierge" ? currentUserAssignee.id : "";
+  return currentUserAssignee?.id ?? "";
+}
+
+function parseTaskDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+/**
+ * Start and end/due of a new task or event. A sub-task starts inside its
+ * parent's window: the parent's start and due (or, for an event, its end).
+ * Without a parent a calendar click starts at 09:00 Berlin time on that Berlin
+ * day, otherwise in an hour; either way it lasts an hour.
+ */
+export function initialTaskWindow(
+  initialDate: Date | null | undefined,
+  parentTask: Pick<ConciergeTask, "kind" | "starts_at" | "due_at" | "ends_at"> | null | undefined,
+  now = Date.now(),
+): { start: Date; end: Date } {
+  const hour = 60 * 60_000;
+  if (!initialDate && parentTask) {
+    const parentStart = parseTaskDate(parentTask.starts_at);
+    const parentEnd = parseTaskDate(
+      parentTask.kind === "event" ? parentTask.ends_at : parentTask.due_at ?? parentTask.ends_at,
+    );
+    const start = parentStart
+      ?? new Date(parentEnd ? Math.min(parentEnd.getTime() - hour, now + hour) : now + hour);
+    const end = parentEnd && parentEnd.getTime() > start.getTime()
+      ? parentEnd
+      : new Date(start.getTime() + hour);
+    return { start, end };
+  }
+  let start = new Date(now + hour);
+  if (initialDate) {
+    const { year, month, day } = appWallClock(initialDate);
+    start = appWallClockToInstant(year, month, day, 9);
+  }
+  return { start, end: new Date(start.getTime() + hour) };
 }
 
 export function ConciergeTaskEventDialog({
@@ -383,6 +436,7 @@ export function ConciergeTaskEventDialog({
   const [commentBusy, setCommentBusy] = useState(false);
   const [commentError, setCommentError] = useState("");
   const createdTaskRef = useRef<ConciergeTask | null>(null);
+  const [parentCloseRequest, setParentCloseRequest] = useState<ParentCloseRequest | null>(null);
   const commentRequestRef = useRef<{ body: string; requestId: string } | null>(null);
 
   const sortedServices = useMemo(
@@ -419,10 +473,8 @@ export function ConciergeTaskEventDialog({
     // half-written task (or subtask) and its selected dates/assignee.
     if (initializedDraftRef.current === draftKey) return;
     initializedDraftRef.current = draftKey;
-    const start = initialDate ? new Date(initialDate) : new Date(Date.now() + 60 * 60_000);
+    const { start, end } = initialTaskWindow(initialDate, item ? null : parentTask);
     setScheduleError("");
-    if (initialDate) start.setHours(9, 0, 0, 0);
-    const end = new Date(start.getTime() + 60 * 60_000);
     setKind(item?.kind ?? initialKind);
     setTitle(item?.title ?? initialTitle);
     setNote(item?.note ?? "");
@@ -433,7 +485,9 @@ export function ConciergeTaskEventDialog({
     setLocation(item?.location ?? "");
     setPriority(item?.priority ?? "normal");
     setStatus(item?.status ?? "open");
-    setAssigneeId(selectTaskAssigneeId(item?.assigned_to ?? initialAssigneeId, currentUserId, assignees));
+    setAssigneeId(selectTaskAssigneeId(item?.assigned_to ?? initialAssigneeId, currentUserId, assignees, {
+      serviceLinked: Boolean(item?.concierge_service_id ?? initialServiceId),
+    }));
     setReminderAt(localDateTimeValue(item?.reminder_at ?? null));
     setAudience(item?.task_audience ?? "internal");
     setPatientId(item?.patient_id ?? initialPatientId ?? "");
@@ -443,7 +497,7 @@ export function ConciergeTaskEventDialog({
     setExternalName(item?.external_assignee_name ?? "");
     setExternalPhone(item?.external_assignee_phone ?? "");
     setExternalEmail(item?.external_assignee_email ?? "");
-  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialKind, initialPatientId, initialProjectId, initialProviderId, initialServiceId, initialTitle, item, open]);
+  }, [assignees, currentUserId, initialAssigneeId, initialDate, initialKind, initialPatientId, initialProjectId, initialProviderId, initialServiceId, initialTitle, item, open, parentTask]);
 
   useEffect(() => {
     if (!open) return;
@@ -511,16 +565,39 @@ export function ConciergeTaskEventDialog({
     event.preventDefault();
     if (uploadingPending) return;
     const endValue = kind === "task" ? dueAt : endsAt;
-    if (startsAt && endValue && new Date(endValue) <= new Date(startsAt)) {
+    const startInstant = parseBerlinLocalInput(startsAt);
+    const endInstant = parseBerlinLocalInput(endValue);
+    if (startInstant && endInstant && endInstant <= startInstant) {
       setScheduleError(lang === "ru" ? "Окончание должно быть позже начала." : "Das Ende muss nach dem Beginn liegen.");
       return;
     }
     setScheduleError("");
+    // Completing a parent here asks about its open sub-tasks exactly like the
+    // status actions of the work center do.
+    const openChildren = item && !createdTaskRef.current && status === "completed" && item.status !== "completed"
+      ? item.child_open_count ?? 0
+      : 0;
+    if (openChildren > 0 && item) {
+      setParentCloseRequest({ task: item, openCount: openChildren, archive: false, run: (closeChildren) => save(closeChildren) });
+      return;
+    }
+    await save(false);
+  }
+
+  async function save(closeChildren: boolean) {
     setUploadingPending(true);
     setPendingAttachmentError("");
     try {
       let saved = createdTaskRef.current;
       const retryingAttachmentUpload = Boolean(saved);
+      if (!saved && closeChildren && item) {
+        try {
+          await closeOpenSubtasks(item.id, "completed");
+        } catch {
+          setScheduleError(labels.closeChildrenFailed);
+          return;
+        }
+      }
       if (!saved) {
         const selectedService = services.find((service) => service.id === serviceId);
         const selectedServiceId = showServiceLink
@@ -775,6 +852,11 @@ export function ConciergeTaskEventDialog({
           </ConciergeDialogFooter>
         </form>
       </DialogContent>
+      <ParentCloseChoiceDialog
+        request={open ? parentCloseRequest : null}
+        lang={lang}
+        onDone={() => setParentCloseRequest(null)}
+      />
     </Dialog>
   );
 }

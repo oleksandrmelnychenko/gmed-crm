@@ -13,6 +13,7 @@ import {
 } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
+import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
@@ -79,12 +80,6 @@ function doctorLabel(doctor: DoctorOption, lang: SpecializationLabelLang) {
   return specialty ? `${doctor.name} (${specialty})` : doctor.name;
 }
 
-function todayDateString() {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
 type FormState = {
   title: string;
   appointmentType: AppointmentKind;
@@ -113,7 +108,7 @@ function blankForm(): FormState {
     providerId: "",
     doctorId: "",
     skipMedicalProviderBinding: false,
-    date: todayDateString(),
+    date: appDateKey(),
     timeStart: "",
     timeEnd: "",
     location: "",

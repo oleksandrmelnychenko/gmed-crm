@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -76,9 +77,10 @@ const copy = {
     consequence: "Voraussichtliche Auswirkung nach Finanzfreigabe",
     pendingWarning: "Die Einreichung bleibt bis zur Prüfung im Status „Ausstehend“. Es wird jetzt noch kein Saldo verändert.",
     patientReceivable: "Forderung an Patient",
+    afterDelivery: "wird nach Erbringung der Leistung gebucht",
     providerLiability: "Verbindlichkeit gegenüber Partner",
     companyPaid: "Zahlung / Ausgabe GMED",
-    missingProvider: "Für GMED-bezahlte oder unbezahlte Ausgaben muss vor der Freigabe ein nicht-medizinischer Partner mit dem Service verknüpft sein.",
+    missingProvider: "Für eine noch unbezahlte Ausgabe muss vor der Freigabe ein nicht-medizinischer Partner mit dem Service verknüpft sein. Von GMED bezahlte Belege können auch ohne registrierten Partner mit dem Anbieter vom Beleg bestätigt werden.",
     submit: "Zur Prüfung einreichen",
     submitting: "Ausgabe wird gesendet",
     cancel: "Schließen",
@@ -130,9 +132,10 @@ const copy = {
     consequence: "Ожидаемое влияние после финансового подтверждения",
     pendingWarning: "Заявка останется в статусе «На проверке». Сейчас баланс не изменяется.",
     patientReceivable: "К оплате пациентом",
+    afterDelivery: "начисляется после оказания услуги",
     providerLiability: "Обязательство перед партнёром",
     companyPaid: "Оплата / расход GMED",
-    missingProvider: "Для расхода, оплаченного GMED, или неоплаченного расхода перед подтверждением к услуге должен быть привязан немедицинский партнёр.",
+    missingProvider: "Для неоплаченного расхода перед подтверждением к услуге должен быть привязан немедицинский партнёр. Чек, оплаченный GMED, можно подтвердить и без зарегистрированного партнёра — с поставщиком из чека.",
     submit: "Отправить на проверку",
     submitting: "Отправка расхода",
     cancel: "Закрыть",
@@ -154,11 +157,7 @@ const selectClass = "h-9 w-full rounded-md border border-input bg-field px-3 tex
 const MANUAL_VENDOR_VALUE = "__manual_vendor__";
 
 function todayInputValue() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKey();
 }
 
 function formatMoney(value: string, currency: string, lang: Lang) {
@@ -173,7 +172,7 @@ function formatMoney(value: string, currency: string, lang: Lang) {
 function formatDate(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -274,7 +273,7 @@ export function ConciergeExpenseReceiptDialog({
     : calculateConciergeExpenseVat(netInput, vatRate);
   const consequence = conciergeExpenseConsequencePreview(paidBy, serviceDelivered, amountGross);
   const currency = context?.task?.currency || context?.service?.currency || service?.currency || "EUR";
-  const providerMissing = paidBy !== "patient"
+  const providerMissing = paidBy === "unpaid"
     && !(context?.task?.provider_id || context?.service?.provider_id);
   const netMinor = moneyStringToMinorUnits(amountNet);
   const vatMinor = moneyStringToMinorUnits(amountVat);
@@ -599,7 +598,15 @@ export function ConciergeExpenseReceiptDialog({
                         [labels.providerLiability, consequence.providerLiabilityGross],
                         [labels.companyPaid, consequence.companyPaidGross],
                       ] as const).map(([label, value]) => (
-                        <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-mono text-xs font-semibold">{formatMoney(value, currency, lang)}</dd></div>
+                        <div key={label} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                          <dt className="text-xs text-muted-foreground">
+                            {label}
+                            {label === labels.patientReceivable && consequence.patientReceivableAfterDelivery
+                              ? <span className="block text-[11px]">{labels.afterDelivery}</span>
+                              : null}
+                          </dt>
+                          <dd className="font-mono text-xs font-semibold">{formatMoney(value, currency, lang)}</dd>
+                        </div>
                       ))}
                     </dl>
                     {providerMissing ? <p className="mt-3 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-800"><AlertCircle className="mt-0.5 size-4 shrink-0" />{labels.missingProvider}</p> : null}

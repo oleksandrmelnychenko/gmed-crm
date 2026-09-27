@@ -1,4 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { pickerSection } from "./helpers";
 
 async function typeText(input: Locator, value: string) {
   await input.press("ControlOrMeta+A");
@@ -95,9 +96,9 @@ for (const kind of ["dialog", "sheet"]) {
 
     test("compares dates selected in a picker", async ({ page }) => {
       const save = page.getByRole("button", { name: "Save values" });
-      await page.getByRole("spinbutton", { name: "Day", exact: true }).fill("06");
+      await page.getByRole("spinbutton", { name: pickerSection.day }).fill("06");
       await expect(save).toBeEnabled();
-      await page.getByRole("spinbutton", { name: "Day", exact: true }).fill("05");
+      await page.getByRole("spinbutton", { name: pickerSection.day }).fill("05");
       await expect(save).toBeDisabled();
     });
 

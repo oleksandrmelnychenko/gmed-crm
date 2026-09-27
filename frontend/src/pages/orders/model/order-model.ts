@@ -1,4 +1,10 @@
-import { formatMoneyAmount } from "@/lib/money";
+import { appWallClock, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import {
+  formatMoneyAmount,
+  moneyLineAmounts,
+  roundCents,
+  type MoneyLineAmounts,
+} from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
@@ -16,6 +22,7 @@ import type {
   OrderPlanningPreparation,
   OrderProcessGateFormState,
   OrderProcessGates,
+  OrderReadScope,
   OrdersFilters,
   OrdersPermissions,
   OrderStatus,
@@ -105,7 +112,26 @@ export function orderPermissions(actor?: Actor): OrdersPermissions {
     // Provider (external) invoices: the order owner or finance.
     canManageExternalInvoices: canEdit || hasCapability(actor, "invoices.finance"),
     canManageEconomics: hasCapability(actor, "orders.economics"),
+    readsOnlyOrderPart: readsOnlyOrderPart(actor),
   };
+}
+
+/**
+ * `orders.view` without any commercial capability: the concierge and the
+ * interpreter team lead read a projection of their part of an order.
+ */
+export function readsOnlyOrderPart(actor?: Actor) {
+  return (
+    hasCapability(actor, "orders.view") &&
+    !hasCapability(actor, "orders.edit") &&
+    !hasCapability(actor, "orders.economics") &&
+    !hasCapability(actor, "invoices.view")
+  );
+}
+
+/** Whether an order payload is a partial projection (see `readsOnlyOrderPart`). */
+export function isPartialOrderRead(detail: { read_scope?: OrderReadScope } | null | undefined) {
+  return Boolean(detail?.read_scope && detail.read_scope !== "full");
 }
 
 export function blankCreateOrderForm(): CreateOrderFormState {
@@ -204,6 +230,9 @@ export function blankOrderFollowupForm(): OrderFollowupFormState {
     followup1wStatus: "pending",
     followup1mStatus: "pending",
     followup6mStatus: "pending",
+    followup1wDate: "",
+    followup1mDate: "",
+    followup6mDate: "",
     packageEndDate: "",
     packageEndStatus: "not_required",
     resultsHandoffStatus: "pending",
@@ -272,6 +301,9 @@ export function orderFollowupToForm(
     followup1wStatus: followup.followup_1w_status,
     followup1mStatus: followup.followup_1m_status,
     followup6mStatus: followup.followup_6m_status,
+    followup1wDate: followup.followup_1w_date ?? "",
+    followup1mDate: followup.followup_1m_date ?? "",
+    followup6mDate: followup.followup_6m_date ?? "",
     packageEndDate:
       followup.package_end_date ?? followup.suggested_package_end_date ?? "",
     packageEndStatus: followup.package_end_status,
@@ -325,15 +357,40 @@ export function optString(value: string) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+// Dates in the order workspace read DD.MM.YYYY in every staff language
+// (docs/architecture/patient-order-wizard-plan_ua.md). A calendar date
+// ("2026-09-27") is never shifted through a time zone, and a date-only value
+// stored as a UTC-midnight timestamp shows no time of day ("03:00").
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const UTC_MIDNIGHT = /^(\d{4})-(\d{2})-(\d{2})T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)$/;
+
+function twoDigits(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function calendarDateLabel(value: string): string | null {
+  const match = CALENDAR_DATE.exec(value.trim()) ?? UTC_MIDNIGHT.exec(value.trim());
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : null;
+}
+
+function berlinDateLabel(date: Date) {
+  const { year, month, day } = appWallClock(date);
+  return `${twoDigits(day)}.${twoDigits(month)}.${year}`;
+}
+
+/** DD.MM.YYYY of a calendar date or of a timestamp's Berlin date. */
 export function formatDate(
   value: string | null | undefined,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  const date = new Date(`${value}T00:00:00`);
+  const calendarDate = calendarDateLabel(value);
+  if (calendarDate) return calendarDate;
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(locale, { dateStyle: "medium" });
+  return berlinDateLabel(date);
 }
 
 export function numberFromUnknown(value: unknown) {
@@ -374,44 +431,41 @@ export function formatOptionalCurrency(
     : formatCurrency(value, currency, locale);
 }
 
+/**
+ * "DD.MM.YYYY, HH:MM" of a timestamp in Berlin time; a date-only value (a
+ * calendar date or a UTC-midnight timestamp) shows the date alone.
+ */
 export function formatDateTime(
   value: string | null | undefined,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
+  void _locale;
   if (!value) return emptyLabel;
+  const calendarDate = calendarDateLabel(value);
+  if (calendarDate) return calendarDate;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  const { hour, minute } = appWallClock(date);
+  return `${berlinDateLabel(date)}, ${twoDigits(hour)}:${twoDigits(minute)}`;
 }
 
+/** DD.MM.YYYY; the same rules as {@link formatDate}. */
 export function formatDateOnly(
   value: string | null | undefined,
   locale = "de-DE",
   emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
-  if (!value) return emptyLabel;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(locale, { dateStyle: "medium" });
+  return formatDate(value, locale, emptyLabel);
 }
 
 function toDateTimeInputValue(value: string | null | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
+/** A `datetime-local` value, read as Berlin time, as an API timestamp; null when empty or invalid. */
 export function inputDateTimeToApiValue(value: string) {
-  if (!value.trim()) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
+  return berlinLocalInputToIso(value);
 }
 
 export function patientLabel(
@@ -439,4 +493,55 @@ export function sumLeistungTotals(items: Leistung[]) {
     const unitPrice = numberFromUnknown(item.unit_price) ?? 0;
     return sum + quantity * unitPrice;
   }, 0);
+}
+
+/**
+ * Net, VAT and gross of one order service line, rounded like quotes and
+ * invoices (pass-through costs carry no VAT). The gross is what the line adds
+ * to the order total.
+ */
+export function leistungLineAmounts(item: Leistung): MoneyLineAmounts {
+  const quantity = numberFromUnknown(item.quantity) ?? 0;
+  const unitPrice =
+    numberFromUnknown(item.unit_price_snapshot) ?? numberFromUnknown(item.unit_price) ?? 0;
+  const vatRate = item.is_cost_passthrough
+    ? 0
+    : numberFromUnknown(item.vat_rate_snapshot) ?? numberFromUnknown(item.vat_rate) ?? 0;
+  return moneyLineAmounts(quantity, unitPrice, vatRate);
+}
+
+/**
+ * Counters of the order services. Cancelled lines are left out of the totals
+ * and counted separately. "Delivered" includes approved and invoiced services
+ * (they were delivered first); "awaiting approval" is delivered but not yet
+ * approved.
+ */
+export function summarizeLeistungMetrics(items: Leistung[]) {
+  const active = items.filter((item) => item.status !== "cancelled");
+  return {
+    total: active.length,
+    cancelled: items.length - active.length,
+    delivered: active.filter((item) =>
+      item.status === "delivered" || item.status === "approved" || item.status === "invoiced"
+    ).length,
+    awaitingApproval: active.filter((item) => item.status === "delivered").length,
+    approved: active.filter((item) =>
+      item.status === "approved" || item.status === "invoiced"
+    ).length,
+    net: roundCents(active.reduce((sum, item) => sum + leistungLineAmounts(item).net, 0)),
+    gross: sumLeistungGross(items),
+  };
+}
+
+/**
+ * Gross total of the order services that are not cancelled — the order total
+ * the server reports as `total_estimated` for an order with services.
+ */
+export function sumLeistungGross(items: Leistung[]) {
+  return roundCents(
+    items.reduce(
+      (sum, item) => (item.status === "cancelled" ? sum : sum + leistungLineAmounts(item).gross),
+      0,
+    ),
+  );
 }

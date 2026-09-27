@@ -12,6 +12,7 @@ import {
 } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
+import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { PatientRiskScore } from "@/pages/patients/model/detail-resource-types";
@@ -55,11 +56,6 @@ function scoreTypeLabel(
   }
 }
 
-function toLocalDateTimeInput(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 function parseNumber(value: string): number | undefined {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
@@ -90,7 +86,7 @@ type FormState = {
 
 function blankForm(): FormState {
   return {
-    computedAt: toLocalDateTimeInput(new Date()),
+    computedAt: isoToBerlinLocalInput(new Date()),
     scoreType: SCORE_TYPE_OPTIONS[0],
     scoreValue: "",
     scaleMax: "",
@@ -102,7 +98,7 @@ function blankForm(): FormState {
 function formFromScore(score: PatientRiskScore | null | undefined): FormState {
   if (!score) return blankForm();
   return {
-    computedAt: toLocalDateTimeInput(new Date(score.computed_at)),
+    computedAt: isoToBerlinLocalInput(score.computed_at),
     scoreType: SCORE_TYPE_OPTIONS.includes(score.score_type as ScoreType)
       ? score.score_type as ScoreType
       : "other",
@@ -139,8 +135,8 @@ export function PatientRiskScoreSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const computedAt = new Date(form.computedAt);
-    if (Number.isNaN(computedAt.getTime())) {
+    const computedAt = berlinLocalInputToIso(form.computedAt);
+    if (!computedAt) {
       toast.error(l("patients_invalid_date_2"));
       return;
     }
@@ -162,7 +158,7 @@ export function PatientRiskScoreSheet({
       await apiFetch(endpoint, {
         method: "POST",
         body: JSON.stringify({
-          computed_at: computedAt.toISOString(),
+          computed_at: computedAt,
           score_type: form.scoreType,
           score_value: scoreValue,
           scale_max: scaleMax,

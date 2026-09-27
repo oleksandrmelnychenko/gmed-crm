@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import {
+  BellRing,
   Building2,
   KeyRound,
   Pencil,
@@ -104,7 +105,7 @@ type SettingFieldMeta = {
   rows?: number;
 };
 
-type SettingsGroupId = "tokens" | "agency" | "documents" | "clinical";
+type SettingsGroupId = "tokens" | "agency" | "documents" | "clinical" | "concierge";
 
 type SettingsGroup = {
   id: SettingsGroupId;
@@ -188,6 +189,22 @@ const CLINICAL_SETTING_FIELDS: SettingFieldMeta[] = [
   },
 ];
 
+// Lead times of the automatic reminder and preparation task of a concierge service.
+const CONCIERGE_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "concierge_reminder_lead_hours",
+    labelKey: "settings_concierge_reminder_lead_hours",
+    inputType: "number",
+    min: 1,
+  },
+  {
+    key: "concierge_prep_lead_hours",
+    labelKey: "settings_concierge_prep_lead_hours",
+    inputType: "number",
+    min: 1,
+  },
+];
+
 const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: "tokens",
@@ -220,6 +237,14 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     fields: CLINICAL_SETTING_FIELDS,
     icon: ShieldCheck,
     tone: "slate",
+  },
+  {
+    id: "concierge",
+    titleKey: "settings_concierge_preparation",
+    descriptionKey: "settings_concierge_preparation_hint",
+    fields: CONCIERGE_SETTING_FIELDS,
+    icon: BellRing,
+    tone: "sky",
   },
 ];
 

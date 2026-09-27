@@ -21,7 +21,9 @@ import {
   costEstimate,
   guardianIsComplete,
   guardianPayload,
+  discoveryReferrerMissing,
   draftFromLead,
+  intakeAsksDiscoverySource,
   isMinor,
   nextStep,
   orderLineClientReference,
@@ -107,6 +109,29 @@ describe("draftFromLead", () => {
   });
 });
 
+describe("discovery source", () => {
+  const referral = { discoverySource: "customer_referral", referrerPatientId: "" };
+
+  it("is asked on a first intake only", () => {
+    expect(intakeAsksDiscoverySource(false)).toBe(true);
+    expect(intakeAsksDiscoverySource(true)).toBe(false);
+  });
+
+  it("requires the recommending customer on a first intake", () => {
+    expect(discoveryReferrerMissing(referral, false)).toBe(true);
+    expect(
+      discoveryReferrerMissing({ ...referral, referrerPatientId: "p1" }, false),
+    ).toBe(false);
+    expect(
+      discoveryReferrerMissing({ discoverySource: "google", referrerPatientId: "" }, false),
+    ).toBe(false);
+  });
+
+  it("does not require the recommending customer on a repeat intake", () => {
+    expect(discoveryReferrerMissing(referral, true)).toBe(false);
+  });
+});
+
 describe("isMinor", () => {
   const today = new Date("2026-07-08");
   it("flags an under-18 date of birth", () => {
@@ -122,6 +147,12 @@ describe("isMinor", () => {
   it("returns false for empty or invalid input", () => {
     expect(isMinor("", today)).toBe(false);
     expect(isMinor("not-a-date", today)).toBe(false);
+  });
+  it("counts the birthday by the Berlin date", () => {
+    // 00:30 on 8 Jul in Berlin, still 7 Jul in UTC: the 18th birthday has begun.
+    expect(isMinor("2008-07-08", new Date("2026-07-07T22:30:00Z"))).toBe(false);
+    // 23:30 on 8 Jul in Berlin, already 9 Jul in Kyiv: not yet 18.
+    expect(isMinor("2008-07-09", new Date("2026-07-08T21:30:00Z"))).toBe(true);
   });
 });
 

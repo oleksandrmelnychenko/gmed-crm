@@ -598,13 +598,44 @@ async fn seed_appointment(
     created_by: Uuid,
     tag: &str,
 ) -> Uuid {
+    seed_appointment_at(
+        pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        order_id,
+        interpreter_id,
+        owner_user_id,
+        created_by,
+        tag,
+        "09:00",
+    )
+    .await
+}
+
+/// A completed two-hour visit five days ago, starting at `time_start`. Visits
+/// of one patient or interpreter must not overlap.
+#[allow(clippy::too_many_arguments)]
+async fn seed_appointment_at(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Option<Uuid>,
+    order_id: Uuid,
+    interpreter_id: Uuid,
+    owner_user_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    time_start: &str,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO appointments (
                 patient_id, provider_id, doctor_id, order_id, interpreter_id, owner_user_id,
                 appointment_type, title, date, time_start, time_end, status, created_by
            ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                'medical', $7, CURRENT_DATE - 5, '09:00', '11:00', 'completed', $8
+                'medical', $7, CURRENT_DATE - 5, $9::time, $9::time + interval '2 hours',
+                'completed', $8
            ) RETURNING id"#,
     )
     .bind(patient_id)
@@ -615,6 +646,7 @@ async fn seed_appointment(
     .bind(owner_user_id)
     .bind(format!("Visit {tag}"))
     .bind(created_by)
+    .bind(time_start)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -797,7 +829,7 @@ async fn seed_appointment_arztbrief(
                 $1, $2, $3, $4, $5, $6,
                 'arztbrief', 'medical', 'active', 'released_external', true, 'application/pdf', 1024,
                 $7, $1, 1, $8,
-                ((a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00')) AT TIME ZONE 'UTC')
+                ((a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00')) AT TIME ZONE 'Europe/Berlin')
                     + ($9::int * interval '1 hour')
            FROM appointments a
            WHERE a.id = $4"#,
@@ -3630,4 +3662,94 @@ async fn assistant_sales_and_it_admin_scorecards_stay_within_their_capabilities(
             "it_admin scorecard exposes business data {key}"
         );
     }
+}
+
+#[tokio::test]
+async fn interpreter_scorecards_count_pending_reports_instead_of_reading_fully_approved() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("pending-report-kpi");
+    let teamlead_id = seed_user(&pool, &format!("{tag}-lead"), "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-interp"), "interpreter").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag, "Germany").await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag, "active").await;
+    let teamlead_auth = auth_header_for(teamlead_id, "teamlead_interpreter");
+    let interpreter_auth = auth_header_for(interpreter_id, "interpreter");
+
+    let (status, baseline) =
+        json_request(&app, "GET", "/api/v1/stats/my-kpis", &teamlead_auth, None).await;
+    assert_eq!(status, StatusCode::OK, "{baseline}");
+    let baseline_pending = json_i64(&baseline["kpi"]["pending_reports"]);
+
+    let approved_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        None,
+        order_id,
+        interpreter_id,
+        admin_id,
+        admin_id,
+        &format!("{tag}-approved"),
+    )
+    .await;
+    seed_interpreter_report(&pool, approved_visit, interpreter_id).await;
+    // Later the same day: the patient's and the interpreter's visits must not
+    // overlap.
+    let pending_visit = seed_appointment_at(
+        &pool,
+        patient_id,
+        provider_id,
+        None,
+        order_id,
+        interpreter_id,
+        admin_id,
+        admin_id,
+        &format!("{tag}-pending"),
+        "12:00",
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO interpreter_reports (appointment_id, interpreter_id, hours, report_text)
+           VALUES ($1, $2, 1.5, 'Waiting for review')"#,
+    )
+    .bind(pending_visit)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Both visits are completed with two booked hours each and the approved
+    // report covers one of them: the old utilisation figure could read as a
+    // fully approved month. The approval rate compares submitted hours.
+    let (status, own) = json_request(
+        &app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &interpreter_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    assert_eq!(own["kpi"]["pending_reports"], 1, "{own}");
+    assert_eq!(own["kpi"]["pending_hours_30d"], "1.5", "{own}");
+    assert_eq!(own["kpi"]["approved_hours_30d"], "2", "{own}");
+    assert_eq!(own["kpi"]["hours_approval_rate_pct"], 57.1, "{own}");
+
+    let (status, team) =
+        json_request(&app, "GET", "/api/v1/stats/my-kpis", &teamlead_auth, None).await;
+    assert_eq!(status, StatusCode::OK, "{team}");
+    assert!(
+        json_i64(&team["kpi"]["pending_reports"]) > baseline_pending,
+        "{team}"
+    );
+    let rate = team["kpi"]["hours_approval_rate_pct"]
+        .as_f64()
+        .expect("team approval rate");
+    assert!(
+        rate < 100.0,
+        "a pending report must keep the rate below 100: {team}"
+    );
 }

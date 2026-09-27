@@ -161,8 +161,8 @@ test("workflow serializes writes and recovers from a failed status request", asy
 test("subtask count stays stable and paused subtasks have a linked Kanban card", async ({ page }) => {
   await page.setViewportSize({ width: 1720, height: 1120 });
   const state = await setup(page);
-  await expect(page.getByTestId("task-sub-count-root")).toHaveText("5");
-  await expect(page.getByTestId("task-sub-count-child")).toHaveText("1");
+  await expect(page.getByTestId("task-sub-count-root")).toHaveText("2/5");
+  await expect(page.getByTestId("task-sub-count-child")).toHaveText("0/1");
   await page.locator('[data-workflow-task-id="root"]').click();
   const dialog = page.getByTestId("task-workflow-dialog");
   await dialog.getByTestId("workflow-item-child").getByRole("button", { name: `Запустить: ${titles.child}` }).click();
@@ -175,7 +175,7 @@ test("subtask count stays stable and paused subtasks have a linked Kanban card",
   await expect(pausedCard).toBeFocused();
   await expect(pausedCard.getByText("↳ Подзадача", { exact: true })).toBeVisible();
   await expect(page.getByTestId("task-column-in_progress").getByTestId("task-card-root")).toBeVisible();
-  await expect(page.getByTestId("task-sub-count-root")).toHaveText("5");
+  await expect(page.getByTestId("task-sub-count-root")).toHaveText("2/5");
   await page.screenshot({ path: "../artifacts/design-qa/task-workflow-paused-kanban.png" });
   await pausedCard.getByRole("button", { name: `В составе: ${titles.root}` }).click();
   await expect(dialog.getByRole("listitem")).toHaveCount(6);
@@ -188,7 +188,7 @@ test("subtask count stays stable and paused subtasks have a linked Kanban card",
 test("show on board reveals a sub-event excluded by current filters", async ({ page }) => {
   await setup(page);
   await page.getByPlaceholder("Поиск по задаче, адресу или исполнителю").fill(titles.root);
-  await expect(page.getByTestId("task-sub-count-root")).toHaveText("5");
+  await expect(page.getByTestId("task-sub-count-root")).toHaveText("2/5");
   await expect(page.getByTestId("task-card-event")).toHaveCount(0);
   await page.locator('[data-workflow-task-id="root"]').click();
   const dialog = page.getByTestId("task-workflow-dialog");

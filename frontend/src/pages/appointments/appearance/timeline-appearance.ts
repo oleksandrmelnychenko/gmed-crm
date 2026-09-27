@@ -1,3 +1,10 @@
+import {
+  appDateKey,
+  appDateKeyOf,
+  appDateTimeFormat,
+  dateOrInstant,
+  daysBetweenDateKeys,
+} from "@/lib/app-time-zone";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   AppointmentTimelineKind,
@@ -13,33 +20,33 @@ const TIMELINE_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
 const TIMELINE_DATE_FORMATTERS = new Map<string, Intl.DateTimeFormat>([
   [
     "de-DE:current",
-    new Intl.DateTimeFormat("de-DE", TIMELINE_DATE_FORMAT_OPTIONS),
+    appDateTimeFormat("de-DE", TIMELINE_DATE_FORMAT_OPTIONS),
   ],
   [
     "de-DE:year",
-    new Intl.DateTimeFormat("de-DE", {
+    appDateTimeFormat("de-DE", {
       ...TIMELINE_DATE_FORMAT_OPTIONS,
       year: "numeric",
     }),
   ],
   [
     "ru-RU:current",
-    new Intl.DateTimeFormat("ru-RU", TIMELINE_DATE_FORMAT_OPTIONS),
+    appDateTimeFormat("ru-RU", TIMELINE_DATE_FORMAT_OPTIONS),
   ],
   [
     "ru-RU:year",
-    new Intl.DateTimeFormat("ru-RU", {
+    appDateTimeFormat("ru-RU", {
       ...TIMELINE_DATE_FORMAT_OPTIONS,
       year: "numeric",
     }),
   ],
   [
     "en-GB:current",
-    new Intl.DateTimeFormat("en-GB", TIMELINE_DATE_FORMAT_OPTIONS),
+    appDateTimeFormat("en-GB", TIMELINE_DATE_FORMAT_OPTIONS),
   ],
   [
     "en-GB:year",
-    new Intl.DateTimeFormat("en-GB", {
+    appDateTimeFormat("en-GB", {
       ...TIMELINE_DATE_FORMAT_OPTIONS,
       year: "numeric",
     }),
@@ -164,14 +171,9 @@ export function appointmentTimelineToneLabel(tone: AppointmentTimelineTone) {
   }
 }
 
+/** The Berlin day an entry happened on, "YYYY-MM-DD". */
 export function appointmentTimelineDateGroupKey(value?: string | null) {
-  if (!value) return "unknown";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "unknown";
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKeyOf(value) || "unknown";
 }
 
 export function appointmentTimelineDateGroupLabel(
@@ -183,21 +185,8 @@ export function appointmentTimelineDateGroupLabel(
     return appointmentText("timeline_date_unknown");
   }
 
-  const date = new Date(value!);
-  const today = new Date();
-  const startOfToday = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate(),
-  );
-  const startOfTarget = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  );
-  const diffInDays = Math.round(
-    (startOfToday.getTime() - startOfTarget.getTime()) / (1000 * 60 * 60 * 24),
-  );
+  const today = appDateKey();
+  const diffInDays = daysBetweenDateKeys(key, today);
 
   if (diffInDays === 0) {
     return appointmentText("timeline_date_today");
@@ -209,8 +198,8 @@ export function appointmentTimelineDateGroupLabel(
   try {
     return getTimelineDateFormatter(
       options.locale,
-      startOfTarget.getFullYear() !== startOfToday.getFullYear(),
-    ).format(date);
+      key.slice(0, 4) !== today.slice(0, 4),
+    ).format(dateOrInstant(value!));
   } catch {
     return key;
   }

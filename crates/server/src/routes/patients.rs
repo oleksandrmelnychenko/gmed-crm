@@ -1559,8 +1559,7 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
             validate_relation_payload_fields(relation)?;
         }
     }
-    if is_minor_birth_date(parsed_birth_date, chrono::Utc::now().date_naive())
-        && !has_minor_guardian(req)
+    if is_minor_birth_date(parsed_birth_date, crate::app_time::today()) && !has_minor_guardian(req)
     {
         return Err(
             "Minor patients require a guardian/parent relation or guardian emergency contact",
@@ -1976,7 +1975,7 @@ fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), 
 }
 
 fn generate_patient_id(seq: i64) -> String {
-    let now = chrono::Utc::now();
+    let now = crate::app_time::local(chrono::Utc::now());
     format!("P-{}-{:04}", now.format("%Y%m%d"), seq)
 }
 
@@ -3409,7 +3408,7 @@ async fn update_patient(
         Err(response) => return response,
     };
     if (birth_date_supplied || emergency_contact_supplied || contacts_patch_supplied)
-        && is_minor_birth_date(birth_date, chrono::Utc::now().date_naive())
+        && is_minor_birth_date(birth_date, crate::app_time::today())
         && !has_guardian_or_parent_contact(
             emergency_contact_relation.as_deref(),
             emergency_contact_name.as_deref(),
@@ -5816,17 +5815,19 @@ fn parse_clinical_timestamp(
         .map(|value| value.with_timezone(&chrono::Utc))
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S")
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .or_else(|_| {
+            // Date-only values carry `measured_at_precision = date` and are
+            // stored as UTC midnight, which clients print as a UTC date.
             chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
                 .map(|value| {
                     value
@@ -6640,19 +6641,21 @@ async fn list_patient_orders(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    // The interpreter works on its own appointments only; the patient's
+    // orders (and their totals) are not part of that scope.
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
-        Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let rows = sqlx::query(
         r#"SELECT id, order_number, phase, status, intake_state,
                   CASE WHEN EXISTS(SELECT 1 FROM leads l WHERE l.id=orders.source_lead_id AND l.repeat_patient_id=$1) THEN source_lead_id END AS repeat_lead_id, needs_description, created_at,
-                  total_estimated, total_actual, currency, date_from, date_to,
+                  COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated,
+                  total_actual, currency, date_from, date_to,
                   signed_patient, signed_agency, signed_at
            FROM orders
            WHERE patient_id = $1
@@ -6714,6 +6717,10 @@ async fn list_patient_appointments(
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
+    // A visible patient opens its calendar only for roles whose appointment
+    // scope follows the patient; an interpreter linked to the patient through
+    // one booking still sees only the visits it runs or owns.
+    let scope = crate::access::AppointmentScope::for_role(auth.role);
     let rows = sqlx::query(
         r#"SELECT a.id, a.title, a.date, a.time_start, a.appointment_type, a.care_path_kind, a.status,
                   p.name AS provider_name, d.name AS doctor_name
@@ -6721,9 +6728,18 @@ async fn list_patient_appointments(
            LEFT JOIN providers p ON p.id = a.provider_id
            LEFT JOIN provider_doctors d ON d.id = a.doctor_id
            WHERE a.patient_id = $1
+             AND (
+                 $2::boolean
+                 OR ($3::boolean AND a.interpreter_id = $5)
+                 OR ($4::boolean AND a.owner_user_id = $5)
+             )
            ORDER BY a.date DESC, a.time_start DESC NULLS LAST, a.created_at DESC"#,
     )
     .bind(patient_uuid)
+    .bind(scope.all || scope.via_patient_assignment)
+    .bind(scope.as_interpreter)
+    .bind(scope.as_owner)
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     .map_err(|e| {
@@ -6786,6 +6802,10 @@ async fn list_patient_documents(
                   d.document_number,
                   d.generated_template_id,
                   d.order_id,
+                  d.appointment_id,
+                  (SELECT linked_appointment.interpreter_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
                   d.version_root_document_id,
                   d.replaces_document_id,
                   d.version_number,
@@ -7217,6 +7237,10 @@ async fn load_staff_visible_patient_document_ids(
         r#"SELECT d.id,
                   d.patient_id,
                   d.lead_id,
+                  d.appointment_id,
+                  (SELECT linked_appointment.interpreter_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
                   d.is_medical,
                   d.art,
                   d.category,
@@ -7406,7 +7430,7 @@ pub(crate) async fn load_patient_recheck_readiness(
         // Passport validity is independent of whether an existing-customer
         // re-check is due, so report it even on the minimal payload (#6).
         let (passport_status, passport_days_until_expiry) =
-            passport_compliance_status(passport_expiry, chrono::Utc::now().date_naive());
+            passport_compliance_status(passport_expiry, crate::app_time::today());
         return Ok(Some(PatientRecheckReadiness {
             can_create_order: true,
             blocking_reasons: Vec::new(),
@@ -7527,7 +7551,7 @@ pub(crate) async fn load_patient_recheck_readiness(
         )
     })?;
 
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::app_time::today();
     // #6: surface passport expiry in compliance (a warning, never a hard gate on
     // order creation). No passport date on file is treated as "unknown".
     let (passport_status, passport_days_until_expiry) =
@@ -8080,11 +8104,15 @@ async fn get_patient_service_report(
                   d.name AS doctor_name,
                   ol.is_cost_passthrough,
                   ol.notes,
+                  ol.source_interpreter_report_id,
+                  source_report.report_text AS source_report_text,
                   ol.delivered_at,
                   ol.approved_at,
                   COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS effective_at
            FROM order_leistungen ol
            JOIN orders o ON o.id = ol.order_id
+           LEFT JOIN interpreter_reports source_report
+             ON source_report.id = ol.source_interpreter_report_id
            LEFT JOIN providers p ON p.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            WHERE o.patient_id = $1
@@ -8160,7 +8188,12 @@ async fn get_patient_service_report(
                 "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
                 "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
                 "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
-                "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                "notes": super::orders::order_line_notes_for_reader(
+                    &auth,
+                    row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    row.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                    row.try_get::<Option<String>, _>("source_report_text").unwrap_or_default().as_deref(),
+                ),
                 "delivered_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                 "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                 "effective_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("effective_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
@@ -8485,12 +8518,13 @@ async fn get_patient_timeline(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientTimelineQuery>,
 ) -> Result<Json<Value>, axum::response::Response> {
+    // The timeline replays the patient's whole history (every appointment,
+    // order and document); the interpreter's scope is its own appointments.
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
-        Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
@@ -9047,6 +9081,8 @@ async fn get_patient_timeline(
                        WHEN al.action = 'feedback_reviewed' THEN 'Patient feedback reviewed'
                        WHEN al.action = 'workflow_checklist_item_created' THEN 'Workflow checklist item created'
                        WHEN al.action = 'workflow_checklist_item_completed' THEN 'Workflow checklist item completed'
+                       WHEN al.action = 'workflow_checklist_item_not_required' THEN 'Workflow checklist item marked not required'
+                       WHEN al.action = 'workflow_checklist_item_reopened' THEN 'Workflow checklist item reopened'
                        ELSE 'Legal/compliance status updated'
                    END AS title,
                    CASE
@@ -9062,7 +9098,8 @@ async fn get_patient_timeline(
                        WHEN al.action IN (
                            'privacy_request_created',
                            'feedback_submitted',
-                           'workflow_checklist_item_created'
+                           'workflow_checklist_item_created',
+                           'workflow_checklist_item_reopened'
                        ) THEN 'open'
                        WHEN al.action IN ('privacy_request_reviewed') THEN 'in_progress'
                        ELSE 'completed'
@@ -9083,6 +9120,8 @@ async fn get_patient_timeline(
                         'feedback_reviewed',
                         'workflow_checklist_item_created',
                         'workflow_checklist_item_completed',
+                        'workflow_checklist_item_not_required',
+                        'workflow_checklist_item_reopened',
                         'privacy_request_created',
                         'privacy_request_reviewed',
                         'privacy_request_executed'
@@ -10333,10 +10372,8 @@ fn build_patient_detail_json(
             insert_optional_string(map, "address_country", patient.address_country);
             insert_optional_string(map, "passport_number", patient.passport_number);
             {
-                let (status, days) = passport_compliance_status(
-                    patient.passport_expiry,
-                    chrono::Utc::now().date_naive(),
-                );
+                let (status, days) =
+                    passport_compliance_status(patient.passport_expiry, crate::app_time::today());
                 map.insert(
                     "passport_expiry".to_string(),
                     patient
@@ -15026,9 +15063,7 @@ async fn get_patient_medikationsplan_pdf(
     }
     let russian = query.lang.as_deref() == Some("ru");
     let tx = |ru, de| if russian { ru } else { de };
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = crate::app_time::today();
     let fail = || {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,

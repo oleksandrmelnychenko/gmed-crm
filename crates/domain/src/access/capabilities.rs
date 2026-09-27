@@ -301,6 +301,8 @@ const INTERPRETER: &[Capability] = &[
 const TEAMLEAD_INTERPRETER: &[Capability] = &[
     C::PatientsView,
     C::PatientsMedicalView,
+    // Read-only, interpreter part of the order only (server projection).
+    C::OrdersView,
     C::DocumentsView,
     C::DocumentsUpload,
     C::DocumentsSharesView,
@@ -324,6 +326,8 @@ const TEAMLEAD_INTERPRETER: &[Capability] = &[
 const CONCIERGE: &[Capability] = &[
     C::PatientsView,
     C::LeadsView,
+    // Read-only, service/logistics part of the order only (server projection).
+    C::OrdersView,
     C::DocumentsView,
     C::DocumentsUpload,
     C::AppointmentsView,
@@ -696,6 +700,7 @@ mod tests {
                 &[
                     "patients.view",
                     "patients.medical.view",
+                    "orders.view",
                     "documents.view",
                     "documents.upload",
                     "documents.shares.view",
@@ -721,6 +726,7 @@ mod tests {
                 &[
                     "patients.view",
                     "leads.view",
+                    "orders.view",
                     "documents.view",
                     "documents.upload",
                     "appointments.view",

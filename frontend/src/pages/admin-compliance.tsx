@@ -56,6 +56,7 @@ import {
   reviewCompliancePrivacyRequest,
 } from "@/pages/admin/data/admin-api";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { IncidentRegisterSection } from "@/pages/admin/ui/incident-register-section";
 import { PatientPrivacySections } from "@/pages/admin/ui/patient-privacy-sections";
@@ -137,7 +138,7 @@ const COMPLIANCE_REALTIME_EVENTS = [
 
 function compactDt(dt: string | null | undefined): string {
   if (!dt) return "\u2014";
-  return dt.split("T")[0] ?? dt;
+  return appDateKeyOf(dt) || dt;
 }
 
 function privacyRequestTypeLabel(

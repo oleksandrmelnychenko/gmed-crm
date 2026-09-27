@@ -2,8 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   filterAppointmentOwnerOptions,
+  isAppointmentReminderRecipient,
   isAppointmentTaskAssignableRole,
 } from "./staff-roles";
+
+describe("appointment reminder recipients", () => {
+  it("leaves billing out of concierge bookings and IT out of every reminder", () => {
+    expect(isAppointmentReminderRecipient("billing", "non_medical")).toBe(false);
+    expect(isAppointmentReminderRecipient("billing", "medical")).toBe(true);
+    expect(isAppointmentReminderRecipient("it_admin", "medical")).toBe(false);
+    expect(isAppointmentReminderRecipient("concierge", "non_medical")).toBe(true);
+  });
+});
 
 const staff = [
   { id: "ceo-1", role: "ceo" },

@@ -338,6 +338,8 @@ export type CompanyConciergeExpenseItem = {
     company_paid_gross: string;
     provider_liability_gross: string;
     intended_patient_receivable_gross: string;
+    /** A not yet paid receipt: the patient share is booked on delivery. */
+    patient_receivable_after_delivery?: boolean;
     intended_company_paid_gross: string;
     intended_provider_liability_gross: string;
   };

@@ -54,9 +54,13 @@ describe("customer release notes", () => {
     });
   });
 
-  it("uses a stable UTC build date and avoids invalid-date labels", () => {
+  it("dates the build in German time, whatever the browser zone, and avoids invalid-date labels", () => {
+    // 22:00Z is already 8 September in Berlin (00:00 CEST) but still the 7th in UTC.
     expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "2026-09-08T01:00:00+03:00" }).title.ru)
-      .toBe("Релиз от 7 сентября 2026");
+      .toBe("Релиз от 8 сентября 2026");
+    // 21:30Z is still 7 September in Berlin but already the 8th in Kyiv.
+    expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "2026-09-07T21:30:00Z" }).title.de)
+      .toBe("Release vom 7. September 2026");
     expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "invalid" }).title)
       .toEqual({ ru: "Релиз", de: "Release" });
   });

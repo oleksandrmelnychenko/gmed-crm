@@ -509,6 +509,8 @@ async fn concierge_partner_workflow_rejects_and_redacts_medical_provider() {
     .await;
     assert_eq!(status, StatusCode::OK, "{service}");
     assert_eq!(service["title"], "Service request");
+    // The UI names the placeholder in the viewer's language.
+    assert_eq!(service["title_redacted"], true);
     assert!(service["provider_id"].is_null());
     assert!(service["provider_name"].is_null());
 

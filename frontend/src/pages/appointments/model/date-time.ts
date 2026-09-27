@@ -1,4 +1,13 @@
-import { startOfIsoWeek } from "@/lib/calendar-standards";
+import {
+  addDaysToDateKey,
+  addMonthsToDateKey,
+  appDateKey,
+  endOfMonthKey,
+  isoToBerlinLocalInput,
+  parseDateKey,
+  startOfIsoWeekKey,
+  startOfMonthKey,
+} from "@/lib/app-time-zone";
 
 import {
   CALENDAR_STORAGE_DATE_KEY,
@@ -6,19 +15,9 @@ import {
 } from "./constants";
 import type { CalendarView } from "./types";
 
-const BERLIN_DATE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  timeZone: "Europe/Berlin",
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-});
-
+/** Today's clinic date in Europe/Berlin. */
 export function currentDateInput(date = new Date()): string {
-  const parts = BERLIN_DATE_FORMATTER.formatToParts(date);
-  const year = parts.find((part) => part.type === "year")?.value ?? "";
-  const month = parts.find((part) => part.type === "month")?.value ?? "";
-  const day = parts.find((part) => part.type === "day")?.value ?? "";
-  return `${year}-${month}-${day}`;
+  return appDateKey(date);
 }
 
 export function hasPairedAppointmentTimes(
@@ -80,6 +79,11 @@ export function readStoredCalendarDate(): string {
   );
 }
 
+/**
+ * "YYYY-MM-DD" of a FullCalendar date. The calendar runs in its default
+ * "local" zone with naive (offset-less) Berlin wall times, so its Date objects
+ * carry the Berlin wall clock in their local fields — read them locally.
+ */
 export function toDateInput(date: Date): string {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
     .toISOString()
@@ -87,14 +91,11 @@ export function toDateInput(date: Date): string {
 }
 
 export function startOfWeekInput(anchorDate: string): string {
-  const date = new Date(`${anchorDate}T12:00:00`);
-  return toDateInput(startOfIsoWeek(date));
+  return startOfIsoWeekKey(anchorDate);
 }
 
 export function endOfWeekInput(anchorDate: string): string {
-  const start = new Date(`${startOfWeekInput(anchorDate)}T12:00:00`);
-  start.setDate(start.getDate() + 6);
-  return toDateInput(start);
+  return addDaysToDateKey(startOfWeekInput(anchorDate), 6);
 }
 
 export function initialCalendarVisibleRange(
@@ -111,50 +112,47 @@ export function initialCalendarVisibleRange(
     };
   }
 
-  const month = new Date(`${anchorDate}T12:00:00`);
-  const first = new Date(month.getFullYear(), month.getMonth(), 1, 12);
-  const last = new Date(month.getFullYear(), month.getMonth() + 1, 0, 12);
-  return { dateFrom: toDateInput(first), dateTo: toDateInput(last) };
+  return { dateFrom: startOfMonthKey(anchorDate), dateTo: endOfMonthKey(anchorDate) };
 }
 
+/** FullCalendar's visible range (exclusive end) as an inclusive API date range. */
 export function inclusiveCalendarVisibleRange(
   start: Date,
   exclusiveEnd: Date,
 ) {
-  const inclusiveEnd = new Date(exclusiveEnd);
-  inclusiveEnd.setDate(inclusiveEnd.getDate() - 1);
   return {
     dateFrom: toDateInput(start),
-    dateTo: toDateInput(inclusiveEnd),
+    dateTo: addDaysToDateKey(toDateInput(exclusiveEnd), -1),
   };
 }
 
+/** A timestamp as a `datetime-local` value in Berlin time. */
 export function toDateTimeLocalInput(
   dateTime: string | null | undefined,
 ): string {
-  if (!dateTime) return "";
-  const value = new Date(dateTime);
-  if (Number.isNaN(value.getTime())) return "";
-  const shifted = new Date(
-    value.getTime() - value.getTimezoneOffset() * 60000,
-  );
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(dateTime);
 }
 
+const LOCAL_DATE_TIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/;
+
+/**
+ * Moves a naive Berlin "YYYY-MM-DDTHH:mm" value by whole days and months and
+ * keeps its wall-clock time; a month step clamps to the month's last day.
+ */
 export function shiftLocalDateTime(
   localDateTime: string,
   adjustment: { days?: number; months?: number },
 ): string {
-  if (!localDateTime) return "";
-  const value = new Date(localDateTime);
-  if (Number.isNaN(value.getTime())) return "";
+  const match = LOCAL_DATE_TIME.exec(localDateTime);
+  if (!match || !parseDateKey(match[1])) return "";
+  let date = match[1];
   if (adjustment.days) {
-    value.setDate(value.getDate() + adjustment.days);
+    date = addDaysToDateKey(date, adjustment.days);
   }
   if (adjustment.months) {
-    value.setMonth(value.getMonth() + adjustment.months);
+    date = addMonthsToDateKey(date, adjustment.months);
   }
-  return toDateTimeLocalInput(value.toISOString());
+  return `${date}T${match[2]}`;
 }
 
 /**
@@ -181,6 +179,7 @@ export function shiftAppointmentSlot(
   };
 }
 
+/** "HH:mm" of a FullCalendar date (Berlin wall clock in its local fields, see `toDateInput`). */
 export function toTimeInput(date: Date): string {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
     .toISOString()

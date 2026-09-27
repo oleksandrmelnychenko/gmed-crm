@@ -1,3 +1,4 @@
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import {
   formatUiText,
   getLang,
@@ -5,6 +6,7 @@ import {
   type Translations,
 } from "@/lib/i18n";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
+import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 import {
   communicationChannelLabel,
   communicationDirectionLabel,
@@ -232,12 +234,12 @@ const BILLING_HANDOFF_PREFIX = "Billing handoff:";
 const FINDINGS_CHECKLIST_PREFIX = "[Findings]";
 const INCOMING_DATA_CHECKLIST_PREFIX = "[Incoming data]";
 const INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS = {
-  de: new Intl.DateTimeFormat("de-DE", {
+  de: appDateTimeFormat("de-DE", {
     weekday: "long",
     day: "2-digit",
     month: "short",
   }),
-  default: new Intl.DateTimeFormat("ru-RU", {
+  default: appDateTimeFormat("ru-RU", {
     weekday: "long",
     day: "2-digit",
     month: "short",
@@ -343,7 +345,10 @@ function localizeKnownTimelineText(
       return item.label;
     }
   }
-  return value;
+  // Generated concierge tasks, reminders and checklist items.
+  const lang = getLang();
+  const title = localizeTaskTitle(value, lang);
+  return title === value ? localizeTaskNote(value, lang) : title;
 }
 
 function formatInterpreterMobileAgendaDateLabel(
@@ -357,7 +362,7 @@ function formatInterpreterMobileAgendaDateLabel(
       getLang() === "de"
         ? INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS.de
         : INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS.default;
-    return formatter.format(new Date(`${date}T00:00:00`));
+    return formatter.format(dateOrInstant(date));
   } catch {
     return date;
   }

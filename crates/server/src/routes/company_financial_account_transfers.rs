@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::post,
 };
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::json;
@@ -124,7 +124,7 @@ async fn create_company_financial_account_transfer(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if effective_on > Utc::now().date_naive() {
+    if effective_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Transfer date cannot be in the future",
@@ -343,7 +343,7 @@ async fn reverse_company_financial_account_transfer(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if effective_on > Utc::now().date_naive() {
+    if effective_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Reversal date cannot be in the future",

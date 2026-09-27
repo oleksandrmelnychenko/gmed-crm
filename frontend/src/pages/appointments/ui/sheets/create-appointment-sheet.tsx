@@ -34,7 +34,10 @@ import {
 } from "@/pages/appointments/model/constants";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { useDebouncedValue } from "@/pages/appointments/data/use-debounced-value";
-import { defaultOrderIdFor, usePatientOrderOptions } from "@/pages/appointments/data/use-patient-order-options";
+import {
+  reconcileCreateOrderId,
+  usePatientOrderOptionsState,
+} from "@/pages/appointments/data/use-patient-order-options";
 import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
 import {
   appointmentText,
@@ -172,6 +175,7 @@ function useCreateAppointmentSheetContent({
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const interpreterFieldLabel = appointmentText("appointments_interpreter");
+  const orderFieldLabel = appointmentText("appointments_order");
   const [sheetState, dispatchSheetState] = useReducer(
     createAppointmentSheetReducer,
     undefined,
@@ -198,16 +202,18 @@ function useCreateAppointmentSheetContent({
     () => hasAppointmentFormChanges(form, baseline),
     [baseline, form],
   );
-  const patientOrders = usePatientOrderOptions(form.patientId);
-  // A new appointment joins the patient's only open order unless staff picks another.
+  const { orders: patientOrders, loaded: patientOrdersLoaded } =
+    usePatientOrderOptionsState(form.patientId);
+  // A new appointment keeps the preselected order of its patient (e.g. when it
+  // is started from the order workspace) and otherwise joins the patient's only
+  // open order unless staff picks another.
   useEffect(() => {
     dispatchSheetState((current) => {
       const { orderId } = current.form;
-      if (orderId && patientOrders.some((order) => order.id === orderId)) return current;
-      const next = defaultOrderIdFor(patientOrders);
+      const next = reconcileCreateOrderId(orderId, patientOrders, patientOrdersLoaded);
       return orderId === next ? current : { form: { ...current.form, orderId: next } };
     });
-  }, [patientOrders]);
+  }, [patientOrders, patientOrdersLoaded]);
 
   useEffect(() => {
     latestDraftRef.current = draft ?? null;
@@ -944,14 +950,18 @@ function useCreateAppointmentSheetContent({
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field compact label={tr.appointments_order}>
+                  <Field compact label={orderFieldLabel}>
                     <NativeComboboxSelect
                       value={form.orderId}
+                      aria-label={orderFieldLabel}
                       onChange={(event) =>
                         setForm((current) => ({
                           ...current,
                           orderId: event.target.value,
                         }))
+                      }
+                      missingValueLabel={
+                        patientOrdersLoaded ? undefined : t.common_loading
                       }
                       className={createSheetSelectClassName}
                     >

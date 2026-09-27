@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -156,7 +157,7 @@ function statusTone(status: string) {
 function formatUploadedAt(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",

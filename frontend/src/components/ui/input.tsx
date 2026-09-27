@@ -2,9 +2,12 @@ import * as React from "react"
 import { Input as InputPrimitive } from "@base-ui/react/input"
 import { DatePicker } from "@mui/x-date-pickers/DatePicker"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { TimePicker } from "@mui/x-date-pickers/TimePicker"
+import { deDE, ruRU } from "@mui/x-date-pickers/locales"
 import dayjs, { type Dayjs } from "dayjs"
 
+import { useLang, type Lang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
@@ -94,6 +97,38 @@ export function pickerFieldReadOnly(
   return type === "time" ? true : readOnly
 }
 
+/**
+ * Picker texts in the UI language: the action bar ("Отмена"/"Ок" instead of
+ * CANCEL/OK), screen-reader labels and the empty field placeholder
+ * ("ДД.ММ.ГГГГ" / "TT.MM.JJJJ" instead of DD.MM.YYYY).
+ */
+export const PICKER_LOCALE_TEXT = {
+  de: deDE.components.MuiLocalizationProvider.defaultProps.localeText,
+  ru: ruRU.components.MuiLocalizationProvider.defaultProps.localeText,
+} satisfies Record<Lang, unknown>
+
+/**
+ * The visible label of a date field for its accessible name. Date fields sit
+ * in a `<label>` (or are named by `<label for>`), but MUI renders the value
+ * as spin buttons in a group that the label does not name.
+ */
+export function pickerVisibleLabel(anchor: HTMLElement | null, id?: string): string | undefined {
+  if (!anchor) return undefined
+  const byFor = id
+    ? Array.from(anchor.ownerDocument.querySelectorAll("label")).find(
+        (label) => label.htmlFor === id,
+      )
+    : undefined
+  const label = anchor.closest("label") ?? byFor
+  if (!label) return undefined
+  const copy = label.cloneNode(true) as HTMLElement
+  copy
+    .querySelectorAll("[data-picker-anchor], input, select, textarea, button")
+    .forEach((node) => node.remove())
+  const text = copy.textContent?.replace(/\s+/g, " ").trim()
+  return text || undefined
+}
+
 function getPickerControlStyle(className: string | undefined) {
   const isTall = hasClassToken(className, "h-10")
   const isShellHeight = hasClassToken(className, "h-9")
@@ -141,6 +176,18 @@ function Input({
   const updateOverlayField = useOverlayDirtyField(pickerCurrentValue ?? "")
   const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
   const timePickerReferenceDate = React.useMemo(() => getTimePickerReferenceDate(), [])
+  const { lang } = useLang()
+  const isPicker = type === "date" || type === "datetime-local" || type === "time"
+  const pickerAnchorRef = React.useRef<HTMLSpanElement | null>(null)
+  const explicitAriaLabel = typeof props["aria-label"] === "string" ? props["aria-label"] : undefined
+  const ariaLabelledBy =
+    typeof props["aria-labelledby"] === "string" ? props["aria-labelledby"] : undefined
+  const [visibleLabel, setVisibleLabel] = React.useState<string | undefined>()
+
+  React.useEffect(() => {
+    if (!isPicker || explicitAriaLabel || ariaLabelledBy) return
+    setVisibleLabel(pickerVisibleLabel(pickerAnchorRef.current, id))
+  }, [ariaLabelledBy, explicitAriaLabel, id, isPicker, lang])
 
   React.useEffect(() => {
     if (type === "date" || type === "datetime-local" || type === "time") {
@@ -164,6 +211,9 @@ function Input({
       controlBorderColor,
       controlBackground,
     } = getPickerControlStyle(className)
+    const accessibleName = explicitAriaLabel ?? visibleLabel
+    // MUI keeps the real value in a hidden input (aria-hidden, not focusable);
+    // the name belongs on the group of spin buttons people actually reach.
     const htmlInputProps = {
       ...props,
       "data-overlay-dirty-ignore": "",
@@ -171,7 +221,8 @@ function Input({
       max,
       step,
       readOnly: type === "time" ? true : props.readOnly,
-      "aria-label": typeof props["aria-label"] === "string" ? props["aria-label"] : undefined,
+      "aria-label": undefined,
+      "aria-labelledby": undefined,
     }
     const sharedTextFieldProps = {
       id,
@@ -184,6 +235,13 @@ function Input({
       error: props["aria-invalid"] === true || props["aria-invalid"] === "true",
       slotProps: {
         input: {
+          // The group of date/time spin buttons is what assistive technology
+          // announces; name it like the field's visible label.
+          ...(ariaLabelledBy
+            ? { "aria-labelledby": ariaLabelledBy }
+            : accessibleName
+              ? { "aria-label": accessibleName }
+              : {}),
           className: cn(
             "w-full min-w-0 px-2.5 py-1 text-base transition-colors outline-none placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/25 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 md:text-sm dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
             className,
@@ -245,8 +303,18 @@ function Input({
       },
     }
 
+    // The anchor finds the field's visible label; `contents` keeps it out of
+    // the layout. The nested provider only adds the UI-language texts.
+    const wrapPicker = (picker: React.ReactNode) => (
+      <LocalizationProvider localeText={PICKER_LOCALE_TEXT[lang]}>
+        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents">
+          {picker}
+        </span>
+      </LocalizationProvider>
+    )
+
     if (type === "datetime-local") {
-      return (
+      return wrapPicker(
         <DateTimePicker
           value={parseDateValue(value)}
           onChange={(nextDate, context) => {
@@ -270,7 +338,7 @@ function Input({
     }
 
     if (type === "time") {
-      return (
+      return wrapPicker(
         <TimePicker
           value={parseTimeValue(value)}
           onChange={(nextDate, context) => {
@@ -305,7 +373,7 @@ function Input({
       )
     }
 
-    return (
+    return wrapPicker(
       <DatePicker
         value={parseDateValue(value)}
         onChange={(nextDate, context) => {

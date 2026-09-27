@@ -157,6 +157,16 @@ export function reverseInvoiceRefund(
   );
 }
 
+/** Moves (part of) an invoice's credit balance to another open invoice. */
+export function createCreditTransfer(invoiceId: string, payload: JsonPayload) {
+  return postJson(`/invoices/${invoiceId}/credit-transfers`, payload);
+}
+
+/** Reverses both legs of a credit transfer. */
+export function reverseCreditTransfer(invoiceId: string, transferId: string, payload: JsonPayload) {
+  return postJson(`/invoices/${invoiceId}/credit-transfers/${transferId}/reversal`, payload);
+}
+
 export function updateInvoiceVisibility(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/visibility`, payload);
 }
@@ -188,6 +198,14 @@ export function createDunningEvent(invoiceId: string, payload: JsonPayload) {
 
 export function fetchInvoicePdfBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
+}
+
+export function fetchCreditNotePdfBlob(invoiceId: string, creditNoteId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/credit-notes/${creditNoteId}/pdf`);
+}
+
+export function fetchDunningLetterBlob(invoiceId: string, dunningEventId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/dunning/${dunningEventId}/pdf`);
 }
 
 export function fetchInvoiceZugferdXmlBlob(invoiceId: string) {

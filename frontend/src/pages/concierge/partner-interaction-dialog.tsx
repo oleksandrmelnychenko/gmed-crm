@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { appDateTimeFormat, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -146,14 +147,13 @@ export type RecordPartnerInteractionInput = {
 };
 
 function localDateTimeValue(value: Date) {
-  const shifted = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
 function formatDateTime(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -250,12 +250,14 @@ export function ConciergePartnerInteractionDialog({
 
   async function record() {
     try {
+      const occurredAtIso = berlinLocalInputToIso(occurredAt);
+      if (!occurredAtIso) throw new RangeError("Invalid time value");
       await onRecord({
         request_id: requestId,
         channel,
         direction,
         outcome,
-        occurred_at: new Date(occurredAt).toISOString(),
+        occurred_at: occurredAtIso,
         contact_person: contactPerson.trim() || null,
         note: note.trim() || null,
         quoted_cost: quotedCost.trim() ? Number(quotedCost) : null,

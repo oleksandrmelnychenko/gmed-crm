@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Banner, Field } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -26,7 +27,7 @@ const copy = {
     datesError: "Укажите корректные даты: начало периода не должно быть позже окончания.", dataError: "Не удалось сверить движения с остатком. Суммы не показаны — повторите загрузку.",
     reconciliation: "Остаток расчётный: есть суммы, требующие сверки. Они учитываются в таблице, но пока не подтверждены.",
     explanation: "Счета показаны с учётом кредит-нот, оплаты и возвраты — с учётом сторно. Прочие движения включают внешние требования и ручные корректировки. Нажмите на месяц, чтобы увидеть операции.",
-    invoice: "Выставлен счёт", credit_note: "Кредит-нота", credit_note_reversal: "Сторно кредит-ноты", payment: "Оплата", payment_reversal: "Сторно оплаты", refund: "Возврат", refund_reversal: "Сторно возврата", balance_adjustment: "Корректировка", balance_adjustment_reversal: "Сторно корректировки", external_receivable: "Внешнее требование", external_allocation: "Распределение внешнего требования", external_allocation_reversal: "Сторно распределения", imported: "Перенесённая оплата", unknown: "Прочая операция",
+    invoice: "Выставлен счёт", credit_note: "Кредит-нота", credit_note_reversal: "Сторно кредит-ноты", payment: "Оплата", payment_reversal: "Сторно оплаты", refund: "Возврат", refund_reversal: "Сторно возврата", balance_adjustment: "Корректировка", balance_adjustment_reversal: "Сторно корректировки", external_receivable: "Внешнее требование", external_allocation: "Распределение внешнего требования", external_allocation_reversal: "Сторно распределения", termination_uninvoiced: "Расторжение: набежало, ещё не выставлено", imported: "Перенесённая оплата", unknown: "Прочая операция",
   },
   de: {
     title: "Finanzen nach Zeitraum", from: "Zeitraum von", to: "Bis", currency: "Währung",
@@ -39,7 +40,7 @@ const copy = {
     datesError: "Gültige Daten eingeben: Der Beginn darf nicht nach dem Ende liegen.", dataError: "Buchungen und Saldo konnten nicht abgestimmt werden. Beträge werden nicht angezeigt. Bitte erneut laden.",
     reconciliation: "Der Saldo ist vorläufig: Einige Beträge müssen noch abgestimmt werden. Sie sind in der Tabelle berücksichtigt, aber noch nicht bestätigt.",
     explanation: "Rechnungen enthalten Gutschriften, Zahlungen und Erstattungen berücksichtigen Stornierungen. Sonstige Buchungen umfassen externe Forderungen und manuelle Korrekturen. Ein Klick auf einen Monat zeigt die Buchungen.",
-    invoice: "Rechnung", credit_note: "Gutschrift", credit_note_reversal: "Gutschriftstorno", payment: "Zahlung", payment_reversal: "Zahlungsstorno", refund: "Erstattung", refund_reversal: "Erstattungsstorno", balance_adjustment: "Kontokorrektur", balance_adjustment_reversal: "Korrekturstorno", external_receivable: "Externe Forderung", external_allocation: "Forderungszuordnung", external_allocation_reversal: "Zuordnungsstorno", imported: "Übernommene Zahlung", unknown: "Sonstige Buchung",
+    invoice: "Rechnung", credit_note: "Gutschrift", credit_note_reversal: "Gutschriftstorno", payment: "Zahlung", payment_reversal: "Zahlungsstorno", refund: "Erstattung", refund_reversal: "Erstattungsstorno", balance_adjustment: "Kontokorrektur", balance_adjustment_reversal: "Korrekturstorno", external_receivable: "Externe Forderung", external_allocation: "Forderungszuordnung", external_allocation_reversal: "Zuordnungsstorno", termination_uninvoiced: "Kündigung: angefallen, noch nicht berechnet", imported: "Übernommene Zahlung", unknown: "Sonstige Buchung",
   },
 } as const;
 
@@ -91,7 +92,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
   }, [data, range, patientId, currency]);
   const effectiveCurrency = data?.currency ?? currency ?? "EUR";
   const amount = useCallback((value: bigint) => formatMoneyAmount(financeAmount(value), effectiveCurrency || "EUR"), [effectiveCurrency]);
-  const monthLabel = useCallback((value: string) => new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`)), [lang]);
+  const monthLabel = useCallback((value: string) => appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`)), [lang]);
   const balanceLabel = (value: bigint) => value > 0n ? l.debt : value < 0n ? l.credit : l.settled;
   const periods = report.periods;
   const totals = periods.reduce((sum, period) => ({ invoices: sum.invoices + period.invoices, payments: sum.payments + period.payments, refunds: sum.refunds + period.refunds, adjustments: sum.adjustments + period.adjustments }), { invoices: 0n, payments: 0n, refunds: 0n, adjustments: 0n });
@@ -113,7 +114,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
     })),
   ];
   const movementColumns: ColumnDef<PatientAccountMovement>[] = [
-    { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU").format(new Date(`${row.entry_date}T12:00:00`))}</span> },
+    { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{formatDateKey(row.entry_date, lang === "de" ? "de-DE" : "ru-RU")}</span> },
     { id: "kind", label: l.kind, accessor: row => row.id.startsWith("payment-balance:") ? l.imported : (l[row.kind as keyof typeof l] ?? l.unknown), width: 235 },
     { id: "document", label: l.document, accessor: row => row.document_number ?? "", width: 190, render: row => <span className="font-mono text-xs">{row.document_number || "—"}</span> },
     { id: "order", label: l.order, accessor: row => row.order_number ?? "", width: 180, render: row => <span className="font-mono text-xs">{row.order_number || "—"}</span> },

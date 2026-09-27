@@ -551,35 +551,58 @@ test("a rejected invoice-to-service link is visible on the invoice page", async 
   await expect(page.getByText("Invoice link rejected", {exact:true})).toBeVisible();
 });
 
-test("amount amendments accept decimal commas and reject zero", async ({page}) => {
+test("amount amendments need a VAT treatment, accept decimal commas and reject zero or reductions", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=services`);
-  const delta = page.getByRole("textbox", {name:"Изменение суммы", exact:true});
+  const delta = page.getByRole("textbox", {name:"Сумма увеличения с НДС", exact:true});
   await page.getByRole("textbox", {name:"Что согласовано с пациентом", exact:true}).fill("QA agreed change");
   const propose = page.getByRole("button", {name:"Предложить", exact:true});
+  await delta.fill("9,50");
+  // Without the VAT treatment the proposal cannot be sent.
+  await expect(propose).toBeDisabled();
+  await chooseComboboxOption(page, page.getByRole("combobox", {name:"НДС для этой суммы", exact:true}), "Услуга агентства · НДС 19 %");
   await delta.fill("0");
+  await expect(propose).toBeDisabled();
+  await delta.fill("-50");
   await expect(propose).toBeDisabled();
   await delta.fill("9,50");
   await propose.click();
   await expect(delta).toHaveValue("");
+  await expect(page.getByText("Предложение отправлено на согласование.", {exact:true})).toBeVisible();
   expect(writes.find(write => write.path.endsWith("/amendments"))?.body)
-    .toMatchObject({delta_amount:"9.50", agreed_note:"QA agreed change"});
+    .toMatchObject({delta_amount:"9.50", agreed_note:"QA agreed change", vat_treatment:"standard_vat"});
 });
 
-test("approving an amount amendment refreshes the order total", async ({page}) => {
+test("approving an amount amendment adds a billing line and refreshes the order total", async ({page}) => {
   const {order} = await prepare(page);
-  const amendment = {id:"amendment-1", order_id:orderId, delta_amount:"100", agreed_note:"QA agreed change", status:"pending", currency:"EUR", created_at:"2026-09-06T12:02:00Z"};
+  const amendment: Record<string, unknown> = {id:"amendment-1", order_id:orderId, delta_amount:"100", agreed_note:"QA agreed change", status:"pending", currency:"EUR", created_at:"2026-09-06T12:02:00Z", vat_treatment:"standard_vat", vat_rate:"19", is_cost_passthrough:false, order_leistung_id:null, billable:false};
   await page.route(`**/orders/${orderId}/amendments`, route => route.fulfill({json:[amendment]}));
   await page.route(`**/orders/${orderId}/amendments/amendment-1/decision`, route => {
     order.total_estimated = "12600";
-    amendment.status = "approved";
-    return route.fulfill({json:{amendment, order_total_estimated:"12600"}});
+    Object.assign(amendment, {status:"approved", order_leistung_id:"line-amendment", order_leistung_status:"approved"});
+    return route.fulfill({json:{amendment, order_total_estimated:"12600", order_leistung_id:"line-amendment"}});
   });
   await page.goto(`/orders/${orderId}?section=services`);
   await expect(orderTotal(page)).toHaveText(/12.500|12 500/);
+  await expect(page.getByText("Услуга агентства · НДС 19 %", {exact:true})).toBeVisible();
   await page.getByRole("button", {name:"Одобрить", exact:true}).click();
   await expect(page.getByText("Одобрено", {exact:true})).toBeVisible();
+  await expect(page.getByText("В услугах заказа", {exact:true})).toBeVisible();
+  await expect(page.getByRole("status").filter({hasText:"Строка «Корректировка» добавлена в услуги заказа"})).toBeVisible();
   await expect(orderTotal(page)).toHaveText(/12.600|12 600/);
+});
+
+test("a pending amendment without a VAT treatment asks for it before approval", async ({page}) => {
+  const {writes} = await prepare(page);
+  const amendment = {id:"amendment-legacy", order_id:orderId, delta_amount:"80", agreed_note:"Legacy change", status:"pending", currency:"EUR", created_at:"2026-09-06T12:02:00Z"};
+  await page.route(`**/orders/${orderId}/amendments`, route => route.fulfill({json:[amendment]}));
+  await page.goto(`/orders/${orderId}?section=services`);
+  const approve = page.getByRole("button", {name:"Одобрить", exact:true});
+  await expect(approve).toBeDisabled();
+  await chooseComboboxOption(page, page.getByRole("combobox", {name:"НДС для этой суммы", exact:true}).last(), "Организация лечения · НДС 0 %");
+  await approve.click();
+  await expect.poll(() => writes.find(write => write.path.endsWith("/amendment-legacy/decision"))?.body)
+    .toMatchObject({decision:"approve", vat_treatment:"termin_fee_0"});
 });
 
 test("a failed amendment load is visible and can be retried", async ({page}) => {
@@ -632,4 +655,81 @@ test("invoice allocation validates capacity, accepts commas and retries with the
   expect(attempts).toHaveLength(2);
   expect(attempts[0]).toMatchObject({amount_gross:"10.50", patient_invoice_id:"patient-invoice-1"});
   expect(attempts[1].request_id).toBe(attempts[0].request_id);
+});
+
+test("cancelling an order needs a reason and shows what is cancelled and what stays for billing", async ({page}) => {
+  const {order, writes} = await prepare(page);
+  await page.route(`**/orders/${orderId}/cancellation-preview`, route => route.fulfill({json:{
+    reason: null,
+    cancelled_services: [{id:"line-1", description:"Dolmetscher", quantity:"2", gross:"119"}],
+    cancelled_appointment_ids: ["appointment-1", "appointment-2"],
+    closed_quotes: [{id:"quote-1", quote_number:"KV-QA-1", previous_status:"sent"}],
+    rejected_amendment_ids: [],
+    settlement: {currency:"EUR", accrued_gross:"200", invoiced_gross:"0", paid_gross:"500", balance_gross:"-300", uninvoiced_gross:"200",
+      lines:[{description:"Organisation der Behandlung", status:"delivered", gross:"200"}]},
+  }}));
+  await page.goto(`/orders/${orderId}`);
+  await openOrderActions(page);
+  await page.getByRole("button", {name:"Отменить", exact:true}).click();
+  const dialog = page.getByRole("dialog", {name:"Отменить заказ", exact:true});
+  const preview = dialog.getByTestId("order-cancellation-preview");
+  await expect(preview).toContainText("Запланированные услуги: 1");
+  await expect(preview).toContainText("Предстоящие приёмы: 2");
+  await expect(preview).toContainText("KV-QA-1");
+  await expect(dialog.getByTestId("order-cancellation-balance")).toContainText("Пациенту к возврату: 300,00");
+  const confirm = dialog.getByRole("button", {name:"Отменить заказ", exact:true});
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("textbox", {name:"Причина отмены"}).fill("Patient postponed the treatment");
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => order.status).toBe("cancelled");
+  expect(writes.filter(write => write.path.endsWith("/status")).at(-1)?.body)
+    .toEqual({status:"cancelled", reason:"Patient postponed the treatment"});
+});
+
+test("follow-up blockers open the milestone planner, which plans and creates the reminder with feedback", async ({page}) => {
+  const {order, writes} = await prepare(page);
+  const reason = "1-week follow-up is not scheduled yet";
+  Object.assign(order, {phase:"closure"});
+  Object.assign(order.lifecycle, {
+    current_stage:"closure", next_stage:"followup",
+    allowed_transitions:[{phase:"followup", blocked:true, reasons:[reason]}],
+  });
+  Object.assign(order.followup_flow, {
+    followup_ready:false, followup_1w_status:"pending", followup_1w_ready:false,
+    followup_1m_ready:true, followup_6m_ready:true, followup_1w_date:null,
+    followup_1w_visits:0, followup_1w_reminders:0, followup_1m_visits:0, followup_1m_reminders:0,
+    followup_6m_visits:0, followup_6m_reminders:0, followup_appointments_total:0,
+    package_end_reminders:0, results_portal_shares:0,
+    closure_anchor_at:"2026-09-28T10:00:00+02:00", reminder_anchor_appointment_id:"appointment-anchor",
+    blocking_reasons:[reason],
+  });
+  await page.goto(`/orders/${orderId}`);
+  await page.getByRole("button", {name:/Недельный контроль ещё не запланирован/}).click();
+  const planner = page.getByTestId("order-followup-milestones");
+  await expect(planner).toBeInViewport();
+  const week = planner.getByTestId("followup-milestone-post_1w");
+  await chooseComboboxOption(page, week.getByRole("combobox", {name:"Через 1 неделю: статус"}), /Запланировано/);
+  // Prefilled one week after the closure anchor, shown as DD.MM.YYYY.
+  await expect(week.getByLabel("Через 1 неделю: дата")).toHaveValue("05.10.2026");
+  await week.getByRole("button", {name:"Создать напоминание", exact:true}).click();
+  await expect(week.getByRole("status")).toHaveText("Напоминание на 05.10.2026 создано.");
+  const reminder = writes.find(write => write.path === "/appointments/appointment-anchor/reminders");
+  expect(reminder?.body).toMatchObject({title:"Контроль через 1 неделю", user_id:"order-test-user"});
+  expect(writes.find(write => write.path.endsWith("/followup-flow"))?.body)
+    .toEqual({followup_1w_status:"scheduled", followup_1w_date:"2026-10-05"});
+});
+
+test("a patient manager sees the billing release as waiting for billing, without an action", async ({page}) => {
+  const {order} = await prepare(page);
+  const reason = "Billing release is not granted and package coverage is not confirmed";
+  Object.assign(order.process_gates, {billing_release_status:"pending", execution_ready:false, blocking_reasons:[reason]});
+  Object.assign(order.lifecycle, {allowed_transitions:[{phase:"execution", blocked:true, reasons:[reason]}]});
+  await page.route("**/api/v1/me", route => route.fulfill({json:{id:"pm-user", email:"pm@example.org", name:"PM QA", role:"patient_manager", created_at:"2026-01-01T00:00:00Z"}}));
+  await page.goto(`/orders/${orderId}`);
+  const waiting = page.getByTestId("order-blocker-waits-for-billing");
+  await expect(waiting).toContainText("Ждёт бухгалтерию");
+  await expect(waiting.getByRole("button")).toHaveCount(0);
+  await page.goto(`/orders/${orderId}?section=gates`);
+  await expect(page.getByTestId("order-billing-release-readonly")).toContainText("Разрешение выдаёт бухгалтерия");
 });

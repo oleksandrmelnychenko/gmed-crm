@@ -44,6 +44,7 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -216,7 +217,7 @@ function createBlankBalanceAdjustmentForm(currency = "EUR"): BalanceAdjustmentFo
     category: "correction",
     amount: "",
     currency,
-    effectiveOn: new Date().toISOString().slice(0, 10),
+    effectiveOn: appDateKey(),
     orderId: "",
     reason: "",
     note: "",
@@ -611,6 +612,7 @@ function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: st
     external_receivable: ["Externe Forderung", "Внешний долг"],
     external_allocation: ["Forderung zugeordnet", "Долг распределён"],
     external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
+    termination_uninvoiced: ["Kündigung: angefallen, noch nicht berechnet", "Расторжение: набежало, ещё не выставлено"],
   };
   return lang === "de" ? labels[kind][0] : labels[kind][1];
 }
@@ -1309,26 +1311,32 @@ function usePatientInvoicesTabContent({
     );
     return invoices.filter((invoice) => invoiceIds.has(invoice.id));
   }, [effectiveFinancialSummary, hasFinanceFilters, invoices]);
+  // Like the server: overdue once the due date lies before today in Berlin.
   const invoiceIsOverdue = (invoice: InvoiceItem) =>
     invoice.status === "overdue" ||
-    (Boolean(invoice.due_date) &&
+    (Boolean(appDateKeyOf(invoice.due_date)) &&
       moneyValueNumber(invoice.balance_due) > 0 &&
-      new Date(invoice.due_date as string).getTime() < Date.now());
+      appDateKeyOf(invoice.due_date) < appDateKey());
   const invoiceColumns = useMemo<ColumnDef<InvoiceItem>[]>(
     () => [
       {
         id: "invoice_number",
         label: t.invoices_number,
-        accessor: (invoice) => invoice.invoice_number,
+        accessor: (invoice) => invoice.invoice_number || t.revenue_invoices_draft_number,
         sortable: true,
         searchable: true,
         required: true,
         width: 200,
-        render: (invoice) => (
-          <span className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
-            {invoice.invoice_number}
-          </span>
-        ),
+        render: (invoice) =>
+          invoice.invoice_number ? (
+            <span className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
+              {invoice.invoice_number}
+            </span>
+          ) : (
+            <span className="text-xs italic text-muted-foreground">
+              {t.revenue_invoices_draft_number}
+            </span>
+          ),
       },
       {
         id: "invoice_type",
@@ -2309,6 +2317,8 @@ function usePatientInvoicesTabContent({
               [lang === "de" ? "Offene Rechnungen" : "Открытые счета", accountStatement.summary.invoice_due],
               [lang === "de" ? "Zahlungen erhalten" : "Получено оплат", accountStatement.summary.cash_paid],
               [lang === "de" ? "Vorauszahlung verfügbar" : "Доступно предоплаты", accountStatement.summary.available_prepayment],
+              [t.finance_statement_credit_balance, accountStatement.summary.credit_balance ?? null],
+              [t.finance_statement_amount_to_pay, accountStatement.summary.amount_to_pay ?? null],
               [lang === "de" ? "Externe Restforderung" : "Остаток внешнего долга", accountStatement.summary.external_receivable],
             ].map(([label, value]) => (
               <div

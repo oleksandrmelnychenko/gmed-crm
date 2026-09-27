@@ -55,6 +55,8 @@ export interface ClinicalTranslations {
   appointment_incoming_category_other: string;
   appointment_task_status_open: string;
   appointment_task_status_in_progress: string;
+  appointment_task_status_on_hold: string;
+  appointment_task_status_review: string;
   appointment_task_status_completed: string;
   appointment_task_status_cancelled: string;
   appointment_task_priority_low: string;
@@ -270,6 +272,8 @@ export const clinicalRu: ClinicalTranslations = {
   appointment_incoming_category_other: "Другое",
   appointment_task_status_open: "Открыта",
   appointment_task_status_in_progress: "В работе",
+  appointment_task_status_on_hold: "Приостановлена",
+  appointment_task_status_review: "На проверке",
   appointment_task_status_completed: "Завершена",
   appointment_task_status_cancelled: "Отменена",
   appointment_task_priority_low: "Низкий",
@@ -489,6 +493,8 @@ export const clinicalDe: ClinicalTranslations = {
   appointment_incoming_category_other: "Sonstiges",
   appointment_task_status_open: "Offen",
   appointment_task_status_in_progress: "In Bearbeitung",
+  appointment_task_status_on_hold: "Pausiert",
+  appointment_task_status_review: "In Prüfung",
   appointment_task_status_completed: "Erledigt",
   appointment_task_status_cancelled: "Abgebrochen",
   appointment_task_priority_low: "Niedrig",

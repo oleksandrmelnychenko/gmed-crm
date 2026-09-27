@@ -1128,3 +1128,103 @@ async fn economics_plan_skips_cancelled_services() {
     assert_eq!(kept["cancelled"], false);
     assert_eq!(kept["planned_revenue_net"], "100");
 }
+
+/// "Billed to the patient" includes issued advance invoices; once an advance
+/// is credited into a settlement invoice it is not counted twice. The unpaid
+/// part of an advance is still to be received.
+#[tokio::test]
+async fn economics_bills_issued_advances_once() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing = auth_header(seed_user(&pool, &tag, "billing").await, "billing");
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // An issued, unpaid 500 EUR advance and a draft advance (not billed yet).
+    seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &tag,
+        "advance",
+        "advance",
+        "sent",
+        Decimal::new(500, 0),
+        Decimal::ZERO,
+        Decimal::new(500, 0),
+    )
+    .await;
+    seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &tag,
+        "draft-advance",
+        "advance",
+        "draft",
+        Decimal::new(100, 0),
+        Decimal::ZERO,
+        Decimal::new(100, 0),
+    )
+    .await;
+
+    let economics = |app: axum::Router, billing: String| async move {
+        let (status, economics) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/orders/{order_id}/economics"),
+            &billing,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "economics: {economics:?}");
+        economics
+    };
+    let first = economics(app.clone(), billing.clone()).await;
+    assert_eq!(first["actual"]["recognized_revenue_gross"], "0");
+    assert_eq!(first["actual"]["advance_invoiced_gross"], "500");
+    assert_eq!(first["actual"]["billed_to_patient_gross"], "500");
+    assert_eq!(first["actual"]["patient_outstanding_gross"], "500");
+
+    // A final invoice of 669 that credits 500 of the advance: billed 669 in total.
+    let final_id = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &tag,
+        "final",
+        "final",
+        "sent",
+        Decimal::new(55000, 2) + Decimal::new(10000, 2),
+        Decimal::new(1900, 2),
+        Decimal::new(669, 0),
+    )
+    .await;
+    sqlx::query("UPDATE invoices SET prepayment_applied_amount = 500 WHERE id = $1")
+        .bind(final_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let second = economics(app.clone(), billing.clone()).await;
+    assert_eq!(second["actual"]["recognized_revenue_gross"], "669");
+    assert_eq!(second["actual"]["prepayment_applied_gross"], "500");
+    assert_eq!(second["actual"]["billed_to_patient_gross"], "669");
+}

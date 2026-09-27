@@ -1,4 +1,5 @@
 import type { LeadDetail } from "@/lib/api/types";
+import { appWallClock } from "@/lib/app-time-zone";
 import { moneyLineAmounts, roundCents } from "@/lib/money";
 import type {
   ClinicalMedication,
@@ -65,7 +66,29 @@ export function draftFromLead(lead: LeadDetail): WizardDraft {
   };
 }
 
-/** True when the person is younger than 18 on `today` — i.e. a child (#2). */
+/**
+ * "How did you hear about us?" is asked on a first intake only. A repeat
+ * intake is a new order for a known patient, so the acquisition source and
+ * the customer referral are neither shown nor required again
+ * (docs/architecture/patient-order-wizard-plan_ua.md).
+ */
+export function intakeAsksDiscoverySource(repeatIntake: boolean): boolean {
+  return !repeatIntake;
+}
+
+/** The recommending customer is required once "customer referral" is picked. */
+export function discoveryReferrerMissing(
+  draft: { discoverySource: string; referrerPatientId: string },
+  repeatIntake: boolean,
+): boolean {
+  return (
+    intakeAsksDiscoverySource(repeatIntake) &&
+    draft.discoverySource === "customer_referral" &&
+    !draft.referrerPatientId
+  );
+}
+
+/** True when the person is younger than 18 on the Berlin date of `today` — i.e. a child (#2). */
 export function isMinor(dateOfBirth: string, today: Date): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOfBirth);
   if (!match) return false;
@@ -80,9 +103,10 @@ export function isMinor(dateOfBirth: string, today: Date): boolean {
   ) {
     return false;
   }
-  let age = today.getFullYear() - year;
-  const monthDelta = today.getMonth() + 1 - month;
-  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < day)) {
+  const now = appWallClock(today);
+  let age = now.year - year;
+  const monthDelta = now.month - month;
+  if (monthDelta < 0 || (monthDelta === 0 && now.day < day)) {
     age -= 1;
   }
   return age < 18;

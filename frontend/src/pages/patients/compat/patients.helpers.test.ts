@@ -96,6 +96,11 @@ describe("computeAge", () => {
     expect(computeAge("", now)).toBeNull();
     expect(computeAge("not-a-date", now)).toBeNull();
   });
+  it("turns a year older at Berlin midnight", () => {
+    // 27 Sep 23:30 in Berlin (28 Sep in Kyiv), then 28 Sep 00:30 in Berlin (27 Sep in UTC).
+    expect(computeAge("1990-09-28", new Date("2026-09-27T21:30:00Z"))).toBe(35);
+    expect(computeAge("1990-09-28", new Date("2026-09-27T22:30:00Z"))).toBe(36);
+  });
 });
 
 describe("patientDisplayName", () => {

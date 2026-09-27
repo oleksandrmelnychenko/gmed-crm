@@ -371,7 +371,10 @@ function useAppointmentConciergeSectionContent({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-slate-950">
-                          {service.title}
+                          {service.title_redacted
+                            ? serviceTaxonomyLabel(service, lang)
+                              || (lang === "de" ? "Serviceanfrage" : "Сервисный запрос")
+                            : service.title}
                         </p>
                         <span className={appointmentMiniPillClassName}>
                           {serviceKindLabel(service.service_kind)}

@@ -1446,7 +1446,7 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
     .await;
 
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
-    let due_date = (chrono::Utc::now().date_naive() - chrono::Duration::days(3)).to_string();
+    let due_date = (gmed_server::app_time::today() - chrono::Duration::days(3)).to_string();
 
     let (status, created_body) = json_request(
         &app,
@@ -2219,7 +2219,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
 
-    let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
+    let expired_on = (gmed_server::app_time::today() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
@@ -3200,6 +3200,88 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
         leistungen[0]["agency_service_id"],
         agency_service_id.to_string()
     );
+    // The billing line references the report instead of copying its text.
+    let report_text = format!("Interpreter completed support for {tag}");
+    let notes = leistungen[0]["notes"].as_str().unwrap_or_default();
+    assert!(notes.contains(&format!("Bericht: {report_id}")), "{notes}");
+    assert!(notes.contains("Stunden: 2.5"), "{notes}");
+    assert!(!notes.contains(&report_text), "{notes}");
+
+    // A line written before the change still stores the copied text. Billing
+    // (no medical view) reads and searches it without the text; roles with
+    // medical access keep the history as stored.
+    sqlx::query(
+        "UPDATE order_leistungen SET notes = notes || E'\\nReport: ' || $2 WHERE id = $1::uuid",
+    )
+    .bind(billing_leistung_id)
+    .bind(&report_text)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let (status, billing_order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billing_order}");
+    assert!(
+        !billing_order.to_string().contains(&report_text),
+        "{billing_order}"
+    );
+    assert!(
+        billing_order["leistungen"][0]["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&format!("Bericht: {report_id}")),
+        "{billing_order}"
+    );
+    let (status, billing_lines) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billing_lines}");
+    assert!(
+        !billing_lines.to_string().contains(&report_text),
+        "{billing_lines}"
+    );
+    let (status, billing_search) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders?search=completed%20support%20for%20{tag}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billing_search}");
+    assert!(
+        !billing_search.to_string().contains(&order_id.to_string()),
+        "{billing_search}"
+    );
+    let (status, ceo_order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ceo_order}");
+    assert!(
+        ceo_order["leistungen"][0]["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&report_text),
+        "{ceo_order}"
+    );
 }
 
 struct InterpreterReportFixture<'a> {
@@ -3739,12 +3821,18 @@ async fn completed_medical_appointment_auto_creates_order_leistung_from_agency_c
         leistungen[0]["agency_service_id"],
         agency_service_id.to_string()
     );
+    let auto_notes = leistungen[0]["notes"].as_str().unwrap_or_default();
     assert!(
-        leistungen[0]["notes"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Automatisch aus abgeschlossenem medizinischem Termin")
+        auto_notes.contains("Automatisch aus dem abgeschlossenen medizinischen Termin erstellt"),
+        "{auto_notes}"
     );
+    // Readable notes: the appointment stays linked by reference, the notes
+    // show no raw IDs, catalog keys or ISO dates.
+    assert!(
+        !auto_notes.contains(&appointment_id.to_string()),
+        "{auto_notes}"
+    );
+    assert!(!auto_notes.contains("Katalogschlüssel"), "{auto_notes}");
 
     let (status, _) = json_request(
         &app,
@@ -3839,7 +3927,12 @@ async fn completed_medical_appointment_consumes_the_planned_treatment_organizati
     .await;
 
     let mut appointment_ids = Vec::new();
-    for (suffix, date) in [("first", "2026-04-23"), ("second", "2026-04-24")] {
+    for (suffix, date) in [
+        ("first", "2026-04-23"),
+        ("second", "2026-04-24"),
+        ("third", "2026-04-25"),
+        ("fourth", "2026-04-26"),
+    ] {
         let appointment_id = seed_appointment(
             &pool,
             patient_id,
@@ -3895,11 +3988,18 @@ async fn completed_medical_appointment_consumes_the_planned_treatment_organizati
         consumed.get::<Option<Uuid>, _>("doctor_id"),
         Some(doctor_id)
     );
+    let consumed_notes = consumed
+        .get::<Option<String>, _>("notes")
+        .unwrap_or_default();
     assert!(
-        consumed
-            .get::<Option<String>, _>("notes")
-            .unwrap_or_default()
-            .contains("Geplante Leistung durch abgeschlossenen medizinischen Termin")
+        consumed_notes
+            .contains("Geplante Leistung durch den abgeschlossenen medizinischen Termin erbracht"),
+        "{consumed_notes}"
+    );
+    // The appointment stays linked by reference; the notes are readable text.
+    assert!(
+        !consumed_notes.contains(&appointment_ids[0].to_string()),
+        "{consumed_notes}"
     );
     let line_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM order_leistungen WHERE order_id = $1")
@@ -3924,32 +4024,116 @@ async fn completed_medical_appointment_consumes_the_planned_treatment_organizati
     })
     .await;
 
-    // The next appointment finds no single planned line: the multi-unit block
-    // stays planned for later visits and a delivered line is added as before.
-    let (status, _) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/appointments/{}/status", appointment_ids[1]),
-        &pm_bearer,
-        Some(json!({ "status": "completed" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    // The next appointments each deliver one unit of the planned block of
+    // three: the block keeps the remaining units, the delivered unit gets a
+    // line of its own with the block's terms; the last unit is the block.
+    let complete = |appointment_id: Uuid| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        async move {
+            let (status, _) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/appointments/{appointment_id}/status"),
+                &pm_bearer,
+                Some(json!({ "status": "completed" })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+    };
+    complete(appointment_ids[1]).await;
     let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
     assert_eq!(block_status, "planned");
-    assert_eq!(block_quantity, "3");
+    assert_eq!(block_quantity, "2");
     let (unrelated_status, _, _) = order_service_state(&pool, unrelated).await;
     assert_eq!(unrelated_status, "planned");
-    let second_line: i64 = sqlx::query_scalar(
-        r#"SELECT count(*) FROM order_leistungen
-           WHERE order_id = $1 AND source_medical_appointment_id = $2 AND status = 'delivered'"#,
+    let split = sqlx::query(
+        r#"SELECT id, status, quantity::text AS quantity, unit_price::text AS unit_price,
+                  agency_service_id, description, provider_id
+           FROM order_leistungen
+           WHERE order_id = $1 AND source_medical_appointment_id = $2"#,
     )
     .bind(order_id)
     .bind(appointment_ids[1])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(split.len(), 1);
+    assert_eq!(split[0].get::<String, _>("status"), "delivered");
+    assert_eq!(split[0].get::<String, _>("quantity"), "1");
+    assert_eq!(split[0].get::<String, _>("unit_price"), "60");
+    assert_eq!(
+        split[0].get::<Option<Uuid>, _>("agency_service_id"),
+        Some(agency_service_id)
+    );
+    assert_eq!(
+        split[0].get::<String, _>("description"),
+        "Organisation der Behandlung (Folgetermine)"
+    );
+    assert_eq!(
+        split[0].get::<Option<Uuid>, _>("provider_id"),
+        Some(provider_id)
+    );
+    let split_id = split[0].get::<Uuid, _>("id");
+    support::wait_until("split planned medical line audit", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'consume_planned_medical_order_leistung'
+                     AND entity_id = $1
+                     AND context->>'order_leistung_id' = $2
+                     AND context->>'split_from_order_leistung_id' = $3
+                     AND context->>'remaining_planned_quantity' = '2')"#,
+        )
+        .bind(order_id)
+        .bind(split_id.to_string())
+        .bind(planned_block.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    })
+    .await;
+
+    complete(appointment_ids[2]).await;
+    let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
+    assert_eq!(
+        (block_status.as_str(), block_quantity.as_str()),
+        ("planned", "1")
+    );
+    complete(appointment_ids[3]).await;
+    let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
+    assert_eq!(
+        (block_status.as_str(), block_quantity.as_str()),
+        ("delivered", "1")
+    );
+    let block_appointment: Option<Uuid> = sqlx::query_scalar(
+        "SELECT source_medical_appointment_id FROM order_leistungen WHERE id = $1",
+    )
+    .bind(planned_block)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(second_line, 1);
+    assert_eq!(block_appointment, Some(appointment_ids[3]));
+
+    // Three units planned, three delivered: nothing counted twice.
+    let delivered_units: rust_decimal::Decimal = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(quantity), 0) FROM order_leistungen
+           WHERE order_id = $1 AND agency_service_id = $2 AND status = 'delivered'"#,
+    )
+    .bind(order_id)
+    .bind(agency_service_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(delivered_units, rust_decimal::Decimal::new(4, 0));
+    let line_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM order_leistungen WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(line_count, 5);
 }
 
 #[tokio::test]
@@ -5820,6 +6004,98 @@ async fn non_medical_appointment_bootstraps_concierge_checklists_tasks_and_remin
 }
 
 #[tokio::test]
+async fn concierge_preparation_is_due_ahead_of_the_service_and_skips_billing() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-lead-times");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Austria").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let service_date = (gmed_server::app_time::today() + chrono::Duration::days(20)).to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "appointment_type": "non_medical",
+            "title": "Dinner at the restaurant",
+            "date": service_date,
+            "time_start": "19:30",
+            "time_end": "21:30"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let appointment_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+
+    let reminder_lead: f64 = sqlx::query_scalar(
+        r#"SELECT EXTRACT(EPOCH FROM (
+               ((a.date + a.time_start) AT TIME ZONE 'Europe/Berlin') - r.remind_at
+           ))::float8 / 3600
+           FROM reminders r JOIN appointments a ON a.id = r.appointment_id
+           WHERE a.id = $1 AND r.title LIKE 'Upcoming concierge service:%'"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(reminder_lead, 24.0);
+    let prep_lead: f64 = sqlx::query_scalar(
+        r#"SELECT EXTRACT(EPOCH FROM (
+               ((a.date + a.time_start) AT TIME ZONE 'Europe/Berlin') - t.due_date
+           ))::float8 / 3600
+           FROM tasks t JOIN appointments a ON a.id = t.appointment_id
+           WHERE a.id = $1 AND t.title LIKE 'Coordinate concierge service:%'"#,
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(prep_lead, 2.0);
+
+    // Billing has nothing to prepare for a concierge booking.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders"),
+        &pm_bearer,
+        Some(json!({
+            "user_id": billing_id,
+            "title": "Prepare the dinner",
+            "remind_at": format!("{service_date}T08:00:00Z"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders"),
+        &pm_bearer,
+        Some(json!({
+            "user_id": concierge_id,
+            "title": "Prepare the dinner",
+            "remind_at": format!("{service_date}T08:00:00Z"),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
+#[tokio::test]
 async fn non_medical_appointment_bootstraps_concierge_service_record() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -7565,6 +7841,14 @@ async fn reminders_can_be_created_by_pm_and_completed_by_assignee() {
         "2026-04-25",
     )
     .await;
+    // The reminder goes to the interpreter who runs the visit: an interpreter
+    // only linked to the patient does not reach the appointment.
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
@@ -7997,9 +8281,7 @@ async fn attention_endpoint_flags_past_visit_with_unprocessed_follow_up() {
     };
 
     let tag = unique_tag("attention-past");
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     let appointment_date = (today - chrono::Days::new(1)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
 
@@ -8084,7 +8366,7 @@ async fn attention_endpoint_flags_upcoming_slot_with_preparation_gaps() {
     };
 
     let tag = unique_tag("attention-upcoming");
-    let appointment_date = (chrono::Utc::now().date_naive() + chrono::Days::new(1)).to_string();
+    let appointment_date = (gmed_server::app_time::today() + chrono::Days::new(1)).to_string();
 
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
@@ -8159,7 +8441,7 @@ async fn attention_endpoint_excludes_resolved_completed_visits() {
     };
 
     let tag = unique_tag("attention-resolved");
-    let appointment_date = (chrono::Utc::now().date_naive() - chrono::Days::new(2)).to_string();
+    let appointment_date = (gmed_server::app_time::today() - chrono::Days::new(2)).to_string();
 
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
@@ -8229,9 +8511,7 @@ async fn attention_endpoint_keeps_overdue_follow_up_after_appointment_completion
     };
 
     let tag = unique_tag("attention-completed-overdue");
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     let appointment_date = (today - chrono::Days::new(3)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
@@ -8297,9 +8577,7 @@ async fn attention_endpoint_does_not_treat_future_follow_up_as_overdue_work() {
     };
 
     let tag = unique_tag("attention-future-follow-up");
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     let appointment_date = (today - chrono::Days::new(1)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today + chrono::Days::new(7));
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
@@ -8412,9 +8690,7 @@ async fn appointment_completion_is_blocked_when_checklist_items_remain_open() {
 }
 
 fn berlin_today() -> chrono::NaiveDate {
-    chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive()
+    gmed_server::app_time::today()
 }
 
 async fn appointment_status(pool: &PgPool, appointment_id: Uuid) -> String {
@@ -9002,8 +9278,13 @@ async fn recurring_completion_scope_is_rejected_while_it_contains_future_occurre
     );
 }
 
+/// Appointment tasks follow the work-center rules (no exemption): the
+/// assignee takes the task to review, the creator closes it, every change
+/// needs the current `updated_at`, is written to the task history and
+/// notifies the creator. The legacy `/tasks/{id}/status` path runs the same
+/// handler as `/concierge-operational-items/{id}/status`.
 #[tokio::test]
-async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
+async fn tasks_can_be_created_for_appointment_and_completed_through_review() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -9063,17 +9344,77 @@ async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
     let items = body.as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["assigned_to"], interpreter_id.to_string());
+    assert_eq!(items[0]["assigned_by_role"], "patient_manager");
     assert_eq!(items[0]["priority"], "high");
+    let created_at_version = items[0]["updated_at"].clone();
 
-    let (status, _) = json_request(
+    // Without the optimistic-lock token the status cannot change.
+    let status_path = format!("/api/v1/tasks/{task_id}/status");
+    let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/tasks/{task_id}/status"),
+        &status_path,
         &interpreter_bearer,
-        Some(json!({ "status": "completed" })),
+        Some(json!({ "status": "in_progress" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The assignee cannot skip the review step.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": created_at_version, "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Invalid task status transition");
+
+    let (status, started) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": created_at_version, "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    assert_eq!(started["status"], "in_progress");
+
+    // A stale token is a concurrent change.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": created_at_version, "status": "review" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, in_review) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": started["updated_at"], "status": "review" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{in_review}");
+    assert_eq!(in_review["status"], "review");
+
+    // The creator reviews and closes the task through the work-center path.
+    let (status, completed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-operational-items/{task_id}/status"),
+        &pm_bearer,
+        Some(json!({ "expected_updated_at": in_review["updated_at"], "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed}");
 
     let (status, body) = json_request(
         &app,
@@ -9085,6 +9426,47 @@ async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "completed");
+
+    let task_uuid = Uuid::parse_str(&task_id).unwrap();
+    let history: Vec<String> = sqlx::query_scalar(
+        r#"SELECT payload->>'status'
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND event_type = 'status_changed'
+           ORDER BY created_at, id"#,
+    )
+    .bind(task_uuid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history, vec!["in_progress", "review", "completed"]);
+    let creator_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM user_notifications
+           WHERE user_id = $1 AND entity_id = $2 AND kind = 'operational_task_updated'"#,
+    )
+    .bind(pm_id)
+    .bind(task_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(creator_notifications, 2, "one per assignee status change");
+
+    // An archived task cannot change its status any more. An archive always
+    // records who archived the task.
+    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = $2 WHERE id = $1")
+        .bind(task_uuid)
+        .bind(pm_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm_bearer,
+        Some(json!({ "expected_updated_at": completed["updated_at"], "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
 }
 
 #[tokio::test]
@@ -10794,6 +11176,265 @@ async fn assigned_interpreter_can_update_response_and_non_assignee_cannot() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+async fn notifications_of(pool: &PgPool, user_id: Uuid, kind: &str) -> Vec<Value> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT body FROM user_notifications
+           WHERE user_id = $1 AND kind = $2
+           ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .bind(kind)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .iter()
+    .map(|body| serde_json::from_str(body).unwrap())
+    .collect()
+}
+
+#[tokio::test]
+async fn interpreter_reports_and_clarifications_notify_whoever_acts_next() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("report-notices");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let outsider_id = seed_user(&pool, &format!("{tag}-outsider"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Report notices {tag}"),
+        "confirmed",
+        "2026-04-21",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let report_path = format!("/api/v1/appointments/{appointment_id}/report");
+    let submit = json!({ "hours": 2.5, "report_text": format!("Report {tag}") });
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(submit.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let submitted = notifications_of(&pool, manager_id, "interpreter_report_submitted").await;
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(
+        submitted[0]["appointment_title"],
+        format!("Report notices {tag}")
+    );
+    assert_eq!(submitted[0]["appointment_date"], "2026-04-21");
+    assert_eq!(
+        submitted[0]["interpreter_name"],
+        format!("interpreter {tag}")
+    );
+    assert!(
+        notifications_of(&pool, outsider_id, "interpreter_report_submitted")
+            .await
+            .is_empty()
+    );
+    assert!(
+        notifications_of(&pool, admin_id, "interpreter_report_submitted")
+            .await
+            .is_empty()
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{report_path}/reject"),
+        &bearer,
+        Some(json!({ "notes": "Bitte Stunden prüfen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rejected = notifications_of(&pool, interpreter_id, "interpreter_report_rejected").await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0]["notes"], "Bitte Stunden prüfen");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(submit),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        notifications_of(&pool, manager_id, "interpreter_report_submitted")
+            .await
+            .len(),
+        2
+    );
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{report_path}/approve"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let approved = notifications_of(&pool, interpreter_id, "interpreter_report_approved").await;
+    assert_eq!(approved.len(), 1);
+    assert!(approved[0]["notes"].is_null());
+
+    // A second appointment: the interpreter asks for clarification.
+    let second_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Clarification {tag}"),
+        "planned",
+        "2026-12-01",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{second_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let response_path = format!("/api/v1/appointments/{second_id}/interpreter-response");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &response_path,
+        &interpreter_bearer,
+        Some(json!({ "response": "discussion_requested", "comment": "x".repeat(1001) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &response_path,
+        &interpreter_bearer,
+        Some(json!({ "response": "discussion_requested", "comment": "  Welche Adresse?  " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let clarification =
+        notifications_of(&pool, manager_id, "interpreter_clarification_requested").await;
+    assert_eq!(clarification.len(), 1);
+    assert_eq!(clarification[0]["comment"], "Welche Adresse?");
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{second_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["interpreter_response_comment"], "Welche Adresse?");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &response_path,
+        &interpreter_bearer,
+        Some(json!({ "response": "accepted", "comment": "ignored" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{second_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(detail["interpreter_response"], "accepted");
+    assert!(detail["interpreter_response_comment"].is_null(), "{detail}");
+}
+
+#[tokio::test]
+async fn tasks_created_from_the_appointment_page_notify_their_assignee() {
+    let Some((app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-task-notice");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Task notice {tag}"),
+        "planned",
+        "2026-12-01",
+    )
+    .await;
+    let manager_bearer = auth_header_for(manager_id, "patient_manager");
+
+    for (assignee, expected) in [(concierge_id, 1_i64), (manager_id, 0_i64)] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            &manager_bearer,
+            Some(json!({
+                "title": "Book the airport pickup",
+                "assigned_to": assignee,
+                "appointment_id": appointment_id,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let task_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM user_notifications
+               WHERE user_id = $1 AND kind = 'operational_task_assigned'
+                 AND entity_type = 'concierge_task' AND entity_id = $2"#,
+        )
+        .bind(assignee)
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // Self-assigned work needs no notification.
+        assert_eq!(count, expected);
+    }
 }
 
 #[tokio::test]
@@ -14469,4 +15110,283 @@ async fn concierge_and_patient_manager_can_list_non_medical_providers() {
             "{role} list with provider_type=non_medical must exclude medical providers"
         );
     }
+}
+
+async fn seed_order_line(
+    pool: &PgPool,
+    order_id: Uuid,
+    provider_id: Option<Uuid>,
+    service_key: Option<&str>,
+    description: &str,
+    notes: &str,
+) -> Uuid {
+    // The catalog snapshot trigger fills the service key from the linked
+    // catalog service (and clears it on a line without one), so a keyed line
+    // links the catalog entry.
+    sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, provider_id,
+                agency_service_id, notes
+           ) VALUES (
+                $1, $2, 1, 480, 19, $3,
+                (SELECT id FROM agency_service_catalog WHERE service_key = $4), $5
+           )
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(description)
+    .bind(provider_id)
+    .bind(service_key)
+    .bind(notes)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+fn line_ids(body: &Value) -> Vec<String> {
+    body["leistungen"]
+        .as_array()
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line["id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn concierge_and_interpreter_team_lead_read_only_their_part_of_an_order() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("order-part-readers");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let clinic_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let transfer_id =
+        seed_provider_with_type(&pool, &format!("{tag}-transfer"), "non_medical", "Germany").await;
+    let needs = format!("Knee replacement consult {tag}");
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-PART-{tag}"),
+        "execution",
+        "active",
+        &needs,
+    )
+    .await;
+    let medical_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(clinic_id),
+        None,
+        &format!("Knee surgery {tag}"),
+        "Implant size 7",
+    )
+    .await;
+    let transfer_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(transfer_id),
+        None,
+        &format!("Airport transfer {tag}"),
+        "Pick up at gate",
+    )
+    .await;
+    let interpreter_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some("interpreter_hours"),
+        &format!("Interpreter hours {tag}"),
+        "Report: patient anxious before surgery",
+    )
+    .await;
+
+    let concierge_id = seed_user(&pool, &format!("{tag}-c"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let concierge = auth_header_for(concierge_id, "concierge");
+
+    let patient_orders = format!("/api/v1/orders?patient_id={patient_id}");
+    let (status, list) = json_request(&app, "GET", &patient_orders, &concierge, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == order_id.to_string())
+        .cloned()
+        .expect("concierge lists the order of an assigned patient");
+    assert_eq!(row["read_scope"], "concierge_services");
+    for key in [
+        "total_estimated",
+        "payment_tracking",
+        "prepayment_amount",
+        "case_id",
+    ] {
+        assert!(row.get(key).is_none(), "{key} leaked: {row}");
+    }
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["read_scope"], "concierge_services");
+    assert_eq!(line_ids(&detail), vec![transfer_line.to_string()]);
+    assert!(detail["needs_description"].is_null(), "{detail}");
+    assert!(detail["leistungen"][0]["unit_price"].is_null(), "{detail}");
+    assert!(detail["leistungen"][0]["notes"].is_null(), "{detail}");
+    let text = detail.to_string();
+    for secret in ["Knee", "Implant", "anxious"] {
+        assert!(!text.contains(secret), "{secret} leaked: {detail}");
+    }
+
+    for path in [
+        format!("/api/v1/orders/{order_id}/economics"),
+        format!("/api/v1/orders/{order_id}/leistungen"),
+        format!("/api/v1/orders/{order_id}/amendments"),
+        format!("/api/v1/orders/{order_id}/group"),
+        format!("/api/v1/orders/{order_id}/pipeline"),
+        format!("/api/v1/orders?provider_id={clinic_id}"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &concierge, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/orders?search=Knee%20replacement",
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains(&order_id.to_string()), "{body}");
+    // Reading does not open any write.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &concierge,
+        Some(json!({ "status": "paused" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // The interpreter team lead is not assigned to the patient: an order
+    // without interpreter involvement stays closed, while interpreter hours or
+    // an interpreter appointment put an order into the team context.
+    let teamlead_id = seed_user(&pool, &format!("{tag}-t"), "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-i"), "interpreter").await;
+    let teamlead = auth_header_for(teamlead_id, "teamlead_interpreter");
+    let clinic_only_order = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-CLINIC-{tag}"),
+        "execution",
+        "active",
+        "Clinic only",
+    )
+    .await;
+    seed_order_line(
+        &pool,
+        clinic_only_order,
+        Some(clinic_id),
+        None,
+        &format!("Consultation {tag}"),
+        "",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{clinic_only_order}"),
+        &teamlead,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        clinic_id,
+        seed_doctor(&pool, clinic_id, &tag).await,
+        admin_id,
+        &format!("Interpreted visit {tag}"),
+        "confirmed",
+        "2026-05-10",
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET order_id = $2, interpreter_id = $3 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &teamlead,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["read_scope"], "interpreter_team");
+    assert_eq!(line_ids(&detail), vec![interpreter_line.to_string()]);
+    let text = detail.to_string();
+    assert!(detail["leistungen"][0]["unit_price"].is_null(), "{detail}");
+    for secret in ["Knee", "Implant", "anxious", "Airport"] {
+        assert!(!text.contains(secret), "{secret} leaked: {detail}");
+    }
+    let (status, list) = json_request(&app, "GET", &patient_orders, &teamlead, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list.to_string().contains(&order_id.to_string()), "{list}");
+    assert!(
+        !list.to_string().contains(&clinic_only_order.to_string()),
+        "{list}"
+    );
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &teamlead,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Roles with the full view are unchanged.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail.get("read_scope").is_none(), "{detail}");
+    assert_eq!(line_ids(&detail).len(), 3);
+    assert!(line_ids(&detail).contains(&medical_line.to_string()));
+
+    // The interpreter still has no order access at all.
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/orders",
+        &auth_header_for(interpreter_id, "interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

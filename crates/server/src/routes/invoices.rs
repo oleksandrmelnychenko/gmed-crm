@@ -31,6 +31,14 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+pub(crate) mod advance_application;
+mod credit_note_pdf;
+pub(crate) mod credit_notes;
+mod credit_transfers;
+mod document;
+mod dunning_letters;
+mod release;
+mod stored_documents;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -64,12 +72,24 @@ pub fn router() -> Router<AppState> {
             get(list_my_invoice_credit_notes),
         )
         .route(
+            "/me/invoices/{invoice_id}/credit-notes/{credit_note_id}/pdf",
+            get(credit_note_pdf::download_my_credit_note_pdf),
+        )
+        .route(
             "/me/invoices/{invoice_id}/refunds",
             get(list_my_invoice_refunds),
         )
         .route(
             "/me/invoices/{invoice_id}/pdf",
             get(download_my_invoice_pdf),
+        )
+        .route(
+            "/me/invoices/{invoice_id}/dunning",
+            get(list_my_dunning_letters),
+        )
+        .route(
+            "/me/invoices/{invoice_id}/dunning/{dunning_event_id}/pdf",
+            get(download_my_dunning_letter),
         )
         .route("/invoices/accounting-ledger", get(get_accounting_ledger))
         .route(
@@ -105,12 +125,24 @@ pub fn router() -> Router<AppState> {
             post(reverse_invoice_credit_note),
         )
         .route(
+            "/invoices/{invoice_id}/credit-notes/{credit_note_id}/pdf",
+            get(credit_note_pdf::download_credit_note_pdf),
+        )
+        .route(
             "/invoices/{invoice_id}/refunds",
             get(list_invoice_refunds).post(create_invoice_refund),
         )
         .route(
             "/invoices/{invoice_id}/refunds/{refund_id}/reversal",
             post(reverse_invoice_refund),
+        )
+        .route(
+            "/invoices/{invoice_id}/credit-transfers",
+            post(credit_transfers::create_credit_transfer),
+        )
+        .route(
+            "/invoices/{invoice_id}/credit-transfers/{transfer_id}/reversal",
+            post(credit_transfers::reverse_credit_transfer),
         )
         .route(
             "/invoices/{invoice_id}/visibility",
@@ -128,6 +160,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/dunning",
             get(list_dunning_events).post(create_dunning_event),
+        )
+        .route(
+            "/invoices/{invoice_id}/dunning/{dunning_event_id}/pdf",
+            get(download_dunning_letter),
         )
         .route(
             "/quotes/{quote_id}/invoices",
@@ -173,6 +209,10 @@ struct CreateInvoiceRequest {
     due_date: Option<String>,
     notes: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
+    /// Advance invoices only: `prepayment` bills the order's required
+    /// prepayment as "Anzahlung" lines; `positions` (default) bills the
+    /// selected quote positions.
+    advance_basis: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -233,6 +273,9 @@ struct CreateInvoicePaymentRequest {
     payment_reference: Option<String>,
     received_on: String,
     note: Option<String>,
+    /// A receipt above the open balance is recorded only when billing
+    /// confirms it; the excess becomes the patient's credit balance.
+    accept_overpayment: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -244,6 +287,22 @@ struct CorrectInvoicePaymentRequest {
     received_on: String,
     note: Option<String>,
     reason: String,
+    accept_overpayment: Option<bool>,
+}
+
+/// 409 for a receipt above the open balance that billing did not confirm as
+/// an overpayment; names the excess so the UI can ask.
+fn payment_exceeds_balance(balance_due: Decimal, overpayment: Decimal) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "payment_exceeds_balance",
+            "message": "Payment exceeds invoice balance; confirm the overpayment to record the excess as patient credit",
+            "balance_due": decimal_to_string(balance_due),
+            "overpayment_gross": decimal_to_string(overpayment),
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -252,13 +311,79 @@ struct ReverseInvoicePaymentRequest {
     note: String,
 }
 
+/// One invoice line to credit: in full, or with a gross amount.
+#[derive(Deserialize)]
+struct CreditNoteLineSelection {
+    line_index: usize,
+    amount_gross: Option<MoneyInput>,
+}
+
+/// A credit note credits selected invoice lines (`lines`), or `amount_gross`
+/// within one `vat_rate`. A bare `amount_gross` (older clients) is accepted
+/// only when the invoice has a single VAT rate.
 #[derive(Deserialize)]
 struct CreateInvoiceCreditNoteRequest {
     request_id: Uuid,
-    amount_gross: MoneyInput,
+    amount_gross: Option<MoneyInput>,
+    vat_rate: Option<MoneyInput>,
+    lines: Option<Vec<CreditNoteLineSelection>>,
     reason: String,
     issued_on: String,
     portal_visible: Option<bool>,
+}
+
+impl CreateInvoiceCreditNoteRequest {
+    fn selection(&self) -> Result<credit_notes::CreditSelection, &'static str> {
+        let amount = match &self.amount_gross {
+            Some(value) => Some(
+                value
+                    .parse_decimal()
+                    .ok_or("Invalid credit-note amount")?
+                    .round_cents(),
+            ),
+            None => None,
+        };
+        if let Some(lines) = &self.lines {
+            if self.vat_rate.is_some() || amount.is_some() {
+                return Err("Credit either invoice lines or an amount, not both");
+            }
+            let mut selected = Vec::with_capacity(lines.len());
+            for line in lines {
+                let amount = match &line.amount_gross {
+                    Some(value) => {
+                        let amount = value
+                            .parse_decimal()
+                            .ok_or("Invalid credit-note amount")?
+                            .round_cents();
+                        if amount <= Decimal::ZERO {
+                            return Err("Credit-note amount must be greater than zero");
+                        }
+                        Some(amount)
+                    }
+                    None => None,
+                };
+                selected.push((line.line_index, amount));
+            }
+            return Ok(credit_notes::CreditSelection::Lines(selected));
+        }
+        let amount = amount.ok_or("Invalid credit-note amount")?;
+        if amount <= Decimal::ZERO {
+            return Err("Credit-note amount must be greater than zero");
+        }
+        match &self.vat_rate {
+            Some(rate) => {
+                let rate = rate.parse_decimal().ok_or("Invalid VAT rate")?;
+                if rate < Decimal::ZERO || rate > Decimal::ONE_HUNDRED {
+                    return Err("Invalid VAT rate");
+                }
+                Ok(credit_notes::CreditSelection::VatRate {
+                    rate,
+                    amount_gross: amount,
+                })
+            }
+            None => Ok(credit_notes::CreditSelection::Amount(amount)),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -301,6 +426,10 @@ struct UpdateInvoicePayerRequest {
     payer_contact_phone: Option<String>,
     payer_contact_relationship: Option<String>,
     payer_notes: Option<String>,
+    payer_address_street: Option<String>,
+    payer_address_zip: Option<String>,
+    payer_address_city: Option<String>,
+    payer_address_country: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -432,8 +561,12 @@ struct InvoicePdfLineItem {
     quantity: String,
     unit_price: String,
     vat_rate: String,
+    vat_rate_value: Decimal,
     is_cost_passthrough: bool,
     line_gross: String,
+    line_net: Decimal,
+    line_vat: Decimal,
+    line_gross_value: Decimal,
 }
 
 #[derive(Clone)]
@@ -460,7 +593,8 @@ struct InvoicePdfContext {
     patient_id: Uuid,
     invoice_number: String,
     invoice_type: String,
-    status: String,
+    /// Issued (numbered) invoice; drafts render as marked previews.
+    released: bool,
     portal_visible: bool,
     hide_amounts_from_patient: bool,
     pdf_visible_to_patient: bool,
@@ -469,16 +603,16 @@ struct InvoicePdfContext {
     total_net: String,
     total_vat: String,
     total_gross: String,
-    credited_amount: String,
     /// Advance payments credited against this invoice.
     prepayment_applied_amount: String,
-    paid_amount: String,
-    balance_due: String,
     notes: Option<String>,
     patient_pid: String,
     patient_name: String,
     patient_title: Option<String>,
-    birth_date: Option<NaiveDate>,
+    /// Rechnungsempfänger: the payer when one is set, the patient otherwise.
+    recipient: document::InvoiceRecipient,
+    /// Leistungszeitraum (first and last service day).
+    service_period: Option<(NaiveDate, NaiveDate)>,
     order_number: String,
     quote_number: Option<String>,
     language: String,
@@ -570,14 +704,15 @@ fn is_valid_invoice_status(value: &str) -> bool {
 
 /// Manual invoice status moves. `paid` and `partially_paid` are derived from
 /// the payment journal, so asking for `sent` on a settled invoice only
-/// re-normalises it through `recompute_invoice_settlement_status`.
+/// re-normalises it through `recompute_invoice_settlement_status`. A released
+/// invoice never returns to draft: it is corrected by cancelling it.
 fn is_valid_invoice_status_transition(from: &str, to: &str) -> bool {
     if from == to {
         return true;
     }
     match from {
         "draft" => matches!(to, "sent" | "cancelled"),
-        "sent" => matches!(to, "draft" | "overdue" | "cancelled"),
+        "sent" => matches!(to, "overdue" | "cancelled"),
         "partially_paid" => matches!(to, "sent" | "overdue" | "cancelled"),
         "paid" => matches!(to, "sent"),
         "overdue" => matches!(to, "sent" | "cancelled"),
@@ -645,12 +780,18 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 
 /// Staff working context in the invoice detail that the patient portal must
 /// not receive: internal visibility notes, advances available for crediting,
-/// the supporting documents list and the contract link.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 4] = [
+/// the supporting documents list, the contract link, the credit-note form
+/// data, credit transfers (internal notes, other invoices) and the patient's
+/// relatives offered as payers.
+const STAFF_ONLY_INVOICE_KEYS: [&str; 8] = [
     "visibility_note",
     "available_prepayments",
     "supporting_documents",
     "contract_id",
+    "creditable_lines",
+    "credit_transfers",
+    "credit_transfer_targets",
+    "payer_relation_options",
 ];
 
 /// Internal pricing and sourcing fields of an invoice line (VAT source
@@ -715,6 +856,8 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
             "paid_amount",
             "prepayment_applied_amount",
             "balance_due",
+            "advance_credit_available",
+            "amount_to_pay",
             "credit_balance",
             "refundable_cash_amount",
         ] {
@@ -729,8 +872,10 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
     }
 }
 
-fn gen_invoice_number(seq: i64) -> String {
-    format!("INV-{}-{:04}", Utc::now().format("%Y%m%d"), seq)
+/// Invoice number assigned at release: the invoice date and the next value
+/// of the gapless counter (see `release`).
+fn gen_invoice_number(invoice_date: NaiveDate, seq: i64) -> String {
+    format!("INV-{}-{:04}", invoice_date.format("%Y%m%d"), seq)
 }
 
 fn parse_optional_date(value: Option<&str>) -> Result<Option<NaiveDate>, &'static str> {
@@ -962,6 +1107,71 @@ async fn provider_payment_journal_target_gross(
     }))
 }
 
+/// Where the cash retained on an invoice (payments minus refunds) belongs, as
+/// `(category, gross, VAT)` booking targets.
+///
+/// The split follows the invoice after its active credit notes: a credited
+/// 0 % pass-through line no longer attracts cash, a credited 19 % line no
+/// longer attracts VAT. Only cash up to what the patient still has to pay in
+/// cash (adjusted total minus credited advances) is revenue; anything beyond
+/// it — an overpayment, or a credit note not yet refunded — is patient credit
+/// without VAT until it is refunded or moved to another invoice.
+fn invoice_cash_targets(
+    context: &InvoicePaymentContext,
+    credits: &[credit_notes::ExistingCredit],
+    retained_gross: Decimal,
+) -> [(&'static str, Decimal, Decimal); 3] {
+    let (_, passthrough_vat, passthrough_gross) = invoice_passthrough_totals(&context.line_items);
+    let (mut credited_gross, mut credited_vat) = (Decimal::ZERO, Decimal::ZERO);
+    let (mut credited_passthrough_gross, mut credited_passthrough_vat) =
+        (Decimal::ZERO, Decimal::ZERO);
+    for credit in credits {
+        credited_gross += credit.gross;
+        credited_vat += credit.vat;
+        let (gross, vat) = credit_notes::credited_passthrough(
+            credit,
+            passthrough_gross,
+            passthrough_vat,
+            context.total_gross,
+        );
+        credited_passthrough_gross += gross;
+        credited_passthrough_vat += vat;
+    }
+    let adjusted_gross = (context.total_gross - credited_gross).max(Decimal::ZERO);
+    let adjusted_vat = (context.total_vat - credited_vat).max(Decimal::ZERO);
+    let adjusted_passthrough_gross = (passthrough_gross - credited_passthrough_gross)
+        .max(Decimal::ZERO)
+        .min(adjusted_gross);
+    let adjusted_passthrough_vat = (passthrough_vat - credited_passthrough_vat)
+        .max(Decimal::ZERO)
+        .min(adjusted_vat);
+    let cash_capacity = (adjusted_gross - context.prepayment_applied_amount).max(Decimal::ZERO);
+    let revenue_gross = retained_gross.min(cash_capacity);
+    let passthrough_target =
+        proportional_share(revenue_gross, adjusted_passthrough_gross, adjusted_gross);
+    [
+        (
+            "service_revenue",
+            revenue_gross - passthrough_target,
+            proportional_share(
+                revenue_gross,
+                adjusted_vat - adjusted_passthrough_vat,
+                adjusted_gross,
+            ),
+        ),
+        (
+            "cost_passthrough_revenue",
+            passthrough_target,
+            proportional_share(revenue_gross, adjusted_passthrough_vat, adjusted_gross),
+        ),
+        (
+            "patient_credit",
+            retained_gross - revenue_gross,
+            Decimal::ZERO,
+        ),
+    ]
+}
+
 struct InvoiceCashLine {
     category: String,
     amount_net: Decimal,
@@ -1058,25 +1268,11 @@ async fn invoice_cash_lines(
         );
     }
     let retained_gross = previous_gross + signed_gross;
-    let (_, passthrough_vat, passthrough_gross) = invoice_passthrough_totals(&context.line_items);
-    let target_passthrough_gross =
-        proportional_share(retained_gross, passthrough_gross, context.total_gross);
-    let targets = [
-        (
-            "service_revenue",
-            retained_gross - target_passthrough_gross,
-            proportional_share(
-                retained_gross,
-                context.total_vat - passthrough_vat,
-                context.total_gross,
-            ),
-        ),
-        (
-            "cost_passthrough_revenue",
-            target_passthrough_gross,
-            proportional_share(retained_gross, passthrough_vat, context.total_gross),
-        ),
-    ];
+    let targets = invoice_cash_targets(
+        context,
+        &credit_notes::load_active_credits(transaction, context.invoice_id).await?,
+        retained_gross,
+    );
     Ok(targets
         .into_iter()
         .map(|(category, target_gross, target_vat)| {
@@ -1237,7 +1433,7 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
 
     let delta_vat = proportional_share(delta_gross, context.amount_vat, context.amount_gross);
     let delta_net = delta_gross - delta_vat;
-    let entry_date = context.paid_at.unwrap_or_else(Utc::now).date_naive();
+    let entry_date = crate::app_time::date_of(context.paid_at.unwrap_or_else(Utc::now));
 
     insert_accounting_entry(
         state,
@@ -1363,7 +1559,7 @@ async fn load_auto_dunning_candidates(
             status: row.try_get::<String, _>("status").unwrap_or_default(),
             due_date: row
                 .try_get::<NaiveDate, _>("due_date")
-                .unwrap_or_else(|_| Utc::now().date_naive()),
+                .unwrap_or_else(|_| crate::app_time::today()),
             total_gross: row
                 .try_get::<Decimal, _>("total_gross")
                 .unwrap_or(Decimal::ZERO),
@@ -1416,14 +1612,16 @@ fn next_auto_dunning_level(
 
     let first_sent_at = candidate.first_sent_at?;
     if candidate.second_sent_at.is_none()
-        && first_sent_at.date_naive() <= today - chrono::Duration::days(second_delay_days)
+        && crate::app_time::date_of(first_sent_at)
+            <= today - chrono::Duration::days(second_delay_days)
     {
         return Some("second");
     }
 
     let second_sent_at = candidate.second_sent_at?;
     if candidate.collections_sent_at.is_none()
-        && second_sent_at.date_naive() <= today - chrono::Duration::days(collections_delay_days)
+        && crate::app_time::date_of(second_sent_at)
+            <= today - chrono::Duration::days(collections_delay_days)
     {
         return Some("collections");
     }
@@ -1460,7 +1658,7 @@ async fn load_auto_dunning_delay_days(state: &AppState) -> Result<(i64, i64), sq
 pub async fn run_auto_dunning_scheduler_once(
     state: &AppState,
 ) -> Result<AutoDunningRunSummary, sqlx::Error> {
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let automation_actor_user_id = resolve_auto_dunning_actor_user_id(state).await?;
     let (second_delay_days, collections_delay_days) = load_auto_dunning_delay_days(state).await?;
     let mut summary = AutoDunningRunSummary::default();
@@ -1529,10 +1727,18 @@ pub async fn run_auto_dunning_scheduler_once(
         }
 
         let note = auto_dunning_note(level);
-        let inserted = sqlx::query(
+        // The event and its letter are written together: a dunning step
+        // without the letter it sends is not recorded.
+        let mut transaction = state.db.begin().await?;
+        let payment_due_date = dunning_letters::dunning_payment_due_date(
+            invoice_document_date(Utc::now()),
+            dunning_letters::load_dunning_payment_term_days(&mut transaction).await?,
+        );
+        let inserted = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO invoice_dunning_events (
-                    invoice_id, level, note, due_date_snapshot, balance_due, created_by
-               ) VALUES ($1, $2, $3, $4, $5, $6)
+                    invoice_id, level, note, due_date_snapshot, balance_due, created_by,
+                    payment_due_date
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                ON CONFLICT (invoice_id, level) DO NOTHING
                RETURNING id"#,
         )
@@ -1542,8 +1748,32 @@ pub async fn run_auto_dunning_scheduler_once(
         .bind(Some(candidate.due_date))
         .bind(balance_due)
         .bind(actor_user_id)
-        .fetch_optional(&state.db)
+        .bind(payment_due_date)
+        .fetch_optional(&mut *transaction)
         .await?;
+        let mut letter_blob = None;
+        if let Some(dunning_event_id) = inserted {
+            match dunning_letters::store_dunning_letter(
+                &mut transaction,
+                candidate.invoice_id,
+                dunning_event_id,
+                Some(actor_user_id),
+            )
+            .await
+            {
+                Ok(letter) => letter_blob = letter.and_then(|letter| letter.blob),
+                Err(_) => {
+                    tracing::error!(invoice_id = %candidate.invoice_id, dunning_level = level, "auto dunning letter could not be stored; retried on the next run");
+                    continue;
+                }
+            }
+        }
+        if let Err(error) = transaction.commit().await {
+            if let Some(blob) = letter_blob {
+                blob.discard().await;
+            }
+            return Err(error);
+        }
 
         if inserted.is_some() {
             summary.dunning_events_created += 1;
@@ -1557,6 +1787,8 @@ pub async fn run_auto_dunning_scheduler_once(
                     "level": level,
                     "balance_due": decimal_to_string(balance_due),
                     "due_date_snapshot": candidate.due_date.to_string(),
+                    "payment_due_date": payment_due_date.to_string(),
+                    "dunning_event_id": inserted,
                 }),
             )
             .await;
@@ -1663,19 +1895,6 @@ fn invoice_pdf_text_width_mm(text: &str, font_size_pt: f32) -> f32 {
         })
         .sum();
     pt_to_mm(font_size_pt) * em_total
-}
-
-fn truncate_invoice_pdf_text(text: &str, font_size_pt: f32, width_mm: f32) -> String {
-    let original = text.trim();
-    let mut value = original.to_string();
-    while !value.is_empty() && invoice_pdf_text_width_mm(&value, font_size_pt) > width_mm {
-        value.pop();
-    }
-    if value.len() < original.len() && value.len() > 3 {
-        value.truncate(value.len().saturating_sub(3));
-        value.push_str("...");
-    }
-    value
 }
 
 fn wrap_invoice_text(text: &str, font_size_pt: f32, available_width_mm: f32) -> Vec<String> {
@@ -1929,18 +2148,47 @@ impl InvoicePdfLayout {
         }
     }
 
+    /// Two-column card of labelled values. Each label sits above its value and
+    /// long values wrap instead of being cut: identifiers such as the invoice
+    /// or order number must be printed in full.
     fn meta_grid(&mut self, cells: &[(&str, String)]) {
         if cells.is_empty() {
             return;
         }
         const COLUMN_GAP_MM: f32 = 10.0;
         const CARD_PADDING_X_MM: f32 = 5.0;
-        const CARD_PADDING_Y_MM: f32 = 4.0;
-        const ROW_HEIGHT_MM: f32 = 8.5;
+        const CARD_PADDING_Y_MM: f32 = 3.5;
+        const ROW_GAP_MM: f32 = 2.4;
+        const LABEL_SIZE_PT: f32 = 7.0;
+        const VALUE_SIZE_PT: f32 = 9.5;
+
+        let label_height_mm = invoice_pdf_line_height_mm(LABEL_SIZE_PT, 1.3);
+        let value_line_height_mm = invoice_pdf_line_height_mm(VALUE_SIZE_PT, 1.3);
+        let column_width_mm = (INVOICE_PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
+        let text_width_mm = column_width_mm - CARD_PADDING_X_MM * 2.0;
+        let wrapped = cells
+            .iter()
+            .map(|(_, value)| {
+                let lines = wrap_invoice_text(value, VALUE_SIZE_PT, text_width_mm);
+                if lines.is_empty() {
+                    vec!["—".to_string()]
+                } else {
+                    lines
+                }
+            })
+            .collect::<Vec<_>>();
+        let row_heights = wrapped
+            .chunks(2)
+            .map(|row| {
+                let lines = row.iter().map(Vec::len).max().unwrap_or(1) as f32;
+                label_height_mm + lines * value_line_height_mm
+            })
+            .collect::<Vec<_>>();
+        let card_height_mm = CARD_PADDING_Y_MM * 2.0
+            + row_heights.iter().sum::<f32>()
+            + ROW_GAP_MM * (row_heights.len().saturating_sub(1)) as f32;
 
         self.spacer(4.0);
-        let row_count = cells.len().div_ceil(2);
-        let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_count as f32 * ROW_HEIGHT_MM;
         self.ensure_space(card_height_mm);
         let card_top_mm = self.y_mm;
         let card_bottom_mm = card_top_mm - card_height_mm;
@@ -1989,41 +2237,41 @@ impl InvoicePdfLayout {
             );
         }
 
-        let column_width_mm = (INVOICE_PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
-        for (index, (label, value)) in cells.iter().enumerate() {
-            let row = index / 2;
-            let column = index % 2;
-            let column_left_mm =
-                INVOICE_PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
-            let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
-            let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
-            let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
-            let label_size_pt = 7.0;
-            let value_size_pt = 9.5;
-            let value_width_mm = invoice_pdf_text_width_mm(value, value_size_pt);
-            let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm + 18.0);
-            append_invoice_pdf_text_line(
-                &mut self.page_ops,
-                label,
-                text_x_mm,
-                baseline_y_mm,
-                label_size_pt,
-                &self.regular_font,
-                InvoicePdfColor::Muted,
-            );
-            append_invoice_pdf_text_line(
-                &mut self.page_ops,
-                &truncate_invoice_pdf_text(
-                    value,
-                    value_size_pt,
-                    (column_right_mm - value_x_mm).max(24.0),
-                ),
-                value_x_mm,
-                baseline_y_mm,
-                value_size_pt,
-                &self.bold_font,
-                InvoicePdfColor::Body,
-            );
+        let mut row_top_mm = card_top_mm - CARD_PADDING_Y_MM;
+        for (row_index, row_height_mm) in row_heights.iter().enumerate() {
+            for column in 0..2 {
+                let index = row_index * 2 + column;
+                let (Some((label, _)), Some(lines)) = (cells.get(index), wrapped.get(index)) else {
+                    continue;
+                };
+                let text_x_mm = INVOICE_PDF_LEFT_MARGIN_MM
+                    + column as f32 * (column_width_mm + COLUMN_GAP_MM)
+                    + CARD_PADDING_X_MM;
+                append_invoice_pdf_text_line(
+                    &mut self.page_ops,
+                    label,
+                    text_x_mm,
+                    row_top_mm - pt_to_mm(LABEL_SIZE_PT),
+                    LABEL_SIZE_PT,
+                    &self.regular_font,
+                    InvoicePdfColor::Muted,
+                );
+                for (line_index, line) in lines.iter().enumerate() {
+                    append_invoice_pdf_text_line(
+                        &mut self.page_ops,
+                        line,
+                        text_x_mm,
+                        row_top_mm
+                            - label_height_mm
+                            - pt_to_mm(VALUE_SIZE_PT)
+                            - line_index as f32 * value_line_height_mm,
+                        VALUE_SIZE_PT,
+                        &self.bold_font,
+                        InvoicePdfColor::Body,
+                    );
+                }
+            }
+            row_top_mm -= row_height_mm + ROW_GAP_MM;
         }
         self.y_mm = card_bottom_mm;
         self.spacer(6.0);
@@ -2180,10 +2428,78 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "page_label") => "Страница",
         ("en", "page_label") => "Page",
         (_, "page_label") => "Seite",
-        ("uk", "issued_on") => "Виставлено",
-        ("ru", "issued_on") => "Выставлен",
-        ("en", "issued_on") => "Issued on",
-        (_, "issued_on") => "Ausgestellt am",
+        ("uk", "issued_on") => "Дата рахунку",
+        ("ru", "issued_on") => "Дата счёта",
+        ("en", "issued_on") => "Invoice date",
+        (_, "issued_on") => "Rechnungsdatum",
+        ("uk", "draft_number") => "Чернетка",
+        ("ru", "draft_number") => "Черновик",
+        ("en", "draft_number") => "Draft",
+        (_, "draft_number") => "Entwurf",
+        ("uk", "draft_notice") => {
+            "ЧЕРНЕТКА — не є рахунком. Номер і дату рахунку буде присвоєно під час випуску."
+        }
+        ("ru", "draft_notice") => {
+            "ЧЕРНОВИК — не является счётом. Номер и дата счёта присваиваются при выпуске."
+        }
+        ("en", "draft_notice") => {
+            "DRAFT – not a valid invoice. The number and invoice date are assigned on release."
+        }
+        (_, "draft_notice") => {
+            "ENTWURF – keine gültige Rechnung. Nummer und Rechnungsdatum werden bei der Ausstellung vergeben."
+        }
+        ("uk", "invoice_number") => "Номер рахунку",
+        ("ru", "invoice_number") => "Номер счёта",
+        ("en", "invoice_number") => "Invoice number",
+        (_, "invoice_number") => "Rechnungsnummer",
+        ("uk", "recipient_heading") => "Одержувач рахунку",
+        ("ru", "recipient_heading") => "Получатель счёта",
+        ("en", "recipient_heading") => "Bill to",
+        (_, "recipient_heading") => "Rechnungsempfänger",
+        ("uk", "service_period") => "Період надання послуг",
+        ("ru", "service_period") => "Период оказания услуг",
+        ("en", "service_period") => "Service period",
+        (_, "service_period") => "Leistungszeitraum",
+        ("uk", "service_date") => "Дата надання послуг",
+        ("ru", "service_date") => "Дата оказания услуг",
+        ("en", "service_date") => "Service date",
+        (_, "service_date") => "Leistungsdatum",
+        ("uk", "column_net") => "Нетто",
+        ("ru", "column_net") => "Нетто",
+        ("en", "column_net") => "Net",
+        (_, "column_net") => "Netto",
+        ("uk", "column_vat") => "ПДВ",
+        ("ru", "column_vat") => "НДС",
+        ("en", "column_vat") => "VAT",
+        (_, "column_vat") => "MwSt.",
+        ("uk", "column_gross") => "Брутто",
+        ("ru", "column_gross") => "Брутто",
+        ("en", "column_gross") => "Gross",
+        (_, "column_gross") => "Brutto",
+        ("uk", "vat_group_zero_rated") => "0 % (звільнено від ПДВ)",
+        ("ru", "vat_group_zero_rated") => "0 % (освобождено от НДС)",
+        ("en", "vat_group_zero_rated") => "0 % (VAT exempt)",
+        (_, "vat_group_zero_rated") => "0 % (steuerbefreit)",
+        ("uk", "vat_group_passthrough") => "Перевиставлені витрати (0 %)",
+        ("ru", "vat_group_passthrough") => "Перевыставленные расходы (0 %)",
+        ("en", "vat_group_passthrough") => "Pass-through costs (0 %)",
+        (_, "vat_group_passthrough") => "Durchlaufende Posten (0 %)",
+        ("uk", "vat_total_row") => "Разом",
+        ("ru", "vat_total_row") => "Итого",
+        ("en", "vat_total_row") => "Total",
+        (_, "vat_total_row") => "Summe",
+        ("uk", "invoice_amount") => "Сума рахунку",
+        ("ru", "invoice_amount") => "Сумма счёта",
+        ("en", "invoice_amount") => "Invoice total",
+        (_, "invoice_amount") => "Rechnungsbetrag",
+        ("uk", "amount_payable") => "До сплати",
+        ("ru", "amount_payable") => "К оплате",
+        ("en", "amount_payable") => "Amount due",
+        (_, "amount_payable") => "Zahlbetrag",
+        ("uk", "vat_exemption_note") => "Звільнення від ПДВ",
+        ("ru", "vat_exemption_note") => "Освобождение от НДС",
+        ("en", "vat_exemption_note") => "VAT exemption",
+        (_, "vat_exemption_note") => "Steuerbefreiung",
         ("uk", "due_date") => "Термін оплати",
         ("ru", "due_date") => "Срок оплаты",
         ("en", "due_date") => "Due date",
@@ -2196,10 +2512,6 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "patient_name") => "Пациент",
         ("en", "patient_name") => "Patient",
         (_, "patient_name") => "Patient",
-        ("uk", "birth_date") => "Дата народження",
-        ("ru", "birth_date") => "Дата рождения",
-        ("en", "birth_date") => "Birth date",
-        (_, "birth_date") => "Geburtsdatum",
         ("uk", "order_number") => "Замовлення",
         ("ru", "order_number") => "Заказ",
         ("en", "order_number") => "Order",
@@ -2216,10 +2528,6 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "tax_number") => "Налоговый номер",
         ("en", "tax_number") => "Tax number",
         (_, "tax_number") => "Steuernummer",
-        ("uk", "status") => "Статус",
-        ("ru", "status") => "Статус",
-        ("en", "status") => "Status",
-        (_, "status") => "Status",
         ("uk", "invoice_type") => "Тип рахунку",
         ("ru", "invoice_type") => "Тип счёта",
         ("en", "invoice_type") => "Invoice type",
@@ -2337,36 +2645,6 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
     }
 }
 
-fn invoice_pdf_status_label(language: &str, value: &str) -> &'static str {
-    match (language, value) {
-        ("uk", "draft") => "Чернетка",
-        ("uk", "sent") => "Надіслано",
-        ("uk", "partially_paid") => "Частково сплачено",
-        ("uk", "paid") => "Сплачено",
-        ("uk", "overdue") => "Прострочено",
-        ("uk", "cancelled") => "Скасовано",
-        ("ru", "draft") => "Черновик",
-        ("ru", "sent") => "Отправлен",
-        ("ru", "partially_paid") => "Частично оплачен",
-        ("ru", "paid") => "Оплачен",
-        ("ru", "overdue") => "Просрочен",
-        ("ru", "cancelled") => "Отменён",
-        ("en", "draft") => "Draft",
-        ("en", "sent") => "Sent",
-        ("en", "partially_paid") => "Partially paid",
-        ("en", "paid") => "Paid",
-        ("en", "overdue") => "Overdue",
-        ("en", "cancelled") => "Cancelled",
-        (_, "draft") => "Entwurf",
-        (_, "sent") => "Versandt",
-        (_, "partially_paid") => "Teilbezahlt",
-        (_, "paid") => "Bezahlt",
-        (_, "overdue") => "Überfällig",
-        (_, "cancelled") => "Storniert",
-        _ => "Status",
-    }
-}
-
 fn invoice_pdf_type_label(language: &str, value: &str) -> &'static str {
     match (language, value) {
         ("uk", "advance") => "Авансовий",
@@ -2419,16 +2697,33 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
 
     items
         .iter()
-        .map(|item| InvoicePdfLineItem {
-            description: invoice_pdf_value_to_string(item.get("description")),
-            quantity: invoice_pdf_value_to_string(item.get("quantity")),
-            unit_price: invoice_pdf_value_to_string(item.get("unit_price")),
-            vat_rate: invoice_pdf_value_to_string(item.get("vat_rate")),
-            is_cost_passthrough: item
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
+        .map(|item| {
+            let vat_rate_value = invoice_json_decimal(item, "vat_rate").unwrap_or(Decimal::ZERO);
+            // Legacy lines may lack stored amounts; derive them the way new
+            // lines are computed.
+            let (net, vat, gross) = compute_invoice_line_parts(
+                invoice_json_decimal(item, "quantity").unwrap_or(Decimal::ONE),
+                invoice_json_decimal(item, "unit_price").unwrap_or(Decimal::ZERO),
+                vat_rate_value,
+            );
+            let line_net = invoice_json_decimal(item, "line_net").unwrap_or(net);
+            let line_vat = invoice_json_decimal(item, "line_vat").unwrap_or(vat);
+            let line_gross_value = invoice_json_decimal(item, "line_gross").unwrap_or(gross);
+            InvoicePdfLineItem {
+                description: invoice_pdf_value_to_string(item.get("description")),
+                quantity: invoice_pdf_value_to_string(item.get("quantity")),
+                unit_price: invoice_pdf_value_to_string(item.get("unit_price")),
+                vat_rate: invoice_pdf_value_to_string(item.get("vat_rate")),
+                vat_rate_value,
+                is_cost_passthrough: item
+                    .get("is_cost_passthrough")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
+                line_net,
+                line_vat,
+                line_gross_value,
+            }
         })
         .collect()
 }
@@ -2534,6 +2829,10 @@ fn invoice_pdf_bank_cells(
 }
 
 fn invoice_pdf_filename(context: &InvoicePdfContext) -> String {
+    if !context.released {
+        let id = context.invoice_id.simple().to_string();
+        return format!("RECHNUNG-ENTWURF-{}.pdf", &id[..8]);
+    }
     let base = context
         .invoice_number
         .chars()
@@ -2644,7 +2943,7 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
         .unwrap_or_else(|_| serde_json::json!([]));
     let direct_document_ids = extract_external_document_ids(&line_items);
     let source_line_ids = extract_source_line_ids(&line_items);
-    let payment_date = paid_at.date_naive();
+    let payment_date = crate::app_time::date_of(paid_at);
 
     let updated_rows = sqlx::query(
         r#"WITH explicit_documents AS (
@@ -3275,6 +3574,156 @@ async fn build_selected_invoice_snapshot(
     })
 }
 
+/// Advance invoice for the order's required prepayment (e.g. 500 EUR of a
+/// 550 EUR quote) instead of the quote positions; without a configured
+/// prepayment the whole quote is billed. It is taxed like a positions
+/// advance: the amount is split over the quote's VAT groups (rate, and
+/// pass-through costs without VAT) in proportion to their gross, one
+/// "Anzahlung" line per group referencing the quote, so the VAT of the
+/// prepayment matches the services it pays for. A single-rate quote gets a
+/// single line. Advances consume no quote quantities.
+async fn build_prepayment_advance_snapshot(
+    state: &AppState,
+    ctx: &QuoteInvoiceContext,
+) -> Result<InvoiceCreationSnapshot, axum::response::Response> {
+    let required = sqlx::query_scalar::<_, Option<Decimal>>(
+        "SELECT NULLIF(prepayment_amount, 0) FROM orders WHERE id = $1",
+    )
+    .bind(ctx.order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %ctx.order_id, "load required order prepayment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the required prepayment",
+        )
+    })?;
+
+    let quote_items = ctx.line_items.as_array().cloned().unwrap_or_default();
+    let mut groups = BTreeMap::<(bool, Decimal), Decimal>::new();
+    for item in &quote_items {
+        let source_service_cancelled = ctx.order_contract_terminated
+            && item
+                .get("source_order_leistung_id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
+        if source_service_cancelled {
+            continue;
+        }
+        let gross = invoice_json_decimal(item, "line_gross")
+            .unwrap_or(Decimal::ZERO)
+            .round_cents();
+        if gross <= Decimal::ZERO {
+            continue;
+        }
+        let is_cost_passthrough = item
+            .get("is_cost_passthrough")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let vat_rate = if is_cost_passthrough {
+            Decimal::ZERO
+        } else {
+            invoice_json_decimal(item, "vat_rate")
+                .unwrap_or(Decimal::ZERO)
+                .round_commercial(2)
+        };
+        if vat_rate < Decimal::ZERO {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Quote contains invalid price or VAT data",
+            ));
+        }
+        *groups
+            .entry((is_cost_passthrough, vat_rate.normalize()))
+            .or_insert(Decimal::ZERO) += gross;
+    }
+    let quote_gross: Decimal = groups.values().copied().sum();
+    if quote_gross <= Decimal::ZERO {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Quote has no invoiceable line items",
+        ));
+    }
+    let amount = required.unwrap_or(quote_gross).round_cents();
+    if amount <= Decimal::ZERO {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The required prepayment must be greater than zero",
+        ));
+    }
+    if amount > quote_gross {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The required prepayment exceeds the quote total",
+        ));
+    }
+
+    let group_count = groups.len();
+    let mut remaining = amount;
+    let mut total_net = Decimal::ZERO;
+    let mut total_vat = Decimal::ZERO;
+    let mut total_gross = Decimal::ZERO;
+    let mut line_items = Vec::with_capacity(group_count);
+    for (position, ((is_cost_passthrough, vat_rate), group_gross)) in groups.into_iter().enumerate()
+    {
+        // The last group takes the rounding remainder, so the lines add up to
+        // the required prepayment.
+        let share = if position + 1 == group_count {
+            remaining
+        } else {
+            (amount * group_gross / quote_gross).round_cents()
+        };
+        remaining -= share;
+        if share <= Decimal::ZERO {
+            continue;
+        }
+        let unit_price = money::net_for_gross(share, vat_rate);
+        let (line_net, line_vat, line_gross) =
+            compute_invoice_line_parts(Decimal::ONE, unit_price, vat_rate);
+        let description = if group_count == 1 {
+            format!("Anzahlung gemäß Angebot {}", ctx.quote_number)
+        } else if is_cost_passthrough {
+            format!(
+                "Anzahlung gemäß Angebot {} – Anteil Auslagen",
+                ctx.quote_number
+            )
+        } else {
+            format!(
+                "Anzahlung gemäß Angebot {} – Anteil {} % USt.",
+                ctx.quote_number,
+                decimal_to_string(vat_rate)
+            )
+        };
+        total_net += line_net;
+        total_vat += line_vat;
+        total_gross += line_gross;
+        line_items.push(json!({
+            "description": description,
+            "quantity": "1",
+            "unit_price": decimal_to_string(unit_price),
+            "vat_rate": decimal_to_string(vat_rate),
+            "is_cost_passthrough": is_cost_passthrough,
+            "line_net": decimal_to_string(line_net),
+            "line_vat": decimal_to_string(line_vat),
+            "line_gross": decimal_to_string(line_gross),
+            "source": "advance_prepayment",
+            "quote_id": ctx.quote_id,
+            "quote_number": ctx.quote_number,
+            "quote_group_gross": decimal_to_string(group_gross),
+        }));
+    }
+
+    Ok(InvoiceCreationSnapshot {
+        total_net: total_net.round_cents(),
+        total_vat: total_vat.round_cents(),
+        total_gross: total_gross.round_cents(),
+        line_items: Value::Array(line_items),
+        allocations: Vec::new(),
+    })
+}
+
 async fn build_invoice_snapshot_with_approved_package_overages(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -3587,11 +4036,13 @@ async fn load_invoice_detail(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.line_items, i.notes,
-                  i.created_at, i.updated_at,
+                  i.created_at, i.updated_at, i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
                   i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
                   i.payer_contact_phone, i.payer_contact_relationship, i.payer_notes,
+                  i.payer_address_street, i.payer_address_zip, i.payer_address_city,
+                  i.payer_address_country,
                   i.payer_updated_at,
                   o.order_number, i.currency, o.contract_id, q.quote_number,
                   p.first_name, p.last_name, p.patient_id AS patient_pid,
@@ -3636,6 +4087,23 @@ async fn load_invoice_detail(
     let raw_line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
+    // What each line can still be credited, for the credit-note form.
+    let creditable_lines = {
+        let mut connection = state.db.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "acquire connection for creditable lines");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?;
+        let credits = credit_notes::load_active_credits(&mut connection, invoice_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice credit notes");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?;
+        credit_notes::creditable_lines(&raw_line_items, &credits)
+            .iter()
+            .map(credit_notes::CreditableLine::to_json)
+            .collect::<Vec<_>>()
+    };
     let direct_document_ids = extract_external_document_ids(&raw_line_items);
     let source_line_ids = extract_source_line_ids(&raw_line_items);
     let line_items = enrich_invoice_line_items(state, &raw_line_items).await?;
@@ -3744,6 +4212,9 @@ async fn load_invoice_detail(
         .collect::<Vec<_>>()
     };
 
+    // Advances credited automatically on release share one transaction
+    // timestamp; within it they are listed in the order they were applied
+    // (oldest advance first), not by the random allocation id.
     let prepayment_allocations = sqlx::query(
         r#"SELECT allocation.id, allocation.advance_invoice_id,
                   allocation.amount_gross, allocation.created_at,
@@ -3751,7 +4222,7 @@ async fn load_invoice_detail(
            FROM invoice_prepayment_allocations allocation
            JOIN invoices advance ON advance.id = allocation.advance_invoice_id
            WHERE allocation.target_invoice_id = $1
-           ORDER BY allocation.created_at, allocation.id"#,
+           ORDER BY allocation.created_at, advance.issued_at, advance.id, allocation.id"#,
     )
     .bind(invoice_id)
     .fetch_all(&state.db)
@@ -3775,10 +4246,127 @@ async fn load_invoice_detail(
     })
     .collect::<Vec<_>>();
 
+    let invoice_currency = row
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
+    let balance_due = invoice_balance_due(
+        &invoice_status,
+        total_gross,
+        credited_amount,
+        paid_amount,
+        prepayment_applied_amount,
+    );
+    let credit_balance = (paid_amount + prepayment_applied_amount
+        - (total_gross - credited_amount))
+        .max(Decimal::ZERO);
+    let refundable_cash_amount = (paid_amount
+        - (total_gross - credited_amount - prepayment_applied_amount).max(Decimal::ZERO))
+    .max(Decimal::ZERO);
+    // Paid advances of the order not applied yet reduce what this invoice
+    // still needs from the patient (same rule as the account statement).
+    let advance_credit_available = if balance_due > Decimal::ZERO {
+        advance_application::advance_credit_shares(&state.db, &[invoice_id])
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice advance credit");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?
+            .get(&invoice_id)
+            .copied()
+            .unwrap_or(Decimal::ZERO)
+    } else {
+        Decimal::ZERO
+    };
+    let credit_transfers_history = credit_transfers::load_invoice_credit_transfers(
+        state, invoice_id,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice credit transfers");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?;
+    let credit_transfer_targets = if refundable_cash_amount > Decimal::ZERO
+        && !matches!(invoice_status.as_str(), "draft" | "cancelled")
+    {
+        credit_transfers::load_credit_transfer_targets(
+            state,
+            invoice_id,
+            patient_id,
+            &invoice_currency,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load credit transfer targets");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?
+    } else {
+        Vec::new()
+    };
+    let recipient = match state.db.acquire().await {
+        Ok(mut conn) => document::load_invoice_recipient(&mut conn, invoice_id).await,
+        Err(error) => Err(error),
+    }
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice recipient");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .map(|recipient| recipient.to_json());
+    // The archived document of an issued invoice (GoBD), when stored.
+    let stored_document = match state.db.acquire().await {
+        Ok(mut conn) => stored_documents::load(&mut conn, invoice_id, None).await,
+        Err(error) => Err(error),
+    }
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load stored invoice document");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .map(|document| {
+        json!({
+            "file_name": document.file_name,
+            "sha256": document.sha256,
+            "generation_trigger": document.generation_trigger,
+            "generated_at": document.generated_at.to_rfc3339(),
+        })
+    });
+    // Relatives of the patient the payer can be picked from (staff only).
+    let payer_relation_options = sqlx::query(
+        r#"SELECT relation.id, relation.related_name, relation.relation_type,
+                  relative.patient_id AS related_patient_pid,
+                  NULLIF(btrim(concat_ws(' ', relative.first_name, relative.last_name)), '')
+                      AS related_patient_name,
+                  COALESCE(btrim(relative.address_street), '') <> '' AS has_address
+           FROM patient_relations relation
+           LEFT JOIN patients relative ON relative.id = relation.related_patient_id
+           WHERE relation.patient_id = $1
+           ORDER BY relation.is_emergency_contact DESC, relation.created_at, relation.id"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payer relations");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .into_iter()
+    .map(|relation| {
+        json!({
+            "id": relation.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "related_name": relation.try_get::<String, _>("related_name").unwrap_or_default(),
+            "relation_type": relation.try_get::<String, _>("relation_type").unwrap_or_default(),
+            "related_patient_pid": relation.try_get::<Option<String>, _>("related_patient_pid").unwrap_or_default(),
+            "related_patient_name": relation.try_get::<Option<String>, _>("related_patient_name").unwrap_or_default(),
+            "has_address": relation.try_get::<bool, _>("has_address").unwrap_or(false),
+        })
+    })
+    .collect::<Vec<_>>();
+
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
+        "recipient": recipient,
+        "stored_document": stored_document,
+        "payer_relation_options": payer_relation_options,
         "order_id": invoice_order_id,
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "contract_id": row.try_get::<Option<Uuid>, _>("contract_id").unwrap_or_default(),
@@ -3789,7 +4377,8 @@ async fn load_invoice_detail(
             row.try_get::<String, _>("last_name").unwrap_or_default()
         ).trim().to_string(),
         "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
-        "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+        "released_at": row.try_get::<Option<DateTime<Utc>>, _>("released_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -3802,17 +4391,18 @@ async fn load_invoice_detail(
         "adjusted_total_gross": decimal_to_string((total_gross - credited_amount).max(Decimal::ZERO)),
         "paid_amount": decimal_to_string(paid_amount),
         "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
-        "balance_due": decimal_to_string(invoice_balance_due(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount, paid_amount, prepayment_applied_amount)),
-        "credit_balance": decimal_to_string((paid_amount + prepayment_applied_amount - (total_gross - credited_amount)).max(Decimal::ZERO)),
-        "refundable_cash_amount": decimal_to_string((
-            paid_amount
-                - (total_gross - credited_amount - prepayment_applied_amount)
-                    .max(Decimal::ZERO)
-        ).max(Decimal::ZERO)),
+        "balance_due": decimal_to_string(balance_due),
+        "advance_credit_available": decimal_to_string(advance_credit_available),
+        "amount_to_pay": decimal_to_string((balance_due - advance_credit_available).max(Decimal::ZERO)),
+        "credit_balance": decimal_to_string(credit_balance),
+        "refundable_cash_amount": decimal_to_string(refundable_cash_amount),
+        "credit_transfers": credit_transfers_history,
+        "credit_transfer_targets": credit_transfer_targets,
         "available_prepayments": available_prepayments,
         "prepayment_allocations": prepayment_allocations,
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": line_items,
+        "creditable_lines": creditable_lines,
         "supporting_documents": supporting_documents,
         "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
         "hide_amounts_from_patient": row.try_get::<bool, _>("hide_amounts_from_patient").unwrap_or(false),
@@ -3830,6 +4420,10 @@ async fn load_invoice_detail(
             "relation_type": row.try_get::<Option<String>, _>("payer_relation_type").unwrap_or_default(),
             "relation_patient_name": row.try_get::<Option<String>, _>("payer_relation_patient_name").unwrap_or_default(),
             "relation_patient_pid": row.try_get::<Option<String>, _>("payer_relation_patient_pid").unwrap_or_default(),
+            "address_street": row.try_get::<Option<String>, _>("payer_address_street").unwrap_or_default(),
+            "address_zip": row.try_get::<Option<String>, _>("payer_address_zip").unwrap_or_default(),
+            "address_city": row.try_get::<Option<String>, _>("payer_address_city").unwrap_or_default(),
+            "address_country": row.try_get::<Option<String>, _>("payer_address_country").unwrap_or_default(),
             "notes": row.try_get::<Option<String>, _>("payer_notes").unwrap_or_default(),
             "updated_at": row.try_get::<Option<DateTime<Utc>>, _>("payer_updated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         },
@@ -3843,66 +4437,83 @@ async fn load_invoice_pdf_context(
     state: &AppState,
     invoice_id: Uuid,
 ) -> Result<Option<InvoicePdfContext>, axum::response::Response> {
-    let row = sqlx::query(
-        r#"SELECT i.id, i.patient_id, i.invoice_number, i.invoice_type, i.status,
-                  i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
-                  i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.line_items, i.notes,
-                  i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
-                  o.order_number, i.currency, q.quote_number,
-                  p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
-                  p.birth_date, p.languages,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_holder') AS agency_bank_holder,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
-           FROM invoices i
-           LEFT JOIN orders o ON o.id = i.order_id
-           JOIN patients p ON p.id = i.patient_id
-           LEFT JOIN quotes q ON q.id = i.quote_id
-           WHERE i.id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice pdf context");
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, invoice_id = %invoice_id, "load invoice pdf context");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load invoice PDF context",
         )
-    })?;
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    load_invoice_pdf_context_on(&mut conn, invoice_id)
+        .await
+        .map_err(failed)
+}
 
-    let Some(row) = row else {
+/// Everything printed on the invoice, read through one connection so a
+/// release can render the document inside its own transaction.
+async fn load_invoice_pdf_context_on(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+) -> Result<Option<InvoicePdfContext>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT i.id, i.patient_id, i.order_id, i.invoice_number, i.invoice_type, i.status,
+                  i.released_at IS NOT NULL AS released,
+                  i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
+                  i.prepayment_applied_amount, i.line_items, i.notes,
+                  i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
+                  o.order_number, i.currency, q.quote_number,
+                  p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
+                  p.languages,
+                  {recipient_columns},
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_holder') AS agency_bank_holder,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
+           FROM invoices i
+           LEFT JOIN orders o ON o.id = i.order_id
+           JOIN patients p ON p.id = i.patient_id
+           LEFT JOIN quotes q ON q.id = i.quote_id
+           {recipient_joins}
+           WHERE i.id = $1"#,
+        recipient_columns = document::RECIPIENT_COLUMNS,
+        recipient_joins = document::RECIPIENT_JOINS,
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
         return Ok(None);
     };
 
     let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    let total_gross = row
-        .try_get::<Decimal, _>("total_gross")
-        .unwrap_or(Decimal::ZERO);
-    let paid_amount = row
-        .try_get::<Decimal, _>("paid_amount")
-        .unwrap_or(Decimal::ZERO);
-    let credited_amount = row
-        .try_get::<Decimal, _>("credited_amount")
-        .unwrap_or(Decimal::ZERO);
-    let prepayment_applied_amount = row
-        .try_get::<Decimal, _>("prepayment_applied_amount")
-        .unwrap_or(Decimal::ZERO);
     let line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
     let languages = row
         .try_get::<Vec<String>, _>("languages")
         .unwrap_or_default();
+    let service_period = document::load_invoice_service_period(
+        conn,
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        &line_items,
+    )
+    .await?;
+    let setting = |key: &str| {
+        row.try_get::<Option<String>, _>(key)
+            .unwrap_or_default()
+            .filter(|value| !value.trim().is_empty())
+    };
 
     Ok(Some(InvoicePdfContext {
         currency: row
@@ -3911,10 +4522,11 @@ async fn load_invoice_pdf_context(
         invoice_id,
         patient_id,
         invoice_number: row
-            .try_get::<String, _>("invoice_number")
+            .try_get::<Option<String>, _>("invoice_number")
+            .unwrap_or_default()
             .unwrap_or_default(),
         invoice_type: row.try_get::<String, _>("invoice_type").unwrap_or_default(),
-        status: row.try_get::<String, _>("status").unwrap_or_default(),
+        released: row.try_get::<bool, _>("released").unwrap_or(false),
         portal_visible: row.try_get::<bool, _>("portal_visible").unwrap_or(true),
         hide_amounts_from_patient: row
             .try_get::<bool, _>("hide_amounts_from_patient")
@@ -3936,17 +4548,14 @@ async fn load_invoice_pdf_context(
             row.try_get::<Decimal, _>("total_vat")
                 .unwrap_or(Decimal::ZERO),
         ),
-        total_gross: decimal_to_string(total_gross),
-        credited_amount: decimal_to_string(credited_amount),
-        prepayment_applied_amount: decimal_to_string(prepayment_applied_amount),
-        paid_amount: decimal_to_string(paid_amount),
-        balance_due: decimal_to_string(invoice_balance_due(
-            &row.try_get::<String, _>("status").unwrap_or_default(),
-            total_gross,
-            credited_amount,
-            paid_amount,
-            prepayment_applied_amount,
-        )),
+        total_gross: decimal_to_string(
+            row.try_get::<Decimal, _>("total_gross")
+                .unwrap_or(Decimal::ZERO),
+        ),
+        prepayment_applied_amount: decimal_to_string(
+            row.try_get::<Decimal, _>("prepayment_applied_amount")
+                .unwrap_or(Decimal::ZERO),
+        ),
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -3965,9 +4574,8 @@ async fn load_invoice_pdf_context(
             .unwrap_or_default()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
-        birth_date: row
-            .try_get::<Option<NaiveDate>, _>("birth_date")
-            .unwrap_or_default(),
+        recipient: document::resolve_invoice_recipient(&document::recipient_source_from_row(&row)),
+        service_period,
         order_number: row
             .try_get::<Option<String>, _>("order_number")
             .unwrap_or_default()
@@ -3978,61 +4586,87 @@ async fn load_invoice_pdf_context(
         language: resolve_invoice_pdf_language(&languages),
         line_items: parse_invoice_pdf_line_items(&line_items),
         agency: InvoicePdfAgency {
-            name: row
-                .try_get::<Option<String>, _>("agency_name")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty())
+            name: setting("agency_name")
                 .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
-            care_of: row
-                .try_get::<Option<String>, _>("agency_care_of")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            address: row
-                .try_get::<Option<String>, _>("agency_address")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            phone: row
-                .try_get::<Option<String>, _>("agency_phone")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            email: row
-                .try_get::<Option<String>, _>("agency_email")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            website: row
-                .try_get::<Option<String>, _>("agency_website")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_holder: row
-                .try_get::<Option<String>, _>("agency_bank_holder")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_name: row
-                .try_get::<Option<String>, _>("agency_bank_name")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_swift: row
-                .try_get::<Option<String>, _>("agency_bank_swift")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_iban: row
-                .try_get::<Option<String>, _>("agency_bank_iban")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            vat_id: row
-                .try_get::<Option<String>, _>("agency_vat_id")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            tax_number: row
-                .try_get::<Option<String>, _>("agency_tax_number")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
+            care_of: setting("agency_care_of"),
+            address: setting("agency_address"),
+            phone: setting("agency_phone"),
+            email: setting("agency_email"),
+            website: setting("agency_website"),
+            bank_holder: setting("agency_bank_holder"),
+            bank_name: setting("agency_bank_name"),
+            bank_swift: setting("agency_bank_swift"),
+            bank_iban: setting("agency_bank_iban"),
+            vat_id: setting("agency_vat_id"),
+            tax_number: setting("agency_tax_number"),
         },
     }))
 }
 
+/// The agency's name and address on one line, printed small above the
+/// recipient like the return address of a letter.
+fn invoice_pdf_sender_line(agency: &InvoicePdfAgency) -> String {
+    let mut parts = vec![agency.name.trim().to_string()];
+    if let Some(address) = agency.address.as_deref() {
+        parts.extend(
+            address
+                .replace('\r', "\n")
+                .split(['\n', ','])
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(ToOwned::to_owned),
+        );
+    }
+    parts.join(" · ")
+}
+
+fn format_invoice_pdf_service_period(
+    language: &str,
+    period: (NaiveDate, NaiveDate),
+) -> (&'static str, String) {
+    let (first, last) = period;
+    if first == last {
+        (
+            invoice_pdf_label(language, "service_date"),
+            format_invoice_pdf_date(Some(first)),
+        )
+    } else {
+        (
+            invoice_pdf_label(language, "service_period"),
+            format!(
+                "{} – {}",
+                format_invoice_pdf_date(Some(first)),
+                format_invoice_pdf_date(Some(last))
+            ),
+        )
+    }
+}
+
+fn invoice_pdf_vat_group_label(language: &str, row: &document::VatBreakdownRow) -> String {
+    match row.kind {
+        document::VatGroupKind::Taxed => format!(
+            "{} %",
+            format_invoice_pdf_number(language, &row.rate.to_string())
+        ),
+        document::VatGroupKind::ZeroRated => {
+            invoice_pdf_label(language, "vat_group_zero_rated").to_string()
+        }
+        document::VatGroupKind::Passthrough => {
+            invoice_pdf_label(language, "vat_group_passthrough").to_string()
+        }
+    }
+}
+
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
-    let mut document = PdfDocument::new(&context.invoice_number);
+    let language = context.language.as_str();
+    // A draft has no number and no invoice date yet: it is printed as a
+    // marked preview, never as an invoice.
+    let document_number = if context.released {
+        context.invoice_number.clone()
+    } else {
+        invoice_pdf_label(language, "draft_number").to_uppercase()
+    };
+    let mut document = PdfDocument::new(&document_number);
     let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let patient_line = match context
@@ -4046,14 +4680,53 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     };
 
     let mut layout = InvoicePdfLayout::new(
-        context.invoice_number.clone(),
+        document_number.clone(),
         invoice_pdf_brand(&context.agency),
-        invoice_pdf_label(&context.language, "page_label").to_string(),
+        invoice_pdf_label(language, "page_label").to_string(),
         regular_handle,
         bold_handle,
     );
+
+    // Recipient block (§ 14 Abs. 4 Nr. 1 UStG): the payer when one is set.
+    layout.text_block(
+        &invoice_pdf_sender_line(&context.agency),
+        7.0,
+        false,
+        0.0,
+        InvoicePdfColor::Muted,
+        0.0,
+        1.5,
+    );
+    layout.text_block(
+        invoice_pdf_label(language, "recipient_heading"),
+        7.0,
+        false,
+        0.0,
+        InvoicePdfColor::Muted,
+        0.0,
+        0.5,
+    );
+    let recipient_name = if context.recipient.name.trim().is_empty() {
+        patient_line.clone()
+    } else {
+        context.recipient.name.clone()
+    };
+    layout.text_block(
+        &recipient_name,
+        10.5,
+        true,
+        0.0,
+        InvoicePdfColor::Body,
+        0.0,
+        0.0,
+    );
+    for line in context.recipient.address_lines() {
+        layout.text_block(&line, 10.0, false, 0.0, InvoicePdfColor::Body, 0.0, 0.0);
+    }
+    layout.spacer(6.0);
+
     layout.text_block_centered(
-        invoice_pdf_type_label(&context.language, &context.invoice_type),
+        invoice_pdf_type_label(language, &context.invoice_type),
         10.5,
         true,
         InvoicePdfColor::Primary,
@@ -4061,49 +4734,60 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         1.0,
     );
     layout.text_block_centered(
-        &invoice_pdf_label(&context.language, "invoice_title").to_uppercase(),
+        &invoice_pdf_label(language, "invoice_title").to_uppercase(),
         18.0,
         true,
         InvoicePdfColor::Body,
         0.0,
         2.0,
     );
+    if !context.released {
+        layout.text_block_centered(
+            invoice_pdf_label(language, "draft_notice"),
+            10.0,
+            true,
+            InvoicePdfColor::Primary,
+            0.0,
+            2.0,
+        );
+    }
 
     let mut meta_cells = vec![
         (
-            invoice_pdf_label(&context.language, "issued_on"),
-            format_invoice_pdf_date(Some(invoice_document_date(context.issued_at))),
+            invoice_pdf_label(language, "invoice_number"),
+            document_number.clone(),
         ),
         (
-            invoice_pdf_label(&context.language, "patient_name"),
-            patient_line,
+            invoice_pdf_label(language, "issued_on"),
+            format_invoice_pdf_date(
+                context
+                    .released
+                    .then(|| invoice_document_date(context.issued_at)),
+            ),
         ),
         (
-            invoice_pdf_label(&context.language, "due_date"),
+            invoice_pdf_label(language, "due_date"),
             format_invoice_pdf_date(context.due_date),
         ),
-        (
-            invoice_pdf_label(&context.language, "status"),
-            invoice_pdf_status_label(&context.language, &context.status).to_string(),
-        ),
-        (
-            invoice_pdf_label(&context.language, "patient_id"),
-            context.patient_pid.clone(),
-        ),
-        (
-            invoice_pdf_label(&context.language, "birth_date"),
-            format_invoice_pdf_date(context.birth_date),
-        ),
     ];
+    if let Some(period) = context.service_period {
+        let (label, value) = format_invoice_pdf_service_period(language, period);
+        meta_cells.push((label, value));
+    }
+    meta_cells.push((invoice_pdf_label(language, "patient_name"), patient_line));
+    meta_cells.push((
+        invoice_pdf_label(language, "patient_id"),
+        context.patient_pid.clone(),
+    ));
     if !context.order_number.is_empty() {
         meta_cells.push((
-            invoice_pdf_label(&context.language, "order_number"),
+            invoice_pdf_label(language, "order_number"),
             context.order_number.clone(),
         ));
     }
     if let Some(quote_number) = context.quote_number.as_deref() {
         meta_cells.push((
-            invoice_pdf_label(&context.language, "quote_number"),
+            invoice_pdf_label(language, "quote_number"),
             quote_number.to_string(),
         ));
     }
@@ -4114,13 +4798,13 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         ("tax_number", context.agency.tax_number.as_deref()),
     ] {
         if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            meta_cells.push((invoice_pdf_label(&context.language, key), value.to_string()));
+            meta_cells.push((invoice_pdf_label(language, key), value.to_string()));
         }
     }
     layout.meta_grid(&meta_cells);
 
     layout.text_block(
-        invoice_pdf_label(&context.language, "items_heading"),
+        invoice_pdf_label(language, "items_heading"),
         14.0,
         true,
         0.0,
@@ -4131,7 +4815,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     if context.line_items.is_empty() {
         layout.text_block(
-            invoice_pdf_label(&context.language, "no_items"),
+            invoice_pdf_label(language, "no_items"),
             11.0,
             false,
             0.0,
@@ -4143,27 +4827,27 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         layout.table_row(
             &[
                 (
-                    invoice_pdf_label(&context.language, "item_description"),
+                    invoice_pdf_label(language, "item_description"),
                     82.0,
                     InvoicePdfCellAlign::Left,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_quantity"),
+                    invoice_pdf_label(language, "item_quantity"),
                     18.0,
                     InvoicePdfCellAlign::Right,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_unit_price"),
+                    invoice_pdf_label(language, "item_unit_price"),
                     27.0,
                     InvoicePdfCellAlign::Right,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_vat_rate"),
+                    invoice_pdf_label(language, "item_vat_rate"),
                     18.0,
                     InvoicePdfCellAlign::Right,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_total"),
+                    invoice_pdf_label(language, "item_total"),
                     29.0,
                     InvoicePdfCellAlign::Right,
                 ),
@@ -4176,21 +4860,18 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             let mut description = item.description.trim().to_string();
             if item.is_cost_passthrough {
                 description.push_str(" · ");
-                description.push_str(invoice_pdf_label(&context.language, "cost_passthrough"));
+                description.push_str(invoice_pdf_label(language, "cost_passthrough"));
             }
             let quantity = if item.quantity.trim().is_empty() {
                 "1".to_string()
             } else {
-                format_invoice_pdf_number(&context.language, &item.quantity)
+                format_invoice_pdf_number(language, &item.quantity)
             };
             let quantity = quantity.as_str();
             let vat_rate = if item.vat_rate.trim().is_empty() {
                 "—".to_string()
             } else {
-                format!(
-                    "{}%",
-                    format_invoice_pdf_number(&context.language, &item.vat_rate)
-                )
+                format!("{}%", format_invoice_pdf_number(language, &item.vat_rate))
             };
             let unit_price = format_invoice_pdf_money(&item.unit_price, &context.currency);
             let total = format_invoice_pdf_money(&item.line_gross, &context.currency);
@@ -4207,60 +4888,133 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 false,
             );
         }
-        layout.spacer(4.0);
+        layout.spacer(6.0);
     }
 
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "total_net"),
-        &format_invoice_pdf_money(&context.total_net, &context.currency),
-        false,
-        false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "total_vat"),
-        &format_invoice_pdf_money(&context.total_vat, &context.currency),
-        false,
-        false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "total_gross"),
-        &format_invoice_pdf_money(&context.total_gross, &context.currency),
+    // Net, VAT and gross per rate (§ 14 Abs. 4 Nr. 7 und 8 UStG).
+    let breakdown = document::vat_breakdown(&context.line_items);
+    if !breakdown.is_empty() {
+        layout.table_row(
+            &[
+                (
+                    invoice_pdf_label(language, "item_vat_rate"),
+                    72.0,
+                    InvoicePdfCellAlign::Left,
+                ),
+                (
+                    invoice_pdf_label(language, "column_net"),
+                    34.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+                (
+                    invoice_pdf_label(language, "column_vat"),
+                    34.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+                (
+                    invoice_pdf_label(language, "column_gross"),
+                    34.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+            ],
+            true,
+            true,
+            false,
+        );
+        for row in &breakdown {
+            let label = invoice_pdf_vat_group_label(language, row);
+            let net = format_invoice_pdf_money(&row.net.to_string(), &context.currency);
+            let vat = format_invoice_pdf_money(&row.vat.to_string(), &context.currency);
+            let gross = format_invoice_pdf_money(&row.gross.to_string(), &context.currency);
+            layout.table_row(
+                &[
+                    (&label, 72.0, InvoicePdfCellAlign::Left),
+                    (&net, 34.0, InvoicePdfCellAlign::Right),
+                    (&vat, 34.0, InvoicePdfCellAlign::Right),
+                    (&gross, 34.0, InvoicePdfCellAlign::Right),
+                ],
+                false,
+                false,
+                false,
+            );
+        }
+    }
+    let total_net = format_invoice_pdf_money(&context.total_net, &context.currency);
+    let total_vat = format_invoice_pdf_money(&context.total_vat, &context.currency);
+    let total_gross = format_invoice_pdf_money(&context.total_gross, &context.currency);
+    layout.table_row(
+        &[
+            (
+                invoice_pdf_label(language, "vat_total_row"),
+                72.0,
+                InvoicePdfCellAlign::Left,
+            ),
+            (&total_net, 34.0, InvoicePdfCellAlign::Right),
+            (&total_vat, 34.0, InvoicePdfCellAlign::Right),
+            (&total_gross, 34.0, InvoicePdfCellAlign::Right),
+        ],
         true,
         false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "credited_amount"),
-        &format_invoice_pdf_deduction(&context.credited_amount, &context.currency),
-        false,
         false,
     );
-    // The balance below already nets out credited advances, so the printed
-    // summary has to show them for the arithmetic to add up.
-    if !invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+    layout.spacer(3.0);
+
+    // Credited advances reduce what is still to pay (§ 14 Abs. 5 UStG), so
+    // the document shows them for the arithmetic to add up. Payments and
+    // credit notes recorded later are not part of the issued invoice.
+    if invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
         layout.summary_row(
-            invoice_pdf_label(&context.language, "prepayment_applied"),
+            invoice_pdf_label(language, "invoice_amount"),
+            &total_gross,
+            true,
+            true,
+        );
+    } else {
+        let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
+        let prepayment = Decimal::from_str_exact(context.prepayment_applied_amount.trim())
+            .unwrap_or(Decimal::ZERO);
+        layout.summary_row(
+            invoice_pdf_label(language, "invoice_amount"),
+            &total_gross,
+            true,
+            false,
+        );
+        layout.summary_row(
+            invoice_pdf_label(language, "prepayment_applied"),
             &format_invoice_pdf_deduction(&context.prepayment_applied_amount, &context.currency),
             false,
             false,
         );
+        layout.summary_row(
+            invoice_pdf_label(language, "amount_payable"),
+            &format_invoice_pdf_money(
+                &(gross - prepayment).max(Decimal::ZERO).to_string(),
+                &context.currency,
+            ),
+            true,
+            true,
+        );
     }
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "paid_amount"),
-        &format_invoice_pdf_money(&context.paid_amount, &context.currency),
-        false,
-        false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "balance_due"),
-        &format_invoice_pdf_money(&context.balance_due, &context.currency),
-        true,
-        true,
-    );
 
-    let bank_cells = invoice_pdf_bank_cells(&context.language, &context.agency);
+    if let Some(reason) = document::zero_rate_exemption_note(&context.line_items) {
+        layout.text_block(
+            &format!(
+                "{}: {reason}",
+                invoice_pdf_label(language, "vat_exemption_note")
+            ),
+            8.5,
+            false,
+            0.0,
+            InvoicePdfColor::Muted,
+            3.0,
+            0.0,
+        );
+    }
+
+    let bank_cells = invoice_pdf_bank_cells(language, &context.agency);
     if !bank_cells.is_empty() {
         layout.text_block(
-            invoice_pdf_label(&context.language, "payment_details"),
+            invoice_pdf_label(language, "payment_details"),
             13.0,
             true,
             0.0,
@@ -4286,7 +5040,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     if let Some(notes) = &context.notes {
         layout.text_block(
-            invoice_pdf_label(&context.language, "notes_heading"),
+            invoice_pdf_label(language, "notes_heading"),
             14.0,
             true,
             0.0,
@@ -4329,7 +5083,7 @@ async fn list_my_invoices(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.notes,
-                  i.created_at, i.updated_at,
+                  i.created_at, i.updated_at, i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
                   o.order_number, i.currency, q.quote_number,
@@ -4365,7 +5119,9 @@ async fn list_my_invoices(
            LEFT JOIN orders o ON o.id = i.order_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE i.patient_id = $2
-             AND i.status <> 'draft'
+             -- Issued invoices only: a draft, or a draft cancelled before
+             -- release, never reached the patient.
+             AND i.released_at IS NOT NULL
              AND i.portal_visible = true
              AND ($3::text IS NULL OR i.status = $3)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
@@ -4400,7 +5156,8 @@ async fn list_my_invoices(
                         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
                         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
-                        "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                        "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+                        "released_at": row.try_get::<Option<DateTime<Utc>>, _>("released_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -4465,12 +5222,9 @@ async fn get_my_invoice(
     {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
-    if !invoice_is_patient_visible(
-        invoice
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-    ) {
+    // Only issued invoices reach the patient; a draft cancelled before its
+    // release was never issued.
+    if invoice.get("released_at").is_none_or(Value::is_null) {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
     if !invoice
@@ -4635,7 +5389,7 @@ async fn get_accounting_ledger(
     for row in rows {
         let entry_date: NaiveDate = row
             .try_get("entry_date")
-            .unwrap_or_else(|_| Utc::now().date_naive());
+            .unwrap_or_else(|_| crate::app_time::today());
         let direction: String = row.try_get("direction").unwrap_or_default();
         let category: String = row.try_get("category").unwrap_or_default();
         let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
@@ -4807,7 +5561,7 @@ async fn export_accounting_ledger(
         .join(" ");
         let entry_date: NaiveDate = row
             .try_get("entry_date")
-            .unwrap_or_else(|_| Utc::now().date_naive());
+            .unwrap_or_else(|_| crate::app_time::today());
         let amount_net: Decimal = row.try_get("amount_net").unwrap_or(Decimal::ZERO);
         let amount_vat: Decimal = row.try_get("amount_vat").unwrap_or(Decimal::ZERO);
         let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
@@ -4896,6 +5650,7 @@ async fn list_invoices(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.created_at, i.updated_at,
+                  i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
                   o.order_number, i.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
@@ -4964,7 +5719,8 @@ async fn list_invoices(
                         row.try_get::<String, _>("last_name").unwrap_or_default()
                     ).trim().to_string(),
                     "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
-                    "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                    "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+                    "released_at": row.try_get::<Option<DateTime<Utc>>, _>("released_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -4997,11 +5753,53 @@ async fn list_invoices(
             let total_pages = total.div_ceil(per_page).max(1);
             let page = page.min(total_pages);
             let offset = (page - 1) * per_page;
-            let items = items
+            let mut items = items
                 .into_iter()
                 .skip(offset)
                 .take(per_page)
                 .collect::<Vec<_>>();
+            // "To pay" net of the order's paid advances not applied yet.
+            let open_ids = items
+                .iter()
+                .filter(|item| {
+                    item["invoice_type"] != "advance"
+                        && item["balance_due"]
+                            .as_str()
+                            .and_then(|value| Decimal::from_str(value).ok())
+                            .is_some_and(|value| value > Decimal::ZERO)
+                })
+                .filter_map(|item| item["id"].as_str().and_then(|id| Uuid::parse_str(id).ok()))
+                .collect::<Vec<_>>();
+            let shares = match advance_application::advance_credit_shares(&state.db, &open_ids)
+                .await
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::error!(error = %e, "load invoice advance credit");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list invoices");
+                }
+            };
+            for item in &mut items {
+                let share = item["id"]
+                    .as_str()
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                    .and_then(|id| shares.get(&id).copied())
+                    .unwrap_or(Decimal::ZERO);
+                let balance = item["balance_due"]
+                    .as_str()
+                    .and_then(|value| Decimal::from_str(value).ok())
+                    .unwrap_or(Decimal::ZERO);
+                if let Some(map) = item.as_object_mut() {
+                    map.insert(
+                        "advance_credit_available".to_string(),
+                        json!(decimal_to_string(share)),
+                    );
+                    map.insert(
+                        "amount_to_pay".to_string(),
+                        json!(decimal_to_string((balance - share).max(Decimal::ZERO))),
+                    );
+                }
+            }
 
             Json(json!({
                 "items": items,
@@ -5534,20 +6332,8 @@ async fn create_patient_billing_invoice(
         );
     };
 
-    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
-        .fetch_one(&mut *transaction)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(%error, "patient billing invoice sequence");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create invoice",
-            );
-        }
-    };
-    let invoice_number = gen_invoice_number(seq);
+    // Drafts carry no invoice number; it is assigned when the invoice is
+    // released (see `release`).
     let payer = match body.order_id {
         Some(order_id) => inherited_invoice_payer(&state.db, order_id, patient_id).await,
         None => InheritedInvoicePayer::default(),
@@ -5559,18 +6345,17 @@ async fn create_patient_billing_invoice(
     });
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
-                quote_id, order_id, patient_id, invoice_number, invoice_type, status, currency,
+                quote_id, order_id, patient_id, invoice_type, status, currency,
                 due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
-           ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17, $18, $19)
+           ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12,
+                     $13, $14, $15, $16, $17, $18)
            RETURNING id"#,
     )
     .bind(body.quote_id)
     .bind(body.order_id)
     .bind(patient_id)
-    .bind(&invoice_number)
     .bind(&invoice_type)
     .bind(&currency)
     .bind(due_date)
@@ -5756,7 +6541,7 @@ async fn create_patient_billing_invoice(
         Some(auth.user_id),
         "invoice.created",
         invoice_id,
-        json!({"invoice_number": invoice_number, "patient_id": patient_id, "order_id": body.order_id, "status": "draft"}),
+        json!({"invoice_number": null, "patient_id": patient_id, "order_id": body.order_id, "status": "draft"}),
     )
     .await;
     match load_invoice_detail(&state, invoice_id, &auth).await {
@@ -5803,14 +6588,41 @@ async fn create_invoice_from_quote(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let invoice_snapshot = match build_selected_invoice_snapshot(
-        &state,
-        &ctx,
-        &invoice_type,
-        body.line_items.as_deref(),
-    )
-    .await
+    let prepayment_basis = match body
+        .advance_basis
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
+        None | Some("positions") => false,
+        Some("prepayment") => true,
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "advance_basis must be prepayment or positions",
+            );
+        }
+    };
+    if prepayment_basis && invoice_type != "advance" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only an advance invoice bills the required prepayment",
+        );
+    }
+    if prepayment_basis && body.line_items.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A prepayment advance invoice takes no position selection",
+        );
+    }
+
+    let invoice_snapshot = if prepayment_basis {
+        build_prepayment_advance_snapshot(&state, &ctx).await
+    } else {
+        build_selected_invoice_snapshot(&state, &ctx, &invoice_type, body.line_items.as_deref())
+            .await
+    };
+    let invoice_snapshot = match invoice_snapshot {
         Ok(value) => value,
         Err(resp) => return resp,
     };
@@ -5818,21 +6630,8 @@ async fn create_invoice_from_quote(
         return resp;
     }
 
-    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, "invoice sequence");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create invoice",
-            );
-        }
-    };
-
-    let invoice_number = gen_invoice_number(seq);
+    // Drafts carry no invoice number; it is assigned when the invoice is
+    // released (see `release`).
     let notes = body.notes.clone().or(ctx.notes.clone());
     let payer = inherited_invoice_payer(&state.db, ctx.order_id, ctx.patient_id).await;
     let mut transaction = match state.db.begin().await {
@@ -5851,19 +6650,18 @@ async fn create_invoice_from_quote(
 
     match sqlx::query(
         r#"INSERT INTO invoices (
-                quote_id, order_id, patient_id, invoice_number, invoice_type, status,
+                quote_id, order_id, patient_id, invoice_type, status,
                 due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
            ) VALUES (
-                $1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18
+                $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11,
+                $12, $13, $14, $15, $16, $17
            ) RETURNING id"#,
     )
     .bind(ctx.quote_id)
     .bind(ctx.order_id)
     .bind(ctx.patient_id)
-    .bind(invoice_number.clone())
     .bind(invoice_type.clone())
     .bind(due_date)
     .bind(invoice_snapshot.total_net)
@@ -6002,7 +6800,7 @@ async fn create_invoice_from_quote(
                 "invoice",
                 Some(invoice_id),
                 serde_json::json!({
-                    "invoice_number": invoice_number,
+                    "invoice_number": null,
                     "invoice_type": invoice_type,
                     "quote_id": ctx.quote_id,
                     "order_id": ctx.order_id,
@@ -6020,7 +6818,7 @@ async fn create_invoice_from_quote(
                 "invoice.created",
                 invoice_id,
                 serde_json::json!({
-                    "invoice_number": invoice_number,
+                    "invoice_number": null,
                     "invoice_type": invoice_type,
                     "quote_id": ctx.quote_id,
                     "order_id": ctx.order_id,
@@ -6807,11 +7605,37 @@ async fn list_my_invoice_payments(
     }
 }
 
-fn invoice_credit_note_row_payload(
-    row: &sqlx::postgres::PgRow,
+/// What a reader of the credit-note history may see.
+#[derive(Clone, Copy)]
+struct CreditNoteHistoryView {
     staff_view: bool,
     amounts_visible: bool,
+    /// Credited lines name invoice lines; hidden when invoice lines are.
+    lines_visible: bool,
+    pdf_visible: bool,
+}
+
+impl CreditNoteHistoryView {
+    fn staff() -> Self {
+        Self {
+            staff_view: true,
+            amounts_visible: true,
+            lines_visible: true,
+            pdf_visible: true,
+        }
+    }
+}
+
+fn invoice_credit_note_row_payload(
+    row: &sqlx::postgres::PgRow,
+    view: CreditNoteHistoryView,
 ) -> Value {
+    let CreditNoteHistoryView {
+        staff_view,
+        amounts_visible,
+        lines_visible,
+        pdf_visible,
+    } = view;
     let transaction_type = row
         .try_get::<String, _>("transaction_type")
         .unwrap_or_default();
@@ -6823,7 +7647,28 @@ fn invoice_credit_note_row_payload(
     } else {
         amount_gross
     };
+    let credited_lines = credit_notes::parse_credit_note_lines(
+        row.try_get::<Option<Value>, _>("line_items")
+            .unwrap_or_default()
+            .as_ref(),
+    );
+    let (line_items, vat_breakdown) = match (&credited_lines, amounts_visible && lines_visible) {
+        (Some(lines), true) => (
+            Value::Array(
+                lines
+                    .iter()
+                    .map(credit_notes::CreditNoteLine::to_json)
+                    .collect(),
+            ),
+            credit_notes::vat_breakdown_json(lines),
+        ),
+        _ => (Value::Null, Value::Null),
+    };
     let mut payload = serde_json::json!({
+        "credit_mode": row.try_get::<String, _>("credit_mode").unwrap_or_else(|_| credit_notes::CREDIT_MODE_LEGACY.to_string()),
+        "line_items": line_items,
+        "vat_breakdown": vat_breakdown,
+        "pdf_available": pdf_visible && amounts_visible,
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
         "transaction_type": transaction_type,
@@ -6868,8 +7713,7 @@ fn invoice_credit_note_row_payload(
 async fn load_invoice_credit_note_history(
     state: &AppState,
     invoice_id: Uuid,
-    staff_view: bool,
-    amounts_visible: bool,
+    view: CreditNoteHistoryView,
 ) -> Result<Vec<Value>, sqlx::Error> {
     sqlx::query(
         r#"SELECT credit.id, credit.invoice_id, credit.transaction_type,
@@ -6877,6 +7721,7 @@ async fn load_invoice_credit_note_history(
                   credit.reason, credit.amount_net, credit.amount_vat,
                   credit.amount_gross, credit.currency, credit.issued_on,
                   credit.portal_visible, credit.created_by, credit.created_at,
+                  credit.credit_mode, credit.line_items,
                   creator.name AS created_by_name, creator.role AS created_by_role,
                   reversal.id AS reversed_by_transaction_id,
                   (reversal.id IS NOT NULL) AS is_reversed
@@ -6890,12 +7735,12 @@ async fn load_invoice_credit_note_history(
            ORDER BY credit.issued_on DESC, credit.created_at DESC, credit.id DESC"#,
     )
     .bind(invoice_id)
-    .bind(staff_view)
+    .bind(view.staff_view)
     .fetch_all(&state.db)
     .await
     .map(|rows| {
         rows.into_iter()
-            .map(|row| invoice_credit_note_row_payload(&row, staff_view, amounts_visible))
+            .map(|row| invoice_credit_note_row_payload(&row, view))
             .collect()
     })
 }
@@ -6928,7 +7773,8 @@ async fn list_invoice_credit_notes(
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
-    match load_invoice_credit_note_history(&state, invoice_id, true, true).await {
+    match load_invoice_credit_note_history(&state, invoice_id, CreditNoteHistoryView::staff()).await
+    {
         Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice credit notes");
@@ -6953,7 +7799,8 @@ async fn list_my_invoice_credit_notes(
         Err(resp) => return resp,
     };
     let invoice = match sqlx::query(
-        r#"SELECT patient_id, status, portal_visible, hide_amounts_from_patient
+        r#"SELECT patient_id, status, portal_visible, hide_amounts_from_patient,
+                  line_items_visible_to_patient, pdf_visible_to_patient
            FROM invoices WHERE id = $1"#,
     )
     .bind(invoice_id)
@@ -6984,7 +7831,17 @@ async fn list_my_invoice_credit_notes(
     let amounts_visible = !invoice
         .try_get::<bool, _>("hide_amounts_from_patient")
         .unwrap_or(true);
-    match load_invoice_credit_note_history(&state, invoice_id, false, amounts_visible).await {
+    let view = CreditNoteHistoryView {
+        staff_view: false,
+        amounts_visible,
+        lines_visible: invoice
+            .try_get::<bool, _>("line_items_visible_to_patient")
+            .unwrap_or(false),
+        pdf_visible: invoice
+            .try_get::<bool, _>("pdf_visible_to_patient")
+            .unwrap_or(false),
+    };
+    match load_invoice_credit_note_history(&state, invoice_id, view).await {
         Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list portal invoice credit notes");
@@ -7075,7 +7932,7 @@ async fn create_invoice_payment(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
     }
     let received_on = match parse_optional_date(Some(body.received_on.as_str())) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => {
             return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date");
         }
@@ -7280,10 +8137,14 @@ async fn create_invoice_payment(
             );
         }
     };
-    if current_cash_paid - current_cash_refunded + amount_gross + context.prepayment_applied_amount
-        > context.total_gross - context.credited_amount
-    {
-        return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+    let balance_due = (context.total_gross
+        - context.credited_amount
+        - context.prepayment_applied_amount
+        - (current_cash_paid - current_cash_refunded))
+        .max(Decimal::ZERO);
+    let overpayment_gross = (amount_gross - balance_due).max(Decimal::ZERO);
+    if overpayment_gross > Decimal::ZERO && !body.accept_overpayment.unwrap_or(false) {
+        return payment_exceeds_balance(balance_due, overpayment_gross);
     }
 
     let payment_id = match sqlx::query_scalar::<_, Uuid>(
@@ -7306,7 +8167,10 @@ async fn create_invoice_payment(
     {
         Ok(payment_id) => payment_id,
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
-            return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+            return err(
+                StatusCode::CONFLICT,
+                "Payments require an active released invoice",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice payment");
@@ -7342,6 +8206,23 @@ async fn create_invoice_payment(
             "Failed to record payment",
         );
     }
+    // An advance paid after the final invoice was released settles it now.
+    let applied_advances = match apply_advances_to_open_final_invoices(
+        &mut transaction,
+        invoice_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "apply paid advance to final invoice");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record payment",
+            );
+        }
+    };
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice payment");
         return err(
@@ -7351,6 +8232,13 @@ async fn create_invoice_payment(
     }
 
     run_paid_invoice_follow_up(&state, &auth, invoice_id, payment_id).await;
+    advance_application::follow_up_applied_advances(
+        &state,
+        &auth,
+        "advance_paid",
+        &applied_advances,
+    )
+    .await;
 
     write_invoice_audit(
         &state,
@@ -7361,6 +8249,7 @@ async fn create_invoice_payment(
             "payment_transaction_id": payment_id,
             "request_id": body.request_id,
             "amount_gross": decimal_to_string(amount_gross),
+            "overpayment_gross": decimal_to_string(overpayment_gross),
             "payment_method": payment_method,
             "payment_reference": payment_reference,
             "received_on": received_on.to_string(),
@@ -7387,6 +8276,7 @@ async fn create_invoice_payment(
             StatusCode::CREATED,
             Json(serde_json::json!({
                 "payment_transaction_id": payment_id,
+                "overpayment_gross": decimal_to_string(overpayment_gross),
                 "invoice": invoice,
             })),
         )
@@ -7394,6 +8284,32 @@ async fn create_invoice_payment(
         Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(resp) => resp,
     }
+}
+
+/// After cash reaches an advance invoice: credit the order's paid advances
+/// against its released final invoices that still ask for money.
+async fn apply_advances_to_open_final_invoices(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    advance_invoice_id: Uuid,
+    actor_id: Uuid,
+) -> Result<Vec<advance_application::AppliedAdvance>, sqlx::Error> {
+    let mut applied = Vec::new();
+    for final_invoice_id in
+        advance_application::open_final_invoices_for_advance_tx(transaction, advance_invoice_id)
+            .await?
+    {
+        let credited = advance_application::apply_available_advances_tx(
+            transaction,
+            final_invoice_id,
+            actor_id,
+        )
+        .await?;
+        if !credited.is_empty() {
+            recompute_invoice_settlement_status(transaction, final_invoice_id).await?;
+        }
+        applied.extend(credited);
+    }
+    Ok(applied)
 }
 
 async fn reverse_invoice_payment(
@@ -7415,8 +8331,8 @@ async fn reverse_invoice_payment(
         }
     };
     let reversed_on = match parse_optional_date(body.reversed_on.as_deref()) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
@@ -7509,6 +8425,12 @@ async fn reverse_invoice_payment(
     let payment_method = row
         .try_get::<String, _>("payment_method")
         .unwrap_or_else(|_| "other".to_string());
+    if payment_method == credit_transfers::CREDIT_TRANSFER_METHOD {
+        return err(
+            StatusCode::CONFLICT,
+            "This receipt is a credit transfer; reverse the transfer instead",
+        );
+    }
     let payment_reference = row
         .try_get::<Option<String>, _>("payment_reference")
         .unwrap_or_default();
@@ -7717,7 +8639,7 @@ async fn correct_invoice_payment(
     if !is_valid_invoice_payment_method(payment_method) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
     }
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let received_on = match parse_optional_date(Some(body.received_on.as_str())) {
         Ok(Some(value)) if value <= today => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date"),
@@ -7874,6 +8796,12 @@ async fn correct_invoice_payment(
             "Imported opening balances cannot be corrected; reverse them instead",
         );
     }
+    if original_method == credit_transfers::CREDIT_TRANSFER_METHOD {
+        return err(
+            StatusCode::CONFLICT,
+            "A credit transfer is corrected by reversing the transfer",
+        );
+    }
     if original_amount == amount_gross
         && original_method == payment_method
         && original_reference == payment_reference
@@ -7966,10 +8894,14 @@ async fn correct_invoice_payment(
             "Refunds and applied advances must be reversed or released before this payment can be reduced",
         );
     }
-    if cash_after - cash_refunded + context.prepayment_applied_amount
-        > context.total_gross - context.credited_amount
-    {
-        return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+    let corrected_overpayment = (cash_after - cash_refunded + context.prepayment_applied_amount
+        - (context.total_gross - context.credited_amount))
+        .max(Decimal::ZERO);
+    if corrected_overpayment > Decimal::ZERO && !body.accept_overpayment.unwrap_or(false) {
+        return payment_exceeds_balance(
+            (amount_gross - corrected_overpayment).max(Decimal::ZERO),
+            corrected_overpayment,
+        );
     }
 
     // The reversal is dated today: the correction happens now, while the
@@ -8150,23 +9082,15 @@ async fn create_invoice_credit_note(
         }
     };
     let issued_on = match parse_optional_date(Some(body.issued_on.as_str())) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid credit-note date"),
     };
-    let Some(amount_gross) = body.amount_gross.parse_decimal() else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Invalid credit-note amount",
-        );
+    let selection = match body.selection() {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let amount_gross = amount_gross.round_cents();
+    let request_selection = selection.to_json();
     let request_id = body.request_id;
-    if amount_gross <= Decimal::ZERO {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Credit-note amount must be greater than zero",
-        );
-    }
     let patient_id =
         match sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM invoices WHERE id = $1")
             .bind(invoice_id)
@@ -8259,7 +9183,7 @@ async fn create_invoice_credit_note(
     if issued_on
         < row
             .try_get::<DateTime<Utc>, _>("issued_at")
-            .map(|value| value.date_naive())
+            .map(crate::app_time::date_of)
             .unwrap_or(issued_on)
     {
         return err(
@@ -8268,7 +9192,7 @@ async fn create_invoice_credit_note(
         );
     }
     let existing_request = match sqlx::query(
-        r#"SELECT id, amount_gross, reason, issued_on, portal_visible
+        r#"SELECT id, amount_gross, reason, issued_on, portal_visible, request_selection
            FROM invoice_credit_note_transactions
            WHERE invoice_id = $1
              AND request_id = $2
@@ -8289,9 +9213,20 @@ async fn create_invoice_credit_note(
         }
     };
     if let Some(existing) = existing_request {
-        let exact_replay = existing
-            .try_get::<Decimal, _>("amount_gross")
-            .is_ok_and(|value| value == amount_gross)
+        // Credit notes recorded before line-level credits kept only the amount.
+        let same_selection = match existing
+            .try_get::<Option<Value>, _>("request_selection")
+            .unwrap_or_default()
+        {
+            Some(stored) => stored == request_selection,
+            None => match &selection {
+                credit_notes::CreditSelection::Amount(amount) => existing
+                    .try_get::<Decimal, _>("amount_gross")
+                    .is_ok_and(|value| value == *amount),
+                _ => false,
+            },
+        };
+        let exact_replay = same_selection
             && existing
                 .try_get::<String, _>("reason")
                 .is_ok_and(|value| value == reason)
@@ -8326,11 +9261,48 @@ async fn create_invoice_credit_note(
             Err(resp) => resp,
         };
     }
+    // VAT follows the credited lines: a 0 % pass-through line credits no VAT.
+    let existing_credits =
+        match credit_notes::load_active_credits(&mut transaction, invoice_id).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load active credit notes");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create credit note",
+                );
+            }
+        };
+    let creditable = credit_notes::creditable_lines(&context.line_items, &existing_credits);
+    let planned = match (&selection, creditable.is_empty()) {
+        (credit_notes::CreditSelection::Amount(amount), true) => {
+            Ok(credit_notes::CreditNotePlan::without_lines(
+                *amount,
+                context.total_vat,
+                context.total_gross,
+            ))
+        }
+        _ => credit_notes::plan_credit_note(&creditable, &selection),
+    };
+    let plan = match planned {
+        Ok(value) => value,
+        Err(error) => {
+            return err(
+                if error.is_conflict() {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                },
+                error.message(),
+            );
+        }
+    };
+    let amount_net = plan.net;
+    let amount_vat = plan.vat;
+    let amount_gross = plan.gross;
     if context.credited_amount + amount_gross > context.total_gross {
         return err(StatusCode::CONFLICT, "Credit note exceeds invoice total");
     }
-    let amount_vat = proportional_share(amount_gross, context.total_vat, context.total_gross);
-    let amount_net = amount_gross - amount_vat;
     let sequence = match sqlx::query_scalar::<_, i64>(
         "SELECT nextval('invoice_credit_note_number_seq')",
     )
@@ -8352,8 +9324,9 @@ async fn create_invoice_credit_note(
         r#"INSERT INTO invoice_credit_note_transactions (
                 invoice_id, transaction_type, request_id, document_number, reason,
                 amount_net, amount_vat, amount_gross, currency,
-                issued_on, portal_visible, created_by
-           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                issued_on, portal_visible, created_by,
+                credit_mode, line_items, request_selection
+           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -8367,6 +9340,9 @@ async fn create_invoice_credit_note(
     .bind(issued_on)
     .bind(portal_visible)
     .bind(auth.user_id)
+    .bind(plan.mode)
+    .bind(plan.line_items_json())
+    .bind(&request_selection)
     .fetch_one(&mut *transaction)
     .await
     {
@@ -8413,6 +9389,14 @@ async fn create_invoice_credit_note(
         serde_json::json!({
             "credit_note_transaction_id": credit_note_id,
             "document_number": document_number,
+            "credit_mode": plan.mode,
+            "credited_line_indexes": plan
+                .lines
+                .iter()
+                .map(|line| line.invoice_line_index)
+                .collect::<Vec<_>>(),
+            "amount_net": decimal_to_string(amount_net),
+            "amount_vat": decimal_to_string(amount_vat),
             "amount_gross": decimal_to_string(amount_gross),
             "currency": context.currency,
             "reason": reason,
@@ -8437,6 +9421,11 @@ async fn create_invoice_credit_note(
             StatusCode::CREATED,
             Json(serde_json::json!({
                 "credit_note_transaction_id": credit_note_id,
+                "document_number": document_number,
+                "credit_mode": plan.mode,
+                "amount_net": decimal_to_string(amount_net),
+                "amount_vat": decimal_to_string(amount_vat),
+                "amount_gross": decimal_to_string(amount_gross),
                 "invoice": invoice,
             })),
         )
@@ -8465,8 +9454,8 @@ async fn reverse_invoice_credit_note(
         }
     };
     let issued_on = match parse_optional_date(body.issued_on.as_deref()) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
@@ -8504,6 +9493,7 @@ async fn reverse_invoice_credit_note(
         r#"SELECT credit.amount_net, credit.amount_vat, credit.amount_gross,
                   credit.issued_on AS credit_issued_on,
                   credit.currency, credit.transaction_type, credit.portal_visible,
+                  credit.credit_mode, credit.line_items AS credit_line_items,
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
@@ -8586,8 +9576,9 @@ async fn reverse_invoice_credit_note(
         r#"INSERT INTO invoice_credit_note_transactions (
                 invoice_id, transaction_type, reverses_transaction_id,
                 document_number, reason, amount_net, amount_vat, amount_gross,
-                currency, issued_on, portal_visible, created_by
-           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                currency, issued_on, portal_visible, created_by,
+                credit_mode, line_items
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -8601,6 +9592,17 @@ async fn reverse_invoice_credit_note(
     .bind(issued_on)
     .bind(row.try_get::<bool, _>("portal_visible").unwrap_or(false))
     .bind(auth.user_id)
+    // The reversal mirrors the credited lines, so VAT per rate reverses too.
+    // `credit_line_items` are the credit note's lines; the row also carries
+    // the invoice's `line_items`, which must not end up on the reversal.
+    .bind(
+        row.try_get::<String, _>("credit_mode")
+            .unwrap_or_else(|_| credit_notes::CREDIT_MODE_LEGACY.to_string()),
+    )
+    .bind(
+        row.try_get::<Option<Value>, _>("credit_line_items")
+            .unwrap_or_default(),
+    )
     .fetch_one(&mut *transaction)
     .await
     {
@@ -8876,7 +9878,7 @@ async fn create_invoice_refund(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund method");
     }
     let refunded_on = match parse_optional_date(Some(body.refunded_on.as_str())) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund date"),
     };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
@@ -9178,8 +10180,8 @@ async fn reverse_invoice_refund(
         }
     };
     let reversed_on = match parse_optional_date(body.reversed_on.as_deref()) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
@@ -9272,6 +10274,12 @@ async fn reverse_invoice_refund(
     let payment_method = row
         .try_get::<String, _>("payment_method")
         .unwrap_or_else(|_| "other".to_string());
+    if payment_method == credit_transfers::CREDIT_TRANSFER_METHOD {
+        return err(
+            StatusCode::CONFLICT,
+            "This refund is a credit transfer; reverse the transfer instead",
+        );
+    }
     let payment_reference = row
         .try_get::<Option<String>, _>("payment_reference")
         .unwrap_or_default();
@@ -9450,11 +10458,11 @@ async fn download_invoice_pdf(
         return resp;
     }
 
-    let pdf_bytes = match build_invoice_pdf(&context) {
-        Ok(bytes) => bytes,
-        Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
-    };
-    let pdf_bytes = attach_zugferd_xml(&state, &context, pdf_bytes).await;
+    let (pdf_bytes, file_name, source) =
+        match invoice_pdf_for_download(&state, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     state.audit_sender.try_send(audit::domain_event(
         "download_invoice_pdf",
@@ -9464,15 +10472,13 @@ async fn download_invoice_pdf(
         serde_json::json!({
             "invoice_number": context.invoice_number,
             "source": "staff_workspace",
+            "document": source,
         }),
     ));
 
-    let disposition = format!(
-        "inline; filename=\"{}\"",
-        invoice_pdf_filename(&context).replace('"', "")
-    );
+    let disposition = format!("inline; filename=\"{}\"", file_name.replace('"', ""));
 
-    invoice_pdf_response(pdf_bytes, disposition)
+    invoice_pdf_response(pdf_bytes, disposition, source)
 }
 
 async fn download_my_invoice_pdf(
@@ -9499,18 +10505,18 @@ async fn download_my_invoice_pdf(
     if context.patient_id != patient_id {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
-    if !invoice_is_patient_visible(&context.status) || !context.portal_visible {
+    if !context.released || !context.portal_visible {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
     if context.hide_amounts_from_patient || !context.pdf_visible_to_patient {
         return err(StatusCode::FORBIDDEN, "Invoice PDF is hidden from patient");
     }
 
-    let pdf_bytes = match build_invoice_pdf(&context) {
-        Ok(bytes) => bytes,
-        Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
-    };
-    let pdf_bytes = attach_zugferd_xml(&state, &context, pdf_bytes).await;
+    let (pdf_bytes, file_name, source) =
+        match invoice_pdf_for_download(&state, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     state.audit_sender.try_send(audit::domain_event(
         "download_portal_invoice_pdf",
@@ -9520,42 +10526,45 @@ async fn download_my_invoice_pdf(
         serde_json::json!({
             "invoice_number": context.invoice_number,
             "source": "patient_portal",
+            "document": source,
         }),
     ));
 
-    let disposition = format!(
-        "inline; filename=\"{}\"",
-        invoice_pdf_filename(&context).replace('"', "")
-    );
+    let disposition = format!("inline; filename=\"{}\"", file_name.replace('"', ""));
 
-    invoice_pdf_response(pdf_bytes, disposition)
+    invoice_pdf_response(pdf_bytes, disposition, source)
 }
 
 /// Invoice data for the ZUGFeRD XML, read from the same rows the PDF uses.
 async fn load_einvoice(
-    state: &AppState,
+    conn: &mut sqlx::PgConnection,
     invoice_id: Uuid,
 ) -> Result<Option<zugferd::EInvoice>, sqlx::Error> {
-    let Some(row) = sqlx::query(
+    let sql = format!(
         r#"SELECT i.invoice_number, i.invoice_type, i.issued_at, i.created_at, i.due_date,
                   i.currency, i.total_gross, i.prepayment_applied_amount, i.line_items, i.notes,
-                  i.payer_contact_name, i.payer_contact_email, o.order_number,
-                  p.first_name, p.last_name, p.email AS patient_email,
-                  p.address_street, p.address_zip, p.address_city,
-                  p.address_country, p.residence_country,
-                  (SELECT jsonb_object_agg(key, value #>> '{}') FROM system_settings
+                  o.order_number,
+                  {recipient_columns},
+                  (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
                     WHERE key LIKE 'agency\_%') AS agency
            FROM invoices i
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN orders o ON o.id = i.order_id
+           {recipient_joins}
            WHERE i.id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await?
+        recipient_columns = document::RECIPIENT_COLUMNS,
+        recipient_joins = document::RECIPIENT_JOINS,
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_optional(conn)
+        .await?
     else {
         return Ok(None);
     };
+    // The buyer is the recipient printed on the invoice: the payer with the
+    // payer's own address, or the patient.
+    let recipient = document::resolve_invoice_recipient(&document::recipient_source_from_row(&row));
 
     let agency = row
         .try_get::<Option<Value>, _>("agency")
@@ -9577,11 +10586,6 @@ async fn load_einvoice(
 
     let (seller_street, seller_postcode, seller_city) =
         zugferd::split_german_address(&setting("agency_address").unwrap_or_default());
-    let patient_name = [optional("first_name"), optional("last_name")]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
     let lines = row
         .try_get::<Value, _>("line_items")
         .ok()
@@ -9635,15 +10639,12 @@ async fn load_einvoice(
             tax_number: setting("agency_tax_number"),
         },
         buyer: zugferd::EInvoiceParty {
-            name: optional("payer_contact_name").unwrap_or(patient_name),
-            address_line: optional("address_street"),
-            postcode: optional("address_zip"),
-            city: optional("address_city"),
-            country_code: crate::routes::patients::patient_label_country_code(
-                optional("address_country").as_deref(),
-                optional("residence_country").as_deref(),
-            ),
-            email: optional("payer_contact_email").or(optional("patient_email")),
+            name: recipient.name,
+            address_line: recipient.street,
+            postcode: recipient.zip,
+            city: recipient.city,
+            country_code: recipient.country_code,
+            email: recipient.email,
             vat_id: None,
             tax_number: None,
         },
@@ -9658,17 +10659,42 @@ async fn load_einvoice(
     }))
 }
 
+/// The printed invoice, as a ZUGFeRD hybrid when the e-invoice can be built.
+async fn render_invoice_pdf_on(
+    conn: &mut sqlx::PgConnection,
+    context: &InvoicePdfContext,
+) -> Result<Vec<u8>, &'static str> {
+    let pdf = build_invoice_pdf(context)?;
+    Ok(attach_zugferd_xml(conn, context, pdf).await)
+}
+
+async fn render_invoice_pdf(
+    state: &AppState,
+    context: &InvoicePdfContext,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let mut conn = state.db.acquire().await.map_err(|error| {
+        tracing::error!(%error, invoice_id = %context.invoice_id, "acquire invoice pdf connection");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build invoice PDF",
+        )
+    })?;
+    render_invoice_pdf_on(&mut conn, context)
+        .await
+        .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))
+}
+
 /// Turns the rendered PDF into a ZUGFeRD hybrid when the invoice is released
 /// and every mandatory EN 16931 field is known; otherwise the PDF stays as is.
 async fn attach_zugferd_xml(
-    state: &AppState,
+    conn: &mut sqlx::PgConnection,
     context: &InvoicePdfContext,
     pdf: Vec<u8>,
 ) -> Vec<u8> {
-    if context.status == "draft" {
+    if !context.released {
         return pdf;
     }
-    let invoice = match load_einvoice(state, context.invoice_id).await {
+    let invoice = match load_einvoice(conn, context.invoice_id).await {
         Ok(Some(invoice)) => invoice,
         Ok(None) => return pdf,
         Err(error) => {
@@ -9718,7 +10744,17 @@ async fn download_invoice_zugferd_xml(
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
-    let invoice = match load_einvoice(&state, invoice_id).await {
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "acquire zugferd connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
+    };
+    let invoice = match load_einvoice(&mut conn, invoice_id).await {
         Ok(Some(invoice)) => invoice,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(error) => {
@@ -9729,24 +10765,45 @@ async fn download_invoice_zugferd_xml(
             );
         }
     };
-    let missing = zugferd::missing_requirements(&invoice);
-    if !missing.is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "message": format!("E-invoice is missing mandatory data: {}", missing.join(", ")),
-                "missing": missing,
-            })),
-        )
-            .into_response();
-    }
-    let xml = zugferd::build_cii_xml(&invoice);
+    // An issued invoice's e-invoice is the XML embedded in its stored
+    // document, so it cannot drift from the archived PDF.
+    let stored_xml = match stored_documents::load(&mut conn, invoice_id, None).await {
+        Ok(Some(document)) => match stored_documents::read_bytes(&document).await {
+            Ok(bytes) => zugferd::extract_xml_from_pdf(&bytes),
+            Err(resp) => return resp,
+        },
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load stored invoice document for zugferd");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
+    };
+    let (xml, source) = match stored_xml {
+        Some(xml) => (xml, "stored"),
+        None => {
+            let missing = zugferd::missing_requirements(&invoice);
+            if !missing.is_empty() {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({
+                        "message": format!("E-invoice is missing mandatory data: {}", missing.join(", ")),
+                        "missing": missing,
+                    })),
+                )
+                    .into_response();
+            }
+            (zugferd::build_cii_xml(&invoice), "live")
+        }
+    };
     state.audit_sender.try_send(audit::domain_event(
         "download_invoice_zugferd_xml",
         Some(auth.user_id),
         "invoice",
         Some(invoice_id),
-        json!({ "invoice_number": invoice.number }),
+        json!({ "invoice_number": invoice.number, "document": source }),
     ));
     let filename = invoice
         .number
@@ -9768,6 +10825,7 @@ async fn download_invoice_zugferd_xml(
                 zugferd::ZUGFERD_XML_FILENAME
             ),
         )
+        .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
         .body(Body::from(xml))
     {
         Ok(response) => response,
@@ -9781,10 +10839,57 @@ async fn download_invoice_zugferd_xml(
     }
 }
 
-fn invoice_pdf_response(pdf_bytes: Vec<u8>, disposition: String) -> axum::response::Response {
+/// Response header naming where a served invoice document came from:
+/// `stored`, `stored-on-first-download` or `draft-preview`.
+const INVOICE_DOCUMENT_SOURCE_HEADER: &str = "x-gmed-invoice-document";
+
+/// The PDF a download serves: the stored document of a released invoice
+/// (stored now when it was released before documents were kept), or a live
+/// preview of a draft that is marked as such and never stored.
+async fn invoice_pdf_for_download(
+    state: &AppState,
+    context: &InvoicePdfContext,
+    actor: Uuid,
+) -> Result<(Vec<u8>, String, &'static str), axum::response::Response> {
+    if !context.released {
+        let bytes = render_invoice_pdf(state, context).await?;
+        return Ok((bytes, invoice_pdf_filename(context), "draft-preview"));
+    }
+    let mut conn = state.db.acquire().await.map_err(|error| {
+        tracing::error!(%error, invoice_id = %context.invoice_id, "acquire invoice document connection");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the invoice document",
+        )
+    })?;
+    let (bytes, file_name, source) =
+        stored_documents::released_invoice_pdf(&mut conn, context.invoice_id, actor).await?;
+    if source == stored_documents::InvoicePdfSource::StoredOnFirstDownload {
+        write_invoice_audit(
+            state,
+            actor,
+            "store_invoice_document",
+            context.invoice_id,
+            json!({
+                "trigger": stored_documents::TRIGGER_FIRST_DOWNLOAD,
+                "sha256": stored_documents::sha256_hex(&bytes),
+                "file_name": file_name,
+            }),
+        )
+        .await;
+    }
+    Ok((bytes, file_name, source.header_value()))
+}
+
+fn invoice_pdf_response(
+    pdf_bytes: Vec<u8>,
+    disposition: String,
+    source: &'static str,
+) -> axum::response::Response {
     match axum::response::Response::builder()
         .header("content-type", "application/pdf")
         .header("content-disposition", disposition)
+        .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
         .body(Body::from(pdf_bytes))
     {
         Ok(response) => response,
@@ -9796,6 +10901,74 @@ fn invoice_pdf_response(pdf_bytes: Vec<u8>, disposition: String) -> axum::respon
             )
         }
     }
+}
+
+/// Dunning events of an invoice with their letters. Events recorded before
+/// letters existed show the deadline their letter will carry.
+async fn load_dunning_event_rows(
+    state: &AppState,
+    invoice_id: Uuid,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let mut conn = state.db.acquire().await?;
+    let term_days = dunning_letters::load_dunning_payment_term_days(&mut conn).await?;
+    let rows = sqlx::query(
+        r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
+                  ide.sent_at, ide.created_at, ide.payment_due_date,
+                  u.name AS created_by_name, u.role AS created_by_role,
+                  letter.file_name AS letter_file_name,
+                  letter.generated_at AS letter_generated_at
+           FROM invoice_dunning_events ide
+           JOIN users u ON u.id = ide.created_by
+           LEFT JOIN invoice_documents letter ON letter.dunning_event_id = ide.id
+           WHERE ide.invoice_id = $1
+           ORDER BY ide.sent_at, ide.created_at"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let sent_at = row
+                .try_get::<DateTime<Utc>, _>("sent_at")
+                .unwrap_or_else(|_| Utc::now());
+            let payment_due_date = row
+                .try_get::<Option<NaiveDate>, _>("payment_due_date")
+                .unwrap_or_default()
+                .unwrap_or_else(|| {
+                    dunning_letters::dunning_payment_due_date(
+                        invoice_document_date(sent_at),
+                        term_days,
+                    )
+                });
+            let letter = row
+                .try_get::<Option<String>, _>("letter_file_name")
+                .unwrap_or_default()
+                .map(|file_name| {
+                    json!({
+                        "file_name": file_name,
+                        "generated_at": row
+                            .try_get::<Option<DateTime<Utc>>, _>("letter_generated_at")
+                            .unwrap_or_default()
+                            .map(|value| value.to_rfc3339()),
+                    })
+                });
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "invoice_id": invoice_id,
+                "level": row.try_get::<String, _>("level").unwrap_or_default(),
+                "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+                "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
+                "payment_due_date": payment_due_date.to_string(),
+                "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
+                "sent_at": sent_at.to_rfc3339(),
+                "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
+                "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
+                "letter": letter,
+            })
+        })
+        .collect())
 }
 
 async fn list_dunning_events(
@@ -9818,38 +10991,8 @@ async fn list_dunning_events(
         return resp;
     }
 
-    match sqlx::query(
-        r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
-                  ide.sent_at, ide.created_at, u.name AS created_by_name, u.role AS created_by_role
-           FROM invoice_dunning_events ide
-           JOIN users u ON u.id = ide.created_by
-           WHERE ide.invoice_id = $1
-           ORDER BY ide.sent_at, ide.created_at"#,
-    )
-    .bind(invoice_id)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => {
-            let items = rows
-                .into_iter()
-                .map(|row| {
-                    serde_json::json!({
-                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                        "invoice_id": ctx.invoice_id,
-                        "level": row.try_get::<String, _>("level").unwrap_or_default(),
-                        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
-                        "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
-                        "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
-                        "sent_at": row.try_get::<DateTime<Utc>, _>("sent_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                        "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
-                        "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
-                    })
-                })
-                .collect::<Vec<_>>();
-            Json(items).into_response()
-        }
+    match load_dunning_event_rows(&state, ctx.invoice_id).await {
+        Ok(items) => Json(items).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice dunning");
             err(
@@ -9900,7 +11043,7 @@ async fn create_dunning_event(
         );
     }
 
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let Some(due_date) = ctx.due_date else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -9934,11 +11077,39 @@ async fn create_dunning_event(
         return err(status, message);
     }
 
-    match sqlx::query(
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, invoice_id = %invoice_id, "create invoice dunning");
+        match &error {
+            sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("23505") => err(
+                StatusCode::CONFLICT,
+                "This dunning level already exists for this invoice",
+            ),
+            _ => err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice dunning event",
+            ),
+        }
+    };
+    // The event, the overdue status and the letter it sends are one step.
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => return failed(error),
+    };
+    let payment_term_days =
+        match dunning_letters::load_dunning_payment_term_days(&mut transaction).await {
+            Ok(days) => days,
+            Err(error) => return failed(error),
+        };
+    let payment_due_date = dunning_letters::dunning_payment_due_date(
+        invoice_document_date(Utc::now()),
+        payment_term_days,
+    );
+    let dunning_event_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_dunning_events (
-                invoice_id, level, note, due_date_snapshot, balance_due, created_by
-           ) VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, level, note, due_date_snapshot, balance_due, sent_at, created_at"#,
+                invoice_id, level, note, due_date_snapshot, balance_due, created_by,
+                payment_due_date
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id"#,
     )
     .bind(invoice_id)
     .bind(body.level.clone())
@@ -9946,71 +11117,305 @@ async fn create_dunning_event(
     .bind(Some(due_date))
     .bind(balance_due)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .bind(payment_due_date)
+    .fetch_one(&mut *transaction)
     .await
     {
-        Ok(row) => {
-            let dunning_event_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-            let _ = sqlx::query(
-                "UPDATE invoices
-                 SET status = CASE
-                     WHEN status IN ('paid', 'cancelled', 'overdue') THEN status
-                     ELSE 'overdue'
-                 END
-                 WHERE id = $1",
-            )
-            .bind(invoice_id)
-            .execute(&state.db)
-            .await;
-
-            write_invoice_audit(
-                &state,
-                auth.user_id,
-                "create_invoice_dunning_event",
-                invoice_id,
-                serde_json::json!({
-                    "level": body.level,
-                    "balance_due": decimal_to_string(balance_due),
-                    "due_date_snapshot": due_date.to_string(),
-                }),
-            )
-            .await;
-
-            crate::realtime::publish_invoice_event(
-                &state,
-                Some(auth.user_id),
-                "invoice.dunning_created",
-                invoice_id,
-                serde_json::json!({
-                    "dunning_event_id": dunning_event_id,
-                    "level": body.level,
-                    "status": "overdue",
-                    "balance_due": decimal_to_string(balance_due),
-                    "due_date_snapshot": due_date.to_string(),
-                }),
-            )
-            .await;
-
-            Json(serde_json::json!({
-                "id": dunning_event_id,
-                "invoice_id": invoice_id,
-                "level": row.try_get::<String, _>("level").unwrap_or_default(),
-                "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
-                "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
-                "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
-                "sent_at": row.try_get::<DateTime<Utc>, _>("sent_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            }))
-            .into_response()
+        Ok(id) => id,
+        Err(error) => return failed(error),
+    };
+    if let Err(error) = sqlx::query(
+        "UPDATE invoices
+         SET status = CASE
+             WHEN status IN ('paid', 'cancelled', 'overdue') THEN status
+             ELSE 'overdue'
+         END
+         WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .execute(&mut *transaction)
+    .await
+    {
+        return failed(error);
+    }
+    let letter = match dunning_letters::store_dunning_letter(
+        &mut transaction,
+        invoice_id,
+        dunning_event_id,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        Ok(Some(letter)) => letter,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => return resp,
+    };
+    let letter_sha256 = stored_documents::sha256_hex(&letter.bytes);
+    if let Err(error) = transaction.commit().await {
+        if let Some(blob) = letter.blob {
+            blob.discard().await;
         }
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "create invoice dunning");
+        return failed(error);
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "create_invoice_dunning_event",
+        invoice_id,
+        serde_json::json!({
+            "level": body.level,
+            "dunning_event_id": dunning_event_id,
+            "balance_due": decimal_to_string(balance_due),
+            "due_date_snapshot": due_date.to_string(),
+            "payment_due_date": payment_due_date.to_string(),
+            "letter_file_name": letter.file_name,
+            "letter_sha256": letter_sha256,
+        }),
+    )
+    .await;
+
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.dunning_created",
+        invoice_id,
+        serde_json::json!({
+            "dunning_event_id": dunning_event_id,
+            "level": body.level,
+            "status": "overdue",
+            "balance_due": decimal_to_string(balance_due),
+            "due_date_snapshot": due_date.to_string(),
+            "payment_due_date": payment_due_date.to_string(),
+        }),
+    )
+    .await;
+
+    match load_dunning_event_rows(&state, invoice_id).await {
+        Ok(items) => items
+            .into_iter()
+            .find(|item| item["id"] == json!(dunning_event_id))
+            .map(|item| Json(item).into_response())
+            .unwrap_or_else(|| err(StatusCode::NOT_FOUND, "Dunning event not found")),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load created dunning event");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create invoice dunning event",
+                "Failed to load invoice dunning event",
             )
         }
     }
+}
+
+fn dunning_letter_response(
+    bytes: Vec<u8>,
+    file_name: &str,
+    source: &'static str,
+) -> axum::response::Response {
+    invoice_pdf_response(
+        bytes,
+        format!("inline; filename=\"{}\"", file_name.replace('"', "")),
+        source,
+    )
+}
+
+async fn download_dunning_letter(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, dunning_event_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(ctx) = (match load_invoice_dunning_context(&state, invoice_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    }) else {
+        return err(StatusCode::NOT_FOUND, "Invoice not found");
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, ctx.patient_id).await {
+        return resp;
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "acquire dunning letter connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the dunning letter",
+            );
+        }
+    };
+    let (bytes, file_name, source) = match dunning_letters::dunning_letter_pdf(
+        &mut conn,
+        invoice_id,
+        dunning_event_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Dunning event not found"),
+        Err(resp) => return resp,
+    };
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "download_dunning_letter",
+        invoice_id,
+        json!({
+            "dunning_event_id": dunning_event_id,
+            "document": source,
+            "source": "staff_workspace",
+        }),
+    )
+    .await;
+    dunning_letter_response(bytes, &file_name, source)
+}
+
+/// The patient's own invoice whose PDF the patient may see, if so.
+async fn portal_invoice_with_documents(
+    state: &AppState,
+    auth: &AuthUser,
+    invoice_id: Uuid,
+) -> Result<(Uuid, String), axum::response::Response> {
+    auth.require_any_role(&[Role::Patient])?;
+    let patient_id = resolve_self_patient_id(state, auth.user_id).await?;
+    let row = sqlx::query(
+        r#"SELECT i.patient_id, i.released_at IS NOT NULL AS released, i.portal_visible,
+                  i.hide_amounts_from_patient, i.pdf_visible_to_patient, p.languages
+           FROM invoices i
+           JOIN patients p ON p.id = i.patient_id
+           WHERE i.id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %invoice_id, "load portal dunning access");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Invoice not found"))?;
+    if row.try_get::<Uuid, _>("patient_id").ok() != Some(patient_id)
+        || !row.try_get::<bool, _>("released").unwrap_or(false)
+        || !row.try_get::<bool, _>("portal_visible").unwrap_or(false)
+    {
+        return Err(err(StatusCode::NOT_FOUND, "Invoice not found"));
+    }
+    if row
+        .try_get::<bool, _>("hide_amounts_from_patient")
+        .unwrap_or(true)
+        || !row
+            .try_get::<bool, _>("pdf_visible_to_patient")
+            .unwrap_or(false)
+    {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Invoice documents are hidden from patient",
+        ));
+    }
+    let language = resolve_invoice_pdf_language(
+        &row.try_get::<Vec<String>, _>("languages")
+            .unwrap_or_default(),
+    );
+    Ok((patient_id, language))
+}
+
+async fn list_my_dunning_letters(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    let (_, language) = match portal_invoice_with_documents(&state, &auth, invoice_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let invoice_number = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT invoice_number FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or_default()
+    .unwrap_or_default();
+    match load_dunning_event_rows(&state, invoice_id).await {
+        Ok(rows) => {
+            let items = rows
+                .into_iter()
+                .map(|row| {
+                    let level = row["level"].as_str().unwrap_or_default().to_string();
+                    let file_name = row["letter"]["file_name"]
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| {
+                            dunning_letters::dunning_letter_filename(&level, &invoice_number)
+                        });
+                    json!({
+                        "id": row["id"],
+                        "level": level,
+                        "title": dunning_letters::dunning_letter_title(&language, &level),
+                        "sent_at": row["sent_at"],
+                        "payment_due_date": row["payment_due_date"],
+                        "balance_due": row["balance_due"],
+                        "file_name": file_name,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Json(json!({ "items": items })).into_response()
+        }
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "list portal dunning letters");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list dunning letters",
+            )
+        }
+    }
+}
+
+async fn download_my_dunning_letter(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, dunning_event_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = portal_invoice_with_documents(&state, &auth, invoice_id).await {
+        return resp;
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "acquire portal dunning letter connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the dunning letter",
+            );
+        }
+    };
+    let (bytes, file_name, source) = match dunning_letters::dunning_letter_pdf(
+        &mut conn,
+        invoice_id,
+        dunning_event_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Dunning event not found"),
+        Err(resp) => return resp,
+    };
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "download_dunning_letter",
+        invoice_id,
+        json!({
+            "dunning_event_id": dunning_event_id,
+            "document": source,
+            "source": "patient_portal",
+        }),
+    )
+    .await;
+    dunning_letter_response(bytes, &file_name, source)
 }
 
 async fn update_invoice_visibility(
@@ -10159,10 +11564,12 @@ async fn update_invoice_payer(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let row = match sqlx::query("SELECT patient_id FROM invoices WHERE id = $1")
-        .bind(invoice_id)
-        .fetch_optional(&state.db)
-        .await
+    let row = match sqlx::query(
+        "SELECT patient_id, released_at IS NOT NULL AS released FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
@@ -10178,6 +11585,13 @@ async fn update_invoice_payer(
     let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
+    }
+    // The recipient is part of the issued document.
+    if row.try_get::<bool, _>("released").unwrap_or(false) {
+        return err(
+            StatusCode::CONFLICT,
+            "The payer of a released invoice cannot change; cancel the invoice and issue a new one",
+        );
     }
 
     if let Some(relation_id) = body.payer_patient_relation_id {
@@ -10202,6 +11616,10 @@ async fn update_invoice_payer(
     let payer_contact_phone = normalize_optional(body.payer_contact_phone.as_deref());
     let payer_contact_relationship = normalize_optional(body.payer_contact_relationship.as_deref());
     let payer_notes = normalize_optional(body.payer_notes.as_deref());
+    let payer_address_street = normalize_optional(body.payer_address_street.as_deref());
+    let payer_address_zip = normalize_optional(body.payer_address_zip.as_deref());
+    let payer_address_city = normalize_optional(body.payer_address_city.as_deref());
+    let payer_address_country = normalize_optional(body.payer_address_country.as_deref());
 
     match sqlx::query(
         r#"UPDATE invoices
@@ -10212,7 +11630,11 @@ async fn update_invoice_payer(
                payer_contact_relationship = $6,
                payer_notes = $7,
                payer_updated_by = $8,
-               payer_updated_at = now()
+               payer_updated_at = now(),
+               payer_address_street = $9,
+               payer_address_zip = $10,
+               payer_address_city = $11,
+               payer_address_country = $12
            WHERE id = $1"#,
     )
     .bind(invoice_id)
@@ -10223,6 +11645,10 @@ async fn update_invoice_payer(
     .bind(payer_contact_relationship.clone())
     .bind(payer_notes.clone())
     .bind(auth.user_id)
+    .bind(payer_address_street)
+    .bind(payer_address_zip)
+    .bind(payer_address_city)
+    .bind(payer_address_country)
     .execute(&state.db)
     .await
     {
@@ -10380,6 +11806,7 @@ async fn update_invoice_status(
 
     let locked_invoice = match sqlx::query(
         r#"SELECT invoice.status, invoice.invoice_type, invoice.due_date,
+                  invoice.invoice_number, invoice.released_at IS NOT NULL AS released,
                   invoice.prepayment_applied_amount, invoice.credited_amount,
                   COALESCE((
                       SELECT SUM(
@@ -10429,10 +11856,28 @@ async fn update_invoice_status(
     let locked_credited_amount = locked_invoice
         .try_get::<Decimal, _>("credited_amount")
         .unwrap_or(Decimal::ZERO);
+    let locked_due_date = locked_invoice
+        .try_get::<Option<NaiveDate>, _>("due_date")
+        .unwrap_or_default();
+    let locked_invoice_number = locked_invoice
+        .try_get::<Option<String>, _>("invoice_number")
+        .unwrap_or_default();
+    let locked_released = locked_invoice
+        .try_get::<bool, _>("released")
+        .unwrap_or(false);
     if locked_status == "cancelled" && requested_status != "cancelled" {
         return err(
             StatusCode::CONFLICT,
             "Cancelled invoices cannot be reactivated",
+        );
+    }
+    // A draft becomes an invoice only by being released (sent).
+    if locked_status == "draft"
+        && !matches!(requested_status.as_str(), "draft" | "sent" | "cancelled")
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "A draft invoice must be released before it can be settled",
         );
     }
     let settles_through_payment = requested_paid_amount.is_some()
@@ -10445,22 +11890,51 @@ async fn update_invoice_status(
             "Invoice status cannot move from the current status to the requested one",
         );
     }
-    if requested_status == "draft"
-        && locked_status != "draft"
-        && (locked_paid_amount > Decimal::ZERO
-            || locked_prepayment_amount > Decimal::ZERO
-            || locked_credited_amount > Decimal::ZERO)
+    if requested_status == "draft" && (locked_status != "draft" || locked_released) {
+        return err(
+            StatusCode::CONFLICT,
+            "A released invoice cannot return to draft; cancel it and issue a new invoice",
+        );
+    }
+    // The due date is part of the issued invoice; a dunning letter sets a new
+    // payment deadline instead. Released invoices without one may get it.
+    if locked_released
+        && locked_due_date.is_some()
+        && due_date.is_some()
+        && due_date != locked_due_date
     {
         return err(
             StatusCode::CONFLICT,
-            "An invoice with payments, prepayments or credit notes cannot return to draft",
+            "The due date of a released invoice cannot change; a payment reminder sets a new deadline",
         );
     }
+    let releasing = locked_status == "draft" && requested_status == "sent";
+    let invoice_date = invoice_document_date(Utc::now());
+    let release_due_date = if releasing {
+        let payment_term_days =
+            match release::load_invoice_payment_term_days(&mut transaction).await {
+                Ok(days) => days,
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "load invoice payment term");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            };
+        match release::release_due_date(invoice_date, due_date, locked_due_date, payment_term_days)
+        {
+            Ok(value) => Some(value),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
+    } else {
+        None
+    };
     if requested_status == "overdue" && locked_status != "overdue" {
         let effective_due_date = due_date.or(locked_invoice
             .try_get::<Option<NaiveDate>, _>("due_date")
             .unwrap_or_default());
-        if effective_due_date.is_some_and(|value| value >= Utc::now().date_naive()) {
+        if effective_due_date.is_some_and(|value| value >= crate::app_time::today()) {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Invoice is not past its due date",
@@ -10581,6 +12055,13 @@ async fn update_invoice_status(
                 "Payments require an active released invoice",
             );
         }
+        // The deprecated paid_amount field never records an overpayment:
+        // receipts above the balance go through the payment journal.
+        if requested_paid_amount + payment_context.prepayment_applied_amount
+            > payment_context.total_gross - payment_context.credited_amount
+        {
+            return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+        }
         let payment_delta = requested_paid_amount - existing_paid_amount;
         let payment_id = match sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO invoice_payment_transactions (
@@ -10618,7 +12099,7 @@ async fn update_invoice_status(
             payment_delta,
             "legacy_import",
             Some("legacy-status-api"),
-            Utc::now().date_naive(),
+            crate::app_time::today(),
             auth.user_id,
         )
         .await
@@ -10677,23 +12158,48 @@ async fn update_invoice_status(
         );
     }
 
+    // The number is taken last, right before the release is written, so the
+    // counter row stays locked only briefly. Drafts numbered before numbers
+    // moved to release keep theirs.
+    let release_number = if releasing && locked_invoice_number.is_none() {
+        match release::next_invoice_number(&mut transaction, invoice_date).await {
+            Ok(number) => Some(number),
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "assign invoice number");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        }
+    } else {
+        None
+    };
+
     match sqlx::query(
         // A draft is not issued yet: the invoice date is the day it is
-        // released, not the day the draft was prepared.
+        // released, not the day the draft was prepared, and it is numbered
+        // then.
         r#"UPDATE invoices
            SET status = $2,
                issued_at = CASE
                    WHEN status = 'draft' AND $2 = 'sent' THEN now()
                    ELSE issued_at
                END,
+               released_at = CASE
+                   WHEN status = 'draft' AND $2 = 'sent' THEN now()
+                   ELSE released_at
+               END,
+               invoice_number = COALESCE(invoice_number, $5),
                due_date = COALESCE($3, due_date),
                notes = COALESCE($4, notes)
            WHERE id = $1"#,
     )
     .bind(invoice_id)
     .bind(requested_status.clone())
-    .bind(due_date)
+    .bind(release_due_date.or(due_date))
     .bind(body.notes.clone())
+    .bind(release_number.clone())
     .execute(&mut *transaction)
     .await
     {
@@ -10755,6 +12261,41 @@ async fn update_invoice_status(
                 );
             }
 
+            // Releasing the final invoice credits the order's paid advances.
+            let applied_advances = if locked_status == "draft"
+                && requested_status == "sent"
+                && locked_invoice_type == "final"
+            {
+                match advance_application::apply_available_advances_tx(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(applied) => applied,
+                    Err(e) => {
+                        tracing::error!(error = %e, invoice_id = %invoice_id, "apply advances to released final invoice");
+                        return err(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Failed to update invoice",
+                        );
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            if !applied_advances.is_empty()
+                && let Err(e) =
+                    recompute_invoice_settlement_status(&mut transaction, invoice_id).await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after applying advances");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+
             let settlement = match sqlx::query(
                 r#"SELECT status, paid_amount, prepayment_applied_amount, paid_at
                    FROM invoices
@@ -10787,13 +12328,43 @@ async fn update_invoice_status(
                 .unwrap_or_default();
             let paid_at_payload = paid_at.as_ref().map(|value| value.to_rfc3339());
 
+            // GoBD: the issued document is rendered once, inside the release,
+            // and kept; downloads serve this copy from now on. Anything the
+            // release changes above (number, dates, credited advances) is in it.
+            let stored_blob = if releasing {
+                match stored_documents::store_invoice_pdf(
+                    &mut transaction,
+                    invoice_id,
+                    stored_documents::TRIGGER_RELEASE,
+                    Some(auth.user_id),
+                )
+                .await
+                {
+                    Ok((_, _, blob)) => blob,
+                    Err(resp) => return resp,
+                }
+            } else {
+                None
+            };
+            let stored_sha256 = stored_blob.as_ref().map(|blob| blob.sha256.clone());
+
             if let Err(e) = transaction.commit().await {
                 tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice status update");
+                if let Some(blob) = stored_blob {
+                    blob.discard().await;
+                }
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice",
                 );
             }
+            advance_application::publish_applied_advances(
+                &state,
+                auth.user_id,
+                "final_invoice_released",
+                &applied_advances,
+            )
+            .await;
             if let Some(paid_at) = paid_at
                 && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
                     &state,
@@ -10806,6 +12377,11 @@ async fn update_invoice_status(
                 return resp;
             }
 
+            let released_number = if releasing {
+                release_number.clone().or(locked_invoice_number.clone())
+            } else {
+                None
+            };
             state.audit_sender.try_send(audit::domain_event(
                 "update_invoice_status",
                 Some(auth.user_id),
@@ -10816,7 +12392,10 @@ async fn update_invoice_status(
                     "paid_amount": decimal_to_string(effective_paid_amount),
                     "prepayment_applied_amount": decimal_to_string(effective_prepayment_amount),
                     "legacy_payment_transaction_id": legacy_payment_transaction_id,
-                    "due_date": due_date.map(|value| value.to_string()),
+                    "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
+                    "released": releasing,
+                    "invoice_number": released_number,
+                    "stored_document_sha256": stored_sha256,
                 }),
             ));
 
@@ -10829,8 +12408,9 @@ async fn update_invoice_status(
                     "patient_id": patient_id,
                     "status": effective_status,
                     "paid_amount": decimal_to_string(effective_paid_amount),
-                    "due_date": due_date.map(|value| value.to_string()),
+                    "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
                     "paid_at": paid_at_payload,
+                    "released": releasing,
                 }),
             )
             .await;
@@ -10855,26 +12435,20 @@ async fn update_invoice_status(
 #[cfg(test)]
 mod tests {
     use super::{
-        InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, invoice_pdf_filename,
+        InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, document, invoice_pdf_filename,
         invoice_pdf_footer_line,
     };
     use chrono::{NaiveDate, Utc};
     use uuid::Uuid;
 
-    #[test]
-    fn invoice_footer_includes_current_and_total_pages() {
-        assert_eq!(invoice_pdf_footer_line("Page", 2, 5), "Page: 2/5");
-    }
-
-    #[test]
-    fn invoice_pdf_preserves_cyrillic_text() {
-        let mut context = InvoicePdfContext {
+    fn sample_context() -> InvoicePdfContext {
+        InvoicePdfContext {
             currency: "EUR".to_string(),
             invoice_id: Uuid::new_v4(),
             patient_id: Uuid::new_v4(),
             invoice_number: "INV-UNIT-1".to_string(),
             invoice_type: "final".to_string(),
-            status: "sent".to_string(),
+            released: true,
             portal_visible: true,
             hide_amounts_from_patient: false,
             pdf_visible_to_patient: true,
@@ -10883,15 +12457,22 @@ mod tests {
             total_net: "145.00".to_string(),
             total_vat: "0.00".to_string(),
             total_gross: "145.00".to_string(),
-            credited_amount: "0.00".to_string(),
             prepayment_applied_amount: "0.00".to_string(),
-            paid_amount: "0.00".to_string(),
-            balance_due: "145.00".to_string(),
             notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
             patient_name: "Макс Мюллер".to_string(),
             patient_title: Some("Dr.".to_string()),
-            birth_date: Some(NaiveDate::from_ymd_opt(1990, 1, 1).unwrap()),
+            recipient: document::InvoiceRecipient {
+                name: "Dr. Макс Мюллер".to_string(),
+                street: Some("Хрещатик 1".to_string()),
+                zip: Some("01001".to_string()),
+                city: Some("Київ".to_string()),
+                country: Some("Україна".to_string()),
+                country_code: Some("UA".to_string()),
+                email: None,
+                is_payer: false,
+            },
+            service_period: None,
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
             language: "ru".to_string(),
@@ -10915,17 +12496,39 @@ mod tests {
                 vat_id: None,
                 tax_number: Some("143/999/00001".to_string()),
             },
-        };
+        }
+    }
+
+    fn pdf_text(context: &InvoicePdfContext) -> String {
+        let bytes = build_invoice_pdf(context).unwrap();
+        pdf_extract::extract_text_from_mem(&bytes).unwrap()
+    }
+
+    #[test]
+    fn invoice_footer_includes_current_and_total_pages() {
+        assert_eq!(invoice_pdf_footer_line("Page", 2, 5), "Page: 2/5");
+    }
+
+    #[test]
+    fn invoice_pdf_preserves_cyrillic_text() {
+        let mut context = sample_context();
 
         let bytes = build_invoice_pdf(&context).unwrap();
         // The ZUGFeRD hybrid keeps the rendered pages readable and carries the XML.
+        let xml = super::zugferd::build_cii_xml(&super::zugferd::test_sample());
         let hybrid = super::zugferd::embed_xml_in_pdf(
             &bytes,
-            &super::zugferd::build_cii_xml(&super::zugferd::test_sample()),
+            &xml,
             &context.invoice_number,
             context.issued_at,
         )
         .unwrap();
+        // The XML served for a stored invoice is read back from its document.
+        assert_eq!(
+            super::zugferd::extract_xml_from_pdf(&hybrid).as_deref(),
+            Some(xml.as_str())
+        );
+        assert_eq!(super::zugferd::extract_xml_from_pdf(&bytes), None);
         // CI runs the official ZUGFeRD validator (PDF/A-3 + EN 16931) over this file.
         if let Ok(dir) = std::env::var("EINVOICE_SAMPLE_DIR") {
             std::fs::create_dir_all(&dir).unwrap();
@@ -10957,30 +12560,139 @@ mod tests {
         assert_eq!(invoice_pdf_filename(&context), "RECHNUNG-INV-UNIT-1.pdf");
         context.order_number.clear();
         context.quote_number = None;
-        let no_order_bytes = build_invoice_pdf(&context).unwrap();
-        let no_order_text = pdf_extract::extract_text_from_mem(&no_order_bytes).unwrap();
+        let no_order_text = pdf_text(&context);
         assert!(!no_order_text.contains("ORD-UNIT-1"));
         assert!(!no_order_text.contains("Q-UNIT-1"));
-        assert!(no_order_text.contains("01.01.1990"));
         context.currency = "USD".to_string();
-        let usd_bytes = build_invoice_pdf(&context).unwrap();
-        let usd_text = pdf_extract::extract_text_from_mem(&usd_bytes).unwrap();
+        let usd_text = pdf_text(&context);
         assert!(usd_text.contains("145,00 USD"));
         assert!(!usd_text.contains("€"));
         assert!(!extracted_text.contains("Предоплата"));
-        // A final invoice with a credited advance: 145 - 45 advance = 100 open.
+        // A final invoice with a credited advance: 145 - 45 advance = 100 to pay.
         context.currency = "EUR".to_string();
         context.language = "de".to_string();
         context.prepayment_applied_amount = "45.00".to_string();
-        context.balance_due = "100.00".to_string();
-        let prepaid_bytes = build_invoice_pdf(&context).unwrap();
-        let prepaid_text = pdf_extract::extract_text_from_mem(&prepaid_bytes).unwrap();
+        let prepaid_text = pdf_text(&context);
         assert!(prepaid_text.contains("Anzahlungen"));
         assert!(prepaid_text.contains("-45,00 €"));
+        assert!(prepaid_text.contains("Zahlbetrag"));
         assert!(prepaid_text.contains("100,00 €"));
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
+    }
+
+    /// A draft renders as a marked preview: no number, no invoice date.
+    #[test]
+    fn draft_preview_is_marked_and_carries_no_number() {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.released = false;
+        context.invoice_number = String::new();
+        let text = pdf_text(&context);
+        assert!(text.contains("ENTWURF – keine gültige Rechnung"), "{text}");
+        assert!(text.contains("Rechnungsnummer\nENTWURF"), "{text}");
+        assert!(invoice_pdf_filename(&context).starts_with("RECHNUNG-ENTWURF-"));
+        // A draft numbered before numbers moved to release keeps its stored
+        // number, but the preview still prints none. (The sample patient ID
+        // PT-INV-UNIT is printed, so the check names the invoice number.)
+        context.invoice_number = "INV-UNIT-1".to_string();
+        let text = pdf_text(&context);
+        assert!(text.contains("Rechnungsnummer\nENTWURF"), "{text}");
+        assert!(!text.contains("INV-UNIT-1"), "{text}");
+        assert!(invoice_pdf_filename(&context).starts_with("RECHNUNG-ENTWURF-"));
+    }
+
+    /// § 14 Abs. 4 UStG content: recipient with address, service period, VAT
+    /// per rate with the exemption reason; no settlement status and no birth
+    /// date on the document.
+    #[test]
+    fn invoice_pdf_carries_the_mandatory_invoice_content() {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.order_number = "A-20260927-0001-FAMILIE-KOPF-2".to_string();
+        context.recipient = document::InvoiceRecipient {
+            name: "Ivan Zahler".to_string(),
+            street: Some("Kyivska 5".to_string()),
+            zip: Some("01001".to_string()),
+            city: Some("Kyiv".to_string()),
+            country: Some("Ukraine".to_string()),
+            country_code: Some("UA".to_string()),
+            email: None,
+            is_payer: true,
+        };
+        context.service_period = Some((
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 5).unwrap(),
+        ));
+        context.total_net = "400.00".to_string();
+        context.total_vat = "19.00".to_string();
+        context.total_gross = "419.00".to_string();
+        context.line_items = super::parse_invoice_pdf_line_items(&serde_json::json!([
+            {
+                "description": "Dolmetscherstunden", "quantity": "2", "unit_price": "50",
+                "vat_rate": "19", "line_net": "100", "line_vat": "19", "line_gross": "119",
+                "is_cost_passthrough": false
+            },
+            {
+                "description": "Terminorganisation", "quantity": "1", "unit_price": "100",
+                "vat_rate": "0", "line_net": "100", "line_vat": "0", "line_gross": "100",
+                "is_cost_passthrough": false
+            },
+            {
+                "description": "Klinikrechnung", "quantity": "1", "unit_price": "200",
+                "vat_rate": "0", "line_net": "200", "line_vat": "0", "line_gross": "200",
+                "is_cost_passthrough": true
+            }
+        ]));
+
+        let text = pdf_text(&context);
+        assert!(text.contains("Rechnungsempfänger"), "{text}");
+        assert!(text.contains("Ivan Zahler"));
+        assert!(text.contains("Kyivska 5"));
+        assert!(text.contains("01001 Kyiv"));
+        assert!(text.contains("Ukraine"));
+        // Return address line of the agency above the recipient.
+        assert!(text.contains("Albert-Schweitzer-Straße 56 · 81735 München"));
+        assert!(text.contains("Leistungszeitraum"));
+        assert!(text.contains("01.09.2026 – 05.09.2026"));
+        assert!(text.contains("Rechnungsnummer"));
+        assert!(text.contains("Rechnungsdatum"));
+        // The full order number, however long.
+        assert!(text.contains("A-20260927-0001-FAMILIE-KOPF-2"), "{text}");
+        // VAT breakdown per rate and the totals.
+        assert!(text.contains("19 %"));
+        assert!(text.contains("0 % (steuerbefreit)"));
+        assert!(text.contains("Durchlaufende Posten (0 %)"));
+        assert!(text.contains("119,00 €"));
+        assert!(text.contains("200,00 €"));
+        assert!(text.contains("Summe"));
+        assert!(text.contains("Rechnungsbetrag"));
+        assert!(text.contains("419,00 €"));
+        assert!(text.contains("Steuerbefreiung: Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG"));
+        // Settlement state and the patient's birth date are not invoice content.
+        for absent in [
+            "Status",
+            "Bezahlt",
+            "Offener Betrag",
+            "Geburtsdatum",
+            "01.01.1990",
+        ] {
+            assert!(!text.contains(absent), "{absent} must not be printed");
+        }
+
+        // A single service day prints as the service date; no exempt line, no note.
+        context.service_period = Some((
+            NaiveDate::from_ymd_opt(2026, 9, 3).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 3).unwrap(),
+        ));
+        context
+            .line_items
+            .retain(|line| line.vat_rate_value > rust_decimal::Decimal::ZERO);
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistungsdatum"));
+        assert!(text.contains("03.09.2026"));
+        assert!(!text.contains("§ 4 Nr. 14"));
     }
 }
 
@@ -10998,6 +12710,7 @@ mod patient_invoice_redaction_tests {
             "available_prepayments": [{ "invoice_number": "INV-A", "available_amount": "700" }],
             "supporting_documents": [{ "auto_name": "Hotel original.pdf" }],
             "contract_id": "c",
+            "payer_relation_options": [{ "related_name": "Brother" }],
             "payer": { "contact_name": "Ivan", "notes": "calls after 6pm" },
             "prepayment_allocations": [{ "amount_gross": "300" }],
             "portal_visibility": {
@@ -11024,6 +12737,7 @@ mod patient_invoice_redaction_tests {
             "available_prepayments",
             "supporting_documents",
             "contract_id",
+            "payer_relation_options",
         ] {
             assert!(invoice.get(key).is_none(), "{key}");
         }

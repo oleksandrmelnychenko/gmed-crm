@@ -8,6 +8,7 @@ import { operationDescription } from "./operation-text";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ApiRequestError } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { DatevSetupSection } from "./setup-section";
 import { useDatevText } from "./text";
@@ -77,7 +78,7 @@ export function DatevLiveConnection() {
   function clearRead() { setAccess(null); setResult(null); }
   const stateLabels: Record<string,string> = { not_configured: t.notConfigured, disconnected: t.disconnected, connected: t.connected, reconnect_required: t.reconnect, revocation_pending: t.revoking };
   const kinds: Record<ReadKind,string> = { "fiscal-years": t.fiscal, "terms-of-payment": t.terms, "sums-and-balances": t.balances };
-  const date = (value?: string | null) => value ? new Date(value).toLocaleString(de ? "de-DE" : "ru-RU") : t.never;
+  const date = (value?: string | null) => value ? appDateTimeFormat(de ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).format(new Date(value)) : t.never;
   const blocked = busy || !ready;
   const hasCompany = !!profileRevision && !!profile && /^\d{1,7}$/.test(profile.consultant_number) && Number(profile.consultant_number) > 0 && /^\d{1,5}$/.test(profile.client_number) && Number(profile.client_number) > 0;
   const canRead = !blocked && !requiresReconnect && hasCompany && connection?.status === "connected" && connection.exchange_enabled;

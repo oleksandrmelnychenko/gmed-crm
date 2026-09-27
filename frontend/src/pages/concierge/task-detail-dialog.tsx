@@ -7,6 +7,8 @@ import {
   Check,
   ChevronDown,
   Circle,
+  CircleSlash,
+  ClipboardList,
   ExternalLink,
   FolderKanban,
   ListChecks,
@@ -31,7 +33,9 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import type { Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
 import { cn } from "@/lib/utils";
@@ -45,11 +49,15 @@ import type {
 } from "./model";
 import {
   availableConciergeTaskStatuses,
+  canAttachToConciergeTask,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
+  canMarkConciergeTaskNotRequired,
   canModifyConciergeTask,
   conciergeTaskCode,
   conciergeTaskErrorMessage,
+  conciergeTaskNotRequiredPath,
+  isConciergeTaskOverdue,
 } from "./model";
 import {
   conciergeDialogContentClassName,
@@ -74,6 +82,8 @@ import type {
   ConciergeExpenseSubmitInput,
 } from "./expense-receipt-model";
 import { ConciergeTaskAttachments } from "./task-attachments";
+import { openSubtaskCount, subtaskProgress } from "./task-workflow";
+import { closeOpenSubtasks, completableParentAfterChild, completeParentTask, ParentCloseChoiceDialog, ParentCompletionSuggestionDialog, type ParentCloseRequest, type ParentCompletionSuggestion } from "./subtask-flow";
 
 const copy = {
   de: {
@@ -81,6 +91,8 @@ const copy = {
     unavailable: "Die Aufgabe wurde gelöscht oder ist nicht mehr verfügbar.",
     children: "Unteraufgaben und Termine",
     emptyChildren: "Noch keine Unteraufgaben oder Termine",
+    childrenDone: "Erledigt",
+    overdue: "Überfällig",
     noMatchingChildren: "Keine Unteraufgaben oder Termine entsprechen den Filtern.",
     subtask: "Unteraufgabe",
     event: "Termin",
@@ -116,6 +128,7 @@ const copy = {
     patient: "Patient / Kunde",
     provider: "Provider",
     project: "Projekt",
+    order: "Auftrag",
     birthDate: "Geburtsdatum",
     externalAssignee: "Externer Ausführender",
     open: "Offen",
@@ -151,6 +164,9 @@ const copy = {
     delete: "Löschen",
     deleteTitle: "Aufgabe löschen?",
     deleteMessage: "Die Aufgabe verschwindet aus dem Aufgabenmanager. Der Audit-Verlauf bleibt erhalten.",
+    notRequired: "Nicht erforderlich",
+    notRequiredTitle: "Als nicht erforderlich markieren?",
+    notRequiredMessage: "Die Aufgabe gehört zu einer Checkliste. Sie wird storniert und der Checklistenpunkt als „Nicht erforderlich“ geschlossen. Auf der Auftragsseite lässt er sich wieder öffnen.",
     cancel: "Abbrechen",
     overview: "Aufgabendaten",
     links: "Verknüpfungen",
@@ -180,6 +196,8 @@ const copy = {
     unavailable: "Задача удалена или больше недоступна.",
     children: "Подзадачи и события",
     emptyChildren: "Подзадач и событий пока нет",
+    childrenDone: "Выполнено",
+    overdue: "Просрочено",
     noMatchingChildren: "Нет подзадач и событий, соответствующих фильтрам.",
     subtask: "Подзадача",
     event: "Событие",
@@ -215,6 +233,7 @@ const copy = {
     patient: "Пациент / клиент",
     provider: "Провайдер",
     project: "Проект",
+    order: "Заказ",
     birthDate: "Дата рождения",
     externalAssignee: "Внешний исполнитель",
     open: "Открыта",
@@ -250,6 +269,9 @@ const copy = {
     delete: "Удалить",
     deleteTitle: "Удалить задачу?",
     deleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
+    notRequired: "Не требуется",
+    notRequiredTitle: "Отметить как «Не требуется»?",
+    notRequiredMessage: "Задача относится к чек-листу. Она будет отменена, а пункт чек-листа закроется со статусом «Не требуется». Вернуть его в работу можно на странице заказа.",
     cancel: "Отмена",
     overview: "Данные задачи",
     links: "Связи",
@@ -280,7 +302,7 @@ function dateTime(value: string | null, lang: Lang) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
@@ -288,9 +310,7 @@ function dateTime(value: string | null, lang: Lang) {
 
 function dateOnly(value: string | null, lang: Lang) {
   if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }).format(date);
+  return formatDateKey(value, lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }) || value;
 }
 
 function expenseMoney(value: string, currency: string, lang: Lang) {
@@ -342,11 +362,13 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
 }) {
   const labels = copy[lang];
   const statuses = ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const;
-  const dateCell = (value: string | null) => {
+  const now = new Date();
+  const progress = subtaskProgress(rows);
+  const dateCell = (value: string | null, overdue = false) => {
     if (!value) return <span className="text-muted-foreground">—</span>;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return <span className="text-muted-foreground">—</span>;
-    return <Badge variant="outline" className="bg-muted/15 text-[10px] font-normal"><time dateTime={date.toISOString()}>{new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)}</time></Badge>;
+    return <Badge variant="outline" className={cn("text-[10px] font-normal", overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "bg-muted/15")} title={overdue ? labels.overdue : undefined}><time dateTime={date.toISOString()}>{appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)}</time></Badge>;
   };
   const columns: ColumnDef<ConciergeTask>[] = [
     {
@@ -364,11 +386,14 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
       render: task => <Badge variant="outline" className="min-w-0 max-w-full gap-1.5 bg-muted/15 text-[10px] font-normal text-muted-foreground" title={task.assigned_to_name || labels.noAssignee}><UserRound /><span className="truncate">{task.assigned_to_name || labels.noAssignee}</span></Badge>,
     },
     { id: "start", label: labels.start, accessor: task => task.starts_at, filterType: "date", width: 155, render: task => dateCell(task.starts_at) },
-    { id: "end", label: labels.end, accessor: task => task.kind === "event" ? task.ends_at : task.due_at, filterType: "date", width: 155, render: task => dateCell(task.kind === "event" ? task.ends_at : task.due_at) },
+    { id: "end", label: labels.end, accessor: task => task.kind === "event" ? task.ends_at : task.due_at, filterType: "date", width: 155, render: task => dateCell(task.kind === "event" ? task.ends_at : task.due_at, !task.archived_at && isConciergeTaskOverdue(task, now)) },
     {
-      id: "status", label: labels.status, accessor: task => task.archived_at ? "archived" : task.status, width: 125, filterType: "enum",
+      id: "status", label: labels.status, accessor: task => task.archived_at ? "archived" : task.status, width: 150, filterType: "enum",
       filterOptions: [...statuses.map(value => ({ value, label: labels[value] })), { value: "archived", label: labels.archivedStatus }],
-      render: task => <Badge variant="outline" className={task.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(task.status)}>{task.archived_at ? labels.archivedStatus : labels[task.status]}</Badge>,
+      render: task => <span className="flex min-w-0 flex-wrap items-center gap-1">
+        <Badge variant="outline" className={task.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(task.status)}>{task.archived_at ? labels.archivedStatus : labels[task.status]}</Badge>
+        {!task.archived_at && isConciergeTaskOverdue(task, now) ? <Badge variant="outline" data-testid={`task-child-overdue-${task.id}`} className="border-rose-200 bg-rose-50 text-rose-700">{labels.overdue}</Badge> : null}
+      </span>,
     },
   ];
   return <section data-testid="task-children-table" className="min-w-0" aria-label={labels.children}>
@@ -387,6 +412,7 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
       mobileDetailColumnIds={["code", "kind", "assignee", "start", "end", "status"]}
       toolbarStart={<>
         <h3 className="flex shrink-0 items-center gap-2 self-center text-sm font-semibold"><span className="size-1.5 rounded-full bg-primary" />{labels.children}</h3>
+        {progress.total > 0 ? <Badge variant="outline" data-testid="task-children-progress" className={cn("shrink-0 self-center rounded-full text-[10px]", progress.done === progress.total ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "bg-muted/20 text-muted-foreground")}>{labels.childrenDone}: <span className="ml-1 font-semibold tabular-nums">{progress.done}/{progress.total}</span></Badge> : null}
         {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
       </>}
       emptyState={<p className="px-4 py-6 text-center text-xs text-muted-foreground">{rows.length ? labels.noMatchingChildren : labels.emptyChildren}</p>}
@@ -454,6 +480,8 @@ export function ConciergeTaskDetailDialog({
 }) {
   const labels = copy[lang];
   const { user } = useAuth();
+  // The order link only helps people who may open orders.
+  const canOpenOrders = hasCapability(user, "orders.view");
   const [detail, setDetail] = useState<ConciergeTaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -480,6 +508,12 @@ export function ConciergeTaskDetailDialog({
   const [expenseProgress, setExpenseProgress] = useState(0);
   const canModify = detail ? canModifyConciergeTask(detail.item, user?.id, user?.role) : false;
   const canDelete = detail ? canDeleteConciergeTask(detail.item, user?.id, user?.role) : false;
+  const canMarkNotRequired = detail
+    ? canMarkConciergeTaskNotRequired(detail.item, user?.id, user?.role)
+    : false;
+  const [notRequiredConfirmOpen, setNotRequiredConfirmOpen] = useState(false);
+  const [parentCloseRequest, setParentCloseRequest] = useState<ParentCloseRequest | null>(null);
+  const [completionSuggestion, setCompletionSuggestion] = useState<ParentCompletionSuggestion | null>(null);
   const canChangeStatus = detail
     ? canChangeConciergeTaskStatus(detail.item, user?.id, user?.role)
     : false;
@@ -836,25 +870,68 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function markNotRequired() {
+    const path = detail ? conciergeTaskNotRequiredPath(detail.item) : null;
+    if (!taskId || !path || !canMarkNotRequired || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(path, { method: "POST" });
+      clearApiCache("/concierge-operational-items");
+      clearApiCache(path.replace(/\/[^/]+\/not-required$/, ""));
+      setNotRequiredConfirmOpen(false);
+      await load();
+      onChanged();
+    } catch (notRequiredError) {
+      setNotRequiredConfirmOpen(false);
+      setError(conciergeTaskErrorMessage(notRequiredError, lang, labels.notRequired));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function changeStatus() {
     if (!taskId || !detail || !canChangeStatus || busy || !pendingStatus || pendingStatus === detail.item.status) return;
     if (pendingStatus === "archive") {
       await changeArchiveState(true);
       return;
     }
+    const status = pendingStatus;
+    const openChildren = status === "completed" ? openSubtaskCount(detail.item, relatedTasks) : 0;
+    if (openChildren > 0) {
+      // Completing a parent with open sub-tasks is a decision, not a side effect.
+      setParentCloseRequest({
+        task: detail.item,
+        openCount: openChildren,
+        archive: false,
+        run: (closeChildren) => applyStatus(status, closeChildren),
+      });
+      return;
+    }
+    await applyStatus(status, false);
+  }
+
+  async function applyStatus(status: string, closeChildren: boolean) {
+    if (!taskId || !detail) return;
+    const item = detail.item;
     setBusy(true);
     setError("");
     try {
+      if (closeChildren) await closeOpenSubtasks(taskId, "completed");
       await apiFetch(`/concierge-operational-items/${taskId}/status`, {
         method: "POST",
         body: JSON.stringify({
-          expected_updated_at: detail.item.updated_at,
-          status: pendingStatus,
+          expected_updated_at: item.updated_at,
+          status,
         }),
       });
       clearApiCache("/concierge-operational-items");
       await load();
       onChanged();
+      if (status === "completed" && item.parent_task_id) {
+        const suggestion = await completableParentAfterChild(item, user?.id, user?.role);
+        if (suggestion && (suggestion.canComplete || onOpenRelated)) setCompletionSuggestion(suggestion);
+      }
     } catch (statusError) {
       setError(conciergeTaskErrorMessage(statusError, lang, labels.status));
     } finally {
@@ -862,12 +939,36 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
-  async function changeArchiveState(archive: boolean) {
-    if (!taskId || !detail || !canModify || busy) return;
-    if (archive ? detail.item.status !== "completed" || Boolean(detail.item.archived_at) : !detail.item.archived_at) return;
+  async function completeParent(parent: ConciergeTask) {
     setBusy(true);
     setError("");
     try {
+      await completeParentTask(parent, user?.id, user?.role);
+      onChanged();
+    } catch (completeError) {
+      setError(conciergeTaskErrorMessage(completeError, lang, labels.status));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeArchiveState(archive: boolean, closeChildren?: boolean) {
+    if (!taskId || !detail || !canModify || busy) return;
+    if (archive ? detail.item.status !== "completed" || Boolean(detail.item.archived_at) : !detail.item.archived_at) return;
+    const openChildren = archive && closeChildren === undefined ? openSubtaskCount(detail.item, relatedTasks) : 0;
+    if (openChildren > 0) {
+      setParentCloseRequest({
+        task: detail.item,
+        openCount: openChildren,
+        archive: true,
+        run: (choice) => changeArchiveState(true, choice),
+      });
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      if (archive && closeChildren) await closeOpenSubtasks(taskId, "completed");
       const updated = await apiFetch<ConciergeTask>(`/concierge-operational-items/${taskId}/${archive ? "archive" : "restore"}`, { method: "POST" });
       setDetail((current) => current?.item.id === updated.id ? { ...current, item: updated } : current);
       setPendingStatus(updated.status);
@@ -937,12 +1038,12 @@ export function ConciergeTaskDetailDialog({
         dirty={hasUnsavedChanges}
         onOpenChange={onOpenChange}
       >
-      <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
+      <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || canMarkNotRequired || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
           tone="dot"
           title={detail ? localizeTaskTitle(detail.item.title, lang) : labels.loading}
-          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
+          meta={detail ? <><Badge variant="outline" className="rounded-full font-mono text-muted-foreground">{conciergeTaskCode(detail.item)}</Badge><Badge variant="outline" className={detail.item.archived_at ? "bg-muted text-muted-foreground" : taskStatusClassName(detail.item.status)}>{detail.item.archived_at ? labels.archivedStatus : labels[detail.item.status]}</Badge><Badge variant="secondary" className="rounded-full" data-testid="task-detail-checklist-progress" title={`${labels.checklist}: ${detail.item.checklist_completed}/${detail.item.checklist_total}`}>{labels.checklist}: {detail.item.checklist_completed}/{detail.item.checklist_total}</Badge></> : undefined}
         />
         <ConciergeDialogBody>
           {error ? <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
@@ -1008,9 +1109,17 @@ export function ConciergeTaskDetailDialog({
                 </div>
               </TaskDetailSection>
 
-              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
+              {(detail.item.patient_id && detail.item.patient_name) || (detail.item.order_id && canOpenOrders) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
                 <TaskDetailSection title={labels.links}>
                   <div className="divide-y divide-border/60">
+                    {/* Generated order work (checklist, appointment concierge tasks) links back to its order. */}
+                    {detail.item.order_id && canOpenOrders ? (
+                      <StaffLink to={`/orders?order=${detail.item.order_id}`} data-testid="task-detail-order-link" className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-orange-50 text-orange-700"><ClipboardList className="size-4" /></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.order}</span><strong className="block truncate text-sm">{detail.item.order_number || "—"}</strong></span>
+                        <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
+                      </StaffLink>
+                    ) : null}
                     {detail.item.patient_id && detail.item.patient_name ? (
                       <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
                         <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date, lang)}</span></span>
@@ -1100,7 +1209,13 @@ export function ConciergeTaskDetailDialog({
                 </TaskDetailSection>
               ) : null}
 
-              <ConciergeTaskAttachments taskId={detail.item.id} lang={lang} canModify={canModify && !detail.item.archived_at} />
+              <ConciergeTaskAttachments
+                taskId={detail.item.id}
+                lang={lang}
+                canModify={canModify && !detail.item.archived_at}
+                canUpload={canAttachToConciergeTask(detail.item, user?.id, user?.role) && !detail.item.archived_at}
+                currentUserId={user?.id ?? null}
+              />
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
               <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
@@ -1208,11 +1323,15 @@ export function ConciergeTaskDetailDialog({
             </div>
           ) : null}
         </ConciergeDialogBody>
-        {canDelete || statusDirty ? (
+        {canDelete || canMarkNotRequired || statusDirty ? (
           <ConciergeDialogFooter>
             {canDelete ? (
               <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive sm:mr-auto" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>
                 <Trash2 />{labels.delete}
+              </Button>
+            ) : canMarkNotRequired ? (
+              <Button type="button" size="sm" variant="ghost" className="h-8 text-muted-foreground sm:mr-auto" disabled={busy || statusDirty} onClick={() => setNotRequiredConfirmOpen(true)}>
+                <CircleSlash />{labels.notRequired}
               </Button>
             ) : null}
             {statusDirty ? (
@@ -1245,6 +1364,28 @@ export function ConciergeTaskDetailDialog({
         confirmDisabled={busy}
         onCancel={() => setDeleteConfirmOpen(false)}
         onConfirm={() => void deleteTask()}
+      />
+      <DirtyDismissConfirmDialog
+        open={open && notRequiredConfirmOpen}
+        title={labels.notRequiredTitle}
+        message={labels.notRequiredMessage}
+        cancelLabel={labels.cancel}
+        confirmLabel={labels.notRequired}
+        confirmDisabled={busy}
+        onCancel={() => setNotRequiredConfirmOpen(false)}
+        onConfirm={() => void markNotRequired()}
+      />
+      <ParentCloseChoiceDialog
+        request={open ? parentCloseRequest : null}
+        lang={lang}
+        onDone={() => setParentCloseRequest(null)}
+      />
+      <ParentCompletionSuggestionDialog
+        suggestion={open ? completionSuggestion : null}
+        lang={lang}
+        onOpenParent={onOpenRelated}
+        onComplete={(parent) => void completeParent(parent)}
+        onDone={() => setCompletionSuggestion(null)}
       />
       <DirtyDismissConfirmDialog
         open={open && Boolean(pendingChildDelete)}

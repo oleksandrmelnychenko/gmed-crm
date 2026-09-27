@@ -123,6 +123,8 @@ const INCOMING_DATA_CATEGORY_LABEL_KEYS = {
 const TASK_STATUS_LABEL_KEYS = {
   open: "appointment_task_status_open",
   in_progress: "appointment_task_status_in_progress",
+  on_hold: "appointment_task_status_on_hold",
+  review: "appointment_task_status_review",
   completed: "appointment_task_status_completed",
   cancelled: "appointment_task_status_cancelled",
 } satisfies LabelKeyMap;
@@ -260,6 +262,12 @@ export function appointmentPluralText(
 export function roleLabel(role?: string | null) {
   const tr = runtimeTranslations();
   if (!role) return "";
+  // On appointments interpreters are named by their job ("Переводчик"), not
+  // by the generic staff role name ("Сотрудник").
+  if (role === "interpreter") return appointmentText("appointments_interpreter");
+  if (role === "teamlead_interpreter") {
+    return appointmentText("appointments_role_teamlead_interpreter");
+  }
   const translated = tr[`role_${role}` as keyof typeof tr];
   return typeof translated === "string"
     ? translated

@@ -135,7 +135,7 @@ async fn get_company_financial_position(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let default_from = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap_or(today);
     let from = match parse_date(query.from.as_deref(), "from") {
         Ok(value) => value.unwrap_or(default_from),

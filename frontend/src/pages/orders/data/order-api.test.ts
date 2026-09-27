@@ -191,6 +191,29 @@ describe("normalizeOrderAmendment (#10)", () => {
     expect(amendment.currency).toBe("EUR");
     expect(amendment.status).toBe("pending");
     expect(amendment.decided_at).toBeNull();
+    expect(amendment.vat_treatment).toBeNull();
+    expect(amendment.order_leistung_id).toBeNull();
+    expect(amendment.billable).toBe(false);
+  });
+
+  it("keeps the VAT treatment and the billing line of an approved amendment", () => {
+    const amendment = normalizeOrderAmendment({
+      id: "amd-2",
+      status: "approved",
+      delta_amount: "150",
+      vat_treatment: "standard_vat",
+      vat_rate: "19",
+      is_cost_passthrough: false,
+      order_leistung_id: "line-1",
+      order_leistung_status: "approved",
+      billable: false,
+    });
+
+    expect(amendment.vat_treatment).toBe("standard_vat");
+    expect(amendment.vat_rate).toBe("19");
+    expect(amendment.order_leistung_id).toBe("line-1");
+    expect(amendment.billable).toBe(false);
+    expect(normalizeOrderAmendment({ vat_treatment: "bogus" }).vat_treatment).toBeNull();
   });
 });
 

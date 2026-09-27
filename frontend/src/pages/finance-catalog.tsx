@@ -58,6 +58,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateKey } from "@/lib/app-time-zone";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
@@ -292,9 +293,7 @@ function createBlankPackageForm(unitLabel: string): ServicePackageForm {
 }
 
 function todayInputDate() {
-  const now = new Date();
-  const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
-  return localDate.toISOString().slice(0, 10);
+  return appDateKey();
 }
 
 const BLANK_PRICE_VERSION_FORM: PriceVersionForm = {

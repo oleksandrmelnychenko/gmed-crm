@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { Field, textareaClass } from "@/components/ui-shell";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -291,7 +292,7 @@ export function contractTerminationSummary(
   const date = new Date(contract.terminated_at);
   const dateLabel = Number.isNaN(date.getTime())
     ? contract.terminated_at
-    : date.toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU");
+    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(date);
   return {
     date: dateLabel,
     by: contract.terminated_by_name?.trim() || null,

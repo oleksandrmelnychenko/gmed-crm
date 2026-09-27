@@ -76,12 +76,13 @@ describe("staff route access by capability", () => {
       "/documents/document-1",
       "/sops",
       "/feedback",
+      // Read-only service part of an order (server projection).
+      "/orders",
     ]) {
       expect(canAccessStaffRoute("concierge", path), path).toBe(true);
     }
     for (const path of [
       "/reports",
-      "/orders",
       "/contracts",
       "/invoices",
       "/company-finance",
@@ -267,10 +268,14 @@ describe("staff route access by capability", () => {
       for (const path of ["/patients", "/appointments", "/documents", "/providers", "/chat", "/task-manager", "/sops"]) {
         expect(canAccessStaffRoute(role, path), `${role} -> ${path}`).toBe(true);
       }
-      for (const path of ["/leads", "/invoices", "/orders", "/admin/users", "/reports"]) {
+      for (const path of ["/leads", "/invoices", "/admin/users", "/reports"]) {
         expect(canAccessStaffRoute(role, path), `${role} -> ${path}`).toBe(false);
       }
     }
+    // The team lead reads the interpreter part of an order; the interpreter
+    // has no order access.
+    expect(canAccessStaffRoute("teamlead_interpreter", "/orders")).toBe(true);
+    expect(canAccessStaffRoute("interpreter", "/orders")).toBe(false);
   });
 
   it("locks the P0 operations workspaces to their capability contracts", () => {

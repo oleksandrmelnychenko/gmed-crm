@@ -19,6 +19,12 @@ export type TerminationSettlementLine = {
   is_cost_passthrough: boolean;
 };
 
+/**
+ * Settlement figures on the account-statement basis:
+ * `balance = invoiced + uninvoiced - paid`. `uninvoiced` is what accrued but
+ * is not on a released invoice (uninvoiced services, third-party costs still
+ * to re-invoice, drafts); `billable` is what "create final invoice" bills now.
+ */
 export type TerminationFigures = {
   accrued_net: DecimalString;
   accrued_gross: DecimalString;
@@ -26,6 +32,10 @@ export type TerminationFigures = {
   paid_gross: DecimalString;
   balance_gross: DecimalString;
   uninvoiced_gross: DecimalString;
+  /** Live figures only; snapshots taken at termination do not carry them. */
+  draft_gross?: DecimalString;
+  billable_gross?: DecimalString;
+  unmatched_invoiced_gross?: DecimalString;
 };
 
 export type TerminationPreviewOrder = TerminationFigures & {
@@ -78,7 +88,8 @@ export type TerminationSettlement = {
   lines: TerminationSettlementLine[];
   final_invoice: {
     id: string;
-    invoice_number: string;
+    /** Assigned when the draft is released. */
+    invoice_number: string | null;
     status: string;
     total_gross: DecimalString;
   } | null;
@@ -95,7 +106,8 @@ export type TerminationSettlementFilter = TerminationSettlementStatus | "all";
 
 export type FinalInvoiceResult = {
   id: string;
-  invoice_number: string;
+  /** Drafts carry no number until they are released. */
+  invoice_number: string | null;
   termination_settlement_id: string;
   idempotent_replay: boolean;
 };

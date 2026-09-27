@@ -5,6 +5,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod access;
+pub mod app_time;
 pub mod audit;
 pub mod auth;
 // Legacy BMP 2.2 encoder fixtures; printable plans use the Unicode PDF renderer.

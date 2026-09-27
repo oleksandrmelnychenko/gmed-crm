@@ -33,6 +33,7 @@ import {
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
 import { ApiRequestError } from "@/lib/api";
+import { appDateTimeFormat, appWallClock } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,10 +86,10 @@ const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as c
 function formatChatDay(iso: string, lang: "de" | "ru") {
   const value = new Date(iso);
   if (Number.isNaN(value.getTime())) return iso.slice(0, 10);
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "numeric",
     month: "long",
-    year: value.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+    year: appWallClock(value).year === appWallClock().year ? undefined : "numeric",
   }).format(value);
 }
 

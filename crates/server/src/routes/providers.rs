@@ -960,7 +960,7 @@ async fn list_providers(
                   NULLIF(
                     GREATEST(
                         COALESCE((
-                            SELECT MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC')
+                            SELECT MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'Europe/Berlin')
                             FROM appointments a
                             WHERE a.provider_id = p.id
                         ), to_timestamp(0)),
@@ -6454,8 +6454,8 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
         return Err("Currency is too long");
     }
 
-    let valid_from = parse_date(body.valid_from, "valid_from")?
-        .unwrap_or_else(|| chrono::Utc::now().date_naive());
+    let valid_from =
+        parse_date(body.valid_from, "valid_from")?.unwrap_or_else(crate::app_time::today);
     let valid_to = parse_date(body.valid_to, "valid_to")?;
 
     if let Some(valid_to) = valid_to
@@ -9911,7 +9911,7 @@ async fn load_provider_patients_json(
                        COUNT(*)::bigint AS appointment_count,
                        0::bigint AS leistung_count,
                        0::bigint AS concierge_count,
-                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC') AS last_interaction_at
+                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'Europe/Berlin') AS last_interaction_at
                 FROM appointments a
                 WHERE a.provider_id = $1
                   AND ($2::uuid IS NULL OR a.doctor_id = $2)
@@ -10127,7 +10127,7 @@ async fn load_provider_interactions_json(
                        a.appointment_type AS appointment_type,
                        a.location AS location,
                        a.notes AS notes,
-                       (a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC' AS occurred_at,
+                       (a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'Europe/Berlin' AS occurred_at,
                        NULL::numeric AS quantity,
                        NULL::numeric AS unit_price,
                        NULL::text AS currency
@@ -10153,7 +10153,10 @@ async fn load_provider_interactions_json(
                        ol.description AS title,
                        NULL::text AS appointment_type,
                        NULL::text AS location,
-                       ol.notes AS notes,
+                       -- Lines billed from an interpreter report may carry the
+                       -- report's free text; it stays with the appointment.
+                       CASE WHEN ol.source_interpreter_report_id IS NULL
+                            THEN ol.notes END AS notes,
                        COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS occurred_at,
                        ol.quantity AS quantity,
                        ol.unit_price AS unit_price,

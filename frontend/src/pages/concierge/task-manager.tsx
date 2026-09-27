@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { SelectField } from "@/components/ui/select-field";
 import { Section } from "@/components/ui-shell";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
@@ -50,7 +51,10 @@ import {
   type ConciergeTaskStatus,
 } from "./model";
 import {
+  isSameTaskCalendarMonth,
   isoWeekNumber,
+  shiftTaskCalendarFocus,
+  taskCalendarDayKey,
   taskCalendarDays,
   taskCalendarWeeks,
   taskOccursOnDay,
@@ -58,7 +62,7 @@ import {
 } from "./task-calendar";
 import { TaskTimeline } from "./task-timeline";
 import { TaskWorkflowDialog } from "./task-workflow-dialog";
-import { taskWorkflowCounts } from "./task-workflow";
+import { taskWorkflowCounts, type TaskWorkflowCount } from "./task-workflow";
 
 type TaskView = "board" | "list" | "calendar" | "timeline";
 type CalendarScale = TaskCalendarScale;
@@ -217,15 +221,12 @@ const copy = {
 const statuses = ["open", "in_progress", "on_hold", "review", "completed", "cancelled"] as const;
 
 function dateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return taskCalendarDayKey(date);
 }
 
 function formatDateTime(value: Date | null, lang: Lang) {
   if (!value) return "—";
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
@@ -296,7 +297,7 @@ function TaskCard({
 }: {
   task: ConciergeTask;
   parentTask?: ConciergeTask;
-  subCount?: { total: number; paused: number };
+  subCount?: TaskWorkflowCount;
   assignedToRole?: string;
   lang: Lang;
   now: Date;
@@ -325,6 +326,7 @@ function TaskCard({
   const terminal = task.status === "completed" || task.status === "cancelled";
   const workflowLabel = lang === "ru" ? "Процесс задачи" : "Aufgabenablauf";
   const countLabel = lang === "ru" ? "Подзадачи и события" : "Unteraufgaben und Termine";
+  const doneLabel = lang === "ru" ? "Выполнено" : "Erledigt";
   const parentLabel = lang === "ru" ? "В составе" : "Gehört zu";
   return (
     <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md focus:outline-2 focus:outline-primary focus:outline-offset-2", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
@@ -337,7 +339,7 @@ function TaskCard({
         ) : terminal ? (
           <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
         ) : null}
-        <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className="min-w-4 rounded-full bg-primary/10 px-1 font-mono text-[10px] leading-4">{subCount?.total ?? 0}</span></Button>
+        <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className={cn("min-w-4 rounded-full px-1 font-mono text-[10px] leading-4", subCount?.active && subCount.done === subCount.active ? "bg-emerald-100 text-emerald-700" : "bg-primary/10")}>{subCount?.total ? `${subCount.done}/${subCount.active}` : 0}</span></Button>
         {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
         {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>
@@ -559,7 +561,8 @@ export function ConciergeTaskManager({
   const calendarWeeks = useMemo(() => taskCalendarWeeks(days), [days]);
   const calendarLocale = lang === "de" ? "de-DE" : "ru-RU";
   const weekdayLabels = useMemo(() => {
-    return Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(calendarLocale, { weekday: "short" }).format(new Date(2026, 0, 5 + index)));
+    // 5 Jan 2026 is a Monday; noon UTC is the same day in Berlin.
+    return Array.from({ length: 7 }, (_, index) => appDateTimeFormat(calendarLocale, { weekday: "short" }).format(new Date(Date.UTC(2026, 0, 5 + index, 12))));
   }, [calendarLocale]);
   const visibleStatuses = filters.archive === "archived"
     ? statuses.filter((status) => status === "completed" || status === "cancelled")
@@ -586,10 +589,7 @@ export function ConciergeTaskManager({
   }, []);
 
   function shiftCalendar(direction: number) {
-    const next = new Date(focusDate);
-    if (calendarScale === "month") next.setMonth(next.getMonth() + direction);
-    else next.setDate(next.getDate() + direction * (calendarScale === "week" ? 7 : 1));
-    setFocusDate(next);
+    setFocusDate(shiftTaskCalendarFocus(focusDate, calendarScale, direction));
   }
 
   function toggleCalendarDay(key: string) {
@@ -716,7 +716,7 @@ export function ConciergeTaskManager({
             <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(-1)}><ChevronLeft /></Button><Button type="button" size="sm" variant="ghost" onClick={() => setFocusDate(new Date())}>{labels.today}</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => shiftCalendar(1)}><ChevronRight /></Button></div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="rounded-md tabular-nums">{labels.calendarWeekShort} {isoWeekNumber(focusDate)}</Badge>
-              <h3 className="text-sm font-semibold">{new Intl.DateTimeFormat(calendarLocale, { month: "long", year: "numeric" }).format(focusDate)}</h3>
+              <h3 className="text-sm font-semibold">{appDateTimeFormat(calendarLocale, { month: "long", year: "numeric" }).format(focusDate)}</h3>
             </div>
             <div className="flex gap-1">{(["day", "week", "month"] as const).map((scale) => <Button key={scale} type="button" size="sm" variant={calendarScale === scale ? "secondary" : "ghost"} className="h-8 text-xs" onClick={() => setCalendarScale(scale)}>{labels[scale]}</Button>)}</div>
           </div>
@@ -733,7 +733,7 @@ export function ConciergeTaskManager({
                   return (
                     <div key={day.toISOString()} className="min-h-28 border-b p-1.5">
                       <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
-                        {new Intl.DateTimeFormat(calendarLocale, { weekday: "short", day: "2-digit", month: "long" }).format(day)}
+                        {appDateTimeFormat(calendarLocale, { weekday: "short", day: "2-digit", month: "long" }).format(day)}
                       </button>
                       <div className="space-y-1">
                         {visibleRows.map((task) => (
@@ -767,11 +767,11 @@ export function ConciergeTaskManager({
                       const hiddenCount = Math.max(0, rows.length - visibleLimit);
                       const expanded = expandedCalendarDays.has(key);
                       const visibleRows = expanded ? rows : rows.slice(0, visibleLimit);
-                      const outsideMonth = calendarScale === "month" && day.getMonth() !== focusDate.getMonth();
+                      const outsideMonth = calendarScale === "month" && !isSameTaskCalendarMonth(day, focusDate);
                       return (
                         <div key={day.toISOString()} className={cn("min-h-28 border-b border-r p-1.5 last:border-r-0", outsideMonth && "bg-muted/30 text-muted-foreground")}>
                           <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
-                            {new Intl.DateTimeFormat(calendarLocale, { day: "2-digit" }).format(day)}
+                            {appDateTimeFormat(calendarLocale, { day: "2-digit" }).format(day)}
                           </button>
                           <div className="space-y-1">
                             {visibleRows.map((task) => (

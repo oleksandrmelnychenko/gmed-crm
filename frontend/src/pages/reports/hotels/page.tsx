@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -26,11 +27,11 @@ import { breakfastModes, decimal, emptyHotelGroup, filterHotelStays, groupHotels
 const panelClass = "rounded-xl border border-border/70 bg-card shadow-sm";
 const statusOptions = ["committed", "completed", "in_service", "future", "confirmed", "booked", "planned", "cancelled", "all"] as const;
 function berlinToday() {
-  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(new Date());
+  return appDateKey();
 }
 function defaultPeriod() { const year = berlinToday().slice(0, 4); return { from: `${year}-01-01`, to: `${year}-12-31` }; }
 function dateLabel(value: string | null, lang: Lang) {
-  return value ? new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)) : "—";
+  return value ? appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)) : "—";
 }
 
 function RoomEditor({ stay, lang, editable, onSaved, onDirty }: { stay: HotelStay; lang: Lang; editable: boolean; onSaved: () => void; onDirty: (id: string, dirty: boolean) => void }) {
@@ -115,7 +116,7 @@ function HotelStatisticsPageContent() {
   const currencies = [...new Set([filters.currency, ...(workspace?.rows ?? []).map(row => row.currency)])].sort();
   const money = (cents: bigint) => formatMoneyAmount(decimal(cents), filters.currency);
   const monthly = monthlyCosts(rows, period.from, period.to).map(row => ({
-    ...row, label: new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(`${row.month}-01T00:00:00Z`)),
+    ...row, label: appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(`${row.month}-01T00:00:00Z`)),
     // Empty months are measured zero; unpriced bookings remain gaps, not zero-cost stays.
     actual: row.bookings && !row.known ? null : Number(row.actual) / 100,
     estimated: row.bookings && !row.known ? null : Number(row.estimated) / 100,

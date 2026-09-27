@@ -25,7 +25,9 @@ import {
   canAssignConciergeTaskToRole,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
+  canMarkConciergeTaskNotRequired,
   canModifyConciergeTask,
+  conciergeTaskNotRequiredPath,
   filterConciergeServices,
   filterConciergeTasks,
   filterConciergeTaskAssignees,
@@ -206,6 +208,28 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canDeleteConciergeTask({ ...own, status: "in_progress" }, "creator", "interpreter")).toBe(false);
   });
 
+  it("offers 'not required' instead of deleting a checklist task", () => {
+    const checklistTask = task({
+      assigned_by: "creator",
+      assigned_by_role: "patient_manager",
+      workflow_checklist_item_id: "item-1",
+      workflow_checklist_scope_type: "order",
+      workflow_checklist_scope_id: "order-1",
+    });
+    expect(canDeleteConciergeTask(checklistTask, "creator", "patient_manager")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired(checklistTask, "creator", "patient_manager")).toBe(true);
+    expect(canMarkConciergeTaskNotRequired({ ...checklistTask, status: "completed" }, "creator", "patient_manager")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired({ ...checklistTask, workflow_checklist_item_id: null }, "creator", "patient_manager")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired(checklistTask, "someone", "interpreter")).toBe(false);
+    expect(conciergeTaskNotRequiredPath(checklistTask))
+      .toBe("/orders/order-1/workflow-checklist/item-1/not-required");
+    expect(conciergeTaskNotRequiredPath({ ...checklistTask, workflow_checklist_scope_type: "patient", workflow_checklist_scope_id: "patient-1" }))
+      .toBe("/patients/patient-1/workflow-checklist/item-1/not-required");
+    const refused = Object.assign(new Error("server text"), { body: { code: "workflow_checklist_task_delete" } });
+    expect(conciergeTaskErrorMessage(refused, "ru", "Error")).toContain("Не требуется");
+    expect(conciergeTaskErrorMessage(refused, "de", "Error")).toContain("Nicht erforderlich");
+  });
+
   it("explains why a parent cannot be deleted without cascading into children", () => {
     expect(conciergeTaskErrorMessage("Delete subtasks and events before deleting this task", "ru", "Error"))
       .toContain("Сначала удалите подзадачи");
@@ -364,7 +388,10 @@ function provider(overrides: Partial<ConciergeProvider> = {}): ConciergeProvider
 
 describe("concierge workspace model", () => {
   it("builds a stable human-readable task code", () => {
-    expect(conciergeTaskCode(task({ id: "cba1c6d0-e03d-4087-88d0-9eb825893864" }))).toBe("TASK-CBA1C6D0");
+    expect(conciergeTaskCode(task({ id: "cba1c6d0-e03d-4087-88d0-9eb825893864" }))).toBe("TASK-CBA1-25893864");
+    // Seeded ids share their start; their codes must still differ.
+    expect(conciergeTaskCode(task({ id: "12900000-0000-0000-0000-000000000001" })))
+      .not.toBe(conciergeTaskCode(task({ id: "12900000-0000-0000-0000-000000000002" })));
   });
 
   it("filters task-manager rows by assignee, timing and plain-language search", () => {
@@ -531,6 +558,44 @@ describe("concierge workspace model", () => {
     );
 
     expect(stats).toEqual({ active: 2, today: 2, overdue: 1, readyForBilling: 1 });
+  });
+
+  it("decides 'today' by the Berlin calendar day, whatever the browser zone", () => {
+    // 27 Sep 23:30 in Berlin, already 28 Sep in Kyiv.
+    const now = new Date("2026-09-27T21:30:00Z");
+    // 27 Sep 00:30 in Berlin (still 26 Sep in UTC) and 28 Sep 00:30 in Berlin (still 27 Sep in UTC).
+    const berlinToday = "2026-09-26T22:30:00Z";
+    const berlinTomorrow = "2026-09-27T22:30:00Z";
+
+    expect(conciergeWorkspaceStats([
+      service({ id: "today", starts_at: berlinToday }),
+      service({ id: "tomorrow", starts_at: berlinTomorrow }),
+    ], now).today).toBe(1);
+
+    const rows = [
+      task({ id: "today", due_at: berlinToday }),
+      task({ id: "tomorrow", due_at: berlinTomorrow }),
+    ];
+    expect(filterConciergeTasks(rows, {
+      query: "",
+      assignee: "all",
+      status: "all",
+      priority: "all",
+      kind: "all",
+      audience: "all",
+      timing: "today",
+      archive: "active",
+    }, now).map((item) => item.id)).toEqual(["today"]);
+
+    const [workload] = conciergeTaskWorkload(rows.map((row) => ({ ...row, assigned_to: "concierge-1" })), [
+      { id: "concierge-1", name: "Hans", email: "hans@example.test", role: "concierge", is_active: true },
+    ], now);
+    expect(workload.today).toBe(1);
+
+    const providers = new Map<string, ConciergeProvider>();
+    const services = [service({ id: "late", starts_at: "2026-09-27T21:30:00Z" }), service({ id: "early", starts_at: berlinTomorrow })];
+    expect(buildConciergeRouteStops(services, [], providers, "2026-09-27").map((stop) => stop.id)).toEqual(["service:late"]);
+    expect(buildConciergeRouteStops(services, [], providers, "2026-09-28").map((stop) => stop.id)).toEqual(["service:early"]);
   });
 
   it("calculates actual cost variance only when both amounts are valid", () => {

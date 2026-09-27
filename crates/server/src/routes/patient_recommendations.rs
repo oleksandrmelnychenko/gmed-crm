@@ -1278,7 +1278,7 @@ fn parse_due_at(value: Option<String>) -> Result<Option<DateTime<Utc>>, axum::re
         let Some(naive) = date.and_hms_opt(12, 0, 0) else {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid due_at"));
         };
-        return Ok(Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc)));
+        return Ok(Some(crate::app_time::from_local(naive)));
     }
 
     Err(err(

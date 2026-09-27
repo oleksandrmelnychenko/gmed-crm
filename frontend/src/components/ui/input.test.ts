@@ -6,6 +6,8 @@ import {
   getTimePickerReferenceDate,
   normalizeInputStep,
   parseTimeValue,
+  PICKER_LOCALE_TEXT,
+  pickerVisibleLabel,
   pickerFieldReadOnly,
   timePickerMinutesStep,
 } from "./input";
@@ -63,5 +65,29 @@ describe("Input", () => {
       "2000-01-01 23:59",
     );
     expect(parseTimeValue("24:00")).toBeNull();
+  });
+
+  it("gives the pickers the UI language instead of English CANCEL/OK and DD.MM.YYYY", () => {
+    expect(PICKER_LOCALE_TEXT.ru.cancelButtonLabel).toBe("Отмена");
+    expect(PICKER_LOCALE_TEXT.de.cancelButtonLabel).toBe("Abbrechen");
+    expect(PICKER_LOCALE_TEXT.ru.fieldDayPlaceholder?.({} as never)).toBe("ДД");
+    expect(PICKER_LOCALE_TEXT.de.fieldDayPlaceholder?.({} as never)).toBe("TT");
+    expect(PICKER_LOCALE_TEXT.ru.fieldYearPlaceholder?.({ digitAmount: 4 } as never)).toBe("ГГГГ");
+  });
+
+  it("names a date field by the text of its visible label, not by the field itself", () => {
+    const labelText = "Срок выполнения";
+    const field = { remove() {} };
+    const clone = {
+      querySelectorAll: () => [field],
+      textContent: `  ${labelText}\n  `,
+    };
+    const label = { htmlFor: "", cloneNode: () => clone };
+    const anchor = {
+      closest: (selector: string) => (selector === "label" ? label : null),
+      ownerDocument: { querySelectorAll: () => [] },
+    };
+    expect(pickerVisibleLabel(anchor as unknown as HTMLElement)).toBe(labelText);
+    expect(pickerVisibleLabel(null)).toBeUndefined();
   });
 });

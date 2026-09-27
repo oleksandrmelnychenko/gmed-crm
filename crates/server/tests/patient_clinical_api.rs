@@ -3183,7 +3183,7 @@ async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
     let ceo_bearer = auth_header_for(ceo_id, "ceo");
 
     // A passport expiring inside the 90-day warning window (30 days out).
-    let soon = (chrono::Utc::now().date_naive() + chrono::Duration::days(30)).to_string();
+    let soon = (gmed_server::app_time::today() + chrono::Duration::days(30)).to_string();
     let (status, _) = json_request(
         &app,
         "POST",

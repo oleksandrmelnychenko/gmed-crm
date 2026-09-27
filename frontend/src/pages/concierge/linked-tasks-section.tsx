@@ -10,6 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
@@ -24,6 +25,7 @@ import {
   conciergeTaskErrorMessage,
   filterConciergeTaskAssignees,
   isConciergeTaskActive,
+  isConciergeTaskOverdue,
   type ConciergeAssignee,
   type ConciergeProvider,
   type ConciergeTask,
@@ -59,6 +61,7 @@ const copy = {
     cancelled: "Storniert",
     task_kind: "Aufgabe",
     event_kind: "Termin",
+    overdue: "Überfällig",
   },
   ru: {
     title: "Связанные задачи",
@@ -82,6 +85,7 @@ const copy = {
     cancelled: "Отменена",
     task_kind: "Задача",
     event_kind: "Событие",
+    overdue: "Просрочено",
   },
 } as const satisfies Record<Lang, Record<string, string>>;
 
@@ -145,7 +149,7 @@ function taskDateLabel(task: ConciergeTask, lang: Lang, fallback: string) {
   if (!value) return fallback;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return fallback;
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -362,10 +366,24 @@ export function LinkedTasksSection({
                 </Badge>
               </div>
               <span className="truncate text-xs text-muted-foreground">{task.assigned_to_name || "—"}</span>
-              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <CalendarClock className="size-3.5 shrink-0" />
-                {taskDateLabel(task, lang, labels.noDate)}
-              </span>
+              {isConciergeTaskOverdue(task, new Date()) ? (
+                <span
+                  data-testid={`linked-task-overdue-${task.id}`}
+                  className="inline-flex flex-wrap items-center gap-1.5 text-xs font-medium text-rose-700"
+                  title={labels.overdue}
+                >
+                  <CalendarClock className="size-3.5 shrink-0" />
+                  {taskDateLabel(task, lang, labels.noDate)}
+                  <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">
+                    {labels.overdue}
+                  </Badge>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <CalendarClock className="size-3.5 shrink-0" />
+                  {taskDateLabel(task, lang, labels.noDate)}
+                </span>
+              )}
               <Eye className="hidden size-4 text-muted-foreground group-hover:text-orange-700 md:block" />
             </button>
           ))}

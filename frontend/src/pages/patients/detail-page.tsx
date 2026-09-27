@@ -26,6 +26,15 @@ import {
   localizeWorkflowGroupLabel,
 } from "@/lib/workflow-labels";
 import { clearApiCache } from "@/lib/api";
+import {
+  addDaysToDateKey,
+  appDateKey,
+  appDateKeyOf,
+  appDateTimeFormat,
+  berlinLocalInputToIso,
+  dateOrInstant,
+  isoToBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -246,18 +255,18 @@ function patientName(p: PatientDetail) {
 function fmtDate(v?: string | null, fb = "") {
   if (!v) return fb;
   try {
-    return new Intl.DateTimeFormat(patientDateLocale(), {
+    return appDateTimeFormat(patientDateLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
-    }).format(new Date(v.includes("T") ? v : `${v}T00:00:00`));
+    }).format(dateOrInstant(v));
   } catch { return v; }
 }
 
 function fmtDateTime(v?: string | null, fb = "") {
   if (!v) return fb;
   try {
-    return new Intl.DateTimeFormat(patientDateLocale(), {
+    return appDateTimeFormat(patientDateLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -301,14 +310,6 @@ function patientDetailUnknownEnumLabel(value: string | null | undefined) {
 function toOptional(value: string) {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
-}
-
-function toDateTimeLocal(value?: string | null) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return shifted.toISOString().slice(0, 16);
 }
 
 
@@ -475,7 +476,7 @@ function blankContractForm(): ContractFormState {
 function contractToForm(contract: ContractItem): ContractFormState {
   return {
     status: (contract.status as ContractStatus) ?? "draft",
-    signedAt: toDateTimeLocal(contract.signed_at),
+    signedAt: isoToBerlinLocalInput(contract.signed_at),
   };
 }
 
@@ -499,7 +500,7 @@ function blankWorkflowChecklistForm(): WorkflowChecklistFormState {
 
 function blankPatientVitalForm(): PatientVitalFormState {
   return {
-    measuredAt: toDateTimeLocal(new Date().toISOString()),
+    measuredAt: isoToBerlinLocalInput(new Date()),
     bpSystolic: "",
     bpDiastolic: "",
     heartRate: "",
@@ -512,7 +513,7 @@ function blankPatientVitalForm(): PatientVitalFormState {
 
 function blankPatientCardEntryForm(): PatientCardEntryFormState {
   return {
-    entryDate: toDateTimeLocal(new Date().toISOString()),
+    entryDate: isoToBerlinLocalInput(new Date()),
     category: PATIENT_CARD_ENTRY_CATEGORY_OPTIONS[0].value,
     source: "",
     content: "",
@@ -521,7 +522,7 @@ function blankPatientCardEntryForm(): PatientCardEntryFormState {
 
 function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
   return {
-    orderDate: toDateTimeLocal(new Date().toISOString()),
+    orderDate: isoToBerlinLocalInput(new Date()),
     orderType: PATIENT_MEDICAL_ORDER_TYPE_OPTIONS[0].value,
     title: "",
     instructions: "",
@@ -532,7 +533,7 @@ function blankPatientMedicalOrderForm(): PatientMedicalOrderFormState {
 
 function blankPatientRiskScoreForm(): PatientRiskScoreFormState {
   return {
-    computedAt: toDateTimeLocal(new Date().toISOString()),
+    computedAt: isoToBerlinLocalInput(new Date()),
     scoreType: PATIENT_RISK_SCORE_TYPE_OPTIONS[0].value,
     scoreValue: "",
     scaleMax: "",
@@ -717,13 +718,7 @@ function timelineItemSurfaceClass(status: string) {
 }
 
 function timelineDateGroupKey(value?: string | null) {
-  if (!value) return "unknown";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "unknown";
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKeyOf(value) || "unknown";
 }
 
 function timelineDateGroupLabel(value: string | null | undefined) {
@@ -732,21 +727,12 @@ function timelineDateGroupLabel(value: string | null | undefined) {
     return patientDetailText("timeline_date_unknown");
   }
 
-  const date = new Date(value!);
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-
-  const sameDay = (left: Date, right: Date) =>
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate();
-
-  if (sameDay(date, today)) {
+  const today = appDateKey();
+  if (key === today) {
     return patientDetailText("timeline_date_today");
   }
 
-  if (sameDay(date, yesterday)) {
+  if (key === addDaysToDateKey(today, -1)) {
     return patientDetailText("timeline_date_yesterday");
   }
 
@@ -862,6 +848,7 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "case.medication_expiry_flagged",
   "workflow_checklist_item.created",
   "workflow_checklist_item.completed",
+  "workflow_checklist_item.updated",
 ] as const;
 
 type PatientDetailPageState = {
@@ -1368,12 +1355,12 @@ function usePatientDetailPageContent() {
   );
   const invoiceOverdueCount = useMemo(() => {
     if (!isInvoicesTabActive) return 0;
-    const now = new Date();
+    const today = appDateKey();
     return invoices.filter((item) => {
       if (item.status === "overdue") return true;
       if (moneyValueNumber(item.balance_due) <= 0 || !item.due_date) return false;
-      const dueDate = new Date(item.due_date);
-      return !Number.isNaN(dueDate.getTime()) && dueDate < now;
+      const dueDate = appDateKeyOf(item.due_date);
+      return Boolean(dueDate) && dueDate < today;
     }).length;
   }, [invoices, isInvoicesTabActive]);
   const hasTimelineFilters =
@@ -1627,9 +1614,7 @@ function usePatientDetailPageContent() {
         item_text: workflowForm.itemText.trim(),
         owner_user_id: toOptional(workflowForm.ownerUserId),
         priority: workflowForm.priority,
-        due_date: workflowForm.dueDate
-          ? new Date(workflowForm.dueDate).toISOString()
-          : null,
+        due_date: berlinLocalInputToIso(workflowForm.dueDate),
       });
       toast.success(t.common_active);
       setWorkflowForm((current) => ({
@@ -1724,9 +1709,7 @@ function usePatientDetailPageContent() {
       await createFrameworkContract({
         patient_id: id,
         status: contractCreateForm.status,
-        signed_at: toOptional(contractCreateForm.signedAt)
-          ? new Date(contractCreateForm.signedAt).toISOString()
-          : null,
+        signed_at: berlinLocalInputToIso(contractCreateForm.signedAt),
       });
       toast.success(t.common_active);
       setContractCreateOpen(false);
@@ -1772,9 +1755,7 @@ function usePatientDetailPageContent() {
     try {
       await updateFrameworkContractStatus(contractStatusId, {
         status: contractStatusForm.status,
-        signed_at: toOptional(contractStatusForm.signedAt)
-          ? new Date(contractStatusForm.signedAt).toISOString()
-          : null,
+        signed_at: berlinLocalInputToIso(contractStatusForm.signedAt),
       });
       toast.success(t.common_active);
       setContractStatusId("");

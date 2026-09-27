@@ -605,7 +605,7 @@ test.describe("commercial live workflows", () => {
       name: /Zahlung nachverfolgen/i,
     });
     await expect(
-      dunningDialog.getByText(/Erste Mahnung|Первое напоминание/i),
+      dunningDialog.getByText(/Zahlungserinnerung|Напоминание об оплате/i),
     ).toBeVisible();
     await dunningDialog
       .getByRole("textbox", { name: DUNNING_NOTE_NAME })

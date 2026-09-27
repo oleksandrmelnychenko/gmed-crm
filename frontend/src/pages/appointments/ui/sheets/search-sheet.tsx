@@ -274,7 +274,7 @@ function SearchSheet({
       </Field>
       <Field
         label={
-          tr.role_interpreter ??
+          // Interpreters are "Переводчик" here, not the generic "Сотрудник" role name.
           appointmentText("appointments_interpreter")
         }
       >

@@ -47,6 +47,18 @@ describe("roleDashboardDefinition", () => {
     }
   });
 
+  it.each(["teamlead_interpreter", "interpreter"] as const)(
+    "shows pending interpreter reports on the %s dashboard",
+    (role) => {
+      const keys = roleDashboardDefinition(role, "ru").metrics.map((metric) => metric.key);
+      // The approval rate compares approved with submitted hours, so a pending
+      // report can no longer read as "100 % approved".
+      expect(keys).toContain("pending_reports");
+      expect(keys).toContain("hours_approval_rate_pct");
+      expect(keys).not.toContain("utilization_rate_pct");
+    },
+  );
+
   it("keeps the IT admin preset technical", () => {
     const definition = roleDashboardDefinition("it_admin", "de");
     const keys = definition.metrics.map((metric) => metric.key);

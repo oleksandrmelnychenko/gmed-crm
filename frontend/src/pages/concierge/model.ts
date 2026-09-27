@@ -1,3 +1,4 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import { hasCapability } from "@/lib/permissions";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 
@@ -23,6 +24,8 @@ export type ConciergeKeyAction = (typeof CONCIERGE_KEY_ACTIONS)[number];
 
 export type ConciergeService = {
   id: string;
+  /** The title is a placeholder hiding a medical appointment or provider. */
+  title_redacted?: boolean;
   patient_id: string;
   patient_name: string;
   patient_pid: string;
@@ -137,6 +140,9 @@ export type ConciergeTask = {
   id: string;
   parent_task_id?: string | null;
   child_count?: number;
+  /** Direct children that are completed / still open (not cancelled). */
+  child_completed_count?: number;
+  child_open_count?: number;
   kind: "task" | "event";
   title: string;
   note: string | null;
@@ -174,6 +180,13 @@ export type ConciergeTask = {
   provider_email: string | null;
   project_id: string | null;
   project_name: string | null;
+  /** Order the task belongs to, e.g. a generated order checklist task. */
+  order_id?: string | null;
+  order_number?: string | null;
+  /** Order or patient checklist item this task carries out. */
+  workflow_checklist_item_id?: string | null;
+  workflow_checklist_scope_type?: "order" | "patient" | null;
+  workflow_checklist_scope_id?: string | null;
   external_assignee_type: string | null;
   external_assignee_name: string | null;
   external_assignee_phone: string | null;
@@ -297,6 +310,21 @@ export function canModifyConciergeTask(
   return canManageConciergeTaskCreatorRole(actorRole, task.assigned_by_role);
 }
 
+/**
+ * Attaching files: the creator or a higher role, and the assignee of the task
+ * (who documents its own work). The assignee removes only its own uploads.
+ */
+export function canAttachToConciergeTask(
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  return Boolean(
+    actorId
+    && (task.assigned_to === actorId || canModifyConciergeTask(task, actorId, actorRole)),
+  );
+}
+
 export function canChangeConciergeTaskStatus(
   task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
   actorId: string | null | undefined,
@@ -336,13 +364,15 @@ export function availableConciergeTaskStatuses(
 }
 
 export function canDeleteConciergeTask(
-  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number; child_count?: number },
+  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number; child_count?: number; workflow_checklist_item_id?: string | null },
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
   if (!canModifyConciergeTask(task, actorId, actorRole)
     || task.archived_at
-    || (task.child_count ?? 0) > 0) return false;
+    || (task.child_count ?? 0) > 0
+    // A checklist task is closed as "not required" instead of deleted.
+    || task.workflow_checklist_item_id) return false;
   // Concierge ownership comes from the creator, never from the assignee.
   if (actorRole === "concierge" && task.assigned_by === actorId) return true;
   return task.status === "open"
@@ -362,6 +392,35 @@ const TASK_ACCESS_ERROR = "Only the task assignee, creator, or a higher role can
 const TASK_SERVICE_ERROR = "concierge_service_id must reference an assigned non-medical service";
 const TASK_SERVICE_CONVERTED_ERROR = "Concierge service request already converted to a task";
 
+/**
+ * A checklist task that is still open can be closed as "not required": the
+ * checklist item and the task are closed together and can be reopened on the
+ * order page. Deleting it would leave the item open behind a dead task.
+ */
+export function canMarkConciergeTaskNotRequired(
+  task: Pick<ConciergeTask, "status" | "archived_at" | "assigned_by" | "assigned_by_role" | "workflow_checklist_item_id" | "workflow_checklist_scope_id">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  return Boolean(
+    task.workflow_checklist_item_id
+    && task.workflow_checklist_scope_id
+    && !task.archived_at
+    && task.status !== "completed"
+    && task.status !== "cancelled"
+    && ["ceo", "patient_manager", "concierge"].includes(actorRole ?? "")
+    && canModifyConciergeTask(task, actorId, actorRole),
+  );
+}
+
+export function conciergeTaskNotRequiredPath(
+  task: Pick<ConciergeTask, "workflow_checklist_item_id" | "workflow_checklist_scope_type" | "workflow_checklist_scope_id">,
+) {
+  if (!task.workflow_checklist_item_id || !task.workflow_checklist_scope_id) return null;
+  const scope = task.workflow_checklist_scope_type === "patient" ? "patients" : "orders";
+  return `/${scope}/${task.workflow_checklist_scope_id}/workflow-checklist/${task.workflow_checklist_item_id}/not-required`;
+}
+
 export function conciergeTaskErrorMessage(
   error: unknown,
   lang: "de" | "ru",
@@ -373,6 +432,16 @@ export function conciergeTaskErrorMessage(
       : typeof error === "string"
         ? error
         : "";
+  const code =
+    error && typeof error === "object" && "body" in error
+      ? (error as { body?: { code?: unknown } | null }).body?.code
+      : undefined;
+
+  if (code === "workflow_checklist_task_delete") {
+    return lang === "ru"
+      ? "Эта задача выполняет пункт чек-листа заказа или пациента, поэтому её нельзя удалить. Отметьте её как «Не требуется» — пункт чек-листа закроется вместе с задачей."
+      : "Diese Aufgabe gehört zu einem Checklistenpunkt des Auftrags oder Patienten und kann nicht gelöscht werden. Markieren Sie sie als „Nicht erforderlich“ – der Checklistenpunkt wird zusammen mit der Aufgabe geschlossen.";
+  }
 
   if (message === TASK_STATUS_PERMISSION_ERROR) {
     return lang === "ru"
@@ -641,14 +710,14 @@ export function isConciergeServiceOverdue(service: ConciergeService, now: Date):
   return Boolean(startsAt && startsAt < now && !TERMINAL_STATUSES.has(service.status));
 }
 
+/** Whether two instants fall on the same Berlin calendar day. */
+function isSameAppDay(left: Date, right: Date): boolean {
+  return appDateKey(left) === appDateKey(right);
+}
+
 export function isConciergeServiceToday(service: ConciergeService, now: Date): boolean {
   const startsAt = validDate(service.starts_at);
-  return Boolean(
-    startsAt &&
-      startsAt.getFullYear() === now.getFullYear() &&
-      startsAt.getMonth() === now.getMonth() &&
-      startsAt.getDate() === now.getDate(),
-  );
+  return Boolean(startsAt && isSameAppDay(startsAt, now));
 }
 
 export function isConciergeTaskOverdue(task: ConciergeTask, now: Date): boolean {
@@ -670,9 +739,15 @@ export function conciergeTaskDisplayTitle(task: ConciergeTask, lang: "de" | "ru"
   return localizeTaskTitle(task.title, lang);
 }
 
+/**
+ * Short human code of a task. The first 8 characters alone are not unique:
+ * seeded and imported ids share their prefix (all demo tasks read
+ * TASK-12900000), so the code keeps the start and the end of the id.
+ */
 export function conciergeTaskCode(task: Pick<ConciergeTask, "id">): string {
   const compactId = task.id.replace(/[^a-z0-9]/gi, "").toUpperCase();
-  return `TASK-${compactId.slice(0, 8)}`;
+  if (compactId.length <= 12) return `TASK-${compactId}`;
+  return `TASK-${compactId.slice(0, 4)}-${compactId.slice(-8)}`;
 }
 
 export function conciergeWorkspaceStats(
@@ -744,7 +819,9 @@ export function conciergeServiceDisplayTitle(
   service: ConciergeService,
   lang: "de" | "ru",
 ): string {
-  if (service.appointment_id) {
+  // The server replaces the title of a service tied to a medical appointment
+  // or provider with an English placeholder for roles that may not see it.
+  if (service.appointment_id || service.title_redacted) {
     return conciergeServiceTaxonomyLabel(service, lang) ||
       (lang === "ru" ? "Сервисный запрос" : "Serviceanfrage");
   }
@@ -863,10 +940,7 @@ export function filterConciergeTasks(
     const scheduled = conciergeTaskScheduledAt(task);
     if (filters.timing === "overdue" && !isConciergeTaskOverdue(task, now)) return false;
     if (filters.timing === "today") {
-      if (!scheduled
-        || scheduled.getFullYear() !== now.getFullYear()
-        || scheduled.getMonth() !== now.getMonth()
-        || scheduled.getDate() !== now.getDate()) return false;
+      if (!scheduled || !isSameAppDay(scheduled, now)) return false;
     }
     if (filters.timing === "upcoming") {
       if (!scheduled || scheduled < now || TERMINAL_STATUSES.has(task.status)) return false;
@@ -890,9 +964,7 @@ export function conciergeTaskWorkload(
         const scheduled = conciergeTaskScheduledAt(task);
         return Boolean(
           scheduled
-          && scheduled.getFullYear() === now.getFullYear()
-          && scheduled.getMonth() === now.getMonth()
-          && scheduled.getDate() === now.getDate()
+          && isSameAppDay(scheduled, now)
           && isConciergeTaskActive(task)
         );
       }).length,
@@ -1104,10 +1176,7 @@ export function conciergeServiceRouteAddress(
 function localDateKey(value: string): string | null {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return appDateKey(date);
 }
 
 export function buildConciergeRouteStops(

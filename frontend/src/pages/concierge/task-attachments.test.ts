@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vitest";
 
+import { canAttachToConciergeTask } from "./model";
 import {
+  canRemoveTaskAttachment,
   formatTaskAttachmentSize,
   filesMissingFromTaskAttachments,
   mergeTaskAttachmentFiles,
   TASK_ATTACHMENT_MAX_BYTES,
   taskAttachmentValidationError,
 } from "./task-attachments";
+
+describe("task attachment permissions", () => {
+  const task = { assigned_to: "assignee", assigned_by: "creator", assigned_by_role: "patient_manager" };
+
+  it("lets the assignee attach files to its own task", () => {
+    expect(canAttachToConciergeTask(task, "assignee", "concierge")).toBe(true);
+    expect(canAttachToConciergeTask(task, "creator", "patient_manager")).toBe(true);
+    expect(canAttachToConciergeTask(task, "someone-else", "concierge")).toBe(false);
+    expect(canAttachToConciergeTask(task, null, "concierge")).toBe(false);
+  });
+
+  it("lets the assignee remove only its own uploads", () => {
+    const assigneeAccess = { canModify: false, canUpload: true, currentUserId: "assignee" };
+    expect(canRemoveTaskAttachment({ uploaded_by: "assignee" }, assigneeAccess)).toBe(true);
+    expect(canRemoveTaskAttachment({ uploaded_by: "creator" }, assigneeAccess)).toBe(false);
+    expect(canRemoveTaskAttachment({ uploaded_by: "assignee" }, { canModify: true })).toBe(true);
+    expect(canRemoveTaskAttachment({ uploaded_by: "assignee" }, { canModify: false })).toBe(false);
+  });
+});
 
 describe("task attachments", () => {
   it("accepts PDF, image and Word files", () => {

@@ -143,6 +143,7 @@ export interface RevenueTranslations {
   revenue_unit_ride: string;
   revenue_unit_day: string;
   revenue_unit_appointment: string;
+  revenue_unit_item: string;
   revenue_filter_all_patients: string;
   revenue_filter_all_orders: string;
 
@@ -287,13 +288,32 @@ export interface RevenueTranslations {
   revenue_invoices_visibility_note: string;
   revenue_invoices_save_visibility: string;
   revenue_invoices_current_payer: string;
-  revenue_invoices_payer_relation_id: string;
+  revenue_invoices_payer_relation: string;
+  revenue_invoices_payer_relation_none: string;
   revenue_invoices_contact_name: string;
   revenue_invoices_email: string;
   revenue_invoices_phone: string;
   revenue_invoices_relationship: string;
   revenue_invoices_payer_notes: string;
-  revenue_invoices_optional_uuid: string;
+  revenue_invoices_payer_address_hint: string;
+  revenue_invoices_payer_address_street: string;
+  revenue_invoices_payer_address_zip: string;
+  revenue_invoices_payer_address_city: string;
+  revenue_invoices_payer_address_country: string;
+  revenue_invoices_recipient_payer: string;
+  revenue_invoices_recipient_patient: string;
+  revenue_invoices_recipient_address_missing: string;
+  revenue_invoices_draft_number: string;
+  revenue_invoices_draft_preview_pdf: string;
+  revenue_invoices_release_hint: string;
+  revenue_invoices_due_date_before_invoice_date: string;
+  revenue_invoices_due_date_locked: string;
+  revenue_invoices_document_draft_preview: string;
+  revenue_invoices_document_archived: string;
+  revenue_invoices_document_archived_on_first_download: string;
+  revenue_invoices_dunning_new_deadline: string;
+  revenue_invoices_dunning_letter: string;
+  revenue_invoices_dunning_letter_download: string;
   revenue_invoices_save_payer: string;
   revenue_invoices_redaction_invoice_hidden: string;
   revenue_invoices_redaction_amounts_hidden: string;
@@ -963,6 +983,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_unit_ride: "поездка",
   revenue_unit_day: "день",
   revenue_unit_appointment: "приём",
+  revenue_unit_item: "шт.",
   revenue_filter_all_patients: "Все пациенты",
   revenue_filter_all_orders: "Все заказы",
 
@@ -1143,13 +1164,37 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_visibility_note: "Примечание о видимости",
   revenue_invoices_save_visibility: "Сохранить видимость",
   revenue_invoices_current_payer: "Текущий плательщик",
-  revenue_invoices_payer_relation_id: "ID связи плательщика",
+  revenue_invoices_payer_relation: "Плательщик из связей пациента",
+  revenue_invoices_payer_relation_none: "Не выбран",
   revenue_invoices_contact_name: "Контактное имя",
   revenue_invoices_email: "Электронная почта",
   revenue_invoices_phone: "Телефон",
   revenue_invoices_relationship: "Отношение",
   revenue_invoices_payer_notes: "Примечания по плательщику",
-  revenue_invoices_optional_uuid: "необязательный UUID",
+  revenue_invoices_payer_address_hint:
+    "Адрес плательщика печатается в счёте. Если плательщик — пациент из связей, берётся адрес из его карточки, пока поля ниже пусты.",
+  revenue_invoices_payer_address_street: "Улица и дом",
+  revenue_invoices_payer_address_zip: "Индекс",
+  revenue_invoices_payer_address_city: "Город",
+  revenue_invoices_payer_address_country: "Страна",
+  revenue_invoices_recipient_payer: "Получатель счёта — плательщик",
+  revenue_invoices_recipient_patient: "Получатель счёта — пациент",
+  revenue_invoices_recipient_address_missing: "Нет почтового адреса получателя: счёт без адреса неполный",
+  revenue_invoices_draft_number: "Черновик (без номера)",
+  revenue_invoices_draft_preview_pdf: "Предпросмотр черновика (PDF)",
+  revenue_invoices_release_hint:
+    "При выпуске счёт получает номер и дату счёта (сегодня). Срок оплаты не может быть раньше даты счёта; если он не указан, ставится дата счёта + {days} дней. После выпуска счёт нельзя вернуть в черновик, а PDF сохраняется без изменений.",
+  revenue_invoices_due_date_before_invoice_date: "Срок оплаты не может быть раньше даты счёта (сегодня).",
+  revenue_invoices_due_date_locked:
+    "Срок оплаты выпущенного счёта не меняется. Новый срок задаётся напоминанием об оплате.",
+  revenue_invoices_document_draft_preview:
+    "Предпросмотр черновика. PDF сохраняется в архив при выпуске счёта.",
+  revenue_invoices_document_archived: "Архивный PDF от {date}: выдаётся без изменений.",
+  revenue_invoices_document_archived_on_first_download:
+    "Счёт выпущен до архивирования PDF: копия сохранится при первом открытии и дальше не изменится.",
+  revenue_invoices_dunning_new_deadline: "Новый срок оплаты",
+  revenue_invoices_dunning_letter: "Письмо",
+  revenue_invoices_dunning_letter_download: "PDF письма",
   revenue_invoices_save_payer: "Сохранить плательщика",
   revenue_invoices_redaction_invoice_hidden: "Счет скрыт от пациента",
   revenue_invoices_redaction_amounts_hidden: "Суммы скрыты от пациента",
@@ -1163,9 +1208,9 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoice_type_advance: "Авансовый",
   revenue_invoice_type_interim: "Промежуточный",
   revenue_invoice_type_final: "Финальный",
-  revenue_dunning_level_first: "Первое напоминание",
-  revenue_dunning_level_second: "Второе напоминание",
-  revenue_dunning_level_collections: "Передано на взыскание",
+  revenue_dunning_level_first: "Напоминание об оплате",
+  revenue_dunning_level_second: "1-е требование об оплате",
+  revenue_dunning_level_collections: "2-е (последнее) требование",
   revenue_accounting_direction_income: "Доход",
   revenue_accounting_direction_expense: "Расход",
   revenue_accounting_category_service_revenue: "Выручка по услугам",
@@ -1334,6 +1379,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_unit_ride: "Fahrt",
   revenue_unit_day: "Tag",
   revenue_unit_appointment: "Termin",
+  revenue_unit_item: "Stk.",
   revenue_filter_all_patients: "Alle Patienten",
   revenue_filter_all_orders: "Alle Aufträge",
 
@@ -1514,13 +1560,37 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoices_visibility_note: "Sichtbarkeitsnotiz",
   revenue_invoices_save_visibility: "Sichtbarkeit speichern",
   revenue_invoices_current_payer: "Aktueller Zahler",
-  revenue_invoices_payer_relation_id: "Zahler-Beziehungs-ID",
+  revenue_invoices_payer_relation: "Zahler aus den Beziehungen des Patienten",
+  revenue_invoices_payer_relation_none: "Keine Auswahl",
   revenue_invoices_contact_name: "Kontaktname",
   revenue_invoices_email: "E-Mail",
   revenue_invoices_phone: "Telefon",
   revenue_invoices_relationship: "Beziehung",
   revenue_invoices_payer_notes: "Zahlernotizen",
-  revenue_invoices_optional_uuid: "optionale UUID",
+  revenue_invoices_payer_address_hint:
+    "Die Zahleranschrift wird auf die Rechnung gedruckt. Ist der Zahler ein Patient aus den Beziehungen, gilt dessen Anschrift, solange die Felder unten leer sind.",
+  revenue_invoices_payer_address_street: "Straße und Hausnummer",
+  revenue_invoices_payer_address_zip: "PLZ",
+  revenue_invoices_payer_address_city: "Ort",
+  revenue_invoices_payer_address_country: "Land",
+  revenue_invoices_recipient_payer: "Rechnungsempfänger – Zahler",
+  revenue_invoices_recipient_patient: "Rechnungsempfänger – Patient",
+  revenue_invoices_recipient_address_missing: "Anschrift des Rechnungsempfängers fehlt: ohne Anschrift ist die Rechnung unvollständig",
+  revenue_invoices_draft_number: "Entwurf (ohne Nummer)",
+  revenue_invoices_draft_preview_pdf: "Entwurfsvorschau (PDF)",
+  revenue_invoices_release_hint:
+    "Mit der Ausstellung erhält die Rechnung ihre Nummer und das Rechnungsdatum (heute). Das Fälligkeitsdatum darf nicht vor dem Rechnungsdatum liegen; ohne Angabe gilt Rechnungsdatum + {days} Tage. Danach kann die Rechnung nicht mehr zum Entwurf werden, und das PDF wird unverändert archiviert.",
+  revenue_invoices_due_date_before_invoice_date: "Das Fälligkeitsdatum darf nicht vor dem Rechnungsdatum (heute) liegen.",
+  revenue_invoices_due_date_locked:
+    "Das Fälligkeitsdatum einer ausgestellten Rechnung bleibt unverändert. Eine neue Frist setzt die Zahlungserinnerung.",
+  revenue_invoices_document_draft_preview:
+    "Entwurfsvorschau. Das PDF wird bei der Ausstellung archiviert.",
+  revenue_invoices_document_archived: "Archiviertes PDF vom {date}: wird unverändert ausgegeben.",
+  revenue_invoices_document_archived_on_first_download:
+    "Vor der PDF-Archivierung ausgestellt: die Kopie wird beim ersten Abruf archiviert und bleibt dann unverändert.",
+  revenue_invoices_dunning_new_deadline: "Neue Zahlungsfrist",
+  revenue_invoices_dunning_letter: "Schreiben",
+  revenue_invoices_dunning_letter_download: "Schreiben (PDF)",
   revenue_invoices_save_payer: "Zahler speichern",
   revenue_invoices_redaction_invoice_hidden: "Rechnung vor Patient verborgen",
   revenue_invoices_redaction_amounts_hidden: "Beträge vor Patient verborgen",
@@ -1534,9 +1604,9 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoice_type_advance: "Anzahlung",
   revenue_invoice_type_interim: "Zwischenrechnung",
   revenue_invoice_type_final: "Schlussrechnung",
-  revenue_dunning_level_first: "Erste Mahnung",
-  revenue_dunning_level_second: "Zweite Mahnung",
-  revenue_dunning_level_collections: "Inkasso",
+  revenue_dunning_level_first: "Zahlungserinnerung",
+  revenue_dunning_level_second: "1. Mahnung",
+  revenue_dunning_level_collections: "2. Mahnung (letzte)",
   revenue_accounting_direction_income: "Einnahme",
   revenue_accounting_direction_expense: "Ausgabe",
   revenue_accounting_category_service_revenue: "Leistungsumsatz",

@@ -1,17 +1,21 @@
+import { addDaysToDateKey, appDateKey, appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { formatMoneyAmount, moneyLineAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
   AccountingLedgerPayload,
+  AdvanceBasis,
   CreateForm,
   DunningEvent,
   Filters,
   InvoiceItem,
   InvoiceLineItem,
+  InvoiceRecipient,
   InvoiceStatus,
   InvoiceType,
   InvoicesPermissions,
   PayerForm,
+  PayerRelationOption,
   QuoteOption,
   StatusForm,
   VisibilityForm,
@@ -31,10 +35,12 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
 /**
  * Manual status moves accepted by POST /invoices/{id}/status. `paid` and
  * `partially_paid` are derived from the payment journal and never picked by hand.
+ * Sending a draft releases it (number, invoice date); a released invoice never
+ * returns to draft.
  */
 const INVOICE_STATUS_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   draft: ["sent", "cancelled"],
-  sent: ["draft", "overdue", "cancelled"],
+  sent: ["overdue", "cancelled"],
   partially_paid: ["sent", "overdue", "cancelled"],
   paid: [],
   overdue: ["sent", "cancelled"],
@@ -46,6 +52,71 @@ export function canPickInvoiceStatus(current: string, next: InvoiceStatus): bool
     current === next ||
     (INVOICE_STATUS_TRANSITIONS[current as InvoiceStatus] ?? []).includes(next)
   );
+}
+
+/** Payment term the server applies when a draft is released without a due date. */
+export const DEFAULT_INVOICE_PAYMENT_TERM_DAYS = 14;
+
+/** Whether the invoice was issued (numbered); drafts, also cancelled ones, were not. */
+export function isInvoiceReleased(invoice: Pick<InvoiceItem, "released_at" | "status">) {
+  if (invoice.released_at !== undefined) return Boolean(invoice.released_at);
+  return invoice.status !== "draft";
+}
+
+/** The invoice number, or the draft label for an invoice not released yet. */
+export function invoiceDisplayNumber(
+  invoice: Pick<InvoiceItem, "invoice_number">,
+  draftLabel: string,
+) {
+  return invoice.invoice_number?.trim() || draftLabel;
+}
+
+/** Due date the server sets on release when none is given: today (Berlin) + payment term. */
+export function defaultReleaseDueDate(today: Date, termDays = DEFAULT_INVOICE_PAYMENT_TERM_DAYS) {
+  return addDaysToDateKey(appDateKey(today), termDays);
+}
+
+/**
+ * Why the status form cannot be saved as it is: a draft is released with a due
+ * date on or after the invoice date (today); a released invoice keeps its due date.
+ */
+export function invoiceStatusFormProblem(
+  invoice: Pick<InvoiceItem, "status" | "released_at" | "due_date">,
+  form: Pick<StatusForm, "status" | "dueDate">,
+  today: Date,
+): "due_date_before_invoice_date" | "due_date_locked" | null {
+  const releasing = invoice.status === "draft" && form.status === "sent";
+  if (releasing && form.dueDate && form.dueDate < appDateKey(today)) {
+    return "due_date_before_invoice_date";
+  }
+  if (
+    isInvoiceReleased(invoice) &&
+    invoice.due_date &&
+    form.dueDate &&
+    form.dueDate !== invoice.due_date
+  ) {
+    return "due_date_locked";
+  }
+  return null;
+}
+
+/**
+ * Which PDF a download serves: a live draft preview, the archived document, or
+ * (for invoices issued before documents were kept) the copy archived on the
+ * first download.
+ */
+export function invoiceDocumentState(
+  invoice: Pick<InvoiceItem, "status" | "released_at" | "stored_document">,
+): "draft_preview" | "archived" | "archived_on_first_download" {
+  if (!isInvoiceReleased(invoice)) return "draft_preview";
+  return invoice.stored_document ? "archived" : "archived_on_first_download";
+}
+
+/** A released invoice keeps its due date; one issued without it may still get one. */
+export function canEditInvoiceDueDate(
+  invoice: Pick<InvoiceItem, "status" | "released_at" | "due_date">,
+) {
+  return !isInvoiceReleased(invoice) || !invoice.due_date;
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -71,14 +142,14 @@ const INVOICE_DATE_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
 };
 
 const dateFormatters = new Map<string, Intl.DateTimeFormat>([
-  ["de-DE", new Intl.DateTimeFormat("de-DE", INVOICE_DATE_FORMAT_OPTIONS)],
-  ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_FORMAT_OPTIONS)],
-  ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["de-DE", appDateTimeFormat("de-DE", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["ru-RU", appDateTimeFormat("ru-RU", INVOICE_DATE_FORMAT_OPTIONS)],
+  ["en-GB", appDateTimeFormat("en-GB", INVOICE_DATE_FORMAT_OPTIONS)],
 ]);
 const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>([
-  ["de-DE", new Intl.DateTimeFormat("de-DE", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-  ["ru-RU", new Intl.DateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-  ["en-GB", new Intl.DateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["de-DE", appDateTimeFormat("de-DE", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["ru-RU", appDateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
+  ["en-GB", appDateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
 ]);
 
 function invoiceDateFormatter(locale: string) {
@@ -138,6 +209,7 @@ export function buildSearchParams(
 
 export function blankCreateForm(quoteId = ""): CreateForm {
   return {
+    advanceBasis: "prepayment",
     quoteId,
     invoiceType: "final",
     dueDate: "",
@@ -249,6 +321,94 @@ export function calculateInvoiceSelectionTotals(
   );
 }
 
+/** The order's required prepayment offered for an advance invoice, if configured. */
+export function quoteRequiredPrepayment(quote: QuoteOption | null | undefined): number | null {
+  const amount = Number(quote?.order_prepayment_amount ?? "");
+  return Number.isFinite(amount) && amount > 0 ? roundCents(amount) : null;
+}
+
+/**
+ * What the advance invoice bills: the required prepayment when the order has
+ * one (and the form did not switch to positions), otherwise the positions.
+ */
+export function effectiveAdvanceBasis(
+  form: Pick<CreateForm, "invoiceType" | "advanceBasis">,
+  quote: QuoteOption | null | undefined,
+): AdvanceBasis | null {
+  if (form.invoiceType !== "advance") return null;
+  return form.advanceBasis === "prepayment" && quoteRequiredPrepayment(quote) != null
+    ? "prepayment"
+    : "positions";
+}
+
+/** Net (in cents) of a single-unit line whose gross is `gross`; mirrors the server. */
+export function netForGross(gross: number, vatRate: number): number {
+  const target = toCents(gross);
+  const estimate = toCents(gross / (1 + vatRate / 100));
+  for (const offset of [0, -1, 1, -2, 2]) {
+    const net = (estimate + offset) / 100;
+    if (toCents(moneyLineAmounts(1, net, vatRate).gross) === target) return net;
+  }
+  return estimate / 100;
+}
+
+export type PrepaymentAdvanceLine = {
+  vatRate: number;
+  isCostPassthrough: boolean;
+  net: number;
+  vat: number;
+  gross: number;
+};
+
+/**
+ * The "Anzahlung" lines of a prepayment advance invoice, like the server
+ * builds them: the amount is split over the quote's VAT groups in proportion
+ * to their gross (the last group takes the rounding remainder), so the
+ * advance is taxed like the services it pays for.
+ */
+export function prepaymentAdvanceSplit(lines: InvoiceLineItem[], amount: number) {
+  const groups = new Map<string, { vatRate: number; isCostPassthrough: boolean; gross: number }>();
+  for (const line of lines) {
+    const gross = roundCents(Number(line.line_gross ?? 0));
+    if (!Number.isFinite(gross) || gross <= 0) continue;
+    const isCostPassthrough = Boolean(line.is_cost_passthrough);
+    const vatRate = isCostPassthrough ? 0 : roundCents(Number(line.vat_rate ?? 0));
+    if (!Number.isFinite(vatRate) || vatRate < 0) continue;
+    const key = `${isCostPassthrough ? 1 : 0}:${vatRate}`;
+    const group = groups.get(key) ?? { vatRate, isCostPassthrough, gross: 0 };
+    group.gross = roundCents(group.gross + gross);
+    groups.set(key, group);
+  }
+  const ordered = [...groups.values()].sort((left, right) =>
+    Number(left.isCostPassthrough) - Number(right.isCostPassthrough) || left.vatRate - right.vatRate,
+  );
+  const quoteGross = roundCents(ordered.reduce((sum, group) => sum + group.gross, 0));
+  const target = roundCents(amount);
+  const result: PrepaymentAdvanceLine[] = [];
+  if (quoteGross <= 0 || !Number.isFinite(target) || target <= 0) {
+    return { lines: result, net: 0, vat: 0, gross: 0, quoteGross, exceedsQuote: false };
+  }
+  let remaining = target;
+  ordered.forEach((group, index) => {
+    const share = index === ordered.length - 1
+      ? roundCents(remaining)
+      : roundCents((target * group.gross) / quoteGross);
+    remaining = roundCents(remaining - share);
+    if (share <= 0) return;
+    const net = netForGross(share, group.vatRate);
+    const amounts = moneyLineAmounts(1, net, group.vatRate);
+    result.push({ vatRate: group.vatRate, isCostPassthrough: group.isCostPassthrough, ...amounts });
+  });
+  return {
+    lines: result,
+    net: roundCents(result.reduce((sum, line) => sum + line.net, 0)),
+    vat: roundCents(result.reduce((sum, line) => sum + line.vat, 0)),
+    gross: roundCents(result.reduce((sum, line) => sum + line.gross, 0)),
+    quoteGross,
+    exceedsQuote: target > quoteGross,
+  };
+}
+
 export function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {
   return {
     status: (invoice.status as InvoiceStatus) ?? "draft",
@@ -274,8 +434,52 @@ export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
     contactEmail: invoice.payer?.contact_email ?? "",
     contactPhone: invoice.payer?.contact_phone ?? "",
     contactRelationship: invoice.payer?.contact_relationship ?? "",
+    addressStreet: invoice.payer?.address_street ?? "",
+    addressZip: invoice.payer?.address_zip ?? "",
+    addressCity: invoice.payer?.address_city ?? "",
+    addressCountry: invoice.payer?.address_country ?? "",
     notes: invoice.payer?.notes ?? "",
   };
+}
+
+/** Body of POST /invoices/{id}/payer; blank fields clear the stored value. */
+export function payerFormToPayload(form: PayerForm) {
+  const text = (value: string) => value.trim() || null;
+  return {
+    payer_patient_relation_id: form.payerPatientRelationId || null,
+    payer_contact_name: text(form.contactName),
+    payer_contact_email: text(form.contactEmail),
+    payer_contact_phone: text(form.contactPhone),
+    payer_contact_relationship: text(form.contactRelationship),
+    payer_address_street: text(form.addressStreet),
+    payer_address_zip: text(form.addressZip),
+    payer_address_city: text(form.addressCity),
+    payer_address_country: text(form.addressCountry),
+    payer_notes: text(form.notes),
+  };
+}
+
+/** Label of a relative offered as payer: name, relation and patient number. */
+export function payerRelationOptionLabel(
+  option: PayerRelationOption,
+  relationTypeLabel: (value: string) => string,
+) {
+  const name = option.related_patient_name?.trim() || option.related_name;
+  const details = [relationTypeLabel(option.relation_type), option.related_patient_pid]
+    .filter(Boolean)
+    .join(", ");
+  return details ? `${name} (${details})` : name;
+}
+
+/** Address lines of the invoice recipient as printed under the name. */
+export function invoiceRecipientAddressLines(recipient: InvoiceRecipient) {
+  const locality = [recipient.zip, recipient.city]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+  return [recipient.street?.trim(), locality, recipient.country?.trim()].filter(
+    (value): value is string => Boolean(value),
+  );
 }
 
 export function formatDate(
@@ -285,12 +489,9 @@ export function formatDate(
 ) {
   if (!value) return emptyLabel;
   try {
-    // Date-only values are local calendar days; timestamps such as paid_at
-    // already carry a time and zone.
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(value)
-      ? new Date(`${value}T00:00:00`)
-      : new Date(value);
-    return invoiceDateFormatter(locale).format(date);
+    // Date-only values are calendar days; timestamps such as paid_at are
+    // instants shown on their Berlin date.
+    return invoiceDateFormatter(locale).format(dateOrInstant(value));
   } catch {
     return value;
   }
@@ -326,6 +527,21 @@ export function isCoveredByPrepaymentOnly(
     toCents(Number(invoice.prepayment_applied_amount ?? 0)) > 0 &&
     toCents(Number(invoice.balance_due ?? 0)) <= 0
   );
+}
+
+/**
+ * File name of a dunning letter: the stored one, else the name the server
+ * gives it (Zahlungserinnerung, 1. Mahnung, 2. Mahnung).
+ */
+export function dunningLetterFileName(
+  event: Pick<DunningEvent, "level" | "letter">,
+  invoiceNumber: string | null | undefined,
+) {
+  if (event.letter?.file_name) return event.letter.file_name;
+  const prefix =
+    event.level === "first" ? "ZAHLUNGSERINNERUNG" : event.level === "second" ? "1-MAHNUNG" : "2-MAHNUNG";
+  const number = (invoiceNumber ?? "").replace(/[/\\:*?"<>|]/g, "-").trim();
+  return `${prefix}-${number || "RECHNUNG"}.pdf`;
 }
 
 export function nextDunningLevel(events: DunningEvent[]) {

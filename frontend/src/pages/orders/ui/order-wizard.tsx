@@ -5,7 +5,9 @@ import { Input } from "@/components/ui/input";
 import { Field, checkboxClass, textareaClass } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
+import { CountrySelect, countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { createContract, createQuote, fetchAgencyServices, fetchContracts } from "@/pages/contracts/data/contracts-api";
@@ -215,6 +217,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
     if (value === null || value === "") return tx("Не указано", "Nicht angegeben");
     if (typeof value === "boolean") return value ? tx("Да", "Ja") : tx("Нет", "Nein");
     if (key === "insurance_type") return ({ private: tx("Частная", "Privat"), public: tx("Государственная", "Gesetzlich"), foreign: tx("Иностранная", "Ausländisch"), self_pay: tx("Без страховки / самостоятельно", "Selbstzahler") })[value] ?? value;
+    // Stored as an ISO code or a legacy name such as "Germany".
+    if (key === "address_country") return countryNameForDisplay(value, lang) || value;
     return value;
   };
   const reviewEvidence = () => void run(async () => {
@@ -293,7 +297,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
               {(Object.keys(FACT_LABELS) as (keyof IntakeFacts)[]).filter(key => !["pep_office", "pep_asset_origin"].includes(key) || pep).map(key =>
                 <Field key={key} label={FACT_LABELS[key][language]}>{key.startsWith("pep_") && ["pep_contract_partner", "pep_beneficial_owner"].includes(key) ?
                   <NativeComboboxSelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" value={data.facts[key] === null ? "" : String(data.facts[key])} onChange={event => patchFact(key, event.target.value === "" ? null : event.target.value === "true")}><option value="">{tx("Нужно уточнить", "Noch zu klären")}</option><option value="false">{tx("Нет", "Nein")}</option><option value="true">{tx("Да", "Ja")}</option></NativeComboboxSelect> : key === "insurance_type" ?
-                  <NativeComboboxSelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" value={data.facts[key]} onChange={event => patchFact(key, event.target.value)}>{["", "private", "public", "foreign", "self_pay"].map(value => <option key={value} value={value}>{prettyFact(key, value)}</option>)}</NativeComboboxSelect> :
+                  <NativeComboboxSelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" value={data.facts[key]} onChange={event => patchFact(key, event.target.value)}>{["", "private", "public", "foreign", "self_pay"].map(value => <option key={value} value={value}>{prettyFact(key, value)}</option>)}</NativeComboboxSelect> : key === "address_country" ?
+                  <CountrySelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" lang={lang} value={data.facts[key]} onChange={code => patchFact(key, code ?? "")} /> :
                   <Input aria-label={FACT_LABELS[key][language]} value={String(data.facts[key] ?? "")} maxLength={key === "email" || key === "phone_primary" ? 255 : 2000} onChange={event => patchFact(key, event.target.value)} />}</Field>)}
             </div>
             {factsChanged.length ? <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="mb-2 font-medium">{tx("Будет изменено в карточке пациента", "Änderungen in der Patientenakte")}</p>{factsChanged.map(key => <p key={key}>{FACT_LABELS[key][language]}: {prettyFact(key, workspace!.baseline_facts[key])} → {prettyFact(key, data.facts[key])}</p>)}</div> : null}
@@ -320,7 +325,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
           </OrderWizardLinesTable>
           <OrderWizardSection title={tx("Условия оплаты", "Zahlungsbedingungen")}>
             <label className="flex items-center gap-2 text-xs font-medium"><input className={checkboxClass} type="checkbox" checked={data.prepayment_required} onChange={event => patch({ prepayment_required: event.target.checked })} />{tx("Предоплата предусмотрена", "Vorauszahlung vorgesehen")}</label>
-            {data.prepayment_required ? <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-2"><Field label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")}><Input aria-label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")} type="number" min="0" max={amount} step="0.01" value={data.prepayment_amount} onChange={event => patch({ prepayment_amount: event.target.value })} /></Field><Field label={tx("Срок оплаты", "Zahlungsfrist")}><Input type="date" value={data.prepayment_due_at?.slice(0, 10) ?? ""} onChange={event => patch({ prepayment_due_at: event.target.value ? `${event.target.value}T12:00:00Z` : null })} /></Field></div> : null}
+            {data.prepayment_required ? <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-2"><Field label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")}><Input aria-label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")} type="number" min="0" max={amount} step="0.01" value={data.prepayment_amount} onChange={event => patch({ prepayment_amount: event.target.value })} /></Field><Field label={tx("Срок оплаты", "Zahlungsfrist")}><Input type="date" value={appDateKeyOf(data.prepayment_due_at)} onChange={event => patch({ prepayment_due_at: event.target.value ? `${event.target.value}T12:00:00Z` : null })} /></Field></div> : null}
             <Button type="button" variant="outline" className="h-auto min-h-9 whitespace-normal text-left" onClick={() => void run(async () => { await prepare(data); })}><Save className="size-3.5 shrink-0" />{tx("Сохранить услуги и подготовить смету", "Leistungen speichern und Kostenvoranschlag erstellen")}</Button>
           </OrderWizardSection>
         </> : null}

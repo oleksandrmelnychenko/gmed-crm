@@ -1,3 +1,4 @@
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -186,7 +187,7 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "timeline",
 ]);
 
-const PATIENT_LABEL_BIRTH_DATE_FORMATTER = new Intl.DateTimeFormat("de-DE", {
+const PATIENT_LABEL_BIRTH_DATE_FORMATTER = appDateTimeFormat("de-DE", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
@@ -239,23 +240,27 @@ const PATIENT_RECORD_SERVER_ROLES: ReadonlySet<string> = new Set([
   "concierge",
 ]);
 
-/** `/patients/{id}/orders`, `/timeline`, `/document-alerts`. */
+/**
+ * `/patients/{id}/orders` and `/timeline`. The interpreter is not listed: its
+ * scope is its own appointments, not the patient's whole history.
+ */
 const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
   "patient_manager",
   "billing",
   "teamlead_interpreter",
-  "interpreter",
 ]);
 
 /**
  * `/patients/{id}/appointments`: the care-history roles plus the concierge,
  * who reads a patient's appointments (medical ones as blocked slots) but not
- * the orders or the timeline.
+ * the orders or the timeline, and the interpreter, who gets only the
+ * appointments it runs or owns.
  */
 const PATIENT_APPOINTMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
   ...PATIENT_CARE_HISTORY_SERVER_ROLES,
   "concierge",
+  "interpreter",
 ]);
 
 /** `/patients/{id}/assignments` (the curators tab). */
@@ -629,11 +634,25 @@ function formatPrintValue(value?: string | null, fallback?: string) {
   return normalized ? normalized : fallback ?? translateCatalog(getLang()).common_not_set;
 }
 
+const PATIENT_LABEL_GENERATED_AT_FORMATTER = appDateTimeFormat("de-DE", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** When the label was generated, in German time. */
+function formatPatientLabelGeneratedAt(value?: string | null) {
+  const generatedAt = value?.trim() ? new Date(value) : new Date();
+  return Number.isNaN(generatedAt.getTime())
+    ? formatPrintValue(value)
+    : PATIENT_LABEL_GENERATED_AT_FORMATTER.format(generatedAt);
+}
+
 function formatPatientLabelBirthDate(value: string) {
   try {
-    return PATIENT_LABEL_BIRTH_DATE_FORMATTER.format(
-      new Date(value.includes("T") ? value : `${value}T00:00:00`),
-    );
+    return PATIENT_LABEL_BIRTH_DATE_FORMATTER.format(dateOrInstant(value));
   } catch {
     return value;
   }
@@ -675,7 +694,7 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
   ]
     .filter((value) => Boolean(value && value.trim()))
     .join("  ·  ");
-  const footerLine = `${tr.patient_label_print_generated} ${formatPrintValue(payload.generated_at, new Date().toISOString())}`;
+  const footerLine = `${tr.patient_label_print_generated} ${formatPatientLabelGeneratedAt(payload.generated_at)}`;
   const documentTitle = tr.patient_label_print_browser_title.replace(
     "{patientId}",
     payload.patient_id,

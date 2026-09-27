@@ -67,6 +67,10 @@ pub fn router() -> Router<AppState> {
             post(update_item_status),
         )
         .route(
+            "/concierge-operational-items/{item_id}/close-children",
+            post(close_children),
+        )
+        .route(
             "/concierge-operational-items/{item_id}/archive",
             post(archive_item),
         )
@@ -184,8 +188,15 @@ struct UpdateItemRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct UpdateItemStatusRequest {
+pub(crate) struct UpdateItemStatusRequest {
     expected_updated_at: String,
+    status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CloseChildrenRequest {
+    /// `completed` or `cancelled`: the status the parent is closed with.
     status: String,
 }
 
@@ -273,10 +284,16 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           END AS concierge_service_id,
           t.task_kind, t.due_date, t.starts_at, t.ends_at, t.parent_task_id,
           (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
+          (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status = 'completed') AS child_completed_count,
+          (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status NOT IN ('completed', 'cancelled')) AS child_open_count,
           t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
           t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
           t.project_id, project.name AS project_name,
+          t.order_id, linked_order.order_number AS order_number,
+          checklist_link.id AS workflow_checklist_item_id,
+          checklist_link.scope_type AS workflow_checklist_scope_type,
+          checklist_link.scope_id AS workflow_checklist_scope_id,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -299,6 +316,14 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    LEFT JOIN patients patient ON patient.id = t.patient_id
    LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
    LEFT JOIN crm_projects project ON project.id = t.project_id
+   LEFT JOIN orders linked_order ON linked_order.id = t.order_id
+   LEFT JOIN LATERAL (
+       SELECT link.id, link.scope_type, link.scope_id
+       FROM workflow_checklist_items link
+       WHERE link.linked_task_id = t.id
+       ORDER BY link.created_at
+       LIMIT 1
+   ) checklist_link ON true
    WHERE t.id = $1
      AND t.task_scope IN ('general', 'concierge_operational')
      AND t.deleted_at IS NULL"#;
@@ -369,10 +394,16 @@ async fn list_items(
                   END AS concierge_service_id,
                   t.task_kind, t.due_date, t.starts_at, t.ends_at, t.parent_task_id,
                   (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
+                  (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status = 'completed') AS child_completed_count,
+                  (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status NOT IN ('completed', 'cancelled')) AS child_open_count,
                   t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
                   t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
                   t.project_id, project.name AS project_name,
+                  t.order_id, linked_order.order_number AS order_number,
+                  checklist_link.id AS workflow_checklist_item_id,
+                  checklist_link.scope_type AS workflow_checklist_scope_type,
+                  checklist_link.scope_id AS workflow_checklist_scope_id,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -395,6 +426,14 @@ async fn list_items(
            LEFT JOIN patients patient ON patient.id = t.patient_id
            LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
            LEFT JOIN crm_projects project ON project.id = t.project_id
+           LEFT JOIN orders linked_order ON linked_order.id = t.order_id
+           LEFT JOIN LATERAL (
+               SELECT link.id, link.scope_type, link.scope_id
+               FROM workflow_checklist_items link
+               WHERE link.linked_task_id = t.id
+               ORDER BY link.created_at
+               LIMIT 1
+           ) checklist_link ON true
            WHERE t.task_scope IN ('general', 'concierge_operational')
              AND t.deleted_at IS NULL
              AND ($1::uuid IS NULL OR t.assigned_to = $1)
@@ -427,7 +466,8 @@ async fn list_items(
                            )) END
                      )
                  ))
-                 OR (t.patient_id IS NOT NULL AND EXISTS (
+                 OR ($10::text NOT IN ('concierge', 'interpreter')
+                     AND t.patient_id IS NOT NULL AND EXISTS (
                      SELECT 1
                      FROM patient_assignments visible_assignment
                      WHERE visible_assignment.patient_id = t.patient_id
@@ -592,7 +632,8 @@ async fn list_all_attachments(
                            )) END
                      )
                  ))
-                 OR (task.patient_id IS NOT NULL AND EXISTS (
+                 OR ($4::text NOT IN ('concierge', 'interpreter')
+                     AND task.patient_id IS NOT NULL AND EXISTS (
                      SELECT 1
                      FROM patient_assignments visible_assignment
                      WHERE visible_assignment.patient_id = task.patient_id
@@ -653,7 +694,8 @@ async fn upload_attachment(
     if let Err(response) = require_operational_role(&auth) {
         return response;
     }
-    if let Err(response) = ensure_operational_mutation_access(&state, &auth, item_id).await {
+    if let Err(response) = ensure_operational_attachment_upload_access(&state, &auth, item_id).await
+    {
         return response;
     }
     let mut upload: Option<(String, String, Vec<u8>)> = None;
@@ -749,8 +791,8 @@ async fn upload_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let context = match lock_task_mutation_context(&mut tx, &auth, item_id).await {
-        Ok(value) => value,
+    let context = match lock_task_attachment_context(&mut tx, &auth, item_id).await {
+        Ok((context, _)) => context,
         Err(response) => {
             remove_document_blob(&storage_key).await;
             return response;
@@ -937,10 +979,34 @@ async fn delete_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let context = match lock_task_mutation_context(&mut tx, &auth, item_id).await {
+    let (context, access) = match lock_task_attachment_context(&mut tx, &auth, item_id).await {
         Ok(value) => value,
         Err(response) => return response,
     };
+    if access == AttachmentAccess::AssigneeUploads {
+        let uploaded_by = match sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT uploaded_by FROM concierge_operational_task_attachments
+               WHERE id = $1 AND task_id = $2 AND deleted_at IS NULL"#,
+        )
+        .bind(attachment_id)
+        .bind(item_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Attachment not found"),
+            Err(error) => {
+                tracing::error!(error = %error, attachment_id = %attachment_id, "load operational task attachment owner");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete file");
+            }
+        };
+        if uploaded_by != auth.user_id {
+            return err(
+                StatusCode::FORBIDDEN,
+                "The task assignee can remove only the attachments it uploaded",
+            );
+        }
+    }
     let attachment = match sqlx::query(
         r#"UPDATE concierge_operational_task_attachments
            SET deleted_at = now(), deleted_by = $3
@@ -1644,13 +1710,17 @@ async fn update_item(
         tracing::error!(error = %error, item_id = %item_id, "record concierge task update history");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    let completed_checklist_items = if existing_status == body.status {
-        Vec::new()
-    } else {
-        match complete_linked_checklist_items(&mut tx, item_id, &body.status, auth.user_id).await {
-            Ok(value) => value,
-            Err(response) => return response,
-        }
+    let checklist_changes = match sync_linked_checklist_items(
+        &mut tx,
+        item_id,
+        &existing_status,
+        &body.status,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
     };
     // A reassigned task is new work for its next assignee, exactly like a
     // newly created one; without this they only find it by chance.
@@ -1700,11 +1770,10 @@ async fn update_item(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
         &state,
         auth.user_id,
-        item_id,
-        &completed_checklist_items,
+        &checklist_changes,
     )
     .await;
     state.audit_sender.try_send(audit::domain_event(
@@ -1743,7 +1812,11 @@ async fn update_item(
     }
 }
 
-async fn update_item_status(
+/// Status change of any task (`general` and `concierge_operational`). Also
+/// mounted at the legacy `/tasks/{id}/status` path, so appointment tasks get
+/// the same review step, optimistic lock, archive check, history and creator
+/// notification.
+pub(crate) async fn update_item_status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(item_id): Path<Uuid>,
@@ -1887,11 +1960,18 @@ async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "record concierge task status history");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    let completed_checklist_items =
-        match complete_linked_checklist_items(&mut tx, item_id, &body.status, auth.user_id).await {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
+    let checklist_changes = match sync_linked_checklist_items(
+        &mut tx,
+        item_id,
+        &previous_status,
+        &body.status,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let creator_notification = if auth.user_id != assigned_by {
         match insert_task_notification(
             &mut tx,
@@ -1913,11 +1993,10 @@ async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task status update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
         &state,
         auth.user_id,
-        item_id,
-        &completed_checklist_items,
+        &checklist_changes,
     )
     .await;
     state.audit_sender.try_send(audit::domain_event(
@@ -1952,6 +2031,247 @@ async fn update_item_status(
         Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => response,
     }
+}
+
+/// Closes every open sub-task and event below a task (any depth) with the
+/// status its parent is about to be closed with. The work center asks first
+/// whether open sub-tasks should be closed or kept when a parent is completed
+/// or archived; this is the "close them all" answer. Each child gets its own
+/// history entry, checklist sync, creator notification and audit event.
+async fn close_children(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(item_id): Path<Uuid>,
+    Json(body): Json<CloseChildrenRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    if !matches!(body.status.as_str(), "completed" | "cancelled") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Sub-tasks can only be closed as completed or cancelled",
+        );
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin closing sub-tasks");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let parent = match sqlx::query(
+        r#"SELECT task.assigned_by, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL
+           FOR UPDATE OF task"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load parent for closing sub-tasks");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let parent_assigned_by = parent
+        .try_get::<Uuid, _>("assigned_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let parent_creator_role = parent
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    if !can_mutate_operational_item(&auth, parent_assigned_by, &parent_creator_role) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the task creator or a higher role can close its sub-tasks",
+        );
+    }
+    let children = match sqlx::query(
+        r#"WITH RECURSIVE branch AS (
+               SELECT id, ARRAY[id] AS path FROM tasks
+               WHERE parent_task_id = $1 AND deleted_at IS NULL
+               UNION ALL
+               SELECT child.id, branch.path || child.id
+               FROM tasks child
+               JOIN branch ON child.parent_task_id = branch.id
+               WHERE child.deleted_at IS NULL
+                 AND NOT child.id = ANY(branch.path)
+           )
+           SELECT task.id, task.title, task.status, task.assigned_to, task.assigned_by,
+                  creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN branch ON branch.id = task.id
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id <> $1
+             AND task.archived_at IS NULL
+             AND task.status NOT IN ('completed', 'cancelled')
+           ORDER BY task.created_at, task.id
+           FOR UPDATE OF task"#,
+    )
+    .bind(item_id)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load open sub-tasks");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    struct OpenChild {
+        id: Uuid,
+        title: String,
+        status: String,
+        assigned_to: Uuid,
+        assigned_by: Uuid,
+    }
+    let mut open_children = Vec::with_capacity(children.len());
+    for row in &children {
+        let child = OpenChild {
+            id: row.try_get("id").unwrap_or_else(|_| Uuid::nil()),
+            title: row.try_get("title").unwrap_or_default(),
+            status: row.try_get("status").unwrap_or_default(),
+            assigned_to: row.try_get("assigned_to").unwrap_or_else(|_| Uuid::nil()),
+            assigned_by: row.try_get("assigned_by").unwrap_or_else(|_| Uuid::nil()),
+        };
+        let creator_role = row
+            .try_get::<String, _>("assigned_by_role")
+            .unwrap_or_default();
+        if !can_collaborate_on_operational_item(
+            &auth,
+            child.assigned_to,
+            child.assigned_by,
+            &creator_role,
+        ) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Some sub-tasks can only be closed by their creator, assignee or a higher role",
+            );
+        }
+        open_children.push(child);
+    }
+
+    let mut checklist_changes = Vec::new();
+    let mut notifications = Vec::new();
+    for child in &open_children {
+        if let Err(error) = sqlx::query(
+            r#"UPDATE tasks
+               SET status = $2,
+                   completed_at = CASE
+                       WHEN $2 = 'completed' THEN COALESCE(completed_at, now())
+                       ELSE NULL
+                   END,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(child.id)
+        .bind(&body.status)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, item_id = %child.id, "close sub-task");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(child.id)
+        .bind(auth.user_id)
+        .bind(serde_json::json!({
+            "assigned_to": child.assigned_to,
+            "status": body.status.as_str(),
+            "previous_status": child.status,
+            "reason": "parent_closed",
+            "parent_task_id": item_id,
+        }))
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, item_id = %child.id, "record sub-task closing");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        match sync_linked_checklist_items(
+            &mut tx,
+            child.id,
+            &child.status,
+            &body.status,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(response) => return response,
+        }
+        if auth.user_id != child.assigned_by {
+            match insert_task_notification(
+                &mut tx,
+                child.assigned_by,
+                "operational_task_updated",
+                "Task status changed",
+                &child.title,
+                child.id,
+            )
+            .await
+            {
+                Ok(value) => notifications.push((value, child.id)),
+                Err(response) => return response,
+            }
+        }
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit closing sub-tasks");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
+    for child in &open_children {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_concierge_operational_item_status",
+            Some(auth.user_id),
+            "task",
+            Some(child.id),
+            serde_json::json!({
+                "assigned_to": child.assigned_to,
+                "status": body.status.as_str(),
+                "previous_status": child.status,
+                "reason": "parent_closed",
+                "parent_task_id": item_id,
+            }),
+        ));
+        publish_operational_child_event(
+            &state,
+            &auth,
+            "concierge_operational_item.updated",
+            child.id,
+            child.assigned_to,
+            serde_json::json!({
+                "status": body.status.as_str(),
+                "previous_status": child.status,
+            }),
+        )
+        .await;
+    }
+    for (notification, child_id) in notifications {
+        publish_pending_notification(&state, notification, child_id).await;
+    }
+
+    Json(serde_json::json!({
+        "closed_count": open_children.len(),
+        "closed_ids": open_children.iter().map(|child| child.id).collect::<Vec<_>>(),
+    }))
+    .into_response()
 }
 
 async fn archive_item(
@@ -2178,6 +2498,7 @@ async fn delete_item(
                   EXISTS(SELECT 1 FROM concierge_operational_task_checklist_items checklist WHERE checklist.task_id = task.id AND checklist.deleted_at IS NULL) AS has_checklist,
                   EXISTS(SELECT 1 FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = task.id AND attachment.deleted_at IS NULL) AS has_attachments,
                   EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL) AS has_children,
+                  EXISTS(SELECT 1 FROM workflow_checklist_items checklist_link WHERE checklist_link.linked_task_id = task.id) AS workflow_checklist_task,
                   creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
@@ -2220,8 +2541,22 @@ async fn delete_item(
             || task.try_get::<bool, _>("has_checklist").unwrap_or(true)
             || task.try_get::<bool, _>("has_attachments").unwrap_or(true),
         has_children: task.try_get::<bool, _>("has_children").unwrap_or(true),
+        workflow_checklist_task: task
+            .try_get::<bool, _>("workflow_checklist_task")
+            .unwrap_or(true),
     };
     if let Err((status, message)) = validate_operational_item_deletion(&auth, &deletion) {
+        if message == WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE {
+            return (
+                status,
+                Json(serde_json::json!({
+                    "error": status.canonical_reason().unwrap_or("error"),
+                    "code": WORKFLOW_CHECKLIST_TASK_DELETE_CODE,
+                    "message": message,
+                })),
+            )
+                .into_response();
+        }
         return err(status, message);
     }
     if let Err(error) = sqlx::query(
@@ -3474,7 +3809,8 @@ async fn lock_item_access(
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
-    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false);
+    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
+        && patient_scope_opens_tasks(auth.role);
     if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
         && (for_update || (!project_access && !patient_access))
     {
@@ -3539,7 +3875,8 @@ async fn ensure_operational_view_access(
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
-    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false);
+    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
+        && patient_scope_opens_tasks(auth.role);
     if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
         && !project_access
         && !patient_access
@@ -3549,13 +3886,40 @@ async fn ensure_operational_view_access(
     Ok(())
 }
 
-async fn ensure_operational_mutation_access(
+/// Files of a task: the creator or a higher role manages all of them; the
+/// assignee attaches files to its own task (to document its work) and removes
+/// only the files it uploaded itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentAccess {
+    Manage,
+    AssigneeUploads,
+}
+
+fn attachment_access(
+    auth: &AuthUser,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    assigned_by_role: &str,
+) -> Option<AttachmentAccess> {
+    if can_mutate_operational_item(auth, assigned_by, assigned_by_role) {
+        Some(AttachmentAccess::Manage)
+    } else if auth.user_id == assigned_to {
+        Some(AttachmentAccess::AssigneeUploads)
+    } else {
+        None
+    }
+}
+
+const ATTACHMENT_ACCESS_DENIED: &str =
+    "Only the task assignee, creator, or a higher role can change attachments";
+
+async fn ensure_operational_attachment_upload_access(
     state: &AppState,
     auth: &AuthUser,
     item_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let row = sqlx::query(
-        r#"SELECT task.assigned_by, creator.role AS assigned_by_role
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
@@ -3571,26 +3935,26 @@ async fn ensure_operational_mutation_access(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
+    let assigned_to = row
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
     let assigned_by = row
         .try_get::<Uuid, _>("assigned_by")
         .unwrap_or_else(|_| Uuid::nil());
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role) {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Only the task creator or a higher role can change attachments",
-        ));
+    if attachment_access(auth, assigned_to, assigned_by, &assigned_by_role).is_none() {
+        return Err(err(StatusCode::FORBIDDEN, ATTACHMENT_ACCESS_DENIED));
     }
     Ok(())
 }
 
-async fn lock_task_mutation_context(
+async fn lock_task_attachment_context(
     tx: &mut Transaction<'_, Postgres>,
     auth: &AuthUser,
     item_id: Uuid,
-) -> Result<TaskMutationContext, axum::response::Response> {
+) -> Result<(TaskMutationContext, AttachmentAccess), axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.title,
                   creator.role AS assigned_by_role
@@ -3610,25 +3974,26 @@ async fn lock_task_mutation_context(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
+    let assigned_to = row
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
     let assigned_by = row
         .try_get::<Uuid, _>("assigned_by")
         .unwrap_or_else(|_| Uuid::nil());
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role) {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Only the task creator or a higher role can change attachments",
-        ));
-    }
-    Ok(TaskMutationContext {
-        assigned_to: row
-            .try_get::<Uuid, _>("assigned_to")
-            .unwrap_or_else(|_| Uuid::nil()),
-        assigned_by,
-        title: row.try_get::<String, _>("title").unwrap_or_default(),
-    })
+    let Some(access) = attachment_access(auth, assigned_to, assigned_by, &assigned_by_role) else {
+        return Err(err(StatusCode::FORBIDDEN, ATTACHMENT_ACCESS_DENIED));
+    };
+    Ok((
+        TaskMutationContext {
+            assigned_to,
+            assigned_by,
+            title: row.try_get::<String, _>("title").unwrap_or_default(),
+        },
+        access,
+    ))
 }
 
 async fn load_attachments(
@@ -4229,6 +4594,8 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "kind": row.try_get::<String, _>("task_kind").ok()?,
         "parent_task_id": row.try_get::<Option<Uuid>, _>("parent_task_id").unwrap_or_default(),
         "child_count": row.try_get::<i64, _>("child_count").unwrap_or_default(),
+        "child_completed_count": row.try_get::<i64, _>("child_completed_count").unwrap_or_default(),
+        "child_open_count": row.try_get::<i64, _>("child_open_count").unwrap_or_default(),
         "title": row.try_get::<String, _>("title").ok()?,
         "note": row.try_get::<Option<String>, _>("operational_note").unwrap_or_default(),
         "assigned_to": row.try_get::<Uuid, _>("assigned_to").ok()?,
@@ -4265,6 +4632,11 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "provider_email": row.try_get::<Option<String>, _>("provider_email").unwrap_or_default(),
         "project_id": row.try_get::<Option<Uuid>, _>("project_id").unwrap_or_default(),
         "project_name": row.try_get::<Option<String>, _>("project_name").unwrap_or_default(),
+        "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+        "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+        "workflow_checklist_item_id": row.try_get::<Option<Uuid>, _>("workflow_checklist_item_id").unwrap_or_default(),
+        "workflow_checklist_scope_type": row.try_get::<Option<String>, _>("workflow_checklist_scope_type").unwrap_or_default(),
+        "workflow_checklist_scope_id": row.try_get::<Option<Uuid>, _>("workflow_checklist_scope_id").unwrap_or_default(),
         "external_assignee_type": row.try_get::<Option<String>, _>("external_assignee_type").unwrap_or_default(),
         "external_assignee_name": row.try_get::<Option<String>, _>("external_assignee_name").unwrap_or_default(),
         "external_assignee_phone": row.try_get::<Option<String>, _>("external_assignee_phone").unwrap_or_default(),
@@ -4336,25 +4708,24 @@ async fn publish_operational_event(
 }
 
 /// Order and patient checklist items follow their linked task when it is
-/// completed from the work center or the patient card.
-async fn complete_linked_checklist_items(
+/// completed, cancelled or reopened from the work center or the patient card.
+async fn sync_linked_checklist_items(
     tx: &mut Transaction<'_, Postgres>,
     item_id: Uuid,
+    previous_status: &str,
     status: &str,
     actor_id: Uuid,
-) -> Result<
-    Vec<crate::routes::workflow_checklists::TaskCompletedChecklistItem>,
-    axum::response::Response,
-> {
-    if status != "completed" {
-        return Ok(Vec::new());
-    }
-    crate::routes::workflow_checklists::complete_checklist_items_for_task(
-        &mut **tx, item_id, actor_id,
+) -> Result<Vec<crate::routes::workflow_checklists::ChecklistItemSync>, axum::response::Response> {
+    crate::routes::workflow_checklists::sync_checklist_items_for_task_status(
+        tx,
+        item_id,
+        previous_status,
+        status,
+        actor_id,
     )
     .await
     .map_err(|error| {
-        tracing::error!(error = %error, item_id = %item_id, "complete workflow checklist items for task");
+        tracing::error!(error = %error, item_id = %item_id, "sync workflow checklist items with task status");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })
 }
@@ -4573,7 +4944,12 @@ struct OperationalItemDeletion<'a> {
     archived: bool,
     has_work: bool,
     has_children: bool,
+    /// The task backs an order or patient checklist item.
+    workflow_checklist_task: bool,
 }
+
+const WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE: &str = "This task belongs to an order or patient checklist item and cannot be deleted; mark the checklist item as not required instead";
+const WORKFLOW_CHECKLIST_TASK_DELETE_CODE: &str = "workflow_checklist_task_delete";
 
 fn validate_operational_item_deletion(
     auth: &AuthUser,
@@ -4584,6 +4960,11 @@ fn validate_operational_item_deletion(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can delete this task",
         ));
+    }
+    // A deleted checklist task would leave its checklist item open behind a
+    // task nobody can see, blocking the order; "not required" closes both.
+    if task.workflow_checklist_task {
+        return Err((StatusCode::CONFLICT, WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE));
     }
     if task.archived {
         return Err((
@@ -4656,6 +5037,14 @@ fn can_assign_operational_role(actor_role: Role, target_role: &str) -> bool {
         Role::TeamleadInterpreter => target_role == "interpreter",
         _ => false,
     }
+}
+
+/// Executors (concierge, interpreter) work on their own tasks only: assigned
+/// to them, created by them or shared with them through a project. Their
+/// patient assignment does not open the other tasks of that patient (RBAC
+/// matrix: task manager "W (свої)"). Managers keep the patient-wide view.
+fn patient_scope_opens_tasks(role: Role) -> bool {
+    !matches!(role, Role::Concierge | Role::Interpreter)
 }
 
 fn can_collaborate_on_operational_item(
@@ -4803,6 +5192,47 @@ mod work_center_tests {
     }
 
     #[test]
+    fn assignee_attaches_files_and_creator_manages_them() {
+        let creator = Uuid::new_v4();
+        let assignee = Uuid::new_v4();
+        assert_eq!(
+            attachment_access(
+                &actor(assignee, Role::Interpreter),
+                assignee,
+                creator,
+                "patient_manager"
+            ),
+            Some(AttachmentAccess::AssigneeUploads)
+        );
+        assert_eq!(
+            attachment_access(
+                &actor(creator, Role::PatientManager),
+                assignee,
+                creator,
+                "patient_manager"
+            ),
+            Some(AttachmentAccess::Manage)
+        );
+        assert_eq!(
+            attachment_access(
+                &actor(Uuid::new_v4(), Role::Concierge),
+                assignee,
+                creator,
+                "patient_manager"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn executors_do_not_see_patient_tasks_of_others() {
+        assert!(!patient_scope_opens_tasks(Role::Concierge));
+        assert!(!patient_scope_opens_tasks(Role::Interpreter));
+        assert!(patient_scope_opens_tasks(Role::PatientManager));
+        assert!(patient_scope_opens_tasks(Role::TeamleadInterpreter));
+    }
+
+    #[test]
     fn concierge_deletion_is_creator_only_in_every_status() {
         let creator = Uuid::new_v4();
         let owner = actor(creator, Role::Concierge);
@@ -4823,6 +5253,7 @@ mod work_center_tests {
                     archived: false,
                     has_work,
                     has_children: false,
+                    workflow_checklist_task: false,
                 };
                 assert!(validate_operational_item_deletion(&owner, &task).is_ok());
                 assert_eq!(
@@ -4847,6 +5278,7 @@ mod work_center_tests {
             archived: false,
             has_work: false,
             has_children: false,
+            workflow_checklist_task: false,
         };
         assert!(validate_operational_item_deletion(&manager, &task).is_ok());
         task.has_work = true;
@@ -4871,6 +5303,29 @@ mod work_center_tests {
                 .1,
             "Restore the archived task before deleting it"
         );
+    }
+
+    #[test]
+    fn checklist_tasks_cannot_be_deleted_even_by_their_creator() {
+        let creator = Uuid::new_v4();
+        let task = OperationalItemDeletion {
+            assigned_by: creator,
+            assigned_by_role: "concierge",
+            status: "open",
+            archived: false,
+            has_work: false,
+            has_children: false,
+            workflow_checklist_task: true,
+        };
+        for auth in [
+            actor(creator, Role::Concierge),
+            actor(Uuid::new_v4(), Role::Ceo),
+        ] {
+            assert_eq!(
+                validate_operational_item_deletion(&auth, &task).unwrap_err(),
+                (StatusCode::CONFLICT, WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE)
+            );
+        }
     }
 
     #[test]

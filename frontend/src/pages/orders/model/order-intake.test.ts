@@ -12,6 +12,12 @@ describe("repeat patient order", () => {
     expect(formatIntakeDate("2026-12-05")).toBe("05.12.2026");
     expect(formatIntakeDate(null)).toBe("—");
   });
+  it("displays timestamps on their Berlin date", () => {
+    // 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(formatIntakeDate("2026-09-27T21:30:00Z")).toBe("27.09.2026");
+    // 00:30 in Berlin, still 27 Sep in UTC.
+    expect(formatIntakeDate("2026-09-27T22:30:00+00:00")).toBe("28.09.2026");
+  });
   it("rounds VAT on each service before summing", () => {
     const line = { id: "a", description: "Service", quantity: "3", unit_price: "0.33", vat_rate: "19", agency_service_id: null, agency_service_price_version_id: null };
     expect(intakeTotal([line, { ...line, id: "b" }])).toBe(2.36);

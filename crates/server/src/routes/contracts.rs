@@ -713,11 +713,87 @@ impl SupersededQuote {
     }
 }
 
+/// An open quote closed because its order was cancelled.
+pub(crate) struct ClosedOrderQuote {
+    pub id: Uuid,
+    pub quote_number: String,
+    pub previous_status: String,
+}
+
+/// Cancelling an order closes its open quotes (status `rejected`, a version
+/// snapshot with change reason `order_cancelled`), so nothing more can be
+/// invoiced from them; delivered services are billed from a new quote that
+/// only lists them. The selection matches [`supersede_open_order_quotes_tx`]:
+/// rejected, expired and superseded quotes and quotes settled by an active
+/// final invoice stay as they are; invoices already issued remain valid.
+/// Runs inside the order cancellation transaction after
+/// [`lock_open_order_quotes_tx`].
+pub(crate) async fn close_open_order_quotes_for_cancelled_order_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+    actor_user_id: Uuid,
+) -> Result<Vec<ClosedOrderQuote>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"UPDATE quotes quote
+           SET status = 'rejected'
+           FROM quotes previous
+           WHERE previous.id = quote.id
+             AND quote.order_id = $1
+             AND quote.status NOT IN ('rejected', 'expired', 'superseded')
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoices final_invoice
+                 WHERE final_invoice.quote_id = quote.id
+                   AND final_invoice.invoice_type = 'final'
+                   AND final_invoice.status <> 'cancelled'
+             )
+           RETURNING quote.id, quote.quote_number, previous.status AS previous_status,
+                     quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
+                     order_recorded_cash_paid(quote.order_id) AS paid_amount,
+                     order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                     quote.line_items, quote.notes"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut closed = Vec::with_capacity(rows.len());
+    for row in rows {
+        let quote_id = row.try_get::<Uuid, _>("id")?;
+        let quote_number = row.try_get::<String, _>("quote_number")?;
+        let snapshot = QuoteVersionSnapshotInput {
+            quote_id,
+            order_id,
+            quote_number: quote_number.clone(),
+            status: "rejected".to_string(),
+            total_net: row.try_get::<Decimal, _>("total_net")?,
+            total_vat: row.try_get::<Decimal, _>("total_vat")?,
+            total_gross: row.try_get::<Decimal, _>("total_gross")?,
+            valid_until: row.try_get::<Option<NaiveDate>, _>("valid_until")?,
+            paid_amount: row
+                .try_get::<Option<Decimal>, _>("paid_amount")?
+                .unwrap_or(Decimal::ZERO),
+            paid_at: row.try_get::<Option<DateTime<Utc>>, _>("paid_at")?,
+            line_items: row.try_get::<Value, _>("line_items")?,
+            notes: row.try_get::<Option<String>, _>("notes")?,
+            change_reason: Some("order_cancelled".to_string()),
+            created_by: actor_user_id,
+        };
+        insert_quote_version_snapshot(tx, &snapshot).await?;
+        closed.push(ClosedOrderQuote {
+            id: quote_id,
+            quote_number,
+            previous_status: row.try_get::<String, _>("previous_status")?,
+        });
+    }
+    closed.sort_by(|a, b| a.quote_number.cmp(&b.quote_number));
+    Ok(closed)
+}
+
 /// Lock the order's open quotes before the order services are read, in the
 /// same order an invoice from a quote takes its locks (quote, then services).
 /// An invoice racing the new quote then either commits first or finds its
 /// quote closed.
-async fn lock_open_order_quotes_tx(
+pub(crate) async fn lock_open_order_quotes_tx(
     tx: &mut Transaction<'_, Postgres>,
     order_id: Uuid,
 ) -> Result<(), sqlx::Error> {
@@ -2098,7 +2174,7 @@ async fn create_framework_contract(
     // takes effect (printed in the PDF) and defaults to today; an end date is
     // never stored.
     let valid_from = match parse_optional_date(body.valid_from.as_deref()) {
-        Ok(value) => Some(value.unwrap_or_else(|| Utc::now().date_naive())),
+        Ok(value) => Some(value.unwrap_or_else(crate::app_time::today)),
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let valid_to: Option<NaiveDate> = None;
@@ -3078,6 +3154,7 @@ async fn list_quotes(
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
                   o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
+                  o.prepayment_required, NULLIF(o.prepayment_amount, 0) AS order_prepayment_amount,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
@@ -3172,6 +3249,13 @@ async fn list_quotes(
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
+                    // The order's required prepayment: the default amount of
+                    // an advance invoice from this quote.
+                    "order_prepayment_required": row.try_get::<bool, _>("prepayment_required").unwrap_or(false),
+                    "order_prepayment_amount": row
+                        .try_get::<Option<Decimal>, _>("order_prepayment_amount")
+                        .unwrap_or_default()
+                        .map(decimal_to_string),
                     "line_items": add_remaining_quote_quantities(
                         row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),

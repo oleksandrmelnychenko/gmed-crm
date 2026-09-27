@@ -172,13 +172,25 @@ impl TaxGroup {
     }
 }
 
-fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
-    if line.vat_rate > Decimal::ZERO {
-        ("S", None)
-    } else if line.is_cost_passthrough {
-        ("E", Some(PASSTHROUGH_EXEMPTION))
+/// Why a line carries no VAT, as the e-invoice states it. The printed invoice
+/// uses the same wording so the visible document and the embedded XML agree.
+pub(super) fn line_exemption_reason(
+    vat_rate: Decimal,
+    is_cost_passthrough: bool,
+) -> Option<&'static str> {
+    if vat_rate > Decimal::ZERO {
+        None
+    } else if is_cost_passthrough {
+        Some(PASSTHROUGH_EXEMPTION)
     } else {
-        ("E", Some(ZERO_RATE_EXEMPTION))
+        Some(ZERO_RATE_EXEMPTION)
+    }
+}
+
+fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
+    match line_exemption_reason(line.vat_rate, line.is_cost_passthrough) {
+        None => ("S", None),
+        Some(reason) => ("E", Some(reason)),
     }
 }
 
@@ -579,6 +591,43 @@ pub(super) fn embed_xml_in_pdf(
         .save_to(&mut output)
         .map_err(|error| format!("write zugferd pdf: {error}"))?;
     Ok(output)
+}
+
+fn follow<'a>(document: &'a lopdf::Document, object: &'a Object) -> Option<&'a Object> {
+    match object {
+        Object::Reference(id) => document.get_object(*id).ok(),
+        other => Some(other),
+    }
+}
+
+/// The e-invoice XML embedded in a (stored) hybrid PDF, if it carries one.
+/// Serving it from the archived document keeps the XML identical to the
+/// invoice as issued, whatever changed in the settings since.
+pub(super) fn extract_xml_from_pdf(pdf: &[u8]) -> Option<String> {
+    let document = lopdf::Document::load_mem(pdf).ok()?;
+    let catalog = document.catalog().ok()?;
+    let names = follow(&document, catalog.get(b"Names").ok()?)?
+        .as_dict()
+        .ok()?;
+    let embedded = follow(&document, names.get(b"EmbeddedFiles").ok()?)?
+        .as_dict()
+        .ok()?;
+    let entries = follow(&document, embedded.get(b"Names").ok()?)?
+        .as_array()
+        .ok()?;
+    let filespec = entries.chunks(2).find_map(|pair| match pair {
+        [name, spec] if name.as_str().ok()? == ZUGFERD_XML_FILENAME.as_bytes() => Some(spec),
+        _ => None,
+    })?;
+    let filespec = follow(&document, filespec)?.as_dict().ok()?;
+    let files = follow(&document, filespec.get(b"EF").ok()?)?
+        .as_dict()
+        .ok()?;
+    let stream = follow(&document, files.get(b"F").ok()?)?.as_stream().ok()?;
+    let bytes = stream
+        .decompressed_content()
+        .unwrap_or_else(|_| stream.content.clone());
+    String::from_utf8(bytes).ok()
 }
 
 /// Reference invoice for the PDF tests and the CI validator run.

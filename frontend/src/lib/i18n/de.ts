@@ -3,6 +3,7 @@ import { adminSystemDe } from "./catalogs/admin-system";
 import { casesClinicalDe } from "./catalogs/cases-clinical";
 import { clinicalDe } from "./catalogs/clinical";
 import { extractedUiDe } from "./catalogs/extracted-ui";
+import { financeBalancesDe } from "./catalogs/finance-balances";
 import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
 import { revenueDe } from "./catalogs/revenue";
@@ -751,6 +752,11 @@ export const de = {
   settings_clinical_data_hint:
     "Steuert die Aufbewahrungsfrist für medizinische Fälle und die append-only Anamnese-Historie.",
   settings_clinical_retention_years: "Aufbewahrung medizinischer Fälle (Jahre)",
+  settings_concierge_preparation: "Vorbereitung von Concierge-Services",
+  settings_concierge_preparation_hint:
+    "Wie viele Stunden vor Beginn eines Concierge-Services die Erinnerung kommt und die Vorbereitungsaufgabe fällig ist.",
+  settings_concierge_reminder_lead_hours: "Erinnerung an den anstehenden Service, Stunden vorher",
+  settings_concierge_prep_lead_hours: "Fälligkeit der Vorbereitungsaufgabe, Stunden vorher",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
   settings_logout_user: "Sitzungen beenden",
@@ -1327,7 +1333,7 @@ export const de = {
   invoices_workspace_dunning_responsible: "Verantwortlich",
   invoices_workspace_dunning_balance_due: "Offener Betrag",
   invoices_workspace_create_dunning: "Mahnung hinzufügen",
-  invoices_workspace_record_collections: "Inkasso-Übergabe erfassen",
+  invoices_workspace_record_collections: "Letzte Mahnung erfassen",
   invoices_workspace_dunning_unavailable: "Die Rechnung konnte nicht geprüft werden. Aktualisieren Sie die Daten, bevor Sie eine Mahnung hinzufügen.",
   invoices_workspace_dunning_ineligible: "Für bezahlte oder stornierte Rechnungen sowie Rechnungen ohne offenen Betrag werden keine Mahnungen erstellt.",
   invoices_workspace_dunning_not_sent: "Senden Sie zuerst die Rechnung an den Kunden und aktualisieren Sie ihren Status. Für Entwürfe sind keine Mahnungen möglich.",
@@ -1368,9 +1374,9 @@ export const de = {
   invoices_workspace_type_advance: "Vorausrechnung",
   invoices_workspace_type_interim: "Zwischenrechnung",
   invoices_workspace_type_final: "Schlussrechnung",
-  invoices_workspace_dunning_level_first: "Erste Mahnung",
-  invoices_workspace_dunning_level_second: "Zweite Mahnung",
-  invoices_workspace_dunning_level_collections: "Inkasso",
+  invoices_workspace_dunning_level_first: "Zahlungserinnerung",
+  invoices_workspace_dunning_level_second: "1. Mahnung",
+  invoices_workspace_dunning_level_collections: "2. Mahnung (letzte)",
   invoices_workspace_direction_income: "Einnahme",
   invoices_workspace_direction_expense: "Ausgabe",
   invoices_workspace_stats_sent_word: "versendet",
@@ -1788,6 +1794,7 @@ export const de = {
   ...adminSystemDe,
   ...casesClinicalDe,
   ...clinicalDe,
+  ...financeBalancesDe,
   ...operationsDe,
   ...patientsPortalDe,
   ...revenueDe,

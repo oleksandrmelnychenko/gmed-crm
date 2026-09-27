@@ -1,3 +1,5 @@
+import type { InvoiceCreditTransfer, InvoiceCreditTransferTarget } from "./overpayment";
+
 export type InvoiceType = "advance" | "interim" | "final";
 export type InvoiceStatus =
   | "draft"
@@ -74,6 +76,26 @@ export type InvoicePaymentHistoryResponse = {
   items: InvoicePaymentTransaction[];
 };
 
+/** One credited invoice line of a credit note. */
+export type InvoiceCreditNoteLine = {
+  invoice_line_index: number;
+  description: string;
+  quantity: string | null;
+  unit_price: string | null;
+  vat_rate: string;
+  is_cost_passthrough: boolean;
+  line_net: string;
+  line_vat: string;
+  line_gross: string;
+};
+
+export type InvoiceCreditNoteVatRate = {
+  vat_rate: string;
+  net: string;
+  vat: string;
+  gross: string;
+};
+
 export type InvoiceCreditNoteTransaction = {
   id: string;
   invoice_id: string;
@@ -91,8 +113,29 @@ export type InvoiceCreditNoteTransaction = {
   currency: string;
   issued_on: string;
   portal_visible: boolean;
+  /** `legacy_pro_rata` credit notes predate line credits and carry no lines. */
+  credit_mode?: "lines" | "vat_rate" | "legacy_pro_rata";
+  line_items?: InvoiceCreditNoteLine[] | null;
+  vat_breakdown?: InvoiceCreditNoteVatRate[] | null;
+  pdf_available?: boolean;
   created_by_name?: string;
   created_at: string;
+};
+
+/** What an invoice line can still be credited (staff invoice detail). */
+export type InvoiceCreditableLine = {
+  line_index: number;
+  description: string;
+  quantity: string | null;
+  unit_price: string | null;
+  vat_rate: string;
+  is_cost_passthrough: boolean;
+  line_net: string;
+  line_vat: string;
+  line_gross: string;
+  credited_gross: string;
+  remaining_gross: string;
+  remaining_vat?: string;
 };
 
 export type InvoiceCreditNoteHistoryResponse = {
@@ -148,8 +191,42 @@ type InvoicePayer = {
   relation_type?: string | null;
   relation_patient_name?: string | null;
   relation_patient_pid?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  address_city?: string | null;
+  address_country?: string | null;
   notes?: string | null;
   updated_at?: string | null;
+};
+
+/** Rechnungsempfänger printed on the invoice: the payer when set, else the patient. */
+export type InvoiceRecipient = {
+  name: string;
+  street?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  country?: string | null;
+  is_payer: boolean;
+  has_postal_address: boolean;
+};
+
+/** The archived PDF of an issued invoice (GoBD): rendered once, served unchanged. */
+export type InvoiceStoredDocument = {
+  file_name: string;
+  sha256: string;
+  /** `release`, or `first_download` for invoices issued before documents were kept. */
+  generation_trigger: "release" | "first_download" | string;
+  generated_at: string;
+};
+
+/** A relative of the patient that can be chosen as the invoice payer. */
+export type PayerRelationOption = {
+  id: string;
+  related_name: string;
+  relation_type: string;
+  related_patient_pid?: string | null;
+  related_patient_name?: string | null;
+  has_address: boolean;
 };
 
 export type InvoiceItem = {
@@ -163,10 +240,13 @@ export type InvoiceItem = {
   patient_id: string;
   patient_name: string;
   patient_pid: string;
-  invoice_number: string;
+  /** Assigned when the invoice is released; drafts have none. */
+  invoice_number: string | null;
   invoice_type: InvoiceType | string;
   status: InvoiceStatus | string;
   issued_at: string;
+  /** Set once the invoice was issued; drafts (also cancelled ones) have none. */
+  released_at?: string | null;
   due_date: string | null;
   total_net: unknown;
   total_vat: unknown;
@@ -176,8 +256,14 @@ export type InvoiceItem = {
   paid_amount: unknown;
   prepayment_applied_amount?: unknown;
   balance_due: unknown;
+  /** Paid advance of the order not applied yet that would cover this invoice. */
+  advance_credit_available?: unknown;
+  /** Balance due net of `advance_credit_available`. */
+  amount_to_pay?: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
+  credit_transfers?: InvoiceCreditTransfer[];
+  credit_transfer_targets?: InvoiceCreditTransferTarget[];
   paid_at: string | null;
   notes: string | null;
   portal_visible?: boolean;
@@ -187,12 +273,16 @@ export type InvoiceItem = {
   portal_visibility?: InvoicePortalVisibility;
   visibility_note?: string | null;
   payer?: InvoicePayer;
+  recipient?: InvoiceRecipient | null;
+  stored_document?: InvoiceStoredDocument | null;
+  payer_relation_options?: PayerRelationOption[];
   created_at: string;
   updated_at: string;
   line_items?: InvoiceLineItem[];
   supporting_documents?: SupportingDocument[];
   available_prepayments?: InvoicePrepaymentOption[];
   prepayment_allocations?: InvoicePrepaymentAllocation[];
+  creditable_lines?: InvoiceCreditableLine[];
 };
 
 export type InvoiceListResponse = {
@@ -209,6 +299,10 @@ export type DunningEvent = {
   level: "first" | "second" | "collections" | string;
   note: string | null;
   due_date_snapshot: string | null;
+  /** New payment deadline the letter sets. */
+  payment_due_date?: string | null;
+  /** The stored letter (Zahlungserinnerung, 1. or 2. Mahnung). */
+  letter?: { file_name: string; generated_at: string | null } | null;
   balance_due: unknown;
   sent_at: string;
   created_at: string;
@@ -288,6 +382,9 @@ export type QuoteOption = {
   quote_number: string;
   status?: string;
   active_invoice_types?: string[];
+  /** The order's required prepayment: the default amount of an advance invoice. */
+  order_prepayment_amount?: string | null;
+  order_prepayment_required?: boolean;
   total_gross: unknown;
   line_items: InvoiceLineItem[];
 };
@@ -301,7 +398,11 @@ export type Filters = {
   invoiceType: string;
 };
 
+/** What an advance invoice bills: the order's required prepayment or selected positions. */
+export type AdvanceBasis = "prepayment" | "positions";
+
 export type CreateForm = {
+  advanceBasis: AdvanceBasis;
   quoteId: string;
   invoiceType: InvoiceType;
   dueDate: string;
@@ -334,6 +435,10 @@ export type PayerForm = {
   contactEmail: string;
   contactPhone: string;
   contactRelationship: string;
+  addressStreet: string;
+  addressZip: string;
+  addressCity: string;
+  addressCountry: string;
   notes: string;
 };
 

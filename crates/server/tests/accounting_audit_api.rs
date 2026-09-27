@@ -26,7 +26,7 @@ async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
     );
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(4)
-        .connect(&url)
+        .connect_with(gmed_db::with_session_settings(url.parse().unwrap()))
         .await
         .expect("Audit database must be available");
     let admin = seed_user(&pool, &unique_tag("audit-ceo"), "ceo").await;
@@ -204,7 +204,7 @@ async fn record_payment(
             "amount_gross": amount,
             "payment_method": "bank_transfer",
             "payment_reference": reference,
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
             "note": format!("Internal {reference}")
         })),
     )
@@ -234,7 +234,7 @@ async fn audit_case() -> (axum::Router, PgPool, Uuid, Uuid, Uuid, String) {
 
 async fn credit(app: &axum::Router, bearer: &str, invoice: Uuid) -> Value {
     let (status, body) = json_request(app, "POST", &format!("/api/v1/invoices/{invoice}/credit-notes"), bearer,
-        Some(json!({"request_id":Uuid::new_v4(),"amount_gross":40,"reason":"Audit credit","issued_on":chrono::Utc::now().date_naive().to_string()}))).await;
+        Some(json!({"request_id":Uuid::new_v4(),"amount_gross":40,"reason":"Audit credit","issued_on":gmed_server::app_time::today().to_string()}))).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     body
 }
@@ -257,7 +257,7 @@ async fn audit_refunded_invoice_must_reopen_after_credit_reversal() {
     record_payment(&app, &bearer, invoice, Uuid::new_v4(), 100, "paid").await;
     let credit = credit(&app, &bearer, invoice).await;
     let (status, refund) = json_request(&app,"POST",&format!("/api/v1/invoices/{invoice}/refunds"),&bearer,
-        Some(json!({"request_id":Uuid::new_v4(),"amount_gross":40,"payment_method":"bank_transfer","refunded_on":chrono::Utc::now().date_naive().to_string(),"reason":"Audit refund"}))).await;
+        Some(json!({"request_id":Uuid::new_v4(),"amount_gross":40,"payment_method":"bank_transfer","refunded_on":gmed_server::app_time::today().to_string(),"reason":"Audit refund"}))).await;
     assert_eq!(status, StatusCode::CREATED, "{refund}");
     let credit_id = credit["credit_note_transaction_id"].as_str().unwrap();
     let (status, result) = json_request(
@@ -408,7 +408,7 @@ async fn audit_payment_reversal_must_not_precede_receipt() {
     .await;
     let payment = record_payment(&app, &bearer, invoice, Uuid::new_v4(), 100, "today").await;
     let payment_id = payment["payment_transaction_id"].as_str().unwrap();
-    let yesterday = (chrono::Utc::now().date_naive() - chrono::Duration::days(1)).to_string();
+    let yesterday = (gmed_server::app_time::today() - chrono::Duration::days(1)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
@@ -442,7 +442,7 @@ async fn audit_payment_reversal_must_use_original_financial_account() {
     let payment_id = Uuid::parse_str(payment["payment_transaction_id"].as_str().unwrap()).unwrap();
     let original_account:Uuid = sqlx::query_scalar("SELECT financial_account_id FROM accounting_entries WHERE source_invoice_payment_transaction_id=$1 LIMIT 1").bind(payment_id).fetch_one(&pool).await.unwrap();
     let (status,account) = json_request(&app,"POST","/api/v1/company-financial-accounts",&bearer,
-        Some(json!({"name":unique_tag("New bank"),"account_type":"bank","currency":"EUR","opening_balance":"0","opening_balance_on":chrono::Utc::now().date_naive().to_string(),"is_default":true}))).await;
+        Some(json!({"name":unique_tag("New bank"),"account_type":"bank","currency":"EUR","opening_balance":"0","opening_balance_on":gmed_server::app_time::today().to_string(),"is_default":true}))).await;
     assert_eq!(status, StatusCode::CREATED, "{account}");
     let (status, reversal) = json_request(
         &app,
@@ -552,11 +552,11 @@ async fn audit_control_partial_payment_replay_and_overpayment() {
     assert_eq!(payment["invoice"]["status"], "partially_paid");
     assert_eq!(payment["invoice"]["balance_due"], "60");
     let (status,replay)=json_request(&app,"POST",&format!("/api/v1/invoices/{invoice}/payments"),&bearer,
-        Some(json!({"request_id":request_id,"amount_gross":40,"payment_method":"bank_transfer","payment_reference":"control","received_on":chrono::Utc::now().date_naive().to_string(),"note":"Internal control"}))).await;
+        Some(json!({"request_id":request_id,"amount_gross":40,"payment_method":"bank_transfer","payment_reference":"control","received_on":gmed_server::app_time::today().to_string(),"note":"Internal control"}))).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
     assert_eq!(replay["idempotent_replay"], true);
     let (status,_)=json_request(&app,"POST",&format!("/api/v1/invoices/{invoice}/payments"),&bearer,
-        Some(json!({"request_id":Uuid::new_v4(),"amount_gross":61,"payment_method":"cash","received_on":chrono::Utc::now().date_naive().to_string()}))).await;
+        Some(json!({"request_id":Uuid::new_v4(),"amount_gross":61,"payment_method":"cash","received_on":gmed_server::app_time::today().to_string()}))).await;
     assert_eq!(status, StatusCode::CONFLICT);
     let final_payment = record_payment(&app, &bearer, invoice, Uuid::new_v4(), 60, "balance").await;
     assert_eq!(final_payment["invoice"]["status"], "paid");
@@ -595,7 +595,7 @@ async fn audit_partial_payments_must_preserve_invoice_vat_total() {
     .await;
     for amount in ["33.33", "33.33", "33.34"] {
         let (status,body)=json_request(&app,"POST",&format!("/api/v1/invoices/{invoice}/payments"),&bearer,
-            Some(json!({"request_id":Uuid::new_v4(),"amount_gross":amount,"payment_method":"bank_transfer","received_on":chrono::Utc::now().date_naive().to_string()}))).await;
+            Some(json!({"request_id":Uuid::new_v4(),"amount_gross":amount,"payment_method":"bank_transfer","received_on":gmed_server::app_time::today().to_string()}))).await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
     }
     let expected: Decimal = sqlx::query_scalar("SELECT total_vat FROM invoices WHERE id=$1")
@@ -646,7 +646,7 @@ async fn audit_reversal_preserves_exact_vat_and_inactive_account() {
     let mut last = Value::Null;
     for amount in ["33.33", "33.33", "33.34"] {
         let (status, body) = json_request(&app, "POST", &format!("/api/v1/invoices/{invoice}/payments"), &bearer,
-            Some(json!({"request_id":Uuid::new_v4(),"amount_gross":amount,"payment_method":"bank_transfer","received_on":chrono::Utc::now().date_naive().to_string()}))).await;
+            Some(json!({"request_id":Uuid::new_v4(),"amount_gross":amount,"payment_method":"bank_transfer","received_on":gmed_server::app_time::today().to_string()}))).await;
         assert_eq!(status, StatusCode::CREATED, "{body}");
         last = body;
     }
@@ -708,7 +708,7 @@ async fn audit_refund_reversal_preserves_original_account() {
     .await;
     record_payment(&app, &bearer, invoice, Uuid::new_v4(), 100, "paid").await;
     credit(&app, &bearer, invoice).await;
-    let (status,refund)=json_request(&app,"POST",&format!("/api/v1/invoices/{invoice}/refunds"),&bearer,Some(json!({"request_id":Uuid::new_v4(),"amount_gross":40,"payment_method":"bank_transfer","refunded_on":chrono::Utc::now().date_naive().to_string(),"reason":"Refund"}))).await;
+    let (status,refund)=json_request(&app,"POST",&format!("/api/v1/invoices/{invoice}/refunds"),&bearer,Some(json!({"request_id":Uuid::new_v4(),"amount_gross":40,"payment_method":"bank_transfer","refunded_on":gmed_server::app_time::today().to_string(),"reason":"Refund"}))).await;
     assert_eq!(status, StatusCode::CREATED, "{refund}");
     let refund_id = Uuid::parse_str(refund["refund_transaction_id"].as_str().unwrap()).unwrap();
     let old:Uuid=sqlx::query_scalar("SELECT financial_account_id FROM accounting_entries WHERE source_invoice_refund_transaction_id=$1 LIMIT 1").bind(refund_id).fetch_one(&pool).await.unwrap();
@@ -822,11 +822,11 @@ async fn audit_released_advance_remains_in_historical_statement() {
         .execute(&pool)
         .await
         .unwrap();
-    let payment_date = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
+    let payment_date = (gmed_server::app_time::today() - chrono::Duration::days(2)).to_string();
     let (status,body)=json_request(&app,"POST",&format!("/api/v1/invoices/{source}/payments"),&bearer,Some(json!({"request_id":Uuid::new_v4(),"amount_gross":100,"payment_method":"bank_transfer","received_on":payment_date}))).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let allocation:Uuid=sqlx::query_scalar("INSERT INTO invoice_prepayment_allocations(advance_invoice_id,target_invoice_id,amount_gross,created_by,created_at) VALUES($1,$2,100,$3,now()-interval '1 day') RETURNING id").bind(source).bind(target).bind(admin).fetch_one(&pool).await.unwrap();
-    let date = (chrono::Utc::now().date_naive() - chrono::Duration::days(1)).to_string();
+    let date = (gmed_server::app_time::today() - chrono::Duration::days(1)).to_string();
     let path = format!("/api/v1/patients/{patient}/account-statement?currency=EUR&to={date}");
     let (status, before) = json_request(&app, "GET", &path, &bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{before}");

@@ -479,13 +479,15 @@ async fn concierge_creators_can_delete_own_worked_tasks_but_not_foreign_tasks_or
             .0,
         StatusCode::NOT_FOUND
     );
+    // The legacy status path is the work-center handler and needs the
+    // optimistic-lock token like every status change.
     assert_eq!(
         json_request(
             &ctx.app,
             "POST",
             &format!("{legacy_path}/status"),
             &bearer,
-            Some(json!({ "status": "open" }))
+            Some(json!({ "status": "open", "expected_updated_at": started["updated_at"] }))
         )
         .await
         .0,
@@ -772,7 +774,9 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
     assert_eq!(task["note"], "Call before pickup");
     assert_eq!(task["concierge_service_id"], service_id.to_string());
     assert!(task["patient_id"].is_null());
-    assert!(task.get("order_id").is_none());
+    // Items name the order they belong to (generated order work links back to
+    // it); a service task has none. The appointment link stays internal.
+    assert!(task["order_id"].is_null());
     assert!(task.get("appointment_id").is_none());
     assert!(task.get("description").is_none());
     let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();
@@ -2143,6 +2147,83 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
     .unwrap();
     assert_eq!(correction_notifications, 1);
 
+    // The assignee documents its work: it attaches files to its own task and
+    // removes only its own uploads; the creator is notified.
+    let (status, own_upload) = multipart_file_request(
+        &ctx.app,
+        &attachment_path,
+        &assignee_bearer,
+        &format!("receipt-{tag}.pdf"),
+        "application/pdf",
+        &pdf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{own_upload}");
+    assert_eq!(own_upload["uploaded_by"], assignee_id.to_string());
+    let own_upload_id = Uuid::parse_str(own_upload["id"].as_str().expect("own upload id")).unwrap();
+    let upload_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE user_id = $1 AND kind = 'operational_task_updated'
+             AND entity_id = $2 AND title = 'Task attachment added'"#,
+    )
+    .bind(creator_id)
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(upload_notifications, 1);
+    let (status, creator_file) = multipart_file_request(
+        &ctx.app,
+        &attachment_path,
+        &creator_bearer,
+        &format!("briefing-{tag}.pdf"),
+        "application/pdf",
+        &pdf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{creator_file}");
+    let creator_file_id =
+        Uuid::parse_str(creator_file["id"].as_str().expect("creator file id")).unwrap();
+    let (status, denied_foreign) = raw_request(
+        &ctx.app,
+        "DELETE",
+        &format!("{attachment_path}/{creator_file_id}"),
+        &assignee_bearer,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        String::from_utf8_lossy(&denied_foreign)
+    );
+    let (status, removed_own) = raw_request(
+        &ctx.app,
+        "DELETE",
+        &format!("{attachment_path}/{own_upload_id}"),
+        &assignee_bearer,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&removed_own)
+    );
+    let (status, removed_creator_file) = raw_request(
+        &ctx.app,
+        "DELETE",
+        &format!("{attachment_path}/{creator_file_id}"),
+        &creator_bearer,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&removed_creator_file)
+    );
+
     let second_file_name = format!("hotel-{tag}.pdf");
     let (status, second_attachment) = multipart_file_request(
         &ctx.app,
@@ -2223,7 +2304,7 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(attachment_events, 6);
+    assert_eq!(attachment_events, 10);
 }
 
 #[tokio::test]
@@ -3278,12 +3359,15 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
             .any(|item| item["id"] == legacy_task_id.to_string())
     );
 
+    // A concierge assigned to the same patient does not see a task that is
+    // neither assigned to it, created by it nor shared through a project: the
+    // executor roles work on their own tasks ("W (свої)").
     let (status, patient_items) =
         json_request(&ctx.app, "GET", base_path, &patient_bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{patient_items}");
     let patient_items = patient_items.as_array().expect("patient-scoped task list");
     assert!(
-        patient_items
+        !patient_items
             .iter()
             .any(|item| item["id"] == general_task_id.to_string())
     );
@@ -3294,11 +3378,6 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
     );
 
     let general_path = format!("{base_path}/{general_task_id}");
-    let (status, patient_detail) =
-        json_request(&ctx.app, "GET", &general_path, &patient_bearer, None).await;
-    assert_eq!(status, StatusCode::OK, "{patient_detail}");
-    assert_eq!(patient_detail["item"]["id"], general_task_id.to_string());
-
     let (status, comment) = json_request(
         &ctx.app,
         "POST",
@@ -3311,30 +3390,71 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{comment}");
+    let (status, owner_detail) =
+        json_request(&ctx.app, "GET", &general_path, &owner_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{owner_detail}");
 
-    let (status, patient_detail) =
-        json_request(&ctx.app, "GET", &general_path, &patient_bearer, None).await;
-    assert_eq!(status, StatusCode::OK, "{patient_detail}");
-    assert_eq!(
-        patient_detail["comments"]
-            .as_array()
-            .expect("patient-scoped comments")
-            .len(),
-        1
-    );
-
+    for path in [general_path.clone(), format!("{general_path}/attachments")] {
+        let (status, body) = json_request(&ctx.app, "GET", &path, &patient_bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert!(
+            !body.to_string().contains("Canonical task comment"),
+            "{path}: {body}"
+        );
+    }
     let (status, denied_status) = json_request(
         &ctx.app,
         "POST",
         &format!("{general_path}/status"),
         &patient_bearer,
         Some(json!({
-            "expected_updated_at": patient_detail["item"]["updated_at"],
+            "expected_updated_at": owner_detail["item"]["updated_at"],
             "status": "in_progress"
         })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_status}");
+
+    // The same holds for an interpreter linked to the patient, while the
+    // patient manager of that patient keeps the patient-wide task view.
+    let interpreter_id = seed_user(&ctx.pool, "interpreter", &format!("work-interp-{tag}")).await;
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &format!("work-pm-{tag}")).await;
+    for user_id in [interpreter_id, manager_id] {
+        sqlx::query(
+            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+               VALUES ($1, $2, $3)"#,
+        )
+        .bind(patient_id)
+        .bind(user_id)
+        .bind(ctx.admin_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    }
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let (status, interpreter_items) =
+        json_request(&ctx.app, "GET", base_path, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{interpreter_items}");
+    assert!(
+        !interpreter_items
+            .as_array()
+            .expect("interpreter task list")
+            .iter()
+            .any(|item| item["id"] == general_task_id.to_string())
+    );
+    let (status, body) =
+        json_request(&ctx.app, "GET", &general_path, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, manager_detail) = json_request(
+        &ctx.app,
+        "GET",
+        &general_path,
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manager_detail}");
+    assert_eq!(manager_detail["item"]["id"], general_task_id.to_string());
 
     let (status, outsider_items) =
         json_request(&ctx.app, "GET", base_path, &outsider_bearer, None).await;
@@ -3349,4 +3469,143 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
     let (status, denied_detail) =
         json_request(&ctx.app, "GET", &general_path, &outsider_bearer, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_detail}");
+}
+
+async fn create_work_center_task(
+    app: &axum::Router,
+    bearer: &str,
+    assigned_to: Uuid,
+    title: &str,
+    parent_task_id: Option<&str>,
+) -> Value {
+    let (status, task) = json_request(
+        app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": title,
+            "assigned_to": assigned_to,
+            "starts_at": "2026-10-01T09:00:00Z",
+            "due_at": "2026-10-02T17:00:00Z",
+            "parent_task_id": parent_task_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    task
+}
+
+async fn work_center_detail(app: &axum::Router, bearer: &str, id: &str) -> Value {
+    let (status, detail) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    detail
+}
+
+#[tokio::test]
+async fn closing_a_parent_can_close_its_open_subtasks_and_reports_child_progress() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let owner = seed_user(&ctx.pool, "concierge", &format!("subtasks-{tag}")).await;
+    let peer = seed_user(&ctx.pool, "concierge", &format!("subtasks-peer-{tag}")).await;
+    let bearer = auth_header_for(owner, "concierge");
+    let peer_bearer = auth_header_for(peer, "concierge");
+
+    let parent = create_work_center_task(&ctx.app, &bearer, owner, "Parent", None).await;
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+    let open_child =
+        create_work_center_task(&ctx.app, &bearer, owner, "Open child", Some(&parent_id)).await;
+    let open_child_id = open_child["id"].as_str().unwrap().to_string();
+    let grandchild =
+        create_work_center_task(&ctx.app, &bearer, owner, "Grandchild", Some(&open_child_id)).await;
+    let mut done_child =
+        create_work_center_task(&ctx.app, &bearer, owner, "Done child", Some(&parent_id)).await;
+    let done_child_id = done_child["id"].as_str().unwrap().to_string();
+    for next in ["in_progress", "completed"] {
+        let (status, changed) = json_request(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/concierge-operational-items/{done_child_id}/status"),
+            &bearer,
+            Some(json!({ "status": next, "expected_updated_at": done_child["updated_at"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{changed}");
+        done_child = changed;
+    }
+
+    let detail = work_center_detail(&ctx.app, &bearer, &parent_id).await;
+    assert_eq!(detail["item"]["child_count"], 2, "{detail}");
+    assert_eq!(detail["item"]["child_completed_count"], 1, "{detail}");
+    assert_eq!(detail["item"]["child_open_count"], 1, "{detail}");
+
+    let close_path = format!("/api/v1/concierge-operational-items/{parent_id}/close-children");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &bearer,
+        Some(json!({ "status": "open" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &peer_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, closed) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["closed_count"], 2, "{closed}");
+
+    for id in [open_child_id.as_str(), grandchild["id"].as_str().unwrap()] {
+        let detail = work_center_detail(&ctx.app, &bearer, id).await;
+        assert_eq!(detail["item"]["status"], "completed", "{detail}");
+        assert!(
+            detail["history"].as_array().unwrap().iter().any(|entry| {
+                entry["payload"]["reason"] == "parent_closed"
+                    && entry["payload"]["parent_task_id"] == json!(parent_id)
+            }),
+            "{detail}"
+        );
+    }
+    let detail = work_center_detail(&ctx.app, &bearer, &parent_id).await;
+    assert_eq!(detail["item"]["status"], "open", "{detail}");
+    assert_eq!(detail["item"]["child_completed_count"], 2, "{detail}");
+    assert_eq!(detail["item"]["child_open_count"], 0, "{detail}");
+
+    // Nothing left to close: the call is a no-op.
+    let (status, closed) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["closed_count"], 0, "{closed}");
 }

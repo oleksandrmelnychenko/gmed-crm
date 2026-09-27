@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { InvoiceImportPreview } from "../../src/pages/invoices/model/import-model";
 import fs from "node:fs";
+import { pickerValueInput } from "./helpers";
 import path from "node:path";
 if (process.env.PARSER_TEST_BASE_URL) test.use({ baseURL: process.env.PARSER_TEST_BASE_URL });
 
@@ -112,7 +113,10 @@ if (process.env.PARSER_CORPUS_DIR) {
           [/Дата инвойса|Rechnungsdatum/, "invoice_date"], [/Оплатить до|Fällig am/, "due_date"],
           [netAmountLabel, "amount_net"], [vatAmountLabel, "amount_vat"],
           [grossAmountLabel, "amount_gross"], [/Валюта|Währung/, "currency"],
-        ] as const) await expect(dialog.getByLabel(label)).toHaveValue(preview.fields[field] ?? "");
+        ] as const) {
+          const input = field === "invoice_date" || field === "due_date" ? pickerValueInput(dialog, label) : dialog.getByLabel(label);
+          await expect(input).toHaveValue(preview.fields[field] ?? "");
+        }
         const positions = dialog.locator("div.rounded-xl").filter({ has: page.getByRole("heading", { name: /Позиции в документе|Positionen im Dokument/ }) }).last();
         for (const line of preview.line_items ?? []) {
           for (const field of ["name", "qty", "unit_price", "price_subtotal", "service_period", "vat_rate"]) {
@@ -587,9 +591,10 @@ test("manual review stays available when parser is unavailable, including mobile
     [netAmountLabel, "80"], [vatAmountLabel, "0"], [grossAmountLabel, "80"], [/^Валюта$|^Währung$/, "EUR"],
   ] as const) await dialog.getByLabel(label).fill(value);
   // MUI date fields use editable sections; filling the hidden input bypasses them.
-  await dialog.getByLabel(/Дата инвойса|Rechnungsdatum/).locator("..").getByRole("button").click();
+  const invoiceDate = dialog.getByRole("group", { name: /Дата инвойса|Rechnungsdatum/ });
+  await invoiceDate.locator("..").getByRole("button").click();
   await page.getByRole("gridcell", { name: "1", exact: true }).click();
-  await expect(dialog.getByLabel(/Дата инвойса|Rechnungsdatum/)).not.toHaveValue("");
+  await expect(invoiceDate.locator("input")).not.toHaveValue("");
   await dialog.getByRole("heading", { name: /Проверка входящего инвойса|Eingangsrechnung prüfen/ }).click();
   await dialog.getByRole("checkbox", { name: /Я сверил|Ich habe/ }).check();
   await dialog.screenshot({ path: "../artifacts/design-qa/invoice-import-mobile.png" });
@@ -692,7 +697,7 @@ test("missing amounts are named and collection date is distinct from payment dea
   } });
   await expect(dialog.getByText(/Заполните поля: Сумма без НДС, Сумма НДС|Bitte ergänzen: Nettobetrag, Umsatzsteuerbetrag/).first()).toBeVisible();
   await expect(dialog.getByText(/Автоматическое списание · 29.09.2026|Lastschrift · 29.09.2026/)).toBeVisible();
-  await expect(dialog.getByLabel(/Оплатить до|Fällig am/)).toHaveValue("");
+  await expect(pickerValueInput(dialog, /Оплатить до|Fällig am/)).toHaveValue("");
   await dialog.getByLabel(netAmountLabel).fill("100");
   await dialog.getByLabel(vatAmountLabel).fill("19");
   await expect(dialog.getByText(/Заполните поля:|Bitte ergänzen:/)).toHaveCount(0);

@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::{NaiveDate, Utc};
+use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -594,7 +594,7 @@ async fn upload_interpreter_profile_document(
         document_variant: Some("original"),
         document_language: None,
         access_category: Some("internal"),
-        document_date: Some(Utc::now().date_naive()),
+        document_date: Some(crate::app_time::today()),
         source_person: Some("interpreter_profile"),
         source_institution: None,
         addressee_person: None,

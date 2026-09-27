@@ -3,11 +3,12 @@ import { ArrowUpRight, CalendarDays, Check, CircleAlert, Clock3, FolderKanban, L
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { cn } from "@/lib/utils";
 import { conciergeTaskCode, conciergeTaskInterval, type ConciergeTask, type ConciergeTaskStatus } from "./model";
-import { taskWorkflowRows } from "./task-workflow";
+import { subtaskProgress, taskWorkflowRows } from "./task-workflow";
 import { ConciergeDialogHeader } from "./dialog-layout";
 
 const copy = {
@@ -59,9 +60,9 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
   const saving = useRef(false);
   const locked = busy || Boolean(pendingId);
   const children = rows.slice(1);
-  const completed = children.filter(({ task }) => task.status === "completed").length;
+  const progress = subtaskProgress(children.map(({ task }) => task));
   const incompleteVisibility = rows.some(({ task }) => (task.child_count ?? 0) > rows.filter(row => row.task.parent_task_id === task.id).length);
-  const formatDate = (date: Date) => new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
+  const formatDate = (date: Date) => appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
 
   async function changeStatus(task: ConciergeTask, status: ConciergeTaskStatus) {
     if (locked || saving.current || !availableStatusesForTask(task).includes(status)) return;
@@ -87,7 +88,7 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border/70 bg-muted/20 px-4 py-3 sm:px-5" aria-label={`${labels.total}: ${children.length}`}>
           <Badge variant="outline" className="h-6 gap-1.5 border-primary/20 bg-primary/5 text-[10px] text-primary"><ListChecks />{labels.tasks}<span className="font-semibold tabular-nums">{children.filter(({ task }) => task.kind === "task").length}</span></Badge>
           <Badge variant="outline" className={cn("h-6 gap-1.5 text-[10px]", statusTone.review)}><CalendarDays />{labels.events}<span className="font-semibold tabular-nums">{children.filter(({ task }) => task.kind === "event").length}</span></Badge>
-          <Badge variant="outline" className={cn("ml-auto h-6 gap-1.5 text-[10px]", completed > 0 ? statusTone.completed : "bg-background text-muted-foreground")}><Check />{labels.completedCount}: <span className="font-semibold tabular-nums">{completed}/{children.length}</span></Badge>
+          <Badge variant="outline" className={cn("ml-auto h-6 gap-1.5 text-[10px]", progress.done > 0 ? statusTone.completed : "bg-background text-muted-foreground")}><Check />{labels.completedCount}: <span className="font-semibold tabular-nums">{progress.done}/{progress.total}</span></Badge>
         </div>
       ) : null}
       <div className="min-h-0 overflow-y-auto overscroll-contain bg-muted/10 p-4 sm:p-5">

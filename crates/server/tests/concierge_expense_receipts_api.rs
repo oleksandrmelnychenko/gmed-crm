@@ -2,7 +2,7 @@ mod support;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
@@ -349,7 +349,7 @@ async fn task_expense_endpoints_use_task_context_and_owner_permissions() {
         Uuid::new_v4(),
         "unpaid",
         false,
-        Utc::now().date_naive() - Duration::days(1),
+        gmed_server::app_time::today() - Duration::days(1),
     );
     let (status, created) = multipart_request(
         &context.app,
@@ -444,7 +444,7 @@ async fn legacy_service_submission_resolves_and_persists_the_linked_task() {
         Uuid::new_v4(),
         "unpaid",
         false,
-        Utc::now().date_naive() - Duration::days(1),
+        gmed_server::app_time::today() - Duration::days(1),
     );
     fields.push(("document_missing".to_string(), "true".to_string()));
 
@@ -487,7 +487,7 @@ async fn finance_can_post_and_reverse_a_task_native_expense() {
     let task_id = linked_task_id(&context.pool, service_id).await;
     let assignee = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
     let mut fields = submission_fields(Uuid::new_v4(), "patient", true, expense_date);
     fields.push(("document_missing".to_string(), "true".to_string()));
     let (status, created) = multipart_fields_request(
@@ -519,7 +519,7 @@ async fn finance_can_post_and_reverse_a_task_native_expense() {
         Some(json!({
             "request_id": Uuid::new_v4(),
             "reason": "Task settlement correction",
-            "reversed_on": Utc::now().date_naive(),
+            "reversed_on": gmed_server::app_time::today(),
         })),
     )
     .await;
@@ -541,7 +541,7 @@ async fn assigned_concierge_can_submit_expense_without_document_when_declared_mi
         Uuid::new_v4(),
         "unpaid",
         true,
-        Utc::now().date_naive() - Duration::days(1),
+        gmed_server::app_time::today() - Duration::days(1),
     );
     fields.push(("document_missing".to_string(), "true".to_string()));
 
@@ -598,7 +598,7 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     let owner = auth_header(concierge_id, "concierge");
     let other = auth_header(other_concierge_id, "concierge");
     let request_id = Uuid::new_v4();
-    let expense_date = Utc::now().date_naive() - Duration::days(2);
+    let expense_date = gmed_server::app_time::today() - Duration::days(2);
 
     let unrelated_external_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO external_invoices (
@@ -924,7 +924,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
     .unwrap();
     let concierge = auth_header(concierge_id, "concierge");
     let finance = auth_header(context.admin_id, "ceo");
-    let expense_date = Utc::now().date_naive() - Duration::days(3);
+    let expense_date = gmed_server::app_time::today() - Duration::days(3);
     let paid_on = expense_date + Duration::days(2);
 
     for (index, (paid_by, delivered, expected_receivable, expected_liability)) in [
@@ -1128,7 +1128,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 Some(json!({
                     "request_id": Uuid::new_v4(),
                     "reason": "Orderless expense lifecycle regression",
-                    "reversed_on": Utc::now().date_naive(),
+                    "reversed_on": gmed_server::app_time::today(),
                 })),
             )
             .await;
@@ -1229,7 +1229,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 Some(json!({
                     "request_id": Uuid::new_v4(),
                     "reason": "Must reverse later provider payment first",
-                    "reversed_on": Utc::now().date_naive()
+                    "reversed_on": gmed_server::app_time::today()
                 })),
             )
             .await;
@@ -1244,7 +1244,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 &finance,
                 Some(json!({
                     "request_id": Uuid::new_v4(),
-                    "paid_on": Utc::now().date_naive(),
+                    "paid_on": gmed_server::app_time::today(),
                     "note": "Settlement corrected before expense reversal"
                 })),
             )
@@ -1285,7 +1285,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 &finance,
                 Some(json!({
                     "request_id": Uuid::new_v4(),
-                    "paid_on": Utc::now().date_naive(),
+                    "paid_on": gmed_server::app_time::today(),
                     "note": "Canonical reversal before expense reversal"
                 })),
             )
@@ -1299,7 +1299,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 Some(json!({
                     "request_id": Uuid::new_v4(),
                     "reason": "Expense is no longer valid",
-                    "reversed_on": Utc::now().date_naive()
+                    "reversed_on": gmed_server::app_time::today()
                 })),
             )
             .await;
@@ -1340,7 +1340,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     .unwrap();
     let concierge = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(2);
+    let expense_date = gmed_server::app_time::today() - Duration::days(2);
     let paid_on = expense_date + Duration::days(1);
 
     let (status, rejected_submission) = submit_fixture_expense(
@@ -1487,7 +1487,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": Uuid::new_v4(),
             "reason": "Patient invoice still uses this receipt",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1511,7 +1511,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": Uuid::new_v4(),
             "reason": "Allocation was released but patient invoice still charges it",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1534,7 +1534,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": reversal_request_id,
             "reason": "Card payment was voided",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1589,7 +1589,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": reversal_request_id,
             "reason": "Card payment was voided",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1640,7 +1640,7 @@ async fn receipt_upload_limit_accepts_camera_size_and_rejects_above_twenty_five_
     let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
         seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
     let bearer = auth_header(concierge_id, "concierge");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
     let fields = submission_fields(Uuid::new_v4(), "patient", true, expense_date);
     let mut camera_jpeg = vec![0_u8; 3 * 1024 * 1024];
     camera_jpeg[..3].copy_from_slice(&[0xff, 0xd8, 0xff]);
@@ -1682,7 +1682,7 @@ async fn finance_review_queue_is_global_paginated_and_finance_only() {
     let billing_id = seed_user(&context.pool, "billing", &format!("queue-{tag}")).await;
     let concierge = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
 
     for index in 0..2 {
         let fixture_tag = format!("{tag}-{index}");
@@ -1754,4 +1754,153 @@ async fn finance_review_queue_is_global_paginated_and_finance_only() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{invalid_page}");
+}
+
+#[tokio::test]
+async fn receipts_of_an_appointment_task_land_on_its_order_and_gmed_paid_ones_need_no_partner() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("vendor-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("vendor-review-{tag}")).await;
+    let (patient_id, _provider_id, service_id, order_id, _order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    // A restaurant booking of the order's appointment, with a vendor that is
+    // no registered partner.
+    let appointment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+               patient_id, order_id, appointment_type, title, date, status, created_by
+           ) VALUES ($1, $2, 'non_medical', 'Dinner', CURRENT_DATE - 1, 'completed', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(context.admin_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE concierge_services SET provider_id = NULL, appointment_id = $2 WHERE id = $1",
+    )
+    .bind(service_id)
+    .bind(appointment_id)
+    .execute(&context.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE tasks SET provider_id = NULL, appointment_id = $2 WHERE concierge_service_id = $1",
+    )
+    .bind(service_id)
+    .bind(appointment_id)
+    .execute(&context.pool)
+    .await
+    .unwrap();
+    let account_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO company_financial_accounts (
+               name, account_type, currency, opening_balance, opening_balance_on,
+               is_default, is_active, created_by
+           ) VALUES ($1, 'bank', 'EUR', 0, '2020-01-01', false, true, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Vendor receipts {tag}"))
+    .bind(context.admin_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    let concierge = auth_header(concierge_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
+
+    let (status, created) = submit_fixture_expense(
+        &context.app,
+        &concierge,
+        service_id,
+        Uuid::new_v4(),
+        "agency",
+        true,
+        expense_date,
+        &format!("{tag}-agency"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["item"]["order_id"], json!(order_id), "{created}");
+    let expense_id = Uuid::parse_str(created["item"]["id"].as_str().unwrap()).unwrap();
+
+    // The finance notification carries the receipt facts for the staff UI.
+    let body: String = sqlx::query_scalar(
+        r#"SELECT body FROM user_notifications
+           WHERE user_id = $1 AND kind = 'concierge_expense_submitted' AND entity_id = $2"#,
+    )
+    .bind(billing_id)
+    .bind(expense_id)
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    let body: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(body["vendor"], "Berlin Driver GmbH");
+    assert_eq!(body["amount_gross"], "119.00");
+    assert_eq!(body["currency"], "EUR");
+
+    let (status, posted) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "financial_account_id": account_id,
+            "paid_on": expense_date,
+            "payment_method": "bank_transfer",
+            "payment_reference": "VENDOR-1",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{posted}");
+    assert_eq!(posted["item"]["status"], "posted");
+    let external_invoice_id =
+        Uuid::parse_str(posted["item"]["external_invoice"]["id"].as_str().unwrap()).unwrap();
+    let (provider_id, supplier_name): (Option<Uuid>, Option<String>) =
+        sqlx::query_as("SELECT provider_id, supplier_name FROM external_invoices WHERE id = $1")
+            .bind(external_invoice_id)
+            .fetch_one(&context.pool)
+            .await
+            .unwrap();
+    assert!(provider_id.is_none());
+    // Without a partner the receipt's vendor is the supplier of the payable.
+    assert_eq!(supplier_name.as_deref(), Some("Berlin Driver GmbH"));
+
+    // A receipt nobody has paid yet stays owed to a partner, so it needs one;
+    // its patient share is the full amount, booked once delivered.
+    let (status, unpaid) = submit_fixture_expense(
+        &context.app,
+        &concierge,
+        service_id,
+        Uuid::new_v4(),
+        "unpaid",
+        false,
+        expense_date,
+        &format!("{tag}-unpaid"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{unpaid}");
+    assert_eq!(
+        unpaid["item"]["balance_consequence"]["intended_patient_receivable_gross"],
+        "119.00"
+    );
+    assert_eq!(
+        unpaid["item"]["balance_consequence"]["patient_receivable_after_delivery"],
+        true
+    );
+    let unpaid_id = unpaid["item"]["id"].as_str().unwrap();
+    let (status, refused) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/expenses/{unpaid_id}/post"),
+        &billing,
+        Some(json!({ "request_id": Uuid::new_v4(), "order_id": order_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
 }

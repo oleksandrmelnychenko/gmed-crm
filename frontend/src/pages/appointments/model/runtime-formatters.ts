@@ -1,3 +1,4 @@
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { getLang, t as translateCatalog } from "@/lib/i18n";
 
 function appointmentRuntimeTranslations() {
@@ -9,13 +10,13 @@ export function appointmentRuntimeLocale() {
 }
 
 const APPOINTMENT_DATE_FORMATTERS = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     weekday: "short",
     day: "2-digit",
     month: "short",
     year: "numeric",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     weekday: "short",
     day: "2-digit",
     month: "short",
@@ -24,14 +25,14 @@ const APPOINTMENT_DATE_FORMATTERS = {
 } as const;
 
 const APPOINTMENT_DATE_TIME_FORMATTERS = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -43,7 +44,7 @@ const APPOINTMENT_DATE_TIME_FORMATTERS = {
 export function formatAppointmentDateLabel(date: string) {
   try {
     return APPOINTMENT_DATE_FORMATTERS[appointmentRuntimeLocale()].format(
-      new Date(`${date}T00:00:00`),
+      dateOrInstant(date),
     );
   } catch {
     return date;

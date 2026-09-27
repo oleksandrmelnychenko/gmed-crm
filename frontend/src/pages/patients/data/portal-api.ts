@@ -1,4 +1,5 @@
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { appDateKey } from "@/lib/app-time-zone";
 
 import type {
   PortalAccountStatement,
@@ -7,6 +8,7 @@ import type {
   PortalConciergeServiceItem,
   PortalDocumentAlertsSummary,
   PortalDocumentItem,
+  PortalDunningLetterResponse,
   PortalFeedbackItem,
   PortalFollowupMilestoneItem,
   PortalInvoiceCreditNoteHistoryResponse,
@@ -100,7 +102,7 @@ export async function fetchPatientPortalWorkspace() {
 export function downloadPatientPortalExport() {
   return downloadApiFile(
     "/me/export?format=zip",
-    `patient-export-${new Date().toISOString().slice(0, 10)}.zip`,
+    `patient-export-${appDateKey()}.zip`,
   );
 }
 
@@ -241,6 +243,10 @@ export function fetchPortalInvoiceRefunds(invoiceId: string) {
   return apiFetch<PortalInvoiceRefundHistoryResponse>(
     `/me/invoices/${invoiceId}/refunds`,
   );
+}
+
+export function fetchPortalInvoiceDunningLetters(invoiceId: string) {
+  return apiFetch<PortalDunningLetterResponse>(`/me/invoices/${invoiceId}/dunning`);
 }
 
 export function uploadPortalPaymentProof(formData: FormData) {

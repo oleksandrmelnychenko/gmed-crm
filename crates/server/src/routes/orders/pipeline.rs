@@ -10,6 +10,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -172,6 +173,14 @@ async fn get_order_pipeline(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
+    // The pipeline summarises the clinical and commercial state of the order:
+    // it belongs to the full order view, not to the patient link alone.
+    if let Err(response) = auth.require_capability(Capability::OrdersView) {
+        return response;
+    }
+    if let Err(response) = super::require_full_order_read(&auth) {
+        return response;
+    }
     if let Err(response) =
         super::ensure_order_access(&state, &auth, order_id, "Order not found").await
     {

@@ -258,8 +258,8 @@ async fn patient_contract_status_is_derived_across_multiple_framework_contracts(
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
-    let valid_from = (chrono::Utc::now().date_naive() - chrono::Duration::days(1)).to_string();
-    let valid_to = (chrono::Utc::now().date_naive() + chrono::Duration::days(90)).to_string();
+    let valid_from = (gmed_server::app_time::today() - chrono::Duration::days(1)).to_string();
+    let valid_to = (gmed_server::app_time::today() + chrono::Duration::days(90)).to_string();
 
     let (status, signed_contract) = json_request(
         &app,

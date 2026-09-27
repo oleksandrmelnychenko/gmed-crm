@@ -23,6 +23,7 @@ import {
   PageHeader,
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
+import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
@@ -54,10 +55,10 @@ import type {
 
 type ProviderView = "providers" | "documents";
 
-const today = new Date();
+const today = appDateKey();
 const initialFilters: CompanyFinancialFilters = {
-  from: `${today.getFullYear()}-01-01`,
-  to: today.toISOString().slice(0, 10),
+  from: `${today.slice(0, 4)}-01-01`,
+  to: today,
   currency: "",
   movement: "all",
   search: "",
@@ -257,8 +258,7 @@ function formatMoney(value: string | null | undefined, currency: string, _locale
 
 function formatDate(value: string | null, locale: string) {
   if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale);
+  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
 }
 
 function SummaryCard({

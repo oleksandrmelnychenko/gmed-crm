@@ -93,9 +93,23 @@ export function countDueInFull(lines: TerminationSettlementLine[]) {
   return lines.filter((line) => line.due_in_full).length;
 }
 
-/** "Create final invoice" needs an open settlement with an uninvoiced accrued amount. */
-export function canCreateFinalInvoice(settlement: Pick<TerminationSettlement, "status" | "current">) {
-  return settlement.status === "open" && isPositiveAmount(settlement.current.uninvoiced_gross);
+/**
+ * "Create final invoice" needs an open settlement with something to bill now,
+ * or its final invoice draft (the server returns the existing draft).
+ */
+export function canCreateFinalInvoice(
+  settlement: Pick<TerminationSettlement, "status" | "current"> & {
+    final_invoice?: TerminationSettlement["final_invoice"];
+  },
+) {
+  if (settlement.status !== "open") return false;
+  if (settlement.final_invoice?.status === "draft") return true;
+  return isPositiveAmount(settlement.current.billable_gross ?? settlement.current.uninvoiced_gross);
+}
+
+/** Amount the final invoice will bill, for the action label. */
+export function finalInvoiceAmount(settlement: Pick<TerminationSettlement, "current">) {
+  return toAmount(settlement.current.billable_gross ?? settlement.current.uninvoiced_gross);
 }
 
 export const FORCE_SETTLE_NOTE_MIN = 3;

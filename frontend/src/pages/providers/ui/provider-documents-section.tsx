@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ProviderDetail } from "../model/types";
@@ -221,7 +222,7 @@ export function ProviderDocumentsSection({
                 <td className="px-3 py-2.5"><p className="font-medium">{document.auto_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{document.original_filename} · {formatSize(document.file_size)}</p></td>
                 <td className="px-3 py-2.5"><p>{document.patient_name || labels.noPatient}</p>{document.patient_number ? <p className="text-xs text-muted-foreground">{document.patient_number}</p> : null}</td>
                 <td className="px-3 py-2.5"><Badge variant="outline" className={document.is_medical ? "border-sky-200 bg-sky-50 text-sky-700" : ""}>{document.is_medical ? labels.medical : labels.provider}</Badge></td>
-                <td className="px-3 py-2.5"><p>{new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(document.created_at))}</p><p className="text-xs text-muted-foreground">{document.uploaded_by_name}</p></td>
+                <td className="px-3 py-2.5"><p>{appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(document.created_at))}</p><p className="text-xs text-muted-foreground">{document.uploaded_by_name}</p></td>
                 <td className="px-1 py-2.5"><div className="flex items-center justify-end gap-1"><DocumentSignatureAction documentId={document.id} title={document.original_filename || document.auto_name} iconOnly onDone={() => void loadDocuments()} /><Button type="button" size="icon-sm" variant="ghost" title={document.original_filename || document.auto_name} onClick={() => void downloadApiFile(`/documents/${document.id}/download`, document.original_filename || document.auto_name)}><Download /></Button></div></td>
               </tr>
             ))}

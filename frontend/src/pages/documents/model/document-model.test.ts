@@ -122,6 +122,16 @@ describe("buildStandardDocumentName", () => {
     ).toBe("ADMIN-Informationsblatt zum Datenschutz vom 04.06.2026");
   });
 
+  it("names a document dated by an instant after its Berlin calendar day", () => {
+    // 27 Sep 23:30 in Berlin (28 Sep in Kyiv) and 28 Sep 00:30 in Berlin (27 Sep in UTC).
+    expect(
+      buildStandardDocumentName({ category: "consent", art: "privacy_information", documentDate: new Date("2026-09-27T21:30:00Z") }),
+    ).toBe("ADMIN-Informationsblatt zum Datenschutz vom 27.09.2026");
+    expect(
+      buildStandardDocumentName({ category: "consent", art: "privacy_information", documentDate: new Date("2026-09-27T22:30:00Z") }),
+    ).toBe("ADMIN-Informationsblatt zum Datenschutz vom 28.09.2026");
+  });
+
   it("keeps finance documents in the finance prefix even with German labels", () => {
     expect(
       buildStandardDocumentName({

@@ -23,9 +23,11 @@ describe("formatRelativeTime", () => {
   it("Nd ago for days < 7", () => {
     expect(formatRelativeTime(new Date("2026-04-18T12:00:00Z"), now)).toBe("3 дн назад");
   });
-  it("falls back to localeDateString beyond 7d", () => {
+  it("falls back to the German-time date beyond 7d", () => {
     const long = new Date("2026-01-01T00:00:00Z");
     const out = formatRelativeTime(long, now);
     expect(out).not.toMatch(/ago/);
+    // 23:30Z on 31 Dec is already 1 January in Berlin.
+    expect(formatRelativeTime(new Date("2025-12-31T23:30:00Z"), now)).toBe("01.01.2026");
   });
 });

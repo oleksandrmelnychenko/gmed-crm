@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Banner as ShellBanner } from "@/components/ui-shell";
+import { formatDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -86,8 +87,7 @@ function formatMoney(value: string | null | undefined, currency: string, _locale
 }
 
 function formatDate(value: string, locale: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale);
+  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
 }
 
 function operationLabel(

@@ -1,6 +1,10 @@
 import { useCallback, useState, type SetStateAction } from "react";
 
+import { appDateKey } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
+
+import { emptyCreditNoteSelection, type CreditNoteSelectionDraft } from "./credit-note";
+import type { InvoiceCreditableLine } from "./types";
 
 export type InvoicePaymentDraft = {
   requestId: string;
@@ -13,7 +17,8 @@ export type InvoicePaymentDraft = {
 
 export type InvoiceCreditNoteDraft = {
   requestId: string;
-  amountGross: string;
+  /** Credited lines or an amount within one VAT rate. */
+  selection: CreditNoteSelectionDraft;
   reason: string;
   issuedOn: string;
   portalVisible: boolean;
@@ -40,8 +45,9 @@ export type DraftWithBaseline<T> = {
   baseline: T;
 };
 
+/** Today's date in Berlin as "YYYY-MM-DD". */
 export function isoToday(now = new Date()) {
-  return now.toISOString().slice(0, 10);
+  return appDateKey(now);
 }
 
 /** The payment form proposes the open balance, received today. */
@@ -57,10 +63,13 @@ export function newPaymentDraft(balanceDue: unknown, today = isoToday()): Invoic
   };
 }
 
-export function newCreditNoteDraft(today = isoToday()): InvoiceCreditNoteDraft {
+export function newCreditNoteDraft(
+  today = isoToday(),
+  creditableLines?: readonly InvoiceCreditableLine[],
+): InvoiceCreditNoteDraft {
   return {
     requestId: crypto.randomUUID(),
-    amountGross: "",
+    selection: emptyCreditNoteSelection(creditableLines),
     reason: "",
     issuedOn: today,
     portalVisible: true,

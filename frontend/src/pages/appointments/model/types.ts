@@ -190,6 +190,8 @@ export type RecurringLineageHistoryItem = {
 };
 
 export type AppointmentDetail = AppointmentListItem & {
+  /** The interpreter's note to a "needs clarification" or declined answer. */
+  interpreter_response_comment?: string | null;
   category: string | null;
   preparation_notes: string | null;
   followup_notes: string | null;
@@ -345,6 +347,8 @@ export type TaskEntry = {
   assigned_to_role: string;
   assigned_by: string;
   assigned_by_name: string;
+  /** Creator role: decides who may review (complete) the task. */
+  assigned_by_role?: string;
   patient_id: string | null;
   order_id: string | null;
   appointment_id: string | null;
@@ -358,6 +362,8 @@ export type TaskEntry = {
 
 export type ConciergeServiceEntry = {
   id: string;
+  /** The title is a placeholder hiding a medical appointment or provider. */
+  title_redacted?: boolean;
   patient_id: string;
   patient_name: string;
   patient_pid: string;

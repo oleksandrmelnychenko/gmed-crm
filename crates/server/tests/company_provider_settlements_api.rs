@@ -144,7 +144,7 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
         "request_id": first_request_id,
         "financial_account_id": account_id,
         "amount_gross": "40.00",
-        "paid_on": chrono::Utc::now().date_naive().to_string(),
+        "paid_on": gmed_server::app_time::today().to_string(),
         "payment_method": "bank_transfer",
         "reference": "First installment",
         "note": "Provider confirmed receipt"
@@ -188,7 +188,7 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
             "request_id": second_request_id,
             "financial_account_id": account_id,
             "amount_gross": "60.00",
-            "paid_on": chrono::Utc::now().date_naive().to_string(),
+            "paid_on": gmed_server::app_time::today().to_string(),
             "payment_method": "bank_transfer",
             "reference": "Final installment"
         })),
@@ -227,7 +227,7 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     let reversal_path = format!("{path}/{second_payment_id}/reversal");
     let reversal_body = json!({
         "request_id": Uuid::new_v4(),
-        "paid_on": chrono::Utc::now().date_naive().to_string(),
+        "paid_on": gmed_server::app_time::today().to_string(),
         "note": "Bank transfer was rejected"
     });
     let (reversal_status, reversal) = request_json(
@@ -300,10 +300,7 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     assert_eq!(statement_movements[3]["movement_type"], "reversal");
     assert_eq!(statement_movements[3]["running_balance"], "60");
 
-    let tomorrow = chrono::Utc::now()
-        .date_naive()
-        .succ_opt()
-        .expect("tomorrow");
+    let tomorrow = gmed_server::app_time::today().succ_opt().expect("tomorrow");
     let opening_path = format!(
         "/api/v1/company-provider-statements/{provider_id}?currency=EUR&from={tomorrow}&to=2099-12-31"
     );
@@ -345,7 +342,7 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
             "request_id": request_id,
             "financial_account_id": account_id,
             "amount_gross": "70.00",
-            "paid_on": chrono::Utc::now().date_naive().to_string(),
+            "paid_on": gmed_server::app_time::today().to_string(),
             "payment_method": "bank_transfer"
         })
     };

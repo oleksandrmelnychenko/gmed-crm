@@ -284,7 +284,9 @@ export type PatientAccountMovement = {
     | "balance_adjustment_reversal"
     | "external_receivable"
     | "external_allocation"
-    | "external_allocation_reversal";
+    | "external_allocation_reversal"
+    /** Accrued but not yet invoiced amount of an open termination settlement. */
+    | "termination_uninvoiced";
   direction: "debit" | "credit";
   entry_date: string;
   occurred_at: string;
@@ -336,7 +338,11 @@ export type PatientAccountStatement = {
     cash_paid: string;
     prepayment_applied: string;
     available_prepayment: string;
+    /** Cash beyond what invoices ask for (overpayments, credit notes after payment). */
+    credit_balance?: string;
     invoice_due: string;
+    /** Open invoices net of unapplied paid advances and credit balances. */
+    amount_to_pay?: string;
     external_receivable: string | null;
     total_due: string | null;
     reconciliation_required: boolean;

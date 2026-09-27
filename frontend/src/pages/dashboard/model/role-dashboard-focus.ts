@@ -1,3 +1,4 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import {
   conciergeTaskScheduledAt,
   isConciergeTaskActive,
@@ -12,10 +13,9 @@ const PRIORITY_WEIGHT: Record<string, number> = {
   low: 3,
 };
 
-function isSameLocalDay(left: Date, right: Date): boolean {
-  return left.getFullYear() === right.getFullYear()
-    && left.getMonth() === right.getMonth()
-    && left.getDate() === right.getDate();
+/** Whether two instants fall on the same Berlin calendar day. */
+function isSameAppDay(left: Date, right: Date): boolean {
+  return appDateKey(left) === appDateKey(right);
 }
 
 export function isConciergeTaskDueToday(task: ConciergeTask, now: Date): boolean {
@@ -23,7 +23,7 @@ export function isConciergeTaskDueToday(task: ConciergeTask, now: Date): boolean
   return Boolean(
     scheduledAt
       && isConciergeTaskActive(task)
-      && isSameLocalDay(scheduledAt, now),
+      && isSameAppDay(scheduledAt, now),
   );
 }
 

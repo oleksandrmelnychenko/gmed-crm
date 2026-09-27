@@ -73,6 +73,7 @@ import { Input } from "@/components/ui/input";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
+import { appDateKey, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -180,7 +181,11 @@ import {
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
-import { isMinor } from "../model/lead-wizard.model";
+import {
+  discoveryReferrerMissing,
+  intakeAsksDiscoverySource,
+  isMinor,
+} from "../model/lead-wizard.model";
 
 import {
   createLead,
@@ -463,7 +468,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
     continuousMonitoring: "",
     additionalMeasures: "",
     reviewerName: "",
-    reviewDate: new Date().toISOString().slice(0, 10),
+    reviewDate: appDateKey(),
   };
 }
 
@@ -1875,11 +1880,9 @@ function validMoneyInput(value: string) {
   return Number.isFinite(parsed) && parsed >= 0;
 }
 
+/** The `datetime-local` value of a deadline, in Berlin time. */
 function localDeadline(value: string | null | undefined) {
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime())
-    ? new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
-    : "";
+  return isoToBerlinLocalInput(value);
 }
 
 function lineFromOrderLeistung(item: Leistung): ServiceLine {
@@ -2322,19 +2325,23 @@ function documentsValidationIssues(
   return issues;
 }
 
-function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
+function validateMasterDraft(
+  draft: Draft | null,
+  tx: Tx,
+  repeatIntake: boolean,
+): MasterValidationErrors {
   if (!draft) return {};
 
   const errors: MasterValidationErrors = {};
   const required = tx("Обязательное поле", "Pflichtfeld");
-  if (draft.discoverySource === "customer_referral" && !draft.referrerPatientId) {
+  if (discoveryReferrerMissing(draft, repeatIntake)) {
     errors.referrerPatientId = required;
   }
   if (!draft.firstName.trim()) errors.firstName = required;
   if (!draft.lastName.trim()) errors.lastName = required;
   if (!draft.birthDate) {
     errors.birthDate = required;
-  } else if (draft.birthDate > new Date().toISOString().slice(0, 10)) {
+  } else if (draft.birthDate > appDateKey()) {
     errors.birthDate = tx(
       "Дата рождения не может быть в будущем",
       "Das Geburtsdatum darf nicht in der Zukunft liegen",
@@ -2698,6 +2705,8 @@ export function LeadWizard({
   const [prepaymentAmount, setPrepaymentAmount] = useState("");
   const [prepaymentDeadline, setPrepaymentDeadline] = useState("");
   const [commercialFlagsBusyCount, setCommercialFlagsBusyCount] = useState(0);
+  // Typed prepayment values committed on blur; shown as saving, never blocking.
+  const [commercialFlagsBackgroundCount, setCommercialFlagsBackgroundCount] = useState(0);
   const [conversionConfirmed, setConversionConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -2801,7 +2810,11 @@ export function LeadWizard({
   });
 
   useEffect(() => {
-    if (!open || draft?.discoverySource !== "customer_referral") {
+    if (
+      !open
+      || !intakeAsksDiscoverySource(isRepeatIntake)
+      || draft?.discoverySource !== "customer_referral"
+    ) {
       setReferrerPatients([]);
       setReferrerPatientsLoading(false);
       setReferrerPatientsError("");
@@ -2830,7 +2843,7 @@ export function LeadWizard({
     return () => {
       active = false;
     };
-  }, [deferredReferrerSearch, draft?.discoverySource, open, tx]);
+  }, [deferredReferrerSearch, draft?.discoverySource, isRepeatIntake, open, tx]);
 
   useEffect(() => {
     if (!open || !trustedContactEditor) {
@@ -3792,7 +3805,10 @@ export function LeadWizard({
       </div>
     );
   };
-  const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
+  const masterErrors = useMemo(
+    () => validateMasterDraft(draft, tx, isRepeatIntake),
+    [draft, isRepeatIntake, tx],
+  );
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
     if (!validationContext) return [];
@@ -3833,21 +3849,15 @@ export function LeadWizard({
     [draft, lines, paidAmount, prepayment, prepaymentAmount, step],
   );
 
+  // The confirmation covers what staff reviewed on the release step. Data is
+  // only edited on the other steps, so leaving the release step (or switching
+  // the lead) asks for it again. Saves and refreshes while staying there, e.g.
+  // completing the intake from the "Подтвердите данные обращения" blocker,
+  // replace the draft, document and quote objects without changing what was
+  // reviewed, and must not clear the tick.
   useEffect(() => {
     setConversionConfirmed(false);
-  }, [
-    leadId,
-    draft,
-    lines,
-    signedPatient,
-    signedAgency,
-    prepayment,
-    prepaymentAmount,
-    paidAmount,
-    quote?.id,
-    quote?.updated_at,
-    documents,
-  ]);
+  }, [leadId, step]);
 
   const ensureProspect = useCallback(async (
     medicalDraft: Draft,
@@ -5081,11 +5091,26 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
+  /**
+   * Persists commercial flags on the order. A `background` save commits a
+   * typed value when its field loses focus: it keeps the other controls
+   * enabled, because that blur usually comes from a click on the next control,
+   * and disabling it between mousedown and click swallowed that first click.
+   * Actions started meanwhile send the same typed values via ensureCommercial,
+   * and the per-flag request versions keep a stale response from winning.
+   */
   async function saveFlags(
     patchValue: CommercialFlagsPatch,
     rollbackValue: CommercialFlagsPatch,
+    { background = false }: { background?: boolean } = {},
   ) {
-    setCommercialFlagsBusyCount((current) => current + 1);
+    const existingOrderId = order?.id;
+    // Without an order the save creates it first, which must block the wizard.
+    const blocking = !background || !existingOrderId;
+    const setFlagsCount = blocking
+      ? setCommercialFlagsBusyCount
+      : setCommercialFlagsBackgroundCount;
+    setFlagsCount((current) => current + 1);
     const flagKeys = Object.keys(patchValue) as CommercialFlagKey[];
     const requestVersions = new Map(
       flagKeys.map((key) => {
@@ -5095,12 +5120,14 @@ ${serviceCommentLines.join("\n")}`
       }),
     );
     const targetLeadId = leadId;
-    const existingOrderId = order?.id;
     if (!existingOrderId) setBusy("flags");
-    setError("");
+    // Clearing a shown error moves the footer; a background save does it only
+    // after the click that caused the blur has landed.
+    if (blocking) setError("");
     try {
       if (existingOrderId) {
         const saved = await updateOrderCommercialBasis(existingOrderId, patchValue);
+        if (!blocking && hydrated.current === targetLeadId) setError("");
         flagKeys.forEach((key) => {
           if (commercialFlagRequestVersionRef.current[key] === requestVersions.get(key)) {
             commercialFlagRequestVersionRef.current[key] += 1;
@@ -5146,7 +5173,7 @@ ${serviceCommentLines.join("\n")}`
       }
     } finally {
       if (!existingOrderId) setBusy(null);
-      setCommercialFlagsBusyCount((current) => Math.max(0, current - 1));
+      setFlagsCount((current) => Math.max(0, current - 1));
     }
   }
 
@@ -6016,6 +6043,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section title={tx("Личные данные", "Persönliche Daten")}>
               <div className="grid gap-4 md:grid-cols-2">
+                {intakeAsksDiscoverySource(isRepeatIntake) ? (
                 <div className="space-y-4">
                   <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                     <NativeComboboxSelect
@@ -6095,6 +6123,7 @@ ${serviceCommentLines.join("\n")}`
                     </Field>
                   ) : null}
                 </div>
+                ) : null}
                 <Field
                   label={tx("Имя", "Vorname")}
                   required
@@ -6161,7 +6190,7 @@ ${serviceCommentLines.join("\n")}`
                     name="birth_date"
                     autoComplete="bday"
                     type="date"
-                    max={new Date().toISOString().slice(0, 10)}
+                    max={appDateKey()}
                     required
                     aria-invalid={Boolean(visibleMasterError("birthDate"))}
                     aria-describedby={visibleMasterError("birthDate") ? `${MASTER_FIELD_IDS.birthDate}-error` : undefined}
@@ -7779,6 +7808,7 @@ ${serviceCommentLines.join("\n")}`
                             void saveFlags(
                               { prepayment_amount: normalizedAmount },
                               { prepayment_amount: String(order.prepayment_amount ?? "") },
+                              { background: true },
                             );
                           }
                         }}
@@ -7797,13 +7827,14 @@ ${serviceCommentLines.join("\n")}`
                         className={inputClass}
                         onChange={(event) => setPrepaymentDeadline(event.target.value)}
                         onBlur={() => {
-                          const deadline = prepaymentDeadline ? new Date(prepaymentDeadline) : null;
-                          if (deadline && !Number.isFinite(deadline.getTime())) return;
+                          const deadline = prepaymentDeadline ? parseBerlinLocalInput(prepaymentDeadline) : null;
+                          if (prepaymentDeadline && !deadline) return;
                           const nextDueAt = deadline?.toISOString() ?? "";
                           if (localDeadline(order?.prepayment_due_at) === prepaymentDeadline) return;
                           void saveFlags(
                             { prepayment_due_at: nextDueAt },
                             { prepayment_due_at: order?.prepayment_due_at ?? "" },
+                            { background: true },
                           );
                         }}
                         disabled={isBusy}
@@ -8150,7 +8181,7 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
               </span>
               <span role="status" className="inline-flex items-center gap-1.5">
-                {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount > 0 ? (
+                {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
                   ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
                   : autosaveStatus === "dirty" ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
@@ -8530,7 +8561,7 @@ ${serviceCommentLines.join("\n")}`
                     <Input
                       className={inputClass}
                       type="date"
-                      max={new Date().toISOString().slice(0, 10)}
+                      max={appDateKey()}
                       value={trustedContactEditor.birthDate}
                       onChange={(event) => patchTrustedContactEditor("birthDate", event.target.value)}
                     />
@@ -8694,7 +8725,7 @@ ${serviceCommentLines.join("\n")}`
                           <div className="flex min-w-0 items-start gap-2.5">
                             <div className="min-w-0">
                               <h4 className="break-words text-sm font-semibold leading-5 text-foreground">{line.description}</h4>
-                              {line.catalogUnitLabel || catalogService?.unit_label ? (
+                              {rawUnit ? (
                                 <Badge
                                   variant="outline"
                                   className={cn(
@@ -8702,7 +8733,7 @@ ${serviceCommentLines.join("\n")}`
                                     serviceBillingUnitBadgeClass(rawUnit),
                                   )}
                                 >
-                                  {line.catalogUnitLabel || catalogService?.unit_label}
+                                  {unit}
                                 </Badge>
                               ) : null}
                             </div>

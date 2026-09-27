@@ -195,6 +195,21 @@ export function localizeTimelineTitle(
       "workflow_item_followup_plan",
     "Confirm final document release and patient communication":
       "workflow_item_final_release",
+    // Checklist items of the automatic concierge workflow of an appointment.
+    "Confirm travel / service booking details":
+      "generated_concierge_checklist_confirm_booking",
+    "Coordinate provider, transfer, hotel or VIP service":
+      "generated_concierge_checklist_coordinate_provider",
+    "Support patient during the concierge service window":
+      "generated_concierge_checklist_support_patient",
+    "Collect confirmations, receipts and handoff notes":
+      "generated_concierge_checklist_collect_confirmations",
+    // Checklist events of the patient timeline.
+    "Workflow checklist item created": "timeline_title_workflow_item_created",
+    "Workflow checklist item completed": "timeline_title_workflow_item_completed",
+    "Workflow checklist item marked not required":
+      "timeline_title_workflow_item_not_required",
+    "Workflow checklist item reopened": "timeline_title_workflow_item_reopened",
   }[workflowTitle];
   if (exactKey) return l(exactKey);
 
@@ -203,6 +218,10 @@ export function localizeTimelineTitle(
     ["Dunning second:", "timeline_title_dunning_second"],
     ["Dunning final:", "timeline_title_dunning_final"],
     ["Anamnese:", "timeline_title_anamnesis"],
+    // Tasks and reminders the appointment creates for its concierge.
+    ["Coordinate concierge service:", "generated_task_coordinate_concierge_service"],
+    ["Collect concierge receipts:", "generated_task_collect_concierge_receipts"],
+    ["Upcoming concierge service:", "generated_reminder_upcoming_concierge_service"],
   ];
   for (const [prefix, key] of prefixes) {
     if (value.startsWith(prefix)) {

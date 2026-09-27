@@ -8,12 +8,14 @@ import {
 import { LoaderCircle, MessageSquare } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type { ColumnDef } from "@/components/data-table/types";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
+import { formatDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
@@ -79,7 +81,7 @@ function AppointmentHandoffSectionContent({
   onRefresh,
   onError,
 }: AppointmentHandoffSectionProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
   const [followUpBusy, setFollowUpBusy] = useState(false);
@@ -197,6 +199,12 @@ function AppointmentHandoffSectionContent({
           }),
         }),
       });
+      // Visible confirmation: the reminder does not show up in this tab.
+      toast.success(
+        `${followUpPresetTitle(preset.id)}: ${
+          lang === "de" ? "Erinnerung angelegt" : "напоминание создано"
+        } (${formatDateKey(remindAt.slice(0, 10), "de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}).`,
+      );
       onRefresh();
     } catch (error) {
       onError(appointmentActionErrorMessage(error, tr.common_failed_create));

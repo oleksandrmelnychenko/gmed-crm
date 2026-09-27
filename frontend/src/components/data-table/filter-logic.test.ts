@@ -173,6 +173,19 @@ describe("evaluatePredicate — date operators", () => {
     expect(evaluatePredicate(rows[0], pred("birth", "between", { from: "1980-01-01" }), ctx)).toBe(true);
     expect(evaluatePredicate(rows[1], pred("birth", "between", { from: "1980-01-01" }), ctx)).toBe(false);
   });
+  it("compares timestamps by their German calendar day", () => {
+    const at = (created: string) => ({ ...rows[0], created });
+    // 22:30Z is already 28 Sep in Berlin; 21:30Z is still the 27th (though the 28th in Kyiv).
+    const earlyBerlinDay = at("2026-09-27T22:30:00Z");
+    const lateBerlinDay = at("2026-09-27T21:30:00Z");
+    const on28 = pred("created", "between", { from: "2026-09-28", to: "2026-09-28" });
+    expect(evaluatePredicate(earlyBerlinDay, on28, ctx)).toBe(true);
+    expect(evaluatePredicate(lateBerlinDay, on28, ctx)).toBe(false);
+    expect(evaluatePredicate(lateBerlinDay, pred("created", "before", "2026-09-28"), ctx)).toBe(true);
+    expect(evaluatePredicate(earlyBerlinDay, pred("created", "before", "2026-09-28"), ctx)).toBe(false);
+    expect(evaluatePredicate(earlyBerlinDay, pred("created", "after", "2026-09-27"), ctx)).toBe(true);
+    expect(evaluatePredicate(at("2026-09-28T21:59:00Z"), pred("created", "between", { to: "2026-09-28" }), ctx)).toBe(true);
+  });
   it("date filters with empty operands are no-ops", () => {
     expect(evaluatePredicate(rows[0], pred("birth", "before", ""), ctx)).toBe(true);
     expect(evaluatePredicate(rows[0], pred("birth", "after", ""), ctx)).toBe(true);

@@ -28,6 +28,9 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { localizeTaskTitle } from "@/lib/task-labels";
+import { isAppointmentReminderRecipient } from "@/pages/appointments/model/staff-roles";
 import {
   fetchPatientInterpreterHistory,
   fetchInterpreterSuggestions,
@@ -109,8 +112,11 @@ import {
   INTERPRETER_RESPONSE_OPTIONS,
   STATUS_OPTIONS,
   TASK_PRIORITY_OPTIONS,
-  TASK_STATUS_OPTIONS,
 } from "@/pages/appointments/model/constants";
+import {
+  appointmentTaskStatusOptions,
+  appointmentTaskStatusRequest,
+} from "@/pages/appointments/model/task-status";
 import {
   AppointmentEditorSheet,
   type AppointmentEditorSheetOpenChangeDetails,
@@ -717,7 +723,7 @@ function AppointmentInterpreterSection({
     }
   }
 
-  async function handleInterpreterResponse(response: InterpreterResponse) {
+  async function handleInterpreterResponse(response: InterpreterResponse, comment: string) {
     dispatchInterpreterState({
       type: "patch",
       value: { busyAction: `response:${response}` },
@@ -727,7 +733,10 @@ function AppointmentInterpreterSection({
         `/appointments/${detail.id}/interpreter-response`,
         {
           method: "POST",
-          body: JSON.stringify({ response }),
+          body: JSON.stringify({
+            response,
+            ...(response === "accepted" || !comment ? {} : { comment }),
+          }),
         },
       );
       onRefresh();
@@ -781,6 +790,7 @@ function AppointmentInterpreterSection({
           <InterpreterResponseControls
             busyAction={busyAction}
             interpreterResponse={detail.interpreter_response}
+            savedComment={detail.interpreter_response_comment ?? null}
             onResponse={handleInterpreterResponse}
           />
         </WritableScope>
@@ -858,10 +868,21 @@ function InterpreterAssignmentManagement({
         id: "response",
         label: t.users_status,
         accessor: (row) => responseLabel(row.interpreter_response ?? "pending"),
-        width: 170,
+        width: 240,
         render: (row) => (
-          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
-            {responseLabel(row.interpreter_response ?? "pending")}
+          <span className="flex min-w-0 flex-col items-start gap-0.5">
+            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+              {responseLabel(row.interpreter_response ?? "pending")}
+            </span>
+            {row.interpreter_response_comment ? (
+              <span
+                data-testid="interpreter-response-comment"
+                className="block max-w-full truncate text-xs text-muted-foreground"
+                title={row.interpreter_response_comment}
+              >
+                {row.interpreter_response_comment}
+              </span>
+            ) : null}
           </span>
         ),
       },
@@ -973,21 +994,30 @@ function InterpreterAssignmentManagement({
 function InterpreterResponseControls({
   busyAction,
   interpreterResponse,
+  savedComment,
   onResponse,
 }: {
   busyAction: string;
   interpreterResponse: InterpreterResponse | null;
-  onResponse: (response: InterpreterResponse) => void | Promise<void>;
+  savedComment: string | null;
+  onResponse: (response: InterpreterResponse, comment: string) => void | Promise<void>;
 }) {
+  const [comment, setComment] = useState(savedComment ?? "");
+  useEffect(() => setComment(savedComment ?? ""), [savedComment]);
+  const commentMissing = !comment.trim();
   return (
     <Section title={appointmentText("appointments_interpreter_response")}>
       <div className="flex flex-wrap gap-2">
-        {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
+        {/* "pending" is the state before an answer, not an answer. */}
+        {INTERPRETER_RESPONSE_OPTIONS.filter((value) => value !== "pending").map((value) => (
           <Button
             key={value}
             variant={interpreterResponse === value ? "default" : "outline"}
-            disabled={Boolean(busyAction)}
-            onClick={() => void onResponse(value)}
+            disabled={
+              Boolean(busyAction)
+              || (value === "discussion_requested" && commentMissing)
+            }
+            onClick={() => void onResponse(value, comment.trim())}
           >
             {busyAction === `response:${value}` ? (
               <LoaderCircle className="size-4 animate-spin" />
@@ -996,6 +1026,23 @@ function InterpreterResponseControls({
           </Button>
         ))}
       </div>
+      <label className="mt-3 block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          {appointmentText("appointments_interpreter_response_comment")}
+        </span>
+        <textarea
+          value={comment}
+          maxLength={1000}
+          rows={3}
+          className={textareaClassName}
+          disabled={Boolean(busyAction)}
+          onChange={(event) => setComment(event.target.value)}
+          placeholder={appointmentText("appointments_interpreter_response_comment_placeholder")}
+        />
+        <span className="block text-xs text-muted-foreground">
+          {appointmentText("appointments_interpreter_response_comment_hint")}
+        </span>
+      </label>
     </Section>
   );
 }
@@ -1064,7 +1111,7 @@ function AppointmentChecklistSection({
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [{ form, sheetOpen, submitBusy, completingId }, dispatchChecklistState] =
     useReducer(checklistSectionReducer, CHECKLIST_SECTION_INITIAL_STATE);
@@ -1166,7 +1213,7 @@ function AppointmentChecklistSection({
       {
         id: "item",
         label: appointmentText("appointments_checklist"),
-        accessor: (item) => item.item_text,
+        accessor: (item) => localizeTaskTitle(item.item_text, lang),
         filterType: "text",
         sortable: true,
         required: true,
@@ -1179,9 +1226,9 @@ function AppointmentChecklistSection({
                 ? "text-muted-foreground line-through"
                 : "text-foreground",
             )}
-            title={item.item_text}
+            title={localizeTaskTitle(item.item_text, lang)}
           >
-            {item.item_text}
+            {localizeTaskTitle(item.item_text, lang)}
           </span>
         ),
       },
@@ -1232,7 +1279,7 @@ function AppointmentChecklistSection({
           ),
       },
     ],
-    [t, tr],
+    [lang, t, tr],
   );
 
   return (
@@ -1556,11 +1603,13 @@ function AppointmentRemindersSection({
               required
             >
               <option value="">{t.common_not_set}</option>
-              {staff.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name} · {roleLabel(member.role)}
-                </option>
-              ))}
+              {staff
+                .filter((member) => isAppointmentReminderRecipient(member.role, detail.type))
+                .map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name} · {roleLabel(member.role)}
+                  </option>
+                ))}
             </NativeComboboxSelect>
           </Field>
           <Field compact label={t.appointments_date}>
@@ -2203,6 +2252,7 @@ function AppointmentTasksSectionContent({
   onError,
 }: AppointmentTasksSectionProps) {
   const { t } = useLang();
+  const { user } = useAuth();
   const [form, setForm] = useState<TaskFormState>(() =>
     blankTaskForm(
       detail.interpreter_id ?? detail.owner_user_id ?? assignableStaff[0]?.id ?? "",
@@ -2277,12 +2327,15 @@ function AppointmentTasksSectionContent({
     }
   }
 
-  async function handleTaskStatus(taskId: string, status: string) {
-    setActionBusy(`task:${taskId}:${status}`);
+  async function handleTaskStatus(task: TaskEntry, status: string) {
+    setActionBusy(`task:${task.id}:${status}`);
     try {
-      await apiFetch<{ ok: boolean }>(`/tasks/${taskId}/status`, {
+      // Appointment tasks follow the work-center rules: review step,
+      // optimistic lock, archive check, history and creator notification.
+      const request = appointmentTaskStatusRequest(task, status);
+      await apiFetch<unknown>(request.path, {
         method: "POST",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(request.body),
       });
       onRefresh();
     } catch (error) {
@@ -2316,27 +2369,30 @@ function AppointmentTasksSectionContent({
           </Button>
         ) : undefined
       }
-      rowActions={(task) => (
-        <NativeComboboxSelect
-          value={task.status}
-          aria-label={t.users_status}
-          disabled={Boolean(actionBusy)}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => {
-            const nextStatus = event.target.value;
-            if (nextStatus && nextStatus !== task.status) {
-              void handleTaskStatus(task.id, nextStatus);
-            }
-          }}
-          className="h-7 w-[150px] rounded-md bg-field text-xs"
-        >
-          {TASK_STATUS_OPTIONS.map((status) => (
-            <option key={status} value={status}>
-              {taskStatusLabel(status)}
-            </option>
-          ))}
-        </NativeComboboxSelect>
-      )}
+      rowActions={(task) => {
+        const statusOptions = appointmentTaskStatusOptions(task, user?.id, user?.role);
+        return (
+          <NativeComboboxSelect
+            value={task.status}
+            aria-label={t.users_status}
+            disabled={Boolean(actionBusy) || statusOptions.length <= 1}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              const nextStatus = event.target.value;
+              if (nextStatus && nextStatus !== task.status) {
+                void handleTaskStatus(task, nextStatus);
+              }
+            }}
+            className="h-7 w-[150px] rounded-md bg-field text-xs"
+          >
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {taskStatusLabel(status)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        );
+      }}
       rowActionsWidth={170}
     />
 

@@ -626,8 +626,8 @@ async fn audit_analytics(
                       AND entity_type IN ('patient', 'document', 'message_conversation', 'message_attachment')
                       AND action <> 'http_request'
                       AND (
-                            EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC') >= 22
-                         OR EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC') < 6
+                            EXTRACT(HOUR FROM created_at AT TIME ZONE 'Europe/Berlin') >= 22
+                         OR EXTRACT(HOUR FROM created_at AT TIME ZONE 'Europe/Berlin') < 6
                       )
                 ) AS off_hours_sensitive_access_7d
            FROM audit_log"#,
@@ -663,8 +663,8 @@ async fn audit_analytics(
                     al.entity_type IN ('patient', 'document', 'message_conversation', 'message_attachment')
                 AND al.action <> 'http_request'
                 AND (
-                        EXTRACT(HOUR FROM al.created_at AT TIME ZONE 'UTC') >= 22
-                     OR EXTRACT(HOUR FROM al.created_at AT TIME ZONE 'UTC') < 6
+                        EXTRACT(HOUR FROM al.created_at AT TIME ZONE 'Europe/Berlin') >= 22
+                     OR EXTRACT(HOUR FROM al.created_at AT TIME ZONE 'Europe/Berlin') < 6
                 )
               )
            ORDER BY al.created_at DESC

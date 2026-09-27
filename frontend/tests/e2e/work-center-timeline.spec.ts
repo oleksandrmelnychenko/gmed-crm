@@ -1,4 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
+import { pickerSection } from "./helpers";
 
 const parentId = "10000000-0000-0000-0000-000000000001";
 async function mockWorkCenter(page: Page, lang: "ru" | "de" = "ru", role = "ceo") {
@@ -19,7 +20,7 @@ async function mockWorkCenter(page: Page, lang: "ru" | "de" = "ru", role = "ceo"
     tasks: [parent] as Record<string, unknown>[], saves: [] as Record<string, unknown>[],
     statuses: [] as Record<string, unknown>[], deletes: [] as string[],
     comments: [] as Record<string, unknown>[], checklist: [] as Record<string, unknown>[],
-    attachments: [] as Record<string, unknown>[], listReads: 0, connected: true,
+    attachments: [] as Record<string, unknown>[], closeChildren: [] as Record<string, unknown>[], listReads: 0, connected: true,
     emit(type: string, entity_id = parentId) {
       for (const socket of sockets) socket.send(JSON.stringify({ type, entity_type: "task", entity_id }));
     },
@@ -64,6 +65,12 @@ async function mockWorkCenter(page: Page, lang: "ru" | "de" = "ru", role = "ceo"
       state.statuses.push(input);
       Object.assign(task, { status: input.status, updated_at: new Date().toISOString() });
       body = task;
+    } else if (task && path.endsWith("/close-children")) {
+      const input = route.request().postDataJSON();
+      state.closeChildren.push({ parent: id, ...input });
+      const closed = state.tasks.filter(child => child.parent_task_id === id && !["completed", "cancelled"].includes(String(child.status)));
+      for (const child of closed) child.status = input.status;
+      body = { closed_count: closed.length, closed_ids: closed.map(child => child.id) };
     } else if (task && path.endsWith("/update")) {
       const input = route.request().postDataJSON();
       state.saves.push(input);
@@ -152,20 +159,66 @@ for (const kind of ["task", "event"] as const) {
   });
 }
 
+for (const role of ["ceo", "concierge"] as const) {
+  test(`generated order work links back to its order for ${role}`, async ({ page }) => {
+    const state = await mockWorkCenter(page, "ru", role);
+    Object.assign(state.tasks[0], { order_id: "order-1", order_number: "ORD-2026-0001" });
+    await page.goto(`/task-manager?task=${parentId}`);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Данные задачи");
+    const link = dialog.getByTestId("task-detail-order-link");
+    if (role === "ceo") {
+      await expect(link).toContainText("ORD-2026-0001");
+      await expect(link).toHaveAttribute("href", "/orders?order=order-1");
+    } else {
+      // Only people who may open orders get the link.
+      await expect(link).toHaveCount(0);
+    }
+  });
+}
+
+test("completing a parent in the edit form asks about its open sub-tasks first", async ({ page }) => {
+  const state = await mockWorkCenter(page);
+  Object.assign(state.tasks[0], { child_count: 1, child_open_count: 1 });
+  state.tasks.push({ ...state.tasks[0], id: "open-child", title: "Open child", parent_task_id: parentId, status: "open", child_count: 0, child_open_count: 0 });
+  await page.goto("/task-manager");
+  const card = page.locator("article").filter({ has: page.getByRole("heading", { name: "Timeline parent", exact: true }) });
+  await card.getByRole("button", { name: "Изменить", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Изменить задачу или событие" });
+  await dialog.getByRole("combobox", { name: "Статус", exact: true }).selectOption("completed");
+  await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+  const choice = page.getByRole("alertdialog");
+  await expect(choice).toContainText("Открытые подзадачи");
+  await expect(choice).toContainText("Timeline parent");
+  // Cancel keeps the form and saves nothing.
+  await choice.getByRole("button", { name: "Отмена", exact: true }).click();
+  await expect(choice).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  expect(state.saves).toHaveLength(0);
+
+  await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Закрыть все", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(state.closeChildren).toEqual([{ parent: parentId, status: "completed" }]);
+  expect(state.saves).toHaveLength(1);
+  expect(state.saves[0].status).toBe("completed");
+  expect(state.tasks.find(task => task.id === "open-child")?.status).toBe("completed");
+});
+
 test("task form rejects equal dates and preserves a legacy empty start on edit", async ({ page }) => {
   const state = await mockWorkCenter(page);
   state.tasks[0].starts_at = null;
   await page.goto("/task-manager");
   await page.getByRole("button", { name: "Изменить", exact: true }).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel("Начало", { exact: true })).toHaveValue("");
+  await expect(dialog.getByLabel("Начало", { exact: true }).locator("input")).toHaveValue("");
   for (const label of ["Начало", "Окончание"]) {
-    const field = dialog.locator(".MuiFormControl-root").filter({ has: page.locator(`input[aria-label="${label}"]`) });
-    for (const [name, value] of [["Year", "2026"], ["Month", "09"], ["Hours", "10"], ["Minutes", "00"], ["Day", "10"]]) {
-      await field.getByRole("spinbutton", { name, exact: true }).fill(value);
+    const field = dialog.getByRole("group", { name: label, exact: true });
+    for (const [section, value] of [["year", "2026"], ["month", "09"], ["hours", "10"], ["minutes", "00"], ["day", "10"]] as const) {
+      await field.getByRole("spinbutton", { name: pickerSection[section] }).fill(value);
     }
-    await field.getByRole("spinbutton", { name: "Minutes", exact: true }).press("Tab");
-    await expect(field.getByRole("spinbutton", { name: "Day", exact: true })).toHaveText("10");
+    await field.getByRole("spinbutton", { name: pickerSection.minutes }).press("Tab");
+    await expect(field.getByRole("spinbutton", { name: pickerSection.day })).toHaveText("10");
   }
   await dialog.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Окончание должно быть позже начала");
@@ -269,12 +322,12 @@ for (const kind of ["task", "event"] as const) {
     const child = { ...state.tasks[0], id: "remote-child", kind, title: "Remote child", parent_task_id: parentId, status: "open" };
     state.tasks.push(child);
     state.emit("concierge_operational_item.created", "remote-child");
-    const row = dialog.getByRole("button", { name: /Remote child/ });
+    const row = dialog.getByRole("row", { name: /Remote child/ });
     await expect(row).toContainText("Открыта");
     Object.assign(child, { status: "on_hold", starts_at: "2026-09-20T08:15:00Z", due_at: "2026-09-20T09:30:00Z", ends_at: "2026-09-20T09:30:00Z" });
     state.emit("concierge_operational_item.updated", "remote-child");
     await expect(row).toContainText("На паузе");
-    await expect(row).toContainText("20 сент.");
+    await expect(row).toContainText("20.09.2026");
     Object.assign(child, { status: "completed", archived_at: new Date().toISOString() });
     state.emit("concierge_operational_item.archived", "remote-child");
     await expect(row).toContainText("В архиве");
@@ -328,12 +381,12 @@ test("realtime refresh cannot clear a half-written subtask or create it twice", 
   await dialog.getByRole("button", { name: "Подзадача", exact: true }).click();
   const title = dialog.getByRole("textbox", { name: "Название", exact: true });
   await title.fill("Draft survives realtime");
-  const start = await dialog.getByLabel("Начало", { exact: true }).inputValue();
+  const start = await dialog.getByLabel("Начало", { exact: true }).locator("input").inputValue();
   const reads = state.listReads;
   state.emit("concierge_operational_item.updated");
   await expect.poll(() => state.listReads).toBeGreaterThan(reads);
   await expect(title).toHaveValue("Draft survives realtime");
-  await expect(dialog.getByLabel("Начало", { exact: true })).toHaveValue(start);
+  await expect(dialog.getByLabel("Начало", { exact: true }).locator("input")).toHaveValue(start);
   await dialog.getByRole("button", { name: "Создать", exact: true }).click();
   await expect(dialog.getByRole("button", { name: /Draft survives realtime/ })).toBeVisible();
   expect(state.saves).toHaveLength(1);

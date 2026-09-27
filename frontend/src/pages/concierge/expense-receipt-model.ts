@@ -200,6 +200,8 @@ export type ConciergeExpenseConsequencePreview = {
   patientReceivableGross: string;
   providerLiabilityGross: string;
   companyPaidGross: string;
+  /** The patient's share is only booked once the service is delivered. */
+  patientReceivableAfterDelivery?: boolean;
 };
 
 export function conciergeExpenseConsequencePreview(
@@ -223,9 +225,12 @@ export function conciergeExpenseConsequencePreview(
       companyPaidGross: normalized,
     };
   }
+  // Not yet paid: the partner is owed the amount and the patient's share is
+  // the same amount, booked once the service is delivered.
   return {
-    patientReceivableGross: serviceDelivered ? normalized : "0.00",
+    patientReceivableGross: normalized,
     providerLiabilityGross: normalized,
     companyPaidGross: "0.00",
+    patientReceivableAfterDelivery: !serviceDelivered,
   };
 }

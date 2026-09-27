@@ -1792,7 +1792,7 @@ async fn list_my_subscriptions(
         }
     };
 
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let mut subscriptions = Vec::<Value>::new();
     let mut subscription_indexes = HashMap::<Uuid, usize>::new();
 

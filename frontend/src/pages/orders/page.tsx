@@ -21,6 +21,7 @@ import {
   Ban,
   CalendarClock,
   CheckCircle2,
+  CircleSlash,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -31,6 +32,7 @@ import {
   Plus,
   ReceiptText,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   UserRound,
@@ -66,6 +68,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 import { roundCents, toCents } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -117,7 +120,9 @@ import {
 } from "./sections";
 import {
   isOrderReadinessGateApplicable,
+  orderBlockingReasonAnchor,
   orderBlockingReasonSection,
+  orderBlockingReasonWaitsForBilling,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
 import {
@@ -134,6 +139,8 @@ import {
   approveOrderLeistung,
   deliverOrderLeistung,
   completeWorkflowChecklistItem,
+  markWorkflowChecklistItemNotRequired,
+  reopenWorkflowChecklistItem,
   createExternalInvoice,
   createOrder,
   createOrderLeistung,
@@ -185,6 +192,7 @@ import {
   formatNumber,
   externalInvoiceStatusTransitions,
   inputDateTimeToApiValue,
+  isPartialOrderRead,
   nextPhase,
   numberFromUnknown,
   optString,
@@ -195,7 +203,8 @@ import {
   orderProcessGatesToForm,
   patientLabel,
   recheckMissingFieldLabel,
-  sumLeistungTotals,
+  leistungLineAmounts,
+  summarizeLeistungMetrics,
   workflowChecklistLabel,
 } from "./model/order-model";
 import type {
@@ -229,12 +238,20 @@ import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
+import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
   CancelLeistungDialog,
   type CancelLeistungTarget,
 } from "./ui/cancel-leistung-dialog";
+import {
+  OrderCancellationBanner,
+  OrderCancellationDialog,
+} from "./ui/order-cancellation";
+import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
+import { OrderFollowupMilestones } from "./ui/order-followup-milestones";
+import { readableServiceLineNotes } from "./model/service-line-notes";
 import {
   OrderServiceGroupPanel,
   OrderServiceGroupWizard,
@@ -269,6 +286,7 @@ const ORDER_REALTIME_EVENTS = [
   "task.status_changed",
   "workflow_checklist_item.created",
   "workflow_checklist_item.completed",
+  "workflow_checklist_item.updated",
 ] as const;
 
 type SectionCardProps = {
@@ -1110,6 +1128,7 @@ function useOrdersPageContent() {
   } | null>(null);
   const [plannedCostSaving, setPlannedCostSaving] = useState(false);
   const [plannedCostError, setPlannedCostError] = useState<string | null>(null);
+  const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
   const [cancelLeistungTarget, setCancelLeistungTarget] =
     useState<CancelLeistungTarget | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
@@ -1348,7 +1367,7 @@ function useOrdersPageContent() {
     ).filter((price) => price.id || price.is_effective);
   }, [orderDetail?.date_from, selectedLeistungAgencyService]);
 
-  const orderTableColumns: ColumnDef<OrderSummary>[] = [
+  const allOrderTableColumns: ColumnDef<OrderSummary>[] = [
     {
       id: "order_number",
       label: l("orders_auftrag"),
@@ -1448,18 +1467,15 @@ function useOrdersPageContent() {
       ),
     },
   ];
+  // Order-part readers receive no commercial fields; the finance columns stay out.
+  const orderTableColumns = permissions.readsOnlyOrderPart
+    ? allOrderTableColumns.filter((column) => column.group !== "finance")
+    : allOrderTableColumns;
 
-  const leistungMetrics = useMemo(() => {
-    const items = orderDetail?.leistungen ?? [];
-    return {
-      total: items.length,
-      delivered: items.filter((item) => item.status === "delivered").length,
-      approved: items.filter((item) =>
-        item.status === "approved" || item.status === "invoiced"
-      ).length,
-      net: sumLeistungTotals(items),
-    };
-  }, [orderDetail]);
+  const leistungMetrics = useMemo(
+    () => summarizeLeistungMetrics(orderDetail?.leistungen ?? []),
+    [orderDetail],
+  );
   const orderNeedSummary = useMemo(
     () => summarizeOrderNeeds(orderDetail?.needs_description),
     [orderDetail?.needs_description],
@@ -1615,6 +1631,22 @@ function useOrdersPageContent() {
   ]);
   const canManageDebt = hasCapability(user, "orders.economics");
   const orderSectionAnchorRef = useRef<HTMLDivElement>(null);
+  // Scrolls to an element of the section that is being opened; it renders
+  // after the navigation, so wait a few frames for it.
+  const scrollToOrderAnchor = useCallback((elementId: string) => {
+    let frames = 0;
+    const tick = () => {
+      const element = document.getElementById(elementId);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      frames += 1;
+      if (frames < 30) window.requestAnimationFrame(tick);
+      else orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.requestAnimationFrame(tick);
+  }, []);
   const shouldRenderOrderSection = (section: OrderSectionKey) =>
     !isOrderRouteDetail || activeOrderSection === normalizeOrderSectionKey(section);
 
@@ -2283,11 +2315,15 @@ function useOrdersPageContent() {
         if (filters.phase) params.set("phase", filters.phase);
         if (filters.status) params.set("status", filters.status);
         if (filters.patientId) params.set("patient_id", filters.patientId);
-        if (filters.providerId) params.set("provider_id", filters.providerId);
-        if (filters.providerTaxonomyNodeId) {
-          params.set("provider_taxonomy_node_id", filters.providerTaxonomyNodeId);
+        // Provider/doctor filters would reveal lines outside an order-part
+        // reader's projection; the server refuses them for these roles.
+        if (!permissions.readsOnlyOrderPart) {
+          if (filters.providerId) params.set("provider_id", filters.providerId);
+          if (filters.providerTaxonomyNodeId) {
+            params.set("provider_taxonomy_node_id", filters.providerTaxonomyNodeId);
+          }
+          if (filters.doctorId) params.set("doctor_id", filters.doctorId);
         }
-        if (filters.doctorId) params.set("doctor_id", filters.doctorId);
 
         const queryString = params.toString();
         const response = await fetchOrders(
@@ -2326,6 +2362,7 @@ function useOrdersPageContent() {
     finishOrdersLoad,
     isOrderRouteDetail,
     permissions.canViewPage,
+    permissions.readsOnlyOrderPart,
     reloadNonce,
     searchParams,
     startOrdersLoad,
@@ -2433,7 +2470,8 @@ function useOrdersPageContent() {
   ]);
 
   useEffect(() => {
-    if (!selectedOrderId) return;
+    // Order-part readers get no economics (the server answers 403).
+    if (!selectedOrderId || permissions.readsOnlyOrderPart) return;
     const currentOrderId = selectedOrderId;
     let cancelled = false;
     setOrderEconomics(current => current?.order_id === currentOrderId ? current : null);
@@ -2456,7 +2494,7 @@ function useOrdersPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [reloadNonce, selectedOrderId]);
+  }, [permissions.readsOnlyOrderPart, reloadNonce, selectedOrderId]);
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -2623,14 +2661,10 @@ function useOrdersPageContent() {
 
   async function handleOrderStatusChange(status: OrderStatus) {
     if (!orderDetail || status === orderDetail.status || statusSaving || phaseSaving) return;
-    if (
-      status === "cancelled" &&
-      !window.confirm(
-        lang === "de"
-          ? "Diesen Auftrag wirklich stornieren? Dieser Status kann nicht wieder geöffnet werden."
-          : "Действительно отменить этот заказ? После этого его нельзя будет открыть снова.",
-      )
-    ) {
+    // Cancelling needs a reason and shows what is cancelled and what stays
+    // for final billing; the dialog sends it.
+    if (status === "cancelled") {
+      setCancelOrderOpen(true);
       return;
     }
 
@@ -2811,6 +2845,9 @@ function useOrdersPageContent() {
         followup_1w_status: followupForm.followup1wStatus,
         followup_1m_status: followupForm.followup1mStatus,
         followup_6m_status: followupForm.followup6mStatus,
+        followup_1w_date: followupForm.followup1wDate,
+        followup_1m_date: followupForm.followup1mDate,
+        followup_6m_date: followupForm.followup6mDate,
         package_end_date: followupForm.packageEndDate,
         package_end_status: followupForm.packageEndStatus,
         results_handoff_status: followupForm.resultsHandoffStatus,
@@ -3195,7 +3232,7 @@ function useOrdersPageContent() {
         owner_user_id: optString(workflowForm.ownerUserId),
         priority: workflowForm.priority,
         due_date: workflowForm.dueDate
-          ? new Date(workflowForm.dueDate).toISOString()
+          ? berlinLocalInputToIso(workflowForm.dueDate)
           : null,
       });
       setWorkflowForm((current) => ({
@@ -3216,12 +3253,26 @@ function useOrdersPageContent() {
   }
 
   async function handleCompleteWorkflowItem(itemId: string) {
+    await changeWorkflowItem(() => completeWorkflowChecklistItem(selectedOrderId!, itemId));
+  }
+
+  async function handleWorkflowItemNotRequired(itemId: string) {
+    await changeWorkflowItem(() =>
+      markWorkflowChecklistItemNotRequired(selectedOrderId!, itemId),
+    );
+  }
+
+  async function handleReopenWorkflowItem(itemId: string) {
+    await changeWorkflowItem(() => reopenWorkflowChecklistItem(selectedOrderId!, itemId));
+  }
+
+  async function changeWorkflowItem(action: () => Promise<unknown>) {
     if (!selectedOrderId) return;
 
     setWorkflowBusy(true);
     setDetailError(null);
     try {
-      await completeWorkflowChecklistItem(selectedOrderId, itemId);
+      await action();
       triggerReload();
     } catch (error) {
       setDetailError(
@@ -3603,6 +3654,7 @@ function useOrdersPageContent() {
                 </NativeComboboxSelect>
               </ToolbarField>
 
+              {permissions.readsOnlyOrderPart ? null : (<>
               <ToolbarField
                 label={`${t.common_provider} / ${t.providers_category}`}
                 className="col-span-6 w-full"
@@ -3660,6 +3712,7 @@ function useOrdersPageContent() {
                   ))}
                 </NativeComboboxSelect>
               </ToolbarField>
+              </>)}
 
               <ToolbarField label={t.table_actions} className="col-span-3 w-full">
                 <div className="flex h-8 items-center justify-end gap-1.5">
@@ -3781,6 +3834,16 @@ function useOrdersPageContent() {
                 title={tx.common_not_set}
                 description={tx.orders_subtitle}
               />
+            ) : isPartialOrderRead(orderDetail) ? (
+              <ScopedOrderDetail
+                detail={orderDetail}
+                lang={lang}
+                subjectName={detailSubjectName}
+                phaseLabel={phaseLabel}
+                statusLabel={orderStatusLabel}
+                lineStatusLabel={leistungStatusLabel}
+                formatDate={formatDateOnlyLabel}
+              />
             ) : (
               <div className="min-w-0 space-y-4 rounded-xl">
                 {detailError ? <Banner tone="error" withIcon>{detailError}</Banner> : null}
@@ -3788,6 +3851,22 @@ function useOrdersPageContent() {
                   <OrderTerminationBanner
                     orderId={orderDetail.id}
                     patientId={orderDetail.patient_id}
+                    lang={lang}
+                  />
+                ) : orderDetail.status === "cancelled" ? (
+                  <OrderCancellationBanner
+                    reason={orderDetail.cancellation?.reason ?? orderDetail.cancellation_reason ?? null}
+                    cancelledAtLabel={
+                      orderDetail.cancelled_at
+                        ? formatDateTimeLabel(orderDetail.cancelled_at) +
+                          (orderDetail.cancellation?.cancelled_by_name
+                            ? ` · ${orderDetail.cancellation.cancelled_by_name}`
+                            : "")
+                        : null
+                    }
+                    settlement={normalizeOrderCancellationSettlement(
+                      orderDetail.cancellation?.settlement,
+                    )}
                     lang={lang}
                   />
                 ) : null}
@@ -4156,8 +4235,38 @@ function useOrdersPageContent() {
                         <ol className="divide-y divide-border/60">
                           {orderNextStepReasons.map((reason, index) => {
                             const targetSection = orderBlockingReasonSection(reason);
+                            const targetAnchor = orderBlockingReasonAnchor(reason);
+                            // Billing decides the billing release: whoever cannot
+                            // decide it sees that it is waiting, without an action.
+                            const waitsForBilling = orderBlockingReasonWaitsForBilling(
+                              reason,
+                              hasCapability(user, "invoices.finance"),
+                            );
                             return (
                               <li key={reason}>
+                                {waitsForBilling ? (
+                                  <div
+                                    className="flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3"
+                                    data-testid="order-blocker-waits-for-billing"
+                                  >
+                                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
+                                      {index + 1}
+                                    </span>
+                                    <span className="min-w-0 flex-1 text-sm leading-5">
+                                      <span className="block font-medium text-foreground">
+                                        {localizedBlockingReason(reason)}
+                                      </span>
+                                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                                        {lang === "de"
+                                          ? "Wartet auf die Buchhaltung: Die Freigabe erteilt Billing. Sie müssen hier nichts tun."
+                                          : "Ждёт бухгалтерию: разрешение выдаёт Billing. От вас здесь ничего не требуется."}
+                                      </span>
+                                    </span>
+                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                                      {lang === "de" ? "Wartet auf Billing" : "Ждёт бухгалтерию"}
+                                    </span>
+                                  </div>
+                                ) : (
                                 <button
                                   type="button"
                                   className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
@@ -4170,8 +4279,14 @@ function useOrdersPageContent() {
                                       ),
                                     );
                                     // The section opens below this list; bring it into view,
-                                    // also when it is already the active one.
-                                    orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                    // also when it is already the active one. A blocker with
+                                    // its own control (the follow-up milestone planner)
+                                    // scrolls to that control once it is rendered.
+                                    if (targetAnchor) {
+                                      scrollToOrderAnchor(targetAnchor);
+                                    } else {
+                                      orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                    }
                                   }}
                                 >
                                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
@@ -4185,6 +4300,7 @@ function useOrdersPageContent() {
                                     <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
                                   </span>
                                 </button>
+                                )}
                               </li>
                             );
                           })}
@@ -4425,7 +4541,10 @@ function useOrdersPageContent() {
                             <OrderFinancialMetric
                               label={lang === "de" ? "Auftragssumme" : "Сумма заказа"}
                               value={formatMoney(
-                                orderEconomics.planned.revenue_gross,
+                                // The same order total as the header and the
+                                // services section (gross of the services).
+                                orderDetail.total_estimated ??
+                                  orderEconomics.planned.revenue_gross,
                                 orderEconomics.currency,
                               )}
                               emphasis
@@ -4433,7 +4552,8 @@ function useOrdersPageContent() {
                             <OrderFinancialMetric
                               label={lang === "de" ? "Dem Patienten berechnet" : "Выставлено пациенту"}
                               value={formatMoney(
-                                orderEconomics.actual.recognized_revenue_gross,
+                                orderEconomics.actual.billed_to_patient_gross ??
+                                  orderEconomics.actual.recognized_revenue_gross,
                                 orderEconomics.currency,
                               )}
                             />
@@ -4447,11 +4567,26 @@ function useOrdersPageContent() {
                             <OrderFinancialMetric
                               label={lang === "de" ? "Noch vom Patienten zu erhalten" : "Осталось получить"}
                               value={formatMoney(
-                                orderEconomics.actual.invoice_outstanding_gross,
+                                orderEconomics.actual.patient_open_gross ??
+                                  orderEconomics.actual.invoice_outstanding_gross,
                                 orderEconomics.currency,
                               )}
                             />
                           </dl>
+                          {Number(orderEconomics.actual.advance_available_gross ?? 0) > 0 ||
+                          Number(orderEconomics.actual.patient_credit_gross ?? 0) > 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              {t.finance_order_held_hint
+                                .replace(
+                                  "{advance}",
+                                  formatMoney(orderEconomics.actual.advance_available_gross ?? 0, orderEconomics.currency),
+                                )
+                                .replace(
+                                  "{credit}",
+                                  formatMoney(orderEconomics.actual.patient_credit_gross ?? 0, orderEconomics.currency),
+                                )}
+                            </p>
+                          ) : null}
 
                           {orderEconomics.warnings.length > 0 ? (
                             <Banner tone="warning" withIcon>
@@ -4583,7 +4718,29 @@ function useOrdersPageContent() {
                                     <OrderFinancialMetric
                                       label={lang === "de" ? "Offen beim Patienten" : "Осталось получить"}
                                       value={formatMoney(
+                                        orderEconomics.actual.patient_open_gross ??
+                                          orderEconomics.actual.invoice_outstanding_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={t.finance_order_open_invoices}
+                                      value={formatMoney(
                                         orderEconomics.actual.invoice_outstanding_gross,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={t.finance_order_advance_available}
+                                      value={formatMoney(
+                                        orderEconomics.actual.advance_available_gross ?? 0,
+                                        orderEconomics.currency,
+                                      )}
+                                    />
+                                    <OrderFinancialMetric
+                                      label={t.finance_order_patient_credit}
+                                      value={formatMoney(
+                                        orderEconomics.actual.patient_credit_gross ?? 0,
                                         orderEconomics.currency,
                                       )}
                                     />
@@ -4936,7 +5093,25 @@ function useOrdersPageContent() {
                               </div>
                             </div>
                           </div>
-                        ) : null}
+                        ) : (
+                          <div
+                            className="rounded-2xl border border-border bg-muted/20 p-4"
+                            data-testid="order-billing-release-readonly"
+                          >
+                            <div className="text-sm font-semibold text-foreground">
+                              {titleWithDot(l("orders_billing_release"))}
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {orderDetail.process_gates.billing_release_status === "granted"
+                                ? lang === "de"
+                                  ? "Billing hat die Durchführung freigegeben."
+                                  : "Бухгалтерия разрешила выполнение."
+                                : lang === "de"
+                                  ? `Wartet auf die Buchhaltung (${billingReleaseLabel(orderDetail.process_gates.billing_release_status)}). Die Freigabe erteilt Billing; bei einem bestehenden Paket kann stattdessen die Paketdeckung bestätigt werden.`
+                                  : `Ждёт бухгалтерию (${billingReleaseLabel(orderDetail.process_gates.billing_release_status)}). Разрешение выдаёт бухгалтерия; при действующем пакете вместо этого можно подтвердить покрытие пакетом.`}
+                            </p>
+                          </div>
+                        )}
 
                         {permissions.canManagePhase ? (
                           <div className="rounded-2xl border border-border p-4">
@@ -5923,59 +6098,18 @@ function useOrdersPageContent() {
                               </option>
                             </NativeComboboxSelect>
                             </Field>
-                            <div className="grid gap-3 md:grid-cols-3">
-                              <NativeComboboxSelect
-                                value={followupForm.followup1wStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    followup1wStatus: event.target.value as OrderFollowupFormState["followup1wStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{`1W ${followupStatusLabel("pending")}`}</option>
-                                <option value="scheduled">{`1W ${followupStatusLabel("scheduled")}`}</option>
-                                <option value="completed">{`1W ${followupStatusLabel("completed")}`}</option>
-                                <option value="not_required">
-                                  {`1W ${followupStatusLabel("not_required")}`}
-                                </option>
-                              </NativeComboboxSelect>
-                              <NativeComboboxSelect
-                                value={followupForm.followup1mStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    followup1mStatus: event.target.value as OrderFollowupFormState["followup1mStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{`1M ${followupStatusLabel("pending")}`}</option>
-                                <option value="scheduled">{`1M ${followupStatusLabel("scheduled")}`}</option>
-                                <option value="completed">{`1M ${followupStatusLabel("completed")}`}</option>
-                                <option value="not_required">
-                                  {`1M ${followupStatusLabel("not_required")}`}
-                                </option>
-                              </NativeComboboxSelect>
-                              <NativeComboboxSelect
-                                value={followupForm.followup6mStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    followup6mStatus: event.target.value as OrderFollowupFormState["followup6mStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{`6M ${followupStatusLabel("pending")}`}</option>
-                                <option value="scheduled">{`6M ${followupStatusLabel("scheduled")}`}</option>
-                                <option value="completed">{`6M ${followupStatusLabel("completed")}`}</option>
-                                <option value="not_required">
-                                  {`6M ${followupStatusLabel("not_required")}`}
-                                </option>
-                              </NativeComboboxSelect>
-                            </div>
+                            <OrderFollowupMilestones
+                              orderId={orderDetail.id}
+                              patientId={detailPatientId || null}
+                              flow={orderDetail.followup_flow}
+                              form={followupForm}
+                              onFormChange={setFollowupForm}
+                              canManage={permissions.canManagePhase}
+                              currentUserId={user?.id ?? null}
+                              lang={lang}
+                              statusLabel={followupStatusLabel}
+                              onCreated={triggerReload}
+                            />
                             <div className="grid gap-3 md:grid-cols-2">
                               <Field label={l("orders_paketende")}>
                                 <Input
@@ -6454,6 +6588,15 @@ function useOrdersPageContent() {
                           description={l("orders_abgeschlossen_2")}
                           tone="emerald"
                         />
+                        {(workflowChecklist.not_required_count ?? 0) > 0 ? (
+                          <AdminInlineMetric
+                            icon={CircleSlash}
+                            label={l("orders_checklist_not_required_count")}
+                            value={String(workflowChecklist.not_required_count)}
+                            description={l("orders_checklist_not_required_count_hint")}
+                            tone="slate"
+                          />
+                        ) : null}
                         <AdminInlineMetric
                           icon={CalendarClock}
                           label={l("orders_uberfallig_3")}
@@ -6502,7 +6645,9 @@ function useOrdersPageContent() {
                               const openItems = group.items.filter(
                                 (item) => !item.is_completed,
                               ).length;
-                              const completedItems = group.items.length - openItems;
+                              const completedItems = group.items.filter(
+                                (item) => item.is_completed && !item.not_required,
+                              ).length;
                               const groupIsActive = openItems > 0;
 
                               return (
@@ -6589,6 +6734,7 @@ function useOrdersPageContent() {
                                         const itemStatus = item.is_completed
                                           ? "completed"
                                           : item.linked_task_status ?? "open";
+                                        const notRequired = item.not_required === true;
 
                                         return (
                                           <article
@@ -6621,12 +6767,23 @@ function useOrdersPageContent() {
                                                     variant="outline"
                                                     className={cn(
                                                       "rounded-full text-[10px]",
-                                                      item.is_completed
-                                                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
-                                                        : statusClassName(itemStatus),
+                                                      notRequired
+                                                        ? "border-slate-200 bg-slate-100 text-slate-600"
+                                                        : item.is_completed
+                                                          ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                                                          : statusClassName(itemStatus),
                                                     )}
+                                                    title={
+                                                      notRequired && item.not_required_reason
+                                                        ? l(
+                                                            `orders_checklist_not_required_reason_${item.not_required_reason}`,
+                                                          )
+                                                        : undefined
+                                                    }
                                                   >
-                                                    {workflowTaskStatusLabel(itemStatus)}
+                                                    {notRequired
+                                                      ? l("orders_checklist_not_required")
+                                                      : workflowTaskStatusLabel(itemStatus)}
                                                   </Badge>
                                                 </div>
                                                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
@@ -6650,9 +6807,25 @@ function useOrdersPageContent() {
                                                     <>
                                                       <span className="size-1 rounded-full bg-muted-foreground/35" />
                                                       <span>
-                                                        {l("orders_erledigt_2")}:{" "}
+                                                        {notRequired
+                                                          ? l("orders_checklist_not_required_since")
+                                                          : l("orders_erledigt_2")}
+                                                        :{" "}
                                                         {formatDateTimeLabel(
                                                           item.completed_at,
+                                                        )}
+                                                        {item.completed_by_name
+                                                          ? ` · ${item.completed_by_name}`
+                                                          : ""}
+                                                      </span>
+                                                    </>
+                                                  ) : null}
+                                                  {notRequired && item.not_required_reason ? (
+                                                    <>
+                                                      <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                                      <span>
+                                                        {l(
+                                                          `orders_checklist_not_required_reason_${item.not_required_reason}`,
                                                         )}
                                                       </span>
                                                     </>
@@ -6660,6 +6833,43 @@ function useOrdersPageContent() {
                                                 </div>
                                               </div>
                                               {!item.is_completed ? (
+                                                <div className="flex shrink-0 flex-wrap gap-1.5">
+                                                  <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
+                                                    disabled={workflowBusy}
+                                                    onClick={() =>
+                                                      void handleCompleteWorkflowItem(
+                                                        item.id,
+                                                      )
+                                                    }
+                                                  >
+                                                    <CheckCircle2 className="size-3.5" />
+                                                    {l("orders_abschliessen")}
+                                                  </Button>
+                                                  {permissions.canManagePhase ? (
+                                                    <Button
+                                                      type="button"
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground"
+                                                      disabled={workflowBusy}
+                                                      title={l("orders_checklist_mark_not_required_hint")}
+                                                      onClick={() =>
+                                                        void handleWorkflowItemNotRequired(
+                                                          item.id,
+                                                        )
+                                                      }
+                                                    >
+                                                      <CircleSlash className="size-3.5" />
+                                                      {l("orders_checklist_mark_not_required")}
+                                                    </Button>
+                                                  ) : null}
+                                                </div>
+                                              ) : notRequired &&
+                                                permissions.canManagePhase ? (
                                                 <Button
                                                   type="button"
                                                   variant="outline"
@@ -6667,13 +6877,11 @@ function useOrdersPageContent() {
                                                   className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
                                                   disabled={workflowBusy}
                                                   onClick={() =>
-                                                    void handleCompleteWorkflowItem(
-                                                      item.id,
-                                                    )
+                                                    void handleReopenWorkflowItem(item.id)
                                                   }
                                                 >
-                                                  <CheckCircle2 className="size-3.5" />
-                                                  {l("orders_abschliessen")}
+                                                  <RotateCcw className="size-3.5" />
+                                                  {l("orders_checklist_reopen")}
                                                 </Button>
                                               ) : null}
                                             </div>
@@ -6736,15 +6944,23 @@ function useOrdersPageContent() {
                         />
                         <MiniMetric
                           label={t.orders_services_pending_approval_label}
-                          value={String(leistungMetrics.delivered)}
+                          value={String(leistungMetrics.awaitingApproval)}
                         />
                         <MiniMetric
                           label={t.orders_services_approved_label}
                           value={String(leistungMetrics.approved)}
                         />
                         <MiniMetric
-                          label={lang === "de" ? "Leistungssumme netto" : "Сумма услуг нетто"}
-                          value={formatMoney(leistungMetrics.net)}
+                          label={lang === "de" ? "Auftragssumme (brutto)" : "Сумма заказа (с НДС)"}
+                          value={
+                            <>
+                              {formatMoney(orderDetail.total_estimated ?? leistungMetrics.gross)}
+                              <span className="block text-xs font-normal text-muted-foreground">
+                                {lang === "de" ? "netto " : "нетто "}
+                                {formatMoney(leistungMetrics.net)}
+                              </span>
+                            </>
+                          }
                         />
                         <MiniMetric
                           label={t.orders_service_group_split_title}
@@ -6837,9 +7053,7 @@ function useOrdersPageContent() {
                           />
                         ) : (
                           orderDetail.leistungen.map((leistung, index) => {
-                            const lineTotal =
-                              (numberFromUnknown(leistung.quantity) ?? 0) *
-                              (numberFromUnknown(leistung.unit_price) ?? 0);
+                            const lineAmounts = leistungLineAmounts(leistung);
                             const taxonomyLabel = providerTaxonomyLabel(
                               leistung,
                               lang,
@@ -7009,6 +7223,16 @@ function useOrdersPageContent() {
                                               }
                                             </Badge>
                                           ) : null}
+                                          {leistung.source_order_amendment_id ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="rounded-full border-orange-200 bg-orange-100 text-orange-800"
+                                            >
+                                              {lang === "de"
+                                                ? "Genehmigte Betragsänderung"
+                                                : "Одобренное изменение суммы"}
+                                            </Badge>
+                                          ) : null}
                                           {leistung.agency_service_name ||
                                           leistung.agency_service_key ? (
                                             <Badge
@@ -7029,13 +7253,31 @@ function useOrdersPageContent() {
                                   </div>
 
                                   <div className="relative border-t border-border p-4 2xl:border-t-0 2xl:pl-5 2xl:before:absolute 2xl:before:bottom-4 2xl:before:left-0 2xl:before:top-4 2xl:before:border-l 2xl:before:border-dashed 2xl:before:border-border">
+                                    {leistung.status === "cancelled" ? (
+                                      // A cancelled line adds nothing to the order total.
+                                      <div
+                                        className="text-xs leading-5 text-muted-foreground"
+                                        data-testid="leistung-cancelled-total"
+                                      >
+                                        {lang === "de"
+                                          ? "Storniert – zählt nicht zur Auftragssumme."
+                                          : "Отменена — не входит в сумму заказа."}
+                                      </div>
+                                    ) : (
+                                      <>
                                     <div className="text-xs text-muted-foreground">
-                                      {tx.invoices_total}
+                                      {lang === "de" ? "Summe brutto" : "Сумма с НДС"}
                                     </div>
                                     <div className="mt-1 text-xl font-semibold leading-none text-foreground">
-                                      {formatMoney(lineTotal, leistung.currency)}
+                                      {formatMoney(lineAmounts.gross, leistung.currency)}
                                     </div>
-                                    {permissions.canManageEconomics ? (
+                                    <div className="mt-1 text-[11px] text-muted-foreground">
+                                      {lang === "de" ? "netto " : "нетто "}
+                                      {formatMoney(lineAmounts.net, leistung.currency)}
+                                    </div>
+                                      </>
+                                    )}
+                                    {permissions.canManageEconomics && leistung.status !== "cancelled" ? (
                                       <Button
                                         type="button"
                                         variant="outline"
@@ -7220,9 +7462,9 @@ function useOrdersPageContent() {
                                   />
                                 </div>
 
-                                {leistung.notes ? (
-                                  <div className="border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
-                                    {leistung.notes}
+                                {readableServiceLineNotes(leistung.notes) ? (
+                                  <div className="whitespace-pre-line border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
+                                    {readableServiceLineNotes(leistung.notes)}
                                   </div>
                                 ) : null}
                               </article>
@@ -7950,6 +8192,17 @@ function useOrdersPageContent() {
         onCancelled={() => triggerReload()}
         onStale={() => {
           if (selectedOrderId) clearApiCache(`/orders/${selectedOrderId}`);
+          triggerReload();
+        }}
+      />
+
+      <OrderCancellationDialog
+        orderId={orderDetail?.id ?? null}
+        open={cancelOrderOpen}
+        lang={lang}
+        onClose={() => setCancelOrderOpen(false)}
+        onCancelled={() => {
+          if (orderDetail) clearApiCache(`/orders/${orderDetail.id}`);
           triggerReload();
         }}
       />

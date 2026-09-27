@@ -2,6 +2,7 @@ import type { AdminSystemTranslations } from "./catalogs/admin-system";
 import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
 import type { ExtractedUiTranslations } from "./catalogs/extracted-ui";
+import type { FinanceBalancesTranslations } from "./catalogs/finance-balances";
 import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
 import type { RevenueTranslations } from "./catalogs/revenue";
@@ -13,6 +14,7 @@ export type TranslationShape = SharedCoreTranslations &
   CasesClinicalTranslations &
   ClinicalTranslations &
   ExtractedUiTranslations &
+  FinanceBalancesTranslations &
   OperationsTranslations &
   PatientsPortalTranslations &
   RevenueTranslations &

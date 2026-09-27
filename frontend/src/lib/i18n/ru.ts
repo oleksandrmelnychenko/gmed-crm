@@ -3,6 +3,7 @@ import { adminSystemRu } from "./catalogs/admin-system";
 import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
 import { extractedUiRu } from "./catalogs/extracted-ui";
+import { financeBalancesRu } from "./catalogs/finance-balances";
 import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
 import { revenueRu } from "./catalogs/revenue";
@@ -748,6 +749,11 @@ export const ru = {
   settings_clinical_data_hint:
     "Управляет сроком хранения медицинских кейсов и append-only истории анамнеза.",
   settings_clinical_retention_years: "Срок хранения медкейсов (лет)",
+  settings_concierge_preparation: "Подготовка консьерж-услуг",
+  settings_concierge_preparation_hint:
+    "За сколько часов до начала консьерж-услуги приходит напоминание и истекает срок задачи на подготовку.",
+  settings_concierge_reminder_lead_hours: "Напоминание о предстоящей услуге, часов до начала",
+  settings_concierge_prep_lead_hours: "Срок задачи на подготовку, часов до начала",
   settings_sessions: "Управление сессиями",
   settings_active_sessions: "Активные сессии",
   settings_logout_user: "Завершить сессии",
@@ -1323,7 +1329,7 @@ export const ru = {
   invoices_workspace_dunning_responsible: "Ответственный",
   invoices_workspace_dunning_balance_due: "Сумма к взысканию",
   invoices_workspace_create_dunning: "Добавить напоминание",
-  invoices_workspace_record_collections: "Зафиксировать передачу на взыскание",
+  invoices_workspace_record_collections: "Отправить последнее требование",
   invoices_workspace_dunning_unavailable: "Не удалось проверить счёт. Обновите данные перед добавлением напоминания.",
   invoices_workspace_dunning_ineligible: "Для оплаченного, отменённого счёта или счёта без задолженности напоминания не создаются.",
   invoices_workspace_dunning_not_sent: "Сначала отправьте счёт клиенту и обновите его статус. Для черновика напоминания недоступны.",
@@ -1364,9 +1370,9 @@ export const ru = {
   invoices_workspace_type_advance: "Авансовый счёт",
   invoices_workspace_type_interim: "Промежуточный счёт",
   invoices_workspace_type_final: "Финальный счёт",
-  invoices_workspace_dunning_level_first: "Первое напоминание",
-  invoices_workspace_dunning_level_second: "Второе напоминание",
-  invoices_workspace_dunning_level_collections: "Передача на взыскание",
+  invoices_workspace_dunning_level_first: "Напоминание об оплате",
+  invoices_workspace_dunning_level_second: "1-е требование об оплате",
+  invoices_workspace_dunning_level_collections: "2-е (последнее) требование",
   invoices_workspace_direction_income: "Поступление",
   invoices_workspace_direction_expense: "Расход",
   invoices_workspace_stats_sent_word: "\u043E\u0442\u043F\u0440\u0430\u0432\u043B\u0435\u043D\u043E",
@@ -1779,6 +1785,7 @@ export const ru = {
   ...adminSystemRu,
   ...casesClinicalRu,
   ...clinicalRu,
+  ...financeBalancesRu,
   ...operationsRu,
   ...patientsPortalRu,
   ...revenueRu,

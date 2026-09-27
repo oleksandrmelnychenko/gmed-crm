@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -24,7 +25,7 @@ export function localizedNotificationCopy(
       const data = JSON.parse(item.body ?? "{}");
       const due = data.due_at ? new Date(data.due_at) : null;
       const deadline = due && Number.isFinite(due.getTime())
-        ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${due.toLocaleString(lang === "de" ? "de-DE" : "ru-RU")}` : "";
+        ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" }).format(due)}` : "";
       return {
         title: `${data.order_number ?? ""} · ${paymentStatusLabel(data.payment_status ?? "awaiting_payment", lang)}`,
         body: `${lang === "de" ? "Erhalten" : "Получено"}: ${formatMoneyAmount(data.received_amount, data.currency)} · ${lang === "de" ? "Offen" : "Остаток"}: ${formatMoneyAmount(data.remaining_amount, data.currency)}${deadline}`,
@@ -55,11 +56,184 @@ export function localizedNotificationCopy(
           body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
         };
   }
+  const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
+  if (interpreterCopy) return interpreterCopy;
+  const expenseCopy = conciergeExpenseNotificationCopy(item, lang);
+  if (expenseCopy) return expenseCopy;
+  const serviceRequestCopy = conciergeServiceRequestNotificationCopy(item, lang);
+  if (serviceRequestCopy) return serviceRequestCopy;
   const taskTitle = taskNotificationTitle(item, lang);
   if (taskTitle) {
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+function parseNotificationBody<T extends object>(body: string | null): T | null {
+  try {
+    const value = JSON.parse(body ?? "");
+    return value && typeof value === "object" ? (value as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+const CONCIERGE_EXPENSE_TITLES: Record<string, { de: string; ru: string }> = {
+  concierge_expense_submitted: {
+    de: "Concierge-Beleg wartet auf Prüfung",
+    ru: "Чек консьержа ждёт проверки",
+  },
+  concierge_expense_posted: {
+    de: "Concierge-Beleg bestätigt",
+    ru: "Чек консьержа подтверждён",
+  },
+  concierge_expense_rejected: {
+    de: "Concierge-Beleg abgelehnt",
+    ru: "Чек консьержа отклонён",
+  },
+  concierge_expense_reversed: {
+    de: "Concierge-Ausgabe storniert",
+    ru: "Расход консьержа сторнирован",
+  },
+};
+
+// Receipt notifications carry vendor, amount and reason as JSON. Rows written
+// before that carry an English sentence; its facts are recovered for display.
+function conciergeExpenseNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  const titles = CONCIERGE_EXPENSE_TITLES[item.kind];
+  if (!titles) return null;
+  const data = parseNotificationBody<{
+    vendor?: string;
+    amount_gross?: string;
+    currency?: string;
+    reason?: string;
+  }>(item.body) ?? legacyExpenseNotificationFacts(item.body ?? "");
+  const reasonLabel = lang === "de" ? "Grund" : "Причина";
+  if (data.reason) return { title: titles[lang], body: `${reasonLabel}: ${data.reason}` };
+  if (data.vendor || data.amount_gross) {
+    const amount = data.amount_gross
+      ? formatMoneyAmount(data.amount_gross, data.currency ?? "EUR")
+      : null;
+    return { title: titles[lang], body: [data.vendor, amount].filter(Boolean).join(" · ") };
+  }
+  return { title: titles[lang], body: item.body };
+}
+
+function legacyExpenseNotificationFacts(body: string) {
+  const reason = body.match(/Reason: (.*)$/s)?.[1]?.trim();
+  if (reason) return { reason };
+  const receipt = body.match(/receipt from (.+) for (-?[\d.]+) ([A-Z]{3})/);
+  return receipt
+    ? { vendor: receipt[1], amount_gross: receipt[2], currency: receipt[3] }
+    : {};
+}
+
+const SERVICE_KIND_LABELS: Record<string, { de: string; ru: string }> = {
+  hotel: { de: "Hotel", ru: "Отель" },
+  transfer: { de: "Transfer", ru: "Трансфер" },
+  vip_terminal: { de: "VIP-Terminal", ru: "VIP-терминал" },
+  flight: { de: "Flug", ru: "Перелёт" },
+  chauffeur: { de: "Chauffeur", ru: "Водитель" },
+  translation_support: { de: "Übersetzungsunterstützung", ru: "Помощь с переводом" },
+  other: { de: "Sonstiges", ru: "Другое" },
+};
+
+function conciergeServiceRequestNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "concierge_service_request") return null;
+  const data = parseNotificationBody<{
+    patient_label?: string;
+    service_kind?: string;
+    title?: string;
+    starts_at?: string | null;
+  }>(item.body);
+  const patient = data?.patient_label ?? item.title.replace(/^Patient service request:\s*/, "");
+  const title = `${lang === "de" ? "Serviceanfrage des Patienten" : "Запрос услуги от пациента"}: ${patient}`;
+  if (!data) return { title, body: item.body };
+  const start = data.starts_at ? new Date(data.starts_at) : null;
+  const slot = start && Number.isFinite(start.getTime())
+    ? appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(start)
+    : lang === "de" ? "ohne Wunschtermin" : "без желаемого времени";
+  const kind = SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
+  return { title, body: [kind, data.title, slot].filter(Boolean).join(" · ") };
+}
+
+const INTERPRETER_WORK_TITLES: Record<string, { de: string; ru: string }> = {
+  interpreter_report_submitted: {
+    de: "Dolmetscherbericht wartet auf Prüfung",
+    ru: "Отчёт переводчика ждёт проверки",
+  },
+  interpreter_report_approved: {
+    de: "Dolmetscherbericht bestätigt",
+    ru: "Отчёт переводчика подтверждён",
+  },
+  interpreter_report_rejected: {
+    de: "Dolmetscherbericht zur Überarbeitung zurückgegeben",
+    ru: "Отчёт переводчика возвращён на доработку",
+  },
+  interpreter_clarification_requested: {
+    de: "Dolmetscher benötigt eine Klärung",
+    ru: "Переводчику нужно уточнение",
+  },
+};
+
+type InterpreterWorkNotificationBody = {
+  appointment_title?: string | null;
+  appointment_date?: string | null;
+  time_start?: string | null;
+  interpreter_name?: string | null;
+  hours?: string | null;
+  reviewer_name?: string | null;
+  notes?: string | null;
+  comment?: string | null;
+};
+
+// Interpreter report and clarification notifications store their facts as
+// JSON; the wording follows the staff language.
+function interpreterWorkNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  const titles = INTERPRETER_WORK_TITLES[item.kind];
+  if (!titles) return null;
+  let data: InterpreterWorkNotificationBody = {};
+  try {
+    data = JSON.parse(item.body ?? "{}") ?? {};
+  } catch {
+    data = {};
+  }
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const date = formatDateKey(data.appointment_date, locale, { year: "numeric", month: "2-digit", day: "2-digit" });
+  const when = [
+    date || null,
+    data.time_start,
+  ].filter(Boolean).join(" ");
+  const parts = [[data.appointment_title, when].filter(Boolean).join(" · ")];
+  const hours = Number(data.hours);
+  if (item.kind === "interpreter_report_submitted") {
+    parts.push([
+      data.interpreter_name,
+      Number.isFinite(hours) && hours > 0
+        ? `${hours.toLocaleString(locale)} ${lang === "de" ? "Std." : "ч"}`
+        : null,
+    ].filter(Boolean).join(" · "));
+  }
+  if (item.kind === "interpreter_report_approved" && data.reviewer_name) {
+    parts.push(`${lang === "de" ? "Bestätigt von" : "Подтвердил(а)"}: ${data.reviewer_name}`);
+  }
+  if (item.kind === "interpreter_report_rejected" && data.notes) {
+    parts.push(`${lang === "de" ? "Hinweis" : "Замечание"}: ${data.notes}`);
+  }
+  if (item.kind === "interpreter_clarification_requested") {
+    parts.push([data.interpreter_name, data.comment].filter(Boolean).join(": "));
+  }
+  const body = parts.filter(Boolean).join(" — ");
+  return { title: titles[lang], body: body || null };
 }
 
 // The server stores task notification titles as English templates; the body

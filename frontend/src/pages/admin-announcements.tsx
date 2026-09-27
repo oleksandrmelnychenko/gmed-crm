@@ -23,6 +23,11 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import {
+  appDateKeyOf,
+  berlinLocalInputToIso,
+  isoToBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -76,12 +81,11 @@ const ADMIN_ANNOUNCEMENT_REALTIME_EVENTS = [
 
 function compactDt(dt: string | null | undefined): string {
   if (!dt) return "-";
-  return dt.split("T")[0] ?? dt;
+  return appDateKeyOf(dt) || dt;
 }
 
 function toDateTimeLocalInput(value: Date): string {
-  const tzOffsetMs = value.getTimezoneOffset() * 60_000;
-  return new Date(value.getTime() - tzOffsetMs).toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
 type AdminAnnouncementsState = {
@@ -401,8 +405,9 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
     setCreating(true);
     setCreateError("");
     try {
-      const normalizedEndsAt = fEnds.trim();
-      if (normalizedEndsAt && Number.isNaN(new Date(normalizedEndsAt).getTime())) {
+      // The field is German wall-clock time; the API stores an instant.
+      const normalizedEndsAt = fEnds.trim() ? berlinLocalInputToIso(fEnds.trim()) : "";
+      if (normalizedEndsAt === null) {
         setCreateError(t.common_error);
         return;
       }

@@ -32,6 +32,16 @@ import {
   type SaveConciergeOperationalItemInput,
 } from "./task-event-dialog";
 import { ConciergeTaskManager } from "./task-manager";
+import { openSubtaskCount } from "./task-workflow";
+import {
+  closeOpenSubtasks,
+  completableParentAfterChild,
+  completeParentTask,
+  ParentCloseChoiceDialog,
+  ParentCompletionSuggestionDialog,
+  type ParentCloseRequest,
+  type ParentCompletionSuggestion,
+} from "./subtask-flow";
 import type { PatientSummary } from "@/pages/patients/model/list-model";
 import type { ConciergeTaskPatientOption } from "./task-event-dialog";
 
@@ -91,6 +101,8 @@ export function ConciergeTaskManagerPage() {
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [archivingTaskId, setArchivingTaskId] = useState<string | null>(null);
   const [pendingDeleteTask, setPendingDeleteTask] = useState<ConciergeTask | null>(null);
+  const [parentCloseRequest, setParentCloseRequest] = useState<ParentCloseRequest | null>(null);
+  const [completionSuggestion, setCompletionSuggestion] = useState<ParentCompletionSuggestion | null>(null);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [parentTask, setParentTask] = useState<ConciergeTask | null>(null);
@@ -213,6 +225,51 @@ export function ConciergeTaskManagerPage() {
   async function changeTaskStatus(task: ConciergeTask, status: string): Promise<string | null> {
     if (updatingTaskId || task.archived_at || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return labels.updateFailed;
     if (!availableConciergeTaskStatuses(task, user?.id, user?.role).includes(status as ConciergeTaskStatus)) return labels.updateFailed;
+    const openChildren = status === "completed" ? openSubtaskCount(task, tasks) : 0;
+    if (openChildren > 0) {
+      // Completing a parent with open sub-tasks is a decision, not a side effect.
+      setParentCloseRequest({
+        task,
+        openCount: openChildren,
+        archive: false,
+        run: async (closeChildren) => {
+          if (closeChildren && !(await closeChildrenOf(task, "completed"))) return;
+          await applyTaskStatus(task, status);
+          if (closeChildren) requestRefresh();
+        },
+      });
+      return null;
+    }
+    return applyTaskStatus(task, status);
+  }
+
+  async function closeChildrenOf(task: ConciergeTask, status: "completed" | "cancelled") {
+    try {
+      await closeOpenSubtasks(task.id, status);
+      return true;
+    } catch (closeError) {
+      setError(conciergeTaskErrorMessage(closeError, lang, labels.updateFailed));
+      return false;
+    }
+  }
+
+  async function suggestParentCompletion(child: ConciergeTask) {
+    const suggestion = await completableParentAfterChild(child, user?.id, user?.role);
+    if (suggestion) setCompletionSuggestion(suggestion);
+  }
+
+  async function completeParent(parent: ConciergeTask) {
+    setError("");
+    try {
+      const updated = await completeParentTask(parent, user?.id, user?.role);
+      setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (completeError) {
+      setError(conciergeTaskErrorMessage(completeError, lang, labels.updateFailed));
+      requestRefresh();
+    }
+  }
+
+  async function applyTaskStatus(task: ConciergeTask, status: string): Promise<string | null> {
     setUpdatingTaskId(task.id);
     setError("");
     try {
@@ -225,6 +282,7 @@ export function ConciergeTaskManagerPage() {
       });
       clearApiCache("/concierge-operational-items");
       setTasks((current) => current.map((item) => item.id === updated.id ? updated : item));
+      if (status === "completed" && updated.parent_task_id) void suggestParentCompletion(updated);
       return null;
     } catch (updateError) {
       const conflict = updateError instanceof ApiRequestError && updateError.status === 409;
@@ -368,6 +426,25 @@ export function ConciergeTaskManagerPage() {
 
   async function changeArchiveState(task: ConciergeTask, archive: boolean) {
     if (archivingTaskId || !canModifyConciergeTask(task, user?.id, user?.role)) return;
+    const openChildren = archive ? openSubtaskCount(task, tasks) : 0;
+    if (openChildren > 0) {
+      setParentCloseRequest({
+        task,
+        openCount: openChildren,
+        archive: true,
+        run: async (closeChildren) => {
+          const status = task.status === "cancelled" ? "cancelled" : "completed";
+          if (closeChildren && !(await closeChildrenOf(task, status))) return;
+          await applyArchiveState(task, true);
+          if (closeChildren) requestRefresh();
+        },
+      });
+      return;
+    }
+    await applyArchiveState(task, archive);
+  }
+
+  async function applyArchiveState(task: ConciergeTask, archive: boolean) {
     setArchivingTaskId(task.id);
     setError("");
     try {
@@ -503,6 +580,19 @@ export function ConciergeTaskManagerPage() {
           setSearchParams(next, { replace: true });
         }}
         onChanged={requestRefresh}
+      />
+
+      <ParentCloseChoiceDialog
+        request={parentCloseRequest}
+        lang={lang}
+        onDone={() => setParentCloseRequest(null)}
+      />
+      <ParentCompletionSuggestionDialog
+        suggestion={completionSuggestion}
+        lang={lang}
+        onOpenParent={openTaskDetail}
+        onComplete={(parent) => void completeParent(parent)}
+        onDone={() => setCompletionSuggestion(null)}
       />
 
       <DirtyDismissConfirmDialog

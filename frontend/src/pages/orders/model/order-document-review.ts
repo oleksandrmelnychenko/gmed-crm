@@ -1,9 +1,10 @@
+import { appDateKey } from "@/lib/app-time-zone";
 import type { ContractItem } from "@/pages/contracts/model/types";
 
 export type PassportReviewStatus = "unknown" | "expired" | "expires_during_order" | "expiring" | "valid";
 
-// Calendar dates use the same UTC day and 90-day warning window as patient readiness.
-export function passportReviewStatus(expiry: string | null | undefined, orderEnd: string | null, today = new Date().toISOString().slice(0, 10)): PassportReviewStatus {
+// Calendar dates use the same Berlin day and 90-day warning window as patient readiness.
+export function passportReviewStatus(expiry: string | null | undefined, orderEnd: string | null, today = appDateKey()): PassportReviewStatus {
   if (!expiry) return "unknown";
   if (expiry < today) return "expired";
   if (orderEnd && expiry < orderEnd) return "expires_during_order";

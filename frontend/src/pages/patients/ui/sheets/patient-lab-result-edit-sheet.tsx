@@ -7,6 +7,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Field, inputClass, textareaClass } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
+import { berlinNowNaive, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -62,14 +63,19 @@ type CorrectionBuildResult =
   | { ok: true; payload: PatientLabResultCorrectionPayload }
   | { ok: false; error: PatientLabCorrectionValidationError };
 
-function padDatePart(value: number) {
-  return String(value).padStart(2, "0");
-}
-
-function toLocalDateTimeInput(value: string) {
+// Berlin wall clock with seconds and milliseconds, so an unchanged correction
+// round-trips the stored instant exactly.
+function toBerlinDateTimeInput(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}T${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}:${padDatePart(date.getSeconds())}.${String(date.getMilliseconds()).padStart(3, "0")}`;
+  return `${berlinNowNaive(date)}.${String(date.getUTCMilliseconds()).padStart(3, "0")}`;
+}
+
+function berlinDateTimeInputToIso(value: string) {
+  const parsed = parseBerlinLocalInput(value);
+  if (!parsed) return null;
+  const fraction = /\.(\d{1,3})\d*$/.exec(value.trim())?.[1] ?? "";
+  return new Date(parsed.getTime() + Number(fraction.padEnd(3, "0"))).toISOString();
 }
 
 function numberToForm(value: number | null | undefined) {
@@ -84,7 +90,7 @@ export function patientLabCorrectionFormFromResult(
     measuredAt:
       measuredAtPrecision === "date"
         ? result.measured_at.slice(0, 10)
-        : toLocalDateTimeInput(result.measured_at),
+        : toBerlinDateTimeInput(result.measured_at),
     measuredAtPrecision,
     panel: result.panel ?? "",
     laboratoryName: result.laboratory_name ?? "",
@@ -336,11 +342,11 @@ export function buildPatientLabCorrectionPayload(
     if (!validDateOnly(form.measuredAt)) return { ok: false, error: "measured_at" };
     measuredAt = form.measuredAt;
   } else {
-    const parsed = new Date(form.measuredAt);
-    if (!form.measuredAt || Number.isNaN(parsed.getTime())) {
+    const parsed = berlinDateTimeInputToIso(form.measuredAt);
+    if (!parsed) {
       return { ok: false, error: "measured_at" };
     }
-    measuredAt = parsed.toISOString();
+    measuredAt = parsed;
   }
 
   if (!analyteName || analyteName.length > 160) return { ok: false, error: "analyte_name" };

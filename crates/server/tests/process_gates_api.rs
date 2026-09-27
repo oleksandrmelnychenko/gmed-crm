@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -127,9 +127,9 @@ async fn insert_order_appointment(
     status: &str,
 ) {
     let date = match checklist_phase {
-        "execution" => Utc::now().date_naive() + Duration::days(10),
-        "followup" => Utc::now().date_naive() + Duration::days(20),
-        _ => Utc::now().date_naive(),
+        "execution" => gmed_server::app_time::today() + Duration::days(10),
+        "followup" => gmed_server::app_time::today() + Duration::days(20),
+        _ => gmed_server::app_time::today(),
     };
     sqlx::query(
         r#"INSERT INTO appointments (
@@ -183,7 +183,7 @@ async fn insert_order_appointment_with_context(
             }
         }
     };
-    let date = Utc::now().date_naive() + Duration::days(phase_offset + type_offset);
+    let date = gmed_server::app_time::today() + Duration::days(phase_offset + type_offset);
     sqlx::query(
         r#"INSERT INTO appointments (
                 patient_id, order_id, appointment_type, title, date,
@@ -1381,7 +1381,7 @@ async fn order_status_machine_blocks_phase_changes_and_terminal_reopen() {
         "POST",
         &format!("/api/v1/orders/{order_id}/status"),
         &pm_bearer,
-        Some(json!({ "status": "cancelled" })),
+        Some(json!({ "status": "cancelled", "reason": "Patient withdrew the request" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -1955,6 +1955,100 @@ async fn followup_flow_requires_explicit_milestones_before_order_enters_followup
     assert_eq!(status, StatusCode::OK);
 }
 
+/// A milestone marked "scheduled" with a date in the order's follow-up
+/// section satisfies the follow-up gate without a separate visit or reminder;
+/// "scheduled" without a date still blocks.
+#[tokio::test]
+async fn followup_flow_accepts_milestones_planned_with_a_date() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-followup-dates");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+    let visit_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status,
+                checklist_phase, created_by
+           ) VALUES ($1, $2, 'medical', 'Consultation', CURRENT_DATE - 1, 'completed', 'execution', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({
+            "doctor_followup_status": "not_required",
+            "followup_1w_status": "scheduled",
+            "followup_1m_status": "scheduled",
+            "followup_6m_status": "scheduled",
+            "followup_1w_date": "2026-10-05",
+            "followup_1m_date": "2026-10-28",
+            "package_end_status": "not_required",
+            "results_handoff_status": "not_required"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_1w_ready"], true, "{flow}");
+    assert_eq!(flow["followup_1m_ready"], true, "{flow}");
+    assert_eq!(flow["followup_6m_ready"], false, "{flow}");
+    assert_eq!(flow["followup_1w_date"], "2026-10-05");
+    assert_eq!(flow["followup_6m_date"], Value::Null);
+    assert_eq!(
+        flow["reminder_anchor_appointment_id"],
+        json!(visit_id.to_string())
+    );
+    assert_eq!(
+        flow["blocking_reasons"],
+        json!(["6-month follow-up is not scheduled yet"])
+    );
+
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({ "followup_6m_date": "2027-03-28" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_ready"], true, "{flow}");
+    assert_eq!(flow["blocking_reasons"], json!([]));
+
+    // Clearing a date blocks the milestone again; a bad date is rejected.
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({ "followup_1w_date": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_1w_ready"], false, "{flow}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({ "followup_1w_date": "05.10.2026" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
 #[tokio::test]
 async fn followup_flow_recognizes_localized_and_completed_reminders() {
     let Some((app, pool, _admin_id)) = test_context().await else {
@@ -2037,14 +2131,24 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
 
     let patient_id = create_patient(&app, &pm, &tag).await;
     let order_id = insert_existing_order(&pool, patient_id, pm_id, &tag).await;
+    // The order total is the gross of its services: one 1000 EUR line (0 %).
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, patient_id, description, quantity, unit_price, currency, vat_rate, status)
+           VALUES ($1, $2, 'Organisation der Behandlung', 1, 1000, 'EUR', 0, 'planned')"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query("UPDATE orders SET total_estimated = 1000 WHERE id = $1")
         .bind(order_id)
         .execute(&pool)
         .await
         .unwrap();
 
-    // Propose +300, recording what was agreed with the patient.
-    let (status, amendment) = json_request(
+    // How the amount is taxed must be recorded with the proposal.
+    let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/orders/{order_id}/amendments"),
@@ -2055,8 +2159,41 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
         })),
     )
     .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // A reduction is not an amendment (the line is changed or the invoice credited).
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        Some(json!({
+            "delta_amount": "-50",
+            "agreed_note": "Goodwill",
+            "vat_treatment": "standard_vat"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Propose +300 gross at the standard VAT rate.
+    let (status, amendment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        Some(json!({
+            "delta_amount": "300",
+            "agreed_note": "3 extra hours agreed with the patient",
+            "vat_treatment": "standard_vat"
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{amendment}");
     assert_eq!(amendment["status"], "pending");
+    assert_eq!(amendment["vat_treatment"], "standard_vat");
+    assert_eq!(amendment["vat_rate"], "19");
+    assert_eq!(amendment["order_leistung_id"], Value::Null);
     let amendment_id = amendment["id"].as_str().unwrap().to_string();
 
     // The requester may not approve their own amendment.
@@ -2070,7 +2207,8 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // A different approver approves -> the order total goes 1000 -> 1300.
+    // A different approver approves -> a billable service line is added and
+    // the order total goes 1000 -> 1300.
     let (status, decided) = json_request(
         &app,
         "POST",
@@ -2082,6 +2220,91 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
     assert_eq!(status, StatusCode::OK, "{decided}");
     assert_eq!(decided["amendment"]["status"], "approved");
     assert_eq!(decided["order_total_estimated"], "1300");
+    let line_id = Uuid::parse_str(decided["order_leistung_id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        decided["amendment"]["order_leistung_id"],
+        json!(line_id.to_string())
+    );
+
+    let line = sqlx::query(
+        r#"SELECT status, quantity, unit_price, vat_rate, is_cost_passthrough, description,
+                  source_order_amendment_id, approved_by
+           FROM order_leistungen WHERE id = $1"#,
+    )
+    .bind(line_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(line.get::<String, _>("status"), "approved");
+    assert_eq!(
+        line.get::<rust_decimal::Decimal, _>("unit_price")
+            .to_string(),
+        "252.10"
+    );
+    assert_eq!(
+        line.get::<rust_decimal::Decimal, _>("vat_rate"),
+        rust_decimal::Decimal::new(19, 0)
+    );
+    assert!(!line.get::<bool, _>("is_cost_passthrough"));
+    assert_eq!(
+        line.get::<String, _>("description"),
+        "Anpassung: 3 extra hours agreed with the patient"
+    );
+    assert_eq!(
+        line.get::<Option<Uuid>, _>("source_order_amendment_id"),
+        Some(Uuid::parse_str(&amendment_id).unwrap())
+    );
+    assert_eq!(line.get::<Option<Uuid>, _>("approved_by"), Some(billing_id));
+
+    // Header, list and finance card all read the same order total.
+    let (status, order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{order}");
+    assert_eq!(
+        order["total_estimated"]
+            .as_str()
+            .and_then(|value| value.parse::<rust_decimal::Decimal>().ok()),
+        Some(rust_decimal::Decimal::new(1300, 0))
+    );
+    let (status, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economics}");
+    assert_eq!(economics["planned"]["revenue_gross"], "1300");
+
+    // The next quote bills the amendment.
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &billing,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    assert_eq!(quote["total_gross"], "1300");
+    assert!(
+        quote["line_items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["source_order_leistung_id"] == json!(line_id.to_string())
+                    && item["line_gross"] == "300"
+            ),
+        "{quote}"
+    );
 
     // Re-deciding a settled amendment conflicts.
     let (status, _) = json_request(
@@ -2090,6 +2313,68 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
         &format!("/api/v1/orders/{order_id}/amendments/{amendment_id}/decision"),
         &billing,
         Some(json!({ "decision": "reject" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // An amendment approved before approvals created service lines is billed
+    // explicitly, with the VAT treatment chosen then.
+    let legacy_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_amendments (
+                order_id, delta_amount, currency, agreed_note, status, requested_by,
+                decided_by, decided_at
+           ) VALUES ($1, 50, 'EUR', 'Extra transfer', 'approved', $2, $3, now())
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(pm_id)
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, amendments) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{amendments}");
+    let legacy = amendments
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == json!(legacy_id.to_string()))
+        .unwrap();
+    assert_eq!(legacy["billable"], true);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{legacy_id}/billing-line"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, billed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{legacy_id}/billing-line"),
+        &pm,
+        Some(json!({ "vat_treatment": "cost_passthrough" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billed}");
+    assert_eq!(billed["order_total_estimated"], "1350");
+    assert_eq!(billed["amendment"]["billable"], false);
+    assert_eq!(billed["amendment"]["is_cost_passthrough"], true);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{legacy_id}/billing-line"),
+        &pm,
+        Some(json!({ "vat_treatment": "cost_passthrough" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -2574,4 +2859,279 @@ async fn main_order_accepts_related_patient_appointment() {
             .unwrap();
     assert_eq!(persisted_link.0, child);
     assert_eq!(persisted_link.1, Some(head_order));
+}
+
+#[tokio::test]
+async fn cancelling_an_order_requires_a_reason_and_winds_down_open_work() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("order-cancel");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm, &tag).await;
+    let order_id = create_order(&app, &pm, patient_id).await;
+
+    let planned_line: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (order_id, patient_id, description, quantity, unit_price, currency, vat_rate, status)
+           VALUES ($1, $2, 'Dolmetscher', 2, 50, 'EUR', 19, 'planned')
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let delivered_line: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (order_id, patient_id, description, quantity, unit_price, currency, vat_rate, status, delivered_at)
+           VALUES ($1, $2, 'Organisation der Behandlung', 1, 200, 'EUR', 0, 'delivered', now())
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let appointment_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status, checklist_phase, created_by
+           ) VALUES
+                ($1, $2, 'medical', 'Upcoming consultation', CURRENT_DATE + 5, 'planned', 'execution', $3),
+                ($1, $2, 'medical', 'Confirmed MRI', CURRENT_DATE + 9, 'confirmed', 'execution', $3),
+                ($1, $2, 'medical', 'Past consultation', CURRENT_DATE - 3, 'completed', 'execution', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(pm_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO reminders (appointment_id, user_id, remind_at, title)
+           VALUES ($1, $2, now() + interval '4 days', 'Call the clinic')"#,
+    )
+    .bind(appointment_ids[1])
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    let quote_id = Uuid::parse_str(quote["id"].as_str().unwrap()).unwrap();
+
+    let amendment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_amendments (order_id, delta_amount, agreed_note, requested_by, vat_treatment, vat_rate)
+           VALUES ($1, 80, 'Extra hour', $2, 'standard_vat', 19)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // A reason is required.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &pm,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The preview shows what would change, and changes nothing.
+    let (status, preview) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/cancellation-preview"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(
+        preview["cancelled_services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!(planned_line.to_string())]
+    );
+    assert_eq!(preview["cancelled_services"][0]["gross"], "119");
+    assert_eq!(
+        preview["cancelled_appointment_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        preview["closed_quotes"][0]["id"],
+        json!(quote_id.to_string())
+    );
+    assert_eq!(preview["settlement"]["accrued_gross"], "200");
+    let still_planned: String =
+        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+            .bind(planned_line)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(still_planned, "planned");
+
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &pm,
+        Some(json!({ "status": "cancelled", "reason": "Patient postponed the treatment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(
+        cancelled["cancellation"]["settlement"]["accrued_gross"],
+        "200"
+    );
+    assert_eq!(
+        cancelled["cancellation"]["settlement"]["balance_gross"],
+        "200"
+    );
+
+    let order = sqlx::query(
+        "SELECT status, cancellation_reason, cancelled_by, cancelled_at FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(order.get::<String, _>("status"), "cancelled");
+    assert_eq!(
+        order
+            .get::<Option<String>, _>("cancellation_reason")
+            .as_deref(),
+        Some("Patient postponed the treatment")
+    );
+    assert_eq!(order.get::<Option<Uuid>, _>("cancelled_by"), Some(pm_id));
+
+    let lines: Vec<(Uuid, String, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT id, status, cancelled_by, cancellation_reason FROM order_leistungen WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let planned = lines.iter().find(|line| line.0 == planned_line).unwrap();
+    assert_eq!(planned.1, "cancelled");
+    assert_eq!(planned.2, Some(pm_id));
+    assert_eq!(
+        planned.3.as_deref(),
+        Some("Patient postponed the treatment")
+    );
+    let delivered = lines.iter().find(|line| line.0 == delivered_line).unwrap();
+    assert_eq!(delivered.1, "delivered");
+
+    let appointment_statuses: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT id, status FROM appointments WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for (id, status) in &appointment_statuses {
+        let expected = if *id == appointment_ids[2] {
+            "completed"
+        } else {
+            "cancelled"
+        };
+        assert_eq!(status, expected, "appointment {id}");
+    }
+    let open_reminders: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM reminders WHERE appointment_id = $1 AND NOT is_completed",
+    )
+    .bind(appointment_ids[1])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open_reminders, 0);
+
+    let quote_status: String = sqlx::query_scalar("SELECT status FROM quotes WHERE id = $1")
+        .bind(quote_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(quote_status, "rejected");
+    let closing_version: Option<String> = sqlx::query_scalar(
+        "SELECT change_reason FROM quote_versions WHERE quote_id = $1 ORDER BY version_number DESC LIMIT 1",
+    )
+    .bind(quote_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(closing_version.as_deref(), Some("order_cancelled"));
+    let amendment_status: String =
+        sqlx::query_scalar("SELECT status FROM order_amendments WHERE id = $1")
+            .bind(amendment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(amendment_status, "rejected");
+
+    // The order shows what stays as the basis for final billing or a refund.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["status"], "cancelled");
+    assert_eq!(
+        detail["cancellation_reason"],
+        "Patient postponed the treatment"
+    );
+    assert_eq!(detail["cancellation"]["settlement"]["accrued_gross"], "200");
+    assert_eq!(
+        detail["cancellation"]["settlement"]["uninvoiced_gross"],
+        "200"
+    );
+
+    // Repeating the request changes nothing; the order cannot be reopened.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &pm,
+        Some(json!({ "status": "cancelled", "reason": "Again" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT cancellation_reason FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some("Patient postponed the treatment"));
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &pm,
+        Some(json!({ "status": "active" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }

@@ -326,7 +326,7 @@ async fn get_provider_statement(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let default_from = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap_or(today);
     let from = match query.from.as_deref() {
         Some(value) => match parse_date(value, "from") {
@@ -709,7 +709,7 @@ async fn create_provider_payment(
         }
         (_, Err(message), _, _) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if input.paid_on > Utc::now().date_naive() {
+    if input.paid_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Payment date cannot be in the future",
@@ -1025,7 +1025,7 @@ async fn reverse_provider_payment(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if paid_on > Utc::now().date_naive() {
+    if paid_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Reversal date cannot be in the future",
@@ -1258,7 +1258,7 @@ async fn reverse_provider_payment(
     {
         let restore_status = if context
             .due_date
-            .is_some_and(|date| date < Utc::now().date_naive())
+            .is_some_and(|date| date < crate::app_time::today())
         {
             "overdue".to_string()
         } else {

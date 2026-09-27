@@ -374,15 +374,22 @@ async fn completing_linked_task_updates_workflow_item_state() {
     let task_id = created_item["task_id"].as_str().unwrap();
     let item_id = created_item["id"].as_str().unwrap().to_string();
 
-    let (status, _) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{task_id}/status"),
-        &pm_bearer,
-        Some(json!({ "status": "completed" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    // The legacy status path follows the work-center rules: every change
+    // carries the optimistic-lock token and an open task is started before
+    // it is completed.
+    let mut task = load_work_center_task(&app, &pm_bearer, task_id).await;
+    for next_status in ["in_progress", "completed"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/status"),
+            &pm_bearer,
+            Some(json!({ "expected_updated_at": task["updated_at"], "status": next_status })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next_status}: {body}");
+        task = body;
+    }
 
     let (status, refreshed_body) = json_request(
         &app,
@@ -514,4 +521,306 @@ async fn completing_linked_task_in_work_center_completes_order_checklist_item() 
         initial_open - 2,
         "{refreshed}"
     );
+}
+
+fn checklist_item<'a>(checklist: &'a Value, item_id: &str) -> &'a Value {
+    checklist["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"].as_str() == Some(item_id))
+        .unwrap_or_else(|| panic!("checklist item {item_id} missing: {checklist}"))
+}
+
+fn first_open_linked_item(checklist: &Value, checklist_key: &str) -> (String, String) {
+    checklist["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["checklist_key"] == checklist_key && item["is_completed"] == false)
+        .find_map(|item| {
+            Some((
+                item["id"].as_str()?.to_string(),
+                item["linked_task_id"].as_str()?.to_string(),
+            ))
+        })
+        .unwrap_or_else(|| panic!("no open {checklist_key} item: {checklist}"))
+}
+
+#[tokio::test]
+async fn checklist_task_cannot_be_deleted_and_not_required_closes_item_until_reopened() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-not-required");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let initial_open = checklist["open_count"].as_u64().unwrap();
+    let (item_id, task_id) = first_open_linked_item(&checklist, "order_discovery");
+
+    // The work center knows the task backs a checklist item of this order.
+    let task = load_work_center_task(&app, &pm_bearer, &task_id).await;
+    assert_eq!(task["order_id"], json!(order_id), "{task}");
+    assert_eq!(task["workflow_checklist_item_id"], json!(item_id), "{task}");
+    assert_eq!(task["workflow_checklist_scope_type"], "order", "{task}");
+
+    let (status, refused) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/concierge-operational-items/{task_id}"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "workflow_checklist_task_delete");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{checklist_path}/{item_id}/not-required"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let item = checklist_item(&checklist, &item_id);
+    assert_eq!(item["is_completed"], true, "{item}");
+    assert_eq!(item["not_required"], true, "{item}");
+    assert_eq!(item["not_required_reason"], "manual", "{item}");
+    assert_eq!(item["linked_task_status"], "cancelled", "{item}");
+    assert_eq!(checklist["open_count"].as_u64().unwrap(), initial_open - 1);
+    assert_eq!(checklist["not_required_count"], 1);
+    assert_eq!(checklist["completed_count"], 0);
+
+    // Reopening brings the item and its task back.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{checklist_path}/{item_id}/reopen"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let item = checklist_item(&checklist, &item_id);
+    assert_eq!(item["is_completed"], false, "{item}");
+    assert_eq!(item["not_required"], false, "{item}");
+    assert!(item["not_required_reason"].is_null(), "{item}");
+    assert_eq!(item["linked_task_status"], "open", "{item}");
+    assert_eq!(checklist["open_count"].as_u64().unwrap(), initial_open);
+
+    // A completed item is neither turned into "not required" nor reopened here.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("{checklist_path}/{item_id}/complete"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for action in ["not-required", "reopen"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("{checklist_path}/{item_id}/{action}"),
+            &pm_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{action}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn cancelling_or_reopening_a_checklist_task_in_work_center_follows_the_item() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-task-cancel");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let (item_id, task_id) = first_open_linked_item(&checklist, "order_discovery");
+
+    let task = load_work_center_task(&app, &pm_bearer, &task_id).await;
+    let task = set_work_center_task_status(&app, &pm_bearer, &task, "cancelled").await;
+    let (_, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    let item = checklist_item(&checklist, &item_id);
+    assert_eq!(item["is_completed"], true, "{item}");
+    assert_eq!(item["not_required"], true, "{item}");
+    assert_eq!(item["not_required_reason"], "task_cancelled", "{item}");
+
+    set_work_center_task_status(&app, &pm_bearer, &task, "open").await;
+    let (_, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    let item = checklist_item(&checklist, &item_id);
+    assert_eq!(item["is_completed"], false, "{item}");
+    assert_eq!(item["not_required"], false, "{item}");
+    assert_eq!(item["linked_task_status"], "open", "{item}");
+}
+
+#[tokio::test]
+async fn passing_a_stage_resolves_its_open_items_as_not_required() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-stage-passed");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let (done_item_id, done_task_id) = first_open_linked_item(&checklist, "order_discovery");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("{checklist_path}/{done_item_id}/complete"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, custom) = json_request(
+        &app,
+        "POST",
+        &checklist_path,
+        &pm_bearer,
+        Some(json!({ "item_text": "Custom follow-up call", "priority": "normal" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{custom}");
+    let custom_item_id = custom["id"].as_str().unwrap().to_string();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "intake" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    for item in checklist["items"].as_array().unwrap() {
+        match item["checklist_key"].as_str().unwrap() {
+            "order_discovery" if item["id"].as_str() == Some(done_item_id.as_str()) => {
+                assert_eq!(item["not_required"], false, "{item}");
+                assert_eq!(item["linked_task_status"], "completed", "{item}");
+            }
+            "order_discovery" => {
+                assert_eq!(item["is_completed"], true, "{item}");
+                assert_eq!(item["not_required"], true, "{item}");
+                assert_eq!(item["not_required_reason"], "phase_passed", "{item}");
+                assert_eq!(item["linked_task_status"], "cancelled", "{item}");
+            }
+            "order_intake" => {
+                assert_eq!(item["is_completed"], false, "{item}");
+                assert_eq!(item["linked_task_status"], "open", "{item}");
+            }
+            "order_custom" => {
+                assert_eq!(item["id"], json!(custom_item_id), "{item}");
+                assert_eq!(item["is_completed"], false, "{item}");
+            }
+            other => panic!("unexpected checklist group {other}: {item}"),
+        }
+    }
+    let done_task = load_work_center_task(&app, &pm_bearer, &done_task_id).await;
+    assert_eq!(done_task["status"], "completed");
+
+    // Reopening a passed stage's item brings its task back for real work.
+    let passed_item_id = checklist["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["not_required_reason"] == "phase_passed")
+        .and_then(|item| item["id"].as_str())
+        .unwrap()
+        .to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{checklist_path}/{passed_item_id}/reopen"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    let item = checklist_item(&checklist, &passed_item_id);
+    assert_eq!(item["is_completed"], false, "{item}");
+    assert_eq!(item["linked_task_status"], "open", "{item}");
+}
+
+#[tokio::test]
+async fn items_of_passed_stages_created_on_first_view_are_not_required_without_tasks() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-lazy-passed");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+
+    // An order that reached a later stage before its checklist was seeded.
+    sqlx::query("DELETE FROM workflow_checklist_items WHERE order_id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE orders SET phase = 'intake' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let items = checklist["items"].as_array().unwrap();
+    let discovery = items
+        .iter()
+        .filter(|item| item["checklist_key"] == "order_discovery")
+        .collect::<Vec<_>>();
+    assert_eq!(discovery.len(), 2, "{checklist}");
+    for item in discovery {
+        assert_eq!(item["is_completed"], true, "{item}");
+        assert_eq!(item["not_required"], true, "{item}");
+        assert_eq!(item["not_required_reason"], "phase_passed", "{item}");
+        assert!(item["linked_task_id"].is_null(), "{item}");
+    }
+    assert!(
+        items
+            .iter()
+            .filter(|item| item["checklist_key"] == "order_intake")
+            .all(|item| item["is_completed"] == false && item["linked_task_id"].is_string()),
+        "{checklist}"
+    );
+    assert_eq!(checklist["not_required_count"], 2);
 }

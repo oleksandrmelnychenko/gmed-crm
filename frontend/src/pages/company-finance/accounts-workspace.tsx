@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
+import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -183,7 +184,7 @@ const copy = {
 } as const;
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return appDateKey();
 }
 
 function accountIcon(type: CompanyFinancialAccount["account_type"]) {
@@ -194,8 +195,7 @@ function accountIcon(type: CompanyFinancialAccount["account_type"]) {
 }
 
 function formatDate(value: string, locale: string) {
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(locale);
+  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
 }
 
 export function CompanyAccountsWorkspace({ payload, currency, locale, money, onChanged }: Props) {

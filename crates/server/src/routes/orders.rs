@@ -32,6 +32,10 @@ pub fn router() -> Router<AppState> {
         .route("/orders/{order_id}/economics", get(get_order_economics))
         .route("/orders/{order_id}/status", post(update_status))
         .route(
+            "/orders/{order_id}/cancellation-preview",
+            get(preview_order_cancellation),
+        )
+        .route(
             "/orders/{order_id}/debt-management",
             post(update_debt_management),
         )
@@ -109,6 +113,10 @@ pub fn router() -> Router<AppState> {
             post(decide_order_amendment),
         )
         .route(
+            "/orders/{order_id}/amendments/{amendment_id}/billing-line",
+            post(bill_order_amendment),
+        )
+        .route(
             "/orders/{order_id}/group",
             get(get_order_group).post(group_order),
         )
@@ -163,6 +171,8 @@ struct PhaseRequest {
 struct StatusRequest {
     status: String,
     note: Option<String>,
+    /// Required when cancelling: why the order is cancelled.
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -211,10 +221,34 @@ struct UpdateOrderFollowupFlowRequest {
     followup_1w_status: Option<String>,
     followup_1m_status: Option<String>,
     followup_6m_status: Option<String>,
+    /// Planned date (YYYY-MM-DD, "" clears) of a milestone marked scheduled.
+    followup_1w_date: Option<String>,
+    followup_1m_date: Option<String>,
+    followup_6m_date: Option<String>,
     package_end_date: Option<String>,
     package_end_status: Option<String>,
     results_handoff_status: Option<String>,
     followup_summary: Option<String>,
+}
+
+/// An optional date field of a partial update: `None` keeps the stored value,
+/// `Some(None)` clears it ("" in the request), `Some(Some(date))` sets it.
+fn parse_optional_date_update(
+    value: Option<&str>,
+    field: &str,
+) -> Result<Option<Option<chrono::NaiveDate>>, axum::response::Response> {
+    match value {
+        None => Ok(None),
+        Some(raw) if raw.trim().is_empty() => Ok(Some(None)),
+        Some(raw) => chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d")
+            .map(|date| Some(Some(date)))
+            .map_err(|_| {
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    &format!("Invalid {field} (YYYY-MM-DD)"),
+                )
+            }),
+    }
 }
 
 #[derive(Deserialize)]
@@ -433,7 +467,7 @@ fn parse_optional_invoice_date(
     value: Option<&str>,
 ) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
     let parsed = parse_optional_order_date(value)?;
-    if parsed.is_some_and(|date| date > chrono::Utc::now().date_naive()) {
+    if parsed.is_some_and(|date| date > crate::app_time::today()) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Invoice date cannot be in the future",
@@ -493,10 +527,25 @@ async fn list_orders(
     }
 
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let read_scope = OrderReadScope::for_role(auth.role);
+    // Filtering by provider, doctor or specialty would reveal which (medical)
+    // services an order contains, which the order-part readers do not see.
+    if read_scope.is_scoped()
+        && (query.provider_id.is_some()
+            || query.doctor_id.is_some()
+            || query.provider_taxonomy_node_id.is_some()
+            || query.lead_id.is_some())
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "This role reads only its part of the order",
+        );
+    }
 
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
-                  o.total_estimated, o.signed_patient, o.signed_agency,
+                  COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
+                  o.signed_patient, o.signed_agency,
                   o.prepayment_required, o.prepayment_amount, o.prepayment_due_at, o.date_from, o.date_to, o.created_at,
                   (SELECT jsonb_build_object('status',payment_status,'required_amount',required_amount::text,'received_amount',received_amount::text,'remaining_amount',remaining_amount::text,'currency',currency,'due_at',prepayment_due_at)
                    FROM order_payment_tracking WHERE order_id=o.id) AS payment_tracking,
@@ -510,21 +559,29 @@ async fn list_orders(
            LEFT JOIN cases cs ON cs.id = o.case_id
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
-                       o.order_number, o.needs_description,
+                       o.order_number,
+                       -- The needs text and the service lines are not part of
+                       -- the order-part readers' projection, so not searchable.
+                       CASE WHEN $10::boolean THEN NULL ELSE o.needs_description END,
                        p.first_name, p.last_name, p.patient_id,
                        p.email, p.phone_primary, p.phone_secondary,
                        l.first_name, l.last_name, l.email, l.phone
                      )) LIKE de_normalize($1)
-                  OR EXISTS (
+                  OR (NOT $10::boolean AND EXISTS (
                         SELECT 1
                         FROM order_leistungen ol
                         LEFT JOIN providers pr ON pr.id = ol.provider_id
                         LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
                         WHERE ol.order_id = o.id
                           AND de_normalize(concat_ws(' ',
-                                ol.description, ol.notes, pr.name, d.name
+                                ol.description,
+                                -- Notes copied from an interpreter report are
+                                -- not searchable for readers who may not see them.
+                                CASE WHEN $9::boolean AND ol.source_interpreter_report_id IS NOT NULL
+                                     THEN NULL ELSE ol.notes END,
+                                pr.name, d.name
                               )) LIKE de_normalize($1)
-                  )
+                  ))
            )
              AND ($2::text IS NULL OR o.phase = $2)
              AND ($3::text IS NULL OR o.status = $3)
@@ -581,6 +638,8 @@ async fn list_orders(
     .bind(query.provider_id)
     .bind(query.doctor_id)
     .bind(query.provider_taxonomy_node_id)
+    .bind(!auth.can(Capability::PatientsMedicalView))
+    .bind(read_scope.is_scoped())
     .fetch_all(&state.db)
     .await
     {
@@ -595,10 +654,39 @@ async fn list_orders(
                     .try_get::<Option<Uuid>, _>("source_lead_id")
                     .unwrap_or_default();
 
-                match if query.lead_id.is_some() { can_access_order_preparation(&state, &auth, order_id, patient_id).await } else { can_access_order(&state, &auth, order_id, patient_id).await } {
+                let access = if read_scope.is_scoped() {
+                    can_access_scoped_order(&state, &auth, order_id, patient_id).await
+                } else if query.lead_id.is_some() {
+                    can_access_order_preparation(&state, &auth, order_id, patient_id).await
+                } else {
+                    can_access_order(&state, &auth, order_id, patient_id).await
+                };
+                match access {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(resp) => return resp,
+                }
+
+                if read_scope.is_scoped() {
+                    // Order-part readers: identity, period and state only.
+                    orders.push(serde_json::json!({
+                        "id": order_id,
+                        "read_scope": read_scope.wire_name(),
+                        "order_number": r.try_get::<String, _>("order_number").unwrap_or_default(),
+                        "patient_id": patient_id,
+                        "patient_name": format!(
+                            "{} {}",
+                            r.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+                            r.try_get::<String, _>("subject_last_name").unwrap_or_default()
+                        ),
+                        "patient_pid": r.try_get::<String, _>("p_pid").unwrap_or_default(),
+                        "phase": r.try_get::<String, _>("phase").unwrap_or_default(),
+                        "status": r.try_get::<String, _>("status").unwrap_or_default(),
+                        "date_from": r.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
+                        "date_to": r.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
+                        "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                    }));
+                    continue;
                 }
 
                 orders.push(serde_json::json!({
@@ -2007,6 +2095,9 @@ async fn load_order_followup_readiness(
                   off.followup_1w_status,
                   off.followup_1m_status,
                   off.followup_6m_status,
+                  off.followup_1w_date,
+                  off.followup_1m_date,
+                  off.followup_6m_date,
                   off.package_end_date,
                   off.package_end_status,
                   off.results_handoff_status,
@@ -2162,6 +2253,24 @@ async fn load_order_followup_readiness(
     .await
     .unwrap_or_default();
 
+    // Follow-up reminders created from the order page are attached to this
+    // appointment of the order (the latest completed one, else the latest
+    // one still open), so they count for the order.
+    let reminder_anchor = sqlx::query(
+        r#"SELECT id, date
+           FROM appointments
+           WHERE order_id = $1 AND status <> 'cancelled'
+           ORDER BY (status = 'completed') DESC, date DESC, created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or_default();
+    let reminder_anchor_appointment_id = reminder_anchor
+        .as_ref()
+        .and_then(|row| row.try_get::<Uuid, _>("id").ok());
+
     let closure_anchor_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
         r#"SELECT created_at
            FROM workflow_lifecycle_events
@@ -2208,6 +2317,12 @@ async fn load_order_followup_readiness(
     let followup_6m_status: String = followup_row
         .try_get("followup_6m_status")
         .unwrap_or_else(|_| "pending".to_string());
+    let followup_1w_date: Option<chrono::NaiveDate> =
+        followup_row.try_get("followup_1w_date").unwrap_or_default();
+    let followup_1m_date: Option<chrono::NaiveDate> =
+        followup_row.try_get("followup_1m_date").unwrap_or_default();
+    let followup_6m_date: Option<chrono::NaiveDate> =
+        followup_row.try_get("followup_6m_date").unwrap_or_default();
     let package_end_date: Option<chrono::NaiveDate> =
         followup_row.try_get("package_end_date").unwrap_or_default();
     let package_end_status: String = followup_row
@@ -2257,12 +2372,21 @@ async fn load_order_followup_readiness(
         doctor_followup_status.as_str(),
         "not_required" | "completed"
     ) || doctor_followup_visits + doctor_followup_tasks > 0;
+    // A milestone is ready when it is done or not needed, when a follow-up
+    // visit or reminder exists for it, or when the follow-up section planned
+    // it: status "scheduled" with a date.
+    let followup_1w_planned = followup_1w_status == "scheduled" && followup_1w_date.is_some();
+    let followup_1m_planned = followup_1m_status == "scheduled" && followup_1m_date.is_some();
+    let followup_6m_planned = followup_6m_status == "scheduled" && followup_6m_date.is_some();
     let followup_1w_ready = matches!(followup_1w_status.as_str(), "not_required" | "completed")
-        || followup_1w_visits + followup_1w_reminders > 0;
+        || followup_1w_visits + followup_1w_reminders > 0
+        || followup_1w_planned;
     let followup_1m_ready = matches!(followup_1m_status.as_str(), "not_required" | "completed")
-        || followup_1m_visits + followup_1m_reminders > 0;
+        || followup_1m_visits + followup_1m_reminders > 0
+        || followup_1m_planned;
     let followup_6m_ready = matches!(followup_6m_status.as_str(), "not_required" | "completed")
-        || followup_6m_visits + followup_6m_reminders > 0;
+        || followup_6m_visits + followup_6m_reminders > 0
+        || followup_6m_planned;
 
     let effective_package_end_date = package_end_date.or(suggested_package_end_date);
     let package_end_required =
@@ -2286,7 +2410,10 @@ async fn load_order_followup_readiness(
         || followup_1w_reminders > 0
         || followup_1m_reminders > 0
         || followup_6m_reminders > 0
-        || package_end_reminders > 0;
+        || package_end_reminders > 0
+        || followup_1w_planned
+        || followup_1m_planned
+        || followup_6m_planned;
     let followup_activity_required = doctor_followup_status != "not_required"
         || followup_1w_status != "not_required"
         || followup_1m_status != "not_required"
@@ -2348,6 +2475,10 @@ async fn load_order_followup_readiness(
             "followup_1w_status": followup_1w_status,
             "followup_1m_status": followup_1m_status,
             "followup_6m_status": followup_6m_status,
+            "followup_1w_date": followup_1w_date.map(|value| value.to_string()),
+            "followup_1m_date": followup_1m_date.map(|value| value.to_string()),
+            "followup_6m_date": followup_6m_date.map(|value| value.to_string()),
+            "reminder_anchor_appointment_id": reminder_anchor_appointment_id,
             "package_end_date": package_end_date.map(|value| value.to_string()),
             "suggested_package_end_date": suggested_package_end_date.map(|value| value.to_string()),
             "package_end_status": package_end_status,
@@ -3107,8 +3238,11 @@ async fn get_order(
                   o.source_lead_id, o.contract_id,
                   o.case_id, cs.case_id AS case_code,
                   o.phase, o.status, o.needs_description, o.signed_patient,
-                  o.signed_agency, o.total_estimated, o.total_actual, UPPER(o.currency) AS currency,
+                  o.signed_agency,
+                  COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
+                  o.total_actual, UPPER(o.currency) AS currency,
                   o.created_at, o.updated_at, o.cancellation_reason, o.cancelled_at,
+                  o.cancelled_by, cancelled_user.name AS cancelled_by_name,
                   settlement.id AS termination_settlement_id,
                   settlement.status AS termination_settlement_status,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
@@ -3119,6 +3253,7 @@ async fn get_order(
            LEFT JOIN patients p ON p.id = COALESCE(o.patient_id, l.converted_patient_id)
            LEFT JOIN cases cs ON cs.id = o.case_id
            LEFT JOIN order_termination_settlements settlement ON settlement.order_id = o.id
+           LEFT JOIN users cancelled_user ON cancelled_user.id = o.cancelled_by
            WHERE o.id = $1"#,
     )
     .bind(order_id)
@@ -3190,6 +3325,19 @@ async fn get_order(
         .try_get::<Option<String>, _>("p_pid")
         .unwrap_or_default();
 
+    let read_scope = OrderReadScope::for_role(auth.role);
+    if read_scope.is_scoped() {
+        match can_access_scoped_order(&state, &auth, order_db_id, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(resp) => return resp,
+        }
+        return match scoped_order_detail(&state, &order, order_db_id, read_scope).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(resp) => resp,
+        };
+    }
+
     match can_access_order_preparation(&state, &auth, order_db_id, patient_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
@@ -3220,7 +3368,7 @@ async fn get_order(
                   ol.cancelled_at, ol.cancellation_reason,
                   ol.client_reference,
                   ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
-                  ol.source_medical_appointment_id, ol.agency_service_id,
+                  ol.source_medical_appointment_id, ol.source_order_amendment_id, ol.agency_service_id,
                   ol.agency_service_price_version_id,
                   ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
@@ -3241,8 +3389,11 @@ async fn get_order(
                   billing.all_invoices_paid, billing.any_payment,
                   billing.invoice_references,
                   doc.auto_name AS external_document_auto_name,
-                  doc.original_filename AS external_document_filename
+                  doc.original_filename AS external_document_filename,
+                  source_report.report_text AS source_report_text
            FROM order_leistungen ol
+           LEFT JOIN interpreter_reports source_report
+             ON source_report.id = ol.source_interpreter_report_id
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            LEFT JOIN LATERAL (
@@ -3359,7 +3510,12 @@ async fn get_order(
             "approved_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "cancelled_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "cancellation_reason": l.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
-            "notes": l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "notes": order_line_notes_for_reader(
+                &auth,
+                l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                l.try_get::<Option<String>, _>("source_report_text").unwrap_or_default().as_deref(),
+            ),
             "client_reference": l.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
             "provider_id": l.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
             "provider_name": l.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
@@ -3371,6 +3527,7 @@ async fn get_order(
             "doctor_name": l.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
             "source_interpreter_report_id": l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
             "source_medical_appointment_id": l.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
+            "source_order_amendment_id": l.try_get::<Option<Uuid>, _>("source_order_amendment_id").unwrap_or_default(),
             "agency_service_id": l.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
             "agency_service_price_version_id": l.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
             "agency_service_key": l.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
@@ -3540,6 +3697,45 @@ async fn get_order(
         Err(resp) => return resp,
     };
 
+    // A cancelled order (not a contract termination, which has its own
+    // settlement) shows what stays as the basis for final billing or a refund.
+    let cancellation_reason = order
+        .try_get::<Option<String>, _>("cancellation_reason")
+        .unwrap_or_default();
+    let cancellation = if status == "cancelled"
+        && cancellation_reason.as_deref()
+            != Some(crate::routes::invoices::termination_settlements::CONTRACT_TERMINATED_REASON)
+    {
+        let settlement = match state.db.acquire().await {
+            Ok(mut conn) => {
+                match crate::routes::invoices::termination_settlements::compute_order_settlement(
+                    &mut conn, order_id,
+                )
+                .await
+                {
+                    Ok(value) => value.map(|settlement| settlement.preview_json()),
+                    Err(error) => {
+                        tracing::error!(error = %error, %order_id, "load cancelled order settlement");
+                        None
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::error!(error = %error, %order_id, "acquire connection for cancelled order settlement");
+                None
+            }
+        };
+        Some(serde_json::json!({
+            "reason": cancellation_reason,
+            "cancelled_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "cancelled_by": order.try_get::<Option<Uuid>, _>("cancelled_by").unwrap_or_default(),
+            "cancelled_by_name": order.try_get::<Option<String>, _>("cancelled_by_name").unwrap_or_default(),
+            "settlement": settlement,
+        }))
+    } else {
+        None
+    };
+
     Json(serde_json::json!({
         "id": order_db_id, "order_number": order_number,
         "patient_id": patient_id,
@@ -3553,6 +3749,7 @@ async fn get_order(
         "phase": phase, "status": status,
         "cancellation_reason": order.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
         "cancelled_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "cancellation": cancellation,
         "termination_settlement": order.try_get::<Option<Uuid>, _>("termination_settlement_id").unwrap_or_default().map(|id| serde_json::json!({
             "id": id,
             "status": order.try_get::<Option<String>, _>("termination_settlement_status").unwrap_or_default(),
@@ -3575,6 +3772,59 @@ async fn get_order(
     .into_response()
 }
 
+/// Notes of an order line as a reader may see them.
+///
+/// Lines billed from an approved interpreter report used to copy the report's
+/// free text into their notes (`Report: …`). The report describes the visit
+/// and can carry medical content, while billing reads order lines. New lines
+/// only reference the report; for the lines written before, a reader without
+/// `patients.medical.view` (billing) gets the reference instead of the text.
+/// The stored notes stay unchanged (history is not rewritten), and the report
+/// itself remains readable where the appointment's access rules allow it.
+pub(crate) fn order_line_notes_for_reader(
+    auth: &AuthUser,
+    notes: Option<String>,
+    source_report_id: Option<Uuid>,
+    source_report_text: Option<&str>,
+) -> Option<String> {
+    if auth.can(Capability::PatientsMedicalView) {
+        return notes;
+    }
+    redact_interpreter_report_text(notes, source_report_id, source_report_text)
+}
+
+fn redact_interpreter_report_text(
+    notes: Option<String>,
+    source_report_id: Option<Uuid>,
+    source_report_text: Option<&str>,
+) -> Option<String> {
+    let Some(report_id) = source_report_id else {
+        return notes;
+    };
+    let notes = notes?;
+    let reference = format!("Bericht: {report_id}");
+    if let Some(text) = source_report_text
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        let copied = format!("Report: {text}");
+        if notes.contains(&copied) {
+            return Some(notes.replace(&copied, &reference));
+        }
+    }
+    // Fall back to hiding everything from a copied `Report:` line on when the
+    // exact text cannot be matched (e.g. whitespace changed on the report).
+    let marker = if notes.starts_with("Report: ") {
+        Some(0)
+    } else {
+        notes.find("\nReport: ").map(|index| index + 1)
+    };
+    Some(match marker {
+        Some(index) => format!("{}{reference}", &notes[..index]),
+        None => notes,
+    })
+}
+
 fn economics_money(value: rust_decimal::Decimal) -> String {
     money::money_string(value)
 }
@@ -3585,6 +3835,9 @@ async fn get_order_economics(
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     if let Err(response) = auth.require_capability(Capability::OrdersView) {
+        return response;
+    }
+    if let Err(response) = require_full_order_read(&auth) {
         return response;
     }
 
@@ -3712,6 +3965,62 @@ async fn get_order_economics(
         }
     };
 
+    // Issued advance invoices are billed to the patient too; the part already
+    // credited into a settlement invoice (prepayment applied) is counted there.
+    let advances = match sqlx::query(
+        r#"WITH credits AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+               GROUP BY transaction.invoice_id
+           ), payments AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'payment'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_payment_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+               GROUP BY transaction.invoice_id
+           ), refunds AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'refund'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_refund_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+               GROUP BY transaction.invoice_id
+           )
+           SELECT
+               COALESCE(SUM(GREATEST(invoice.total_gross - COALESCE(credits.amount_gross, 0), 0))
+                   FILTER (WHERE invoice.invoice_type = 'advance'), 0) AS advance_invoiced_gross,
+               COALESCE(SUM(GREATEST(
+                   invoice.total_gross - COALESCE(credits.amount_gross, 0)
+                       - COALESCE(payments.amount_gross, 0) + COALESCE(refunds.amount_gross, 0),
+                   0
+               )) FILTER (WHERE invoice.invoice_type = 'advance'), 0) AS advance_outstanding_gross,
+               COALESCE(SUM(COALESCE(invoice.prepayment_applied_amount, 0))
+                   FILTER (WHERE invoice.invoice_type <> 'advance'), 0) AS prepayment_applied_gross
+           FROM invoices invoice
+           LEFT JOIN credits ON credits.invoice_id = invoice.id
+           LEFT JOIN payments ON payments.invoice_id = invoice.id
+           LEFT JOIN refunds ON refunds.invoice_id = invoice.id
+           WHERE invoice.order_id = $1
+             AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *economics_transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order advance invoices");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
+        }
+    };
+
     let cash = match sqlx::query(
         r#"WITH payments AS (
                SELECT COALESCE(SUM(CASE WHEN transaction.transaction_type = 'payment'
@@ -3743,6 +4052,58 @@ async fn get_order_economics(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
         }
     };
+
+    // Money the patient already paid that no invoice has taken yet: paid
+    // advances not applied to a settlement invoice, and cash beyond what an
+    // invoice asks for (overpayments, credit notes after payment). What is
+    // still to be received from the patient is net of both.
+    let held = match sqlx::query(
+        r#"SELECT
+               COALESCE(SUM(GREATEST(
+                   LEAST(invoice.paid_amount, invoice.total_gross - invoice.credited_amount)
+                   - COALESCE((
+                       SELECT SUM(allocation.amount_gross)
+                       FROM invoice_prepayment_allocations allocation
+                       WHERE allocation.advance_invoice_id = invoice.id
+                   ), 0),
+                   0
+               )) FILTER (WHERE invoice.invoice_type = 'advance'), 0) AS advance_available_gross,
+               COALESCE(SUM(invoice.prepayment_applied_amount)
+                   FILTER (WHERE invoice.invoice_type <> 'advance'), 0) AS advance_applied_gross,
+               COALESCE(SUM(GREATEST(
+                   invoice.paid_amount + invoice.prepayment_applied_amount
+                   - (invoice.total_gross - invoice.credited_amount),
+                   0
+               )), 0) AS patient_credit_gross
+           FROM invoices invoice
+           WHERE invoice.order_id = $1
+             AND invoice.status NOT IN ('draft', 'cancelled')"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *economics_transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order patient credit");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order economics",
+            );
+        }
+    };
+    let advance_available_gross = held
+        .try_get::<rust_decimal::Decimal, _>("advance_available_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let patient_credit_gross = held
+        .try_get::<rust_decimal::Decimal, _>("patient_credit_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let patient_open_gross = (invoice
+        .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        - advance_available_gross
+        - patient_credit_gross)
+        .max(rust_decimal::Decimal::ZERO);
 
     let external = match sqlx::query(
         r#"SELECT
@@ -4094,6 +4455,29 @@ async fn get_order_economics(
 
     let planned_revenue_gross = planned_revenue_net + planned_revenue_vat;
     let planned_margin_net = planned_revenue_net - planned_cost_net;
+    let advance_invoiced_gross = advances
+        .try_get::<rust_decimal::Decimal, _>("advance_invoiced_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let prepayment_applied_gross = advances
+        .try_get::<rust_decimal::Decimal, _>("prepayment_applied_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    // Everything invoiced to the patient: settlement invoices plus issued
+    // advances, without counting an advance again once it is credited into a
+    // settlement invoice.
+    let billed_to_patient_gross = (invoice
+        .try_get::<rust_decimal::Decimal, _>("revenue_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        + advance_invoiced_gross
+        - prepayment_applied_gross.min(advance_invoiced_gross))
+    .max(rust_decimal::Decimal::ZERO);
+    // Still to be received from the patient: open settlement invoices plus the
+    // unpaid part of issued advances.
+    let patient_outstanding_gross = invoice
+        .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        + advances
+            .try_get::<rust_decimal::Decimal, _>("advance_outstanding_gross")
+            .unwrap_or(rust_decimal::Decimal::ZERO);
     let mut warnings = Vec::new();
     if currency_mismatch_count > 0 {
         warnings.push("external_invoice_currency_mismatch");
@@ -4148,8 +4532,16 @@ async fn get_order_economics(
             "credited_net": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_net").unwrap_or(rust_decimal::Decimal::ZERO)),
             "credited_vat": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_vat").unwrap_or(rust_decimal::Decimal::ZERO)),
             "credited_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
+            "advance_invoiced_gross": economics_money(advance_invoiced_gross),
+            "prepayment_applied_gross": economics_money(prepayment_applied_gross),
+            "billed_to_patient_gross": economics_money(billed_to_patient_gross),
+            "patient_outstanding_gross": economics_money(patient_outstanding_gross),
             "invoice_settled_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_settled_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "invoice_outstanding_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
+            "advance_available_gross": economics_money(advance_available_gross),
+            "advance_applied_gross": economics_money(held.try_get::<rust_decimal::Decimal, _>("advance_applied_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
+            "patient_credit_gross": economics_money(patient_credit_gross),
+            "patient_open_gross": economics_money(patient_open_gross),
             "patient_cash_received_gross": economics_money(cash.try_get::<rust_decimal::Decimal, _>("received_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "patient_cash_refunded_gross": economics_money(cash.try_get::<rust_decimal::Decimal, _>("refunded_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "patient_cash_collected_gross": economics_money(cash.try_get::<rust_decimal::Decimal, _>("collected_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
@@ -4595,6 +4987,16 @@ async fn update_status(
         );
     }
 
+    if requested_status == "cancelled" {
+        let reason = match normalize_order_cancellation_reason(
+            body.reason.as_deref().or(body.note.as_deref()),
+        ) {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        return cancel_order(&state, &auth, order_id, &reason).await;
+    }
+
     if requested_status == "completed" {
         if current_phase != "followup" {
             return lifecycle_gate_err(
@@ -4675,6 +5077,354 @@ async fn update_status(
                 "Failed to update order status",
             )
         }
+    }
+}
+
+/// What cancelling an order changed inside its transaction; used for the
+/// response, the preview, audit and realtime events after commit.
+struct OrderCancellation {
+    previous_status: String,
+    phase: String,
+    cancelled_services: Vec<serde_json::Value>,
+    cancelled_service_ids: Vec<Uuid>,
+    cancelled_appointment_ids: Vec<Uuid>,
+    closed_quotes: Vec<crate::routes::contracts::ClosedOrderQuote>,
+    rejected_amendment_ids: Vec<Uuid>,
+    settlement: Option<serde_json::Value>,
+}
+
+impl OrderCancellation {
+    fn summary_json(&self, reason: Option<&str>) -> serde_json::Value {
+        serde_json::json!({
+            "reason": reason,
+            "previous_status": self.previous_status,
+            "phase": self.phase,
+            "cancelled_services": self.cancelled_services,
+            "cancelled_appointment_ids": self.cancelled_appointment_ids,
+            "closed_quotes": self
+                .closed_quotes
+                .iter()
+                .map(|quote| serde_json::json!({
+                    "id": quote.id,
+                    "quote_number": quote.quote_number,
+                    "previous_status": quote.previous_status,
+                }))
+                .collect::<Vec<_>>(),
+            "rejected_amendment_ids": self.rejected_amendment_ids,
+            // What stays on the order as the basis for final billing or a
+            // refund: delivered/approved/invoiced services and third-party
+            // costs (accrued), released invoices and received cash.
+            "settlement": self.settlement,
+        })
+    }
+}
+
+fn normalize_order_cancellation_reason(
+    reason: Option<&str>,
+) -> Result<String, axum::response::Response> {
+    let reason = reason.map(str::trim).unwrap_or_default();
+    let reason_len = reason.chars().count();
+    if !(3..=1000).contains(&reason_len)
+        || reason == crate::routes::invoices::termination_settlements::CONTRACT_TERMINATED_REASON
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A cancellation reason of 3 to 1000 characters is required",
+        ));
+    }
+    Ok(reason.to_string())
+}
+
+/// Cancels an order inside `tx`. Planned services are cancelled (they keep
+/// who, when and why); upcoming appointments are cancelled with the side
+/// effects of a manual cancellation; open quotes are closed so nothing more
+/// is invoiced from them; pending amount amendments are rejected. Delivered,
+/// approved and invoiced services, issued invoices and payments stay: they
+/// are the basis for the final invoice or a refund, returned as `settlement`.
+async fn cancel_order_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    actor_id: Uuid,
+    reason: &str,
+) -> Result<OrderCancellation, axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, "cancel order");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        )
+    };
+
+    let order = sqlx::query("SELECT status, phase FROM orders WHERE id = $1 FOR UPDATE")
+        .bind(order_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(failed)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
+    let previous_status: String = order.try_get("status").unwrap_or_default();
+    let phase: String = order.try_get("phase").unwrap_or_default();
+    if !allowed_order_statuses(&previous_status).contains(&"cancelled") {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("Order status cannot change from {previous_status} to cancelled"),
+        ));
+    }
+
+    // Quotes before services: the lock order of an invoice from a quote.
+    crate::routes::contracts::lock_open_order_quotes_tx(tx, order_id)
+        .await
+        .map_err(failed)?;
+
+    let service_rows = sqlx::query(
+        r#"UPDATE order_leistungen
+           SET status = 'cancelled',
+               cancelled_at = now(),
+               cancelled_by = $2,
+               cancellation_reason = $3
+           WHERE order_id = $1
+             AND status = 'planned'
+           RETURNING id,
+                     COALESCE(NULLIF(BTRIM(agency_service_name_snapshot), ''), description) AS description,
+                     quantity, unit_price_snapshot, vat_rate_snapshot, is_cost_passthrough,
+                     UPPER(currency) AS currency"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .bind(reason)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+    let mut cancelled_service_ids = Vec::with_capacity(service_rows.len());
+    let mut cancelled_services = Vec::with_capacity(service_rows.len());
+    for row in &service_rows {
+        let id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let quantity = row
+            .try_get::<rust_decimal::Decimal, _>("quantity")
+            .unwrap_or_default();
+        let vat_rate = if row
+            .try_get::<bool, _>("is_cost_passthrough")
+            .unwrap_or(false)
+        {
+            rust_decimal::Decimal::ZERO
+        } else {
+            row.try_get::<rust_decimal::Decimal, _>("vat_rate_snapshot")
+                .unwrap_or_default()
+        };
+        let amounts = money::line_amounts(
+            quantity,
+            row.try_get::<rust_decimal::Decimal, _>("unit_price_snapshot")
+                .unwrap_or_default(),
+            vat_rate,
+        );
+        cancelled_service_ids.push(id);
+        cancelled_services.push(serde_json::json!({
+            "id": id,
+            "description": row.try_get::<String, _>("description").unwrap_or_default(),
+            "quantity": quantity.normalize().to_string(),
+            "gross": money::money_string(amounts.gross),
+            "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
+        }));
+    }
+
+    let cancelled_appointment_ids =
+        crate::routes::appointments::cancel_upcoming_order_appointments_in_tx(
+            tx, order_id, actor_id,
+        )
+        .await?;
+
+    let closed_quotes = crate::routes::contracts::close_open_order_quotes_for_cancelled_order_tx(
+        tx, order_id, actor_id,
+    )
+    .await
+    .map_err(failed)?;
+
+    let rejected_amendment_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE order_amendments
+           SET status = 'rejected', decided_by = $2, decided_at = now(), decision_note = $3
+           WHERE order_id = $1 AND status = 'pending'
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .bind(format!("Auftrag storniert: {reason}"))
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+
+    sqlx::query(
+        r#"UPDATE orders
+           SET status = 'cancelled',
+               cancelled_at = now(),
+               cancelled_by = $2,
+               cancellation_reason = $3,
+               total_estimated = COALESCE(order_service_total_gross(id), total_estimated)
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .bind(reason)
+    .execute(&mut **tx)
+    .await
+    .map_err(failed)?;
+
+    let settlement =
+        crate::routes::invoices::termination_settlements::compute_order_settlement(tx, order_id)
+            .await
+            .map_err(failed)?
+            .map(|settlement| settlement.preview_json());
+
+    Ok(OrderCancellation {
+        previous_status,
+        phase,
+        cancelled_services,
+        cancelled_service_ids,
+        cancelled_appointment_ids,
+        closed_quotes,
+        rejected_amendment_ids,
+        settlement,
+    })
+}
+
+async fn cancel_order(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    reason: &str,
+) -> axum::response::Response {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, "begin order cancellation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order status",
+            );
+        }
+    };
+    let cancellation = match cancel_order_in_tx(&mut tx, order_id, auth.user_id, reason).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, %order_id, "commit order cancellation");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "cancel_order",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({
+            "from_status": cancellation.previous_status,
+            "status": "cancelled",
+            "phase": cancellation.phase,
+            "reason": reason,
+            "cancelled_service_ids": cancellation.cancelled_service_ids,
+            "cancelled_appointment_ids": cancellation.cancelled_appointment_ids,
+            "closed_quote_ids": cancellation
+                .closed_quotes
+                .iter()
+                .map(|quote| quote.id)
+                .collect::<Vec<_>>(),
+            "rejected_amendment_ids": cancellation.rejected_amendment_ids,
+            "accrued_gross": cancellation.settlement.as_ref().map(|value| value["accrued_gross"].clone()),
+            "invoiced_gross": cancellation.settlement.as_ref().map(|value| value["invoiced_gross"].clone()),
+            "paid_gross": cancellation.settlement.as_ref().map(|value| value["paid_gross"].clone()),
+            "balance_gross": cancellation.settlement.as_ref().map(|value| value["balance_gross"].clone()),
+        }),
+    ));
+    for quote in &cancellation.closed_quotes {
+        state.audit_sender.try_send(audit::domain_event(
+            "close_quote_for_cancelled_order",
+            Some(auth.user_id),
+            "quote",
+            Some(quote.id),
+            serde_json::json!({
+                "quote_number": quote.quote_number,
+                "previous_status": quote.previous_status,
+                "status": "rejected",
+                "order_id": order_id,
+            }),
+        ));
+        crate::realtime::publish_quote_event(
+            state,
+            Some(auth.user_id),
+            "quote.status_changed",
+            quote.id,
+            serde_json::json!({
+                "status": "rejected",
+                "previous_status": quote.previous_status,
+                "order_id": order_id,
+                "reason": "order_cancelled",
+            }),
+        )
+        .await;
+    }
+    crate::realtime::publish_order_event(
+        state,
+        Some(auth.user_id),
+        "order.status_changed",
+        order_id,
+        serde_json::json!({
+            "from_status": cancellation.previous_status,
+            "status": "cancelled",
+            "phase": cancellation.phase,
+            "note": reason,
+        }),
+    )
+    .await;
+    crate::routes::appointments::publish_cancelled_order_appointments(
+        state,
+        auth.user_id,
+        order_id,
+        &cancellation.cancelled_appointment_ids,
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "status": "cancelled",
+        "cancellation": cancellation.summary_json(Some(reason)),
+    }))
+    .into_response()
+}
+
+/// What cancelling the order would do, without changing anything: the
+/// cancellation runs in a transaction that is rolled back.
+async fn preview_order_cancellation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return response;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, "begin order cancellation preview");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to preview order cancellation",
+            );
+        }
+    };
+    let result = cancel_order_in_tx(&mut tx, order_id, auth.user_id, "Vorschau").await;
+    if let Err(error) = tx.rollback().await {
+        tracing::error!(error = %error, %order_id, "roll back order cancellation preview");
+    }
+    match result {
+        Ok(cancellation) => Json(cancellation.summary_json(None)).into_response(),
+        Err(response) => response,
     }
 }
 
@@ -4797,6 +5547,17 @@ async fn update_phase(
                 &state,
                 order_id,
                 Some(auth.user_id),
+            )
+            .await
+            {
+                return resp;
+            }
+            // The stage just left keeps no open checklist work behind it.
+            if let Err(resp) = crate::routes::workflow_checklists::resolve_passed_phase_items(
+                &state,
+                order_id,
+                &body.phase,
+                auth.user_id,
             )
             .await
             {
@@ -5571,6 +6332,9 @@ async fn update_followup_flow(
         && body.followup_1w_status.is_none()
         && body.followup_1m_status.is_none()
         && body.followup_6m_status.is_none()
+        && body.followup_1w_date.is_none()
+        && body.followup_1m_date.is_none()
+        && body.followup_6m_date.is_none()
         && body.package_end_date.is_none()
         && body.package_end_status.is_none()
         && body.results_handoff_status.is_none()
@@ -5659,6 +6423,22 @@ async fn update_followup_flow(
         None => None,
     };
 
+    let followup_1w_date =
+        match parse_optional_date_update(body.followup_1w_date.as_deref(), "followup_1w_date") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let followup_1m_date =
+        match parse_optional_date_update(body.followup_1m_date.as_deref(), "followup_1m_date") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let followup_6m_date =
+        match parse_optional_date_update(body.followup_6m_date.as_deref(), "followup_6m_date") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+
     if let Err(resp) = ensure_order_followup_flow_state(&state, order_id).await {
         return resp;
     }
@@ -5672,7 +6452,10 @@ async fn update_followup_flow(
                package_end_date = CASE WHEN $6::bool THEN $7 ELSE package_end_date END,
                package_end_status = COALESCE($8, package_end_status),
                results_handoff_status = COALESCE($9, results_handoff_status),
-               followup_summary = CASE WHEN $10::bool THEN $11 ELSE followup_summary END
+               followup_summary = CASE WHEN $10::bool THEN $11 ELSE followup_summary END,
+               followup_1w_date = CASE WHEN $12::bool THEN $13 ELSE followup_1w_date END,
+               followup_1m_date = CASE WHEN $14::bool THEN $15 ELSE followup_1m_date END,
+               followup_6m_date = CASE WHEN $16::bool THEN $17 ELSE followup_6m_date END
            WHERE order_id = $1"#,
     )
     .bind(order_id)
@@ -5686,6 +6469,12 @@ async fn update_followup_flow(
     .bind(results_handoff_status.clone())
     .bind(followup_summary_supplied)
     .bind(followup_summary.clone())
+    .bind(followup_1w_date.is_some())
+    .bind(followup_1w_date.flatten())
+    .bind(followup_1m_date.is_some())
+    .bind(followup_1m_date.flatten())
+    .bind(followup_6m_date.is_some())
+    .bind(followup_6m_date.flatten())
     .execute(&state.db)
     .await
     {
@@ -5695,6 +6484,9 @@ async fn update_followup_flow(
                 "followup_1w_status": followup_1w_status,
                 "followup_1m_status": followup_1m_status,
                 "followup_6m_status": followup_6m_status,
+                "followup_1w_date": followup_1w_date.map(|value| value.map(|date| date.to_string())),
+                "followup_1m_date": followup_1m_date.map(|value| value.map(|date| date.to_string())),
+                "followup_6m_date": followup_6m_date.map(|value| value.map(|date| date.to_string())),
                 "package_end_date": package_end_date.map(|value| value.to_string()),
                 "package_end_status": package_end_status,
                 "results_handoff_status": results_handoff_status,
@@ -7445,6 +8237,9 @@ async fn list_leistungen(
     if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
+    if let Err(e) = require_full_order_read(&auth) {
+        return e;
+    }
     match can_access_order_preparation(&state, &auth, order_id, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
@@ -7457,7 +8252,7 @@ async fn list_leistungen(
                   ol.is_cost_passthrough, ol.status, ol.notes, ol.client_reference,
                   ol.cancelled_at, ol.cancellation_reason,
                   ol.provider_id, ol.doctor_id,
-                  ol.source_interpreter_report_id, ol.source_medical_appointment_id,
+                  ol.source_interpreter_report_id, ol.source_medical_appointment_id, ol.source_order_amendment_id,
                   ol.agency_service_id, ol.agency_service_price_version_id,
                   ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
@@ -7475,8 +8270,11 @@ async fn list_leistungen(
                   ol.planned_partner_cost_net, ol.planned_partner_cost_vat,
                   ol.planned_partner_cost_gross,
                   doc.auto_name AS external_document_auto_name,
-                  doc.original_filename AS external_document_filename
+                  doc.original_filename AS external_document_filename,
+                  source_report.report_text AS source_report_text
            FROM order_leistungen ol
+           LEFT JOIN interpreter_reports source_report
+             ON source_report.id = ol.source_interpreter_report_id
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            LEFT JOIN LATERAL (
@@ -7499,6 +8297,15 @@ async fn list_leistungen(
         Ok(rows) => {
             let mut items = Vec::with_capacity(rows.len());
             for r in rows {
+                let notes = order_line_notes_for_reader(
+                    &auth,
+                    r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    r.try_get::<Option<Uuid>, _>("source_interpreter_report_id")
+                        .unwrap_or_default(),
+                    r.try_get::<Option<String>, _>("source_report_text")
+                        .unwrap_or_default()
+                        .as_deref(),
+                );
                 items.push(serde_json::json!({
                     "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "patient_id": r.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
@@ -7511,7 +8318,7 @@ async fn list_leistungen(
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
                     "cancelled_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default(),
                     "cancellation_reason": r.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
-                    "notes": r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    "notes": notes,
                     "client_reference": r.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
                     "provider_id": r.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
                     "provider_name": r.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
@@ -7523,6 +8330,7 @@ async fn list_leistungen(
                     "doctor_name": r.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
                     "source_interpreter_report_id": r.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
                     "source_medical_appointment_id": r.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
+                    "source_order_amendment_id": r.try_get::<Option<Uuid>, _>("source_order_amendment_id").unwrap_or_default(),
                     "agency_service_id": r.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
                     "agency_service_price_version_id": r.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
                     "agency_service_key": r.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
@@ -7599,7 +8407,7 @@ async fn add_leistung(
                 row.try_get::<String, _>("currency")
                     .unwrap_or_else(|_| "EUR".to_string()),
                 row.try_get::<chrono::NaiveDate, _>("effective_price_date")
-                    .unwrap_or_else(|_| chrono::Utc::now().date_naive()),
+                    .unwrap_or_else(|_| crate::app_time::today()),
             ),
             Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
             Err(error) => {
@@ -8759,7 +9567,7 @@ async fn resolve_external_invoice_notification_recipients(
 pub async fn run_external_invoice_deadline_scheduler_once(
     state: &AppState,
 ) -> Result<ExternalInvoiceDeadlineRunSummary, sqlx::Error> {
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::app_time::today();
     let mut summary = ExternalInvoiceDeadlineRunSummary::default();
     let recipients = resolve_external_invoice_notification_recipients(state).await?;
 
@@ -8924,27 +9732,149 @@ struct CreateOrderAmendmentRequest {
     delta_amount: String,
     agreed_note: String,
     currency: Option<String>,
+    vat_treatment: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct DecideOrderAmendmentRequest {
     decision: String,
     note: Option<String>,
+    /// VAT treatment of a pending amendment proposed before it was recorded.
+    vat_treatment: Option<String>,
 }
 
-const ORDER_AMENDMENT_COLUMNS: &str = "id, order_id, delta_amount, currency, agreed_note, status, requested_by, decided_by, decided_at, decision_note, created_at";
+#[derive(Deserialize)]
+struct BillOrderAmendmentRequest {
+    vat_treatment: Option<String>,
+}
+
+const ORDER_AMENDMENT_SELECT: &str =
+    "SELECT a.id, a.order_id, a.delta_amount, a.currency, a.agreed_note, a.status,
+            a.requested_by, a.decided_by, a.decided_at, a.decision_note, a.created_at,
+            a.vat_treatment, a.vat_rate, a.is_cost_passthrough,
+            line.id AS order_leistung_id, line.status AS order_leistung_status
+     FROM order_amendments a
+     LEFT JOIN order_leistungen line ON line.source_order_amendment_id = a.id";
+
+/// How an amended amount is taxed. Tax profile keys resolve to the active
+/// profile's rate; a pass-through cost carries no VAT.
+const ORDER_AMENDMENT_VAT_TREATMENTS: [&str; 4] = [
+    "standard_vat",
+    "termin_fee_0",
+    "vat_exempt_0",
+    "cost_passthrough",
+];
+
+fn normalize_amendment_vat_treatment(
+    value: Option<&str>,
+) -> Result<Option<&'static str>, axum::response::Response> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    ORDER_AMENDMENT_VAT_TREATMENTS
+        .into_iter()
+        .find(|treatment| *treatment == value)
+        .map(Some)
+        .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid vat_treatment"))
+}
+
+/// VAT of an amendment's billing line, fixed when the amendment is proposed.
+struct AmendmentVat {
+    treatment: &'static str,
+    vat_rate: rust_decimal::Decimal,
+    is_cost_passthrough: bool,
+    tax_profile_id: Option<Uuid>,
+}
+
+async fn resolve_amendment_vat(
+    conn: &mut sqlx::PgConnection,
+    treatment: &'static str,
+) -> Result<AmendmentVat, sqlx::Error> {
+    if treatment == "cost_passthrough" {
+        return Ok(AmendmentVat {
+            treatment,
+            vat_rate: rust_decimal::Decimal::ZERO,
+            is_cost_passthrough: true,
+            tax_profile_id: None,
+        });
+    }
+    let profile = sqlx::query(
+        r#"SELECT id, vat_rate
+           FROM tax_profiles
+           WHERE profile_key = $1
+             AND is_active
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+           LIMIT 1"#,
+    )
+    .bind(treatment)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let fallback_rate = if treatment == "standard_vat" {
+        rust_decimal::Decimal::new(19, 0)
+    } else {
+        rust_decimal::Decimal::ZERO
+    };
+    Ok(match profile {
+        Some(row) => AmendmentVat {
+            treatment,
+            vat_rate: row
+                .try_get::<rust_decimal::Decimal, _>("vat_rate")
+                .unwrap_or(fallback_rate)
+                .round_commercial(2),
+            is_cost_passthrough: false,
+            tax_profile_id: row.try_get::<Uuid, _>("id").ok(),
+        },
+        None => AmendmentVat {
+            treatment,
+            vat_rate: fallback_rate,
+            is_cost_passthrough: false,
+            tax_profile_id: None,
+        },
+    })
+}
+
+/// The VAT already recorded on an amendment row, if any.
+fn stored_amendment_vat(row: &sqlx::postgres::PgRow) -> Option<AmendmentVat> {
+    let treatment = row
+        .try_get::<Option<String>, _>("vat_treatment")
+        .ok()
+        .flatten()?;
+    let treatment = ORDER_AMENDMENT_VAT_TREATMENTS
+        .into_iter()
+        .find(|known| *known == treatment)?;
+    Some(AmendmentVat {
+        treatment,
+        vat_rate: row
+            .try_get::<Option<rust_decimal::Decimal>, _>("vat_rate")
+            .ok()
+            .flatten()
+            .unwrap_or(rust_decimal::Decimal::ZERO),
+        is_cost_passthrough: row
+            .try_get::<bool, _>("is_cost_passthrough")
+            .unwrap_or(false),
+        tax_profile_id: row
+            .try_get::<Option<Uuid>, _>("tax_profile_id")
+            .ok()
+            .flatten(),
+    })
+}
 
 fn order_amendment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    let delta = row
+        .try_get::<rust_decimal::Decimal, _>("delta_amount")
+        .unwrap_or_default();
+    let order_leistung_id = row
+        .try_get::<Option<Uuid>, _>("order_leistung_id")
+        .unwrap_or_default();
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
         "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_else(|_| Uuid::nil()),
-        "delta_amount": row
-            .try_get::<rust_decimal::Decimal, _>("delta_amount")
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
+        "delta_amount": delta.to_string(),
         "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
         "agreed_note": row.try_get::<String, _>("agreed_note").unwrap_or_default(),
-        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "status": status,
         "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
         "decided_by": row.try_get::<Option<Uuid>, _>("decided_by").unwrap_or_default(),
         "decided_at": row
@@ -8956,7 +9886,161 @@ fn order_amendment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
             .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
             .ok()
             .map(|value| value.to_rfc3339()),
+        "vat_treatment": row.try_get::<Option<String>, _>("vat_treatment").unwrap_or_default(),
+        "vat_rate": row
+            .try_get::<Option<rust_decimal::Decimal>, _>("vat_rate")
+            .unwrap_or_default()
+            .map(|value| value.normalize().to_string()),
+        "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
+        "order_leistung_id": order_leistung_id,
+        "order_leistung_status": row.try_get::<Option<String>, _>("order_leistung_status").unwrap_or_default(),
+        // Approved before approvals created billing lines: can still be billed.
+        "billable": status == "approved"
+            && order_leistung_id.is_none()
+            && delta > rust_decimal::Decimal::ZERO,
     })
+}
+
+async fn load_order_amendment_json(state: &AppState, amendment_id: Uuid) -> serde_json::Value {
+    sqlx::query(&format!("{ORDER_AMENDMENT_SELECT} WHERE a.id = $1"))
+        .bind(amendment_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| order_amendment_json(&row))
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// The order total shown everywhere: gross of the services that are not
+/// cancelled, or the stored estimate while the order has no services.
+async fn load_order_total_estimated(state: &AppState, order_id: Uuid) -> Option<String> {
+    sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
+        "SELECT COALESCE(order_service_total_gross(id), total_estimated) FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(money::money_string)
+}
+
+/// Keeps the stored order estimate equal to the gross of its services after
+/// a service line was added or cancelled outside a quote.
+async fn sync_order_total_estimated(
+    conn: &mut sqlx::PgConnection,
+    order_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE orders
+           SET total_estimated = COALESCE(order_service_total_gross(id), total_estimated),
+               updated_at = now()
+           WHERE id = $1
+             AND total_estimated IS DISTINCT FROM COALESCE(order_service_total_gross(id), total_estimated)"#,
+    )
+    .bind(order_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Why an order cannot take a billable amendment right now, if so. Locks the
+/// order row for the rest of the caller's transaction.
+async fn lock_order_for_amendment(
+    conn: &mut sqlx::PgConnection,
+    order_id: Uuid,
+) -> Result<Result<(Uuid, String), &'static str>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT o.status, o.intake_state, UPPER(o.currency) AS currency,
+                  COALESCE(o.patient_id, l.converted_patient_id) AS patient_id
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1
+           FOR UPDATE OF o"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Err("Order not found"));
+    };
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    if matches!(status.as_str(), "cancelled" | "completed") {
+        return Ok(Err(
+            "Amount amendments are closed for a cancelled or completed order",
+        ));
+    }
+    if row.try_get::<String, _>("intake_state").unwrap_or_default() == "draft" {
+        return Ok(Err(
+            "Complete the order preparation before amending the order amount",
+        ));
+    }
+    let Some(patient_id) = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+    else {
+        return Ok(Err(
+            "Order must be linked to a patient before an amendment is billed",
+        ));
+    };
+    Ok(Ok((
+        patient_id,
+        row.try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+    )))
+}
+
+/// Adds the billable service line of an approved amendment: one unit whose
+/// gross is the approved delta, taxed as recorded on the amendment, already
+/// approved (the second person's approval is the approval). The next quote of
+/// the order, and every invoice from it, includes the line.
+#[allow(clippy::too_many_arguments)]
+async fn insert_amendment_billing_line(
+    conn: &mut sqlx::PgConnection,
+    order_id: Uuid,
+    patient_id: Uuid,
+    amendment_id: Uuid,
+    approver_id: Uuid,
+    delta: rust_decimal::Decimal,
+    currency: &str,
+    agreed_note: &str,
+    vat: &AmendmentVat,
+    note: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let unit_price = money::net_for_gross(delta, vat.vat_rate);
+    let agreed: String = agreed_note.trim().chars().take(300).collect();
+    let description = format!("Anpassung: {agreed}");
+    sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO order_leistungen (
+                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+                is_cost_passthrough, status, delivered_at, approved_by, approved_at, notes,
+                tax_profile_id, vat_source, source_order_amendment_id
+           ) VALUES (
+                $1, $2, $3, 1, $4, $5, $6,
+                $7, 'approved', now(), $8, now(), $9,
+                $10, $11, $12
+           )
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(description)
+    .bind(unit_price)
+    .bind(currency)
+    .bind(vat.vat_rate)
+    .bind(vat.is_cost_passthrough)
+    .bind(approver_id)
+    .bind(note)
+    .bind(vat.tax_profile_id)
+    .bind(if vat.tax_profile_id.is_some() {
+        "tax_profile"
+    } else {
+        "manual"
+    })
+    .bind(amendment_id)
+    .fetch_one(&mut *conn)
+    .await
 }
 
 /// List an order's amount amendments, newest first (#10).
@@ -8968,11 +10052,14 @@ async fn list_order_amendments(
     if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
+    if let Err(e) = require_full_order_read(&auth) {
+        return e;
+    }
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
     match sqlx::query(&format!(
-        "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE order_id = $1 ORDER BY created_at DESC"
+        "{ORDER_AMENDMENT_SELECT} WHERE a.order_id = $1 ORDER BY a.created_at DESC"
     ))
     .bind(order_id)
     .fetch_all(&state.db)
@@ -8989,9 +10076,11 @@ async fn list_order_amendments(
     }
 }
 
-/// Propose an amount change to an order, recording WHAT was agreed with the
-/// patient. It stays `pending` (does not touch the order total) until an
-/// approver decides — see [`decide_order_amendment`] (#10).
+/// Propose an amount increase for an order, recording WHAT was agreed with
+/// the patient and how the amount is taxed. It stays `pending` (not billed,
+/// not part of the order total) until another person approves it — see
+/// [`decide_order_amendment`] (#10). A reduction is not an amendment: the
+/// service line is changed or cancelled, or an issued invoice is credited.
 async fn create_order_amendment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -9011,6 +10100,18 @@ async fn create_order_amendment(
             "delta_amount must be non-zero",
         );
     }
+    if delta < rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "An amendment raises the order amount; reduce or cancel the service line, or credit the invoice instead",
+        );
+    }
+    if delta.round_cents() != delta {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "delta_amount must have at most two decimal places",
+        );
+    }
     let agreed_note = body.agreed_note.trim();
     if agreed_note.is_empty() {
         return err(
@@ -9018,54 +10119,106 @@ async fn create_order_amendment(
             "agreed_note is required (what was agreed with the patient)",
         );
     }
-    let currency = body
-        .currency
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("EUR")
-        .to_string();
+    let treatment = match normalize_amendment_vat_treatment(body.vat_treatment.as_deref()) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "vat_treatment is required (how the amended amount is taxed)",
+            );
+        }
+        Err(resp) => return resp,
+    };
 
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
 
-    match sqlx::query(&format!(
-        "INSERT INTO order_amendments (order_id, delta_amount, currency, agreed_note, requested_by)
-         VALUES ($1, $2, $3, $4, $5) RETURNING {ORDER_AMENDMENT_COLUMNS}"
-    ))
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, "create order amendment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create amendment",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return failed(e),
+    };
+    let order_currency = match lock_order_for_amendment(&mut tx, order_id).await {
+        Ok(Ok((_, currency))) => currency,
+        Ok(Err("Order not found")) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(Err(message)) => return err(StatusCode::CONFLICT, message),
+        Err(e) => return failed(e),
+    };
+    let currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_uppercase)
+        .unwrap_or_else(|| order_currency.clone());
+    if currency != order_currency {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Amendment currency must match the order currency",
+        );
+    }
+    let vat = match resolve_amendment_vat(&mut tx, treatment).await {
+        Ok(value) => value,
+        Err(e) => return failed(e),
+    };
+
+    let amendment_id = match sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO order_amendments (
+             order_id, delta_amount, currency, agreed_note, requested_by,
+             vat_treatment, vat_rate, is_cost_passthrough, tax_profile_id
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+    )
     .bind(order_id)
     .bind(delta)
     .bind(&currency)
     .bind(agreed_note)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .bind(vat.treatment)
+    .bind(vat.vat_rate)
+    .bind(vat.is_cost_passthrough)
+    .bind(vat.tax_profile_id)
+    .fetch_one(&mut *tx)
     .await
     {
-        Ok(row) => {
-            let amendment = order_amendment_json(&row);
-            state.audit_sender.try_send(audit::domain_event(
-                "create_order_amendment",
-                Some(auth.user_id),
-                "order",
-                Some(order_id),
-                serde_json::json!({ "delta_amount": delta.to_string(), "currency": currency }),
-            ));
-            (StatusCode::CREATED, Json(amendment)).into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "create order amendment");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create amendment",
-            )
-        }
+        Ok(id) => id,
+        Err(e) => return failed(e),
+    };
+    if let Err(e) = tx.commit().await {
+        return failed(e);
     }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_order_amendment",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({
+            "amendment_id": amendment_id,
+            "delta_amount": delta.to_string(),
+            "currency": currency,
+            "vat_treatment": vat.treatment,
+            "vat_rate": vat.vat_rate.normalize().to_string(),
+        }),
+    ));
+    (
+        StatusCode::CREATED,
+        Json(load_order_amendment_json(&state, amendment_id).await),
+    )
+        .into_response()
 }
 
-/// Approve or reject a pending amendment. Approval applies the delta to the
-/// order's estimated total and must come from someone other than the requester
-/// (the "under approval" rule); rejection leaves the total untouched (#10).
+/// Approve or reject a pending amendment. Approval must come from someone
+/// other than the requester (the "under approval" rule) and adds the approved
+/// delta as a billable service line, so the order total, the next quote and
+/// its invoices include it; rejection leaves the order untouched (#10).
 async fn decide_order_amendment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -9086,21 +10239,40 @@ async fn decide_order_amendment(
             );
         }
     };
+    let requested_treatment = match normalize_amendment_vat_treatment(body.vat_treatment.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
 
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, %amendment_id, "decide order amendment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin amendment decision tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        Err(e) => return failed(e),
+    };
+
+    // The order first, then the amendment: the same lock order as a billing
+    // line created later for an already approved amendment.
+    let order_lock = if decision == "approved" {
+        match lock_order_for_amendment(&mut tx, order_id).await {
+            Ok(value) => Some(value),
+            Err(e) => return failed(e),
         }
+    } else {
+        None
     };
 
     let existing = match sqlx::query(
-        "SELECT status, delta_amount, requested_by FROM order_amendments WHERE id = $1 AND order_id = $2 FOR UPDATE",
+        "SELECT status, delta_amount, requested_by, currency, agreed_note,
+                vat_treatment, vat_rate, is_cost_passthrough, tax_profile_id
+         FROM order_amendments WHERE id = $1 AND order_id = $2 FOR UPDATE",
     )
     .bind(amendment_id)
     .bind(order_id)
@@ -9109,10 +10281,7 @@ async fn decide_order_amendment(
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
-        Err(e) => {
-            tracing::error!(error = %e, "load order amendment for decision");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+        Err(e) => return failed(e),
     };
 
     let status: String = existing.try_get("status").unwrap_or_default();
@@ -9130,6 +10299,84 @@ async fn decide_order_amendment(
     }
     let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
 
+    let mut billing_line: Option<(Uuid, AmendmentVat)> = None;
+    if decision == "approved" {
+        let (patient_id, order_currency) = match order_lock {
+            Some(Ok(value)) => value,
+            Some(Err("Order not found")) => {
+                return err(StatusCode::NOT_FOUND, "Order not found");
+            }
+            Some(Err(message)) => return err(StatusCode::CONFLICT, message),
+            None => return failed(sqlx::Error::RowNotFound),
+        };
+        if delta <= rust_decimal::Decimal::ZERO {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "An amendment raises the order amount; reduce or cancel the service line, or credit the invoice instead",
+            );
+        }
+        let currency = existing
+            .try_get::<String, _>("currency")
+            .unwrap_or_default()
+            .to_uppercase();
+        if currency != order_currency {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Amendment currency must match the order currency",
+            );
+        }
+        let vat = match stored_amendment_vat(&existing) {
+            Some(value) => value,
+            None => {
+                let Some(treatment) = requested_treatment else {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "vat_treatment is required (how the amended amount is taxed)",
+                    );
+                };
+                let vat = match resolve_amendment_vat(&mut tx, treatment).await {
+                    Ok(value) => value,
+                    Err(e) => return failed(e),
+                };
+                if let Err(e) = sqlx::query(
+                    "UPDATE order_amendments
+                     SET vat_treatment = $2, vat_rate = $3, is_cost_passthrough = $4, tax_profile_id = $5
+                     WHERE id = $1",
+                )
+                .bind(amendment_id)
+                .bind(vat.treatment)
+                .bind(vat.vat_rate)
+                .bind(vat.is_cost_passthrough)
+                .bind(vat.tax_profile_id)
+                .execute(&mut *tx)
+                .await
+                {
+                    return failed(e);
+                }
+                vat
+            }
+        };
+        let agreed_note: String = existing.try_get("agreed_note").unwrap_or_default();
+        let line_id = match insert_amendment_billing_line(
+            &mut tx,
+            order_id,
+            patient_id,
+            amendment_id,
+            auth.user_id,
+            delta,
+            &currency,
+            &agreed_note,
+            &vat,
+            "Genehmigte Betragsänderung",
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(e) => return failed(e),
+        };
+        billing_line = Some((line_id, vat));
+    }
+
     let decision_result = match sqlx::query(
         "UPDATE order_amendments
          SET status = $3, decided_by = $4, decided_at = now(), decision_note = $5
@@ -9139,36 +10386,30 @@ async fn decide_order_amendment(
     .bind(order_id)
     .bind(decision)
     .bind(auth.user_id)
-    .bind(body.note.as_deref())
+    .bind(
+        body.note
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    )
     .execute(&mut *tx)
     .await
     {
         Ok(result) => result,
-        Err(e) => {
-            tracing::error!(error = %e, "update order amendment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+        Err(e) => return failed(e),
     };
     if decision_result.rows_affected() != 1 {
         return err(StatusCode::CONFLICT, "Amendment has already been decided");
     }
 
-    if decision == "approved"
-        && let Err(e) = sqlx::query(
-            "UPDATE orders SET total_estimated = COALESCE(total_estimated, 0) + $2, updated_at = now() WHERE id = $1",
-        )
-        .bind(order_id)
-        .bind(delta)
-        .execute(&mut *tx)
-        .await
+    if billing_line.is_some()
+        && let Err(e) = sync_order_total_estimated(&mut tx, order_id).await
     {
-        tracing::error!(error = %e, "apply amendment to order total");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        return failed(e);
     }
 
     if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, "commit amendment decision");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        return failed(e);
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -9176,31 +10417,200 @@ async fn decide_order_amendment(
         Some(auth.user_id),
         "order",
         Some(order_id),
-        serde_json::json!({ "amendment_id": amendment_id, "decision": decision }),
+        serde_json::json!({
+            "amendment_id": amendment_id,
+            "decision": decision,
+            "delta_amount": delta.to_string(),
+            "order_leistung_id": billing_line.as_ref().map(|(id, _)| *id),
+            "vat_treatment": billing_line.as_ref().map(|(_, vat)| vat.treatment),
+            "vat_rate": billing_line
+                .as_ref()
+                .map(|(_, vat)| vat.vat_rate.normalize().to_string()),
+        }),
     ));
+    if let Some((line_id, _)) = billing_line.as_ref() {
+        crate::realtime::publish_order_event(
+            &state,
+            Some(auth.user_id),
+            "order.leistung_added",
+            order_id,
+            serde_json::json!({ "leistung_id": line_id, "amendment_id": amendment_id }),
+        )
+        .await;
+    }
 
-    let amendment = sqlx::query(&format!(
-        "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE id = $1"
-    ))
-    .bind(amendment_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
-    .map(|row| order_amendment_json(&row))
-    .unwrap_or(serde_json::Value::Null);
-    let new_total = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
-        "SELECT total_estimated FROM orders WHERE id = $1",
+    Json(serde_json::json!({
+        "amendment": load_order_amendment_json(&state, amendment_id).await,
+        "order_total_estimated": load_order_total_estimated(&state, order_id).await,
+        "order_leistung_id": billing_line.as_ref().map(|(id, _)| *id),
+    }))
+    .into_response()
+}
+
+/// Bill an amendment that was approved before approvals created billing
+/// lines: adds its service line now, taxed as chosen here (or as recorded).
+/// Explicit, so an amount that staff already billed by hand is not billed
+/// twice.
+async fn bill_order_amendment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, amendment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<BillOrderAmendmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+    let requested_treatment = match normalize_amendment_vat_treatment(body.vat_treatment.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
+    }
+
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, %amendment_id, "bill order amendment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return failed(e),
+    };
+    let (patient_id, order_currency) = match lock_order_for_amendment(&mut tx, order_id).await {
+        Ok(Ok(value)) => value,
+        Ok(Err("Order not found")) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(Err(message)) => return err(StatusCode::CONFLICT, message),
+        Err(e) => return failed(e),
+    };
+    let existing = match sqlx::query(
+        "SELECT a.status, a.delta_amount, a.currency, a.agreed_note,
+                a.vat_treatment, a.vat_rate, a.is_cost_passthrough, a.tax_profile_id,
+                EXISTS (SELECT 1 FROM order_leistungen line
+                        WHERE line.source_order_amendment_id = a.id) AS billed
+         FROM order_amendments a
+         WHERE a.id = $1 AND a.order_id = $2
+         FOR UPDATE OF a",
     )
+    .bind(amendment_id)
     .bind(order_id)
-    .fetch_one(&state.db)
+    .fetch_optional(&mut *tx)
     .await
-    .ok()
-    .flatten()
-    .map(|value| value.to_string());
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
+        Err(e) => return failed(e),
+    };
+    if existing.try_get::<String, _>("status").unwrap_or_default() != "approved" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only an approved amendment can be billed",
+        );
+    }
+    if existing.try_get::<bool, _>("billed").unwrap_or(false) {
+        return err(StatusCode::CONFLICT, "Amendment has already been billed");
+    }
+    let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
+    if delta <= rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "An amendment raises the order amount; reduce or cancel the service line, or credit the invoice instead",
+        );
+    }
+    let currency = existing
+        .try_get::<String, _>("currency")
+        .unwrap_or_default()
+        .to_uppercase();
+    if currency != order_currency {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Amendment currency must match the order currency",
+        );
+    }
+    let vat = match stored_amendment_vat(&existing) {
+        Some(value) => value,
+        None => {
+            let Some(treatment) = requested_treatment else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "vat_treatment is required (how the amended amount is taxed)",
+                );
+            };
+            let vat = match resolve_amendment_vat(&mut tx, treatment).await {
+                Ok(value) => value,
+                Err(e) => return failed(e),
+            };
+            if let Err(e) = sqlx::query(
+                "UPDATE order_amendments
+                 SET vat_treatment = $2, vat_rate = $3, is_cost_passthrough = $4, tax_profile_id = $5
+                 WHERE id = $1",
+            )
+            .bind(amendment_id)
+            .bind(vat.treatment)
+            .bind(vat.vat_rate)
+            .bind(vat.is_cost_passthrough)
+            .bind(vat.tax_profile_id)
+            .execute(&mut *tx)
+            .await
+            {
+                return failed(e);
+            }
+            vat
+        }
+    };
+    let agreed_note: String = existing.try_get("agreed_note").unwrap_or_default();
+    let line_id = match insert_amendment_billing_line(
+        &mut tx,
+        order_id,
+        patient_id,
+        amendment_id,
+        auth.user_id,
+        delta,
+        &currency,
+        &agreed_note,
+        &vat,
+        "Nachträglich abgerechnete genehmigte Betragsänderung",
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => return failed(e),
+    };
+    if let Err(e) = sync_order_total_estimated(&mut tx, order_id).await {
+        return failed(e);
+    }
+    if let Err(e) = tx.commit().await {
+        return failed(e);
+    }
 
-    Json(serde_json::json!({ "amendment": amendment, "order_total_estimated": new_total }))
-        .into_response()
+    state.audit_sender.try_send(audit::domain_event(
+        "bill_order_amendment",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({
+            "amendment_id": amendment_id,
+            "delta_amount": delta.to_string(),
+            "order_leistung_id": line_id,
+            "vat_treatment": vat.treatment,
+            "vat_rate": vat.vat_rate.normalize().to_string(),
+        }),
+    ));
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.leistung_added",
+        order_id,
+        serde_json::json!({ "leistung_id": line_id, "amendment_id": amendment_id }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "amendment": load_order_amendment_json(&state, amendment_id).await,
+        "order_total_estimated": load_order_total_estimated(&state, order_id).await,
+        "order_leistung_id": line_id,
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
@@ -9231,7 +10641,8 @@ async fn order_group_payload(
     head_id: Uuid,
 ) -> Result<serde_json::Value, axum::response::Response> {
     let head = sqlx::query(
-        "SELECT id, order_number, patient_id, order_role, status, total_estimated, currency,
+        "SELECT id, order_number, patient_id, order_role, status,
+                COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated, currency,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
          FROM orders WHERE id = $1",
@@ -9249,7 +10660,8 @@ async fn order_group_payload(
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
 
     let sub_rows = sqlx::query(
-        "SELECT id, order_number, patient_id, status, total_estimated
+        "SELECT id, order_number, patient_id, status,
+                COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated
          FROM orders WHERE head_order_id = $1 ORDER BY created_at",
     )
     .bind(head_id)
@@ -9286,7 +10698,7 @@ async fn order_group_payload(
     // A cancelled order (e.g. stopped by a contract termination) stays listed
     // in the group but no longer counts toward the group total.
     let rollup = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
-        "SELECT SUM(total_estimated) FROM orders
+        "SELECT SUM(COALESCE(order_service_total_gross(id), total_estimated)) FROM orders
          WHERE (id = $1 OR head_order_id = $1) AND status <> 'cancelled'",
     )
     .bind(head_id)
@@ -9359,6 +10771,9 @@ async fn get_order_group(
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::OrdersView) {
+        return e;
+    }
+    if let Err(e) = require_full_order_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
@@ -9907,6 +11322,224 @@ async fn ensure_patient_access(
     }
 }
 
+/// How much of an order a role may read.
+///
+/// The concierge and the interpreter team lead hold `orders.view` for a
+/// read-only projection of their part of an order: no needs text, case,
+/// contract, totals, prices, notes, invoices or economics. Every write keeps
+/// its own role gate, so neither role gains a mutation from this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OrderReadScope {
+    Full,
+    /// Concierge: period, status and the service lines of non-medical
+    /// providers (transfer, hotel, VIP …).
+    ConciergeServices,
+    /// Interpreter team lead: period, status and the interpreter-hours lines.
+    InterpreterTeam,
+}
+
+impl OrderReadScope {
+    pub(crate) fn for_role(role: Role) -> Self {
+        match role {
+            Role::Concierge => Self::ConciergeServices,
+            Role::TeamleadInterpreter => Self::InterpreterTeam,
+            _ => Self::Full,
+        }
+    }
+
+    fn wire_name(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::ConciergeServices => "concierge_services",
+            Self::InterpreterTeam => "interpreter_team",
+        }
+    }
+
+    fn is_scoped(self) -> bool {
+        self != Self::Full
+    }
+}
+
+/// Endpoints that expose the commercial or clinical side of an order are not
+/// part of the concierge's or the team lead's projection.
+#[allow(clippy::result_large_err)]
+fn require_full_order_read(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if OrderReadScope::for_role(auth.role).is_scoped() {
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "This role reads only its part of the order",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Order visibility of the projection readers: the patient assignment (as for
+/// every assignment role) and, for the interpreter team lead, every order that
+/// involves an interpreter (booked appointment, interpreter report or
+/// interpreter-hours line).
+async fn can_access_scoped_order(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    patient_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    if can_access_order(state, auth, order_id, patient_id).await? {
+        return Ok(true);
+    }
+    if OrderReadScope::for_role(auth.role) != OrderReadScope::InterpreterTeam {
+        return Ok(false);
+    }
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM orders o
+               WHERE o.id = $1
+                 AND o.intake_state IS DISTINCT FROM 'draft'
+                 AND (
+                     EXISTS (
+                         SELECT 1 FROM appointments a
+                         WHERE a.order_id = o.id
+                           AND (a.interpreter_id IS NOT NULL
+                                OR EXISTS (SELECT 1 FROM interpreter_reports ir
+                                           WHERE ir.appointment_id = a.id))
+                     )
+                     OR EXISTS (
+                         SELECT 1 FROM order_leistungen ol
+                         LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+                         WHERE ol.order_id = o.id
+                           AND (ol.source_interpreter_report_id IS NOT NULL
+                                OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                                   = 'interpreter_hours')
+                     )
+                 )
+           )"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "check interpreter team order access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })
+}
+
+/// The read-only projection of an order for the concierge and the interpreter
+/// team lead (see [`OrderReadScope`]).
+async fn scoped_order_detail(
+    state: &AppState,
+    order: &sqlx::postgres::PgRow,
+    order_id: Uuid,
+    scope: OrderReadScope,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let lines = sqlx::query(
+        r#"SELECT ol.id, ol.description, ol.quantity, ol.currency, ol.status,
+                  ol.delivered_at, ol.approved_at, ol.cancelled_at,
+                  ol.provider_id, pr.name AS provider_name,
+                  ol.source_interpreter_report_id,
+                  COALESCE(ol.agency_service_key_snapshot, catalog.service_key) AS agency_service_key,
+                  COALESCE(ol.agency_service_name_snapshot, catalog.service_name) AS agency_service_name,
+                  COALESCE(ol.agency_service_unit_label_snapshot, catalog.unit_label) AS agency_service_unit_label
+           FROM order_leistungen ol
+           LEFT JOIN providers pr ON pr.id = ol.provider_id
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           WHERE ol.order_id = $1
+             AND (
+                 ($2::text = 'concierge_services'
+                  AND ol.provider_id IS NOT NULL
+                  AND pr.provider_type = 'non_medical'
+                  AND ol.source_medical_appointment_id IS NULL
+                  AND ol.source_interpreter_report_id IS NULL)
+                 OR ($2::text = 'interpreter_team'
+                     AND (ol.source_interpreter_report_id IS NOT NULL
+                          OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                             = 'interpreter_hours'))
+             )
+           ORDER BY ol.created_at, ol.id"#,
+    )
+    .bind(order_id)
+    .bind(scope.wire_name())
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "load scoped order services");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order services",
+        )
+    })?;
+    let period = sqlx::query("SELECT date_from, date_to FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %order_id, "load scoped order period");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?;
+    let leistungen = lines
+        .iter()
+        .map(|line| {
+            serde_json::json!({
+                "id": line.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "description": line.try_get::<String, _>("description").unwrap_or_default(),
+                "quantity": line.try_get::<rust_decimal::Decimal, _>("quantity").unwrap_or(rust_decimal::Decimal::ZERO),
+                "unit_price": serde_json::Value::Null,
+                "currency": line.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                "vat_rate": serde_json::Value::Null,
+                "is_cost_passthrough": false,
+                "status": line.try_get::<String, _>("status").unwrap_or_default(),
+                "delivered_at": line.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                "approved_at": line.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                "cancelled_at": line.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                "notes": serde_json::Value::Null,
+                "provider_id": line.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                "provider_name": line.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                "doctor_id": serde_json::Value::Null,
+                "doctor_name": serde_json::Value::Null,
+                "source_interpreter_report_id": line.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                "agency_service_key": line.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
+                "agency_service_name": line.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
+                "agency_service_unit_label": line.try_get::<Option<String>, _>("agency_service_unit_label").unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let patient_name = [
+        order
+            .try_get::<Option<String>, _>("subject_first_name")
+            .unwrap_or_default(),
+        order
+            .try_get::<Option<String>, _>("subject_last_name")
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+
+    Ok(serde_json::json!({
+        "id": order_id,
+        "read_scope": scope.wire_name(),
+        "order_number": order.try_get::<String, _>("order_number").unwrap_or_default(),
+        "patient_id": order.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+        "patient_name": patient_name,
+        "patient_pid": order.try_get::<Option<String>, _>("p_pid").unwrap_or_default(),
+        "phase": order.try_get::<String, _>("phase").unwrap_or_default(),
+        "status": order.try_get::<String, _>("status").unwrap_or_default(),
+        "needs_description": serde_json::Value::Null,
+        "date_from": period.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
+        "date_to": period.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
+        "total_estimated": serde_json::Value::Null,
+        "total_actual": serde_json::Value::Null,
+        "currency": order.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+        "leistungen": leistungen,
+        "external_invoices": [],
+        "created_at": order.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok(),
+        "updated_at": order.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").ok(),
+    }))
+}
+
 /// Only preparation endpoints may access a repeat draft. Operational endpoints keep
 /// using can_access_order, which refuses every draft even for CEO/Billing.
 async fn can_access_order_preparation(
@@ -10169,6 +11802,56 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copied_interpreter_report_text_is_replaced_by_a_reference() {
+        let report_id = Uuid::new_v4();
+        let text = "Patient reported chest pain;\nnext visit cardiology";
+        let notes = format!(
+            "Automatisch aus freigegebenem Dolmetscherbericht {report_id} erstellt\nStunden: 2\nReport: {text}"
+        );
+        let redacted =
+            redact_interpreter_report_text(Some(notes.clone()), Some(report_id), Some(text))
+                .expect("notes stay");
+        assert!(!redacted.contains("chest pain"), "{redacted}");
+        assert!(!redacted.contains("cardiology"), "{redacted}");
+        assert!(redacted.contains("Stunden: 2"), "{redacted}");
+        assert!(
+            redacted.ends_with(&format!("Bericht: {report_id}")),
+            "{redacted}"
+        );
+
+        // A later manual note after the copied block is kept when the report
+        // text matches exactly.
+        let with_follow_up = format!("{notes}\nManuell: Rechnung an Kasse");
+        let redacted =
+            redact_interpreter_report_text(Some(with_follow_up), Some(report_id), Some(text))
+                .expect("notes stay");
+        assert!(
+            redacted.contains("Manuell: Rechnung an Kasse"),
+            "{redacted}"
+        );
+        assert!(!redacted.contains("chest pain"), "{redacted}");
+
+        // Without a matching text the copied block is cut from its marker on.
+        let redacted = redact_interpreter_report_text(
+            Some(format!("Stunden: 2\nReport: {text}")),
+            Some(report_id),
+            Some("edited later"),
+        )
+        .expect("notes stay");
+        assert_eq!(redacted, format!("Stunden: 2\nBericht: {report_id}"));
+
+        // Lines that are not billed from a report are left untouched.
+        assert_eq!(
+            redact_interpreter_report_text(Some("Report: manual".to_string()), None, None),
+            Some("Report: manual".to_string())
+        );
+        assert_eq!(
+            redact_interpreter_report_text(None, Some(report_id), Some(text)),
+            None
+        );
+    }
 
     #[test]
     fn order_service_period_accepts_empty_or_forward_ranges() {

@@ -103,6 +103,30 @@ test("a prepayment route opens an advance invoice with the selected quote", asyn
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
 });
 
+test("an advance invoice bills the order's required prepayment unless positions are picked", async ({ page }) => {
+  const fixture = await prepare(page);
+  Object.assign(fixture.quote, { order_prepayment_amount: "500", order_prepayment_required: true });
+  await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=advance&create=1`);
+  const dialog = page.getByRole("dialog", { name: "Новый счёт", exact: true });
+  await expect(dialog.getByRole("radio", { name: /Требуемая предоплата · 500,00/ })).toBeChecked();
+  const prepayment = dialog.getByTestId("invoice-prepayment-advance");
+  await expect(prepayment).toContainText("KV-TEST-1");
+  await expect(prepayment).toContainText("500,00");
+  await expect(dialog.getByRole("checkbox", { name: "Позиция: Service 1", exact: true })).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(fixture.writes).toEqual([{ invoice_type: "advance", advance_basis: "prepayment", due_date: null, notes: null }]);
+
+  await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=advance&create=1`);
+  const again = page.getByRole("dialog", { name: "Новый счёт", exact: true });
+  await again.getByRole("radio", { name: "Выбранные позиции предложения", exact: true }).check();
+  await expect(again.getByRole("checkbox", { name: "Позиция: Service 1", exact: true })).toBeChecked();
+  await again.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(again).toHaveCount(0);
+  expect(fixture.writes[1]).toMatchObject({ invoice_type: "advance", advance_basis: "positions" });
+  expect(fixture.errors).toEqual([]);
+});
+
 test("allows an approved interim selection while other services remain unapproved", async ({ page }) => {
   const fixture = await prepare(page);
   fixture.order.leistungen[0].status = "pending";

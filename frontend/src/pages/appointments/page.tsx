@@ -51,6 +51,8 @@ import {
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["planned", "confirmed", "in_progress"]);
 import {
+  appointmentCreateContextFromSearch,
+  applyAppointmentCreateContext,
   blankAppointmentForm,
   blankAppointmentFormForCurrentUser,
 } from "@/pages/appointments/model/form-factories";
@@ -283,6 +285,12 @@ function useStaffAppointmentsPageContent() {
   const detailTab = normalizeAppointmentWorkspaceTab(
     searchParams.get("detailTab"),
   );
+  // A new appointment started from a patient or an order workspace keeps
+  // that patient and order preselected.
+  const {
+    patientId: createContextPatientId,
+    orderId: createContextOrderId,
+  } = appointmentCreateContextFromSearch(searchParams);
   const permissions = appointmentPermissions(user);
   const patientSheetPermissions = linkedPatientPermissions(user);
   const canReviewAppointmentRequests = permissions.canManageStatus;
@@ -1182,10 +1190,13 @@ function useStaffAppointmentsPageContent() {
     closeDetailWorkspace,
     setFilters,
     openDetailWorkspace: openDetailWorkspaceFromRoute,
-    onOpenCreateFromPatient: (patientId) => {
-      const next = blankAppointmentFormForCurrentUser(user?.id, user?.role);
-      next.patientId = patientId;
-      openCreateSeedSheet(next);
+    onOpenCreateFromRoute: (context) => {
+      openCreateSeedSheet(
+        applyAppointmentCreateContext(
+          blankAppointmentFormForCurrentUser(user?.id, user?.role),
+          context,
+        ),
+      );
     },
   });
 
@@ -1360,6 +1371,8 @@ function useStaffAppointmentsPageContent() {
     onVisibleDateRangeChange: setVisibleDateRange,
     syncQuery,
     onRefreshAppointments: refreshAppointments,
+    createContextPatientId,
+    createContextOrderId,
     onOpenCreateSeed: openCreateSeedSheet,
     onDismissQuickActionMenu: dismissCalendarQuickActionMenu,
   });

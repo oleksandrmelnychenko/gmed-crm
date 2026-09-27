@@ -44,13 +44,6 @@ export const INTERPRETER_RESPONSE_OPTIONS: InterpreterResponse[] = [
 
 export const CHECKLIST_PHASES = ["preparation", "execution", "followup", "done"] as const;
 
-export const TASK_STATUS_OPTIONS = [
-  "open",
-  "in_progress",
-  "completed",
-  "cancelled",
-] as const;
-
 export const TASK_PRIORITY_OPTIONS = [
   "low",
   "normal",

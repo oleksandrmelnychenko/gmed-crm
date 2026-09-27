@@ -1,4 +1,5 @@
 import { apiFetchFile } from "@/lib/api";
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { formatMoneyAmount } from "@/lib/money";
 import {
   formatEnumLabelFromKeys,
@@ -127,6 +128,10 @@ export type PortalInvoiceItem = {
   paid_amount: unknown;
   prepayment_applied_amount?: unknown;
   balance_due: unknown;
+  /** Paid advance of the order not applied yet that covers this invoice. */
+  advance_credit_available?: unknown;
+  /** Balance due net of the covering advance: what is still to transfer. */
+  amount_to_pay?: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
   paid_at: string | null;
@@ -166,8 +171,12 @@ export type PortalInvoiceCreditNoteTransaction = {
   is_reversed: boolean;
   amounts_visible: boolean;
   amount_gross: unknown;
+  amount_vat?: unknown;
   issued_on: string;
   created_at: string;
+  line_items?: { description: string; vat_rate: string; line_gross: string }[] | null;
+  /** The correction document can be downloaded. */
+  pdf_available?: boolean;
 };
 
 export type PortalInvoiceCreditNoteHistoryResponse = {
@@ -189,6 +198,21 @@ export type PortalInvoiceRefundTransaction = {
 
 export type PortalInvoiceRefundHistoryResponse = {
   items: PortalInvoiceRefundTransaction[];
+};
+
+/** A payment reminder or dunning notice sent for an invoice, with its letter. */
+export type PortalDunningLetter = {
+  id: string;
+  level: "first" | "second" | "collections" | string;
+  sent_at: string;
+  payment_due_date: string | null;
+  balance_due: unknown;
+  title: string;
+  file_name: string;
+};
+
+export type PortalDunningLetterResponse = {
+  items: PortalDunningLetter[];
 };
 
 export type PortalAccountStatementItem = {
@@ -244,7 +268,11 @@ export type PortalAccountStatement = {
     cash_paid: string;
     prepayment_applied: string;
     available_prepayment: string;
+    /** Cash beyond what invoices ask for (overpayments, credit notes after payment). */
+    credit_balance?: string;
     invoice_due: string;
+    /** Open invoices net of unapplied paid advances and credit balances. */
+    amount_to_pay?: string;
     external_receivable: null;
     total_due: string | null;
     reconciliation_required: boolean;
@@ -616,21 +644,21 @@ function portalLocale(): PortalLocale {
 }
 
 const PORTAL_DATE_TIME_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", {
+  "en-GB": appDateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -640,17 +668,17 @@ const PORTAL_DATE_TIME_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
 };
 
 const PORTAL_DATE_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", {
+  "en-GB": appDateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -845,6 +873,7 @@ const PATIENT_INVOICE_LEDGER_DIRECTION_LABEL_KEYS = {
 
 const PATIENT_INVOICE_LEDGER_CATEGORY_LABEL_KEYS = {
   cost_passthrough_revenue: "patient_invoice_ledger_category_cost_passthrough_revenue",
+  patient_credit: "finance_accounting_category_patient_credit",
   provider_expense: "patient_invoice_ledger_category_provider_expense",
   service_revenue: "patient_invoice_ledger_category_service_revenue",
 } satisfies Partial<Record<string, TranslationKey>>;
@@ -913,7 +942,7 @@ export function formatPortalDate(value?: string | null) {
   if (!value) return portalNotSetLabel();
 
   try {
-    return PORTAL_DATE_FORMATTERS[portalLocale()].format(new Date(value));
+    return PORTAL_DATE_FORMATTERS[portalLocale()].format(dateOrInstant(value));
   } catch {
     return value;
   }
@@ -1132,7 +1161,25 @@ export async function downloadPortalInvoicePdf(id: string, filename: string) {
   downloadBlob(blob, filename || "invoice.pdf");
 }
 
+/** Correction document (Rechnungskorrektur) of a credit note shown in the portal. */
+export async function downloadPortalCreditNotePdf(
+  invoiceId: string,
+  creditNoteId: string,
+  documentNumber: string,
+) {
+  const blob = await fetchPortalBlob(`/me/invoices/${invoiceId}/credit-notes/${creditNoteId}/pdf`);
+  downloadBlob(blob, `RECHNUNGSKORREKTUR-${documentNumber || creditNoteId}.pdf`);
+}
+
 export async function openPortalInvoicePdf(id: string) {
   const blob = await fetchPortalBlob(`/me/invoices/${id}/pdf`);
   openBlobPreview(blob);
+}
+
+export async function downloadPortalDunningLetter(
+  invoiceId: string,
+  letter: Pick<PortalDunningLetter, "id" | "file_name">,
+) {
+  const blob = await fetchPortalBlob(`/me/invoices/${invoiceId}/dunning/${letter.id}/pdf`);
+  downloadBlob(blob, letter.file_name || "mahnung.pdf");
 }

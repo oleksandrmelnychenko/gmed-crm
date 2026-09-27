@@ -18,6 +18,7 @@ import { canAccessStaffRoute, staffHrefIfAllowed } from "@/lib/staff-route-acces
 import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import {
   useDebouncedRealtimeSubscription,
@@ -83,6 +84,9 @@ function compactDt(dt: string, lang: "ru" | "de") {
 }
 
 function compactTime(dt: string) {
+  // Message timestamps are UTC instants; show the German wall-clock time.
+  const berlin = isoToBerlinLocalInput(dt);
+  if (berlin) return berlin.slice(11, 16);
   const idx = dt.indexOf("T");
   return idx >= 0 ? dt.slice(idx + 1, idx + 6) : dt.slice(0, 5);
 }
@@ -716,6 +720,8 @@ function NotificationPanel({
     string | null
   >(null);
   const [announcementActionError, setAnnouncementActionError] = useState(false);
+  // Until the first load answers, "no notifications" would be a false claim.
+  const [notificationsLoaded, setNotificationsLoaded] = useState(false);
 
   const loadWorkspace = useCallback(() => {
     fetchNotificationPanelWorkspace()
@@ -723,7 +729,8 @@ function NotificationPanel({
         setNotifs(workspace.notifications);
         setAnnouncements(workspace.announcements);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setNotificationsLoaded(true));
   }, []);
 
   useEffect(() => {
@@ -858,7 +865,16 @@ function NotificationPanel({
               {t.topbar_announcement_dismiss_failed}
             </p>
           ) : null}
-          {notifs.length === 0 ? (
+          {notifs.length === 0 && !notificationsLoaded ? (
+            <div
+              role="status"
+              data-testid="notifications-loading"
+              className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"
+            >
+              <LoaderCircle className="size-4 animate-spin" aria-hidden />
+              {t.common_loading}
+            </div>
+          ) : notifs.length === 0 ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
               {t.topbar_no_notifications}
             </div>

@@ -295,7 +295,7 @@ struct CaseHistoryQuery {
 }
 
 pub(crate) fn gen_case_id(seq: i64) -> String {
-    let now = chrono::Utc::now();
+    let now = crate::app_time::local(chrono::Utc::now());
     format!("C-{}-{:04}", now.format("%Y%m%d"), seq)
 }
 
@@ -3089,7 +3089,7 @@ async fn load_patient_medication_expiry_candidates(
 pub async fn run_medication_expiry_scheduler_once(
     state: &AppState,
 ) -> Result<MedicationExpiryRunSummary, sqlx::Error> {
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::app_time::today();
     let mut summary = MedicationExpiryRunSummary::default();
 
     for candidate in load_patient_medication_expiry_candidates(state, today).await? {
