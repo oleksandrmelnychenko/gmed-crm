@@ -598,13 +598,44 @@ async fn seed_appointment(
     created_by: Uuid,
     tag: &str,
 ) -> Uuid {
+    seed_appointment_at(
+        pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        order_id,
+        interpreter_id,
+        owner_user_id,
+        created_by,
+        tag,
+        "09:00",
+    )
+    .await
+}
+
+/// A completed two-hour visit five days ago, starting at `time_start`. Visits
+/// of one patient or interpreter must not overlap.
+#[allow(clippy::too_many_arguments)]
+async fn seed_appointment_at(
+    pool: &PgPool,
+    patient_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Option<Uuid>,
+    order_id: Uuid,
+    interpreter_id: Uuid,
+    owner_user_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    time_start: &str,
+) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO appointments (
                 patient_id, provider_id, doctor_id, order_id, interpreter_id, owner_user_id,
                 appointment_type, title, date, time_start, time_end, status, created_by
            ) VALUES (
                 $1, $2, $3, $4, $5, $6,
-                'medical', $7, CURRENT_DATE - 5, '09:00', '11:00', 'completed', $8
+                'medical', $7, CURRENT_DATE - 5, $9::time, $9::time + interval '2 hours',
+                'completed', $8
            ) RETURNING id"#,
     )
     .bind(patient_id)
@@ -615,6 +646,7 @@ async fn seed_appointment(
     .bind(owner_user_id)
     .bind(format!("Visit {tag}"))
     .bind(created_by)
+    .bind(time_start)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -3664,7 +3696,9 @@ async fn interpreter_scorecards_count_pending_reports_instead_of_reading_fully_a
     )
     .await;
     seed_interpreter_report(&pool, approved_visit, interpreter_id).await;
-    let pending_visit = seed_appointment(
+    // Later the same day: the patient's and the interpreter's visits must not
+    // overlap.
+    let pending_visit = seed_appointment_at(
         &pool,
         patient_id,
         provider_id,
@@ -3674,6 +3708,7 @@ async fn interpreter_scorecards_count_pending_reports_instead_of_reading_fully_a
         admin_id,
         admin_id,
         &format!("{tag}-pending"),
+        "12:00",
     )
     .await;
     sqlx::query(

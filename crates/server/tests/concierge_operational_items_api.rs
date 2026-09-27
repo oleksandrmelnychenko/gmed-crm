@@ -479,13 +479,15 @@ async fn concierge_creators_can_delete_own_worked_tasks_but_not_foreign_tasks_or
             .0,
         StatusCode::NOT_FOUND
     );
+    // The legacy status path is the work-center handler and needs the
+    // optimistic-lock token like every status change.
     assert_eq!(
         json_request(
             &ctx.app,
             "POST",
             &format!("{legacy_path}/status"),
             &bearer,
-            Some(json!({ "status": "open" }))
+            Some(json!({ "status": "open", "expected_updated_at": started["updated_at"] }))
         )
         .await
         .0,

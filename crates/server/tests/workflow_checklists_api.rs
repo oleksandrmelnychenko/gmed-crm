@@ -374,15 +374,22 @@ async fn completing_linked_task_updates_workflow_item_state() {
     let task_id = created_item["task_id"].as_str().unwrap();
     let item_id = created_item["id"].as_str().unwrap().to_string();
 
-    let (status, _) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/tasks/{task_id}/status"),
-        &pm_bearer,
-        Some(json!({ "status": "completed" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    // The legacy status path follows the work-center rules: every change
+    // carries the optimistic-lock token and an open task is started before
+    // it is completed.
+    let mut task = load_work_center_task(&app, &pm_bearer, task_id).await;
+    for next_status in ["in_progress", "completed"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/tasks/{task_id}/status"),
+            &pm_bearer,
+            Some(json!({ "expected_updated_at": task["updated_at"], "status": next_status })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next_status}: {body}");
+        task = body;
+    }
 
     let (status, refreshed_body) = json_request(
         &app,

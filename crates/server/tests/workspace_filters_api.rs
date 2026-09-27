@@ -7749,6 +7749,14 @@ async fn reminders_can_be_created_by_pm_and_completed_by_assignee() {
         "2026-04-25",
     )
     .await;
+    // The reminder goes to the interpreter who runs the visit: an interpreter
+    // only linked to the patient does not reach the appointment.
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
@@ -9358,9 +9366,11 @@ async fn tasks_can_be_created_for_appointment_and_completed_through_review() {
     .unwrap();
     assert_eq!(creator_notifications, 2, "one per assignee status change");
 
-    // An archived task cannot change its status any more.
-    sqlx::query("UPDATE tasks SET archived_at = now() WHERE id = $1")
+    // An archived task cannot change its status any more. An archive always
+    // records who archived the task.
+    sqlx::query("UPDATE tasks SET archived_at = now(), archived_by = $2 WHERE id = $1")
         .bind(task_uuid)
+        .bind(pm_id)
         .execute(&pool)
         .await
         .unwrap();
@@ -14767,11 +14777,17 @@ async fn seed_order_line(
     description: &str,
     notes: &str,
 ) -> Uuid {
+    // The catalog snapshot trigger fills the service key from the linked
+    // catalog service (and clears it on a line without one), so a keyed line
+    // links the catalog entry.
     sqlx::query_scalar(
         r#"INSERT INTO order_leistungen (
                 order_id, description, quantity, unit_price, vat_rate, provider_id,
-                agency_service_key_snapshot, notes
-           ) VALUES ($1, $2, 1, 480, 19, $3, $4, $5)
+                agency_service_id, notes
+           ) VALUES (
+                $1, $2, 1, 480, 19, $3,
+                (SELECT id FROM agency_service_catalog WHERE service_key = $4), $5
+           )
            RETURNING id"#,
     )
     .bind(order_id)
