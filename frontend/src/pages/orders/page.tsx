@@ -240,6 +240,11 @@ import {
   type CancelLeistungTarget,
 } from "./ui/cancel-leistung-dialog";
 import {
+  OrderCancellationBanner,
+  OrderCancellationDialog,
+} from "./ui/order-cancellation";
+import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
+import {
   OrderServiceGroupPanel,
   OrderServiceGroupWizard,
 } from "./ui/order-service-group-panel";
@@ -1114,6 +1119,7 @@ function useOrdersPageContent() {
   } | null>(null);
   const [plannedCostSaving, setPlannedCostSaving] = useState(false);
   const [plannedCostError, setPlannedCostError] = useState<string | null>(null);
+  const [cancelOrderOpen, setCancelOrderOpen] = useState(false);
   const [cancelLeistungTarget, setCancelLeistungTarget] =
     useState<CancelLeistungTarget | null>(null);
   const [agencyServices, setAgencyServices] = useState<AgencyServiceItem[]>([]);
@@ -2638,14 +2644,10 @@ function useOrdersPageContent() {
 
   async function handleOrderStatusChange(status: OrderStatus) {
     if (!orderDetail || status === orderDetail.status || statusSaving || phaseSaving) return;
-    if (
-      status === "cancelled" &&
-      !window.confirm(
-        lang === "de"
-          ? "Diesen Auftrag wirklich stornieren? Dieser Status kann nicht wieder geöffnet werden."
-          : "Действительно отменить этот заказ? После этого его нельзя будет открыть снова.",
-      )
-    ) {
+    // Cancelling needs a reason and shows what is cancelled and what stays
+    // for final billing; the dialog sends it.
+    if (status === "cancelled") {
+      setCancelOrderOpen(true);
       return;
     }
 
@@ -3815,6 +3817,22 @@ function useOrdersPageContent() {
                   <OrderTerminationBanner
                     orderId={orderDetail.id}
                     patientId={orderDetail.patient_id}
+                    lang={lang}
+                  />
+                ) : orderDetail.status === "cancelled" ? (
+                  <OrderCancellationBanner
+                    reason={orderDetail.cancellation?.reason ?? orderDetail.cancellation_reason ?? null}
+                    cancelledAtLabel={
+                      orderDetail.cancelled_at
+                        ? formatDateTimeLabel(orderDetail.cancelled_at) +
+                          (orderDetail.cancellation?.cancelled_by_name
+                            ? ` · ${orderDetail.cancellation.cancelled_by_name}`
+                            : "")
+                        : null
+                    }
+                    settlement={normalizeOrderCancellationSettlement(
+                      orderDetail.cancellation?.settlement,
+                    )}
                     lang={lang}
                   />
                 ) : null}
@@ -8037,6 +8055,17 @@ function useOrdersPageContent() {
         onCancelled={() => triggerReload()}
         onStale={() => {
           if (selectedOrderId) clearApiCache(`/orders/${selectedOrderId}`);
+          triggerReload();
+        }}
+      />
+
+      <OrderCancellationDialog
+        orderId={orderDetail?.id ?? null}
+        open={cancelOrderOpen}
+        lang={lang}
+        onClose={() => setCancelOrderOpen(false)}
+        onCancelled={() => {
+          if (orderDetail) clearApiCache(`/orders/${orderDetail.id}`);
           triggerReload();
         }}
       />

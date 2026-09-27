@@ -2892,6 +2892,83 @@ async fn reject_pending_reports_for_cancelled_appointments_in_tx(
     Ok(())
 }
 
+/// Cancels an order's upcoming appointments (planned or confirmed, dated
+/// today or later) inside the caller's order-cancellation transaction, with
+/// the side effects of a manual cancellation: pending interpreter reports are
+/// rejected, checklists, tasks and reminders close and automatic concierge
+/// artifacts are closed. Returns the cancelled appointments; the caller
+/// publishes them with [`publish_cancelled_order_appointments`] after commit.
+pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    cancelled_by: Uuid,
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let appointment_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id
+           FROM appointments
+           WHERE order_id = $1
+             AND status IN ('planned', 'confirmed')
+             AND date >= $2
+           ORDER BY date, id
+           FOR UPDATE"#,
+    )
+    .bind(order_id)
+    .bind(berlin_today())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, %order_id, "load upcoming appointments of a cancelled order");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if appointment_ids.is_empty() {
+        return Ok(appointment_ids);
+    }
+
+    if let Err(e) = sqlx::query(
+        "UPDATE appointments SET status = 'cancelled', updated_at = now() WHERE id = ANY($1)",
+    )
+    .bind(&appointment_ids)
+    .execute(&mut **tx)
+    .await
+    {
+        if let Some(resp) = appointment_write_error_response(&e) {
+            return Err(resp);
+        }
+        tracing::error!(error = %e, %order_id, "cancel upcoming appointments of a cancelled order");
+        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+    }
+    reject_pending_reports_for_cancelled_appointments_in_tx(tx, &appointment_ids, cancelled_by)
+        .await?;
+    close_terminal_appointment_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
+    close_auto_concierge_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
+    Ok(appointment_ids)
+}
+
+/// Realtime events for appointments cancelled together with their order.
+pub(crate) async fn publish_cancelled_order_appointments(
+    state: &AppState,
+    actor_user_id: Uuid,
+    order_id: Uuid,
+    appointment_ids: &[Uuid],
+) {
+    for appointment_id in appointment_ids {
+        crate::realtime::publish_appointment_event(
+            state,
+            Some(actor_user_id),
+            "appointment.status_changed",
+            *appointment_id,
+            serde_json::json!({
+                "status": "cancelled",
+                "recurrence_scope": "single",
+                "affected_count": 1,
+                "reason": "order_cancelled",
+                "order_id": order_id,
+            }),
+        )
+        .await;
+    }
+}
+
 fn is_valid_checklist_phase(value: &str) -> bool {
     matches!(value, "preparation" | "execution" | "followup" | "done")
 }

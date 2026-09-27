@@ -255,7 +255,7 @@ impl OrderSettlement {
     }
 
     /// Preview/termination view of an open order.
-    fn preview_json(&self) -> Value {
+    pub(crate) fn preview_json(&self) -> Value {
         json!({
             "id": self.order_id,
             "order_number": self.order_number,

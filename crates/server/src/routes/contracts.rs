@@ -713,11 +713,87 @@ impl SupersededQuote {
     }
 }
 
+/// An open quote closed because its order was cancelled.
+pub(crate) struct ClosedOrderQuote {
+    pub id: Uuid,
+    pub quote_number: String,
+    pub previous_status: String,
+}
+
+/// Cancelling an order closes its open quotes (status `rejected`, a version
+/// snapshot with change reason `order_cancelled`), so nothing more can be
+/// invoiced from them; delivered services are billed from a new quote that
+/// only lists them. The selection matches [`supersede_open_order_quotes_tx`]:
+/// rejected, expired and superseded quotes and quotes settled by an active
+/// final invoice stay as they are; invoices already issued remain valid.
+/// Runs inside the order cancellation transaction after
+/// [`lock_open_order_quotes_tx`].
+pub(crate) async fn close_open_order_quotes_for_cancelled_order_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    order_id: Uuid,
+    actor_user_id: Uuid,
+) -> Result<Vec<ClosedOrderQuote>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"UPDATE quotes quote
+           SET status = 'rejected'
+           FROM quotes previous
+           WHERE previous.id = quote.id
+             AND quote.order_id = $1
+             AND quote.status NOT IN ('rejected', 'expired', 'superseded')
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoices final_invoice
+                 WHERE final_invoice.quote_id = quote.id
+                   AND final_invoice.invoice_type = 'final'
+                   AND final_invoice.status <> 'cancelled'
+             )
+           RETURNING quote.id, quote.quote_number, previous.status AS previous_status,
+                     quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
+                     order_recorded_cash_paid(quote.order_id) AS paid_amount,
+                     order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                     quote.line_items, quote.notes"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut closed = Vec::with_capacity(rows.len());
+    for row in rows {
+        let quote_id = row.try_get::<Uuid, _>("id")?;
+        let quote_number = row.try_get::<String, _>("quote_number")?;
+        let snapshot = QuoteVersionSnapshotInput {
+            quote_id,
+            order_id,
+            quote_number: quote_number.clone(),
+            status: "rejected".to_string(),
+            total_net: row.try_get::<Decimal, _>("total_net")?,
+            total_vat: row.try_get::<Decimal, _>("total_vat")?,
+            total_gross: row.try_get::<Decimal, _>("total_gross")?,
+            valid_until: row.try_get::<Option<NaiveDate>, _>("valid_until")?,
+            paid_amount: row
+                .try_get::<Option<Decimal>, _>("paid_amount")?
+                .unwrap_or(Decimal::ZERO),
+            paid_at: row.try_get::<Option<DateTime<Utc>>, _>("paid_at")?,
+            line_items: row.try_get::<Value, _>("line_items")?,
+            notes: row.try_get::<Option<String>, _>("notes")?,
+            change_reason: Some("order_cancelled".to_string()),
+            created_by: actor_user_id,
+        };
+        insert_quote_version_snapshot(tx, &snapshot).await?;
+        closed.push(ClosedOrderQuote {
+            id: quote_id,
+            quote_number,
+            previous_status: row.try_get::<String, _>("previous_status")?,
+        });
+    }
+    closed.sort_by(|a, b| a.quote_number.cmp(&b.quote_number));
+    Ok(closed)
+}
+
 /// Lock the order's open quotes before the order services are read, in the
 /// same order an invoice from a quote takes its locks (quote, then services).
 /// An invoice racing the new quote then either commits first or finds its
 /// quote closed.
-async fn lock_open_order_quotes_tx(
+pub(crate) async fn lock_open_order_quotes_tx(
     tx: &mut Transaction<'_, Postgres>,
     order_id: Uuid,
 ) -> Result<(), sqlx::Error> {

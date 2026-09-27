@@ -656,3 +656,33 @@ test("invoice allocation validates capacity, accepts commas and retries with the
   expect(attempts[0]).toMatchObject({amount_gross:"10.50", patient_invoice_id:"patient-invoice-1"});
   expect(attempts[1].request_id).toBe(attempts[0].request_id);
 });
+
+test("cancelling an order needs a reason and shows what is cancelled and what stays for billing", async ({page}) => {
+  const {order, writes} = await prepare(page);
+  await page.route(`**/orders/${orderId}/cancellation-preview`, route => route.fulfill({json:{
+    reason: null,
+    cancelled_services: [{id:"line-1", description:"Dolmetscher", quantity:"2", gross:"119"}],
+    cancelled_appointment_ids: ["appointment-1", "appointment-2"],
+    closed_quotes: [{id:"quote-1", quote_number:"KV-QA-1", previous_status:"sent"}],
+    rejected_amendment_ids: [],
+    settlement: {currency:"EUR", accrued_gross:"200", invoiced_gross:"0", paid_gross:"500", balance_gross:"-300", uninvoiced_gross:"200",
+      lines:[{description:"Organisation der Behandlung", status:"delivered", gross:"200"}]},
+  }}));
+  await page.goto(`/orders/${orderId}`);
+  await openOrderActions(page);
+  await page.getByRole("button", {name:"Отменить", exact:true}).click();
+  const dialog = page.getByRole("dialog", {name:"Отменить заказ", exact:true});
+  const preview = dialog.getByTestId("order-cancellation-preview");
+  await expect(preview).toContainText("Запланированные услуги: 1");
+  await expect(preview).toContainText("Предстоящие приёмы: 2");
+  await expect(preview).toContainText("KV-QA-1");
+  await expect(dialog.getByTestId("order-cancellation-balance")).toContainText("Пациенту к возврату: 300,00");
+  const confirm = dialog.getByRole("button", {name:"Отменить заказ", exact:true});
+  await expect(confirm).toBeDisabled();
+  await dialog.getByRole("textbox", {name:"Причина отмены"}).fill("Patient postponed the treatment");
+  await confirm.click();
+  await expect(dialog).toHaveCount(0);
+  await expect.poll(() => order.status).toBe("cancelled");
+  expect(writes.filter(write => write.path.endsWith("/status")).at(-1)?.body)
+    .toEqual({status:"cancelled", reason:"Patient postponed the treatment"});
+});

@@ -32,6 +32,10 @@ pub fn router() -> Router<AppState> {
         .route("/orders/{order_id}/economics", get(get_order_economics))
         .route("/orders/{order_id}/status", post(update_status))
         .route(
+            "/orders/{order_id}/cancellation-preview",
+            get(preview_order_cancellation),
+        )
+        .route(
             "/orders/{order_id}/debt-management",
             post(update_debt_management),
         )
@@ -167,6 +171,8 @@ struct PhaseRequest {
 struct StatusRequest {
     status: String,
     note: Option<String>,
+    /// Required when cancelling: why the order is cancelled.
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -3169,6 +3175,7 @@ async fn get_order(
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
                   o.total_actual, UPPER(o.currency) AS currency,
                   o.created_at, o.updated_at, o.cancellation_reason, o.cancelled_at,
+                  o.cancelled_by, cancelled_user.name AS cancelled_by_name,
                   settlement.id AS termination_settlement_id,
                   settlement.status AS termination_settlement_status,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
@@ -3179,6 +3186,7 @@ async fn get_order(
            LEFT JOIN patients p ON p.id = COALESCE(o.patient_id, l.converted_patient_id)
            LEFT JOIN cases cs ON cs.id = o.case_id
            LEFT JOIN order_termination_settlements settlement ON settlement.order_id = o.id
+           LEFT JOIN users cancelled_user ON cancelled_user.id = o.cancelled_by
            WHERE o.id = $1"#,
     )
     .bind(order_id)
@@ -3622,6 +3630,45 @@ async fn get_order(
         Err(resp) => return resp,
     };
 
+    // A cancelled order (not a contract termination, which has its own
+    // settlement) shows what stays as the basis for final billing or a refund.
+    let cancellation_reason = order
+        .try_get::<Option<String>, _>("cancellation_reason")
+        .unwrap_or_default();
+    let cancellation = if status == "cancelled"
+        && cancellation_reason.as_deref()
+            != Some(crate::routes::invoices::termination_settlements::CONTRACT_TERMINATED_REASON)
+    {
+        let settlement = match state.db.acquire().await {
+            Ok(mut conn) => {
+                match crate::routes::invoices::termination_settlements::compute_order_settlement(
+                    &mut conn, order_id,
+                )
+                .await
+                {
+                    Ok(value) => value.map(|settlement| settlement.preview_json()),
+                    Err(error) => {
+                        tracing::error!(error = %error, %order_id, "load cancelled order settlement");
+                        None
+                    }
+                }
+            }
+            Err(error) => {
+                tracing::error!(error = %error, %order_id, "acquire connection for cancelled order settlement");
+                None
+            }
+        };
+        Some(serde_json::json!({
+            "reason": cancellation_reason,
+            "cancelled_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+            "cancelled_by": order.try_get::<Option<Uuid>, _>("cancelled_by").unwrap_or_default(),
+            "cancelled_by_name": order.try_get::<Option<String>, _>("cancelled_by_name").unwrap_or_default(),
+            "settlement": settlement,
+        }))
+    } else {
+        None
+    };
+
     Json(serde_json::json!({
         "id": order_db_id, "order_number": order_number,
         "patient_id": patient_id,
@@ -3635,6 +3682,7 @@ async fn get_order(
         "phase": phase, "status": status,
         "cancellation_reason": order.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
         "cancelled_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "cancellation": cancellation,
         "termination_settlement": order.try_get::<Option<Uuid>, _>("termination_settlement_id").unwrap_or_default().map(|id| serde_json::json!({
             "id": id,
             "status": order.try_get::<Option<String>, _>("termination_settlement_status").unwrap_or_default(),
@@ -4789,6 +4837,16 @@ async fn update_status(
         );
     }
 
+    if requested_status == "cancelled" {
+        let reason = match normalize_order_cancellation_reason(
+            body.reason.as_deref().or(body.note.as_deref()),
+        ) {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        return cancel_order(&state, &auth, order_id, &reason).await;
+    }
+
     if requested_status == "completed" {
         if current_phase != "followup" {
             return lifecycle_gate_err(
@@ -4869,6 +4927,355 @@ async fn update_status(
                 "Failed to update order status",
             )
         }
+    }
+}
+
+/// What cancelling an order changed inside its transaction; used for the
+/// response, the preview, audit and realtime events after commit.
+struct OrderCancellation {
+    previous_status: String,
+    phase: String,
+    cancelled_services: Vec<serde_json::Value>,
+    cancelled_service_ids: Vec<Uuid>,
+    cancelled_appointment_ids: Vec<Uuid>,
+    closed_quotes: Vec<crate::routes::contracts::ClosedOrderQuote>,
+    rejected_amendment_ids: Vec<Uuid>,
+    settlement: Option<serde_json::Value>,
+}
+
+impl OrderCancellation {
+    fn summary_json(&self, reason: Option<&str>) -> serde_json::Value {
+        serde_json::json!({
+            "reason": reason,
+            "previous_status": self.previous_status,
+            "phase": self.phase,
+            "cancelled_services": self.cancelled_services,
+            "cancelled_appointment_ids": self.cancelled_appointment_ids,
+            "closed_quotes": self
+                .closed_quotes
+                .iter()
+                .map(|quote| serde_json::json!({
+                    "id": quote.id,
+                    "quote_number": quote.quote_number,
+                    "previous_status": quote.previous_status,
+                }))
+                .collect::<Vec<_>>(),
+            "rejected_amendment_ids": self.rejected_amendment_ids,
+            // What stays on the order as the basis for final billing or a
+            // refund: delivered/approved/invoiced services and third-party
+            // costs (accrued), released invoices and received cash.
+            "settlement": self.settlement,
+        })
+    }
+}
+
+fn normalize_order_cancellation_reason(
+    reason: Option<&str>,
+) -> Result<String, axum::response::Response> {
+    let reason = reason.map(str::trim).unwrap_or_default();
+    let reason_len = reason.chars().count();
+    if !(3..=1000).contains(&reason_len)
+        || reason == crate::routes::invoices::termination_settlements::CONTRACT_TERMINATED_REASON
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A cancellation reason of 3 to 1000 characters is required",
+        ));
+    }
+    Ok(reason.to_string())
+}
+
+/// Cancels an order inside `tx`. Planned services are cancelled (they keep
+/// who, when and why); upcoming appointments are cancelled with the side
+/// effects of a manual cancellation; open quotes are closed so nothing more
+/// is invoiced from them; pending amount amendments are rejected. Delivered,
+/// approved and invoiced services, issued invoices and payments stay: they
+/// are the basis for the final invoice or a refund, returned as `settlement`.
+async fn cancel_order_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    actor_id: Uuid,
+    reason: &str,
+) -> Result<OrderCancellation, axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, "cancel order");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        )
+    };
+
+    let order = sqlx::query("SELECT status, phase FROM orders WHERE id = $1 FOR UPDATE")
+        .bind(order_id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(failed)?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
+    let previous_status: String = order.try_get("status").unwrap_or_default();
+    let phase: String = order.try_get("phase").unwrap_or_default();
+    if !allowed_order_statuses(&previous_status).contains(&"cancelled") {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            &format!("Order status cannot change from {previous_status} to cancelled"),
+        ));
+    }
+
+    // Quotes before services: the lock order of an invoice from a quote.
+    crate::routes::contracts::lock_open_order_quotes_tx(tx, order_id)
+        .await
+        .map_err(failed)?;
+
+    let service_rows = sqlx::query(
+        r#"UPDATE order_leistungen
+           SET status = 'cancelled',
+               cancelled_at = now(),
+               cancelled_by = $2,
+               cancellation_reason = $3
+           WHERE order_id = $1
+             AND status = 'planned'
+           RETURNING id,
+                     COALESCE(NULLIF(BTRIM(agency_service_name_snapshot), ''), description) AS description,
+                     quantity, unit_price_snapshot, vat_rate_snapshot, is_cost_passthrough,
+                     UPPER(currency) AS currency"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .bind(reason)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+    let mut cancelled_service_ids = Vec::with_capacity(service_rows.len());
+    let mut cancelled_services = Vec::with_capacity(service_rows.len());
+    for row in &service_rows {
+        let id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+        let quantity = row
+            .try_get::<rust_decimal::Decimal, _>("quantity")
+            .unwrap_or_default();
+        let vat_rate = if row
+            .try_get::<bool, _>("is_cost_passthrough")
+            .unwrap_or(false)
+        {
+            rust_decimal::Decimal::ZERO
+        } else {
+            row.try_get::<rust_decimal::Decimal, _>("vat_rate_snapshot")
+                .unwrap_or_default()
+        };
+        let amounts = money::line_amounts(
+            quantity,
+            row.try_get::<rust_decimal::Decimal, _>("unit_price_snapshot")
+                .unwrap_or_default(),
+            vat_rate,
+        );
+        cancelled_service_ids.push(id);
+        cancelled_services.push(serde_json::json!({
+            "id": id,
+            "description": row.try_get::<String, _>("description").unwrap_or_default(),
+            "quantity": quantity.normalize().to_string(),
+            "gross": money::money_string(amounts.gross),
+            "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
+        }));
+    }
+
+    let cancelled_appointment_ids =
+        crate::routes::appointments::cancel_upcoming_order_appointments_in_tx(
+            tx, order_id, actor_id,
+        )
+        .await?;
+
+    let closed_quotes = crate::routes::contracts::close_open_order_quotes_for_cancelled_order_tx(
+        tx, order_id, actor_id,
+    )
+    .await
+    .map_err(failed)?;
+
+    let rejected_amendment_ids = sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE order_amendments
+           SET status = 'rejected', decided_by = $2, decided_at = now(), decision_note = $3
+           WHERE order_id = $1 AND status = 'pending'
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .bind(format!("Auftrag storniert: {reason}"))
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+
+    sqlx::query(
+        r#"UPDATE orders
+           SET status = 'cancelled',
+               cancelled_at = now(),
+               cancelled_by = $2,
+               cancellation_reason = $3,
+               total_estimated = COALESCE(order_service_total_gross(id), total_estimated)
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .bind(reason)
+    .execute(&mut **tx)
+    .await
+    .map_err(failed)?;
+
+    let settlement = crate::routes::invoices::termination_settlements::compute_order_settlement(
+        &mut **tx, order_id,
+    )
+    .await
+    .map_err(failed)?
+    .map(|settlement| settlement.preview_json());
+
+    Ok(OrderCancellation {
+        previous_status,
+        phase,
+        cancelled_services,
+        cancelled_service_ids,
+        cancelled_appointment_ids,
+        closed_quotes,
+        rejected_amendment_ids,
+        settlement,
+    })
+}
+
+async fn cancel_order(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    reason: &str,
+) -> axum::response::Response {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, "begin order cancellation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order status",
+            );
+        }
+    };
+    let cancellation = match cancel_order_in_tx(&mut tx, order_id, auth.user_id, reason).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, %order_id, "commit order cancellation");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        );
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "cancel_order",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({
+            "from_status": cancellation.previous_status,
+            "status": "cancelled",
+            "phase": cancellation.phase,
+            "reason": reason,
+            "cancelled_service_ids": cancellation.cancelled_service_ids,
+            "cancelled_appointment_ids": cancellation.cancelled_appointment_ids,
+            "closed_quote_ids": cancellation
+                .closed_quotes
+                .iter()
+                .map(|quote| quote.id)
+                .collect::<Vec<_>>(),
+            "rejected_amendment_ids": cancellation.rejected_amendment_ids,
+            "accrued_gross": cancellation.settlement.as_ref().map(|value| value["accrued_gross"].clone()),
+            "invoiced_gross": cancellation.settlement.as_ref().map(|value| value["invoiced_gross"].clone()),
+            "paid_gross": cancellation.settlement.as_ref().map(|value| value["paid_gross"].clone()),
+            "balance_gross": cancellation.settlement.as_ref().map(|value| value["balance_gross"].clone()),
+        }),
+    ));
+    for quote in &cancellation.closed_quotes {
+        state.audit_sender.try_send(audit::domain_event(
+            "close_quote_for_cancelled_order",
+            Some(auth.user_id),
+            "quote",
+            Some(quote.id),
+            serde_json::json!({
+                "quote_number": quote.quote_number,
+                "previous_status": quote.previous_status,
+                "status": "rejected",
+                "order_id": order_id,
+            }),
+        ));
+        crate::realtime::publish_quote_event(
+            state,
+            Some(auth.user_id),
+            "quote.status_changed",
+            quote.id,
+            serde_json::json!({
+                "status": "rejected",
+                "previous_status": quote.previous_status,
+                "order_id": order_id,
+                "reason": "order_cancelled",
+            }),
+        )
+        .await;
+    }
+    crate::realtime::publish_order_event(
+        state,
+        Some(auth.user_id),
+        "order.status_changed",
+        order_id,
+        serde_json::json!({
+            "from_status": cancellation.previous_status,
+            "status": "cancelled",
+            "phase": cancellation.phase,
+            "note": reason,
+        }),
+    )
+    .await;
+    crate::routes::appointments::publish_cancelled_order_appointments(
+        state,
+        auth.user_id,
+        order_id,
+        &cancellation.cancelled_appointment_ids,
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "ok": true,
+        "status": "cancelled",
+        "cancellation": cancellation.summary_json(Some(reason)),
+    }))
+    .into_response()
+}
+
+/// What cancelling the order would do, without changing anything: the
+/// cancellation runs in a transaction that is rolled back.
+async fn preview_order_cancellation(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Ceo]) {
+        return response;
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, "begin order cancellation preview");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to preview order cancellation",
+            );
+        }
+    };
+    let result = cancel_order_in_tx(&mut tx, order_id, auth.user_id, "Vorschau").await;
+    if let Err(error) = tx.rollback().await {
+        tracing::error!(error = %error, %order_id, "roll back order cancellation preview");
+    }
+    match result {
+        Ok(cancellation) => Json(cancellation.summary_json(None)).into_response(),
+        Err(response) => response,
     }
 }
 

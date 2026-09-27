@@ -233,9 +233,20 @@ export type OrderDetail = {
   execution_flow?: OrderExecutionFlow | null;
   followup_flow?: OrderFollowupFlow | null;
   lifecycle?: OrderLifecycle | null;
-  /** "contract_terminated" when the framework contract termination stopped the order. */
+  /**
+   * "contract_terminated" when the framework contract termination stopped the
+   * order; otherwise the reason staff gave when cancelling it.
+   */
   cancellation_reason?: string | null;
   cancelled_at?: string | null;
+  /** A cancelled order (not a termination): who cancelled it and the billing basis. */
+  cancellation?: {
+    reason: string | null;
+    cancelled_at: string | null;
+    cancelled_by: string | null;
+    cancelled_by_name: string | null;
+    settlement: unknown;
+  } | null;
   termination_settlement?: { id: string; status: "open" | "settled" } | null;
   created_at: string;
   updated_at: string;
