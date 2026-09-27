@@ -55,7 +55,7 @@ use super::{
     CreateInvoiceLineSelection, InvoiceCreationSnapshot, MoneyInput,
     build_selected_invoice_snapshot, can_access_patient, can_create_invoices,
     can_manage_invoice_finance, can_read_invoices, compute_invoice_line_parts, decimal_to_string,
-    ensure_patient_access, err, gen_invoice_number, inherited_invoice_payer, invoice_json_decimal,
+    ensure_patient_access, err, inherited_invoice_payer, invoice_json_decimal,
     load_allocated_quote_quantities, load_invoice_detail, load_quote_invoice_context,
     write_invoice_audit,
 };
@@ -1523,29 +1523,21 @@ async fn create_termination_final_invoice(
     invoiced_service_ids.sort();
     invoiced_service_ids.dedup();
 
-    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
-        .fetch_one(&mut *transaction)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => return failed(error),
-    };
-    let invoice_number = gen_invoice_number(seq);
+    // The draft gets its invoice number when it is released.
     let payer = inherited_invoice_payer(&state.db, order_id, patient_id).await;
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
-                quote_id, order_id, patient_id, invoice_number, invoice_type, status,
+                quote_id, order_id, patient_id, invoice_type, status,
                 total_net, total_vat, total_gross, line_items, notes, created_by,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
-           ) VALUES ($1, $2, $3, $4, 'final', 'draft', $5, $6, $7, $8, $9, $10,
-                     $11, $12, $13, $14, $15, $16)
+           ) VALUES ($1, $2, $3, 'final', 'draft', $4, $5, $6, $7, $8, $9,
+                     $10, $11, $12, $13, $14, $15)
            RETURNING id"#,
     )
     .bind(invoice_quote_id)
     .bind(order_id)
     .bind(patient_id)
-    .bind(&invoice_number)
     .bind(snapshot.total_net)
     .bind(snapshot.total_vat)
     .bind(snapshot.total_gross)
@@ -1676,7 +1668,7 @@ async fn create_termination_final_invoice(
         "invoice.created",
         invoice_id,
         json!({
-            "invoice_number": invoice_number,
+            "invoice_number": null,
             "invoice_type": "final",
             "order_id": order_id,
             "patient_id": patient_id,

@@ -313,8 +313,12 @@ async fn create_quote(app: &axum::Router, bearer: &str, order_id: Uuid) -> Value
     body
 }
 
+/// Creates and releases an invoice, then gives it `due_date`. A release needs a
+/// due date on or after the invoice date, so tests that need an overdue
+/// invoice move the date afterwards, as time passing would.
 async fn create_sent_invoice(
     app: &axum::Router,
+    pool: &PgPool,
     bearer: &str,
     quote_id: &str,
     invoice_type: &str,
@@ -325,15 +329,20 @@ async fn create_sent_invoice(
         "POST",
         &format!("/api/v1/quotes/{quote_id}/invoices"),
         bearer,
-        Some(json!({
-            "invoice_type": invoice_type,
-            "due_date": due_date
-        })),
+        Some(json!({ "invoice_type": invoice_type })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let invoice_id = body["id"].as_str().unwrap();
-    release_invoice(app, bearer, invoice_id).await
+    let mut released = release_invoice(app, bearer, invoice_id).await;
+    sqlx::query("UPDATE invoices SET due_date = $2::date WHERE id = $1::uuid")
+        .bind(invoice_id)
+        .bind(due_date)
+        .execute(pool)
+        .await
+        .unwrap();
+    released["due_date"] = json!(due_date);
+    released
 }
 
 async fn release_invoice(app: &axum::Router, bearer: &str, invoice_id: &str) -> Value {
@@ -493,7 +502,9 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(all_quotes.as_array().unwrap().len(), 1);
     assert_eq!(body["status"], "draft");
-    assert!(body["invoice_number"].as_str().unwrap().starts_with("INV-"));
+    // Drafts are numbered only when they are released.
+    assert!(body["invoice_number"].is_null(), "{body}");
+    assert!(body["released_at"].is_null(), "{body}");
     assert_eq!(body["order_id"], order_id.to_string());
     assert_eq!(body["quote_id"], quote_id);
     assert_eq!(body["line_items"].as_array().unwrap().len(), 1);
@@ -576,6 +587,7 @@ async fn invoice_inherits_head_order_payer_with_patient_scoped_relation() {
     let sub_quote = create_quote(&app, &pm_bearer, sub).await;
     let sub_invoice = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         sub_quote["id"].as_str().unwrap(),
         "final",
@@ -600,6 +612,7 @@ async fn invoice_inherits_head_order_payer_with_patient_scoped_relation() {
     let head_quote = create_quote(&app, &pm_bearer, head).await;
     let head_invoice = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         head_quote["id"].as_str().unwrap(),
         "final",
@@ -939,6 +952,7 @@ async fn package_consumption_tracks_overage_approval_and_invoice_linkage() {
     let quote = create_quote(&app, &billing_bearer, order_id).await;
     let invoice = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         quote["id"].as_str().unwrap(),
         "final",
@@ -1436,6 +1450,7 @@ async fn invoice_detail_explains_mixed_vat_sources() {
     let quote = create_quote(&app, &billing_bearer, order_id).await;
     let invoice = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         quote["id"].as_str().unwrap(),
         "final",
@@ -1548,7 +1563,8 @@ async fn invoice_list_returns_page_metadata_and_slices_results() {
         let quote = create_quote(&app, &billing_bearer, order_id).await;
         let quote_id = quote["id"].as_str().unwrap();
         let _invoice = create_sent_invoice(
-            &app,
+        &app,
+        &pool,
             &billing_bearer,
             quote_id,
             "final",
@@ -1707,6 +1723,7 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
     // An advance from the first quote, 100 of it paid.
     let advance = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         &first_quote_id,
         "advance",
@@ -1902,6 +1919,7 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
     // advance paid against the old quote is credited to it.
     let final_invoice = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         &second_quote_id,
         "final",
@@ -1969,6 +1987,237 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
 /// Advances are credited only against released invoices. A draft offers no
 /// advance and refuses one with a message saying why, instead of a balance
 /// conflict. Releasing the draft dates the invoice.
+async fn create_draft_invoice(app: &axum::Router, bearer: &str, quote_id: &str) -> Value {
+    let (status, draft) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        bearer,
+        Some(json!({ "invoice_type": "interim", "line_items": [{ "line_index": 0, "quantity": 1 }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    draft
+}
+
+async fn post_invoice_status(
+    app: &axum::Router,
+    bearer: &str,
+    invoice_id: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        bearer,
+        Some(body),
+    )
+    .await
+}
+
+fn invoice_counter_suffix(number: &str) -> i64 {
+    number.rsplit('-').next().unwrap().parse().unwrap()
+}
+
+/// Drafts carry no number; release numbers them from a gapless counter, dates
+/// them, needs a due date on or after the invoice date and is final: no way
+/// back to draft, no new due date, no new payer. A draft cancelled before
+/// release consumes no number and never reaches the patient.
+#[tokio::test]
+async fn invoices_are_numbered_on_release_and_stay_released() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-numbering");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Dolmetscherstunden', 4, 50, 19, 'approved')"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    // A draft cancelled before release: no number, invisible to the patient.
+    let cancelled = create_draft_invoice(&app, &billing_bearer, quote_id).await;
+    let cancelled_id = cancelled["id"].as_str().unwrap().to_string();
+    assert!(cancelled["invoice_number"].is_null(), "{cancelled}");
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &cancelled_id,
+        json!({ "status": "cancelled" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["invoice_number"].is_null(), "{body}");
+    assert!(body["released_at"].is_null(), "{body}");
+
+    let counter_before: i64 =
+        sqlx::query_scalar("SELECT last_value FROM invoice_number_counter")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let first = create_draft_invoice(&app, &billing_bearer, quote_id).await;
+    let first_id = first["id"].as_str().unwrap().to_string();
+    assert!(first["invoice_number"].is_null());
+
+    // Due date before the invoice date: refused, and no number is consumed.
+    let yesterday = (chrono::Utc::now().date_naive() - chrono::Duration::days(1)).to_string();
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &first_id,
+        json!({ "status": "sent", "due_date": yesterday }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    // A draft goes to settlement only through release.
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &first_id,
+        json!({ "status": "overdue" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // Released without a due date: numbered, dated today, due in 14 days.
+    let released = release_invoice(&app, &billing_bearer, &first_id).await;
+    let first_number = released["invoice_number"].as_str().unwrap().to_string();
+    assert!(first_number.starts_with("INV-"), "{released}");
+    assert_eq!(invoice_counter_suffix(&first_number), counter_before + 1);
+    assert!(released["released_at"].is_string(), "{released}");
+    let (issued_on, due_on): (chrono::NaiveDate, chrono::NaiveDate) = sqlx::query_as(
+        r#"SELECT (issued_at AT TIME ZONE 'Europe/Berlin')::date, due_date
+           FROM invoices WHERE id = $1::uuid"#,
+    )
+    .bind(&first_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(due_on, issued_on + chrono::Duration::days(14));
+
+    // No way back to draft, no new due date, no new payer.
+    let (status, body) =
+        post_invoice_status(&app, &billing_bearer, &first_id, json!({ "status": "draft" })).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let later = (due_on + chrono::Duration::days(30)).to_string();
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &first_id,
+        json!({ "status": "sent", "due_date": later }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &first_id,
+        json!({ "status": "sent", "due_date": due_on.to_string(), "notes": "unchanged due date" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{first_id}/payer"),
+        &billing_bearer,
+        Some(json!({ "payer_contact_name": "Late Payer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // The database refuses the same, whatever the path.
+    let db_error = sqlx::query("UPDATE invoices SET status = 'draft' WHERE id = $1::uuid")
+        .bind(&first_id)
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert!(db_error.to_string().contains("cannot return to draft"), "{db_error}");
+    let db_error = sqlx::query("UPDATE invoices SET invoice_number = 'INV-X' WHERE id = $1::uuid")
+        .bind(&first_id)
+        .execute(&pool)
+        .await
+        .unwrap_err();
+    assert!(db_error.to_string().contains("keeps its invoice number"), "{db_error}");
+
+    // The next release takes the next number: the cancelled draft left no gap.
+    let second = create_draft_invoice(&app, &billing_bearer, quote_id).await;
+    let second_id = second["id"].as_str().unwrap().to_string();
+    let due = (chrono::Utc::now().date_naive() + chrono::Duration::days(7)).to_string();
+    let (status, second_released) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &second_id,
+        json!({ "status": "sent", "due_date": due }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{second_released}");
+    assert_eq!(second_released["due_date"], due);
+    assert_eq!(
+        invoice_counter_suffix(second_released["invoice_number"].as_str().unwrap()),
+        counter_before + 2
+    );
+
+    // A draft numbered before this rule keeps its number on release.
+    let legacy = create_draft_invoice(&app, &billing_bearer, quote_id).await;
+    let legacy_id = legacy["id"].as_str().unwrap().to_string();
+    let legacy_number = format!("INV-LEGACY-{tag}");
+    sqlx::query("UPDATE invoices SET invoice_number = $2 WHERE id = $1::uuid")
+        .bind(&legacy_id)
+        .bind(&legacy_number)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let legacy_released = release_invoice(&app, &billing_bearer, &legacy_id).await;
+    assert_eq!(legacy_released["invoice_number"], legacy_number);
+    let counter_after: i64 = sqlx::query_scalar("SELECT last_value FROM invoice_number_counter")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(counter_after, counter_before + 2);
+
+    // The portal shows the issued invoices only.
+    let (status, portal) =
+        json_request(&app, "GET", "/api/v1/me/invoices", &patient_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{portal}");
+    let portal_ids = portal
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|invoice| invoice["id"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert!(portal_ids.contains(&first_id), "{portal}");
+    assert!(!portal_ids.contains(&cancelled_id), "{portal}");
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{cancelled_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn draft_invoice_offers_no_advance_and_is_dated_on_release() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -1990,7 +2239,9 @@ async fn draft_invoice_offers_no_advance_and_is_dated_on_release() {
     let quote_id = quote["id"].as_str().unwrap().to_string();
 
     let advance =
-        create_sent_invoice(&app, &billing_bearer, &quote_id, "advance", "2026-10-15").await;
+        create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, &quote_id, "advance", "2026-10-15").await;
     let advance_id = advance["id"].as_str().unwrap().to_string();
     let (status, payment) = json_request(
         &app,
@@ -2155,6 +2406,7 @@ async fn replacing_quote_does_not_bill_hours_already_invoiced_from_the_supersede
     // The final invoice settles the remaining 6 h: 570.00 + 108.30 VAT.
     let final_invoice = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         &second_quote_id,
         "final",
@@ -2257,7 +2509,9 @@ async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-05-31").await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, body) = json_request(
@@ -2337,7 +2591,9 @@ async fn paid_invoice_marks_linked_financial_supporting_documents_reimbursed() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-31").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-05-31").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
@@ -2612,15 +2868,22 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
         "POST",
         &format!("/api/v1/quotes/{quote_id}/invoices"),
         &billing_bearer,
-        Some(json!({ "invoice_type": "final", "due_date": invoice_due_date })),
+        Some(json!({ "invoice_type": "final" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let invoice_id = invoice["id"].as_str().unwrap();
-    let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
-    release_invoice(&app, &billing_bearer, invoice_id).await;
+    let released = release_invoice(&app, &billing_bearer, invoice_id).await;
+    let invoice_number = released["invoice_number"].as_str().unwrap().to_string();
+    let invoice_number = invoice_number.as_str();
+    sqlx::query("UPDATE invoices SET due_date = $2::date WHERE id = $1::uuid")
+        .bind(invoice_id)
+        .bind(&invoice_due_date)
+        .execute(&pool)
+        .await
+        .unwrap();
     let (status, body) = json_request(
         &app,
         "POST",
@@ -2802,7 +3065,9 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let quote_id = quote["id"].as_str().unwrap();
 
     let invoice =
-        create_sent_invoice(&app, &billing_bearer, quote_id, "final", &invoice_due_date).await;
+        create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", &invoice_due_date).await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
@@ -2897,7 +3162,9 @@ async fn billing_can_run_first_and_second_dunning_then_collections() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-03-01").await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, body) = json_request(
@@ -2982,7 +3249,9 @@ async fn dunning_sequence_requires_previous_step_and_billing_role() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-03-01").await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, _) = json_request(
@@ -3041,7 +3310,9 @@ async fn dunning_is_blocked_for_paid_invoice() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-03-01").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-03-01").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let total_gross = invoice["total_gross"]
         .as_str()
@@ -3096,6 +3367,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     let quote_first = create_quote(&app, &pm_bearer, order_first).await;
     let invoice_first = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         quote_first["id"].as_str().unwrap(),
         "final",
@@ -3114,6 +3386,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     let quote_second = create_quote(&app, &pm_bearer, order_second).await;
     let invoice_second = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         quote_second["id"].as_str().unwrap(),
         "final",
@@ -3155,6 +3428,7 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     let quote_collections = create_quote(&app, &pm_bearer, order_collections).await;
     let invoice_collections = create_sent_invoice(
         &app,
+        &pool,
         &billing_bearer,
         quote_collections["id"].as_str().unwrap(),
         "final",
@@ -3312,7 +3586,9 @@ async fn staff_can_download_invoice_pdf_document() {
     let billing_bearer = auth_header_for(billing_id, "billing");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
 
@@ -3346,7 +3622,10 @@ async fn staff_can_download_invoice_pdf_document() {
 async fn seed_agency_invoice_settings(pool: &PgPool, admin_id: Uuid) {
     for (key, value) in [
         ("agency_name", "GMED Test Agentur"),
-        ("agency_address", "Albert-Schweitzer-Straße 56\n81735 München"),
+        (
+            "agency_address",
+            "Albert-Schweitzer-Straße 56\n81735 München",
+        ),
         ("agency_country_code", "DE"),
         ("agency_tax_number", "143/999/00001"),
     ] {
@@ -3412,7 +3691,10 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{draft}");
     let invoice_id = draft["id"].as_str().unwrap().to_string();
-    assert_eq!(draft["recipient"]["name"], format!("First {tag} Last {tag}"));
+    assert_eq!(
+        draft["recipient"]["name"],
+        format!("First {tag} Last {tag}")
+    );
     assert_eq!(draft["recipient"]["street"], "Patientenweg 9");
     assert_eq!(draft["recipient"]["is_payer"], false);
 
@@ -3445,7 +3727,10 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
     assert_eq!(updated["recipient"]["street"], "Kyivska 5");
     assert_eq!(updated["recipient"]["is_payer"], true);
     assert_eq!(updated["recipient"]["has_postal_address"], true);
-    assert_eq!(updated["payer_relation_options"][0]["id"], relation_id.to_string());
+    assert_eq!(
+        updated["payer_relation_options"][0]["id"],
+        relation_id.to_string()
+    );
 
     release_invoice(&app, &billing_bearer, &invoice_id).await;
 
@@ -3463,9 +3748,18 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
         .nth(1)
         .and_then(|rest| rest.split("</ram:BuyerTradeParty>").next())
         .unwrap();
-    assert!(buyer.contains("<ram:Name>Ivan Zahler</ram:Name>"), "{buyer}");
-    assert!(buyer.contains("<ram:LineOne>Kyivska 5</ram:LineOne>"), "{buyer}");
-    assert!(buyer.contains("<ram:CountryID>UA</ram:CountryID>"), "{buyer}");
+    assert!(
+        buyer.contains("<ram:Name>Ivan Zahler</ram:Name>"),
+        "{buyer}"
+    );
+    assert!(
+        buyer.contains("<ram:LineOne>Kyivska 5</ram:LineOne>"),
+        "{buyer}"
+    );
+    assert!(
+        buyer.contains("<ram:CountryID>UA</ram:CountryID>"),
+        "{buyer}"
+    );
     assert!(!buyer.contains("Patientenweg"), "{buyer}");
 
     let (status, _, bytes) = binary_request(
@@ -3481,7 +3775,10 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
     assert!(text.contains("Kyivska 5"), "{text}");
     assert!(text.contains("01001 Kyiv"), "{text}");
     assert!(!text.contains("Patientenweg 9"), "{text}");
-    assert!(!text.contains("01.01.1990"), "birth date must not be printed");
+    assert!(
+        !text.contains("01.01.1990"),
+        "birth date must not be printed"
+    );
     assert!(text.contains("Leistungsdatum"), "{text}");
     assert!(text.contains("03.09.2026"), "{text}");
 }
@@ -3515,7 +3812,9 @@ async fn patient_can_download_own_invoice_pdf() {
     let patient_bearer = auth_header_for(patient_user_id, "patient");
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let (status, body) = json_request(
         &app,
@@ -3575,7 +3874,9 @@ async fn ceo_assistant_can_read_but_cannot_mutate_invoice_workspace() {
     .await;
     let quote = create_quote(&app, &billing_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
-    let invoice = create_sent_invoice(&app, &billing_bearer, quote_id, "final", "2026-05-30").await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool, &billing_bearer, quote_id, "final", "2026-05-30").await;
     let invoice_id = invoice["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(

@@ -302,6 +302,11 @@ export interface RevenueTranslations {
   revenue_invoices_recipient_payer: string;
   revenue_invoices_recipient_patient: string;
   revenue_invoices_recipient_address_missing: string;
+  revenue_invoices_draft_number: string;
+  revenue_invoices_draft_preview_pdf: string;
+  revenue_invoices_release_hint: string;
+  revenue_invoices_due_date_before_invoice_date: string;
+  revenue_invoices_due_date_locked: string;
   revenue_invoices_save_payer: string;
   revenue_invoices_redaction_invoice_hidden: string;
   revenue_invoices_redaction_amounts_hidden: string;
@@ -1167,6 +1172,13 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_recipient_payer: "Получатель счёта — плательщик",
   revenue_invoices_recipient_patient: "Получатель счёта — пациент",
   revenue_invoices_recipient_address_missing: "Нет почтового адреса получателя: счёт без адреса неполный",
+  revenue_invoices_draft_number: "Черновик (без номера)",
+  revenue_invoices_draft_preview_pdf: "Предпросмотр черновика (PDF)",
+  revenue_invoices_release_hint:
+    "При выпуске счёт получает номер и дату счёта (сегодня). Срок оплаты не может быть раньше даты счёта; если он не указан, ставится дата счёта + {days} дней. После выпуска счёт нельзя вернуть в черновик, а PDF сохраняется без изменений.",
+  revenue_invoices_due_date_before_invoice_date: "Срок оплаты не может быть раньше даты счёта (сегодня).",
+  revenue_invoices_due_date_locked:
+    "Срок оплаты выпущенного счёта не меняется. Новый срок задаётся напоминанием об оплате.",
   revenue_invoices_save_payer: "Сохранить плательщика",
   revenue_invoices_redaction_invoice_hidden: "Счет скрыт от пациента",
   revenue_invoices_redaction_amounts_hidden: "Суммы скрыты от пациента",
@@ -1547,6 +1559,13 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoices_recipient_payer: "Rechnungsempfänger – Zahler",
   revenue_invoices_recipient_patient: "Rechnungsempfänger – Patient",
   revenue_invoices_recipient_address_missing: "Anschrift des Rechnungsempfängers fehlt: ohne Anschrift ist die Rechnung unvollständig",
+  revenue_invoices_draft_number: "Entwurf (ohne Nummer)",
+  revenue_invoices_draft_preview_pdf: "Entwurfsvorschau (PDF)",
+  revenue_invoices_release_hint:
+    "Mit der Ausstellung erhält die Rechnung ihre Nummer und das Rechnungsdatum (heute). Das Fälligkeitsdatum darf nicht vor dem Rechnungsdatum liegen; ohne Angabe gilt Rechnungsdatum + {days} Tage. Danach kann die Rechnung nicht mehr zum Entwurf werden, und das PDF wird unverändert archiviert.",
+  revenue_invoices_due_date_before_invoice_date: "Das Fälligkeitsdatum darf nicht vor dem Rechnungsdatum (heute) liegen.",
+  revenue_invoices_due_date_locked:
+    "Das Fälligkeitsdatum einer ausgestellten Rechnung bleibt unverändert. Eine neue Frist setzt die Zahlungserinnerung.",
   revenue_invoices_save_payer: "Zahler speichern",
   revenue_invoices_redaction_invoice_hidden: "Rechnung vor Patient verborgen",
   revenue_invoices_redaction_amounts_hidden: "Beträge vor Patient verborgen",

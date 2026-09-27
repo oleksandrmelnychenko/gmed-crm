@@ -147,6 +147,11 @@ import {
   invoiceToStatusForm,
   invoiceToPayerForm,
   invoiceToVisibilityForm,
+  invoiceDisplayNumber,
+  invoiceStatusFormProblem,
+  isInvoiceReleased,
+  canEditInvoiceDueDate,
+  DEFAULT_INVOICE_PAYMENT_TERM_DAYS,
   invoiceRecipientAddressLines,
   payerFormToPayload,
   payerRelationOptionLabel,
@@ -1059,7 +1064,7 @@ function useStaffInvoicesPageContent() {
       {
         id: "invoice_number",
         label: t.invoices_number,
-        accessor: (row) => row.invoice_number,
+        accessor: (row) => invoiceDisplayNumber(row, t.revenue_invoices_draft_number),
         filterType: "text",
         group: "identity",
         sortable: true,
@@ -1067,11 +1072,16 @@ function useStaffInvoicesPageContent() {
         required: true,
         pinned: "left",
         width: 180,
-        render: (row) => (
-          <span className="font-mono text-xs tracking-[0.14em] text-foreground">
-            {row.invoice_number}
-          </span>
-        ),
+        render: (row) =>
+          row.invoice_number ? (
+            <span className="font-mono text-xs tracking-[0.14em] text-foreground">
+              {row.invoice_number}
+            </span>
+          ) : (
+            <span className="text-xs italic text-muted-foreground">
+              {t.revenue_invoices_draft_number}
+            </span>
+          ),
       },
       {
         id: "issued_at",
@@ -1911,6 +1921,9 @@ function useStaffInvoicesPageContent() {
   }
 
   const statusDirty = Boolean(detail && hasFormChanges(statusForm, invoiceToStatusForm(detail)));
+  const statusFormProblem = detail
+    ? invoiceStatusFormProblem(detail, statusForm, new Date())
+    : null;
   const visibilityDirty = Boolean(detail && hasFormChanges(visibilityForm, invoiceToVisibilityForm(detail)));
   const payerDirty = Boolean(detail && hasFormChanges(payerForm, invoiceToPayerForm(detail)));
   // The detail sheet's inline forms are prefilled and re-prefilled after every
@@ -1928,7 +1941,7 @@ function useStaffInvoicesPageContent() {
   });
 
   async function handleSaveStatus() {
-    if (!statusDirty || statusBusy) return;
+    if (!statusDirty || statusBusy || statusFormProblem) return;
     if (!selectedInvoiceId) return;
     setStatusBusy(true);
     try {
@@ -2577,7 +2590,11 @@ function useStaffInvoicesPageContent() {
                           {detail.patient_name}
                         </h3>
                         <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                          {[detail.invoice_number, detail.order_number, detail.quote_number]
+                          {[
+                            invoiceDisplayNumber(detail, t.revenue_invoices_draft_number),
+                            detail.order_number,
+                            detail.quote_number,
+                          ]
                             .filter(Boolean)
                             .join(" - ")}
                         </p>
@@ -2588,7 +2605,9 @@ function useStaffInvoicesPageContent() {
                         </div>
                         <div className="min-w-[12rem] flex-1">
                           <p className="truncate text-sm font-medium text-foreground">
-                            {detail.invoice_number}.pdf
+                            {detail.invoice_number
+                              ? `${detail.invoice_number}.pdf`
+                              : t.revenue_invoices_draft_preview_pdf}
                           </p>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {invoiceTypeLabel(detail.invoice_type)} · PDF
@@ -2628,7 +2647,7 @@ function useStaffInvoicesPageContent() {
                             <Download className="size-3.5" />
                             {text.downloadPdf}
                           </Button>
-                          {detail.status !== "draft" ? (
+                          {isInvoiceReleased(detail) ? (
                             <Button
                               type="button"
                               variant="outline"
@@ -4189,9 +4208,24 @@ function useStaffInvoicesPageContent() {
                     onChange={(event) =>
                       setStatusForm((current) => ({ ...current, dueDate: event.target.value }))
                     }
-                    disabled={!access.canManage}
+                    disabled={!access.canManage || (detail ? !canEditInvoiceDueDate(detail) : false)}
                   />
                 </Field>
+                {detail?.status === "draft" && statusForm.status === "sent" ? (
+                  <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground lg:col-span-2">
+                    {t.revenue_invoices_release_hint.replace(
+                      "{days}",
+                      String(DEFAULT_INVOICE_PAYMENT_TERM_DAYS),
+                    )}
+                  </p>
+                ) : null}
+                {statusFormProblem ? (
+                  <p role="alert" className="text-xs text-destructive lg:col-span-2">
+                    {statusFormProblem === "due_date_before_invoice_date"
+                      ? t.revenue_invoices_due_date_before_invoice_date
+                      : t.revenue_invoices_due_date_locked}
+                  </p>
+                ) : null}
                 <Field label={text.notes} className="lg:col-span-2">
                   <textarea
                     className={textareaClassName}
@@ -4206,7 +4240,7 @@ function useStaffInvoicesPageContent() {
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={statusBusy || !access.canManage || !statusDirty}
+                  disabled={statusBusy || !access.canManage || !statusDirty || Boolean(statusFormProblem)}
                   onClick={() => void handleSaveStatus()}
                 >
                   {statusBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}

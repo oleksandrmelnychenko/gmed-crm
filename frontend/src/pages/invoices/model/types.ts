@@ -231,10 +231,13 @@ export type InvoiceItem = {
   patient_id: string;
   patient_name: string;
   patient_pid: string;
-  invoice_number: string;
+  /** Assigned when the invoice is released; drafts have none. */
+  invoice_number: string | null;
   invoice_type: InvoiceType | string;
   status: InvoiceStatus | string;
   issued_at: string;
+  /** Set once the invoice was issued; drafts (also cancelled ones) have none. */
+  released_at?: string | null;
   due_date: string | null;
   total_net: unknown;
   total_vat: unknown;

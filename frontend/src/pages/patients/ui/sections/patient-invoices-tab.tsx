@@ -1320,16 +1320,21 @@ function usePatientInvoicesTabContent({
       {
         id: "invoice_number",
         label: t.invoices_number,
-        accessor: (invoice) => invoice.invoice_number,
+        accessor: (invoice) => invoice.invoice_number || t.revenue_invoices_draft_number,
         sortable: true,
         searchable: true,
         required: true,
         width: 200,
-        render: (invoice) => (
-          <span className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
-            {invoice.invoice_number}
-          </span>
-        ),
+        render: (invoice) =>
+          invoice.invoice_number ? (
+            <span className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700">
+              {invoice.invoice_number}
+            </span>
+          ) : (
+            <span className="text-xs italic text-muted-foreground">
+              {t.revenue_invoices_draft_number}
+            </span>
+          ),
       },
       {
         id: "invoice_type",

@@ -36,6 +36,7 @@ mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
 mod document;
+mod release;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -574,7 +575,8 @@ struct InvoicePdfContext {
     patient_id: Uuid,
     invoice_number: String,
     invoice_type: String,
-    status: String,
+    /// Issued (numbered) invoice; drafts render as marked previews.
+    released: bool,
     portal_visible: bool,
     hide_amounts_from_patient: bool,
     pdf_visible_to_patient: bool,
@@ -684,14 +686,15 @@ fn is_valid_invoice_status(value: &str) -> bool {
 
 /// Manual invoice status moves. `paid` and `partially_paid` are derived from
 /// the payment journal, so asking for `sent` on a settled invoice only
-/// re-normalises it through `recompute_invoice_settlement_status`.
+/// re-normalises it through `recompute_invoice_settlement_status`. A released
+/// invoice never returns to draft: it is corrected by cancelling it.
 fn is_valid_invoice_status_transition(from: &str, to: &str) -> bool {
     if from == to {
         return true;
     }
     match from {
         "draft" => matches!(to, "sent" | "cancelled"),
-        "sent" => matches!(to, "draft" | "overdue" | "cancelled"),
+        "sent" => matches!(to, "overdue" | "cancelled"),
         "partially_paid" => matches!(to, "sent" | "overdue" | "cancelled"),
         "paid" => matches!(to, "sent"),
         "overdue" => matches!(to, "sent" | "cancelled"),
@@ -851,8 +854,10 @@ fn redact_patient_invoice_payload(invoice: &mut Value) {
     }
 }
 
-fn gen_invoice_number(seq: i64) -> String {
-    format!("INV-{}-{:04}", Utc::now().format("%Y%m%d"), seq)
+/// Invoice number assigned at release: the invoice date and the next value
+/// of the gapless counter (see `release`).
+fn gen_invoice_number(invoice_date: NaiveDate, seq: i64) -> String {
+    format!("INV-{}-{:04}", invoice_date.format("%Y%m%d"), seq)
 }
 
 fn parse_optional_date(value: Option<&str>) -> Result<Option<NaiveDate>, &'static str> {
@@ -2373,6 +2378,22 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "issued_on") => "Дата счёта",
         ("en", "issued_on") => "Invoice date",
         (_, "issued_on") => "Rechnungsdatum",
+        ("uk", "draft_number") => "Чернетка",
+        ("ru", "draft_number") => "Черновик",
+        ("en", "draft_number") => "Draft",
+        (_, "draft_number") => "Entwurf",
+        ("uk", "draft_notice") => {
+            "ЧЕРНЕТКА — не є рахунком. Номер і дату рахунку буде присвоєно під час випуску."
+        }
+        ("ru", "draft_notice") => {
+            "ЧЕРНОВИК — не является счётом. Номер и дата счёта присваиваются при выпуске."
+        }
+        ("en", "draft_notice") => {
+            "DRAFT – not a valid invoice. The number and invoice date are assigned on release."
+        }
+        (_, "draft_notice") => {
+            "ENTWURF – keine gültige Rechnung. Nummer und Rechnungsdatum werden bei der Ausstellung vergeben."
+        }
         ("uk", "invoice_number") => "Номер рахунку",
         ("ru", "invoice_number") => "Номер счёта",
         ("en", "invoice_number") => "Invoice number",
@@ -2754,6 +2775,10 @@ fn invoice_pdf_bank_cells(
 }
 
 fn invoice_pdf_filename(context: &InvoicePdfContext) -> String {
+    if !context.released {
+        let id = context.invoice_id.simple().to_string();
+        return format!("RECHNUNG-ENTWURF-{}.pdf", &id[..8]);
+    }
     let base = context
         .invoice_number
         .chars()
@@ -3807,7 +3832,7 @@ async fn load_invoice_detail(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.line_items, i.notes,
-                  i.created_at, i.updated_at,
+                  i.created_at, i.updated_at, i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
                   i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
@@ -4127,7 +4152,8 @@ async fn load_invoice_detail(
             row.try_get::<String, _>("last_name").unwrap_or_default()
         ).trim().to_string(),
         "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
-        "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+        "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+        "released_at": row.try_get::<Option<DateTime<Utc>>, _>("released_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -4207,6 +4233,7 @@ async fn load_invoice_pdf_context_on(
 ) -> Result<Option<InvoicePdfContext>, sqlx::Error> {
     let sql = format!(
         r#"SELECT i.id, i.patient_id, i.order_id, i.invoice_number, i.invoice_type, i.status,
+                  i.released_at IS NOT NULL AS released,
                   i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.prepayment_applied_amount, i.line_items, i.notes,
                   i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
@@ -4274,7 +4301,7 @@ async fn load_invoice_pdf_context_on(
             .unwrap_or_default()
             .unwrap_or_default(),
         invoice_type: row.try_get::<String, _>("invoice_type").unwrap_or_default(),
-        status: row.try_get::<String, _>("status").unwrap_or_default(),
+        released: row.try_get::<bool, _>("released").unwrap_or(false),
         portal_visible: row.try_get::<bool, _>("portal_visible").unwrap_or(true),
         hide_amounts_from_patient: row
             .try_get::<bool, _>("hide_amounts_from_patient")
@@ -4407,7 +4434,14 @@ fn invoice_pdf_vat_group_label(language: &str, row: &document::VatBreakdownRow) 
 
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
     let language = context.language.as_str();
-    let mut document = PdfDocument::new(&context.invoice_number);
+    // A draft has no number and no invoice date yet: it is printed as a
+    // marked preview, never as an invoice.
+    let document_number = if context.released {
+        context.invoice_number.clone()
+    } else {
+        invoice_pdf_label(language, "draft_number").to_uppercase()
+    };
+    let mut document = PdfDocument::new(&document_number);
     let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
     let patient_line = match context
@@ -4421,7 +4455,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     };
 
     let mut layout = InvoicePdfLayout::new(
-        context.invoice_number.clone(),
+        document_number.clone(),
         invoice_pdf_brand(&context.agency),
         invoice_pdf_label(language, "page_label").to_string(),
         regular_handle,
@@ -4482,15 +4516,29 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         0.0,
         2.0,
     );
+    if !context.released {
+        layout.text_block_centered(
+            invoice_pdf_label(language, "draft_notice"),
+            10.0,
+            true,
+            InvoicePdfColor::Primary,
+            0.0,
+            2.0,
+        );
+    }
 
     let mut meta_cells = vec![
         (
             invoice_pdf_label(language, "invoice_number"),
-            context.invoice_number.clone(),
+            document_number.clone(),
         ),
         (
             invoice_pdf_label(language, "issued_on"),
-            format_invoice_pdf_date(Some(invoice_document_date(context.issued_at))),
+            format_invoice_pdf_date(
+                context
+                    .released
+                    .then(|| invoice_document_date(context.issued_at)),
+            ),
         ),
         (
             invoice_pdf_label(language, "due_date"),
@@ -4810,7 +4858,7 @@ async fn list_my_invoices(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.notes,
-                  i.created_at, i.updated_at,
+                  i.created_at, i.updated_at, i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
                   o.order_number, i.currency, q.quote_number,
@@ -4846,7 +4894,9 @@ async fn list_my_invoices(
            LEFT JOIN orders o ON o.id = i.order_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE i.patient_id = $2
-             AND i.status <> 'draft'
+             -- Issued invoices only: a draft, or a draft cancelled before
+             -- release, never reached the patient.
+             AND i.released_at IS NOT NULL
              AND i.portal_visible = true
              AND ($3::text IS NULL OR i.status = $3)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
@@ -4881,7 +4931,8 @@ async fn list_my_invoices(
                         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
                         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                         "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
-                        "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                        "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+                        "released_at": row.try_get::<Option<DateTime<Utc>>, _>("released_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -4946,12 +4997,9 @@ async fn get_my_invoice(
     {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
-    if !invoice_is_patient_visible(
-        invoice
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-    ) {
+    // Only issued invoices reach the patient; a draft cancelled before its
+    // release was never issued.
+    if invoice.get("released_at").is_none_or(Value::is_null) {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
     if !invoice
@@ -5377,6 +5425,7 @@ async fn list_invoices(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.created_at, i.updated_at,
+                  i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
                   o.order_number, i.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
@@ -5445,7 +5494,8 @@ async fn list_invoices(
                         row.try_get::<String, _>("last_name").unwrap_or_default()
                     ).trim().to_string(),
                     "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
-                    "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
+                    "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+                    "released_at": row.try_get::<Option<DateTime<Utc>>, _>("released_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                     "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
@@ -6057,20 +6107,8 @@ async fn create_patient_billing_invoice(
         );
     };
 
-    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
-        .fetch_one(&mut *transaction)
-        .await
-    {
-        Ok(value) => value,
-        Err(error) => {
-            tracing::error!(%error, "patient billing invoice sequence");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create invoice",
-            );
-        }
-    };
-    let invoice_number = gen_invoice_number(seq);
+    // Drafts carry no invoice number; it is assigned when the invoice is
+    // released (see `release`).
     let payer = match body.order_id {
         Some(order_id) => inherited_invoice_payer(&state.db, order_id, patient_id).await,
         None => InheritedInvoicePayer::default(),
@@ -6082,18 +6120,17 @@ async fn create_patient_billing_invoice(
     });
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
-                quote_id, order_id, patient_id, invoice_number, invoice_type, status, currency,
+                quote_id, order_id, patient_id, invoice_type, status, currency,
                 due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
-           ) VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17, $18, $19)
+           ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12,
+                     $13, $14, $15, $16, $17, $18)
            RETURNING id"#,
     )
     .bind(body.quote_id)
     .bind(body.order_id)
     .bind(patient_id)
-    .bind(&invoice_number)
     .bind(&invoice_type)
     .bind(&currency)
     .bind(due_date)
@@ -6279,7 +6316,7 @@ async fn create_patient_billing_invoice(
         Some(auth.user_id),
         "invoice.created",
         invoice_id,
-        json!({"invoice_number": invoice_number, "patient_id": patient_id, "order_id": body.order_id, "status": "draft"}),
+        json!({"invoice_number": null, "patient_id": patient_id, "order_id": body.order_id, "status": "draft"}),
     )
     .await;
     match load_invoice_detail(&state, invoice_id, &auth).await {
@@ -6341,21 +6378,8 @@ async fn create_invoice_from_quote(
         return resp;
     }
 
-    let seq: i64 = match sqlx::query_scalar("SELECT nextval('invoice_number_seq')")
-        .fetch_one(&state.db)
-        .await
-    {
-        Ok(value) => value,
-        Err(e) => {
-            tracing::error!(error = %e, "invoice sequence");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create invoice",
-            );
-        }
-    };
-
-    let invoice_number = gen_invoice_number(seq);
+    // Drafts carry no invoice number; it is assigned when the invoice is
+    // released (see `release`).
     let notes = body.notes.clone().or(ctx.notes.clone());
     let payer = inherited_invoice_payer(&state.db, ctx.order_id, ctx.patient_id).await;
     let mut transaction = match state.db.begin().await {
@@ -6374,19 +6398,18 @@ async fn create_invoice_from_quote(
 
     match sqlx::query(
         r#"INSERT INTO invoices (
-                quote_id, order_id, patient_id, invoice_number, invoice_type, status,
+                quote_id, order_id, patient_id, invoice_type, status,
                 due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
            ) VALUES (
-                $1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10, $11, $12,
-                $13, $14, $15, $16, $17, $18
+                $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11,
+                $12, $13, $14, $15, $16, $17
            ) RETURNING id"#,
     )
     .bind(ctx.quote_id)
     .bind(ctx.order_id)
     .bind(ctx.patient_id)
-    .bind(invoice_number.clone())
     .bind(invoice_type.clone())
     .bind(due_date)
     .bind(invoice_snapshot.total_net)
@@ -6525,7 +6548,7 @@ async fn create_invoice_from_quote(
                 "invoice",
                 Some(invoice_id),
                 serde_json::json!({
-                    "invoice_number": invoice_number,
+                    "invoice_number": null,
                     "invoice_type": invoice_type,
                     "quote_id": ctx.quote_id,
                     "order_id": ctx.order_id,
@@ -6543,7 +6566,7 @@ async fn create_invoice_from_quote(
                 "invoice.created",
                 invoice_id,
                 serde_json::json!({
-                    "invoice_number": invoice_number,
+                    "invoice_number": null,
                     "invoice_type": invoice_type,
                     "quote_id": ctx.quote_id,
                     "order_id": ctx.order_id,
@@ -10229,7 +10252,7 @@ async fn download_my_invoice_pdf(
     if context.patient_id != patient_id {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
-    if !invoice_is_patient_visible(&context.status) || !context.portal_visible {
+    if !context.released || !context.portal_visible {
         return err(StatusCode::NOT_FOUND, "Invoice not found");
     }
     if context.hide_amounts_from_patient || !context.pdf_visible_to_patient {
@@ -10416,7 +10439,7 @@ async fn attach_zugferd_xml(
     context: &InvoicePdfContext,
     pdf: Vec<u8>,
 ) -> Vec<u8> {
-    if context.status == "draft" {
+    if !context.released {
         return pdf;
     }
     let invoice = match load_einvoice(conn, context.invoice_id).await {
@@ -10914,10 +10937,12 @@ async fn update_invoice_payer(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
-    let row = match sqlx::query("SELECT patient_id FROM invoices WHERE id = $1")
-        .bind(invoice_id)
-        .fetch_optional(&state.db)
-        .await
+    let row = match sqlx::query(
+        "SELECT patient_id, released_at IS NOT NULL AS released FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
@@ -10933,6 +10958,13 @@ async fn update_invoice_payer(
     let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
+    }
+    // The recipient is part of the issued document.
+    if row.try_get::<bool, _>("released").unwrap_or(false) {
+        return err(
+            StatusCode::CONFLICT,
+            "The payer of a released invoice cannot change; cancel the invoice and issue a new one",
+        );
     }
 
     if let Some(relation_id) = body.payer_patient_relation_id {
@@ -11147,6 +11179,7 @@ async fn update_invoice_status(
 
     let locked_invoice = match sqlx::query(
         r#"SELECT invoice.status, invoice.invoice_type, invoice.due_date,
+                  invoice.invoice_number, invoice.released_at IS NOT NULL AS released,
                   invoice.prepayment_applied_amount, invoice.credited_amount,
                   COALESCE((
                       SELECT SUM(
@@ -11196,10 +11229,28 @@ async fn update_invoice_status(
     let locked_credited_amount = locked_invoice
         .try_get::<Decimal, _>("credited_amount")
         .unwrap_or(Decimal::ZERO);
+    let locked_due_date = locked_invoice
+        .try_get::<Option<NaiveDate>, _>("due_date")
+        .unwrap_or_default();
+    let locked_invoice_number = locked_invoice
+        .try_get::<Option<String>, _>("invoice_number")
+        .unwrap_or_default();
+    let locked_released = locked_invoice
+        .try_get::<bool, _>("released")
+        .unwrap_or(false);
     if locked_status == "cancelled" && requested_status != "cancelled" {
         return err(
             StatusCode::CONFLICT,
             "Cancelled invoices cannot be reactivated",
+        );
+    }
+    // A draft becomes an invoice only by being released (sent).
+    if locked_status == "draft"
+        && !matches!(requested_status.as_str(), "draft" | "sent" | "cancelled")
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "A draft invoice must be released before it can be settled",
         );
     }
     let settles_through_payment = requested_paid_amount.is_some()
@@ -11212,17 +11263,46 @@ async fn update_invoice_status(
             "Invoice status cannot move from the current status to the requested one",
         );
     }
-    if requested_status == "draft"
-        && locked_status != "draft"
-        && (locked_paid_amount > Decimal::ZERO
-            || locked_prepayment_amount > Decimal::ZERO
-            || locked_credited_amount > Decimal::ZERO)
+    if requested_status == "draft" && (locked_status != "draft" || locked_released) {
+        return err(
+            StatusCode::CONFLICT,
+            "A released invoice cannot return to draft; cancel it and issue a new invoice",
+        );
+    }
+    // The due date is part of the issued invoice; a dunning letter sets a new
+    // payment deadline instead. Released invoices without one may get it.
+    if locked_released
+        && locked_due_date.is_some()
+        && due_date.is_some()
+        && due_date != locked_due_date
     {
         return err(
             StatusCode::CONFLICT,
-            "An invoice with payments, prepayments or credit notes cannot return to draft",
+            "The due date of a released invoice cannot change; a payment reminder sets a new deadline",
         );
     }
+    let releasing = locked_status == "draft" && requested_status == "sent";
+    let invoice_date = invoice_document_date(Utc::now());
+    let release_due_date = if releasing {
+        let payment_term_days =
+            match release::load_invoice_payment_term_days(&mut *transaction).await {
+                Ok(days) => days,
+                Err(error) => {
+                    tracing::error!(%error, %invoice_id, "load invoice payment term");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to update invoice",
+                    );
+                }
+            };
+        match release::release_due_date(invoice_date, due_date, locked_due_date, payment_term_days)
+        {
+            Ok(value) => Some(value),
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        }
+    } else {
+        None
+    };
     if requested_status == "overdue" && locked_status != "overdue" {
         let effective_due_date = due_date.or(locked_invoice
             .try_get::<Option<NaiveDate>, _>("due_date")
@@ -11451,23 +11531,48 @@ async fn update_invoice_status(
         );
     }
 
+    // The number is taken last, right before the release is written, so the
+    // counter row stays locked only briefly. Drafts numbered before numbers
+    // moved to release keep theirs.
+    let release_number = if releasing && locked_invoice_number.is_none() {
+        match release::next_invoice_number(&mut *transaction, invoice_date).await {
+            Ok(number) => Some(number),
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "assign invoice number");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        }
+    } else {
+        None
+    };
+
     match sqlx::query(
         // A draft is not issued yet: the invoice date is the day it is
-        // released, not the day the draft was prepared.
+        // released, not the day the draft was prepared, and it is numbered
+        // then.
         r#"UPDATE invoices
            SET status = $2,
                issued_at = CASE
                    WHEN status = 'draft' AND $2 = 'sent' THEN now()
                    ELSE issued_at
                END,
+               released_at = CASE
+                   WHEN status = 'draft' AND $2 = 'sent' THEN now()
+                   ELSE released_at
+               END,
+               invoice_number = COALESCE(invoice_number, $5),
                due_date = COALESCE($3, due_date),
                notes = COALESCE($4, notes)
            WHERE id = $1"#,
     )
     .bind(invoice_id)
     .bind(requested_status.clone())
-    .bind(due_date)
+    .bind(release_due_date.or(due_date))
     .bind(body.notes.clone())
+    .bind(release_number.clone())
     .execute(&mut *transaction)
     .await
     {
@@ -11622,6 +11727,11 @@ async fn update_invoice_status(
                 return resp;
             }
 
+            let released_number = if releasing {
+                release_number.clone().or(locked_invoice_number.clone())
+            } else {
+                None
+            };
             state.audit_sender.try_send(audit::domain_event(
                 "update_invoice_status",
                 Some(auth.user_id),
@@ -11632,7 +11742,9 @@ async fn update_invoice_status(
                     "paid_amount": decimal_to_string(effective_paid_amount),
                     "prepayment_applied_amount": decimal_to_string(effective_prepayment_amount),
                     "legacy_payment_transaction_id": legacy_payment_transaction_id,
-                    "due_date": due_date.map(|value| value.to_string()),
+                    "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
+                    "released": releasing,
+                    "invoice_number": released_number,
                 }),
             ));
 
@@ -11645,8 +11757,9 @@ async fn update_invoice_status(
                     "patient_id": patient_id,
                     "status": effective_status,
                     "paid_amount": decimal_to_string(effective_paid_amount),
-                    "due_date": due_date.map(|value| value.to_string()),
+                    "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
                     "paid_at": paid_at_payload,
+                    "released": releasing,
                 }),
             )
             .await;
@@ -11684,7 +11797,7 @@ mod tests {
             patient_id: Uuid::new_v4(),
             invoice_number: "INV-UNIT-1".to_string(),
             invoice_type: "final".to_string(),
-            status: "sent".to_string(),
+            released: true,
             portal_visible: true,
             hide_amounts_from_patient: false,
             pdf_visible_to_patient: true,
@@ -11867,10 +11980,7 @@ mod tests {
         assert!(text.contains("Rechnungsnummer"));
         assert!(text.contains("Rechnungsdatum"));
         // The full order number, however long.
-        assert!(
-            text.contains("A-20260927-0001-FAMILIE-KOPF-2"),
-            "{text}"
-        );
+        assert!(text.contains("A-20260927-0001-FAMILIE-KOPF-2"), "{text}");
         // VAT breakdown per rate and the totals.
         assert!(text.contains("19 %"));
         assert!(text.contains("0 % (steuerbefreit)"));

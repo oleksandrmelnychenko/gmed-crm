@@ -88,7 +88,8 @@ export type TerminationSettlement = {
   lines: TerminationSettlementLine[];
   final_invoice: {
     id: string;
-    invoice_number: string;
+    /** Assigned when the draft is released. */
+    invoice_number: string | null;
     status: string;
     total_gross: DecimalString;
   } | null;
@@ -105,7 +106,8 @@ export type TerminationSettlementFilter = TerminationSettlementStatus | "all";
 
 export type FinalInvoiceResult = {
   id: string;
-  invoice_number: string;
+  /** Drafts carry no number until they are released. */
+  invoice_number: string | null;
   termination_settlement_id: string;
   idempotent_replay: boolean;
 };

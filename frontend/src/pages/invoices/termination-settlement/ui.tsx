@@ -277,8 +277,11 @@ export function SettlementActions({
       const invoice = await createTerminationFinalInvoice(settlement.order_id);
       toast.success(
         invoice.idempotent_replay
-          ? tx(`Черновик ${invoice.invoice_number} уже существует.`, `Entwurf ${invoice.invoice_number} existiert bereits.`)
-          : tx(`Черновик финального счёта ${invoice.invoice_number} создан.`, `Entwurf der Schlussrechnung ${invoice.invoice_number} erstellt.`),
+          ? tx("Черновик финального счёта уже существует.", "Der Entwurf der Schlussrechnung existiert bereits.")
+          : tx(
+              "Черновик финального счёта создан. Номер он получит при выпуске.",
+              "Entwurf der Schlussrechnung erstellt. Die Nummer erhält er bei der Ausstellung.",
+            ),
       );
       onChanged();
       onInvoiceCreated?.(invoice.id);
@@ -378,7 +381,7 @@ export function FinalInvoiceLink({
         className="font-mono text-xs font-semibold text-primary hover:underline"
         to={`/invoices?invoice=${encodeURIComponent(invoice.id)}`}
       >
-        {invoice.invoice_number}
+        {invoice.invoice_number || (lang === "de" ? "Entwurf" : "Черновик")}
       </StaffLink>
       <StatusBadge status={invoice.status}>{finalInvoiceStatusLabel(invoice.status, lang)}</StatusBadge>
       <span className="font-mono text-xs tabular-nums text-muted-foreground">

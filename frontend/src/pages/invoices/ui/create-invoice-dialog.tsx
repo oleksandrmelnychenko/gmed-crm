@@ -153,6 +153,11 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   </FormField>
                 </div>
                 <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">{typeHints[form.invoiceType]}</p>
+                <p className="text-xs leading-5 text-muted-foreground" data-testid="invoice-draft-numbering-hint">
+                  {de
+                    ? "Die Rechnung wird als Entwurf ohne Nummer angelegt. Nummer und Rechnungsdatum erhält sie erst bei der Ausstellung; das Fälligkeitsdatum darf dann nicht vor dem Rechnungsdatum liegen."
+                    : "Счёт создаётся черновиком без номера. Номер и дату счёта он получает только при выпуске; срок оплаты тогда не может быть раньше даты счёта."}
+                </p>
 
                 <section aria-label={de ? "Rechnungspositionen" : "Позиции счёта"} className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2.5">

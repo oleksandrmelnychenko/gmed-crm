@@ -11,6 +11,12 @@ import {
   isCoveredByPrepaymentOnly,
   formatCurrency,
   formatDate,
+  canEditInvoiceDueDate,
+  canPickInvoiceStatus,
+  defaultReleaseDueDate,
+  invoiceDisplayNumber,
+  invoiceStatusFormProblem,
+  isInvoiceReleased,
   invoiceRecipientAddressLines,
   payerFormToPayload,
   payerRelationOptionLabel,
@@ -30,6 +36,51 @@ it("formats both date-only values and timestamps as a date", () => {
   expect(formatDate("2026-09-25T12:00:00+00:00", "de-DE")).not.toContain("T");
   expect(formatDate("2026-09-25T12:00:00+00:00", "de-DE")).toContain("2026");
   expect(formatDate(null, "de-DE", "—")).toBe("—");
+});
+
+describe("invoice release and numbering", () => {
+  const today = new Date(2026, 8, 27);
+
+  it("never offers a way back to draft once an invoice is released", () => {
+    expect(canPickInvoiceStatus("draft", "sent")).toBe(true);
+    expect(canPickInvoiceStatus("draft", "cancelled")).toBe(true);
+    expect(canPickInvoiceStatus("sent", "draft")).toBe(false);
+    expect(canPickInvoiceStatus("overdue", "draft")).toBe(false);
+    expect(canPickInvoiceStatus("sent", "cancelled")).toBe(true);
+  });
+
+  it("labels drafts without a number and tells released invoices apart", () => {
+    expect(invoiceDisplayNumber({ invoice_number: null }, "Entwurf")).toBe("Entwurf");
+    expect(invoiceDisplayNumber({ invoice_number: "INV-20260927-0042" }, "Entwurf")).toBe(
+      "INV-20260927-0042",
+    );
+    expect(isInvoiceReleased({ status: "cancelled", released_at: null })).toBe(false);
+    expect(isInvoiceReleased({ status: "cancelled", released_at: "2026-09-27T10:00:00Z" })).toBe(true);
+    expect(isInvoiceReleased({ status: "sent" })).toBe(true);
+  });
+
+  it("requires a due date on or after the invoice date when releasing", () => {
+    const draft = { status: "draft", released_at: null, due_date: null };
+    expect(invoiceStatusFormProblem(draft, { status: "sent", dueDate: "2026-09-26" }, today)).toBe(
+      "due_date_before_invoice_date",
+    );
+    expect(invoiceStatusFormProblem(draft, { status: "sent", dueDate: "2026-09-27" }, today)).toBeNull();
+    expect(invoiceStatusFormProblem(draft, { status: "sent", dueDate: "" }, today)).toBeNull();
+    // Only the release checks the date; a draft may keep an old one until then.
+    expect(invoiceStatusFormProblem(draft, { status: "draft", dueDate: "2026-09-01" }, today)).toBeNull();
+    expect(defaultReleaseDueDate(today)).toBe("2026-10-11");
+  });
+
+  it("keeps the due date of a released invoice", () => {
+    const released = { status: "sent", released_at: "2026-09-20T10:00:00Z", due_date: "2026-10-04" };
+    expect(invoiceStatusFormProblem(released, { status: "sent", dueDate: "2026-10-30" }, today)).toBe(
+      "due_date_locked",
+    );
+    expect(invoiceStatusFormProblem(released, { status: "overdue", dueDate: "2026-10-04" }, today)).toBeNull();
+    expect(canEditInvoiceDueDate(released)).toBe(false);
+    expect(canEditInvoiceDueDate({ ...released, due_date: null })).toBe(true);
+    expect(canEditInvoiceDueDate({ status: "draft", released_at: null, due_date: "2026-10-04" })).toBe(true);
+  });
 });
 
 describe("invoice payer and recipient", () => {

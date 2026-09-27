@@ -33,10 +33,12 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
 /**
  * Manual status moves accepted by POST /invoices/{id}/status. `paid` and
  * `partially_paid` are derived from the payment journal and never picked by hand.
+ * Sending a draft releases it (number, invoice date); a released invoice never
+ * returns to draft.
  */
 const INVOICE_STATUS_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   draft: ["sent", "cancelled"],
-  sent: ["draft", "overdue", "cancelled"],
+  sent: ["overdue", "cancelled"],
   partially_paid: ["sent", "overdue", "cancelled"],
   paid: [],
   overdue: ["sent", "cancelled"],
@@ -48,6 +50,66 @@ export function canPickInvoiceStatus(current: string, next: InvoiceStatus): bool
     current === next ||
     (INVOICE_STATUS_TRANSITIONS[current as InvoiceStatus] ?? []).includes(next)
   );
+}
+
+/** Payment term the server applies when a draft is released without a due date. */
+export const DEFAULT_INVOICE_PAYMENT_TERM_DAYS = 14;
+
+/** Whether the invoice was issued (numbered); drafts, also cancelled ones, were not. */
+export function isInvoiceReleased(invoice: Pick<InvoiceItem, "released_at" | "status">) {
+  if (invoice.released_at !== undefined) return Boolean(invoice.released_at);
+  return invoice.status !== "draft";
+}
+
+/** The invoice number, or the draft label for an invoice not released yet. */
+export function invoiceDisplayNumber(
+  invoice: Pick<InvoiceItem, "invoice_number">,
+  draftLabel: string,
+) {
+  return invoice.invoice_number?.trim() || draftLabel;
+}
+
+function isoDate(value: Date) {
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${value.getFullYear()}-${month}-${day}`;
+}
+
+/** Due date the server sets on release when none is given: today + payment term. */
+export function defaultReleaseDueDate(today: Date, termDays = DEFAULT_INVOICE_PAYMENT_TERM_DAYS) {
+  const due = new Date(today.getFullYear(), today.getMonth(), today.getDate() + termDays);
+  return isoDate(due);
+}
+
+/**
+ * Why the status form cannot be saved as it is: a draft is released with a due
+ * date on or after the invoice date (today); a released invoice keeps its due date.
+ */
+export function invoiceStatusFormProblem(
+  invoice: Pick<InvoiceItem, "status" | "released_at" | "due_date">,
+  form: Pick<StatusForm, "status" | "dueDate">,
+  today: Date,
+): "due_date_before_invoice_date" | "due_date_locked" | null {
+  const releasing = invoice.status === "draft" && form.status === "sent";
+  if (releasing && form.dueDate && form.dueDate < isoDate(today)) {
+    return "due_date_before_invoice_date";
+  }
+  if (
+    isInvoiceReleased(invoice) &&
+    invoice.due_date &&
+    form.dueDate &&
+    form.dueDate !== invoice.due_date
+  ) {
+    return "due_date_locked";
+  }
+  return null;
+}
+
+/** A released invoice keeps its due date; one issued without it may still get one. */
+export function canEditInvoiceDueDate(
+  invoice: Pick<InvoiceItem, "status" | "released_at" | "due_date">,
+) {
+  return !isInvoiceReleased(invoice) || !invoice.due_date;
 }
 
 export const DEFAULT_FILTERS: Filters = {
