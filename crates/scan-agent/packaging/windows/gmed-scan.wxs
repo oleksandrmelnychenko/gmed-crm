@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Per-machine Windows installer for the GMED scan station (WiX Toolset 5).
+
+  Installs gmed-scan.exe into "Program Files\GMED Scan", adds that folder to
+  the system PATH (for the command line and folder watching), and creates
+  "GMED Scan" shortcuts in the Start menu and on the desktop that open the
+  interactive station. Built by .github/workflows/scan-agent.yml:
+
+    wix build gmed-scan.wxs -arch x64 -d Version=0.1.0 -d BinaryPath=...\gmed-scan.exe -o gmed-scan.msi
+
+  The UpgradeCode must never change: it lets a newer MSI replace an older one.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="GMED Scan"
+           Manufacturer="GMED"
+           Version="$(var.Version)"
+           UpgradeCode="E16877E3-B0AC-4E1F-A9A9-84AE9B1238F0"
+           Scope="perMachine"
+           Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of GMED Scan is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="GMED Scan">
+        <Component Id="ScanAgent">
+          <File Id="GmedScanExe" Source="$(var.BinaryPath)" Name="gmed-scan.exe" KeyPath="yes" />
+          <Environment Id="PathEntry"
+                       Name="PATH"
+                       Value="[INSTALLFOLDER]"
+                       Action="set"
+                       Part="last"
+                       System="yes"
+                       Permanent="no" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="GmedScanStartMenu"
+                  Name="GMED Scan"
+                  Description="Scan documents into the GMED intake queue"
+                  Target="[INSTALLFOLDER]gmed-scan.exe"
+                  Arguments="station"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\GMED\GMED Scan"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut">
+        <Shortcut Id="GmedScanDesktop"
+                  Name="GMED Scan"
+                  Description="Scan documents into the GMED intake queue"
+                  Target="[INSTALLFOLDER]gmed-scan.exe"
+                  Arguments="station"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\GMED\GMED Scan"
+                       Name="DesktopShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="GMED Scan">
+      <ComponentRef Id="ScanAgent" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+  </Package>
+</Wix>

@@ -5,6 +5,7 @@ members = [
     "crates/shared",
     "crates/db",
     "crates/server",
+    "crates/scan-agent",
 ]
 
 [workspace.package]
