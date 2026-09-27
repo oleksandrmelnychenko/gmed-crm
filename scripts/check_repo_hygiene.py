@@ -32,6 +32,8 @@ FORBIDDEN_TRACKED_PATHS = (
 # update this constant in the same commit.
 # Data-only migrations leave this ratchet unchanged; touching this policy block
 # keeps the migration visible during review without weakening the audit budget.
+# 20260927131600 closes checklist items of completed tasks and writes their
+# audit rows inside the migration transaction (no handler insert).
 AUDIT_INSERT_BUDGET = 6
 AUDIT_SEARCH_PATH = "crates/server/src/routes/"
 AUDIT_PATTERN = "INSERT INTO audit_log"

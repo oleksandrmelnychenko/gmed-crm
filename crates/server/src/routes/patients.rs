@@ -9080,6 +9080,8 @@ async fn get_patient_timeline(
                        WHEN al.action = 'feedback_reviewed' THEN 'Patient feedback reviewed'
                        WHEN al.action = 'workflow_checklist_item_created' THEN 'Workflow checklist item created'
                        WHEN al.action = 'workflow_checklist_item_completed' THEN 'Workflow checklist item completed'
+                       WHEN al.action = 'workflow_checklist_item_not_required' THEN 'Workflow checklist item marked not required'
+                       WHEN al.action = 'workflow_checklist_item_reopened' THEN 'Workflow checklist item reopened'
                        ELSE 'Legal/compliance status updated'
                    END AS title,
                    CASE
@@ -9095,7 +9097,8 @@ async fn get_patient_timeline(
                        WHEN al.action IN (
                            'privacy_request_created',
                            'feedback_submitted',
-                           'workflow_checklist_item_created'
+                           'workflow_checklist_item_created',
+                           'workflow_checklist_item_reopened'
                        ) THEN 'open'
                        WHEN al.action IN ('privacy_request_reviewed') THEN 'in_progress'
                        ELSE 'completed'
@@ -9116,6 +9119,8 @@ async fn get_patient_timeline(
                         'feedback_reviewed',
                         'workflow_checklist_item_created',
                         'workflow_checklist_item_completed',
+                        'workflow_checklist_item_not_required',
+                        'workflow_checklist_item_reopened',
                         'privacy_request_created',
                         'privacy_request_reviewed',
                         'privacy_request_executed'

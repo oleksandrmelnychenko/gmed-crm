@@ -277,6 +277,10 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
           t.project_id, project.name AS project_name,
+          t.order_id, linked_order.order_number AS order_number,
+          checklist_link.id AS workflow_checklist_item_id,
+          checklist_link.scope_type AS workflow_checklist_scope_type,
+          checklist_link.scope_id AS workflow_checklist_scope_id,
           t.external_assignee_type, t.external_assignee_name,
           t.external_assignee_phone, t.external_assignee_email,
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -299,6 +303,14 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
    LEFT JOIN patients patient ON patient.id = t.patient_id
    LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
    LEFT JOIN crm_projects project ON project.id = t.project_id
+   LEFT JOIN orders linked_order ON linked_order.id = t.order_id
+   LEFT JOIN LATERAL (
+       SELECT link.id, link.scope_type, link.scope_id
+       FROM workflow_checklist_items link
+       WHERE link.linked_task_id = t.id
+       ORDER BY link.created_at
+       LIMIT 1
+   ) checklist_link ON true
    WHERE t.id = $1
      AND t.task_scope IN ('general', 'concierge_operational')
      AND t.deleted_at IS NULL"#;
@@ -373,6 +385,10 @@ async fn list_items(
                   t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
                   t.project_id, project.name AS project_name,
+                  t.order_id, linked_order.order_number AS order_number,
+                  checklist_link.id AS workflow_checklist_item_id,
+                  checklist_link.scope_type AS workflow_checklist_scope_type,
+                  checklist_link.scope_id AS workflow_checklist_scope_id,
                   t.external_assignee_type, t.external_assignee_name,
                   t.external_assignee_phone, t.external_assignee_email,
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL) AS checklist_total,
@@ -395,6 +411,14 @@ async fn list_items(
            LEFT JOIN patients patient ON patient.id = t.patient_id
            LEFT JOIN providers task_provider ON task_provider.id = t.provider_id
            LEFT JOIN crm_projects project ON project.id = t.project_id
+           LEFT JOIN orders linked_order ON linked_order.id = t.order_id
+           LEFT JOIN LATERAL (
+               SELECT link.id, link.scope_type, link.scope_id
+               FROM workflow_checklist_items link
+               WHERE link.linked_task_id = t.id
+               ORDER BY link.created_at
+               LIMIT 1
+           ) checklist_link ON true
            WHERE t.task_scope IN ('general', 'concierge_operational')
              AND t.deleted_at IS NULL
              AND ($1::uuid IS NULL OR t.assigned_to = $1)
@@ -1671,13 +1695,17 @@ async fn update_item(
         tracing::error!(error = %error, item_id = %item_id, "record concierge task update history");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    let completed_checklist_items = if existing_status == body.status {
-        Vec::new()
-    } else {
-        match complete_linked_checklist_items(&mut tx, item_id, &body.status, auth.user_id).await {
-            Ok(value) => value,
-            Err(response) => return response,
-        }
+    let checklist_changes = match sync_linked_checklist_items(
+        &mut tx,
+        item_id,
+        &existing_status,
+        &body.status,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
     };
     // A reassigned task is new work for its next assignee, exactly like a
     // newly created one; without this they only find it by chance.
@@ -1727,11 +1755,10 @@ async fn update_item(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
         &state,
         auth.user_id,
-        item_id,
-        &completed_checklist_items,
+        &checklist_changes,
     )
     .await;
     state.audit_sender.try_send(audit::domain_event(
@@ -1918,11 +1945,18 @@ pub(crate) async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "record concierge task status history");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    let completed_checklist_items =
-        match complete_linked_checklist_items(&mut tx, item_id, &body.status, auth.user_id).await {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
+    let checklist_changes = match sync_linked_checklist_items(
+        &mut tx,
+        item_id,
+        &previous_status,
+        &body.status,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let creator_notification = if auth.user_id != assigned_by {
         match insert_task_notification(
             &mut tx,
@@ -1944,11 +1978,10 @@ pub(crate) async fn update_item_status(
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task status update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    crate::routes::workflow_checklists::publish_task_completed_checklist_items(
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
         &state,
         auth.user_id,
-        item_id,
-        &completed_checklist_items,
+        &checklist_changes,
     )
     .await;
     state.audit_sender.try_send(audit::domain_event(
@@ -2209,6 +2242,7 @@ async fn delete_item(
                   EXISTS(SELECT 1 FROM concierge_operational_task_checklist_items checklist WHERE checklist.task_id = task.id AND checklist.deleted_at IS NULL) AS has_checklist,
                   EXISTS(SELECT 1 FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = task.id AND attachment.deleted_at IS NULL) AS has_attachments,
                   EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL) AS has_children,
+                  EXISTS(SELECT 1 FROM workflow_checklist_items checklist_link WHERE checklist_link.linked_task_id = task.id) AS workflow_checklist_task,
                   creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
@@ -2251,8 +2285,22 @@ async fn delete_item(
             || task.try_get::<bool, _>("has_checklist").unwrap_or(true)
             || task.try_get::<bool, _>("has_attachments").unwrap_or(true),
         has_children: task.try_get::<bool, _>("has_children").unwrap_or(true),
+        workflow_checklist_task: task
+            .try_get::<bool, _>("workflow_checklist_task")
+            .unwrap_or(true),
     };
     if let Err((status, message)) = validate_operational_item_deletion(&auth, &deletion) {
+        if message == WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE {
+            return (
+                status,
+                Json(serde_json::json!({
+                    "error": status.canonical_reason().unwrap_or("error"),
+                    "code": WORKFLOW_CHECKLIST_TASK_DELETE_CODE,
+                    "message": message,
+                })),
+            )
+                .into_response();
+        }
         return err(status, message);
     }
     if let Err(error) = sqlx::query(
@@ -4326,6 +4374,11 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "provider_email": row.try_get::<Option<String>, _>("provider_email").unwrap_or_default(),
         "project_id": row.try_get::<Option<Uuid>, _>("project_id").unwrap_or_default(),
         "project_name": row.try_get::<Option<String>, _>("project_name").unwrap_or_default(),
+        "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+        "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
+        "workflow_checklist_item_id": row.try_get::<Option<Uuid>, _>("workflow_checklist_item_id").unwrap_or_default(),
+        "workflow_checklist_scope_type": row.try_get::<Option<String>, _>("workflow_checklist_scope_type").unwrap_or_default(),
+        "workflow_checklist_scope_id": row.try_get::<Option<Uuid>, _>("workflow_checklist_scope_id").unwrap_or_default(),
         "external_assignee_type": row.try_get::<Option<String>, _>("external_assignee_type").unwrap_or_default(),
         "external_assignee_name": row.try_get::<Option<String>, _>("external_assignee_name").unwrap_or_default(),
         "external_assignee_phone": row.try_get::<Option<String>, _>("external_assignee_phone").unwrap_or_default(),
@@ -4397,25 +4450,24 @@ async fn publish_operational_event(
 }
 
 /// Order and patient checklist items follow their linked task when it is
-/// completed from the work center or the patient card.
-async fn complete_linked_checklist_items(
+/// completed, cancelled or reopened from the work center or the patient card.
+async fn sync_linked_checklist_items(
     tx: &mut Transaction<'_, Postgres>,
     item_id: Uuid,
+    previous_status: &str,
     status: &str,
     actor_id: Uuid,
-) -> Result<
-    Vec<crate::routes::workflow_checklists::TaskCompletedChecklistItem>,
-    axum::response::Response,
-> {
-    if status != "completed" {
-        return Ok(Vec::new());
-    }
-    crate::routes::workflow_checklists::complete_checklist_items_for_task(
-        &mut **tx, item_id, actor_id,
+) -> Result<Vec<crate::routes::workflow_checklists::ChecklistItemSync>, axum::response::Response> {
+    crate::routes::workflow_checklists::sync_checklist_items_for_task_status(
+        tx,
+        item_id,
+        previous_status,
+        status,
+        actor_id,
     )
     .await
     .map_err(|error| {
-        tracing::error!(error = %error, item_id = %item_id, "complete workflow checklist items for task");
+        tracing::error!(error = %error, item_id = %item_id, "sync workflow checklist items with task status");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })
 }
@@ -4634,7 +4686,12 @@ struct OperationalItemDeletion<'a> {
     archived: bool,
     has_work: bool,
     has_children: bool,
+    /// The task backs an order or patient checklist item.
+    workflow_checklist_task: bool,
 }
+
+const WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE: &str = "This task belongs to an order or patient checklist item and cannot be deleted; mark the checklist item as not required instead";
+const WORKFLOW_CHECKLIST_TASK_DELETE_CODE: &str = "workflow_checklist_task_delete";
 
 fn validate_operational_item_deletion(
     auth: &AuthUser,
@@ -4645,6 +4702,11 @@ fn validate_operational_item_deletion(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can delete this task",
         ));
+    }
+    // A deleted checklist task would leave its checklist item open behind a
+    // task nobody can see, blocking the order; "not required" closes both.
+    if task.workflow_checklist_task {
+        return Err((StatusCode::CONFLICT, WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE));
     }
     if task.archived {
         return Err((
@@ -4933,6 +4995,7 @@ mod work_center_tests {
                     archived: false,
                     has_work,
                     has_children: false,
+                    workflow_checklist_task: false,
                 };
                 assert!(validate_operational_item_deletion(&owner, &task).is_ok());
                 assert_eq!(
@@ -4957,6 +5020,7 @@ mod work_center_tests {
             archived: false,
             has_work: false,
             has_children: false,
+            workflow_checklist_task: false,
         };
         assert!(validate_operational_item_deletion(&manager, &task).is_ok());
         task.has_work = true;
@@ -4981,6 +5045,29 @@ mod work_center_tests {
                 .1,
             "Restore the archived task before deleting it"
         );
+    }
+
+    #[test]
+    fn checklist_tasks_cannot_be_deleted_even_by_their_creator() {
+        let creator = Uuid::new_v4();
+        let task = OperationalItemDeletion {
+            assigned_by: creator,
+            assigned_by_role: "concierge",
+            status: "open",
+            archived: false,
+            has_work: false,
+            has_children: false,
+            workflow_checklist_task: true,
+        };
+        for auth in [
+            actor(creator, Role::Concierge),
+            actor(Uuid::new_v4(), Role::Ceo),
+        ] {
+            assert_eq!(
+                validate_operational_item_deletion(&auth, &task).unwrap_err(),
+                (StatusCode::CONFLICT, WORKFLOW_CHECKLIST_TASK_DELETE_MESSAGE)
+            );
+        }
     }
 
     #[test]

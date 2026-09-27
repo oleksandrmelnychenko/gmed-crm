@@ -25,7 +25,9 @@ import {
   canAssignConciergeTaskToRole,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
+  canMarkConciergeTaskNotRequired,
   canModifyConciergeTask,
+  conciergeTaskNotRequiredPath,
   filterConciergeServices,
   filterConciergeTasks,
   filterConciergeTaskAssignees,
@@ -204,6 +206,28 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canDeleteConciergeTask({ ...own, status: "completed" }, "manager", "patient_manager")).toBe(false);
     expect(canDeleteConciergeTask({ ...own, comment_count: 1 }, "manager", "ceo")).toBe(false);
     expect(canDeleteConciergeTask({ ...own, status: "in_progress" }, "creator", "interpreter")).toBe(false);
+  });
+
+  it("offers 'not required' instead of deleting a checklist task", () => {
+    const checklistTask = task({
+      assigned_by: "creator",
+      assigned_by_role: "patient_manager",
+      workflow_checklist_item_id: "item-1",
+      workflow_checklist_scope_type: "order",
+      workflow_checklist_scope_id: "order-1",
+    });
+    expect(canDeleteConciergeTask(checklistTask, "creator", "patient_manager")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired(checklistTask, "creator", "patient_manager")).toBe(true);
+    expect(canMarkConciergeTaskNotRequired({ ...checklistTask, status: "completed" }, "creator", "patient_manager")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired({ ...checklistTask, workflow_checklist_item_id: null }, "creator", "patient_manager")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired(checklistTask, "someone", "interpreter")).toBe(false);
+    expect(conciergeTaskNotRequiredPath(checklistTask))
+      .toBe("/orders/order-1/workflow-checklist/item-1/not-required");
+    expect(conciergeTaskNotRequiredPath({ ...checklistTask, workflow_checklist_scope_type: "patient", workflow_checklist_scope_id: "patient-1" }))
+      .toBe("/patients/patient-1/workflow-checklist/item-1/not-required");
+    const refused = Object.assign(new Error("server text"), { body: { code: "workflow_checklist_task_delete" } });
+    expect(conciergeTaskErrorMessage(refused, "ru", "Error")).toContain("Не требуется");
+    expect(conciergeTaskErrorMessage(refused, "de", "Error")).toContain("Nicht erforderlich");
   });
 
   it("explains why a parent cannot be deleted without cascading into children", () => {

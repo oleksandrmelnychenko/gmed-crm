@@ -119,6 +119,7 @@ const STAFF_DASHBOARD_REALTIME_EVENTS = [
   "user.deactivated",
   "workflow_checklist_item.created",
   "workflow_checklist_item.completed",
+  "workflow_checklist_item.updated",
 ] as const;
 
 function clearStaffDashboardCache() {

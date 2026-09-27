@@ -548,8 +548,13 @@ export type WorkflowChecklistItem = {
   due_date: string | null;
   linked_task_id: string | null;
   linked_task_status: string | null;
+  linked_task_deleted?: boolean;
   is_completed: boolean;
+  /** Closed as "не требуется" rather than done; `is_completed` is true too. */
+  not_required?: boolean;
+  not_required_reason?: "manual" | "phase_passed" | "task_cancelled" | null;
   completed_at: string | null;
+  completed_by_name?: string | null;
   sort_order: number;
   created_at: string;
 };
@@ -559,6 +564,7 @@ export type WorkflowChecklistResponse = {
   scope_id: string;
   open_count: number;
   completed_count: number;
+  not_required_count?: number;
   blocked_reason?: string | null;
   items: WorkflowChecklistItem[];
 };

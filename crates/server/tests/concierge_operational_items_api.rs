@@ -774,7 +774,9 @@ async fn operational_staff_only_see_their_scope_and_same_rank_cannot_edit_anothe
     assert_eq!(task["note"], "Call before pickup");
     assert_eq!(task["concierge_service_id"], service_id.to_string());
     assert!(task["patient_id"].is_null());
-    assert!(task.get("order_id").is_none());
+    // Items name the order they belong to (generated order work links back to
+    // it); a service task has none. The appointment link stays internal.
+    assert!(task["order_id"].is_null());
     assert!(task.get("appointment_id").is_none());
     assert!(task.get("description").is_none());
     let task_id = Uuid::parse_str(task["id"].as_str().expect("task id")).unwrap();

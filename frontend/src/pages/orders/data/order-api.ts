@@ -447,6 +447,14 @@ export function completeWorkflowChecklistItem(orderId: string, itemId: string) {
   return post(`/orders/${orderId}/workflow-checklist/${itemId}/complete`);
 }
 
+export function markWorkflowChecklistItemNotRequired(orderId: string, itemId: string) {
+  return post(`/orders/${orderId}/workflow-checklist/${itemId}/not-required`);
+}
+
+export function reopenWorkflowChecklistItem(orderId: string, itemId: string) {
+  return post(`/orders/${orderId}/workflow-checklist/${itemId}/reopen`);
+}
+
 export type OrderGroupHead = {
   id: string;
   order_number: string;

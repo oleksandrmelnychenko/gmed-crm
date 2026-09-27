@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   Circle,
+  CircleSlash,
   ExternalLink,
   FolderKanban,
   ListChecks,
@@ -48,9 +49,11 @@ import {
   canAttachToConciergeTask,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
+  canMarkConciergeTaskNotRequired,
   canModifyConciergeTask,
   conciergeTaskCode,
   conciergeTaskErrorMessage,
+  conciergeTaskNotRequiredPath,
 } from "./model";
 import {
   conciergeDialogContentClassName,
@@ -152,6 +155,9 @@ const copy = {
     delete: "Löschen",
     deleteTitle: "Aufgabe löschen?",
     deleteMessage: "Die Aufgabe verschwindet aus dem Aufgabenmanager. Der Audit-Verlauf bleibt erhalten.",
+    notRequired: "Nicht erforderlich",
+    notRequiredTitle: "Als nicht erforderlich markieren?",
+    notRequiredMessage: "Die Aufgabe gehört zu einer Checkliste. Sie wird storniert und der Checklistenpunkt als „Nicht erforderlich“ geschlossen. Auf der Auftragsseite lässt er sich wieder öffnen.",
     cancel: "Abbrechen",
     overview: "Aufgabendaten",
     links: "Verknüpfungen",
@@ -251,6 +257,9 @@ const copy = {
     delete: "Удалить",
     deleteTitle: "Удалить задачу?",
     deleteMessage: "Задача исчезнет из менеджера задач. Аудит действий будет сохранён.",
+    notRequired: "Не требуется",
+    notRequiredTitle: "Отметить как «Не требуется»?",
+    notRequiredMessage: "Задача относится к чек-листу. Она будет отменена, а пункт чек-листа закроется со статусом «Не требуется». Вернуть его в работу можно на странице заказа.",
     cancel: "Отмена",
     overview: "Данные задачи",
     links: "Связи",
@@ -481,6 +490,10 @@ export function ConciergeTaskDetailDialog({
   const [expenseProgress, setExpenseProgress] = useState(0);
   const canModify = detail ? canModifyConciergeTask(detail.item, user?.id, user?.role) : false;
   const canDelete = detail ? canDeleteConciergeTask(detail.item, user?.id, user?.role) : false;
+  const canMarkNotRequired = detail
+    ? canMarkConciergeTaskNotRequired(detail.item, user?.id, user?.role)
+    : false;
+  const [notRequiredConfirmOpen, setNotRequiredConfirmOpen] = useState(false);
   const canChangeStatus = detail
     ? canChangeConciergeTaskStatus(detail.item, user?.id, user?.role)
     : false;
@@ -837,6 +850,26 @@ export function ConciergeTaskDetailDialog({
     }
   }
 
+  async function markNotRequired() {
+    const path = detail ? conciergeTaskNotRequiredPath(detail.item) : null;
+    if (!taskId || !path || !canMarkNotRequired || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await apiFetch(path, { method: "POST" });
+      clearApiCache("/concierge-operational-items");
+      clearApiCache(path.replace(/\/[^/]+\/not-required$/, ""));
+      setNotRequiredConfirmOpen(false);
+      await load();
+      onChanged();
+    } catch (notRequiredError) {
+      setNotRequiredConfirmOpen(false);
+      setError(conciergeTaskErrorMessage(notRequiredError, lang, labels.notRequired));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function changeStatus() {
     if (!taskId || !detail || !canChangeStatus || busy || !pendingStatus || pendingStatus === detail.item.status) return;
     if (pendingStatus === "archive") {
@@ -938,7 +971,7 @@ export function ConciergeTaskDetailDialog({
         dirty={hasUnsavedChanges}
         onOpenChange={onOpenChange}
       >
-      <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
+      <DialogContent className={cn(conciergeDialogContentClassName, (canDelete || canMarkNotRequired || statusDirty) && "grid-rows-[auto_minmax(0,1fr)_auto]")} style={{ maxWidth: "64rem" }}>
         <ConciergeDialogHeader
           icon={ListChecks}
           tone="dot"
@@ -1215,11 +1248,15 @@ export function ConciergeTaskDetailDialog({
             </div>
           ) : null}
         </ConciergeDialogBody>
-        {canDelete || statusDirty ? (
+        {canDelete || canMarkNotRequired || statusDirty ? (
           <ConciergeDialogFooter>
             {canDelete ? (
               <Button type="button" size="sm" variant="ghost" className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive sm:mr-auto" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>
                 <Trash2 />{labels.delete}
+              </Button>
+            ) : canMarkNotRequired ? (
+              <Button type="button" size="sm" variant="ghost" className="h-8 text-muted-foreground sm:mr-auto" disabled={busy || statusDirty} onClick={() => setNotRequiredConfirmOpen(true)}>
+                <CircleSlash />{labels.notRequired}
               </Button>
             ) : null}
             {statusDirty ? (
@@ -1252,6 +1289,16 @@ export function ConciergeTaskDetailDialog({
         confirmDisabled={busy}
         onCancel={() => setDeleteConfirmOpen(false)}
         onConfirm={() => void deleteTask()}
+      />
+      <DirtyDismissConfirmDialog
+        open={open && notRequiredConfirmOpen}
+        title={labels.notRequiredTitle}
+        message={labels.notRequiredMessage}
+        cancelLabel={labels.cancel}
+        confirmLabel={labels.notRequired}
+        confirmDisabled={busy}
+        onCancel={() => setNotRequiredConfirmOpen(false)}
+        onConfirm={() => void markNotRequired()}
       />
       <DirtyDismissConfirmDialog
         open={open && Boolean(pendingChildDelete)}

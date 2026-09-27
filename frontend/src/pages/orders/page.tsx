@@ -21,6 +21,7 @@ import {
   Ban,
   CalendarClock,
   CheckCircle2,
+  CircleSlash,
   ChevronDown,
   ChevronRight,
   ClipboardList,
@@ -31,6 +32,7 @@ import {
   Plus,
   ReceiptText,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldCheck,
   UserRound,
@@ -136,6 +138,8 @@ import {
   approveOrderLeistung,
   deliverOrderLeistung,
   completeWorkflowChecklistItem,
+  markWorkflowChecklistItemNotRequired,
+  reopenWorkflowChecklistItem,
   createExternalInvoice,
   createOrder,
   createOrderLeistung,
@@ -281,6 +285,7 @@ const ORDER_REALTIME_EVENTS = [
   "task.status_changed",
   "workflow_checklist_item.created",
   "workflow_checklist_item.completed",
+  "workflow_checklist_item.updated",
 ] as const;
 
 type SectionCardProps = {
@@ -3247,12 +3252,26 @@ function useOrdersPageContent() {
   }
 
   async function handleCompleteWorkflowItem(itemId: string) {
+    await changeWorkflowItem(() => completeWorkflowChecklistItem(selectedOrderId!, itemId));
+  }
+
+  async function handleWorkflowItemNotRequired(itemId: string) {
+    await changeWorkflowItem(() =>
+      markWorkflowChecklistItemNotRequired(selectedOrderId!, itemId),
+    );
+  }
+
+  async function handleReopenWorkflowItem(itemId: string) {
+    await changeWorkflowItem(() => reopenWorkflowChecklistItem(selectedOrderId!, itemId));
+  }
+
+  async function changeWorkflowItem(action: () => Promise<unknown>) {
     if (!selectedOrderId) return;
 
     setWorkflowBusy(true);
     setDetailError(null);
     try {
-      await completeWorkflowChecklistItem(selectedOrderId, itemId);
+      await action();
       triggerReload();
     } catch (error) {
       setDetailError(
@@ -6568,6 +6587,15 @@ function useOrdersPageContent() {
                           description={l("orders_abgeschlossen_2")}
                           tone="emerald"
                         />
+                        {(workflowChecklist.not_required_count ?? 0) > 0 ? (
+                          <AdminInlineMetric
+                            icon={CircleSlash}
+                            label={l("orders_checklist_not_required_count")}
+                            value={String(workflowChecklist.not_required_count)}
+                            description={l("orders_checklist_not_required_count_hint")}
+                            tone="slate"
+                          />
+                        ) : null}
                         <AdminInlineMetric
                           icon={CalendarClock}
                           label={l("orders_uberfallig_3")}
@@ -6616,7 +6644,9 @@ function useOrdersPageContent() {
                               const openItems = group.items.filter(
                                 (item) => !item.is_completed,
                               ).length;
-                              const completedItems = group.items.length - openItems;
+                              const completedItems = group.items.filter(
+                                (item) => item.is_completed && !item.not_required,
+                              ).length;
                               const groupIsActive = openItems > 0;
 
                               return (
@@ -6703,6 +6733,7 @@ function useOrdersPageContent() {
                                         const itemStatus = item.is_completed
                                           ? "completed"
                                           : item.linked_task_status ?? "open";
+                                        const notRequired = item.not_required === true;
 
                                         return (
                                           <article
@@ -6735,12 +6766,23 @@ function useOrdersPageContent() {
                                                     variant="outline"
                                                     className={cn(
                                                       "rounded-full text-[10px]",
-                                                      item.is_completed
-                                                        ? "border-emerald-200 bg-emerald-100 text-emerald-800"
-                                                        : statusClassName(itemStatus),
+                                                      notRequired
+                                                        ? "border-slate-200 bg-slate-100 text-slate-600"
+                                                        : item.is_completed
+                                                          ? "border-emerald-200 bg-emerald-100 text-emerald-800"
+                                                          : statusClassName(itemStatus),
                                                     )}
+                                                    title={
+                                                      notRequired && item.not_required_reason
+                                                        ? l(
+                                                            `orders_checklist_not_required_reason_${item.not_required_reason}`,
+                                                          )
+                                                        : undefined
+                                                    }
                                                   >
-                                                    {workflowTaskStatusLabel(itemStatus)}
+                                                    {notRequired
+                                                      ? l("orders_checklist_not_required")
+                                                      : workflowTaskStatusLabel(itemStatus)}
                                                   </Badge>
                                                 </div>
                                                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
@@ -6764,9 +6806,25 @@ function useOrdersPageContent() {
                                                     <>
                                                       <span className="size-1 rounded-full bg-muted-foreground/35" />
                                                       <span>
-                                                        {l("orders_erledigt_2")}:{" "}
+                                                        {notRequired
+                                                          ? l("orders_checklist_not_required_since")
+                                                          : l("orders_erledigt_2")}
+                                                        :{" "}
                                                         {formatDateTimeLabel(
                                                           item.completed_at,
+                                                        )}
+                                                        {item.completed_by_name
+                                                          ? ` · ${item.completed_by_name}`
+                                                          : ""}
+                                                      </span>
+                                                    </>
+                                                  ) : null}
+                                                  {notRequired && item.not_required_reason ? (
+                                                    <>
+                                                      <span className="size-1 rounded-full bg-muted-foreground/35" />
+                                                      <span>
+                                                        {l(
+                                                          `orders_checklist_not_required_reason_${item.not_required_reason}`,
                                                         )}
                                                       </span>
                                                     </>
@@ -6774,6 +6832,43 @@ function useOrdersPageContent() {
                                                 </div>
                                               </div>
                                               {!item.is_completed ? (
+                                                <div className="flex shrink-0 flex-wrap gap-1.5">
+                                                  <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
+                                                    disabled={workflowBusy}
+                                                    onClick={() =>
+                                                      void handleCompleteWorkflowItem(
+                                                        item.id,
+                                                      )
+                                                    }
+                                                  >
+                                                    <CheckCircle2 className="size-3.5" />
+                                                    {l("orders_abschliessen")}
+                                                  </Button>
+                                                  {permissions.canManagePhase ? (
+                                                    <Button
+                                                      type="button"
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs text-muted-foreground"
+                                                      disabled={workflowBusy}
+                                                      title={l("orders_checklist_mark_not_required_hint")}
+                                                      onClick={() =>
+                                                        void handleWorkflowItemNotRequired(
+                                                          item.id,
+                                                        )
+                                                      }
+                                                    >
+                                                      <CircleSlash className="size-3.5" />
+                                                      {l("orders_checklist_mark_not_required")}
+                                                    </Button>
+                                                  ) : null}
+                                                </div>
+                                              ) : notRequired &&
+                                                permissions.canManagePhase ? (
                                                 <Button
                                                   type="button"
                                                   variant="outline"
@@ -6781,13 +6876,11 @@ function useOrdersPageContent() {
                                                   className="h-7 shrink-0 gap-1.5 rounded-lg px-2 text-xs"
                                                   disabled={workflowBusy}
                                                   onClick={() =>
-                                                    void handleCompleteWorkflowItem(
-                                                      item.id,
-                                                    )
+                                                    void handleReopenWorkflowItem(item.id)
                                                   }
                                                 >
-                                                  <CheckCircle2 className="size-3.5" />
-                                                  {l("orders_abschliessen")}
+                                                  <RotateCcw className="size-3.5" />
+                                                  {l("orders_checklist_reopen")}
                                                 </Button>
                                               ) : null}
                                             </div>

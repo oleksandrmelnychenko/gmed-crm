@@ -862,6 +862,7 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "case.medication_expiry_flagged",
   "workflow_checklist_item.created",
   "workflow_checklist_item.completed",
+  "workflow_checklist_item.updated",
 ] as const;
 
 type PatientDetailPageState = {

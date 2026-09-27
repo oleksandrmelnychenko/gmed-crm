@@ -5552,6 +5552,17 @@ async fn update_phase(
             {
                 return resp;
             }
+            // The stage just left keeps no open checklist work behind it.
+            if let Err(resp) = crate::routes::workflow_checklists::resolve_passed_phase_items(
+                &state,
+                order_id,
+                &body.phase,
+                auth.user_id,
+            )
+            .await
+            {
+                return resp;
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "update_phase",
                 Some(auth.user_id),
