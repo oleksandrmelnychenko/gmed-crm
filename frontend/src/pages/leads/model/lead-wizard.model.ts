@@ -65,6 +65,28 @@ export function draftFromLead(lead: LeadDetail): WizardDraft {
   };
 }
 
+/**
+ * "How did you hear about us?" is asked on a first intake only. A repeat
+ * intake is a new order for a known patient, so the acquisition source and
+ * the customer referral are neither shown nor required again
+ * (docs/architecture/patient-order-wizard-plan_ua.md).
+ */
+export function intakeAsksDiscoverySource(repeatIntake: boolean): boolean {
+  return !repeatIntake;
+}
+
+/** The recommending customer is required once "customer referral" is picked. */
+export function discoveryReferrerMissing(
+  draft: { discoverySource: string; referrerPatientId: string },
+  repeatIntake: boolean,
+): boolean {
+  return (
+    intakeAsksDiscoverySource(repeatIntake) &&
+    draft.discoverySource === "customer_referral" &&
+    !draft.referrerPatientId
+  );
+}
+
 /** True when the person is younger than 18 on `today` — i.e. a child (#2). */
 export function isMinor(dateOfBirth: string, today: Date): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOfBirth);

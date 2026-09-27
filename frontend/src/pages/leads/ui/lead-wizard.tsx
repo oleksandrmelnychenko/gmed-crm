@@ -180,7 +180,11 @@ import {
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
-import { isMinor } from "../model/lead-wizard.model";
+import {
+  discoveryReferrerMissing,
+  intakeAsksDiscoverySource,
+  isMinor,
+} from "../model/lead-wizard.model";
 
 import {
   createLead,
@@ -2322,12 +2326,16 @@ function documentsValidationIssues(
   return issues;
 }
 
-function validateMasterDraft(draft: Draft | null, tx: Tx): MasterValidationErrors {
+function validateMasterDraft(
+  draft: Draft | null,
+  tx: Tx,
+  repeatIntake: boolean,
+): MasterValidationErrors {
   if (!draft) return {};
 
   const errors: MasterValidationErrors = {};
   const required = tx("Обязательное поле", "Pflichtfeld");
-  if (draft.discoverySource === "customer_referral" && !draft.referrerPatientId) {
+  if (discoveryReferrerMissing(draft, repeatIntake)) {
     errors.referrerPatientId = required;
   }
   if (!draft.firstName.trim()) errors.firstName = required;
@@ -2801,7 +2809,11 @@ export function LeadWizard({
   });
 
   useEffect(() => {
-    if (!open || draft?.discoverySource !== "customer_referral") {
+    if (
+      !open
+      || !intakeAsksDiscoverySource(isRepeatIntake)
+      || draft?.discoverySource !== "customer_referral"
+    ) {
       setReferrerPatients([]);
       setReferrerPatientsLoading(false);
       setReferrerPatientsError("");
@@ -2830,7 +2842,7 @@ export function LeadWizard({
     return () => {
       active = false;
     };
-  }, [deferredReferrerSearch, draft?.discoverySource, open, tx]);
+  }, [deferredReferrerSearch, draft?.discoverySource, isRepeatIntake, open, tx]);
 
   useEffect(() => {
     if (!open || !trustedContactEditor) {
@@ -3792,7 +3804,10 @@ export function LeadWizard({
       </div>
     );
   };
-  const masterErrors = useMemo(() => validateMasterDraft(draft, tx), [draft, tx]);
+  const masterErrors = useMemo(
+    () => validateMasterDraft(draft, tx, isRepeatIntake),
+    [draft, isRepeatIntake, tx],
+  );
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
     if (!validationContext) return [];
@@ -6016,6 +6031,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section title={tx("Личные данные", "Persönliche Daten")}>
               <div className="grid gap-4 md:grid-cols-2">
+                {intakeAsksDiscoverySource(isRepeatIntake) ? (
                 <div className="space-y-4">
                   <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
                     <NativeComboboxSelect
@@ -6095,6 +6111,7 @@ ${serviceCommentLines.join("\n")}`
                     </Field>
                   ) : null}
                 </div>
+                ) : null}
                 <Field
                   label={tx("Имя", "Vorname")}
                   required

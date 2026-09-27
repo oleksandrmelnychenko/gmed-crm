@@ -21,7 +21,9 @@ import {
   costEstimate,
   guardianIsComplete,
   guardianPayload,
+  discoveryReferrerMissing,
   draftFromLead,
+  intakeAsksDiscoverySource,
   isMinor,
   nextStep,
   orderLineClientReference,
@@ -104,6 +106,29 @@ describe("draftFromLead", () => {
     expect(draft.legalSex).toBe("");
     expect(draft.needsInterpreter).toBe(false);
     expect(draft.requestedSpecialties).toEqual([]);
+  });
+});
+
+describe("discovery source", () => {
+  const referral = { discoverySource: "customer_referral", referrerPatientId: "" };
+
+  it("is asked on a first intake only", () => {
+    expect(intakeAsksDiscoverySource(false)).toBe(true);
+    expect(intakeAsksDiscoverySource(true)).toBe(false);
+  });
+
+  it("requires the recommending customer on a first intake", () => {
+    expect(discoveryReferrerMissing(referral, false)).toBe(true);
+    expect(
+      discoveryReferrerMissing({ ...referral, referrerPatientId: "p1" }, false),
+    ).toBe(false);
+    expect(
+      discoveryReferrerMissing({ discoverySource: "google", referrerPatientId: "" }, false),
+    ).toBe(false);
+  });
+
+  it("does not require the recommending customer on a repeat intake", () => {
+    expect(discoveryReferrerMissing(referral, true)).toBe(false);
   });
 });
 
