@@ -4210,6 +4210,9 @@ async fn load_invoice_detail(
         .collect::<Vec<_>>()
     };
 
+    // Advances credited automatically on release share one transaction
+    // timestamp; within it they are listed in the order they were applied
+    // (oldest advance first), not by the random allocation id.
     let prepayment_allocations = sqlx::query(
         r#"SELECT allocation.id, allocation.advance_invoice_id,
                   allocation.amount_gross, allocation.created_at,
@@ -4217,7 +4220,7 @@ async fn load_invoice_detail(
            FROM invoice_prepayment_allocations allocation
            JOIN invoices advance ON advance.id = allocation.advance_invoice_id
            WHERE allocation.target_invoice_id = $1
-           ORDER BY allocation.created_at, allocation.id"#,
+           ORDER BY allocation.created_at, advance.issued_at, advance.id, allocation.id"#,
     )
     .bind(invoice_id)
     .fetch_all(&state.db)
