@@ -488,6 +488,29 @@ export function leistungLineAmounts(item: Leistung): MoneyLineAmounts {
 }
 
 /**
+ * Counters of the order services. Cancelled lines are left out of the totals
+ * and counted separately. "Delivered" includes approved and invoiced services
+ * (they were delivered first); "awaiting approval" is delivered but not yet
+ * approved.
+ */
+export function summarizeLeistungMetrics(items: Leistung[]) {
+  const active = items.filter((item) => item.status !== "cancelled");
+  return {
+    total: active.length,
+    cancelled: items.length - active.length,
+    delivered: active.filter((item) =>
+      item.status === "delivered" || item.status === "approved" || item.status === "invoiced"
+    ).length,
+    awaitingApproval: active.filter((item) => item.status === "delivered").length,
+    approved: active.filter((item) =>
+      item.status === "approved" || item.status === "invoiced"
+    ).length,
+    net: roundCents(active.reduce((sum, item) => sum + leistungLineAmounts(item).net, 0)),
+    gross: sumLeistungGross(items),
+  };
+}
+
+/**
  * Gross total of the order services that are not cancelled — the order total
  * the server reports as `total_estimated` for an order with services.
  */

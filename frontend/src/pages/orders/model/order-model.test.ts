@@ -6,6 +6,7 @@ import {
   formatOptionalCurrency,
   leistungLineAmounts,
   sumLeistungGross,
+  summarizeLeistungMetrics,
   sumLeistungTotals,
 } from "./order-model";
 import type { Leistung } from "./types";
@@ -64,6 +65,31 @@ describe("sumLeistungTotals", () => {
       line("approved", "1", "50.5"),
       line("cancelled", "3", "80"),
     ])).toBeCloseTo(250.5);
+  });
+});
+
+describe("summarizeLeistungMetrics", () => {
+  const line = (status: Leistung["status"]) =>
+    ({ status, quantity: "1", unit_price: "100", vat_rate: "19", is_cost_passthrough: false }) as Leistung;
+
+  it("counts approved and invoiced services as delivered and leaves cancelled lines out", () => {
+    expect(
+      summarizeLeistungMetrics([
+        line("planned"),
+        line("delivered"),
+        line("approved"),
+        line("invoiced"),
+        line("cancelled"),
+      ]),
+    ).toEqual({
+      total: 4,
+      cancelled: 1,
+      delivered: 3,
+      awaitingApproval: 1,
+      approved: 2,
+      net: 400,
+      gross: 476,
+    });
   });
 });
 

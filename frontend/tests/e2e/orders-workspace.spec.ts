@@ -719,3 +719,17 @@ test("follow-up blockers open the milestone planner, which plans and creates the
   expect(writes.find(write => write.path.endsWith("/followup-flow"))?.body)
     .toEqual({followup_1w_status:"scheduled", followup_1w_date:"2026-10-05"});
 });
+
+test("a patient manager sees the billing release as waiting for billing, without an action", async ({page}) => {
+  const {order} = await prepare(page);
+  const reason = "Billing release is not granted and package coverage is not confirmed";
+  Object.assign(order.process_gates, {billing_release_status:"pending", execution_ready:false, blocking_reasons:[reason]});
+  Object.assign(order.lifecycle, {allowed_transitions:[{phase:"execution", blocked:true, reasons:[reason]}]});
+  await page.route("**/api/v1/me", route => route.fulfill({json:{id:"pm-user", email:"pm@example.org", name:"PM QA", role:"patient_manager", created_at:"2026-01-01T00:00:00Z"}}));
+  await page.goto(`/orders/${orderId}`);
+  const waiting = page.getByTestId("order-blocker-waits-for-billing");
+  await expect(waiting).toContainText("Ждёт бухгалтерию");
+  await expect(waiting.getByRole("button")).toHaveCount(0);
+  await page.goto(`/orders/${orderId}?section=gates`);
+  await expect(page.getByTestId("order-billing-release-readonly")).toContainText("Разрешение выдаёт бухгалтерия");
+});

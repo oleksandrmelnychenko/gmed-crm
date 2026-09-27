@@ -214,6 +214,20 @@ const FOLLOWUP_MILESTONE_REASONS = new Set([
   "6-month follow-up must be completed or marked not required",
 ]);
 
+const BILLING_RELEASE_REASON =
+  "Billing release is not granted and package coverage is not confirmed";
+
+/**
+ * The blocker is decided by billing (the billing release), so a user without
+ * invoice finance rights can only wait for it: no action is offered to them.
+ */
+export function orderBlockingReasonWaitsForBilling(
+  reason: string,
+  canDecideBillingRelease: boolean,
+): boolean {
+  return reason === BILLING_RELEASE_REASON && !canDecideBillingRelease;
+}
+
 /** DOM id of the follow-up milestone planner (see `OrderFollowupMilestones`). */
 export const FOLLOWUP_MILESTONES_ANCHOR_ID = "order-followup-milestones";
 

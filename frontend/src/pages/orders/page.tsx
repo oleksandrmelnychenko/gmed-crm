@@ -119,6 +119,7 @@ import {
   isOrderReadinessGateApplicable,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
+  orderBlockingReasonWaitsForBilling,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
 import {
@@ -198,8 +199,7 @@ import {
   patientLabel,
   recheckMissingFieldLabel,
   leistungLineAmounts,
-  sumLeistungGross,
-  sumLeistungTotals,
+  summarizeLeistungMetrics,
   workflowChecklistLabel,
 } from "./model/order-model";
 import type {
@@ -1465,18 +1465,10 @@ function useOrdersPageContent() {
     ? allOrderTableColumns.filter((column) => column.group !== "finance")
     : allOrderTableColumns;
 
-  const leistungMetrics = useMemo(() => {
-    const items = orderDetail?.leistungen ?? [];
-    return {
-      total: items.length,
-      delivered: items.filter((item) => item.status === "delivered").length,
-      approved: items.filter((item) =>
-        item.status === "approved" || item.status === "invoiced"
-      ).length,
-      net: sumLeistungTotals(items),
-      gross: sumLeistungGross(items),
-    };
-  }, [orderDetail]);
+  const leistungMetrics = useMemo(
+    () => summarizeLeistungMetrics(orderDetail?.leistungen ?? []),
+    [orderDetail],
+  );
   const orderNeedSummary = useMemo(
     () => summarizeOrderNeeds(orderDetail?.needs_description),
     [orderDetail?.needs_description],
@@ -4223,8 +4215,37 @@ function useOrdersPageContent() {
                           {orderNextStepReasons.map((reason, index) => {
                             const targetSection = orderBlockingReasonSection(reason);
                             const targetAnchor = orderBlockingReasonAnchor(reason);
+                            // Billing decides the billing release: whoever cannot
+                            // decide it sees that it is waiting, without an action.
+                            const waitsForBilling = orderBlockingReasonWaitsForBilling(
+                              reason,
+                              hasCapability(user, "invoices.finance"),
+                            );
                             return (
                               <li key={reason}>
+                                {waitsForBilling ? (
+                                  <div
+                                    className="flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3"
+                                    data-testid="order-blocker-waits-for-billing"
+                                  >
+                                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
+                                      {index + 1}
+                                    </span>
+                                    <span className="min-w-0 flex-1 text-sm leading-5">
+                                      <span className="block font-medium text-foreground">
+                                        {localizedBlockingReason(reason)}
+                                      </span>
+                                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                                        {lang === "de"
+                                          ? "Wartet auf die Buchhaltung: Die Freigabe erteilt Billing. Sie müssen hier nichts tun."
+                                          : "Ждёт бухгалтерию: разрешение выдаёт Billing. От вас здесь ничего не требуется."}
+                                      </span>
+                                    </span>
+                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                                      {lang === "de" ? "Wartet auf Billing" : "Ждёт бухгалтерию"}
+                                    </span>
+                                  </div>
+                                ) : (
                                 <button
                                   type="button"
                                   className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
@@ -4258,6 +4279,7 @@ function useOrdersPageContent() {
                                     <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
                                   </span>
                                 </button>
+                                )}
                               </li>
                             );
                           })}
@@ -5049,7 +5071,25 @@ function useOrdersPageContent() {
                               </div>
                             </div>
                           </div>
-                        ) : null}
+                        ) : (
+                          <div
+                            className="rounded-2xl border border-border bg-muted/20 p-4"
+                            data-testid="order-billing-release-readonly"
+                          >
+                            <div className="text-sm font-semibold text-foreground">
+                              {titleWithDot(l("orders_billing_release"))}
+                            </div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {orderDetail.process_gates.billing_release_status === "granted"
+                                ? lang === "de"
+                                  ? "Billing hat die Durchführung freigegeben."
+                                  : "Бухгалтерия разрешила выполнение."
+                                : lang === "de"
+                                  ? `Wartet auf die Buchhaltung (${billingReleaseLabel(orderDetail.process_gates.billing_release_status)}). Die Freigabe erteilt Billing; bei einem bestehenden Paket kann stattdessen die Paketdeckung bestätigt werden.`
+                                  : `Ждёт бухгалтерию (${billingReleaseLabel(orderDetail.process_gates.billing_release_status)}). Разрешение выдаёт бухгалтерия; при действующем пакете вместо этого можно подтвердить покрытие пакетом.`}
+                            </p>
+                          </div>
+                        )}
 
                         {permissions.canManagePhase ? (
                           <div className="rounded-2xl border border-border p-4">
@@ -6808,7 +6848,7 @@ function useOrdersPageContent() {
                         />
                         <MiniMetric
                           label={t.orders_services_pending_approval_label}
-                          value={String(leistungMetrics.delivered)}
+                          value={String(leistungMetrics.awaitingApproval)}
                         />
                         <MiniMetric
                           label={t.orders_services_approved_label}
@@ -7117,6 +7157,18 @@ function useOrdersPageContent() {
                                   </div>
 
                                   <div className="relative border-t border-border p-4 2xl:border-t-0 2xl:pl-5 2xl:before:absolute 2xl:before:bottom-4 2xl:before:left-0 2xl:before:top-4 2xl:before:border-l 2xl:before:border-dashed 2xl:before:border-border">
+                                    {leistung.status === "cancelled" ? (
+                                      // A cancelled line adds nothing to the order total.
+                                      <div
+                                        className="text-xs leading-5 text-muted-foreground"
+                                        data-testid="leistung-cancelled-total"
+                                      >
+                                        {lang === "de"
+                                          ? "Storniert – zählt nicht zur Auftragssumme."
+                                          : "Отменена — не входит в сумму заказа."}
+                                      </div>
+                                    ) : (
+                                      <>
                                     <div className="text-xs text-muted-foreground">
                                       {lang === "de" ? "Summe brutto" : "Сумма с НДС"}
                                     </div>
@@ -7127,7 +7179,9 @@ function useOrdersPageContent() {
                                       {lang === "de" ? "netto " : "нетто "}
                                       {formatMoney(lineAmounts.net, leistung.currency)}
                                     </div>
-                                    {permissions.canManageEconomics ? (
+                                      </>
+                                    )}
+                                    {permissions.canManageEconomics && leistung.status !== "cancelled" ? (
                                       <Button
                                         type="button"
                                         variant="outline"
