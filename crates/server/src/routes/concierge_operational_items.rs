@@ -184,7 +184,7 @@ struct UpdateItemRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct UpdateItemStatusRequest {
+pub(crate) struct UpdateItemStatusRequest {
     expected_updated_at: String,
     status: String,
 }
@@ -1745,7 +1745,11 @@ async fn update_item(
     }
 }
 
-async fn update_item_status(
+/// Status change of any task (`general` and `concierge_operational`). Also
+/// mounted at the legacy `/tasks/{id}/status` path, so appointment tasks get
+/// the same review step, optimistic lock, archive check, history and creator
+/// notification.
+pub(crate) async fn update_item_status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(item_id): Path<Uuid>,

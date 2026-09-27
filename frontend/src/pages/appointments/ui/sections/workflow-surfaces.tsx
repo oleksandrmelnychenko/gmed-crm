@@ -28,6 +28,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import {
   fetchPatientInterpreterHistory,
   fetchInterpreterSuggestions,
@@ -109,8 +110,11 @@ import {
   INTERPRETER_RESPONSE_OPTIONS,
   STATUS_OPTIONS,
   TASK_PRIORITY_OPTIONS,
-  TASK_STATUS_OPTIONS,
 } from "@/pages/appointments/model/constants";
+import {
+  appointmentTaskStatusOptions,
+  appointmentTaskStatusRequest,
+} from "@/pages/appointments/model/task-status";
 import {
   AppointmentEditorSheet,
   type AppointmentEditorSheetOpenChangeDetails,
@@ -2203,6 +2207,7 @@ function AppointmentTasksSectionContent({
   onError,
 }: AppointmentTasksSectionProps) {
   const { t } = useLang();
+  const { user } = useAuth();
   const [form, setForm] = useState<TaskFormState>(() =>
     blankTaskForm(
       detail.interpreter_id ?? detail.owner_user_id ?? assignableStaff[0]?.id ?? "",
@@ -2277,12 +2282,15 @@ function AppointmentTasksSectionContent({
     }
   }
 
-  async function handleTaskStatus(taskId: string, status: string) {
-    setActionBusy(`task:${taskId}:${status}`);
+  async function handleTaskStatus(task: TaskEntry, status: string) {
+    setActionBusy(`task:${task.id}:${status}`);
     try {
-      await apiFetch<{ ok: boolean }>(`/tasks/${taskId}/status`, {
+      // Appointment tasks follow the work-center rules: review step,
+      // optimistic lock, archive check, history and creator notification.
+      const request = appointmentTaskStatusRequest(task, status);
+      await apiFetch<unknown>(request.path, {
         method: "POST",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(request.body),
       });
       onRefresh();
     } catch (error) {
@@ -2316,27 +2324,30 @@ function AppointmentTasksSectionContent({
           </Button>
         ) : undefined
       }
-      rowActions={(task) => (
-        <NativeComboboxSelect
-          value={task.status}
-          aria-label={t.users_status}
-          disabled={Boolean(actionBusy)}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => {
-            const nextStatus = event.target.value;
-            if (nextStatus && nextStatus !== task.status) {
-              void handleTaskStatus(task.id, nextStatus);
-            }
-          }}
-          className="h-7 w-[150px] rounded-md bg-field text-xs"
-        >
-          {TASK_STATUS_OPTIONS.map((status) => (
-            <option key={status} value={status}>
-              {taskStatusLabel(status)}
-            </option>
-          ))}
-        </NativeComboboxSelect>
-      )}
+      rowActions={(task) => {
+        const statusOptions = appointmentTaskStatusOptions(task, user?.id, user?.role);
+        return (
+          <NativeComboboxSelect
+            value={task.status}
+            aria-label={t.users_status}
+            disabled={Boolean(actionBusy) || statusOptions.length <= 1}
+            onClick={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              const nextStatus = event.target.value;
+              if (nextStatus && nextStatus !== task.status) {
+                void handleTaskStatus(task, nextStatus);
+              }
+            }}
+            className="h-7 w-[150px] rounded-md bg-field text-xs"
+          >
+            {statusOptions.map((status) => (
+              <option key={status} value={status}>
+                {taskStatusLabel(status)}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        );
+      }}
       rowActionsWidth={170}
     />
 

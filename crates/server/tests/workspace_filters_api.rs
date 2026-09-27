@@ -9084,8 +9084,13 @@ async fn recurring_completion_scope_is_rejected_while_it_contains_future_occurre
     );
 }
 
+/// Appointment tasks follow the work-center rules (no exemption): the
+/// assignee takes the task to review, the creator closes it, every change
+/// needs the current `updated_at`, is written to the task history and
+/// notifies the creator. The legacy `/tasks/{id}/status` path runs the same
+/// handler as `/concierge-operational-items/{id}/status`.
 #[tokio::test]
-async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
+async fn tasks_can_be_created_for_appointment_and_completed_through_review() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -9145,17 +9150,77 @@ async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
     let items = body.as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["assigned_to"], interpreter_id.to_string());
+    assert_eq!(items[0]["assigned_by_role"], "patient_manager");
     assert_eq!(items[0]["priority"], "high");
+    let created_at_version = items[0]["updated_at"].clone();
 
-    let (status, _) = json_request(
+    // Without the optimistic-lock token the status cannot change.
+    let status_path = format!("/api/v1/tasks/{task_id}/status");
+    let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/tasks/{task_id}/status"),
+        &status_path,
         &interpreter_bearer,
-        Some(json!({ "status": "completed" })),
+        Some(json!({ "status": "in_progress" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The assignee cannot skip the review step.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": created_at_version, "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "Invalid task status transition");
+
+    let (status, started) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": created_at_version, "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    assert_eq!(started["status"], "in_progress");
+
+    // A stale token is a concurrent change.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": created_at_version, "status": "review" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, in_review) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &interpreter_bearer,
+        Some(json!({ "expected_updated_at": started["updated_at"], "status": "review" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{in_review}");
+    assert_eq!(in_review["status"], "review");
+
+    // The creator reviews and closes the task through the work-center path.
+    let (status, completed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-operational-items/{task_id}/status"),
+        &pm_bearer,
+        Some(json!({ "expected_updated_at": in_review["updated_at"], "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{completed}");
 
     let (status, body) = json_request(
         &app,
@@ -9167,6 +9232,45 @@ async fn tasks_can_be_created_for_appointment_and_completed_by_assignee() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "completed");
+
+    let task_uuid = Uuid::parse_str(&task_id).unwrap();
+    let history: Vec<String> = sqlx::query_scalar(
+        r#"SELECT payload->>'status'
+           FROM concierge_operational_task_events
+           WHERE task_id = $1 AND event_type = 'status_changed'
+           ORDER BY created_at, id"#,
+    )
+    .bind(task_uuid)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history, vec!["in_progress", "review", "completed"]);
+    let creator_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM user_notifications
+           WHERE user_id = $1 AND entity_id = $2 AND kind = 'operational_task_updated'"#,
+    )
+    .bind(pm_id)
+    .bind(task_uuid)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(creator_notifications, 2, "one per assignee status change");
+
+    // An archived task cannot change its status any more.
+    sqlx::query("UPDATE tasks SET archived_at = now() WHERE id = $1")
+        .bind(task_uuid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm_bearer,
+        Some(json!({ "expected_updated_at": completed["updated_at"], "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
 }
 
 #[tokio::test]

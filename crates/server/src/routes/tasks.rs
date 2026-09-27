@@ -19,7 +19,14 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/tasks", get(list_tasks).post(create_task))
         .route("/tasks/{task_id}", get(get_task))
-        .route("/tasks/{task_id}/status", post(update_status))
+        // Legacy path of the work-center status change: the same handler, so
+        // an appointment task goes through the same review step, optimistic
+        // lock (`expected_updated_at`), archive check, history and creator
+        // notification as every other task.
+        .route(
+            "/tasks/{task_id}/status",
+            post(super::concierge_operational_items::update_item_status),
+        )
 }
 
 #[derive(Deserialize)]
@@ -43,11 +50,6 @@ struct CreateTaskRequest {
     appointment_id: Option<Uuid>,
     due_date: Option<String>,
     priority: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct UpdateTaskStatusRequest {
-    status: String,
 }
 
 async fn list_tasks(
@@ -80,7 +82,7 @@ async fn list_tasks(
                   t.order_id, t.appointment_id, t.due_date, t.priority, t.status,
                   t.completed_at, t.created_at, t.updated_at,
                   assignee.name AS assigned_to_name, assignee.role AS assigned_to_role,
-                  assigner.name AS assigned_by_name
+                  assigner.name AS assigned_by_name, assigner.role AS assigned_by_role
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
@@ -156,7 +158,7 @@ async fn get_task(
                   t.order_id, t.appointment_id, t.due_date, t.priority, t.status,
                   t.completed_at, t.created_at, t.updated_at,
                   assignee.name AS assigned_to_name, assignee.role AS assigned_to_role,
-                  assigner.name AS assigned_by_name
+                  assigner.name AS assigned_by_name, assigner.role AS assigned_by_role
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
@@ -333,104 +335,6 @@ async fn create_task(
     }
 }
 
-async fn update_status(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(task_id): Path<Uuid>,
-    Json(body): Json<UpdateTaskStatusRequest>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-    ]) {
-        return e;
-    }
-
-    if !is_valid_task_status(&body.status) {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
-    }
-
-    let row = match sqlx::query(
-        "SELECT assigned_to, patient_id, appointment_id, order_id FROM tasks WHERE id = $1 AND task_scope = 'general' AND deleted_at IS NULL",
-    )
-    .bind(task_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
-        Err(e) => {
-            tracing::error!(error = %e, task_id = %task_id, "load task status context");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
-    };
-
-    if !can_update_task(&state, &auth, &row).await {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
-    let status = body.status;
-
-    match sqlx::query(
-        r#"UPDATE tasks
-           SET status = $2,
-               completed_at = CASE WHEN $2 = 'completed' THEN now() ELSE NULL END,
-               updated_at = now()
-           WHERE id = $1 AND task_scope = 'general' AND deleted_at IS NULL"#,
-    )
-    .bind(task_id)
-    .bind(&status)
-    .execute(&state.db)
-    .await
-    {
-        Ok(r) if r.rows_affected() > 0 => {
-            if status == "completed" {
-                match crate::routes::workflow_checklists::complete_checklist_items_for_task(
-                    &state.db,
-                    task_id,
-                    auth.user_id,
-                )
-                .await
-                {
-                    Ok(items) => {
-                        crate::routes::workflow_checklists::publish_task_completed_checklist_items(
-                            &state,
-                            auth.user_id,
-                            task_id,
-                            &items,
-                        )
-                        .await;
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, task_id = %task_id, "sync workflow checklist from task");
-                    }
-                }
-            }
-
-            crate::realtime::publish_task_event(
-                &state,
-                Some(auth.user_id),
-                "task.status_changed",
-                task_id,
-                serde_json::json!({
-                    "status": status,
-                }),
-            )
-            .await;
-
-            Json(serde_json::json!({"ok": true})).into_response()
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Task not found"),
-        Err(e) => {
-            tracing::error!(error = %e, task_id = %task_id, "update task status");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-        }
-    }
-}
-
 fn build_task_json(task_id: Uuid, row: &sqlx::postgres::PgRow) -> serde_json::Value {
     serde_json::json!({
         "id": task_id,
@@ -441,6 +345,7 @@ fn build_task_json(task_id: Uuid, row: &sqlx::postgres::PgRow) -> serde_json::Va
         "assigned_to_role": row.try_get::<String, _>("assigned_to_role").unwrap_or_default(),
         "assigned_by": row.try_get::<Uuid, _>("assigned_by").unwrap_or_else(|_| Uuid::nil()),
         "assigned_by_name": row.try_get::<String, _>("assigned_by_name").unwrap_or_default(),
+        "assigned_by_role": row.try_get::<String, _>("assigned_by_role").unwrap_or_default(),
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
@@ -656,28 +561,6 @@ async fn can_view_task(state: &AppState, auth: &AuthUser, row: &sqlx::postgres::
         }
     }
 
-    false
-}
-
-async fn can_update_task(state: &AppState, auth: &AuthUser, row: &sqlx::postgres::PgRow) -> bool {
-    if auth.role == Role::Ceo {
-        return true;
-    }
-    let assigned_to: Uuid = match row.try_get("assigned_to") {
-        Ok(value) => value,
-        Err(_) => return false,
-    };
-    if assigned_to == auth.user_id {
-        return true;
-    }
-    if auth.role == Role::PatientManager {
-        let patient_id: Option<Uuid> = row.try_get("patient_id").unwrap_or_default();
-        if let Some(patient_id) = patient_id {
-            return access::has_active_patient_assignment(&state.db, patient_id, auth.user_id)
-                .await
-                .unwrap_or(false);
-        }
-    }
     false
 }
 

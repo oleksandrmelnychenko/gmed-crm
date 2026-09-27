@@ -345,6 +345,8 @@ export type TaskEntry = {
   assigned_to_role: string;
   assigned_by: string;
   assigned_by_name: string;
+  /** Creator role: decides who may review (complete) the task. */
+  assigned_by_role?: string;
   patient_id: string | null;
   order_id: string | null;
   appointment_id: string | null;
