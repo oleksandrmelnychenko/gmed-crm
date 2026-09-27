@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Field, checkboxClass, textareaClass } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
+import { CountrySelect, countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -215,6 +216,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
     if (value === null || value === "") return tx("Не указано", "Nicht angegeben");
     if (typeof value === "boolean") return value ? tx("Да", "Ja") : tx("Нет", "Nein");
     if (key === "insurance_type") return ({ private: tx("Частная", "Privat"), public: tx("Государственная", "Gesetzlich"), foreign: tx("Иностранная", "Ausländisch"), self_pay: tx("Без страховки / самостоятельно", "Selbstzahler") })[value] ?? value;
+    // Stored as an ISO code or a legacy name such as "Germany".
+    if (key === "address_country") return countryNameForDisplay(value, lang) || value;
     return value;
   };
   const reviewEvidence = () => void run(async () => {
@@ -293,7 +296,8 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
               {(Object.keys(FACT_LABELS) as (keyof IntakeFacts)[]).filter(key => !["pep_office", "pep_asset_origin"].includes(key) || pep).map(key =>
                 <Field key={key} label={FACT_LABELS[key][language]}>{key.startsWith("pep_") && ["pep_contract_partner", "pep_beneficial_owner"].includes(key) ?
                   <NativeComboboxSelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" value={data.facts[key] === null ? "" : String(data.facts[key])} onChange={event => patchFact(key, event.target.value === "" ? null : event.target.value === "true")}><option value="">{tx("Нужно уточнить", "Noch zu klären")}</option><option value="false">{tx("Нет", "Nein")}</option><option value="true">{tx("Да", "Ja")}</option></NativeComboboxSelect> : key === "insurance_type" ?
-                  <NativeComboboxSelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" value={data.facts[key]} onChange={event => patchFact(key, event.target.value)}>{["", "private", "public", "foreign", "self_pay"].map(value => <option key={value} value={value}>{prettyFact(key, value)}</option>)}</NativeComboboxSelect> :
+                  <NativeComboboxSelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" value={data.facts[key]} onChange={event => patchFact(key, event.target.value)}>{["", "private", "public", "foreign", "self_pay"].map(value => <option key={value} value={value}>{prettyFact(key, value)}</option>)}</NativeComboboxSelect> : key === "address_country" ?
+                  <CountrySelect aria-label={FACT_LABELS[key][language]} disabled={busy} className="h-9 w-full text-xs" lang={lang} value={data.facts[key]} onChange={code => patchFact(key, code ?? "")} /> :
                   <Input aria-label={FACT_LABELS[key][language]} value={String(data.facts[key] ?? "")} maxLength={key === "email" || key === "phone_primary" ? 255 : 2000} onChange={event => patchFact(key, event.target.value)} />}</Field>)}
             </div>
             {factsChanged.length ? <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm"><p className="mb-2 font-medium">{tx("Будет изменено в карточке пациента", "Änderungen in der Patientenakte")}</p>{factsChanged.map(key => <p key={key}>{FACT_LABELS[key][language]}: {prettyFact(key, workspace!.baseline_facts[key])} → {prettyFact(key, data.facts[key])}</p>)}</div> : null}

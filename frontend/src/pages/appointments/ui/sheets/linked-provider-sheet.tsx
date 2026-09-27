@@ -12,7 +12,8 @@ import {
   StatusBadge,
   tokens,
 } from "@/components/ui-shell";
-import { useLang, type TranslationKey, type Translations } from "@/lib/i18n";
+import { countryNameForDisplay } from "@/components/ui/country-select";
+import { getLang, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -109,7 +110,11 @@ function linkedProviderAddress(detail: ProviderSheetDetail) {
     .filter(Boolean)
     .join(" ")
     .trim();
-  return [detail.address_street, cityLine, detail.address_country]
+  return [
+    detail.address_street,
+    cityLine,
+    countryNameForDisplay(detail.address_country, getLang()),
+  ]
     .filter(Boolean)
     .join(", ") || notSet;
 }

@@ -53,7 +53,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                   serviceBillingUnitBadgeClass(rawUnit),
                 )}
               >
-                {rawUnit}
+                {serviceBillingUnitLabel(rawUnit, tx)}
               </Badge>
             ) : null}
           </div>

@@ -36,6 +36,15 @@ const AGENCY_SERVICE_UNIT_LABEL_KEYS: Partial<Record<string, TranslationKey>> = 
   tag: "revenue_unit_day",
   appointment: "revenue_unit_appointment",
   termin: "revenue_unit_appointment",
+  item: "revenue_unit_item",
+  items: "revenue_unit_item",
+  piece: "revenue_unit_item",
+  pcs: "revenue_unit_item",
+  "stk.": "revenue_unit_item",
+  stk: "revenue_unit_item",
+  "stück": "revenue_unit_item",
+  "шт.": "revenue_unit_item",
+  "шт": "revenue_unit_item",
 };
 
 function normalizedKey(value?: string | null) {

@@ -143,6 +143,7 @@ export interface RevenueTranslations {
   revenue_unit_ride: string;
   revenue_unit_day: string;
   revenue_unit_appointment: string;
+  revenue_unit_item: string;
   revenue_filter_all_patients: string;
   revenue_filter_all_orders: string;
 
@@ -982,6 +983,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_unit_ride: "поездка",
   revenue_unit_day: "день",
   revenue_unit_appointment: "приём",
+  revenue_unit_item: "шт.",
   revenue_filter_all_patients: "Все пациенты",
   revenue_filter_all_orders: "Все заказы",
 
@@ -1377,6 +1379,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_unit_ride: "Fahrt",
   revenue_unit_day: "Tag",
   revenue_unit_appointment: "Termin",
+  revenue_unit_item: "Stk.",
   revenue_filter_all_patients: "Alle Patienten",
   revenue_filter_all_orders: "Alle Aufträge",
 

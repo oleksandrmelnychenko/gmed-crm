@@ -1545,7 +1545,7 @@ function useLeadsPageContent() {
                       <DetailCard label="WhatsApp" value={dashOrValue(detail.whatsapp_number, t)} />
                     ) : null}
                     {detailLeadType === "questionnaire" ? (
-                      <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
+                      <DetailCard label={t.providers_country} value={dashOrValue(countryNameForDisplay(detail.country, lang), t)} />
                     ) : null}
                     {detailLeadType === "questionnaire" ? (
                       <DetailCard label={t.field_birth_date} value={formatDate(leadDetailDateOfBirth(detail), locale, t.common_not_set)} />
@@ -1748,7 +1748,7 @@ function useLeadsPageContent() {
                     <DetailCard label={t.field_phone} value={detail.phone || t.common_not_set} />
                     <DetailCard label={t.lead_type} value={leadTypeLabel(detail, t)} />
                     <DetailCard label={t.leads_source} value={leadSourceLabel(detail.source, t)} />
-                    <DetailCard label={t.providers_country} value={detail.country || t.common_not_set} />
+                    <DetailCard label={t.providers_country} value={countryNameForDisplay(detail.country, lang) || t.common_not_set} />
                     {detail.console_promoted_at ? (
                       <DetailCard
                         label={t.lead_console_promoted_at}
@@ -1819,7 +1819,7 @@ function useLeadsPageContent() {
                 <section className={cardClass("p-4")}>
                   <SectionTitle>{t.lead_section_address}</SectionTitle>
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
-                    <DetailCard label={t.providers_country} value={dashOrValue(detail.country, t)} />
+                    <DetailCard label={t.providers_country} value={dashOrValue(countryNameForDisplay(detail.country, lang), t)} />
                     <DetailCard label={t.providers_city} value={dashOrValue(detail.city, t)} />
                     <DetailCard label={t.lead_state_region} value={dashOrValue(omitZeroPlaceholder(detail.state), t)} />
                     <DetailCard label={t.lead_zip_code} value={dashOrValue(omitZeroPlaceholder(detail.zip_code), t)} />

@@ -7,6 +7,7 @@ import {
   normalizeFunctionalLabel,
 } from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { formatUiText, getLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -405,7 +406,7 @@ export function buildPatientColumns(
       render: (p: PatientSummary) => (
         <PillCell
           renderId="residence_country"
-          value={p.residence_country}
+          value={countryNameForDisplay(p.residence_country, getLang())}
           emptyLabel={tr.common_not_set}
         />
       ),

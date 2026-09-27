@@ -8726,7 +8726,7 @@ ${serviceCommentLines.join("\n")}`
                           <div className="flex min-w-0 items-start gap-2.5">
                             <div className="min-w-0">
                               <h4 className="break-words text-sm font-semibold leading-5 text-foreground">{line.description}</h4>
-                              {line.catalogUnitLabel || catalogService?.unit_label ? (
+                              {rawUnit ? (
                                 <Badge
                                   variant="outline"
                                   className={cn(
@@ -8734,7 +8734,7 @@ ${serviceCommentLines.join("\n")}`
                                     serviceBillingUnitBadgeClass(rawUnit),
                                   )}
                                 >
-                                  {line.catalogUnitLabel || catalogService?.unit_label}
+                                  {unit}
                                 </Badge>
                               ) : null}
                             </div>
