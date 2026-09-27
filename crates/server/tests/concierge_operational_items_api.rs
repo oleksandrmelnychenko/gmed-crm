@@ -3278,12 +3278,15 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
             .any(|item| item["id"] == legacy_task_id.to_string())
     );
 
+    // A concierge assigned to the same patient does not see a task that is
+    // neither assigned to it, created by it nor shared through a project: the
+    // executor roles work on their own tasks ("W (свої)").
     let (status, patient_items) =
         json_request(&ctx.app, "GET", base_path, &patient_bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{patient_items}");
     let patient_items = patient_items.as_array().expect("patient-scoped task list");
     assert!(
-        patient_items
+        !patient_items
             .iter()
             .any(|item| item["id"] == general_task_id.to_string())
     );
@@ -3294,11 +3297,6 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
     );
 
     let general_path = format!("{base_path}/{general_task_id}");
-    let (status, patient_detail) =
-        json_request(&ctx.app, "GET", &general_path, &patient_bearer, None).await;
-    assert_eq!(status, StatusCode::OK, "{patient_detail}");
-    assert_eq!(patient_detail["item"]["id"], general_task_id.to_string());
-
     let (status, comment) = json_request(
         &ctx.app,
         "POST",
@@ -3311,30 +3309,71 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{comment}");
+    let (status, owner_detail) =
+        json_request(&ctx.app, "GET", &general_path, &owner_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{owner_detail}");
 
-    let (status, patient_detail) =
-        json_request(&ctx.app, "GET", &general_path, &patient_bearer, None).await;
-    assert_eq!(status, StatusCode::OK, "{patient_detail}");
-    assert_eq!(
-        patient_detail["comments"]
-            .as_array()
-            .expect("patient-scoped comments")
-            .len(),
-        1
-    );
-
+    for path in [general_path.clone(), format!("{general_path}/attachments")] {
+        let (status, body) = json_request(&ctx.app, "GET", &path, &patient_bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert!(
+            !body.to_string().contains("Canonical task comment"),
+            "{path}: {body}"
+        );
+    }
     let (status, denied_status) = json_request(
         &ctx.app,
         "POST",
         &format!("{general_path}/status"),
         &patient_bearer,
         Some(json!({
-            "expected_updated_at": patient_detail["item"]["updated_at"],
+            "expected_updated_at": owner_detail["item"]["updated_at"],
             "status": "in_progress"
         })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_status}");
+
+    // The same holds for an interpreter linked to the patient, while the
+    // patient manager of that patient keeps the patient-wide task view.
+    let interpreter_id = seed_user(&ctx.pool, "interpreter", &format!("work-interp-{tag}")).await;
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &format!("work-pm-{tag}")).await;
+    for user_id in [interpreter_id, manager_id] {
+        sqlx::query(
+            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+               VALUES ($1, $2, $3)"#,
+        )
+        .bind(patient_id)
+        .bind(user_id)
+        .bind(ctx.admin_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    }
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let (status, interpreter_items) =
+        json_request(&ctx.app, "GET", base_path, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{interpreter_items}");
+    assert!(
+        !interpreter_items
+            .as_array()
+            .expect("interpreter task list")
+            .iter()
+            .any(|item| item["id"] == general_task_id.to_string())
+    );
+    let (status, body) =
+        json_request(&ctx.app, "GET", &general_path, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, manager_detail) = json_request(
+        &ctx.app,
+        "GET",
+        &general_path,
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manager_detail}");
+    assert_eq!(manager_detail["item"]["id"], general_task_id.to_string());
 
     let (status, outsider_items) =
         json_request(&ctx.app, "GET", base_path, &outsider_bearer, None).await;

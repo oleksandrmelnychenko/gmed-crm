@@ -427,7 +427,8 @@ async fn list_items(
                            )) END
                      )
                  ))
-                 OR (t.patient_id IS NOT NULL AND EXISTS (
+                 OR ($10::text NOT IN ('concierge', 'interpreter')
+                     AND t.patient_id IS NOT NULL AND EXISTS (
                      SELECT 1
                      FROM patient_assignments visible_assignment
                      WHERE visible_assignment.patient_id = t.patient_id
@@ -592,7 +593,8 @@ async fn list_all_attachments(
                            )) END
                      )
                  ))
-                 OR (task.patient_id IS NOT NULL AND EXISTS (
+                 OR ($4::text NOT IN ('concierge', 'interpreter')
+                     AND task.patient_id IS NOT NULL AND EXISTS (
                      SELECT 1
                      FROM patient_assignments visible_assignment
                      WHERE visible_assignment.patient_id = task.patient_id
@@ -3474,7 +3476,8 @@ async fn lock_item_access(
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
-    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false);
+    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
+        && patient_scope_opens_tasks(auth.role);
     if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
         && (for_update || (!project_access && !patient_access))
     {
@@ -3539,7 +3542,8 @@ async fn ensure_operational_view_access(
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
-    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false);
+    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
+        && patient_scope_opens_tasks(auth.role);
     if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
         && !project_access
         && !patient_access
@@ -4658,6 +4662,14 @@ fn can_assign_operational_role(actor_role: Role, target_role: &str) -> bool {
     }
 }
 
+/// Executors (concierge, interpreter) work on their own tasks only: assigned
+/// to them, created by them or shared with them through a project. Their
+/// patient assignment does not open the other tasks of that patient (RBAC
+/// matrix: task manager "W (свої)"). Managers keep the patient-wide view.
+fn patient_scope_opens_tasks(role: Role) -> bool {
+    !matches!(role, Role::Concierge | Role::Interpreter)
+}
+
 fn can_collaborate_on_operational_item(
     auth: &AuthUser,
     assigned_to: Uuid,
@@ -4800,6 +4812,14 @@ mod work_center_tests {
             access_token_jti: Uuid::new_v4(),
             access_token_expires_at: Utc::now(),
         }
+    }
+
+    #[test]
+    fn executors_do_not_see_patient_tasks_of_others() {
+        assert!(!patient_scope_opens_tasks(Role::Concierge));
+        assert!(!patient_scope_opens_tasks(Role::Interpreter));
+        assert!(patient_scope_opens_tasks(Role::PatientManager));
+        assert!(patient_scope_opens_tasks(Role::TeamleadInterpreter));
     }
 
     #[test]

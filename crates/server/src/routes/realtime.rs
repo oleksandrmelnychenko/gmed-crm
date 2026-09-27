@@ -448,7 +448,11 @@ async fn can_receive_task_event(
     auth: &AuthUser,
     event: &RealtimeEvent,
 ) -> Result<bool, axum::response::Response> {
-    if let Some(patient_id) = event.patient_id {
+    // Executors (concierge, interpreter) hear only about their own tasks, as
+    // in the task lists: a patient link does not open other staff's tasks.
+    if let Some(patient_id) = event.patient_id
+        && !matches!(auth.role, Role::Concierge | Role::Interpreter)
+    {
         return can_receive_patient_event(state, auth, patient_id).await;
     }
     if auth.role == Role::Ceo {
