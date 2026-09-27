@@ -7725,6 +7725,8 @@ async fn assign_interpreter_creates_patient_assignment_idempotently() {
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
 
+    // An upcoming visit: the booking link lasts until 14 days after it.
+    let visit_date = (gmed_server::app_time::today() + chrono::Duration::days(5)).to_string();
     let appointment_id = seed_appointment(
         &pool,
         patient_id,
@@ -7733,7 +7735,7 @@ async fn assign_interpreter_creates_patient_assignment_idempotently() {
         admin_id,
         &format!("Appointment {tag}"),
         "confirmed",
-        "2026-04-24",
+        &visit_date,
     )
     .await;
 
@@ -7757,21 +7759,20 @@ async fn assign_interpreter_creates_patient_assignment_idempotently() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let assignment_exists: bool = sqlx::query_scalar(
-        r#"SELECT EXISTS(
-            SELECT 1
-            FROM patient_assignments
-            WHERE patient_id = $1
-              AND user_id = $2
-              AND revoked_at IS NULL
-        )"#,
+    let active_booking_links: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM patient_assignments
+           WHERE patient_id = $1
+             AND user_id = $2
+             AND source = 'interpreter_booking'
+             AND revoked_at IS NULL"#,
     )
     .bind(patient_id)
     .bind(interpreter_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(assignment_exists);
+    assert_eq!(active_booking_links, 1);
 }
 
 #[tokio::test]

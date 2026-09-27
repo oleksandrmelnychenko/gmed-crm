@@ -757,6 +757,10 @@ export const de = {
     "Wie viele Stunden vor Beginn eines Concierge-Services die Erinnerung kommt und die Vorbereitungsaufgabe fällig ist.",
   settings_concierge_reminder_lead_hours: "Erinnerung an den anstehenden Service, Stunden vorher",
   settings_concierge_prep_lead_hours: "Fälligkeit der Vorbereitungsaufgabe, Stunden vorher",
+  settings_interpreter_access: "Patientenzugang von Dolmetschern",
+  settings_interpreter_access_hint:
+    "Ein gebuchter Dolmetscher sieht die Basisdaten, freigegebenen Dokumente und den Chat des Patienten. Der Zugang endet ohne aktive Buchung oder so viele Tage nach dem letzten gebuchten Termin; manuelle Zuweisungen bleiben bestehen.",
+  settings_interpreter_booking_access_days: "Zugang nach dem letzten gebuchten Termin (Tage)",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
   settings_logout_user: "Sitzungen beenden",

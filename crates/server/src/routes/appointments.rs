@@ -15,6 +15,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::me::resolve_self_patient_id;
+use crate::services::interpreter_booking_links as booking_links;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -1406,16 +1407,12 @@ async fn convert_appointment_request(
         .unwrap_or_else(|_| Uuid::nil());
 
     if let Some(interpreter_id) = body.interpreter_id
-        && let Err(e) = sqlx::query(
-            "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (patient_id, user_id)
-             DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
+        && let Err(e) = booking_links::grant_in_tx(
+            &mut tx,
+            &[(patient_id, interpreter_id)],
+            auth.user_id,
+            "convert_appointment_request",
         )
-        .bind(patient_id)
-        .bind(interpreter_id)
-        .bind(auth.user_id)
-        .execute(&mut *tx)
         .await
     {
         tracing::error!(error = %e, request_id = %id, interpreter_id = %interpreter_id, "assign interpreter during request conversion");
@@ -2575,22 +2572,22 @@ async fn create_appointment(
         }
     }
 
-    if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, "create appointment: commit");
+    if let Some(interpreter_id) = interpreter_id
+        && let Err(e) = booking_links::grant_in_tx(
+            &mut tx,
+            &[(patient_id, interpreter_id)],
+            auth.user_id,
+            "create_appointment",
+        )
+        .await
+    {
+        tracing::error!(error = %e, "create appointment: link booked interpreter to patient");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    if let Some(interpreter_id) = interpreter_id {
-        let _ = sqlx::query!(
-            "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
-            patient_id,
-            interpreter_id,
-            auth.user_id
-        )
-        .execute(&state.db)
-        .await;
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, "create appointment: commit");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
     for (appointment_id, occurrence_date) in &created_appointments {
@@ -2946,7 +2943,28 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
         .await?;
     close_terminal_appointment_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
     close_auto_concierge_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
+    end_interpreter_links_of_cancelled_in_tx(tx, &appointment_ids, cancelled_by).await?;
     Ok(appointment_ids)
+}
+
+/// The interpreters of cancelled appointments keep their patient link only
+/// through another active booking of the patient.
+async fn end_interpreter_links_of_cancelled_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+    cancelled_by: Uuid,
+) -> Result<(), axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, "end interpreter patient links of cancelled appointments");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let pairs = booking_links::booked_pairs_in_tx(tx, appointment_ids)
+        .await
+        .map_err(failed)?;
+    booking_links::end_unbooked_in_tx(tx, &pairs, Some(cancelled_by), "cancel_appointment")
+        .await
+        .map_err(failed)?;
+    Ok(())
 }
 
 /// Realtime events for appointments cancelled together with their order.
@@ -4211,6 +4229,22 @@ async fn delete_appointment(
         return err(StatusCode::NOT_FOUND, "Appointment not found");
     }
 
+    if let Some(interpreter_id) = interpreter_id
+        && let Err(error) = booking_links::end_unbooked_in_tx(
+            &mut tx,
+            &[(patient_id, interpreter_id)],
+            Some(auth.user_id),
+            "delete_appointment",
+        )
+        .await
+    {
+        tracing::error!(error = %error, appointment_id = %apt_id, "end interpreter patient link after appointment delete");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to delete appointment",
+        );
+    }
+
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, appointment_id = %apt_id, "commit appointment delete transaction");
         return err(
@@ -4876,7 +4910,7 @@ async fn update_appointment(
     } else {
         recurrence_dates.len().min(targets.len())
     };
-    let mut reminder_targets = Vec::new();
+    let mut booked_pairs: Vec<booking_links::BookingPair> = Vec::new();
     let mut updated_targets = Vec::new();
     let mut created_targets = Vec::new();
     let mut cancelled_target_ids = Vec::new();
@@ -5048,7 +5082,7 @@ async fn update_appointment(
         if let Some(interpreter_id) = body.interpreter_id
             && (interpreter_changed || schedule_changed)
         {
-            reminder_targets.push((target.id, target.patient_id, interpreter_id, target_date));
+            booked_pairs.push((target.patient_id, interpreter_id));
         }
         updated_targets.push((target.id, target.patient_id, target_date));
     }
@@ -5124,7 +5158,7 @@ async fn update_appointment(
                 return resp;
             }
             if let Some(interpreter_id) = body.interpreter_id {
-                reminder_targets.push((appointment_id, patient_id, interpreter_id, target_date));
+                booked_pairs.push((patient_id, interpreter_id));
             }
             updated_targets.push((appointment_id, patient_id, target_date));
             created_targets.push((appointment_id, patient_id, target_date));
@@ -5245,22 +5279,33 @@ async fn update_appointment(
             return resp;
         }
     }
+    // A newly booked or rescheduled interpreter is linked to the patient; an
+    // interpreter taken off these visits keeps the link only through another
+    // booking of the patient.
+    let previous_pairs: Vec<booking_links::BookingPair> = targets
+        .iter()
+        .filter_map(|target| target.interpreter_id.map(|id| (target.patient_id, id)))
+        .collect();
+    if let Err(e) =
+        booking_links::grant_in_tx(&mut tx, &booked_pairs, auth.user_id, "update_appointment").await
+    {
+        tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: link booked interpreter");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = booking_links::end_unbooked_in_tx(
+        &mut tx,
+        &previous_pairs,
+        Some(auth.user_id),
+        "update_appointment",
+    )
+    .await
+    {
+        tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: end interpreter patient links");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
-    for (_target_id, target_patient_id, interpreter_id, _target_date) in reminder_targets {
-        let _ = sqlx::query!(
-            "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
-            target_patient_id,
-            interpreter_id,
-            auth.user_id
-        )
-        .execute(&state.db)
-        .await;
     }
     if appointment_type == "non_medical" {
         let created_ids: HashSet<Uuid> = created_targets.iter().map(|(id, _, _)| *id).collect();
@@ -5710,6 +5755,12 @@ async fn update_status(
     {
         return resp;
     }
+    if body.status == "cancelled"
+        && let Err(resp) =
+            end_interpreter_links_of_cancelled_in_tx(&mut tx, &target_ids, auth.user_id).await
+    {
+        return resp;
+    }
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status: commit");
@@ -5992,29 +6043,33 @@ async fn assign_interpreter(
         tracing::error!(error = %e, appointment_id = %apt_id, "reject stale report after interpreter reassignment");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    if let Err(e) = booking_links::grant_in_tx(
+        &mut tx,
+        &[(patient_id, body.interpreter_id)],
+        auth.user_id,
+        "assign_interpreter",
+    )
+    .await
+    {
+        tracing::error!(error = %e, appointment_id = %apt_id, interpreter_id = %body.interpreter_id, "assign interpreter: link interpreter to patient");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Some(previous_interpreter_id) = previous_interpreter_id
+        && previous_interpreter_id != body.interpreter_id
+        && let Err(e) = booking_links::end_unbooked_in_tx(
+            &mut tx,
+            &[(patient_id, previous_interpreter_id)],
+            Some(auth.user_id),
+            "assign_interpreter",
+        )
+        .await
+    {
+        tracing::error!(error = %e, appointment_id = %apt_id, "assign interpreter: end previous interpreter patient link");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "assign interpreter: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
-    if let Err(e) = sqlx::query(
-        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-           VALUES ($1, $2, $3)
-           ON CONFLICT (patient_id, user_id)
-           DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()"#,
-    )
-    .bind(patient_id)
-    .bind(body.interpreter_id)
-    .bind(auth.user_id)
-    .execute(&state.db)
-    .await
-    {
-        tracing::error!(
-            error = %e,
-            appointment_id = %apt_id,
-            interpreter_id = %body.interpreter_id,
-            "post-assignment patient access update failed"
-        );
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -6076,7 +6131,7 @@ async fn interpreter_response(
         }
     };
     let appointment = match sqlx::query(
-        "SELECT interpreter_id, status FROM appointments WHERE id = $1 FOR UPDATE",
+        "SELECT patient_id, interpreter_id, status FROM appointments WHERE id = $1 FOR UPDATE",
     )
     .bind(apt_id)
     .fetch_optional(&mut *tx)
@@ -6122,6 +6177,28 @@ async fn interpreter_response(
             tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    }
+    // A declined booking no longer links the interpreter to the patient;
+    // taking the visit back re-links them.
+    let Ok(patient_id) = appointment.try_get::<Uuid, _>("patient_id") else {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    };
+    let pair = [(patient_id, auth.user_id)];
+    let link_change = if body.response == "declined" {
+        booking_links::end_unbooked_in_tx(
+            &mut tx,
+            &pair,
+            Some(auth.user_id),
+            "interpreter_declined",
+        )
+        .await
+        .map(|_| ())
+    } else {
+        booking_links::grant_in_tx(&mut tx, &pair, auth.user_id, "interpreter_response").await
+    };
+    if let Err(e) = link_change {
+        tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response: update patient link");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     let notifications = if body.response == "discussion_requested" {
         match insert_interpreter_work_notifications(

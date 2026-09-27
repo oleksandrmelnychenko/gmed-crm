@@ -138,9 +138,11 @@ state.audit_sender.try_send(audit::domain_diff_event(
 
 ### Випадок 4: audit має бути транзакційний
 
-Залиш raw SQL `INSERT INTO audit_log` всередині `.execute(&mut *tx)`. Додай `// TODO(audit-migrate): transactional — coupled to <X> rollback. Do not migrate.` коментар перед INSERT, щоб майбутній рев'юер бачив, що це усвідомлений виняток.
+Для нового коду використовуй `audit::write_in_transaction(&mut tx, &audit::domain_event(..))`: той самий єдиний writer модуля `audit.rs`, але в транзакції виклику — audit row комітиться або відкочується разом зі зміною і не губиться при переповненому каналі. Так пишуть audit зміни прив'язок перекладачів до пацієнтів через бронювання (`crates/server/src/services/interpreter_booking_links.rs`). Бюджет ratchet це не змінює.
 
-Підніми `AUDIT_INSERT_BUDGET` у `scripts/check_repo_hygiene.py` на 1 (так, ratchet рухається вниз — але якщо твій випадок legitimate, ти можеш йому *тимчасово* підняти бюджет; це викличе обговорення в ревью, що і потрібно).
+Існуючі raw SQL `INSERT INTO audit_log` всередині `.execute(&mut *tx)` залиш як є. Додай `// TODO(audit-migrate): transactional — coupled to <X> rollback. Do not migrate.` коментар перед INSERT, щоб майбутній рев'юер бачив, що це усвідомлений виняток.
+
+Новий raw INSERT у `routes/` піднімає `AUDIT_INSERT_BUDGET` у `scripts/check_repo_hygiene.py` на 1 (так, ratchet рухається вниз — але якщо твій випадок legitimate, ти можеш йому *тимчасово* підняти бюджет; це викличе обговорення в ревью, що і потрібно).
 
 ## Як перевірити покриття зараз
 

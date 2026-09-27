@@ -79,6 +79,7 @@ async fn main() {
     gmed_server::routes::concierge_operational_items::spawn_concierge_task_reminder_scheduler(
         app_state.clone(),
     );
+    gmed_server::services::interpreter_booking_links::spawn_expiry_sweeper(app_state.clone());
     gmed_server::services::bfarm_rote_hand::spawn_bfarm_rote_hand_scheduler(app_state.clone());
     gmed_server::services::gba_ais::initialize_gba_ais_connector(
         &app_state,

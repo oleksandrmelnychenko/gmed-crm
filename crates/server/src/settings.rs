@@ -228,6 +228,13 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
                 "Concierge lead time cannot exceed 336 hours (14 days)".into(),
             ));
         }
+        crate::services::interpreter_booking_links::ACCESS_DAYS_SETTING
+            if parsed > crate::services::interpreter_booking_links::MAX_ACCESS_DAYS =>
+        {
+            return Err(UpdateError::InvalidValue(
+                "Interpreter patient access cannot exceed 365 days after the last booking".into(),
+            ));
+        }
         _ => {}
     }
 
@@ -474,5 +481,24 @@ mod tests {
             validate_positive_integer_setting("refresh_token_days", "0"),
             Err(UpdateError::InvalidValue(_))
         ));
+    }
+
+    #[test]
+    fn interpreter_booking_access_days_stay_between_one_day_and_a_year() {
+        let key = crate::services::interpreter_booking_links::ACCESS_DAYS_SETTING;
+        assert_eq!(
+            validate_positive_integer_setting(key, "14").unwrap(),
+            Value::from(14)
+        );
+        assert_eq!(
+            validate_positive_integer_setting(key, "365").unwrap(),
+            Value::from(365)
+        );
+        for invalid in ["0", "366", "two weeks"] {
+            assert!(matches!(
+                validate_positive_integer_setting(key, invalid),
+                Err(UpdateError::InvalidValue(_))
+            ));
+        }
     }
 }

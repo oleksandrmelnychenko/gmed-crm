@@ -375,7 +375,22 @@ pub fn spawn_writer(pool: DbPool, ip_salt: String) -> AuditSender {
     }
 }
 
-async fn write_event(pool: &DbPool, event: &AuditEvent) -> Result<(), sqlx::Error> {
+/// Write an audit row inside the caller's transaction, for a change whose
+/// audit row must commit or roll back together with it (case 4 of
+/// `docs/engineering/02_audit-migration-policy_ua.md`). Unlike
+/// [`AuditSender::try_send`] the row is never written for a rolled-back
+/// change and never dropped on a full channel.
+pub async fn write_in_transaction(
+    conn: &mut sqlx::PgConnection,
+    event: &AuditEvent,
+) -> Result<(), sqlx::Error> {
+    write_event(conn, event).await
+}
+
+async fn write_event<'e, E>(executor: E, event: &AuditEvent) -> Result<(), sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
     // NOTE: this is the one intentional `INSERT INTO audit_log` allowed
     // by the hygiene ratchet — it is the single writer for the module.
     // Every handler-side insert that still exists is subject to the
@@ -395,7 +410,7 @@ async fn write_event(pool: &DbPool, event: &AuditEvent) -> Result<(), sqlx::Erro
     .bind(event.new_value.as_ref())
     .bind(&event.context)
     .bind(event.ip_hash.as_deref())
-    .execute(pool)
+    .execute(executor)
     .await
     .map(|_| ())
 }

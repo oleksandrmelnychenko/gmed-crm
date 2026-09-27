@@ -9647,17 +9647,25 @@ async fn assign_patient(
     let patient_context =
         load_patient_assignment_notification_context(&state, patient_uuid).await?;
 
-    sqlx::query!(
-        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (patient_id, user_id) DO UPDATE SET revoked_at = NULL, assigned_by = $3, assigned_at = now()",
-        patient_uuid, body.user_id, auth.user_id
+    // A manual assignment never expires; it also takes over an interpreter's
+    // booking link, which would otherwise end with the booking.
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
+         VALUES ($1, $2, $3, 'manual')
+         ON CONFLICT (patient_id, user_id) DO UPDATE
+         SET revoked_at = NULL, assigned_by = $3, assigned_at = now(), source = 'manual'",
     )
+    .bind(patient_uuid)
+    .bind(body.user_id)
+    .bind(auth.user_id)
     .execute(&state.db)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to assign patient");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to assign patient")
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to assign patient",
+        )
     })?;
 
     if !assignment_already_active {

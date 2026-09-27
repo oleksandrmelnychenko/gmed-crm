@@ -2,6 +2,7 @@ pub mod bfarm_rote_hand;
 pub mod bmp_import;
 pub mod drug_matching;
 pub mod gba_ais;
+pub mod interpreter_booking_links;
 pub mod interpreter_suggestions;
 pub mod machine_translation;
 pub mod medication_ai_jobs;

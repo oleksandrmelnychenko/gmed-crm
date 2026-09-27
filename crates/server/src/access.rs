@@ -60,10 +60,11 @@ pub fn requires_patient_assignment(role: Role) -> bool {
 /// a capability (`appointments.view`, …) admitted it to the module.
 ///
 /// A patient assignment is not the same as an appointment assignment. An
-/// interpreter is linked to the patient when a manager books them for one
-/// visit, but that link must not open the patient's whole calendar (other
-/// interpreters' visits, their notes, reports and communication). The
-/// interpreter therefore sees only the appointments it runs or owns.
+/// interpreter is linked to the patient while booked on one of the patient's
+/// visits (see `services::interpreter_booking_links`), but that link must not
+/// open the patient's whole calendar (other interpreters' visits, their notes,
+/// reports and communication). The interpreter therefore sees only the
+/// appointments it runs or owns, with or without the link.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AppointmentScope {
     /// Every appointment (roles outside the assignment model).
