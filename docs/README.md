@@ -51,7 +51,8 @@
 - `engineering/02_audit-migration-policy_ua.md`
 - `engineering/03_lead-retention-policy_ua.md`
 - `engineering/04_medication-ai-worker-runbook_ua.md`
-- `engineering/05_time-zone-policy_ua.md` - система працює лише за часом Europe/Berlin: сервер, база даних і фронтенд
+- `engineering/05_scan-station_ua.md` - станція сканування: агент `gmed-scan` для мережевих сканерів
+- `engineering/06_time-zone-policy_ua.md` - система працює лише за часом Europe/Berlin: сервер, база даних і фронтенд
 
 ### Testing
 
