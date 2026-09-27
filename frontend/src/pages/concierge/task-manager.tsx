@@ -58,7 +58,7 @@ import {
 } from "./task-calendar";
 import { TaskTimeline } from "./task-timeline";
 import { TaskWorkflowDialog } from "./task-workflow-dialog";
-import { taskWorkflowCounts } from "./task-workflow";
+import { taskWorkflowCounts, type TaskWorkflowCount } from "./task-workflow";
 
 type TaskView = "board" | "list" | "calendar" | "timeline";
 type CalendarScale = TaskCalendarScale;
@@ -296,7 +296,7 @@ function TaskCard({
 }: {
   task: ConciergeTask;
   parentTask?: ConciergeTask;
-  subCount?: { total: number; paused: number };
+  subCount?: TaskWorkflowCount;
   assignedToRole?: string;
   lang: Lang;
   now: Date;
@@ -325,6 +325,7 @@ function TaskCard({
   const terminal = task.status === "completed" || task.status === "cancelled";
   const workflowLabel = lang === "ru" ? "Процесс задачи" : "Aufgabenablauf";
   const countLabel = lang === "ru" ? "Подзадачи и события" : "Unteraufgaben und Termine";
+  const doneLabel = lang === "ru" ? "Выполнено" : "Erledigt";
   const parentLabel = lang === "ru" ? "В составе" : "Gehört zu";
   return (
     <article tabIndex={-1} data-task-card-id={task.id} data-testid={`task-card-${task.id}`} className={cn("relative min-w-0 max-w-full overflow-hidden rounded-lg border border-l-[3px] border-border/70 bg-card p-3 shadow-sm transition-[border-color,box-shadow] hover:shadow-md focus:outline-2 focus:outline-primary focus:outline-offset-2", taskAccent(task.priority), compact && "grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center")}>
@@ -337,7 +338,7 @@ function TaskCard({
         ) : terminal ? (
           <Button type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs" disabled={!canModify || archiving} title={canModify ? labels.archive : labels.noPermission} onClick={() => onArchive(task)}><Archive /><span className={cn(!compact && "sr-only")}>{labels.archive}</span></Button>
         ) : null}
-        <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className="min-w-4 rounded-full bg-primary/10 px-1 font-mono text-[10px] leading-4">{subCount?.total ?? 0}</span></Button>
+        <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 rounded-md px-1.5 text-primary hover:text-primary" data-workflow-task-id={task.id} title={`${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}${subCount?.paused ? ` · ${labels.on_hold}: ${subCount.paused}` : ""}`} aria-label={`${workflowLabel} · ${countLabel}: ${subCount?.total ?? 0}${subCount?.total ? ` · ${doneLabel}: ${subCount.done}/${subCount.active}` : ""}`} onClick={() => onWorkflow(task)}><Workflow /><span data-testid={`task-sub-count-${task.id}`} className={cn("min-w-4 rounded-full px-1 font-mono text-[10px] leading-4", subCount?.active && subCount.done === subCount.active ? "bg-emerald-100 text-emerald-700" : "bg-primary/10")}>{subCount?.total ? `${subCount.done}/${subCount.active}` : 0}</span></Button>
         {!archived ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md" disabled={!canModify || updating || deleting || archiving} title={canModify ? labels.edit : labels.noPermission} aria-label={labels.edit} onClick={() => onEdit(task)}><Pencil /></Button> : null}
         {!archived && canDelete ? <Button type="button" size="icon-sm" variant="ghost" className="h-8 rounded-md text-destructive hover:text-destructive" disabled={updating || deleting || archiving} title={labels.delete} aria-label={labels.delete} onClick={() => onDelete(task)}><Trash2 /></Button> : null}
       </div>

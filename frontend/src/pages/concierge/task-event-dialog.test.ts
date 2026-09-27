@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ConciergeAssignee, ConciergeService } from "./model";
-import { isConciergeServiceSelectableForTask, selectTaskAssigneeId } from "./task-event-dialog";
+import { initialTaskWindow, isConciergeServiceSelectableForTask, selectTaskAssigneeId } from "./task-event-dialog";
 
 const assignees: ConciergeAssignee[] = [
   { id: "ceo-1", name: "Oleksandr", email: "ceo@example.com", role: "ceo", is_active: true },
@@ -49,5 +49,37 @@ describe("isConciergeServiceSelectableForTask", () => {
     const converted = { ...service, linked_task_id: "task-1" };
     expect(isConciergeServiceSelectableForTask(converted, "concierge-1")).toBe(false);
     expect(isConciergeServiceSelectableForTask(converted, "concierge-2", service.id)).toBe(true);
+  });
+});
+
+describe("initialTaskWindow", () => {
+  const now = Date.parse("2026-09-27T10:00:00Z");
+  const iso = (date: Date) => date.toISOString();
+
+  it("starts a sub-task inside its parent's window", () => {
+    const window = initialTaskWindow(null, {
+      kind: "task",
+      starts_at: "2026-09-29T08:00:00Z",
+      due_at: "2026-09-30T16:00:00Z",
+      ends_at: null,
+    }, now);
+    expect(iso(window.start)).toBe("2026-09-29T08:00:00.000Z");
+    expect(iso(window.end)).toBe("2026-09-30T16:00:00.000Z");
+  });
+
+  it("uses an event parent's end and fills a missing parent start or end", () => {
+    expect(iso(initialTaskWindow(null, { kind: "event", starts_at: "2026-09-29T08:00:00Z", due_at: null, ends_at: "2026-09-29T09:30:00Z" }, now).end))
+      .toBe("2026-09-29T09:30:00.000Z");
+    const onlyDue = initialTaskWindow(null, { kind: "task", starts_at: null, due_at: "2026-09-27T10:30:00Z", ends_at: null }, now);
+    expect(iso(onlyDue.start)).toBe("2026-09-27T09:30:00.000Z");
+    expect(iso(onlyDue.end)).toBe("2026-09-27T10:30:00.000Z");
+    const onlyStart = initialTaskWindow(null, { kind: "task", starts_at: "2026-09-29T08:00:00Z", due_at: null, ends_at: null }, now);
+    expect(iso(onlyStart.end)).toBe("2026-09-29T09:00:00.000Z");
+  });
+
+  it("keeps the one-hour default without a parent", () => {
+    const window = initialTaskWindow(null, null, now);
+    expect(iso(window.start)).toBe("2026-09-27T11:00:00.000Z");
+    expect(iso(window.end)).toBe("2026-09-27T12:00:00.000Z");
   });
 });

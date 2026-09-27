@@ -67,6 +67,10 @@ pub fn router() -> Router<AppState> {
             post(update_item_status),
         )
         .route(
+            "/concierge-operational-items/{item_id}/close-children",
+            post(close_children),
+        )
+        .route(
             "/concierge-operational-items/{item_id}/archive",
             post(archive_item),
         )
@@ -189,6 +193,13 @@ pub(crate) struct UpdateItemStatusRequest {
     status: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CloseChildrenRequest {
+    /// `completed` or `cancelled`: the status the parent is closed with.
+    status: String,
+}
+
 #[derive(Clone, Copy)]
 struct PendingNotification {
     id: Uuid,
@@ -273,6 +284,8 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           END AS concierge_service_id,
           t.task_kind, t.due_date, t.starts_at, t.ends_at, t.parent_task_id,
           (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
+          (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status = 'completed') AS child_completed_count,
+          (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status NOT IN ('completed', 'cancelled')) AS child_open_count,
           t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
           t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
           t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
@@ -381,6 +394,8 @@ async fn list_items(
                   END AS concierge_service_id,
                   t.task_kind, t.due_date, t.starts_at, t.ends_at, t.parent_task_id,
                   (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL) AS child_count,
+                  (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status = 'completed') AS child_completed_count,
+                  (SELECT COUNT(*) FROM tasks child WHERE child.parent_task_id = t.id AND child.deleted_at IS NULL AND child.status NOT IN ('completed', 'cancelled')) AS child_open_count,
                   t.location, t.priority, t.status, t.reminder_at, t.reminder_sent_at,
                   t.completed_at, t.archived_at, t.archived_by, archiver.name AS archived_by_name,
                   t.created_at, t.updated_at, t.task_audience, t.patient_id, t.provider_id,
@@ -2016,6 +2031,247 @@ pub(crate) async fn update_item_status(
         Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => response,
     }
+}
+
+/// Closes every open sub-task and event below a task (any depth) with the
+/// status its parent is about to be closed with. The work center asks first
+/// whether open sub-tasks should be closed or kept when a parent is completed
+/// or archived; this is the "close them all" answer. Each child gets its own
+/// history entry, checklist sync, creator notification and audit event.
+async fn close_children(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(item_id): Path<Uuid>,
+    Json(body): Json<CloseChildrenRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_operational_role(&auth) {
+        return response;
+    }
+    if !matches!(body.status.as_str(), "completed" | "cancelled") {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Sub-tasks can only be closed as completed or cancelled",
+        );
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "begin closing sub-tasks");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let parent = match sqlx::query(
+        r#"SELECT task.assigned_by, creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id = $1
+             AND task.task_scope IN ('general', 'concierge_operational')
+             AND task.deleted_at IS NULL
+           FOR UPDATE OF task"#,
+    )
+    .bind(item_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load parent for closing sub-tasks");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let parent_assigned_by = parent
+        .try_get::<Uuid, _>("assigned_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let parent_creator_role = parent
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    if !can_mutate_operational_item(&auth, parent_assigned_by, &parent_creator_role) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the task creator or a higher role can close its sub-tasks",
+        );
+    }
+    let children = match sqlx::query(
+        r#"WITH RECURSIVE branch AS (
+               SELECT id, ARRAY[id] AS path FROM tasks
+               WHERE parent_task_id = $1 AND deleted_at IS NULL
+               UNION ALL
+               SELECT child.id, branch.path || child.id
+               FROM tasks child
+               JOIN branch ON child.parent_task_id = branch.id
+               WHERE child.deleted_at IS NULL
+                 AND NOT child.id = ANY(branch.path)
+           )
+           SELECT task.id, task.title, task.status, task.assigned_to, task.assigned_by,
+                  creator.role AS assigned_by_role
+           FROM tasks task
+           JOIN branch ON branch.id = task.id
+           JOIN users creator ON creator.id = task.assigned_by
+           WHERE task.id <> $1
+             AND task.archived_at IS NULL
+             AND task.status NOT IN ('completed', 'cancelled')
+           ORDER BY task.created_at, task.id
+           FOR UPDATE OF task"#,
+    )
+    .bind(item_id)
+    .fetch_all(&mut *tx)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, item_id = %item_id, "load open sub-tasks");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    struct OpenChild {
+        id: Uuid,
+        title: String,
+        status: String,
+        assigned_to: Uuid,
+        assigned_by: Uuid,
+    }
+    let mut open_children = Vec::with_capacity(children.len());
+    for row in &children {
+        let child = OpenChild {
+            id: row.try_get("id").unwrap_or_else(|_| Uuid::nil()),
+            title: row.try_get("title").unwrap_or_default(),
+            status: row.try_get("status").unwrap_or_default(),
+            assigned_to: row.try_get("assigned_to").unwrap_or_else(|_| Uuid::nil()),
+            assigned_by: row.try_get("assigned_by").unwrap_or_else(|_| Uuid::nil()),
+        };
+        let creator_role = row
+            .try_get::<String, _>("assigned_by_role")
+            .unwrap_or_default();
+        if !can_collaborate_on_operational_item(
+            &auth,
+            child.assigned_to,
+            child.assigned_by,
+            &creator_role,
+        ) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Some sub-tasks can only be closed by their creator, assignee or a higher role",
+            );
+        }
+        open_children.push(child);
+    }
+
+    let mut checklist_changes = Vec::new();
+    let mut notifications = Vec::new();
+    for child in &open_children {
+        if let Err(error) = sqlx::query(
+            r#"UPDATE tasks
+               SET status = $2,
+                   completed_at = CASE
+                       WHEN $2 = 'completed' THEN COALESCE(completed_at, now())
+                       ELSE NULL
+                   END,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(child.id)
+        .bind(&body.status)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, item_id = %child.id, "close sub-task");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(error) = sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(child.id)
+        .bind(auth.user_id)
+        .bind(serde_json::json!({
+            "assigned_to": child.assigned_to,
+            "status": body.status.as_str(),
+            "previous_status": child.status,
+            "reason": "parent_closed",
+            "parent_task_id": item_id,
+        }))
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = %error, item_id = %child.id, "record sub-task closing");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        match sync_linked_checklist_items(
+            &mut tx,
+            child.id,
+            &child.status,
+            &body.status,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(response) => return response,
+        }
+        if auth.user_id != child.assigned_by {
+            match insert_task_notification(
+                &mut tx,
+                child.assigned_by,
+                "operational_task_updated",
+                "Task status changed",
+                &child.title,
+                child.id,
+            )
+            .await
+            {
+                Ok(value) => notifications.push((value, child.id)),
+                Err(response) => return response,
+            }
+        }
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, item_id = %item_id, "commit closing sub-tasks");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
+    for child in &open_children {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_concierge_operational_item_status",
+            Some(auth.user_id),
+            "task",
+            Some(child.id),
+            serde_json::json!({
+                "assigned_to": child.assigned_to,
+                "status": body.status.as_str(),
+                "previous_status": child.status,
+                "reason": "parent_closed",
+                "parent_task_id": item_id,
+            }),
+        ));
+        publish_operational_child_event(
+            &state,
+            &auth,
+            "concierge_operational_item.updated",
+            child.id,
+            child.assigned_to,
+            serde_json::json!({
+                "status": body.status.as_str(),
+                "previous_status": child.status,
+            }),
+        )
+        .await;
+    }
+    for (notification, child_id) in notifications {
+        publish_pending_notification(&state, notification, child_id).await;
+    }
+
+    Json(serde_json::json!({
+        "closed_count": open_children.len(),
+        "closed_ids": open_children.iter().map(|child| child.id).collect::<Vec<_>>(),
+    }))
+    .into_response()
 }
 
 async fn archive_item(
@@ -4338,6 +4594,8 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "kind": row.try_get::<String, _>("task_kind").ok()?,
         "parent_task_id": row.try_get::<Option<Uuid>, _>("parent_task_id").unwrap_or_default(),
         "child_count": row.try_get::<i64, _>("child_count").unwrap_or_default(),
+        "child_completed_count": row.try_get::<i64, _>("child_completed_count").unwrap_or_default(),
+        "child_open_count": row.try_get::<i64, _>("child_open_count").unwrap_or_default(),
         "title": row.try_get::<String, _>("title").ok()?,
         "note": row.try_get::<Option<String>, _>("operational_note").unwrap_or_default(),
         "assigned_to": row.try_get::<Uuid, _>("assigned_to").ok()?,

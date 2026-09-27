@@ -3470,3 +3470,142 @@ async fn work_center_reads_general_and_legacy_tasks_without_expanding_patient_sc
         json_request(&ctx.app, "GET", &general_path, &outsider_bearer, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_detail}");
 }
+
+async fn create_work_center_task(
+    app: &axum::Router,
+    bearer: &str,
+    assigned_to: Uuid,
+    title: &str,
+    parent_task_id: Option<&str>,
+) -> Value {
+    let (status, task) = json_request(
+        app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "kind": "task",
+            "title": title,
+            "assigned_to": assigned_to,
+            "starts_at": "2026-10-01T09:00:00Z",
+            "due_at": "2026-10-02T17:00:00Z",
+            "parent_task_id": parent_task_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{task}");
+    task
+}
+
+async fn work_center_detail(app: &axum::Router, bearer: &str, id: &str) -> Value {
+    let (status, detail) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    detail
+}
+
+#[tokio::test]
+async fn closing_a_parent_can_close_its_open_subtasks_and_reports_child_progress() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let owner = seed_user(&ctx.pool, "concierge", &format!("subtasks-{tag}")).await;
+    let peer = seed_user(&ctx.pool, "concierge", &format!("subtasks-peer-{tag}")).await;
+    let bearer = auth_header_for(owner, "concierge");
+    let peer_bearer = auth_header_for(peer, "concierge");
+
+    let parent = create_work_center_task(&ctx.app, &bearer, owner, "Parent", None).await;
+    let parent_id = parent["id"].as_str().unwrap().to_string();
+    let open_child =
+        create_work_center_task(&ctx.app, &bearer, owner, "Open child", Some(&parent_id)).await;
+    let open_child_id = open_child["id"].as_str().unwrap().to_string();
+    let grandchild =
+        create_work_center_task(&ctx.app, &bearer, owner, "Grandchild", Some(&open_child_id)).await;
+    let mut done_child =
+        create_work_center_task(&ctx.app, &bearer, owner, "Done child", Some(&parent_id)).await;
+    let done_child_id = done_child["id"].as_str().unwrap().to_string();
+    for next in ["in_progress", "completed"] {
+        let (status, changed) = json_request(
+            &ctx.app,
+            "POST",
+            &format!("/api/v1/concierge-operational-items/{done_child_id}/status"),
+            &bearer,
+            Some(json!({ "status": next, "expected_updated_at": done_child["updated_at"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{changed}");
+        done_child = changed;
+    }
+
+    let detail = work_center_detail(&ctx.app, &bearer, &parent_id).await;
+    assert_eq!(detail["item"]["child_count"], 2, "{detail}");
+    assert_eq!(detail["item"]["child_completed_count"], 1, "{detail}");
+    assert_eq!(detail["item"]["child_open_count"], 1, "{detail}");
+
+    let close_path = format!("/api/v1/concierge-operational-items/{parent_id}/close-children");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &bearer,
+        Some(json!({ "status": "open" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &peer_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, closed) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["closed_count"], 2, "{closed}");
+
+    for id in [open_child_id.as_str(), grandchild["id"].as_str().unwrap()] {
+        let detail = work_center_detail(&ctx.app, &bearer, id).await;
+        assert_eq!(detail["item"]["status"], "completed", "{detail}");
+        assert!(
+            detail["history"].as_array().unwrap().iter().any(|entry| {
+                entry["payload"]["reason"] == "parent_closed"
+                    && entry["payload"]["parent_task_id"] == json!(parent_id)
+            }),
+            "{detail}"
+        );
+    }
+    let detail = work_center_detail(&ctx.app, &bearer, &parent_id).await;
+    assert_eq!(detail["item"]["status"], "open", "{detail}");
+    assert_eq!(detail["item"]["child_completed_count"], 2, "{detail}");
+    assert_eq!(detail["item"]["child_open_count"], 0, "{detail}");
+
+    // Nothing left to close: the call is a no-op.
+    let (status, closed) = json_request(
+        &ctx.app,
+        "POST",
+        &close_path,
+        &bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["closed_count"], 0, "{closed}");
+}

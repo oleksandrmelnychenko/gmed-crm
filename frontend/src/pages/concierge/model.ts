@@ -137,6 +137,9 @@ export type ConciergeTask = {
   id: string;
   parent_task_id?: string | null;
   child_count?: number;
+  /** Direct children that are completed / still open (not cancelled). */
+  child_completed_count?: number;
+  child_open_count?: number;
   kind: "task" | "event";
   title: string;
   note: string | null;
