@@ -655,7 +655,8 @@ async fn upload_attachment(
     if let Err(response) = require_operational_role(&auth) {
         return response;
     }
-    if let Err(response) = ensure_operational_mutation_access(&state, &auth, item_id).await {
+    if let Err(response) = ensure_operational_attachment_upload_access(&state, &auth, item_id).await
+    {
         return response;
     }
     let mut upload: Option<(String, String, Vec<u8>)> = None;
@@ -751,8 +752,8 @@ async fn upload_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let context = match lock_task_mutation_context(&mut tx, &auth, item_id).await {
-        Ok(value) => value,
+    let context = match lock_task_attachment_context(&mut tx, &auth, item_id).await {
+        Ok((context, _)) => context,
         Err(response) => {
             remove_document_blob(&storage_key).await;
             return response;
@@ -939,10 +940,34 @@ async fn delete_attachment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let context = match lock_task_mutation_context(&mut tx, &auth, item_id).await {
+    let (context, access) = match lock_task_attachment_context(&mut tx, &auth, item_id).await {
         Ok(value) => value,
         Err(response) => return response,
     };
+    if access == AttachmentAccess::AssigneeUploads {
+        let uploaded_by = match sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT uploaded_by FROM concierge_operational_task_attachments
+               WHERE id = $1 AND task_id = $2 AND deleted_at IS NULL"#,
+        )
+        .bind(attachment_id)
+        .bind(item_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Attachment not found"),
+            Err(error) => {
+                tracing::error!(error = %error, attachment_id = %attachment_id, "load operational task attachment owner");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete file");
+            }
+        };
+        if uploaded_by != auth.user_id {
+            return err(
+                StatusCode::FORBIDDEN,
+                "The task assignee can remove only the attachments it uploaded",
+            );
+        }
+    }
     let attachment = match sqlx::query(
         r#"UPDATE concierge_operational_task_attachments
            SET deleted_at = now(), deleted_by = $3
@@ -3557,13 +3582,40 @@ async fn ensure_operational_view_access(
     Ok(())
 }
 
-async fn ensure_operational_mutation_access(
+/// Files of a task: the creator or a higher role manages all of them; the
+/// assignee attaches files to its own task (to document its work) and removes
+/// only the files it uploaded itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttachmentAccess {
+    Manage,
+    AssigneeUploads,
+}
+
+fn attachment_access(
+    auth: &AuthUser,
+    assigned_to: Uuid,
+    assigned_by: Uuid,
+    assigned_by_role: &str,
+) -> Option<AttachmentAccess> {
+    if can_mutate_operational_item(auth, assigned_by, assigned_by_role) {
+        Some(AttachmentAccess::Manage)
+    } else if auth.user_id == assigned_to {
+        Some(AttachmentAccess::AssigneeUploads)
+    } else {
+        None
+    }
+}
+
+const ATTACHMENT_ACCESS_DENIED: &str =
+    "Only the task assignee, creator, or a higher role can change attachments";
+
+async fn ensure_operational_attachment_upload_access(
     state: &AppState,
     auth: &AuthUser,
     item_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let row = sqlx::query(
-        r#"SELECT task.assigned_by, creator.role AS assigned_by_role
+        r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role
            FROM tasks task
            JOIN users creator ON creator.id = task.assigned_by
            WHERE task.id = $1
@@ -3579,26 +3631,26 @@ async fn ensure_operational_mutation_access(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
+    let assigned_to = row
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
     let assigned_by = row
         .try_get::<Uuid, _>("assigned_by")
         .unwrap_or_else(|_| Uuid::nil());
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role) {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Only the task creator or a higher role can change attachments",
-        ));
+    if attachment_access(auth, assigned_to, assigned_by, &assigned_by_role).is_none() {
+        return Err(err(StatusCode::FORBIDDEN, ATTACHMENT_ACCESS_DENIED));
     }
     Ok(())
 }
 
-async fn lock_task_mutation_context(
+async fn lock_task_attachment_context(
     tx: &mut Transaction<'_, Postgres>,
     auth: &AuthUser,
     item_id: Uuid,
-) -> Result<TaskMutationContext, axum::response::Response> {
+) -> Result<(TaskMutationContext, AttachmentAccess), axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.title,
                   creator.role AS assigned_by_role
@@ -3618,25 +3670,26 @@ async fn lock_task_mutation_context(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Operational item not found"))?;
+    let assigned_to = row
+        .try_get::<Uuid, _>("assigned_to")
+        .unwrap_or_else(|_| Uuid::nil());
     let assigned_by = row
         .try_get::<Uuid, _>("assigned_by")
         .unwrap_or_else(|_| Uuid::nil());
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role) {
-        return Err(err(
-            StatusCode::FORBIDDEN,
-            "Only the task creator or a higher role can change attachments",
-        ));
-    }
-    Ok(TaskMutationContext {
-        assigned_to: row
-            .try_get::<Uuid, _>("assigned_to")
-            .unwrap_or_else(|_| Uuid::nil()),
-        assigned_by,
-        title: row.try_get::<String, _>("title").unwrap_or_default(),
-    })
+    let Some(access) = attachment_access(auth, assigned_to, assigned_by, &assigned_by_role) else {
+        return Err(err(StatusCode::FORBIDDEN, ATTACHMENT_ACCESS_DENIED));
+    };
+    Ok((
+        TaskMutationContext {
+            assigned_to,
+            assigned_by,
+            title: row.try_get::<String, _>("title").unwrap_or_default(),
+        },
+        access,
+    ))
 }
 
 async fn load_attachments(
@@ -4816,6 +4869,39 @@ mod work_center_tests {
             access_token_jti: Uuid::new_v4(),
             access_token_expires_at: Utc::now(),
         }
+    }
+
+    #[test]
+    fn assignee_attaches_files_and_creator_manages_them() {
+        let creator = Uuid::new_v4();
+        let assignee = Uuid::new_v4();
+        assert_eq!(
+            attachment_access(
+                &actor(assignee, Role::Interpreter),
+                assignee,
+                creator,
+                "patient_manager"
+            ),
+            Some(AttachmentAccess::AssigneeUploads)
+        );
+        assert_eq!(
+            attachment_access(
+                &actor(creator, Role::PatientManager),
+                assignee,
+                creator,
+                "patient_manager"
+            ),
+            Some(AttachmentAccess::Manage)
+        );
+        assert_eq!(
+            attachment_access(
+                &actor(Uuid::new_v4(), Role::Concierge),
+                assignee,
+                creator,
+                "patient_manager"
+            ),
+            None
+        );
     }
 
     #[test]

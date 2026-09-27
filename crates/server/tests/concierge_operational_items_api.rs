@@ -2143,6 +2143,83 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
     .unwrap();
     assert_eq!(correction_notifications, 1);
 
+    // The assignee documents its work: it attaches files to its own task and
+    // removes only its own uploads; the creator is notified.
+    let (status, own_upload) = multipart_file_request(
+        &ctx.app,
+        &attachment_path,
+        &assignee_bearer,
+        &format!("receipt-{tag}.pdf"),
+        "application/pdf",
+        &pdf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{own_upload}");
+    assert_eq!(own_upload["uploaded_by"], assignee_id.to_string());
+    let own_upload_id = Uuid::parse_str(own_upload["id"].as_str().expect("own upload id")).unwrap();
+    let upload_notifications: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE user_id = $1 AND kind = 'operational_task_updated'
+             AND entity_id = $2 AND title = 'Task attachment added'"#,
+    )
+    .bind(creator_id)
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(upload_notifications, 1);
+    let (status, creator_file) = multipart_file_request(
+        &ctx.app,
+        &attachment_path,
+        &creator_bearer,
+        &format!("briefing-{tag}.pdf"),
+        "application/pdf",
+        &pdf,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{creator_file}");
+    let creator_file_id =
+        Uuid::parse_str(creator_file["id"].as_str().expect("creator file id")).unwrap();
+    let (status, denied_foreign) = raw_request(
+        &ctx.app,
+        "DELETE",
+        &format!("{attachment_path}/{creator_file_id}"),
+        &assignee_bearer,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        String::from_utf8_lossy(&denied_foreign)
+    );
+    let (status, removed_own) = raw_request(
+        &ctx.app,
+        "DELETE",
+        &format!("{attachment_path}/{own_upload_id}"),
+        &assignee_bearer,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&removed_own)
+    );
+    let (status, removed_creator_file) = raw_request(
+        &ctx.app,
+        "DELETE",
+        &format!("{attachment_path}/{creator_file_id}"),
+        &creator_bearer,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "{}",
+        String::from_utf8_lossy(&removed_creator_file)
+    );
+
     let second_file_name = format!("hotel-{tag}.pdf");
     let (status, second_attachment) = multipart_file_request(
         &ctx.app,
@@ -2223,7 +2300,7 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    assert_eq!(attachment_events, 6);
+    assert_eq!(attachment_events, 10);
 }
 
 #[tokio::test]

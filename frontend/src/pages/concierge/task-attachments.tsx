@@ -107,16 +107,40 @@ const copy = {
   },
 } as const;
 
+/**
+ * Who may change the files of a task. The creator or a higher role manages
+ * every file (`canModify`); the assignee adds files to its task and removes
+ * only the ones it uploaded itself (`canUpload` + `currentUserId`). The server
+ * enforces the same rule.
+ */
+export function canRemoveTaskAttachment(
+  attachment: Pick<ConciergeTaskAttachment, "uploaded_by">,
+  access: { canModify: boolean; canUpload?: boolean; currentUserId?: string | null },
+) {
+  return (
+    access.canModify ||
+    Boolean(access.canUpload && access.currentUserId && attachment.uploaded_by === access.currentUserId)
+  );
+}
+
 export function ConciergeTaskAttachments({
   taskId,
   lang,
   canModify,
+  canUpload = false,
+  currentUserId = null,
 }: {
   taskId: string;
   lang: Lang;
   canModify: boolean;
+  /** The assignee may attach files even without `canModify`. */
+  canUpload?: boolean;
+  currentUserId?: string | null;
 }) {
   const labels = copy[lang];
+  const mayUpload = canModify || canUpload;
+  const mayRemove = (attachment: ConciergeTaskAttachment) =>
+    canRemoveTaskAttachment(attachment, { canModify, canUpload, currentUserId });
   const inputRef = useRef<HTMLInputElement>(null);
   const [attachments, setAttachments] = useState<ConciergeTaskAttachment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,7 +171,7 @@ export function ConciergeTaskAttachments({
   }, [labels.loadFailed, taskId, version]);
 
   async function uploadFiles(files: File[]) {
-    if (!canModify || busy || files.length === 0) return;
+    if (!mayUpload || busy || files.length === 0) return;
     setBusy(true);
     setError("");
     try {
@@ -182,7 +206,7 @@ export function ConciergeTaskAttachments({
   }
 
   async function removeAttachment(attachment: ConciergeTaskAttachment) {
-    if (!canModify || busy || !window.confirm(labels.confirmRemove)) return;
+    if (!mayRemove(attachment) || busy || !window.confirm(labels.confirmRemove)) return;
     setBusy(true);
     setError("");
     try {
@@ -206,7 +230,7 @@ export function ConciergeTaskAttachments({
           <div className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-[var(--brand)]" /><h3 className="text-[13px] font-semibold tracking-tight">{labels.title}</h3></div>
           <p className="mt-0.5 text-xs text-muted-foreground">{labels.allowed}</p>
         </div>
-        {canModify ? (
+        {mayUpload ? (
           <>
             <input
               ref={inputRef}
@@ -234,7 +258,7 @@ export function ConciergeTaskAttachments({
               <p className="text-xs text-muted-foreground">{formatTaskAttachmentSize(attachment.file_size)} · {attachment.uploaded_by_name}</p>
             </div>
             <Button type="button" size="icon-sm" variant="ghost" title={attachment.file_name} disabled={busy} onClick={() => void downloadAttachment(attachment)}><Download /></Button>
-            {canModify ? <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" title={labels.remove} disabled={busy} onClick={() => void removeAttachment(attachment)}><Trash2 /></Button> : null}
+            {mayRemove(attachment) ? <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:text-destructive" title={labels.remove} disabled={busy} onClick={() => void removeAttachment(attachment)}><Trash2 /></Button> : null}
           </div>
         ))}
       </div>

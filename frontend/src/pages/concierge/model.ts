@@ -297,6 +297,21 @@ export function canModifyConciergeTask(
   return canManageConciergeTaskCreatorRole(actorRole, task.assigned_by_role);
 }
 
+/**
+ * Attaching files: the creator or a higher role, and the assignee of the task
+ * (who documents its own work). The assignee removes only its own uploads.
+ */
+export function canAttachToConciergeTask(
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  actorId: string | null | undefined,
+  actorRole: string | null | undefined,
+) {
+  return Boolean(
+    actorId
+    && (task.assigned_to === actorId || canModifyConciergeTask(task, actorId, actorRole)),
+  );
+}
+
 export function canChangeConciergeTaskStatus(
   task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
   actorId: string | null | undefined,

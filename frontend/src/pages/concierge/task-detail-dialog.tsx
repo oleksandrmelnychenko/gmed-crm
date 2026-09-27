@@ -45,6 +45,7 @@ import type {
 } from "./model";
 import {
   availableConciergeTaskStatuses,
+  canAttachToConciergeTask,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
   canModifyConciergeTask,
@@ -1100,7 +1101,13 @@ export function ConciergeTaskDetailDialog({
                 </TaskDetailSection>
               ) : null}
 
-              <ConciergeTaskAttachments taskId={detail.item.id} lang={lang} canModify={canModify && !detail.item.archived_at} />
+              <ConciergeTaskAttachments
+                taskId={detail.item.id}
+                lang={lang}
+                canModify={canModify && !detail.item.archived_at}
+                canUpload={canAttachToConciergeTask(detail.item, user?.id, user?.role) && !detail.item.archived_at}
+                currentUserId={user?.id ?? null}
+              />
 
             <div className="grid items-start gap-3 lg:grid-cols-2">
               <TaskDetailSection title={labels.checklist} action={<Badge variant="secondary" className="rounded-full">{detail.item.checklist_completed}/{detail.item.checklist_total}</Badge>}>
