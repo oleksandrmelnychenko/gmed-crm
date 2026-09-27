@@ -310,6 +310,14 @@ export type OrderEconomics = {
     patient_credit_gross?: string;
     /** Still to receive: open balances net of unapplied advances and credit. */
     patient_open_gross?: string;
+    /** Issued advance invoices (net of credit notes). */
+    advance_invoiced_gross?: string;
+    /** Advances credited into settlement invoices. */
+    prepayment_applied_gross?: string;
+    /** Settlement invoices plus issued advances, each advance counted once. */
+    billed_to_patient_gross?: string;
+    /** Open settlement invoices plus the unpaid part of issued advances. */
+    patient_outstanding_gross?: string;
     patient_cash_received_gross: string;
     patient_cash_refunded_gross: string;
     patient_cash_collected_gross: string;

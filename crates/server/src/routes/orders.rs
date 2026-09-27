@@ -3965,6 +3965,62 @@ async fn get_order_economics(
         }
     };
 
+    // Issued advance invoices are billed to the patient too; the part already
+    // credited into a settlement invoice (prepayment applied) is counted there.
+    let advances = match sqlx::query(
+        r#"WITH credits AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+               GROUP BY transaction.invoice_id
+           ), payments AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'payment'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_payment_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+               GROUP BY transaction.invoice_id
+           ), refunds AS (
+               SELECT transaction.invoice_id,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'refund'
+                                        THEN transaction.amount_gross ELSE -transaction.amount_gross END), 0) AS amount_gross
+               FROM invoice_refund_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               WHERE invoice.order_id = $1
+               GROUP BY transaction.invoice_id
+           )
+           SELECT
+               COALESCE(SUM(GREATEST(invoice.total_gross - COALESCE(credits.amount_gross, 0), 0))
+                   FILTER (WHERE invoice.invoice_type = 'advance'), 0) AS advance_invoiced_gross,
+               COALESCE(SUM(GREATEST(
+                   invoice.total_gross - COALESCE(credits.amount_gross, 0)
+                       - COALESCE(payments.amount_gross, 0) + COALESCE(refunds.amount_gross, 0),
+                   0
+               )) FILTER (WHERE invoice.invoice_type = 'advance'), 0) AS advance_outstanding_gross,
+               COALESCE(SUM(COALESCE(invoice.prepayment_applied_amount, 0))
+                   FILTER (WHERE invoice.invoice_type <> 'advance'), 0) AS prepayment_applied_gross
+           FROM invoices invoice
+           LEFT JOIN credits ON credits.invoice_id = invoice.id
+           LEFT JOIN payments ON payments.invoice_id = invoice.id
+           LEFT JOIN refunds ON refunds.invoice_id = invoice.id
+           WHERE invoice.order_id = $1
+             AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')"#,
+    )
+    .bind(order_id)
+    .fetch_one(&mut *economics_transaction)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "load order advance invoices");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order economics");
+        }
+    };
+
     let cash = match sqlx::query(
         r#"WITH payments AS (
                SELECT COALESCE(SUM(CASE WHEN transaction.transaction_type = 'payment'
@@ -4399,6 +4455,29 @@ async fn get_order_economics(
 
     let planned_revenue_gross = planned_revenue_net + planned_revenue_vat;
     let planned_margin_net = planned_revenue_net - planned_cost_net;
+    let advance_invoiced_gross = advances
+        .try_get::<rust_decimal::Decimal, _>("advance_invoiced_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    let prepayment_applied_gross = advances
+        .try_get::<rust_decimal::Decimal, _>("prepayment_applied_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO);
+    // Everything invoiced to the patient: settlement invoices plus issued
+    // advances, without counting an advance again once it is credited into a
+    // settlement invoice.
+    let billed_to_patient_gross = (invoice
+        .try_get::<rust_decimal::Decimal, _>("revenue_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        + advance_invoiced_gross
+        - prepayment_applied_gross.min(advance_invoiced_gross))
+    .max(rust_decimal::Decimal::ZERO);
+    // Still to be received from the patient: open settlement invoices plus the
+    // unpaid part of issued advances.
+    let patient_outstanding_gross = invoice
+        .try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross")
+        .unwrap_or(rust_decimal::Decimal::ZERO)
+        + advances
+            .try_get::<rust_decimal::Decimal, _>("advance_outstanding_gross")
+            .unwrap_or(rust_decimal::Decimal::ZERO);
     let mut warnings = Vec::new();
     if currency_mismatch_count > 0 {
         warnings.push("external_invoice_currency_mismatch");
@@ -4453,6 +4532,10 @@ async fn get_order_economics(
             "credited_net": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_net").unwrap_or(rust_decimal::Decimal::ZERO)),
             "credited_vat": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_vat").unwrap_or(rust_decimal::Decimal::ZERO)),
             "credited_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
+            "advance_invoiced_gross": economics_money(advance_invoiced_gross),
+            "prepayment_applied_gross": economics_money(prepayment_applied_gross),
+            "billed_to_patient_gross": economics_money(billed_to_patient_gross),
+            "patient_outstanding_gross": economics_money(patient_outstanding_gross),
             "invoice_settled_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_settled_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "invoice_outstanding_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("invoice_outstanding_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "advance_available_gross": economics_money(advance_available_gross),

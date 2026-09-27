@@ -4531,7 +4531,8 @@ function useOrdersPageContent() {
                             <OrderFinancialMetric
                               label={lang === "de" ? "Dem Patienten berechnet" : "Выставлено пациенту"}
                               value={formatMoney(
-                                orderEconomics.actual.recognized_revenue_gross,
+                                orderEconomics.actual.billed_to_patient_gross ??
+                                  orderEconomics.actual.recognized_revenue_gross,
                                 orderEconomics.currency,
                               )}
                             />
