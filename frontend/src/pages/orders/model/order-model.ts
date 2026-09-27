@@ -16,6 +16,7 @@ import type {
   OrderPlanningPreparation,
   OrderProcessGateFormState,
   OrderProcessGates,
+  OrderReadScope,
   OrdersFilters,
   OrdersPermissions,
   OrderStatus,
@@ -105,7 +106,26 @@ export function orderPermissions(actor?: Actor): OrdersPermissions {
     // Provider (external) invoices: the order owner or finance.
     canManageExternalInvoices: canEdit || hasCapability(actor, "invoices.finance"),
     canManageEconomics: hasCapability(actor, "orders.economics"),
+    readsOnlyOrderPart: readsOnlyOrderPart(actor),
   };
+}
+
+/**
+ * `orders.view` without any commercial capability: the concierge and the
+ * interpreter team lead read a projection of their part of an order.
+ */
+export function readsOnlyOrderPart(actor?: Actor) {
+  return (
+    hasCapability(actor, "orders.view") &&
+    !hasCapability(actor, "orders.edit") &&
+    !hasCapability(actor, "orders.economics") &&
+    !hasCapability(actor, "invoices.view")
+  );
+}
+
+/** Whether an order payload is a partial projection (see `readsOnlyOrderPart`). */
+export function isPartialOrderRead(detail: { read_scope?: OrderReadScope } | null | undefined) {
+  return Boolean(detail?.read_scope && detail.read_scope !== "full");
 }
 
 export function blankCreateOrderForm(): CreateOrderFormState {

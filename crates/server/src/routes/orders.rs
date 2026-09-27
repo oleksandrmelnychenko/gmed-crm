@@ -493,6 +493,20 @@ async fn list_orders(
     }
 
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let read_scope = OrderReadScope::for_role(auth.role);
+    // Filtering by provider, doctor or specialty would reveal which (medical)
+    // services an order contains, which the order-part readers do not see.
+    if read_scope.is_scoped()
+        && (query.provider_id.is_some()
+            || query.doctor_id.is_some()
+            || query.provider_taxonomy_node_id.is_some()
+            || query.lead_id.is_some())
+    {
+        return err(
+            StatusCode::FORBIDDEN,
+            "This role reads only its part of the order",
+        );
+    }
 
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
@@ -510,12 +524,15 @@ async fn list_orders(
            LEFT JOIN cases cs ON cs.id = o.case_id
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
-                       o.order_number, o.needs_description,
+                       o.order_number,
+                       -- The needs text and the service lines are not part of
+                       -- the order-part readers' projection, so not searchable.
+                       CASE WHEN $10::boolean THEN NULL ELSE o.needs_description END,
                        p.first_name, p.last_name, p.patient_id,
                        p.email, p.phone_primary, p.phone_secondary,
                        l.first_name, l.last_name, l.email, l.phone
                      )) LIKE de_normalize($1)
-                  OR EXISTS (
+                  OR (NOT $10::boolean AND EXISTS (
                         SELECT 1
                         FROM order_leistungen ol
                         LEFT JOIN providers pr ON pr.id = ol.provider_id
@@ -529,7 +546,7 @@ async fn list_orders(
                                      THEN NULL ELSE ol.notes END,
                                 pr.name, d.name
                               )) LIKE de_normalize($1)
-                  )
+                  ))
            )
              AND ($2::text IS NULL OR o.phase = $2)
              AND ($3::text IS NULL OR o.status = $3)
@@ -587,6 +604,7 @@ async fn list_orders(
     .bind(query.doctor_id)
     .bind(query.provider_taxonomy_node_id)
     .bind(!auth.can(Capability::PatientsMedicalView))
+    .bind(read_scope.is_scoped())
     .fetch_all(&state.db)
     .await
     {
@@ -601,10 +619,39 @@ async fn list_orders(
                     .try_get::<Option<Uuid>, _>("source_lead_id")
                     .unwrap_or_default();
 
-                match if query.lead_id.is_some() { can_access_order_preparation(&state, &auth, order_id, patient_id).await } else { can_access_order(&state, &auth, order_id, patient_id).await } {
+                let access = if read_scope.is_scoped() {
+                    can_access_scoped_order(&state, &auth, order_id, patient_id).await
+                } else if query.lead_id.is_some() {
+                    can_access_order_preparation(&state, &auth, order_id, patient_id).await
+                } else {
+                    can_access_order(&state, &auth, order_id, patient_id).await
+                };
+                match access {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(resp) => return resp,
+                }
+
+                if read_scope.is_scoped() {
+                    // Order-part readers: identity, period and state only.
+                    orders.push(serde_json::json!({
+                        "id": order_id,
+                        "read_scope": read_scope.wire_name(),
+                        "order_number": r.try_get::<String, _>("order_number").unwrap_or_default(),
+                        "patient_id": patient_id,
+                        "patient_name": format!(
+                            "{} {}",
+                            r.try_get::<String, _>("subject_first_name").unwrap_or_default(),
+                            r.try_get::<String, _>("subject_last_name").unwrap_or_default()
+                        ),
+                        "patient_pid": r.try_get::<String, _>("p_pid").unwrap_or_default(),
+                        "phase": r.try_get::<String, _>("phase").unwrap_or_default(),
+                        "status": r.try_get::<String, _>("status").unwrap_or_default(),
+                        "date_from": r.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
+                        "date_to": r.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
+                        "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
+                    }));
+                    continue;
                 }
 
                 orders.push(serde_json::json!({
@@ -3196,6 +3243,19 @@ async fn get_order(
         .try_get::<Option<String>, _>("p_pid")
         .unwrap_or_default();
 
+    let read_scope = OrderReadScope::for_role(auth.role);
+    if read_scope.is_scoped() {
+        match can_access_scoped_order(&state, &auth, order_db_id, patient_id).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(resp) => return resp,
+        }
+        return match scoped_order_detail(&state, &order, order_db_id, read_scope).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(resp) => resp,
+        };
+    }
+
     match can_access_order_preparation(&state, &auth, order_db_id, patient_id).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
@@ -3652,6 +3712,9 @@ async fn get_order_economics(
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     if let Err(response) = auth.require_capability(Capability::OrdersView) {
+        return response;
+    }
+    if let Err(response) = require_full_order_read(&auth) {
         return response;
     }
 
@@ -7512,6 +7575,9 @@ async fn list_leistungen(
     if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
+    if let Err(e) = require_full_order_read(&auth) {
+        return e;
+    }
     match can_access_order_preparation(&state, &auth, order_id, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
@@ -9047,6 +9113,9 @@ async fn list_order_amendments(
     if let Err(e) = auth.require_capability(Capability::OrdersView) {
         return e;
     }
+    if let Err(e) = require_full_order_read(&auth) {
+        return e;
+    }
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
@@ -9438,6 +9507,9 @@ async fn get_order_group(
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::OrdersView) {
+        return e;
+    }
+    if let Err(e) = require_full_order_read(&auth) {
         return e;
     }
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
@@ -9984,6 +10056,224 @@ async fn ensure_patient_access(
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
     }
+}
+
+/// How much of an order a role may read.
+///
+/// The concierge and the interpreter team lead hold `orders.view` for a
+/// read-only projection of their part of an order: no needs text, case,
+/// contract, totals, prices, notes, invoices or economics. Every write keeps
+/// its own role gate, so neither role gains a mutation from this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OrderReadScope {
+    Full,
+    /// Concierge: period, status and the service lines of non-medical
+    /// providers (transfer, hotel, VIP …).
+    ConciergeServices,
+    /// Interpreter team lead: period, status and the interpreter-hours lines.
+    InterpreterTeam,
+}
+
+impl OrderReadScope {
+    pub(crate) fn for_role(role: Role) -> Self {
+        match role {
+            Role::Concierge => Self::ConciergeServices,
+            Role::TeamleadInterpreter => Self::InterpreterTeam,
+            _ => Self::Full,
+        }
+    }
+
+    fn wire_name(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::ConciergeServices => "concierge_services",
+            Self::InterpreterTeam => "interpreter_team",
+        }
+    }
+
+    fn is_scoped(self) -> bool {
+        self != Self::Full
+    }
+}
+
+/// Endpoints that expose the commercial or clinical side of an order are not
+/// part of the concierge's or the team lead's projection.
+#[allow(clippy::result_large_err)]
+fn require_full_order_read(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if OrderReadScope::for_role(auth.role).is_scoped() {
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "This role reads only its part of the order",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Order visibility of the projection readers: the patient assignment (as for
+/// every assignment role) and, for the interpreter team lead, every order that
+/// involves an interpreter (booked appointment, interpreter report or
+/// interpreter-hours line).
+async fn can_access_scoped_order(
+    state: &AppState,
+    auth: &AuthUser,
+    order_id: Uuid,
+    patient_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    if can_access_order(state, auth, order_id, patient_id).await? {
+        return Ok(true);
+    }
+    if OrderReadScope::for_role(auth.role) != OrderReadScope::InterpreterTeam {
+        return Ok(false);
+    }
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM orders o
+               WHERE o.id = $1
+                 AND o.intake_state IS DISTINCT FROM 'draft'
+                 AND (
+                     EXISTS (
+                         SELECT 1 FROM appointments a
+                         WHERE a.order_id = o.id
+                           AND (a.interpreter_id IS NOT NULL
+                                OR EXISTS (SELECT 1 FROM interpreter_reports ir
+                                           WHERE ir.appointment_id = a.id))
+                     )
+                     OR EXISTS (
+                         SELECT 1 FROM order_leistungen ol
+                         LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+                         WHERE ol.order_id = o.id
+                           AND (ol.source_interpreter_report_id IS NOT NULL
+                                OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                                   = 'interpreter_hours')
+                     )
+                 )
+           )"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "check interpreter team order access");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order access",
+        )
+    })
+}
+
+/// The read-only projection of an order for the concierge and the interpreter
+/// team lead (see [`OrderReadScope`]).
+async fn scoped_order_detail(
+    state: &AppState,
+    order: &sqlx::postgres::PgRow,
+    order_id: Uuid,
+    scope: OrderReadScope,
+) -> Result<serde_json::Value, axum::response::Response> {
+    let lines = sqlx::query(
+        r#"SELECT ol.id, ol.description, ol.quantity, ol.currency, ol.status,
+                  ol.delivered_at, ol.approved_at, ol.cancelled_at,
+                  ol.provider_id, pr.name AS provider_name,
+                  ol.source_interpreter_report_id,
+                  COALESCE(ol.agency_service_key_snapshot, catalog.service_key) AS agency_service_key,
+                  COALESCE(ol.agency_service_name_snapshot, catalog.service_name) AS agency_service_name,
+                  COALESCE(ol.agency_service_unit_label_snapshot, catalog.unit_label) AS agency_service_unit_label
+           FROM order_leistungen ol
+           LEFT JOIN providers pr ON pr.id = ol.provider_id
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
+           WHERE ol.order_id = $1
+             AND (
+                 ($2::text = 'concierge_services'
+                  AND ol.provider_id IS NOT NULL
+                  AND pr.provider_type = 'non_medical'
+                  AND ol.source_medical_appointment_id IS NULL
+                  AND ol.source_interpreter_report_id IS NULL)
+                 OR ($2::text = 'interpreter_team'
+                     AND (ol.source_interpreter_report_id IS NOT NULL
+                          OR COALESCE(ol.agency_service_key_snapshot, catalog.service_key)
+                             = 'interpreter_hours'))
+             )
+           ORDER BY ol.created_at, ol.id"#,
+    )
+    .bind(order_id)
+    .bind(scope.wire_name())
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %order_id, "load scoped order services");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load order services",
+        )
+    })?;
+    let period = sqlx::query("SELECT date_from, date_to FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %order_id, "load scoped order period");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?;
+    let leistungen = lines
+        .iter()
+        .map(|line| {
+            serde_json::json!({
+                "id": line.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "description": line.try_get::<String, _>("description").unwrap_or_default(),
+                "quantity": line.try_get::<rust_decimal::Decimal, _>("quantity").unwrap_or(rust_decimal::Decimal::ZERO),
+                "unit_price": serde_json::Value::Null,
+                "currency": line.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+                "vat_rate": serde_json::Value::Null,
+                "is_cost_passthrough": false,
+                "status": line.try_get::<String, _>("status").unwrap_or_default(),
+                "delivered_at": line.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                "approved_at": line.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                "cancelled_at": line.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|v| v.to_rfc3339()),
+                "notes": serde_json::Value::Null,
+                "provider_id": line.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
+                "provider_name": line.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
+                "doctor_id": serde_json::Value::Null,
+                "doctor_name": serde_json::Value::Null,
+                "source_interpreter_report_id": line.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                "agency_service_key": line.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
+                "agency_service_name": line.try_get::<Option<String>, _>("agency_service_name").unwrap_or_default(),
+                "agency_service_unit_label": line.try_get::<Option<String>, _>("agency_service_unit_label").unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let patient_name = [
+        order
+            .try_get::<Option<String>, _>("subject_first_name")
+            .unwrap_or_default(),
+        order
+            .try_get::<Option<String>, _>("subject_last_name")
+            .unwrap_or_default(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
+
+    Ok(serde_json::json!({
+        "id": order_id,
+        "read_scope": scope.wire_name(),
+        "order_number": order.try_get::<String, _>("order_number").unwrap_or_default(),
+        "patient_id": order.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+        "patient_name": patient_name,
+        "patient_pid": order.try_get::<Option<String>, _>("p_pid").unwrap_or_default(),
+        "phase": order.try_get::<String, _>("phase").unwrap_or_default(),
+        "status": order.try_get::<String, _>("status").unwrap_or_default(),
+        "needs_description": serde_json::Value::Null,
+        "date_from": period.try_get::<Option<chrono::NaiveDate>, _>("date_from").unwrap_or_default().map(|value| value.to_string()),
+        "date_to": period.try_get::<Option<chrono::NaiveDate>, _>("date_to").unwrap_or_default().map(|value| value.to_string()),
+        "total_estimated": serde_json::Value::Null,
+        "total_actual": serde_json::Value::Null,
+        "currency": order.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
+        "leistungen": leistungen,
+        "external_invoices": [],
+        "created_at": order.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok(),
+        "updated_at": order.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").ok(),
+    }))
 }
 
 /// Only preparation endpoints may access a repeat draft. Operational endpoints keep

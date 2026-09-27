@@ -990,10 +990,9 @@ async fn get_order_termination_settlement(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if !auth
-        .role
-        .can_any(&[Capability::OrdersView, Capability::InvoicesView])
-    {
+    // A settlement is a financial record: `orders.view` alone (the concierge's
+    // and the interpreter team lead's read-only part of an order) is not enough.
+    if !auth.role.can(Capability::InvoicesView) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let patient_id = match load_settlement_patient(&state, order_id).await {
@@ -1729,5 +1728,14 @@ mod tests {
         assert!(Role::Billing.can(Capability::InvoicesFinance));
         assert!(!Role::PatientManager.can(Capability::InvoicesFinance));
         assert!(!Role::Interpreter.can_any(&[Capability::OrdersView, Capability::InvoicesView]));
+        // Every role that read settlements through `orders.view` also holds
+        // `invoices.view`; the order-part readers do not.
+        for role in [Role::PatientManager, Role::Billing, Role::CeoAssistant] {
+            assert!(role.can(Capability::InvoicesView), "{role:?}");
+        }
+        for role in [Role::Concierge, Role::TeamleadInterpreter] {
+            assert!(role.can(Capability::OrdersView), "{role:?}");
+            assert!(!role.can(Capability::InvoicesView), "{role:?}");
+        }
     }
 }

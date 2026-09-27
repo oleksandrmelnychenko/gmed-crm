@@ -191,8 +191,25 @@ describe("orders model", () => {
         canCancelLeistung: has("orders.edit"),
         canManageExternalInvoices: has("orders.edit") || has("invoices.finance"),
         canManageEconomics: has("orders.economics"),
+        readsOnlyOrderPart:
+          has("orders.view") && !has("orders.edit") && !has("orders.economics") && !has("invoices.view"),
       });
     });
+  });
+
+  it("gives the concierge and the interpreter team lead a read-only part of an order", () => {
+    for (const role of ["concierge", "teamlead_interpreter"]) {
+      const permissions = orderPermissions(role);
+      expect(permissions.canViewPage).toBe(true);
+      expect(permissions.readsOnlyOrderPart).toBe(true);
+      expect(permissions.canCreate).toBe(false);
+      expect(permissions.canManageEconomics).toBe(false);
+      expect(permissions.canManageExternalInvoices).toBe(false);
+    }
+    for (const role of ["ceo", "ceo_assistant", "patient_manager", "billing"]) {
+      expect(orderPermissions(role).readsOnlyOrderPart).toBe(false);
+    }
+    expect(orderPermissions("interpreter").canViewPage).toBe(false);
   });
 });
 

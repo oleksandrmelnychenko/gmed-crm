@@ -15,7 +15,7 @@
 | `leads.view` | x | x | x |   |   | x |   | x |   |
 | `leads.edit` | x |   | x |   |   |   |   | x |   |
 | `leads.convert` | x |   | x |   |   |   |   |   |   |
-| `orders.view` | x | x | x |   |   |   | x |   |   |
+| `orders.view` | x | x | x | x |   | x | x |   |   |
 | `orders.edit` | x |   | x |   |   |   |   |   |   |
 | `orders.economics` | x |   | x |   |   |   | x |   |   |
 | `contracts.view` | x | x | x |   |   |   | x |   |   |

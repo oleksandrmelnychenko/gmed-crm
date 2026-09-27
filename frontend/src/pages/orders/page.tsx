@@ -185,6 +185,7 @@ import {
   formatNumber,
   externalInvoiceStatusTransitions,
   inputDateTimeToApiValue,
+  isPartialOrderRead,
   nextPhase,
   numberFromUnknown,
   optString,
@@ -229,6 +230,7 @@ import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
+import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
 import {
@@ -1348,7 +1350,7 @@ function useOrdersPageContent() {
     ).filter((price) => price.id || price.is_effective);
   }, [orderDetail?.date_from, selectedLeistungAgencyService]);
 
-  const orderTableColumns: ColumnDef<OrderSummary>[] = [
+  const allOrderTableColumns: ColumnDef<OrderSummary>[] = [
     {
       id: "order_number",
       label: l("orders_auftrag"),
@@ -1448,6 +1450,10 @@ function useOrdersPageContent() {
       ),
     },
   ];
+  // Order-part readers receive no commercial fields; the finance columns stay out.
+  const orderTableColumns = permissions.readsOnlyOrderPart
+    ? allOrderTableColumns.filter((column) => column.group !== "finance")
+    : allOrderTableColumns;
 
   const leistungMetrics = useMemo(() => {
     const items = orderDetail?.leistungen ?? [];
@@ -2283,11 +2289,15 @@ function useOrdersPageContent() {
         if (filters.phase) params.set("phase", filters.phase);
         if (filters.status) params.set("status", filters.status);
         if (filters.patientId) params.set("patient_id", filters.patientId);
-        if (filters.providerId) params.set("provider_id", filters.providerId);
-        if (filters.providerTaxonomyNodeId) {
-          params.set("provider_taxonomy_node_id", filters.providerTaxonomyNodeId);
+        // Provider/doctor filters would reveal lines outside an order-part
+        // reader's projection; the server refuses them for these roles.
+        if (!permissions.readsOnlyOrderPart) {
+          if (filters.providerId) params.set("provider_id", filters.providerId);
+          if (filters.providerTaxonomyNodeId) {
+            params.set("provider_taxonomy_node_id", filters.providerTaxonomyNodeId);
+          }
+          if (filters.doctorId) params.set("doctor_id", filters.doctorId);
         }
-        if (filters.doctorId) params.set("doctor_id", filters.doctorId);
 
         const queryString = params.toString();
         const response = await fetchOrders(
@@ -2326,6 +2336,7 @@ function useOrdersPageContent() {
     finishOrdersLoad,
     isOrderRouteDetail,
     permissions.canViewPage,
+    permissions.readsOnlyOrderPart,
     reloadNonce,
     searchParams,
     startOrdersLoad,
@@ -2433,7 +2444,8 @@ function useOrdersPageContent() {
   ]);
 
   useEffect(() => {
-    if (!selectedOrderId) return;
+    // Order-part readers get no economics (the server answers 403).
+    if (!selectedOrderId || permissions.readsOnlyOrderPart) return;
     const currentOrderId = selectedOrderId;
     let cancelled = false;
     setOrderEconomics(current => current?.order_id === currentOrderId ? current : null);
@@ -2456,7 +2468,7 @@ function useOrdersPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [reloadNonce, selectedOrderId]);
+  }, [permissions.readsOnlyOrderPart, reloadNonce, selectedOrderId]);
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -3603,6 +3615,7 @@ function useOrdersPageContent() {
                 </NativeComboboxSelect>
               </ToolbarField>
 
+              {permissions.readsOnlyOrderPart ? null : (<>
               <ToolbarField
                 label={`${t.common_provider} / ${t.providers_category}`}
                 className="col-span-6 w-full"
@@ -3660,6 +3673,7 @@ function useOrdersPageContent() {
                   ))}
                 </NativeComboboxSelect>
               </ToolbarField>
+              </>)}
 
               <ToolbarField label={t.table_actions} className="col-span-3 w-full">
                 <div className="flex h-8 items-center justify-end gap-1.5">
@@ -3780,6 +3794,16 @@ function useOrdersPageContent() {
               <EmptyState
                 title={tx.common_not_set}
                 description={tx.orders_subtitle}
+              />
+            ) : isPartialOrderRead(orderDetail) ? (
+              <ScopedOrderDetail
+                detail={orderDetail}
+                lang={lang}
+                subjectName={detailSubjectName}
+                phaseLabel={phaseLabel}
+                statusLabel={orderStatusLabel}
+                lineStatusLabel={leistungStatusLabel}
+                formatDate={formatDateOnlyLabel}
               />
             ) : (
               <div className="min-w-0 space-y-4 rounded-xl">

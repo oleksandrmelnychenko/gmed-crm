@@ -73,6 +73,7 @@ export type OrderSummary = {
   date_from?: string | null;
   date_to?: string | null;
   created_at: string;
+  read_scope?: OrderReadScope;
 };
 
 export type Leistung = {
@@ -237,6 +238,8 @@ export type OrderDetail = {
   termination_settlement?: { id: string; status: "open" | "settled" } | null;
   created_at: string;
   updated_at: string;
+  /** Present when the server returned a partial projection of the order. */
+  read_scope?: OrderReadScope;
 };
 
 export type OrderEconomicsAmounts = {
@@ -798,4 +801,14 @@ export type OrdersPermissions = {
   canCancelLeistung: boolean;
   canManageExternalInvoices: boolean;
   canManageEconomics: boolean;
+  /**
+   * The role reads only its part of an order (concierge: service lines,
+   * interpreter team lead: interpreter lines). The server answers with a
+   * projection (`read_scope`) and refuses economics, amendments, group,
+   * pipeline and provider/doctor filters.
+   */
+  readsOnlyOrderPart: boolean;
 };
+
+/** Server projection name of a partial order read (`OrderReadScope`). */
+export type OrderReadScope = "full" | "concierge_services" | "interpreter_team";

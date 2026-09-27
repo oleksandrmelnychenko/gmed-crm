@@ -595,6 +595,12 @@ async fn can_receive_order_event(
     if matches!(auth.role, Role::Ceo | Role::Billing) {
         return Ok(true);
     }
+    // The concierge and the interpreter team lead read only a projection of
+    // an order (`GET /orders`); order events can carry commercial payloads
+    // and are not delivered to them.
+    if matches!(auth.role, Role::Concierge | Role::TeamleadInterpreter) {
+        return Ok(false);
+    }
     if !matches!(auth.role, Role::Patient) && !access::requires_patient_assignment(auth.role) {
         return Ok(false);
     }

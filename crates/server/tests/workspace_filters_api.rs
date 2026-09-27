@@ -14552,3 +14552,276 @@ async fn concierge_and_patient_manager_can_list_non_medical_providers() {
         );
     }
 }
+
+async fn seed_order_line(
+    pool: &PgPool,
+    order_id: Uuid,
+    provider_id: Option<Uuid>,
+    service_key: Option<&str>,
+    description: &str,
+    notes: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+                order_id, description, quantity, unit_price, vat_rate, provider_id,
+                agency_service_key_snapshot, notes
+           ) VALUES ($1, $2, 1, 480, 19, $3, $4, $5)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(description)
+    .bind(provider_id)
+    .bind(service_key)
+    .bind(notes)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+fn line_ids(body: &Value) -> Vec<String> {
+    body["leistungen"]
+        .as_array()
+        .map(|lines| {
+            lines
+                .iter()
+                .filter_map(|line| line["id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn concierge_and_interpreter_team_lead_read_only_their_part_of_an_order() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("order-part-readers");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let clinic_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let transfer_id =
+        seed_provider_with_type(&pool, &format!("{tag}-transfer"), "non_medical", "Germany").await;
+    let needs = format!("Knee replacement consult {tag}");
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-PART-{tag}"),
+        "execution",
+        "active",
+        &needs,
+    )
+    .await;
+    let medical_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(clinic_id),
+        None,
+        &format!("Knee surgery {tag}"),
+        "Implant size 7",
+    )
+    .await;
+    let transfer_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(transfer_id),
+        None,
+        &format!("Airport transfer {tag}"),
+        "Pick up at gate",
+    )
+    .await;
+    let interpreter_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some("interpreter_hours"),
+        &format!("Interpreter hours {tag}"),
+        "Report: patient anxious before surgery",
+    )
+    .await;
+
+    let concierge_id = seed_user(&pool, &format!("{tag}-c"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let concierge = auth_header_for(concierge_id, "concierge");
+
+    let patient_orders = format!("/api/v1/orders?patient_id={patient_id}");
+    let (status, list) = json_request(&app, "GET", &patient_orders, &concierge, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == order_id.to_string())
+        .cloned()
+        .expect("concierge lists the order of an assigned patient");
+    assert_eq!(row["read_scope"], "concierge_services");
+    for key in [
+        "total_estimated",
+        "payment_tracking",
+        "prepayment_amount",
+        "case_id",
+    ] {
+        assert!(row.get(key).is_none(), "{key} leaked: {row}");
+    }
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["read_scope"], "concierge_services");
+    assert_eq!(line_ids(&detail), vec![transfer_line.to_string()]);
+    assert!(detail["needs_description"].is_null(), "{detail}");
+    assert!(detail["leistungen"][0]["unit_price"].is_null(), "{detail}");
+    assert!(detail["leistungen"][0]["notes"].is_null(), "{detail}");
+    let text = detail.to_string();
+    for secret in ["Knee", "Implant", "anxious"] {
+        assert!(!text.contains(secret), "{secret} leaked: {detail}");
+    }
+
+    for path in [
+        format!("/api/v1/orders/{order_id}/economics"),
+        format!("/api/v1/orders/{order_id}/leistungen"),
+        format!("/api/v1/orders/{order_id}/amendments"),
+        format!("/api/v1/orders/{order_id}/group"),
+        format!("/api/v1/orders/{order_id}/pipeline"),
+        format!("/api/v1/orders?provider_id={clinic_id}"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &concierge, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/orders?search=Knee%20replacement",
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains(&order_id.to_string()), "{body}");
+    // Reading does not open any write.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &concierge,
+        Some(json!({ "status": "paused" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // The interpreter team lead is not assigned to the patient: an order
+    // without interpreter involvement stays closed, while interpreter hours or
+    // an interpreter appointment put an order into the team context.
+    let teamlead_id = seed_user(&pool, &format!("{tag}-t"), "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-i"), "interpreter").await;
+    let teamlead = auth_header_for(teamlead_id, "teamlead_interpreter");
+    let clinic_only_order = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-CLINIC-{tag}"),
+        "execution",
+        "active",
+        "Clinic only",
+    )
+    .await;
+    seed_order_line(
+        &pool,
+        clinic_only_order,
+        Some(clinic_id),
+        None,
+        &format!("Consultation {tag}"),
+        "",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{clinic_only_order}"),
+        &teamlead,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        clinic_id,
+        seed_doctor(&pool, clinic_id, &tag).await,
+        admin_id,
+        &format!("Interpreted visit {tag}"),
+        "confirmed",
+        "2026-05-10",
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET order_id = $2, interpreter_id = $3 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(order_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &teamlead,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["read_scope"], "interpreter_team");
+    assert_eq!(line_ids(&detail), vec![interpreter_line.to_string()]);
+    let text = detail.to_string();
+    assert!(detail["leistungen"][0]["unit_price"].is_null(), "{detail}");
+    for secret in ["Knee", "Implant", "anxious", "Airport"] {
+        assert!(!text.contains(secret), "{secret} leaked: {detail}");
+    }
+    let (status, list) = json_request(&app, "GET", &patient_orders, &teamlead, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list.to_string().contains(&order_id.to_string()), "{list}");
+    assert!(
+        !list.to_string().contains(&clinic_only_order.to_string()),
+        "{list}"
+    );
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &teamlead,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Roles with the full view are unchanged.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail.get("read_scope").is_none(), "{detail}");
+    assert_eq!(line_ids(&detail).len(), 3);
+    assert!(line_ids(&detail).contains(&medical_line.to_string()));
+
+    // The interpreter still has no order access at all.
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/orders",
+        &auth_header_for(interpreter_id, "interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

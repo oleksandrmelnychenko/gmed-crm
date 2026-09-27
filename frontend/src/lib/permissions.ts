@@ -174,6 +174,8 @@ const INTERPRETER: readonly KnownCapability[] = [
 const TEAMLEAD_INTERPRETER: readonly KnownCapability[] = [
   "patients.view",
   "patients.medical.view",
+  // Read-only interpreter part of an order (server projection).
+  "orders.view",
   "documents.view",
   "documents.upload",
   "documents.shares.view",
@@ -197,6 +199,8 @@ const TEAMLEAD_INTERPRETER: readonly KnownCapability[] = [
 const CONCIERGE: readonly KnownCapability[] = [
   "patients.view",
   "leads.view",
+  // Read-only service/logistics part of an order (server projection).
+  "orders.view",
   "documents.view",
   "documents.upload",
   "appointments.view",
