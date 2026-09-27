@@ -63,6 +63,26 @@ pub fn line_amounts(quantity: Decimal, unit_price_net: Decimal, vat_rate: Decima
     }
 }
 
+/// Net unit price (in cents) of a single-unit line whose gross should be
+/// `gross` at `vat_rate` percent, e.g. an agreed gross amount that is billed
+/// as one line. Prefers a net whose [`line_amounts`] gross is exactly `gross`;
+/// when no cent value hits it (rare rounding gaps), the nearest net is used and
+/// the line gross differs by a cent.
+pub fn net_for_gross(gross: Decimal, vat_rate: Decimal) -> Decimal {
+    let gross = round_cents(gross);
+    let divisor = Decimal::ONE + vat_rate / Decimal::ONE_HUNDRED;
+    if divisor <= Decimal::ZERO {
+        return gross;
+    }
+    let estimate = round_cents(gross / divisor);
+    let cent = Decimal::new(1, MONEY_DECIMAL_PLACES);
+    [Decimal::ZERO, -cent, cent, -cent - cent, cent + cent]
+        .into_iter()
+        .map(|offset| estimate + offset)
+        .find(|net| line_amounts(Decimal::ONE, *net, vat_rate).gross == gross)
+        .unwrap_or(estimate)
+}
+
 /// Canonical API string of a money amount: rounded to cents, trailing zeros
 /// trimmed (`"282.63"`, `"95"`).
 pub fn money_string(value: Decimal) -> String {
@@ -174,6 +194,28 @@ mod tests {
         assert_eq!(amounts.net, dec("-237.50"));
         assert_eq!(amounts.vat, dec("-45.13"));
         assert_eq!(amounts.gross, dec("-282.63"));
+    }
+
+    #[test]
+    fn net_for_gross_hits_the_agreed_gross_amount() {
+        for (gross, rate) in [
+            ("150", "19"),
+            ("100", "19"),
+            ("10", "19"),
+            ("0.01", "19"),
+            ("550", "0"),
+            ("123.45", "7"),
+            ("999.99", "19"),
+        ] {
+            let net = net_for_gross(dec(gross), dec(rate));
+            assert_eq!(
+                line_amounts(Decimal::ONE, net, dec(rate)).gross,
+                dec(gross),
+                "{gross} at {rate}%"
+            );
+        }
+        assert_eq!(net_for_gross(dec("150"), dec("19")), dec("126.05"));
+        assert_eq!(net_for_gross(dec("550"), dec("0")), dec("550"));
     }
 
     #[test]

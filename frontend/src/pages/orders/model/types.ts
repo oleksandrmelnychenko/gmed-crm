@@ -101,6 +101,7 @@ export type Leistung = {
   doctor_name: string | null;
   source_interpreter_report_id?: string | null;
   source_medical_appointment_id?: string | null;
+  source_order_amendment_id?: string | null;
   agency_service_id?: string | null;
   agency_service_price_version_id?: string | null;
   agency_service_key?: string | null;

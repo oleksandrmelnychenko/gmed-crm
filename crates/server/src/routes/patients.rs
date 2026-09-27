@@ -6653,7 +6653,8 @@ async fn list_patient_orders(
     let rows = sqlx::query(
         r#"SELECT id, order_number, phase, status, intake_state,
                   CASE WHEN EXISTS(SELECT 1 FROM leads l WHERE l.id=orders.source_lead_id AND l.repeat_patient_id=$1) THEN source_lead_id END AS repeat_lead_id, needs_description, created_at,
-                  total_estimated, total_actual, currency, date_from, date_to,
+                  COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated,
+                  total_actual, currency, date_from, date_to,
                   signed_patient, signed_agency, signed_at
            FROM orders
            WHERE patient_id = $1

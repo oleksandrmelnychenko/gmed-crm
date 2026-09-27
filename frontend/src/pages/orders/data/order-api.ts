@@ -543,6 +543,19 @@ export function setOrderPayer(orderId: string, payload: JsonPayload) {
   return postJson<void>(`/orders/${orderId}/payer`, payload);
 }
 
+/** How an amended amount is taxed; mirrors the server's vat_treatment keys. */
+export type OrderAmendmentVatTreatment =
+  | "standard_vat"
+  | "termin_fee_0"
+  | "vat_exempt_0"
+  | "cost_passthrough";
+
+export const ORDER_AMENDMENT_VAT_TREATMENTS: readonly OrderAmendmentVatTreatment[] = [
+  "standard_vat",
+  "termin_fee_0",
+  "cost_passthrough",
+];
+
 export type OrderAmendment = {
   id: string;
   order_id: string;
@@ -555,7 +568,24 @@ export type OrderAmendment = {
   decided_at: string | null;
   decision_note: string | null;
   created_at: string | null;
+  vat_treatment: OrderAmendmentVatTreatment | null;
+  vat_rate: string | null;
+  is_cost_passthrough: boolean;
+  /** Service line created when the amendment was approved (billed). */
+  order_leistung_id: string | null;
+  order_leistung_status: string | null;
+  /** Approved before approvals created service lines: can still be billed. */
+  billable: boolean;
 };
+
+function amendmentVatTreatment(value: unknown): OrderAmendmentVatTreatment | null {
+  return value === "standard_vat" ||
+    value === "termin_fee_0" ||
+    value === "vat_exempt_0" ||
+    value === "cost_passthrough"
+    ? value
+    : null;
+}
 
 export function normalizeOrderAmendment(value: unknown): OrderAmendment {
   const record = asRecord(value);
@@ -571,6 +601,12 @@ export function normalizeOrderAmendment(value: unknown): OrderAmendment {
     decided_at: nullableStringValue(record.decided_at),
     decision_note: nullableStringValue(record.decision_note),
     created_at: nullableStringValue(record.created_at),
+    vat_treatment: amendmentVatTreatment(record.vat_treatment),
+    vat_rate: nullableStringValue(record.vat_rate),
+    is_cost_passthrough: booleanValue(record.is_cost_passthrough),
+    order_leistung_id: nullableStringValue(record.order_leistung_id),
+    order_leistung_status: nullableStringValue(record.order_leistung_status),
+    billable: booleanValue(record.billable),
   };
 }
 
@@ -581,7 +617,12 @@ export async function fetchOrderAmendments(orderId: string): Promise<OrderAmendm
 
 export function createOrderAmendment(
   orderId: string,
-  payload: { delta_amount: string; agreed_note: string; currency?: string },
+  payload: {
+    delta_amount: string;
+    agreed_note: string;
+    vat_treatment: OrderAmendmentVatTreatment;
+    currency?: string;
+  },
 ) {
   return postJson<unknown>(`/orders/${orderId}/amendments`, payload);
 }
@@ -590,11 +631,23 @@ export function decideOrderAmendment(
   orderId: string,
   amendmentId: string,
   decision: "approve" | "reject",
-  note?: string,
+  options: { note?: string; vatTreatment?: OrderAmendmentVatTreatment | null } = {},
 ) {
   return postJson<unknown>(`/orders/${orderId}/amendments/${amendmentId}/decision`, {
     decision,
-    note: note ?? null,
+    note: options.note ?? null,
+    vat_treatment: options.vatTreatment ?? null,
+  });
+}
+
+/** Bill an amendment approved before approvals created service lines. */
+export function billOrderAmendment(
+  orderId: string,
+  amendmentId: string,
+  vatTreatment: OrderAmendmentVatTreatment | null,
+) {
+  return postJson<unknown>(`/orders/${orderId}/amendments/${amendmentId}/billing-line`, {
+    vat_treatment: vatTreatment,
   });
 }
 

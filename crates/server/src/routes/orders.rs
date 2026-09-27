@@ -109,6 +109,10 @@ pub fn router() -> Router<AppState> {
             post(decide_order_amendment),
         )
         .route(
+            "/orders/{order_id}/amendments/{amendment_id}/billing-line",
+            post(bill_order_amendment),
+        )
+        .route(
             "/orders/{order_id}/group",
             get(get_order_group).post(group_order),
         )
@@ -510,7 +514,8 @@ async fn list_orders(
 
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
-                  o.total_estimated, o.signed_patient, o.signed_agency,
+                  COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
+                  o.signed_patient, o.signed_agency,
                   o.prepayment_required, o.prepayment_amount, o.prepayment_due_at, o.date_from, o.date_to, o.created_at,
                   (SELECT jsonb_build_object('status',payment_status,'required_amount',required_amount::text,'received_amount',received_amount::text,'remaining_amount',remaining_amount::text,'currency',currency,'due_at',prepayment_due_at)
                    FROM order_payment_tracking WHERE order_id=o.id) AS payment_tracking,
@@ -3160,7 +3165,9 @@ async fn get_order(
                   o.source_lead_id, o.contract_id,
                   o.case_id, cs.case_id AS case_code,
                   o.phase, o.status, o.needs_description, o.signed_patient,
-                  o.signed_agency, o.total_estimated, o.total_actual, UPPER(o.currency) AS currency,
+                  o.signed_agency,
+                  COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
+                  o.total_actual, UPPER(o.currency) AS currency,
                   o.created_at, o.updated_at, o.cancellation_reason, o.cancelled_at,
                   settlement.id AS termination_settlement_id,
                   settlement.status AS termination_settlement_status,
@@ -3286,7 +3293,7 @@ async fn get_order(
                   ol.cancelled_at, ol.cancellation_reason,
                   ol.client_reference,
                   ol.provider_id, ol.doctor_id, ol.source_interpreter_report_id,
-                  ol.source_medical_appointment_id, ol.agency_service_id,
+                  ol.source_medical_appointment_id, ol.source_order_amendment_id, ol.agency_service_id,
                   ol.agency_service_price_version_id,
                   ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
@@ -3445,6 +3452,7 @@ async fn get_order(
             "doctor_name": l.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
             "source_interpreter_report_id": l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
             "source_medical_appointment_id": l.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
+            "source_order_amendment_id": l.try_get::<Option<Uuid>, _>("source_order_amendment_id").unwrap_or_default(),
             "agency_service_id": l.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
             "agency_service_price_version_id": l.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
             "agency_service_key": l.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
@@ -7646,7 +7654,7 @@ async fn list_leistungen(
                   ol.is_cost_passthrough, ol.status, ol.notes, ol.client_reference,
                   ol.cancelled_at, ol.cancellation_reason,
                   ol.provider_id, ol.doctor_id,
-                  ol.source_interpreter_report_id, ol.source_medical_appointment_id,
+                  ol.source_interpreter_report_id, ol.source_medical_appointment_id, ol.source_order_amendment_id,
                   ol.agency_service_id, ol.agency_service_price_version_id,
                   ol.external_document_id,
                   pr.name AS provider_name, d.name AS doctor_name,
@@ -7724,6 +7732,7 @@ async fn list_leistungen(
                     "doctor_name": r.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
                     "source_interpreter_report_id": r.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
                     "source_medical_appointment_id": r.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
+                    "source_order_amendment_id": r.try_get::<Option<Uuid>, _>("source_order_amendment_id").unwrap_or_default(),
                     "agency_service_id": r.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
                     "agency_service_price_version_id": r.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
                     "agency_service_key": r.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
@@ -9125,27 +9134,149 @@ struct CreateOrderAmendmentRequest {
     delta_amount: String,
     agreed_note: String,
     currency: Option<String>,
+    vat_treatment: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct DecideOrderAmendmentRequest {
     decision: String,
     note: Option<String>,
+    /// VAT treatment of a pending amendment proposed before it was recorded.
+    vat_treatment: Option<String>,
 }
 
-const ORDER_AMENDMENT_COLUMNS: &str = "id, order_id, delta_amount, currency, agreed_note, status, requested_by, decided_by, decided_at, decision_note, created_at";
+#[derive(Deserialize)]
+struct BillOrderAmendmentRequest {
+    vat_treatment: Option<String>,
+}
+
+const ORDER_AMENDMENT_SELECT: &str =
+    "SELECT a.id, a.order_id, a.delta_amount, a.currency, a.agreed_note, a.status,
+            a.requested_by, a.decided_by, a.decided_at, a.decision_note, a.created_at,
+            a.vat_treatment, a.vat_rate, a.is_cost_passthrough,
+            line.id AS order_leistung_id, line.status AS order_leistung_status
+     FROM order_amendments a
+     LEFT JOIN order_leistungen line ON line.source_order_amendment_id = a.id";
+
+/// How an amended amount is taxed. Tax profile keys resolve to the active
+/// profile's rate; a pass-through cost carries no VAT.
+const ORDER_AMENDMENT_VAT_TREATMENTS: [&str; 4] = [
+    "standard_vat",
+    "termin_fee_0",
+    "vat_exempt_0",
+    "cost_passthrough",
+];
+
+fn normalize_amendment_vat_treatment(
+    value: Option<&str>,
+) -> Result<Option<&'static str>, axum::response::Response> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    ORDER_AMENDMENT_VAT_TREATMENTS
+        .into_iter()
+        .find(|treatment| *treatment == value)
+        .map(Some)
+        .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid vat_treatment"))
+}
+
+/// VAT of an amendment's billing line, fixed when the amendment is proposed.
+struct AmendmentVat {
+    treatment: &'static str,
+    vat_rate: rust_decimal::Decimal,
+    is_cost_passthrough: bool,
+    tax_profile_id: Option<Uuid>,
+}
+
+async fn resolve_amendment_vat(
+    conn: &mut sqlx::PgConnection,
+    treatment: &'static str,
+) -> Result<AmendmentVat, sqlx::Error> {
+    if treatment == "cost_passthrough" {
+        return Ok(AmendmentVat {
+            treatment,
+            vat_rate: rust_decimal::Decimal::ZERO,
+            is_cost_passthrough: true,
+            tax_profile_id: None,
+        });
+    }
+    let profile = sqlx::query(
+        r#"SELECT id, vat_rate
+           FROM tax_profiles
+           WHERE profile_key = $1
+             AND is_active
+             AND valid_from <= CURRENT_DATE
+             AND (valid_to IS NULL OR valid_to >= CURRENT_DATE)
+           LIMIT 1"#,
+    )
+    .bind(treatment)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let fallback_rate = if treatment == "standard_vat" {
+        rust_decimal::Decimal::new(19, 0)
+    } else {
+        rust_decimal::Decimal::ZERO
+    };
+    Ok(match profile {
+        Some(row) => AmendmentVat {
+            treatment,
+            vat_rate: row
+                .try_get::<rust_decimal::Decimal, _>("vat_rate")
+                .unwrap_or(fallback_rate)
+                .round_commercial(2),
+            is_cost_passthrough: false,
+            tax_profile_id: row.try_get::<Uuid, _>("id").ok(),
+        },
+        None => AmendmentVat {
+            treatment,
+            vat_rate: fallback_rate,
+            is_cost_passthrough: false,
+            tax_profile_id: None,
+        },
+    })
+}
+
+/// The VAT already recorded on an amendment row, if any.
+fn stored_amendment_vat(row: &sqlx::postgres::PgRow) -> Option<AmendmentVat> {
+    let treatment = row
+        .try_get::<Option<String>, _>("vat_treatment")
+        .ok()
+        .flatten()?;
+    let treatment = ORDER_AMENDMENT_VAT_TREATMENTS
+        .into_iter()
+        .find(|known| *known == treatment)?;
+    Some(AmendmentVat {
+        treatment,
+        vat_rate: row
+            .try_get::<Option<rust_decimal::Decimal>, _>("vat_rate")
+            .ok()
+            .flatten()
+            .unwrap_or(rust_decimal::Decimal::ZERO),
+        is_cost_passthrough: row
+            .try_get::<bool, _>("is_cost_passthrough")
+            .unwrap_or(false),
+        tax_profile_id: row
+            .try_get::<Option<Uuid>, _>("tax_profile_id")
+            .ok()
+            .flatten(),
+    })
+}
 
 fn order_amendment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    let delta = row
+        .try_get::<rust_decimal::Decimal, _>("delta_amount")
+        .unwrap_or_default();
+    let order_leistung_id = row
+        .try_get::<Option<Uuid>, _>("order_leistung_id")
+        .unwrap_or_default();
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
         "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_else(|_| Uuid::nil()),
-        "delta_amount": row
-            .try_get::<rust_decimal::Decimal, _>("delta_amount")
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
+        "delta_amount": delta.to_string(),
         "currency": row.try_get::<String, _>("currency").unwrap_or_default(),
         "agreed_note": row.try_get::<String, _>("agreed_note").unwrap_or_default(),
-        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "status": status,
         "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
         "decided_by": row.try_get::<Option<Uuid>, _>("decided_by").unwrap_or_default(),
         "decided_at": row
@@ -9157,7 +9288,161 @@ fn order_amendment_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
             .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
             .ok()
             .map(|value| value.to_rfc3339()),
+        "vat_treatment": row.try_get::<Option<String>, _>("vat_treatment").unwrap_or_default(),
+        "vat_rate": row
+            .try_get::<Option<rust_decimal::Decimal>, _>("vat_rate")
+            .unwrap_or_default()
+            .map(|value| value.normalize().to_string()),
+        "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
+        "order_leistung_id": order_leistung_id,
+        "order_leistung_status": row.try_get::<Option<String>, _>("order_leistung_status").unwrap_or_default(),
+        // Approved before approvals created billing lines: can still be billed.
+        "billable": status == "approved"
+            && order_leistung_id.is_none()
+            && delta > rust_decimal::Decimal::ZERO,
     })
+}
+
+async fn load_order_amendment_json(state: &AppState, amendment_id: Uuid) -> serde_json::Value {
+    sqlx::query(&format!("{ORDER_AMENDMENT_SELECT} WHERE a.id = $1"))
+        .bind(amendment_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten()
+        .map(|row| order_amendment_json(&row))
+        .unwrap_or(serde_json::Value::Null)
+}
+
+/// The order total shown everywhere: gross of the services that are not
+/// cancelled, or the stored estimate while the order has no services.
+async fn load_order_total_estimated(state: &AppState, order_id: Uuid) -> Option<String> {
+    sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
+        "SELECT COALESCE(order_service_total_gross(id), total_estimated) FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .ok()
+    .flatten()
+    .map(money::money_string)
+}
+
+/// Keeps the stored order estimate equal to the gross of its services after
+/// a service line was added or cancelled outside a quote.
+async fn sync_order_total_estimated(
+    conn: &mut sqlx::PgConnection,
+    order_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE orders
+           SET total_estimated = COALESCE(order_service_total_gross(id), total_estimated),
+               updated_at = now()
+           WHERE id = $1
+             AND total_estimated IS DISTINCT FROM COALESCE(order_service_total_gross(id), total_estimated)"#,
+    )
+    .bind(order_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// Why an order cannot take a billable amendment right now, if so. Locks the
+/// order row for the rest of the caller's transaction.
+async fn lock_order_for_amendment(
+    conn: &mut sqlx::PgConnection,
+    order_id: Uuid,
+) -> Result<Result<(Uuid, String), &'static str>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT o.status, o.intake_state, UPPER(o.currency) AS currency,
+                  COALESCE(o.patient_id, l.converted_patient_id) AS patient_id
+           FROM orders o
+           LEFT JOIN leads l ON l.id = o.source_lead_id
+           WHERE o.id = $1
+           FOR UPDATE OF o"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Err("Order not found"));
+    };
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
+    if matches!(status.as_str(), "cancelled" | "completed") {
+        return Ok(Err(
+            "Amount amendments are closed for a cancelled or completed order",
+        ));
+    }
+    if row.try_get::<String, _>("intake_state").unwrap_or_default() == "draft" {
+        return Ok(Err(
+            "Complete the order preparation before amending the order amount",
+        ));
+    }
+    let Some(patient_id) = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+    else {
+        return Ok(Err(
+            "Order must be linked to a patient before an amendment is billed",
+        ));
+    };
+    Ok(Ok((
+        patient_id,
+        row.try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+    )))
+}
+
+/// Adds the billable service line of an approved amendment: one unit whose
+/// gross is the approved delta, taxed as recorded on the amendment, already
+/// approved (the second person's approval is the approval). The next quote of
+/// the order, and every invoice from it, includes the line.
+#[allow(clippy::too_many_arguments)]
+async fn insert_amendment_billing_line(
+    conn: &mut sqlx::PgConnection,
+    order_id: Uuid,
+    patient_id: Uuid,
+    amendment_id: Uuid,
+    approver_id: Uuid,
+    delta: rust_decimal::Decimal,
+    currency: &str,
+    agreed_note: &str,
+    vat: &AmendmentVat,
+    note: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let unit_price = money::net_for_gross(delta, vat.vat_rate);
+    let agreed: String = agreed_note.trim().chars().take(300).collect();
+    let description = format!("Anpassung: {agreed}");
+    sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO order_leistungen (
+                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+                is_cost_passthrough, status, delivered_at, approved_by, approved_at, notes,
+                tax_profile_id, vat_source, source_order_amendment_id
+           ) VALUES (
+                $1, $2, $3, 1, $4, $5, $6,
+                $7, 'approved', now(), $8, now(), $9,
+                $10, $11, $12
+           )
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(description)
+    .bind(unit_price)
+    .bind(currency)
+    .bind(vat.vat_rate)
+    .bind(vat.is_cost_passthrough)
+    .bind(approver_id)
+    .bind(note)
+    .bind(vat.tax_profile_id)
+    .bind(if vat.tax_profile_id.is_some() {
+        "tax_profile"
+    } else {
+        "manual"
+    })
+    .bind(amendment_id)
+    .fetch_one(&mut *conn)
+    .await
 }
 
 /// List an order's amount amendments, newest first (#10).
@@ -9176,7 +9461,7 @@ async fn list_order_amendments(
         return resp;
     }
     match sqlx::query(&format!(
-        "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE order_id = $1 ORDER BY created_at DESC"
+        "{ORDER_AMENDMENT_SELECT} WHERE a.order_id = $1 ORDER BY a.created_at DESC"
     ))
     .bind(order_id)
     .fetch_all(&state.db)
@@ -9193,9 +9478,11 @@ async fn list_order_amendments(
     }
 }
 
-/// Propose an amount change to an order, recording WHAT was agreed with the
-/// patient. It stays `pending` (does not touch the order total) until an
-/// approver decides — see [`decide_order_amendment`] (#10).
+/// Propose an amount increase for an order, recording WHAT was agreed with
+/// the patient and how the amount is taxed. It stays `pending` (not billed,
+/// not part of the order total) until another person approves it — see
+/// [`decide_order_amendment`] (#10). A reduction is not an amendment: the
+/// service line is changed or cancelled, or an issued invoice is credited.
 async fn create_order_amendment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -9215,6 +9502,18 @@ async fn create_order_amendment(
             "delta_amount must be non-zero",
         );
     }
+    if delta < rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "An amendment raises the order amount; reduce or cancel the service line, or credit the invoice instead",
+        );
+    }
+    if delta.round_cents() != delta {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "delta_amount must have at most two decimal places",
+        );
+    }
     let agreed_note = body.agreed_note.trim();
     if agreed_note.is_empty() {
         return err(
@@ -9222,54 +9521,106 @@ async fn create_order_amendment(
             "agreed_note is required (what was agreed with the patient)",
         );
     }
-    let currency = body
-        .currency
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("EUR")
-        .to_string();
+    let treatment = match normalize_amendment_vat_treatment(body.vat_treatment.as_deref()) {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "vat_treatment is required (how the amended amount is taxed)",
+            );
+        }
+        Err(resp) => return resp,
+    };
 
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
 
-    match sqlx::query(&format!(
-        "INSERT INTO order_amendments (order_id, delta_amount, currency, agreed_note, requested_by)
-         VALUES ($1, $2, $3, $4, $5) RETURNING {ORDER_AMENDMENT_COLUMNS}"
-    ))
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, "create order amendment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create amendment",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return failed(e),
+    };
+    let order_currency = match lock_order_for_amendment(&mut tx, order_id).await {
+        Ok(Ok((_, currency))) => currency,
+        Ok(Err("Order not found")) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(Err(message)) => return err(StatusCode::CONFLICT, message),
+        Err(e) => return failed(e),
+    };
+    let currency = body
+        .currency
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_uppercase)
+        .unwrap_or_else(|| order_currency.clone());
+    if currency != order_currency {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Amendment currency must match the order currency",
+        );
+    }
+    let vat = match resolve_amendment_vat(&mut tx, treatment).await {
+        Ok(value) => value,
+        Err(e) => return failed(e),
+    };
+
+    let amendment_id = match sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO order_amendments (
+             order_id, delta_amount, currency, agreed_note, requested_by,
+             vat_treatment, vat_rate, is_cost_passthrough, tax_profile_id
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id",
+    )
     .bind(order_id)
     .bind(delta)
     .bind(&currency)
     .bind(agreed_note)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .bind(vat.treatment)
+    .bind(vat.vat_rate)
+    .bind(vat.is_cost_passthrough)
+    .bind(vat.tax_profile_id)
+    .fetch_one(&mut *tx)
     .await
     {
-        Ok(row) => {
-            let amendment = order_amendment_json(&row);
-            state.audit_sender.try_send(audit::domain_event(
-                "create_order_amendment",
-                Some(auth.user_id),
-                "order",
-                Some(order_id),
-                serde_json::json!({ "delta_amount": delta.to_string(), "currency": currency }),
-            ));
-            (StatusCode::CREATED, Json(amendment)).into_response()
-        }
-        Err(e) => {
-            tracing::error!(error = %e, "create order amendment");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create amendment",
-            )
-        }
+        Ok(id) => id,
+        Err(e) => return failed(e),
+    };
+    if let Err(e) = tx.commit().await {
+        return failed(e);
     }
+
+    state.audit_sender.try_send(audit::domain_event(
+        "create_order_amendment",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({
+            "amendment_id": amendment_id,
+            "delta_amount": delta.to_string(),
+            "currency": currency,
+            "vat_treatment": vat.treatment,
+            "vat_rate": vat.vat_rate.normalize().to_string(),
+        }),
+    ));
+    (
+        StatusCode::CREATED,
+        Json(load_order_amendment_json(&state, amendment_id).await),
+    )
+        .into_response()
 }
 
-/// Approve or reject a pending amendment. Approval applies the delta to the
-/// order's estimated total and must come from someone other than the requester
-/// (the "under approval" rule); rejection leaves the total untouched (#10).
+/// Approve or reject a pending amendment. Approval must come from someone
+/// other than the requester (the "under approval" rule) and adds the approved
+/// delta as a billable service line, so the order total, the next quote and
+/// its invoices include it; rejection leaves the order untouched (#10).
 async fn decide_order_amendment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -9290,21 +9641,40 @@ async fn decide_order_amendment(
             );
         }
     };
+    let requested_treatment = match normalize_amendment_vat_treatment(body.vat_treatment.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
         return resp;
     }
 
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, %amendment_id, "decide order amendment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
-        Err(e) => {
-            tracing::error!(error = %e, "begin amendment decision tx");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        Err(e) => return failed(e),
+    };
+
+    // The order first, then the amendment: the same lock order as a billing
+    // line created later for an already approved amendment.
+    let order_lock = if decision == "approved" {
+        match lock_order_for_amendment(&mut tx, order_id).await {
+            Ok(value) => Some(value),
+            Err(e) => return failed(e),
         }
+    } else {
+        None
     };
 
     let existing = match sqlx::query(
-        "SELECT status, delta_amount, requested_by FROM order_amendments WHERE id = $1 AND order_id = $2 FOR UPDATE",
+        "SELECT status, delta_amount, requested_by, currency, agreed_note,
+                vat_treatment, vat_rate, is_cost_passthrough, tax_profile_id
+         FROM order_amendments WHERE id = $1 AND order_id = $2 FOR UPDATE",
     )
     .bind(amendment_id)
     .bind(order_id)
@@ -9313,10 +9683,7 @@ async fn decide_order_amendment(
     {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
-        Err(e) => {
-            tracing::error!(error = %e, "load order amendment for decision");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+        Err(e) => return failed(e),
     };
 
     let status: String = existing.try_get("status").unwrap_or_default();
@@ -9334,6 +9701,84 @@ async fn decide_order_amendment(
     }
     let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
 
+    let mut billing_line: Option<(Uuid, AmendmentVat)> = None;
+    if decision == "approved" {
+        let (patient_id, order_currency) = match order_lock {
+            Some(Ok(value)) => value,
+            Some(Err("Order not found")) => {
+                return err(StatusCode::NOT_FOUND, "Order not found");
+            }
+            Some(Err(message)) => return err(StatusCode::CONFLICT, message),
+            None => return failed(sqlx::Error::RowNotFound),
+        };
+        if delta <= rust_decimal::Decimal::ZERO {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "An amendment raises the order amount; reduce or cancel the service line, or credit the invoice instead",
+            );
+        }
+        let currency = existing
+            .try_get::<String, _>("currency")
+            .unwrap_or_default()
+            .to_uppercase();
+        if currency != order_currency {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Amendment currency must match the order currency",
+            );
+        }
+        let vat = match stored_amendment_vat(&existing) {
+            Some(value) => value,
+            None => {
+                let Some(treatment) = requested_treatment else {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "vat_treatment is required (how the amended amount is taxed)",
+                    );
+                };
+                let vat = match resolve_amendment_vat(&mut tx, treatment).await {
+                    Ok(value) => value,
+                    Err(e) => return failed(e),
+                };
+                if let Err(e) = sqlx::query(
+                    "UPDATE order_amendments
+                     SET vat_treatment = $2, vat_rate = $3, is_cost_passthrough = $4, tax_profile_id = $5
+                     WHERE id = $1",
+                )
+                .bind(amendment_id)
+                .bind(vat.treatment)
+                .bind(vat.vat_rate)
+                .bind(vat.is_cost_passthrough)
+                .bind(vat.tax_profile_id)
+                .execute(&mut *tx)
+                .await
+                {
+                    return failed(e);
+                }
+                vat
+            }
+        };
+        let agreed_note: String = existing.try_get("agreed_note").unwrap_or_default();
+        let line_id = match insert_amendment_billing_line(
+            &mut tx,
+            order_id,
+            patient_id,
+            amendment_id,
+            auth.user_id,
+            delta,
+            &currency,
+            &agreed_note,
+            &vat,
+            "Genehmigte Betragsänderung",
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(e) => return failed(e),
+        };
+        billing_line = Some((line_id, vat));
+    }
+
     let decision_result = match sqlx::query(
         "UPDATE order_amendments
          SET status = $3, decided_by = $4, decided_at = now(), decision_note = $5
@@ -9343,36 +9788,30 @@ async fn decide_order_amendment(
     .bind(order_id)
     .bind(decision)
     .bind(auth.user_id)
-    .bind(body.note.as_deref())
+    .bind(
+        body.note
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    )
     .execute(&mut *tx)
     .await
     {
         Ok(result) => result,
-        Err(e) => {
-            tracing::error!(error = %e, "update order amendment");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-        }
+        Err(e) => return failed(e),
     };
     if decision_result.rows_affected() != 1 {
         return err(StatusCode::CONFLICT, "Amendment has already been decided");
     }
 
-    if decision == "approved"
-        && let Err(e) = sqlx::query(
-            "UPDATE orders SET total_estimated = COALESCE(total_estimated, 0) + $2, updated_at = now() WHERE id = $1",
-        )
-        .bind(order_id)
-        .bind(delta)
-        .execute(&mut *tx)
-        .await
+    if billing_line.is_some()
+        && let Err(e) = sync_order_total_estimated(&mut tx, order_id).await
     {
-        tracing::error!(error = %e, "apply amendment to order total");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        return failed(e);
     }
 
     if let Err(e) = tx.commit().await {
-        tracing::error!(error = %e, "commit amendment decision");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        return failed(e);
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -9380,31 +9819,200 @@ async fn decide_order_amendment(
         Some(auth.user_id),
         "order",
         Some(order_id),
-        serde_json::json!({ "amendment_id": amendment_id, "decision": decision }),
+        serde_json::json!({
+            "amendment_id": amendment_id,
+            "decision": decision,
+            "delta_amount": delta.to_string(),
+            "order_leistung_id": billing_line.as_ref().map(|(id, _)| *id),
+            "vat_treatment": billing_line.as_ref().map(|(_, vat)| vat.treatment),
+            "vat_rate": billing_line
+                .as_ref()
+                .map(|(_, vat)| vat.vat_rate.normalize().to_string()),
+        }),
     ));
+    if let Some((line_id, _)) = billing_line.as_ref() {
+        crate::realtime::publish_order_event(
+            &state,
+            Some(auth.user_id),
+            "order.leistung_added",
+            order_id,
+            serde_json::json!({ "leistung_id": line_id, "amendment_id": amendment_id }),
+        )
+        .await;
+    }
 
-    let amendment = sqlx::query(&format!(
-        "SELECT {ORDER_AMENDMENT_COLUMNS} FROM order_amendments WHERE id = $1"
-    ))
-    .bind(amendment_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
-    .map(|row| order_amendment_json(&row))
-    .unwrap_or(serde_json::Value::Null);
-    let new_total = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
-        "SELECT total_estimated FROM orders WHERE id = $1",
+    Json(serde_json::json!({
+        "amendment": load_order_amendment_json(&state, amendment_id).await,
+        "order_total_estimated": load_order_total_estimated(&state, order_id).await,
+        "order_leistung_id": billing_line.as_ref().map(|(id, _)| *id),
+    }))
+    .into_response()
+}
+
+/// Bill an amendment that was approved before approvals created billing
+/// lines: adds its service line now, taxed as chosen here (or as recorded).
+/// Explicit, so an amount that staff already billed by hand is not billed
+/// twice.
+async fn bill_order_amendment(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, amendment_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<BillOrderAmendmentRequest>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+        return e;
+    }
+    let requested_treatment = match normalize_amendment_vat_treatment(body.vat_treatment.as_deref())
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        return resp;
+    }
+
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %order_id, %amendment_id, "bill order amendment");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return failed(e),
+    };
+    let (patient_id, order_currency) = match lock_order_for_amendment(&mut tx, order_id).await {
+        Ok(Ok(value)) => value,
+        Ok(Err("Order not found")) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(Err(message)) => return err(StatusCode::CONFLICT, message),
+        Err(e) => return failed(e),
+    };
+    let existing = match sqlx::query(
+        "SELECT a.status, a.delta_amount, a.currency, a.agreed_note,
+                a.vat_treatment, a.vat_rate, a.is_cost_passthrough, a.tax_profile_id,
+                EXISTS (SELECT 1 FROM order_leistungen line
+                        WHERE line.source_order_amendment_id = a.id) AS billed
+         FROM order_amendments a
+         WHERE a.id = $1 AND a.order_id = $2
+         FOR UPDATE OF a",
     )
+    .bind(amendment_id)
     .bind(order_id)
-    .fetch_one(&state.db)
+    .fetch_optional(&mut *tx)
     .await
-    .ok()
-    .flatten()
-    .map(|value| value.to_string());
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Amendment not found"),
+        Err(e) => return failed(e),
+    };
+    if existing.try_get::<String, _>("status").unwrap_or_default() != "approved" {
+        return err(
+            StatusCode::CONFLICT,
+            "Only an approved amendment can be billed",
+        );
+    }
+    if existing.try_get::<bool, _>("billed").unwrap_or(false) {
+        return err(StatusCode::CONFLICT, "Amendment has already been billed");
+    }
+    let delta: rust_decimal::Decimal = existing.try_get("delta_amount").unwrap_or_default();
+    if delta <= rust_decimal::Decimal::ZERO {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "An amendment raises the order amount; reduce or cancel the service line, or credit the invoice instead",
+        );
+    }
+    let currency = existing
+        .try_get::<String, _>("currency")
+        .unwrap_or_default()
+        .to_uppercase();
+    if currency != order_currency {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Amendment currency must match the order currency",
+        );
+    }
+    let vat = match stored_amendment_vat(&existing) {
+        Some(value) => value,
+        None => {
+            let Some(treatment) = requested_treatment else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "vat_treatment is required (how the amended amount is taxed)",
+                );
+            };
+            let vat = match resolve_amendment_vat(&mut tx, treatment).await {
+                Ok(value) => value,
+                Err(e) => return failed(e),
+            };
+            if let Err(e) = sqlx::query(
+                "UPDATE order_amendments
+                 SET vat_treatment = $2, vat_rate = $3, is_cost_passthrough = $4, tax_profile_id = $5
+                 WHERE id = $1",
+            )
+            .bind(amendment_id)
+            .bind(vat.treatment)
+            .bind(vat.vat_rate)
+            .bind(vat.is_cost_passthrough)
+            .bind(vat.tax_profile_id)
+            .execute(&mut *tx)
+            .await
+            {
+                return failed(e);
+            }
+            vat
+        }
+    };
+    let agreed_note: String = existing.try_get("agreed_note").unwrap_or_default();
+    let line_id = match insert_amendment_billing_line(
+        &mut tx,
+        order_id,
+        patient_id,
+        amendment_id,
+        auth.user_id,
+        delta,
+        &currency,
+        &agreed_note,
+        &vat,
+        "Nachträglich abgerechnete genehmigte Betragsänderung",
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => return failed(e),
+    };
+    if let Err(e) = sync_order_total_estimated(&mut tx, order_id).await {
+        return failed(e);
+    }
+    if let Err(e) = tx.commit().await {
+        return failed(e);
+    }
 
-    Json(serde_json::json!({ "amendment": amendment, "order_total_estimated": new_total }))
-        .into_response()
+    state.audit_sender.try_send(audit::domain_event(
+        "bill_order_amendment",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        serde_json::json!({
+            "amendment_id": amendment_id,
+            "delta_amount": delta.to_string(),
+            "order_leistung_id": line_id,
+            "vat_treatment": vat.treatment,
+            "vat_rate": vat.vat_rate.normalize().to_string(),
+        }),
+    ));
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.leistung_added",
+        order_id,
+        serde_json::json!({ "leistung_id": line_id, "amendment_id": amendment_id }),
+    )
+    .await;
+
+    Json(serde_json::json!({
+        "amendment": load_order_amendment_json(&state, amendment_id).await,
+        "order_total_estimated": load_order_total_estimated(&state, order_id).await,
+        "order_leistung_id": line_id,
+    }))
+    .into_response()
 }
 
 #[derive(Deserialize)]
@@ -9435,7 +10043,8 @@ async fn order_group_payload(
     head_id: Uuid,
 ) -> Result<serde_json::Value, axum::response::Response> {
     let head = sqlx::query(
-        "SELECT id, order_number, patient_id, order_role, status, total_estimated, currency,
+        "SELECT id, order_number, patient_id, order_role, status,
+                COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated, currency,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
                 payer_contact_phone, payer_contact_relationship, payer_notes
          FROM orders WHERE id = $1",
@@ -9453,7 +10062,8 @@ async fn order_group_payload(
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
 
     let sub_rows = sqlx::query(
-        "SELECT id, order_number, patient_id, status, total_estimated
+        "SELECT id, order_number, patient_id, status,
+                COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated
          FROM orders WHERE head_order_id = $1 ORDER BY created_at",
     )
     .bind(head_id)
@@ -9490,7 +10100,7 @@ async fn order_group_payload(
     // A cancelled order (e.g. stopped by a contract termination) stays listed
     // in the group but no longer counts toward the group total.
     let rollup = sqlx::query_scalar::<_, Option<rust_decimal::Decimal>>(
-        "SELECT SUM(total_estimated) FROM orders
+        "SELECT SUM(COALESCE(order_service_total_gross(id), total_estimated)) FROM orders
          WHERE (id = $1 OR head_order_id = $1) AND status <> 'cancelled'",
     )
     .bind(head_id)

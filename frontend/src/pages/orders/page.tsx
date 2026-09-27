@@ -196,6 +196,8 @@ import {
   orderProcessGatesToForm,
   patientLabel,
   recheckMissingFieldLabel,
+  leistungLineAmounts,
+  sumLeistungGross,
   sumLeistungTotals,
   workflowChecklistLabel,
 } from "./model/order-model";
@@ -1464,6 +1466,7 @@ function useOrdersPageContent() {
         item.status === "approved" || item.status === "invoiced"
       ).length,
       net: sumLeistungTotals(items),
+      gross: sumLeistungGross(items),
     };
   }, [orderDetail]);
   const orderNeedSummary = useMemo(
@@ -4449,7 +4452,10 @@ function useOrdersPageContent() {
                             <OrderFinancialMetric
                               label={lang === "de" ? "Auftragssumme" : "Сумма заказа"}
                               value={formatMoney(
-                                orderEconomics.planned.revenue_gross,
+                                // The same order total as the header and the
+                                // services section (gross of the services).
+                                orderDetail.total_estimated ??
+                                  orderEconomics.planned.revenue_gross,
                                 orderEconomics.currency,
                               )}
                               emphasis
@@ -6804,8 +6810,16 @@ function useOrdersPageContent() {
                           value={String(leistungMetrics.approved)}
                         />
                         <MiniMetric
-                          label={lang === "de" ? "Leistungssumme netto" : "Сумма услуг нетто"}
-                          value={formatMoney(leistungMetrics.net)}
+                          label={lang === "de" ? "Auftragssumme (brutto)" : "Сумма заказа (с НДС)"}
+                          value={
+                            <>
+                              {formatMoney(orderDetail.total_estimated ?? leistungMetrics.gross)}
+                              <span className="block text-xs font-normal text-muted-foreground">
+                                {lang === "de" ? "netto " : "нетто "}
+                                {formatMoney(leistungMetrics.net)}
+                              </span>
+                            </>
+                          }
                         />
                         <MiniMetric
                           label={t.orders_service_group_split_title}
@@ -6898,9 +6912,7 @@ function useOrdersPageContent() {
                           />
                         ) : (
                           orderDetail.leistungen.map((leistung, index) => {
-                            const lineTotal =
-                              (numberFromUnknown(leistung.quantity) ?? 0) *
-                              (numberFromUnknown(leistung.unit_price) ?? 0);
+                            const lineAmounts = leistungLineAmounts(leistung);
                             const taxonomyLabel = providerTaxonomyLabel(
                               leistung,
                               lang,
@@ -7070,6 +7082,16 @@ function useOrdersPageContent() {
                                               }
                                             </Badge>
                                           ) : null}
+                                          {leistung.source_order_amendment_id ? (
+                                            <Badge
+                                              variant="outline"
+                                              className="rounded-full border-orange-200 bg-orange-100 text-orange-800"
+                                            >
+                                              {lang === "de"
+                                                ? "Genehmigte Betragsänderung"
+                                                : "Одобренное изменение суммы"}
+                                            </Badge>
+                                          ) : null}
                                           {leistung.agency_service_name ||
                                           leistung.agency_service_key ? (
                                             <Badge
@@ -7091,10 +7113,14 @@ function useOrdersPageContent() {
 
                                   <div className="relative border-t border-border p-4 2xl:border-t-0 2xl:pl-5 2xl:before:absolute 2xl:before:bottom-4 2xl:before:left-0 2xl:before:top-4 2xl:before:border-l 2xl:before:border-dashed 2xl:before:border-border">
                                     <div className="text-xs text-muted-foreground">
-                                      {tx.invoices_total}
+                                      {lang === "de" ? "Summe brutto" : "Сумма с НДС"}
                                     </div>
                                     <div className="mt-1 text-xl font-semibold leading-none text-foreground">
-                                      {formatMoney(lineTotal, leistung.currency)}
+                                      {formatMoney(lineAmounts.gross, leistung.currency)}
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-muted-foreground">
+                                      {lang === "de" ? "netto " : "нетто "}
+                                      {formatMoney(lineAmounts.net, leistung.currency)}
                                     </div>
                                     {permissions.canManageEconomics ? (
                                       <Button

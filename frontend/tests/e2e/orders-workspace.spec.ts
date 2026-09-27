@@ -551,35 +551,58 @@ test("a rejected invoice-to-service link is visible on the invoice page", async 
   await expect(page.getByText("Invoice link rejected", {exact:true})).toBeVisible();
 });
 
-test("amount amendments accept decimal commas and reject zero", async ({page}) => {
+test("amount amendments need a VAT treatment, accept decimal commas and reject zero or reductions", async ({page}) => {
   const {writes} = await prepare(page);
   await page.goto(`/orders/${orderId}?section=services`);
-  const delta = page.getByRole("textbox", {name:"Изменение суммы", exact:true});
+  const delta = page.getByRole("textbox", {name:"Сумма увеличения с НДС", exact:true});
   await page.getByRole("textbox", {name:"Что согласовано с пациентом", exact:true}).fill("QA agreed change");
   const propose = page.getByRole("button", {name:"Предложить", exact:true});
+  await delta.fill("9,50");
+  // Without the VAT treatment the proposal cannot be sent.
+  await expect(propose).toBeDisabled();
+  await chooseComboboxOption(page, page.getByRole("combobox", {name:"НДС для этой суммы", exact:true}), "Услуга агентства · НДС 19 %");
   await delta.fill("0");
+  await expect(propose).toBeDisabled();
+  await delta.fill("-50");
   await expect(propose).toBeDisabled();
   await delta.fill("9,50");
   await propose.click();
   await expect(delta).toHaveValue("");
+  await expect(page.getByText("Предложение отправлено на согласование.", {exact:true})).toBeVisible();
   expect(writes.find(write => write.path.endsWith("/amendments"))?.body)
-    .toMatchObject({delta_amount:"9.50", agreed_note:"QA agreed change"});
+    .toMatchObject({delta_amount:"9.50", agreed_note:"QA agreed change", vat_treatment:"standard_vat"});
 });
 
-test("approving an amount amendment refreshes the order total", async ({page}) => {
+test("approving an amount amendment adds a billing line and refreshes the order total", async ({page}) => {
   const {order} = await prepare(page);
-  const amendment = {id:"amendment-1", order_id:orderId, delta_amount:"100", agreed_note:"QA agreed change", status:"pending", currency:"EUR", created_at:"2026-09-06T12:02:00Z"};
+  const amendment: Record<string, unknown> = {id:"amendment-1", order_id:orderId, delta_amount:"100", agreed_note:"QA agreed change", status:"pending", currency:"EUR", created_at:"2026-09-06T12:02:00Z", vat_treatment:"standard_vat", vat_rate:"19", is_cost_passthrough:false, order_leistung_id:null, billable:false};
   await page.route(`**/orders/${orderId}/amendments`, route => route.fulfill({json:[amendment]}));
   await page.route(`**/orders/${orderId}/amendments/amendment-1/decision`, route => {
     order.total_estimated = "12600";
-    amendment.status = "approved";
-    return route.fulfill({json:{amendment, order_total_estimated:"12600"}});
+    Object.assign(amendment, {status:"approved", order_leistung_id:"line-amendment", order_leistung_status:"approved"});
+    return route.fulfill({json:{amendment, order_total_estimated:"12600", order_leistung_id:"line-amendment"}});
   });
   await page.goto(`/orders/${orderId}?section=services`);
   await expect(orderTotal(page)).toHaveText(/12.500|12 500/);
+  await expect(page.getByText("Услуга агентства · НДС 19 %", {exact:true})).toBeVisible();
   await page.getByRole("button", {name:"Одобрить", exact:true}).click();
   await expect(page.getByText("Одобрено", {exact:true})).toBeVisible();
+  await expect(page.getByText("В услугах заказа", {exact:true})).toBeVisible();
+  await expect(page.getByRole("status").filter({hasText:"Строка «Корректировка» добавлена в услуги заказа"})).toBeVisible();
   await expect(orderTotal(page)).toHaveText(/12.600|12 600/);
+});
+
+test("a pending amendment without a VAT treatment asks for it before approval", async ({page}) => {
+  const {writes} = await prepare(page);
+  const amendment = {id:"amendment-legacy", order_id:orderId, delta_amount:"80", agreed_note:"Legacy change", status:"pending", currency:"EUR", created_at:"2026-09-06T12:02:00Z"};
+  await page.route(`**/orders/${orderId}/amendments`, route => route.fulfill({json:[amendment]}));
+  await page.goto(`/orders/${orderId}?section=services`);
+  const approve = page.getByRole("button", {name:"Одобрить", exact:true});
+  await expect(approve).toBeDisabled();
+  await chooseComboboxOption(page, page.getByRole("combobox", {name:"НДС для этой суммы", exact:true}).last(), "Организация лечения · НДС 0 %");
+  await approve.click();
+  await expect.poll(() => writes.find(write => write.path.endsWith("/amendment-legacy/decision"))?.body)
+    .toMatchObject({decision:"approve", vat_treatment:"termin_fee_0"});
 });
 
 test("a failed amendment load is visible and can be retried", async ({page}) => {

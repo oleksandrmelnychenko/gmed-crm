@@ -1,4 +1,9 @@
-import { formatMoneyAmount } from "@/lib/money";
+import {
+  formatMoneyAmount,
+  moneyLineAmounts,
+  roundCents,
+  type MoneyLineAmounts,
+} from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
@@ -459,4 +464,32 @@ export function sumLeistungTotals(items: Leistung[]) {
     const unitPrice = numberFromUnknown(item.unit_price) ?? 0;
     return sum + quantity * unitPrice;
   }, 0);
+}
+
+/**
+ * Net, VAT and gross of one order service line, rounded like quotes and
+ * invoices (pass-through costs carry no VAT). The gross is what the line adds
+ * to the order total.
+ */
+export function leistungLineAmounts(item: Leistung): MoneyLineAmounts {
+  const quantity = numberFromUnknown(item.quantity) ?? 0;
+  const unitPrice =
+    numberFromUnknown(item.unit_price_snapshot) ?? numberFromUnknown(item.unit_price) ?? 0;
+  const vatRate = item.is_cost_passthrough
+    ? 0
+    : numberFromUnknown(item.vat_rate_snapshot) ?? numberFromUnknown(item.vat_rate) ?? 0;
+  return moneyLineAmounts(quantity, unitPrice, vatRate);
+}
+
+/**
+ * Gross total of the order services that are not cancelled — the order total
+ * the server reports as `total_estimated` for an order with services.
+ */
+export function sumLeistungGross(items: Leistung[]) {
+  return roundCents(
+    items.reduce(
+      (sum, item) => (item.status === "cancelled" ? sum : sum + leistungLineAmounts(item).gross),
+      0,
+    ),
+  );
 }

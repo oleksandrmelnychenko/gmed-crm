@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tower::ServiceExt;
 use uuid::Uuid;
 
@@ -2037,14 +2037,24 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
 
     let patient_id = create_patient(&app, &pm, &tag).await;
     let order_id = insert_existing_order(&pool, patient_id, pm_id, &tag).await;
+    // The order total is the gross of its services: one 1000 EUR line (0 %).
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, patient_id, description, quantity, unit_price, currency, vat_rate, status)
+           VALUES ($1, $2, 'Organisation der Behandlung', 1, 1000, 'EUR', 0, 'planned')"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query("UPDATE orders SET total_estimated = 1000 WHERE id = $1")
         .bind(order_id)
         .execute(&pool)
         .await
         .unwrap();
 
-    // Propose +300, recording what was agreed with the patient.
-    let (status, amendment) = json_request(
+    // How the amount is taxed must be recorded with the proposal.
+    let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/orders/{order_id}/amendments"),
@@ -2055,8 +2065,41 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
         })),
     )
     .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // A reduction is not an amendment (the line is changed or the invoice credited).
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        Some(json!({
+            "delta_amount": "-50",
+            "agreed_note": "Goodwill",
+            "vat_treatment": "standard_vat"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // Propose +300 gross at the standard VAT rate.
+    let (status, amendment) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        Some(json!({
+            "delta_amount": "300",
+            "agreed_note": "3 extra hours agreed with the patient",
+            "vat_treatment": "standard_vat"
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{amendment}");
     assert_eq!(amendment["status"], "pending");
+    assert_eq!(amendment["vat_treatment"], "standard_vat");
+    assert_eq!(amendment["vat_rate"], "19");
+    assert_eq!(amendment["order_leistung_id"], Value::Null);
     let amendment_id = amendment["id"].as_str().unwrap().to_string();
 
     // The requester may not approve their own amendment.
@@ -2070,7 +2113,8 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // A different approver approves -> the order total goes 1000 -> 1300.
+    // A different approver approves -> a billable service line is added and
+    // the order total goes 1000 -> 1300.
     let (status, decided) = json_request(
         &app,
         "POST",
@@ -2082,6 +2126,91 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
     assert_eq!(status, StatusCode::OK, "{decided}");
     assert_eq!(decided["amendment"]["status"], "approved");
     assert_eq!(decided["order_total_estimated"], "1300");
+    let line_id = Uuid::parse_str(decided["order_leistung_id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        decided["amendment"]["order_leistung_id"],
+        json!(line_id.to_string())
+    );
+
+    let line = sqlx::query(
+        r#"SELECT status, quantity, unit_price, vat_rate, is_cost_passthrough, description,
+                  source_order_amendment_id, approved_by
+           FROM order_leistungen WHERE id = $1"#,
+    )
+    .bind(line_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(line.get::<String, _>("status"), "approved");
+    assert_eq!(
+        line.get::<rust_decimal::Decimal, _>("unit_price")
+            .to_string(),
+        "252.10"
+    );
+    assert_eq!(
+        line.get::<rust_decimal::Decimal, _>("vat_rate"),
+        rust_decimal::Decimal::new(19, 0)
+    );
+    assert!(!line.get::<bool, _>("is_cost_passthrough"));
+    assert_eq!(
+        line.get::<String, _>("description"),
+        "Anpassung: 3 extra hours agreed with the patient"
+    );
+    assert_eq!(
+        line.get::<Option<Uuid>, _>("source_order_amendment_id"),
+        Some(Uuid::parse_str(&amendment_id).unwrap())
+    );
+    assert_eq!(line.get::<Option<Uuid>, _>("approved_by"), Some(billing_id));
+
+    // Header, list and finance card all read the same order total.
+    let (status, order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{order}");
+    assert_eq!(
+        order["total_estimated"]
+            .as_str()
+            .and_then(|value| value.parse::<rust_decimal::Decimal>().ok()),
+        Some(rust_decimal::Decimal::new(1300, 0))
+    );
+    let (status, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economics}");
+    assert_eq!(economics["planned"]["revenue_gross"], "1300");
+
+    // The next quote bills the amendment.
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &billing,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    assert_eq!(quote["total_gross"], "1300");
+    assert!(
+        quote["line_items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |item| item["source_order_leistung_id"] == json!(line_id.to_string())
+                    && item["line_gross"] == "300"
+            ),
+        "{quote}"
+    );
 
     // Re-deciding a settled amendment conflicts.
     let (status, _) = json_request(
@@ -2090,6 +2219,68 @@ async fn order_amendment_requires_separate_approval_and_updates_total() {
         &format!("/api/v1/orders/{order_id}/amendments/{amendment_id}/decision"),
         &billing,
         Some(json!({ "decision": "reject" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // An amendment approved before approvals created service lines is billed
+    // explicitly, with the VAT treatment chosen then.
+    let legacy_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_amendments (
+                order_id, delta_amount, currency, agreed_note, status, requested_by,
+                decided_by, decided_at
+           ) VALUES ($1, 50, 'EUR', 'Extra transfer', 'approved', $2, $3, now())
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(pm_id)
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, amendments) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/amendments"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{amendments}");
+    let legacy = amendments
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == json!(legacy_id.to_string()))
+        .unwrap();
+    assert_eq!(legacy["billable"], true);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{legacy_id}/billing-line"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, billed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{legacy_id}/billing-line"),
+        &pm,
+        Some(json!({ "vat_treatment": "cost_passthrough" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billed}");
+    assert_eq!(billed["order_total_estimated"], "1350");
+    assert_eq!(billed["amendment"]["billable"], false);
+    assert_eq!(billed["amendment"]["is_cost_passthrough"], true);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/amendments/{legacy_id}/billing-line"),
+        &pm,
+        Some(json!({ "vat_treatment": "cost_passthrough" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
