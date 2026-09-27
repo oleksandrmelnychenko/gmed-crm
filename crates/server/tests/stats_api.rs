@@ -829,7 +829,7 @@ async fn seed_appointment_arztbrief(
                 $1, $2, $3, $4, $5, $6,
                 'arztbrief', 'medical', 'active', 'released_external', true, 'application/pdf', 1024,
                 $7, $1, 1, $8,
-                ((a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00')) AT TIME ZONE 'UTC')
+                ((a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00')) AT TIME ZONE 'Europe/Berlin')
                     + ($9::int * interval '1 hour')
            FROM appointments a
            WHERE a.id = $4"#,

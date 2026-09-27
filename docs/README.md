@@ -45,6 +45,14 @@
 - `architecture/05_frontend-dashboard-refactor-plan_ua.md` - канонічний tracker dashboard route/staff dashboard refactor і route-level perf split
 - `architecture/06_frontend-feature-pages-refactor-plan_ua.md` - канонічний tracker наступної хвилі міграції root feature pages до патерну `appointments` / `patients`
 
+### Engineering
+
+- `engineering/01_repo-hygiene_ua.md`
+- `engineering/02_audit-migration-policy_ua.md`
+- `engineering/03_lead-retention-policy_ua.md`
+- `engineering/04_medication-ai-worker-runbook_ua.md`
+- `engineering/05_time-zone-policy_ua.md` - система працює лише за часом Europe/Berlin: сервер, база даних і фронтенд
+
 ### Testing
 
 - `testing/user-stories-excel-backlog-audit_ua.md` - аудит 1:1 між Excel `User Stories` і `requirements/03_product-backlog_ua.md`

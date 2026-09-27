@@ -5826,13 +5826,15 @@ fn parse_clinical_timestamp(
                 .map(crate::app_time::from_local)
         })
         .or_else(|_| {
+            // Date-only values carry `measured_at_precision = date` and are
+            // stored as UTC midnight, which clients print as a UTC date.
             chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
                 .map(|value| {
                     value
                         .and_hms_opt(0, 0, 0)
                         .expect("midnight is a valid time")
                 })
-                .map(crate::app_time::from_local)
+                .map(|value| value.and_utc())
         })
         .map_err(|_| {
             err(
