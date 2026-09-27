@@ -33,6 +33,7 @@ use gmed_domain::role::Role;
 
 mod credit_note_pdf;
 pub(crate) mod credit_notes;
+mod credit_transfers;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -121,6 +122,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/refunds/{refund_id}/reversal",
             post(reverse_invoice_refund),
+        )
+        .route(
+            "/invoices/{invoice_id}/credit-transfers",
+            post(credit_transfers::create_credit_transfer),
+        )
+        .route(
+            "/invoices/{invoice_id}/credit-transfers/{transfer_id}/reversal",
+            post(credit_transfers::reverse_credit_transfer),
         )
         .route(
             "/invoices/{invoice_id}/visibility",
@@ -243,6 +252,9 @@ struct CreateInvoicePaymentRequest {
     payment_reference: Option<String>,
     received_on: String,
     note: Option<String>,
+    /// A receipt above the open balance is recorded only when billing
+    /// confirms it; the excess becomes the patient's credit balance.
+    accept_overpayment: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -254,6 +266,22 @@ struct CorrectInvoicePaymentRequest {
     received_on: String,
     note: Option<String>,
     reason: String,
+    accept_overpayment: Option<bool>,
+}
+
+/// 409 for a receipt above the open balance that billing did not confirm as
+/// an overpayment; names the excess so the UI can ask.
+fn payment_exceeds_balance(balance_due: Decimal, overpayment: Decimal) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "payment_exceeds_balance",
+            "message": "Payment exceeds invoice balance; confirm the overpayment to record the excess as patient credit",
+            "balance_due": decimal_to_string(balance_due),
+            "overpayment_gross": decimal_to_string(overpayment),
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -721,14 +749,16 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 
 /// Staff working context in the invoice detail that the patient portal must
 /// not receive: internal visibility notes, advances available for crediting,
-/// the supporting documents list, the contract link and the credit-note form
-/// data.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 5] = [
+/// the supporting documents list, the contract link, the credit-note form
+/// data and credit transfers (internal notes, other invoices).
+const STAFF_ONLY_INVOICE_KEYS: [&str; 7] = [
     "visibility_note",
     "available_prepayments",
     "supporting_documents",
     "contract_id",
     "creditable_lines",
+    "credit_transfers",
+    "credit_transfer_targets",
 ];
 
 /// Internal pricing and sourcing fields of an invoice line (VAT source
@@ -3921,6 +3951,48 @@ async fn load_invoice_detail(
     })
     .collect::<Vec<_>>();
 
+    let invoice_currency = row
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
+    let balance_due = invoice_balance_due(
+        &invoice_status,
+        total_gross,
+        credited_amount,
+        paid_amount,
+        prepayment_applied_amount,
+    );
+    let credit_balance = (paid_amount + prepayment_applied_amount
+        - (total_gross - credited_amount))
+        .max(Decimal::ZERO);
+    let refundable_cash_amount = (paid_amount
+        - (total_gross - credited_amount - prepayment_applied_amount).max(Decimal::ZERO))
+    .max(Decimal::ZERO);
+    let credit_transfers_history = credit_transfers::load_invoice_credit_transfers(
+        state, invoice_id,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice credit transfers");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?;
+    let credit_transfer_targets = if refundable_cash_amount > Decimal::ZERO
+        && !matches!(invoice_status.as_str(), "draft" | "cancelled")
+    {
+        credit_transfers::load_credit_transfer_targets(
+            state,
+            invoice_id,
+            patient_id,
+            &invoice_currency,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load credit transfer targets");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?
+    } else {
+        Vec::new()
+    };
+
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
@@ -3948,13 +4020,11 @@ async fn load_invoice_detail(
         "adjusted_total_gross": decimal_to_string((total_gross - credited_amount).max(Decimal::ZERO)),
         "paid_amount": decimal_to_string(paid_amount),
         "prepayment_applied_amount": decimal_to_string(prepayment_applied_amount),
-        "balance_due": decimal_to_string(invoice_balance_due(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount, paid_amount, prepayment_applied_amount)),
-        "credit_balance": decimal_to_string((paid_amount + prepayment_applied_amount - (total_gross - credited_amount)).max(Decimal::ZERO)),
-        "refundable_cash_amount": decimal_to_string((
-            paid_amount
-                - (total_gross - credited_amount - prepayment_applied_amount)
-                    .max(Decimal::ZERO)
-        ).max(Decimal::ZERO)),
+        "balance_due": decimal_to_string(balance_due),
+        "credit_balance": decimal_to_string(credit_balance),
+        "refundable_cash_amount": decimal_to_string(refundable_cash_amount),
+        "credit_transfers": credit_transfers_history,
+        "credit_transfer_targets": credit_transfer_targets,
         "available_prepayments": available_prepayments,
         "prepayment_allocations": prepayment_allocations,
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
@@ -7486,10 +7556,14 @@ async fn create_invoice_payment(
             );
         }
     };
-    if current_cash_paid - current_cash_refunded + amount_gross + context.prepayment_applied_amount
-        > context.total_gross - context.credited_amount
-    {
-        return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+    let balance_due = (context.total_gross
+        - context.credited_amount
+        - context.prepayment_applied_amount
+        - (current_cash_paid - current_cash_refunded))
+        .max(Decimal::ZERO);
+    let overpayment_gross = (amount_gross - balance_due).max(Decimal::ZERO);
+    if overpayment_gross > Decimal::ZERO && !body.accept_overpayment.unwrap_or(false) {
+        return payment_exceeds_balance(balance_due, overpayment_gross);
     }
 
     let payment_id = match sqlx::query_scalar::<_, Uuid>(
@@ -7512,7 +7586,10 @@ async fn create_invoice_payment(
     {
         Ok(payment_id) => payment_id,
         Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("P0001") => {
-            return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+            return err(
+                StatusCode::CONFLICT,
+                "Payments require an active released invoice",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice payment");
@@ -7567,6 +7644,7 @@ async fn create_invoice_payment(
             "payment_transaction_id": payment_id,
             "request_id": body.request_id,
             "amount_gross": decimal_to_string(amount_gross),
+            "overpayment_gross": decimal_to_string(overpayment_gross),
             "payment_method": payment_method,
             "payment_reference": payment_reference,
             "received_on": received_on.to_string(),
@@ -7593,6 +7671,7 @@ async fn create_invoice_payment(
             StatusCode::CREATED,
             Json(serde_json::json!({
                 "payment_transaction_id": payment_id,
+                "overpayment_gross": decimal_to_string(overpayment_gross),
                 "invoice": invoice,
             })),
         )
@@ -7715,6 +7794,12 @@ async fn reverse_invoice_payment(
     let payment_method = row
         .try_get::<String, _>("payment_method")
         .unwrap_or_else(|_| "other".to_string());
+    if payment_method == credit_transfers::CREDIT_TRANSFER_METHOD {
+        return err(
+            StatusCode::CONFLICT,
+            "This receipt is a credit transfer; reverse the transfer instead",
+        );
+    }
     let payment_reference = row
         .try_get::<Option<String>, _>("payment_reference")
         .unwrap_or_default();
@@ -8080,6 +8165,12 @@ async fn correct_invoice_payment(
             "Imported opening balances cannot be corrected; reverse them instead",
         );
     }
+    if original_method == credit_transfers::CREDIT_TRANSFER_METHOD {
+        return err(
+            StatusCode::CONFLICT,
+            "A credit transfer is corrected by reversing the transfer",
+        );
+    }
     if original_amount == amount_gross
         && original_method == payment_method
         && original_reference == payment_reference
@@ -8172,10 +8263,14 @@ async fn correct_invoice_payment(
             "Refunds and applied advances must be reversed or released before this payment can be reduced",
         );
     }
-    if cash_after - cash_refunded + context.prepayment_applied_amount
-        > context.total_gross - context.credited_amount
-    {
-        return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
+    let corrected_overpayment = (cash_after - cash_refunded + context.prepayment_applied_amount
+        - (context.total_gross - context.credited_amount))
+        .max(Decimal::ZERO);
+    if corrected_overpayment > Decimal::ZERO && !body.accept_overpayment.unwrap_or(false) {
+        return payment_exceeds_balance(
+            (amount_gross - corrected_overpayment).max(Decimal::ZERO),
+            corrected_overpayment,
+        );
     }
 
     // The reversal is dated today: the correction happens now, while the
@@ -9546,6 +9641,12 @@ async fn reverse_invoice_refund(
     let payment_method = row
         .try_get::<String, _>("payment_method")
         .unwrap_or_else(|_| "other".to_string());
+    if payment_method == credit_transfers::CREDIT_TRANSFER_METHOD {
+        return err(
+            StatusCode::CONFLICT,
+            "This refund is a credit transfer; reverse the transfer instead",
+        );
+    }
     let payment_reference = row
         .try_get::<Option<String>, _>("payment_reference")
         .unwrap_or_default();
@@ -10854,6 +10955,13 @@ async fn update_invoice_status(
                 StatusCode::CONFLICT,
                 "Payments require an active released invoice",
             );
+        }
+        // The deprecated paid_amount field never records an overpayment:
+        // receipts above the balance go through the payment journal.
+        if requested_paid_amount + payment_context.prepayment_applied_amount
+            > payment_context.total_gross - payment_context.credited_amount
+        {
+            return err(StatusCode::CONFLICT, "Payment exceeds invoice balance");
         }
         let payment_delta = requested_paid_amount - existing_paid_amount;
         let payment_id = match sqlx::query_scalar::<_, Uuid>(

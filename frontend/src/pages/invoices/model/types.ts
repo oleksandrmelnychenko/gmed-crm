@@ -1,3 +1,5 @@
+import type { InvoiceCreditTransfer, InvoiceCreditTransferTarget } from "./overpayment";
+
 export type InvoiceType = "advance" | "interim" | "final";
 export type InvoiceStatus =
   | "draft"
@@ -219,6 +221,8 @@ export type InvoiceItem = {
   balance_due: unknown;
   credit_balance?: unknown;
   refundable_cash_amount?: unknown;
+  credit_transfers?: InvoiceCreditTransfer[];
+  credit_transfer_targets?: InvoiceCreditTransferTarget[];
   paid_at: string | null;
   notes: string | null;
   portal_visible?: boolean;

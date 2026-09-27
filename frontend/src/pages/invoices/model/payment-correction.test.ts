@@ -4,6 +4,7 @@ import { canPickInvoiceStatus } from "./invoice-model";
 import {
   buildPaymentCorrectionPayload,
   canCorrectPayment,
+  paymentCorrectionOverpayment,
   paymentCorrectionProblem,
   type PaymentCorrectionForm,
 } from "./payment-correction";
@@ -35,14 +36,23 @@ describe("payment correction", () => {
     expect(canCorrectPayment({ ...payment, is_reversed: true }, "paid")).toBe(false);
     expect(canCorrectPayment({ ...payment, transaction_type: "reversal" }, "paid")).toBe(false);
     expect(canCorrectPayment({ ...payment, payment_method: "legacy_import" }, "paid")).toBe(false);
+    expect(canCorrectPayment({ ...payment, payment_method: "credit_transfer" }, "paid")).toBe(false);
   });
 
-  it("requires a real change, a reason and an amount within the open balance", () => {
-    expect(paymentCorrectionProblem(form, payment, 150)).toBe("unchanged");
-    expect(paymentCorrectionProblem({ ...form, amountGross: "120" }, payment, 150)).toBe("missing_reason");
-    expect(paymentCorrectionProblem({ ...form, amountGross: "151", reason: "typo" }, payment, 150)).toBe("exceeds_balance");
-    expect(paymentCorrectionProblem({ ...form, amountGross: "0", reason: "typo" }, payment, 150)).toBe("invalid_amount");
-    expect(paymentCorrectionProblem({ ...form, amountGross: "120", reason: "typo" }, payment, 150)).toBeNull();
+  it("requires a real change and a reason", () => {
+    expect(paymentCorrectionProblem(form, payment)).toBe("unchanged");
+    expect(paymentCorrectionProblem({ ...form, amountGross: "120" }, payment)).toBe("missing_reason");
+    expect(paymentCorrectionProblem({ ...form, amountGross: "0", reason: "typo" }, payment)).toBe("invalid_amount");
+    expect(paymentCorrectionProblem({ ...form, amountGross: "120", reason: "typo" }, payment)).toBeNull();
+  });
+
+  it("records a corrected receipt above the open balance as a confirmed overpayment", () => {
+    const corrected = { ...form, amountGross: "151", reason: "typo" };
+    expect(paymentCorrectionProblem(corrected, payment)).toBeNull();
+    expect(paymentCorrectionOverpayment(corrected, 150)).toBe(1);
+    expect(paymentCorrectionOverpayment({ ...corrected, amountGross: "150" }, 150)).toBe(0);
+    expect(buildPaymentCorrectionPayload(corrected, 150).accept_overpayment).toBe(true);
+    expect(buildPaymentCorrectionPayload({ ...corrected, amountGross: "120" }, 150).accept_overpayment).toBe(false);
   });
 
   it("normalises blank optional fields in the payload", () => {
@@ -54,6 +64,7 @@ describe("payment correction", () => {
       received_on: "2026-09-01",
       note: null,
       reason: "typo",
+      accept_overpayment: false,
     });
   });
 });

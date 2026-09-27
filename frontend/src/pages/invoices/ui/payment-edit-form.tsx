@@ -6,11 +6,14 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { hasFormChanges } from "@/lib/form-changes";
+import { useLang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
   INVOICE_PAYMENT_METHODS,
   buildPaymentCorrectionPayload,
+  paymentCorrectionOverpayment,
   paymentCorrectionProblem,
   type PaymentCorrectionForm,
 } from "../model/payment-correction";
@@ -19,8 +22,12 @@ import type { InvoicePaymentTransaction } from "../model/types";
 type PaymentEditFormProps = {
   lang: string;
   payment: InvoicePaymentTransaction;
-  /** Highest amount the corrected payment may carry: open balance plus this payment. */
+  /**
+   * What the invoice asks for from this receipt: open balance plus this
+   * payment. More is recorded as the patient's credit (overpayment).
+   */
   maxAmount: number;
+  currency?: string;
   methodLabels: Record<string, string>;
   busy: boolean;
   cancelLabel: string;
@@ -43,6 +50,7 @@ export function PaymentEditForm({
   lang,
   payment,
   maxAmount,
+  currency = "EUR",
   methodLabels,
   busy,
   cancelLabel,
@@ -51,6 +59,7 @@ export function PaymentEditForm({
   onSubmit,
 }: PaymentEditFormProps) {
   const de = lang === "de";
+  const { t } = useLang();
   const [initialForm] = useState<PaymentCorrectionForm>(() => ({
     requestId: crypto.randomUUID(),
     amountGross: String(payment.amount_gross ?? ""),
@@ -61,7 +70,8 @@ export function PaymentEditForm({
     reason: "",
   }));
   const [form, setForm] = useState<PaymentCorrectionForm>(initialForm);
-  const problem = paymentCorrectionProblem(form, payment, maxAmount);
+  const problem = paymentCorrectionProblem(form, payment);
+  const overpayment = paymentCorrectionOverpayment(form, maxAmount);
   const set = (patch: Partial<PaymentCorrectionForm>) => {
     const next = { ...form, ...patch };
     setForm(next);
@@ -81,7 +91,6 @@ export function PaymentEditForm({
             type="number"
             min="0.01"
             step="0.01"
-            max={String(maxAmount)}
             value={form.amountGross}
             onChange={(event) => set({ amountGross: event.target.value })}
             className={inputClass}
@@ -131,6 +140,11 @@ export function PaymentEditForm({
           />
         </Field>
       </div>
+      {overpayment > 0 ? (
+        <p className="text-xs text-amber-700" aria-live="polite">
+          {t.finance_payment_overpayment_notice.replace("{amount}", formatMoneyAmount(overpayment, currency))}
+        </p>
+      ) : null}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel}>
           {cancelLabel}
@@ -138,7 +152,7 @@ export function PaymentEditForm({
         <Button
           type="button"
           disabled={busy || problem !== null}
-          onClick={() => onSubmit(buildPaymentCorrectionPayload(form))}
+          onClick={() => onSubmit(buildPaymentCorrectionPayload(form, maxAmount))}
         >
           {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
           {de ? "Korrektur speichern" : "Сохранить исправление"}

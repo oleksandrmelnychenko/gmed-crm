@@ -75,6 +75,8 @@ import { TerminationSettlementQueue } from "./termination-settlement/queue";
 import { PaymentEditForm } from "./ui/payment-edit-form";
 import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
 import { creditNoteSelectionPayload, previewCreditNote } from "./model/credit-note";
+import { CREDIT_TRANSFER_METHOD, paymentOverpayment } from "./model/overpayment";
+import { CreditBalancePanel } from "./ui/credit-balance-panel";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
@@ -633,6 +635,7 @@ function useStaffInvoicesPageContent() {
       cheque: lang === "de" ? "Scheck" : "Чек",
       other: lang === "de" ? "Sonstige" : "Другое",
       legacy_import: lang === "de" ? "Übernommener Bestand" : "Перенесённый остаток",
+      credit_transfer: t.finance_payment_method_credit_transfer,
     } as Record<string, string>,
     sendDunning: (level: string) => t.invoices_workspace_send_dunning.replace("{level}", level),
   };
@@ -1741,6 +1744,8 @@ function useStaffInvoicesPageContent() {
         payment_reference: paymentForm.paymentReference.trim() || null,
         received_on: paymentForm.receivedOn,
         note: paymentForm.note.trim() || null,
+        // The notice above the button showed the excess before this click.
+        accept_overpayment: paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
       });
       // Recorded values are no longer unsaved; the reload prefills the new balance.
       resetPaymentForm((current) => ({
@@ -2715,16 +2720,16 @@ function useStaffInvoicesPageContent() {
                       {text.paymentsDescription}
                     </p>
 
+                    {/* Receipts are recorded also on settled invoices: money that
+                        arrives twice becomes the patient's credit balance. */}
                     {access.canManage &&
-                    !["draft", "cancelled"].includes(detail.status) &&
-                    Number(detail.balance_due ?? 0) > 0 ? (
+                    !["draft", "cancelled"].includes(detail.status) ? (
                       <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
                         <Field label={text.paymentAmount}>
                           <Input
                             type="number"
                             min="0.01"
                             step="0.01"
-                            max={String(detail.balance_due ?? "")}
                             value={paymentForm.amountGross}
                             onChange={(event) =>
                               setPaymentForm((current) => ({
@@ -2798,13 +2803,23 @@ function useStaffInvoicesPageContent() {
                             className={shellInputClassName}
                           />
                         </Field>
-                        <div className="flex items-end sm:col-span-2 lg:col-span-3 lg:justify-end">
+                        <div className="flex flex-wrap items-end justify-between gap-3 sm:col-span-2 lg:col-span-3">
+                          <p className="max-w-xl text-xs text-amber-700" aria-live="polite">
+                            {paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0
+                              ? t.finance_payment_overpayment_notice.replace(
+                                  "{amount}",
+                                  formatMoney(
+                                    paymentOverpayment(paymentForm.amountGross, detail.balance_due),
+                                    detail.currency,
+                                  ),
+                                )
+                              : null}
+                          </p>
                           <Button
                             type="button"
                             disabled={
                               paymentBusy ||
                               Number(paymentForm.amountGross) <= 0 ||
-                              Number(paymentForm.amountGross) > Number(detail.balance_due ?? 0) ||
                               !paymentForm.receivedOn
                             }
                             onClick={() => void handleRecordPayment()}
@@ -2830,10 +2845,12 @@ function useStaffInvoicesPageContent() {
                       <div className="space-y-2">
                         {paymentTransactions.map((payment) => {
                           const isReversal = payment.transaction_type === "reversal";
+                          // A credit transfer is reversed as a whole in the credit section.
                           const canReverse =
                             access.canManage &&
                             !isReversal &&
                             !payment.is_reversed &&
+                            payment.payment_method !== CREDIT_TRANSFER_METHOD &&
                             detail.status !== "cancelled";
                           const canEdit =
                             access.canManage && canCorrectPayment(payment, detail.status);
@@ -2871,7 +2888,14 @@ function useStaffInvoicesPageContent() {
                                       ? ` · ${payment.payment_reference}`
                                       : ""}
                                   </div>
-                                  {payment.note ? (
+                                  {payment.payment_method === CREDIT_TRANSFER_METHOD ? (
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                      {t.finance_payment_credit_transfer_from.replace(
+                                        "{number}",
+                                        payment.payment_reference ?? "—",
+                                      )}
+                                    </div>
+                                  ) : payment.note ? (
                                     <div className="mt-2 text-xs text-muted-foreground">
                                       {payment.transaction_type === "payment" &&
                                       payment.payment_method === "legacy_import" &&
@@ -2933,6 +2957,7 @@ function useStaffInvoicesPageContent() {
                                   lang={lang}
                                   payment={payment}
                                   maxAmount={Number(detail.balance_due ?? 0) + Number(payment.amount_gross ?? 0)}
+                                  currency={detail.currency ?? "EUR"}
                                   methodLabels={text.paymentMethods}
                                   busy={paymentBusy}
                                   cancelLabel={t.common_cancel}
@@ -3065,6 +3090,21 @@ function useStaffInvoicesPageContent() {
                     )}
                   </div>
                 </SectionCard>
+
+                {Number(detail.credit_balance ?? 0) > 0 || (detail.credit_transfers?.length ?? 0) > 0 ? (
+                  <SectionCard title={t.finance_credit_section_title}>
+                    <CreditBalancePanel
+                      invoiceId={detail.id}
+                      currency={detail.currency ?? "EUR"}
+                      creditBalance={detail.credit_balance}
+                      transfers={detail.credit_transfers}
+                      targets={detail.credit_transfer_targets}
+                      canManage={access.canManage}
+                      released={!["draft", "cancelled"].includes(detail.status)}
+                      onChanged={() => setReloadToken((current) => current + 1)}
+                    />
+                  </SectionCard>
+                ) : null}
 
                 <SectionCard title={text.refunds}>
                   <div className="space-y-4">
@@ -3210,10 +3250,12 @@ function useStaffInvoicesPageContent() {
                       <div className="space-y-2">
                         {refundTransactions.map((refund) => {
                           const isReversal = refund.transaction_type === "reversal";
+                          const isCreditTransfer = refund.payment_method === CREDIT_TRANSFER_METHOD;
                           const canReverse =
                             access.canManage &&
                             !isReversal &&
                             !refund.is_reversed &&
+                            !isCreditTransfer &&
                             detail.status !== "cancelled";
                           return (
                             <div
@@ -3234,7 +3276,13 @@ function useStaffInvoicesPageContent() {
                                     ) : null}
                                   </div>
                                   <div className="mt-1 text-xs text-muted-foreground">
-                                    {formatDate(refund.refunded_on, locale, t.common_not_set)} · {refund.reason}
+                                    {formatDate(refund.refunded_on, locale, t.common_not_set)} ·{" "}
+                                    {isCreditTransfer
+                                      ? t.finance_refund_credit_transfer_to.replace(
+                                          "{number}",
+                                          refund.payment_reference ?? "—",
+                                        )
+                                      : refund.reason}
                                   </div>
                                   <div className="mt-1 text-xs text-muted-foreground">
                                     {text.paymentMethods[refund.payment_method] ?? refund.payment_method}

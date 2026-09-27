@@ -23,12 +23,14 @@ export type PaymentCorrectionForm = {
 
 export type PaymentCorrectionProblem =
   | "invalid_amount"
-  | "exceeds_balance"
   | "missing_date"
   | "missing_reason"
   | "unchanged";
 
-/** A payment can be edited while it is a live, API-recorded receipt on an active invoice. */
+/**
+ * A payment can be edited while it is a live, API-recorded receipt on an
+ * active invoice. A credit transfer is undone by reversing the transfer.
+ */
 export function canCorrectPayment(
   payment: Pick<InvoicePaymentTransaction, "transaction_type" | "is_reversed" | "payment_method">,
   invoiceStatus: string,
@@ -37,9 +39,21 @@ export function canCorrectPayment(
     payment.transaction_type === "payment" &&
     !payment.is_reversed &&
     payment.payment_method !== "legacy_import" &&
+    payment.payment_method !== "credit_transfer" &&
     invoiceStatus !== "draft" &&
     invoiceStatus !== "cancelled"
   );
+}
+
+/**
+ * Part of the corrected receipt above what the invoice asks for (`maxAmount`
+ * = open balance plus this payment); recorded as the patient's credit.
+ */
+export function paymentCorrectionOverpayment(form: PaymentCorrectionForm, maxAmount: number): number {
+  const amount = Number(form.amountGross);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  const excess = toCents(amount) - toCents(Math.max(maxAmount, 0));
+  return excess > 0 ? excess / 100 : 0;
 }
 
 export function paymentCorrectionProblem(
@@ -48,11 +62,9 @@ export function paymentCorrectionProblem(
     InvoicePaymentTransaction,
     "amount_gross" | "payment_method" | "payment_reference" | "received_on" | "note"
   >,
-  maxAmount: number,
 ): PaymentCorrectionProblem | null {
   const amount = Number(form.amountGross);
   if (!Number.isFinite(amount) || amount <= 0) return "invalid_amount";
-  if (toCents(amount) > toCents(maxAmount)) return "exceeds_balance";
   if (!form.receivedOn) return "missing_date";
   const unchanged =
     toCents(amount) === toCents(Number(payment.amount_gross)) &&
@@ -65,7 +77,7 @@ export function paymentCorrectionProblem(
   return null;
 }
 
-export function buildPaymentCorrectionPayload(form: PaymentCorrectionForm) {
+export function buildPaymentCorrectionPayload(form: PaymentCorrectionForm, maxAmount = Infinity) {
   return {
     request_id: form.requestId,
     amount_gross: Number(form.amountGross),
@@ -74,5 +86,7 @@ export function buildPaymentCorrectionPayload(form: PaymentCorrectionForm) {
     received_on: form.receivedOn,
     note: form.note.trim() || null,
     reason: form.reason.trim(),
+    // The form shows the excess before saving; saving confirms it.
+    accept_overpayment: paymentCorrectionOverpayment(form, maxAmount) > 0,
   };
 }

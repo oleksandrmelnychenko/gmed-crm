@@ -40,6 +40,30 @@ export interface FinanceBalancesTranslations {
   finance_credit_note_pdf_error: string;
   finance_credit_note_portal_title: string;
   finance_accounting_category_patient_credit: string;
+  finance_credit_section_title: string;
+  finance_credit_balance_description: string;
+  finance_credit_balance_amount: string;
+  finance_credit_transfer_target: string;
+  finance_credit_transfer_target_option: string;
+  finance_credit_transfer_amount: string;
+  finance_credit_transfer_date: string;
+  finance_credit_transfer_note: string;
+  finance_credit_transfer_submit: string;
+  finance_credit_transfer_no_targets: string;
+  finance_credit_transfer_error_invalid_amount: string;
+  finance_credit_transfer_error_exceeds_credit: string;
+  finance_credit_transfer_error_exceeds_target: string;
+  finance_credit_transfer_error_no_target: string;
+  finance_credit_transfer_history_title: string;
+  finance_credit_transfer_out: string;
+  finance_credit_transfer_in: string;
+  finance_credit_transfer_reverse: string;
+  finance_credit_transfer_reversal_reason: string;
+  finance_credit_transfer_reversed: string;
+  finance_payment_overpayment_notice: string;
+  finance_payment_method_credit_transfer: string;
+  finance_payment_credit_transfer_from: string;
+  finance_refund_credit_transfer_to: string;
 }
 
 export const financeBalancesRu: FinanceBalancesTranslations = {
@@ -80,6 +104,33 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_credit_note_pdf_error: "Не удалось открыть документ корректировки.",
   finance_credit_note_portal_title: "Корректировки счёта",
   finance_accounting_category_patient_credit: "Переплата пациента (не выручка)",
+  finance_credit_section_title: "Переплата и зачёты",
+  finance_credit_balance_description:
+    "Получено больше, чем требует счёт (переплата или кредит-нота после оплаты). Сумму можно вернуть пациенту в разделе «Возвраты» или зачесть в другой открытый счёт пациента.",
+  finance_credit_balance_amount: "Кредит пациента",
+  finance_credit_transfer_target: "Зачесть в счёт",
+  finance_credit_transfer_target_option: "{number} · {order} · к оплате {amount}",
+  finance_credit_transfer_amount: "Сумма зачёта",
+  finance_credit_transfer_date: "Дата зачёта",
+  finance_credit_transfer_note: "Комментарий",
+  finance_credit_transfer_submit: "Зачесть переплату",
+  finance_credit_transfer_no_targets:
+    "Других открытых счетов у пациента нет — переплату можно вернуть в разделе «Возвраты».",
+  finance_credit_transfer_error_invalid_amount: "Сумма должна быть больше нуля.",
+  finance_credit_transfer_error_exceeds_credit: "Сумма больше кредита пациента.",
+  finance_credit_transfer_error_exceeds_target: "Сумма больше остатка выбранного счёта.",
+  finance_credit_transfer_error_no_target: "Выберите счёт.",
+  finance_credit_transfer_history_title: "Зачёты переплаты",
+  finance_credit_transfer_out: "Зачтено в счёт {number}",
+  finance_credit_transfer_in: "Зачтено из счёта {number}",
+  finance_credit_transfer_reverse: "Отменить зачёт",
+  finance_credit_transfer_reversal_reason: "Причина отмены зачёта",
+  finance_credit_transfer_reversed: "Отменён",
+  finance_payment_overpayment_notice:
+    "Поступление больше остатка на {amount}. Переплата останется кредитом пациента: её можно вернуть или зачесть в другой счёт.",
+  finance_payment_method_credit_transfer: "Зачёт переплаты",
+  finance_payment_credit_transfer_from: "Зачёт переплаты из счёта {number}",
+  finance_refund_credit_transfer_to: "Зачтено в счёт {number}",
 };
 
 export const financeBalancesDe: FinanceBalancesTranslations = {
@@ -121,4 +172,32 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_credit_note_pdf_error: "Das Korrekturdokument konnte nicht geöffnet werden.",
   finance_credit_note_portal_title: "Rechnungskorrekturen",
   finance_accounting_category_patient_credit: "Patientenguthaben (kein Umsatz)",
+  finance_credit_section_title: "Guthaben und Verrechnungen",
+  finance_credit_balance_description:
+    "Es ist mehr eingegangen, als die Rechnung verlangt (Überzahlung oder Rechnungskorrektur nach Zahlung). Der Betrag kann unter „Erstattungen“ an den Patienten zurückgezahlt oder mit einer anderen offenen Rechnung des Patienten verrechnet werden.",
+  finance_credit_balance_amount: "Patientenguthaben",
+  finance_credit_transfer_target: "Verrechnen mit Rechnung",
+  finance_credit_transfer_target_option: "{number} · {order} · offen {amount}",
+  finance_credit_transfer_amount: "Verrechnungsbetrag",
+  finance_credit_transfer_date: "Verrechnungsdatum",
+  finance_credit_transfer_note: "Kommentar",
+  finance_credit_transfer_submit: "Guthaben verrechnen",
+  finance_credit_transfer_no_targets:
+    "Der Patient hat keine weiteren offenen Rechnungen – das Guthaben kann unter „Erstattungen“ zurückgezahlt werden.",
+  finance_credit_transfer_error_invalid_amount: "Der Betrag muss größer als null sein.",
+  finance_credit_transfer_error_exceeds_credit: "Der Betrag übersteigt das Patientenguthaben.",
+  finance_credit_transfer_error_exceeds_target:
+    "Der Betrag übersteigt den offenen Betrag der gewählten Rechnung.",
+  finance_credit_transfer_error_no_target: "Wählen Sie eine Rechnung.",
+  finance_credit_transfer_history_title: "Verrechnete Guthaben",
+  finance_credit_transfer_out: "Verrechnet mit Rechnung {number}",
+  finance_credit_transfer_in: "Guthaben aus Rechnung {number}",
+  finance_credit_transfer_reverse: "Verrechnung stornieren",
+  finance_credit_transfer_reversal_reason: "Stornogrund",
+  finance_credit_transfer_reversed: "Storniert",
+  finance_payment_overpayment_notice:
+    "Der Zahlungseingang übersteigt den offenen Betrag um {amount}. Die Überzahlung bleibt als Patientenguthaben stehen und kann erstattet oder verrechnet werden.",
+  finance_payment_method_credit_transfer: "Guthabenverrechnung",
+  finance_payment_credit_transfer_from: "Guthaben aus Rechnung {number}",
+  finance_refund_credit_transfer_to: "Verrechnet mit Rechnung {number}",
 };

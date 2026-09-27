@@ -692,3 +692,277 @@ async fn overdue_invoice_stays_overdue_after_a_partial_payment() {
     let settled = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 100, "REST").await;
     assert_eq!(settled["invoice"]["status"], "paid");
 }
+
+async fn category_totals(pool: &PgPool, invoice_id: Uuid) -> Vec<(String, Decimal)> {
+    sqlx::query(
+        r#"SELECT category, SUM(amount_gross) AS gross
+           FROM accounting_entries
+           WHERE source_invoice_id = $1
+           GROUP BY category
+           HAVING SUM(amount_gross) <> 0
+           ORDER BY category"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| (row.get("category"), row.get("gross")))
+    .collect()
+}
+
+#[tokio::test]
+async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("overpayment");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let paid_invoice = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-a"),
+        "interim",
+        100,
+        false,
+    )
+    .await;
+    let open_invoice = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-b"),
+        "final",
+        200,
+        false,
+    )
+    .await;
+    let billing = auth_header_for(billing_id, "billing");
+    let today = chrono::Utc::now().date_naive().to_string();
+    let receipt = |accept: bool| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "150",
+            "payment_method": "bank_transfer",
+            "payment_reference": "BANK-150",
+            "received_on": today,
+            "accept_overpayment": accept,
+        })
+    };
+
+    // Unconfirmed overpayments are still refused, with the excess named.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{paid_invoice}/payments"),
+        &billing,
+        Some(receipt(false)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
+    assert_eq!(refused["error"], "payment_exceeds_balance");
+    assert_eq!(refused["overpayment_gross"], "50");
+
+    let (status, overpaid) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{paid_invoice}/payments"),
+        &billing,
+        Some(receipt(true)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{overpaid:?}");
+    assert_eq!(overpaid["overpayment_gross"], "50");
+    assert_eq!(overpaid["invoice"]["status"], "paid");
+    assert_eq!(overpaid["invoice"]["paid_amount"], "150");
+    assert_eq!(overpaid["invoice"]["balance_due"], "0");
+    assert_eq!(overpaid["invoice"]["credit_balance"], "50");
+    assert_eq!(overpaid["invoice"]["refundable_cash_amount"], "50");
+    assert_eq!(
+        overpaid["invoice"]["credit_transfer_targets"][0]["invoice_id"],
+        open_invoice.to_string()
+    );
+    assert_eq!(
+        overpaid["invoice"]["credit_transfer_targets"][0]["balance_due"],
+        "200"
+    );
+    // The excess is patient credit, not revenue with VAT.
+    assert_eq!(
+        category_totals(&pool, paid_invoice).await,
+        vec![
+            ("patient_credit".to_string(), Decimal::new(50, 0)),
+            ("service_revenue".to_string(), Decimal::new(100, 0)),
+        ]
+    );
+
+    let transfer_request = json!({
+        "request_id": Uuid::new_v4(),
+        "target_invoice_id": open_invoice,
+        "amount_gross": "50",
+        "transferred_on": today,
+        "note": "Overpayment of BANK-150",
+    });
+    let (status, transferred) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{paid_invoice}/credit-transfers"),
+        &billing,
+        Some(transfer_request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{transferred:?}");
+    let transfer_id = transferred["credit_transfer_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(transferred["invoice"]["credit_balance"], "0");
+    assert_eq!(transferred["invoice"]["paid_amount"], "100");
+    assert_eq!(transferred["invoice"]["status"], "paid");
+    assert_eq!(
+        transferred["invoice"]["credit_transfers"][0]["direction"],
+        "out"
+    );
+    let (status, replay) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{paid_invoice}/credit-transfers"),
+        &billing,
+        Some(transfer_request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay:?}");
+    assert_eq!(replay["idempotent_replay"], true);
+
+    let (status, target) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{open_invoice}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(target["paid_amount"], "50");
+    assert_eq!(target["balance_due"], "150");
+    assert_eq!(target["status"], "partially_paid");
+    assert_eq!(target["credit_transfers"][0]["direction"], "in");
+    assert_eq!(
+        category_totals(&pool, paid_invoice).await,
+        vec![("service_revenue".to_string(), Decimal::new(100, 0))]
+    );
+    assert_eq!(
+        category_totals(&pool, open_invoice).await,
+        vec![("service_revenue".to_string(), Decimal::new(50, 0))]
+    );
+
+    // A transfer leg cannot be reversed or corrected on its own.
+    let target_payment_id: Uuid = sqlx::query_scalar(
+        "SELECT target_payment_transaction_id FROM invoice_credit_transfers WHERE id = $1::uuid",
+    )
+    .bind(&transfer_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let source_refund_id: Uuid = sqlx::query_scalar(
+        "SELECT source_refund_transaction_id FROM invoice_credit_transfers WHERE id = $1::uuid",
+    )
+    .bind(&transfer_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{open_invoice}/payments/{target_payment_id}/reversal"),
+        &billing,
+        Some(json!({ "note": "Wrong" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{paid_invoice}/refunds/{source_refund_id}/reversal"),
+        &billing,
+        Some(json!({ "reason": "Wrong" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+    let mut half_reversal = pool.begin().await.unwrap();
+    sqlx::query(
+        r#"INSERT INTO invoice_payment_transactions (
+               invoice_id, transaction_type, reverses_transaction_id, amount_gross,
+               payment_method, received_on, note, created_by
+           ) VALUES ($1, 'reversal', $2, 50, 'credit_transfer', CURRENT_DATE, 'half', $3)"#,
+    )
+    .bind(open_invoice)
+    .bind(target_payment_id)
+    .bind(admin_id)
+    .execute(&mut *half_reversal)
+    .await
+    .unwrap();
+    let error = half_reversal.commit().await.unwrap_err();
+    assert!(
+        error.to_string().contains("reversed only as a whole"),
+        "{error}"
+    );
+
+    let (status, reversed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{open_invoice}/credit-transfers/{transfer_id}/reversal"),
+        &billing,
+        Some(json!({ "reason": "Patient wants the money back" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed:?}");
+    assert_eq!(reversed["invoice"]["paid_amount"], "0");
+    assert_eq!(
+        reversed["invoice"]["credit_transfers"][0]["is_reversed"],
+        true
+    );
+    let (_, source) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{paid_invoice}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(source["credit_balance"], "50");
+    assert_eq!(
+        category_totals(&pool, paid_invoice).await,
+        vec![
+            ("patient_credit".to_string(), Decimal::new(50, 0)),
+            ("service_revenue".to_string(), Decimal::new(100, 0)),
+        ]
+    );
+
+    // The credit is refunded through the regular refund journal.
+    let (status, refunded) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{paid_invoice}/refunds"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "50",
+            "payment_method": "bank_transfer",
+            "refunded_on": today,
+            "reason": "Overpayment returned"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{refunded:?}");
+    assert_eq!(refunded["invoice"]["credit_balance"], "0");
+    assert_eq!(
+        category_totals(&pool, paid_invoice).await,
+        vec![("service_revenue".to_string(), Decimal::new(100, 0))]
+    );
+}
