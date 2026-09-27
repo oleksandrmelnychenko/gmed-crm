@@ -7162,11 +7162,12 @@ async fn sync_completed_medical_appointment_to_billing(
     }
 
     // The completed appointment delivers the treatment organisation the order
-    // already planned (e.g. from the quote): the oldest unlinked planned
-    // single-unit line becomes this appointment's delivered line, so the same
-    // service is not counted twice. A planned line with more units stays for
-    // later appointments; only without a planned line is a new one added.
-    if let Some(leistung_id) = consume_planned_treatment_organization_line(
+    // already planned (e.g. from the quote): one unit of the oldest unlinked
+    // planned line becomes this appointment's delivered line, so the same
+    // service is not counted twice. A multi-unit block keeps its remaining
+    // units for later appointments; only without a planned line is a new one
+    // added.
+    if let Some(consumed) = consume_planned_treatment_organization_line(
         state,
         order_id,
         appointment_id,
@@ -7184,7 +7185,11 @@ async fn sync_completed_medical_appointment_to_billing(
             serde_json::json!({
                 "patient_id": patient_id,
                 "appointment_id": appointment_id,
-                "order_leistung_id": leistung_id,
+                "order_leistung_id": consumed.leistung_id,
+                "split_from_order_leistung_id": consumed.split_from,
+                "remaining_planned_quantity": consumed
+                    .remaining_planned_quantity
+                    .map(|value| value.normalize().to_string()),
                 "service_key": MEDICAL_TREATMENT_ORGANIZATION_SERVICE_KEY,
                 "provider_id": provider_id,
                 "doctor_id": doctor_id,
@@ -7247,15 +7252,28 @@ async fn sync_completed_medical_appointment_to_billing(
     Ok(())
 }
 
+/// The planned treatment-organisation unit a completed medical appointment
+/// delivered.
+struct ConsumedPlannedLine {
+    /// The delivered line linked to the appointment.
+    leistung_id: Uuid,
+    /// The planned multi-unit line the delivered unit was split from.
+    split_from: Option<Uuid>,
+    /// Units still planned on that line afterwards.
+    remaining_planned_quantity: Option<rust_decimal::Decimal>,
+}
+
 /// Links a completed medical appointment to the order's oldest planned
-/// treatment-organisation line that is not linked yet, has one unit, does not
-/// come from a doctor service group and is not planned for another provider
-/// or doctor: the line becomes delivered, carries the appointment (and its
+/// treatment-organisation line that is not linked yet, does not come from a
+/// doctor service group and is not planned for another provider or doctor.
+/// A single-unit line becomes delivered, carries the appointment (and its
 /// provider/doctor when the line had none) and records the change in its
-/// notes. Returns the
-/// consumed line, or `None` when the appointment is already billed or no such
-/// planned line exists. Runs in one transaction so a concurrent completion of
-/// another appointment cannot consume the same line.
+/// notes. A line with more units delivers one of them: it keeps the remaining
+/// units planned and a new delivered one-unit line with the same commercial
+/// terms and catalog wording is linked to the appointment. Returns `None`
+/// when the appointment is already billed or no such planned line exists.
+/// Runs in one transaction so a concurrent completion of another appointment
+/// cannot consume the same unit.
 async fn consume_planned_treatment_organization_line(
     state: &AppState,
     order_id: Uuid,
@@ -7263,7 +7281,7 @@ async fn consume_planned_treatment_organization_line(
     provider_id: Option<Uuid>,
     doctor_id: Option<Uuid>,
     context_notes: &[String],
-) -> Result<Option<Uuid>, sqlx::Error> {
+) -> Result<Option<ConsumedPlannedLine>, sqlx::Error> {
     let mut tx = state.db.begin().await?;
     let already_linked = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM order_leistungen WHERE source_medical_appointment_id = $1)",
@@ -7274,13 +7292,13 @@ async fn consume_planned_treatment_organization_line(
     if already_linked {
         return Ok(None);
     }
-    let planned = sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT ol.id
+    let planned = sqlx::query(
+        r#"SELECT ol.id, ol.quantity
            FROM order_leistungen ol
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            WHERE ol.order_id = $1
              AND ol.status = 'planned'
-             AND ol.quantity <= 1
+             AND ol.quantity > 0
              AND ol.source_interpreter_report_id IS NULL
              AND ol.source_medical_appointment_id IS NULL
              AND ol.source_service_group_id IS NULL
@@ -7297,32 +7315,96 @@ async fn consume_planned_treatment_organization_line(
     .bind(doctor_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(leistung_id) = planned else {
+    let Some(planned) = planned else {
         return Ok(None);
     };
-    let mut notes = vec![format!(
-        "Geplante Leistung durch abgeschlossenen medizinischen Termin {appointment_id} erbracht"
-    )];
+    let planned_id: Uuid = planned.try_get("id")?;
+    let planned_quantity: rust_decimal::Decimal = planned.try_get("quantity")?;
+    let mut notes = vec![
+        "Geplante Leistung durch den abgeschlossenen medizinischen Termin erbracht".to_string(),
+    ];
     notes.extend(context_notes.iter().cloned());
-    sqlx::query(
-        r#"UPDATE order_leistungen
-           SET status = 'delivered',
-               delivered_at = COALESCE(delivered_at, now()),
-               source_medical_appointment_id = $2,
-               provider_id = COALESCE(provider_id, $3),
-               doctor_id = CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
-               notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $5)
-           WHERE id = $1 AND status = 'planned'"#,
+
+    if planned_quantity <= rust_decimal::Decimal::ONE {
+        sqlx::query(
+            r#"UPDATE order_leistungen
+               SET status = 'delivered',
+                   delivered_at = COALESCE(delivered_at, now()),
+                   source_medical_appointment_id = $2,
+                   provider_id = COALESCE(provider_id, $3),
+                   doctor_id = CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
+                   notes = concat_ws(E'\n', NULLIF(btrim(COALESCE(notes, '')), ''), $5)
+               WHERE id = $1 AND status = 'planned'"#,
+        )
+        .bind(planned_id)
+        .bind(appointment_id)
+        .bind(provider_id)
+        .bind(doctor_id)
+        .bind(notes.join("\n"))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        return Ok(Some(ConsumedPlannedLine {
+            leistung_id: planned_id,
+            split_from: None,
+            remaining_planned_quantity: None,
+        }));
+    }
+
+    // One unit of a planned block: the block keeps the remaining units, the
+    // delivered unit gets a line of its own with the same terms.
+    let remaining = planned_quantity - rust_decimal::Decimal::ONE;
+    sqlx::query("UPDATE order_leistungen SET quantity = $2 WHERE id = $1 AND status = 'planned'")
+        .bind(planned_id)
+        .bind(remaining)
+        .execute(&mut *tx)
+        .await?;
+    let delivered_id = sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO order_leistungen (
+                order_id, patient_id, description, quantity, unit_price, currency, vat_rate,
+                is_cost_passthrough, provider_id, doctor_id, status, delivered_at, notes,
+                source_medical_appointment_id, agency_service_id, agency_service_price_version_id,
+                tax_profile_id, vat_source
+           )
+           SELECT order_id, patient_id, description, 1, unit_price, currency, vat_rate,
+                  is_cost_passthrough, COALESCE(provider_id, $3),
+                  CASE WHEN provider_id IS NULL THEN $4 ELSE doctor_id END,
+                  'delivered', now(), $5,
+                  $2, agency_service_id, agency_service_price_version_id,
+                  tax_profile_id, vat_source
+           FROM order_leistungen
+           WHERE id = $1
+           RETURNING id"#,
     )
-    .bind(leistung_id)
+    .bind(planned_id)
     .bind(appointment_id)
     .bind(provider_id)
     .bind(doctor_id)
     .bind(notes.join("\n"))
+    .fetch_one(&mut *tx)
+    .await?;
+    // Inserting refreshes the catalog wording; keep the wording the order was
+    // planned with.
+    sqlx::query(
+        r#"UPDATE order_leistungen delivered
+           SET agency_service_key_snapshot = planned.agency_service_key_snapshot,
+               agency_service_name_snapshot = planned.agency_service_name_snapshot,
+               agency_service_description_snapshot = planned.agency_service_description_snapshot,
+               agency_service_unit_label_snapshot = planned.agency_service_unit_label_snapshot,
+               agency_service_description_items_snapshot = planned.agency_service_description_items_snapshot
+           FROM order_leistungen planned
+           WHERE delivered.id = $1 AND planned.id = $2"#,
+    )
+    .bind(delivered_id)
+    .bind(planned_id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    Ok(Some(leistung_id))
+    Ok(Some(ConsumedPlannedLine {
+        leistung_id: delivered_id,
+        split_from: Some(planned_id),
+        remaining_planned_quantity: Some(remaining),
+    }))
 }
 
 async fn load_interpreter_report_billing_candidates(

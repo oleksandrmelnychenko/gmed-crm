@@ -3921,7 +3921,12 @@ async fn completed_medical_appointment_consumes_the_planned_treatment_organizati
     .await;
 
     let mut appointment_ids = Vec::new();
-    for (suffix, date) in [("first", "2026-04-23"), ("second", "2026-04-24")] {
+    for (suffix, date) in [
+        ("first", "2026-04-23"),
+        ("second", "2026-04-24"),
+        ("third", "2026-04-25"),
+        ("fourth", "2026-04-26"),
+    ] {
         let appointment_id = seed_appointment(
             &pool,
             patient_id,
@@ -3977,11 +3982,18 @@ async fn completed_medical_appointment_consumes_the_planned_treatment_organizati
         consumed.get::<Option<Uuid>, _>("doctor_id"),
         Some(doctor_id)
     );
+    let consumed_notes = consumed
+        .get::<Option<String>, _>("notes")
+        .unwrap_or_default();
     assert!(
-        consumed
-            .get::<Option<String>, _>("notes")
-            .unwrap_or_default()
-            .contains("Geplante Leistung durch abgeschlossenen medizinischen Termin")
+        consumed_notes
+            .contains("Geplante Leistung durch den abgeschlossenen medizinischen Termin erbracht"),
+        "{consumed_notes}"
+    );
+    // The appointment stays linked by reference; the notes are readable text.
+    assert!(
+        !consumed_notes.contains(&appointment_ids[0].to_string()),
+        "{consumed_notes}"
     );
     let line_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM order_leistungen WHERE order_id = $1")
@@ -4006,32 +4018,116 @@ async fn completed_medical_appointment_consumes_the_planned_treatment_organizati
     })
     .await;
 
-    // The next appointment finds no single planned line: the multi-unit block
-    // stays planned for later visits and a delivered line is added as before.
-    let (status, _) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/appointments/{}/status", appointment_ids[1]),
-        &pm_bearer,
-        Some(json!({ "status": "completed" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    // The next appointments each deliver one unit of the planned block of
+    // three: the block keeps the remaining units, the delivered unit gets a
+    // line of its own with the block's terms; the last unit is the block.
+    let complete = |appointment_id: Uuid| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        async move {
+            let (status, _) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/appointments/{appointment_id}/status"),
+                &pm_bearer,
+                Some(json!({ "status": "completed" })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+    };
+    complete(appointment_ids[1]).await;
     let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
     assert_eq!(block_status, "planned");
-    assert_eq!(block_quantity, "3");
+    assert_eq!(block_quantity, "2");
     let (unrelated_status, _, _) = order_service_state(&pool, unrelated).await;
     assert_eq!(unrelated_status, "planned");
-    let second_line: i64 = sqlx::query_scalar(
-        r#"SELECT count(*) FROM order_leistungen
-           WHERE order_id = $1 AND source_medical_appointment_id = $2 AND status = 'delivered'"#,
+    let split = sqlx::query(
+        r#"SELECT id, status, quantity::text AS quantity, unit_price::text AS unit_price,
+                  agency_service_id, description, provider_id
+           FROM order_leistungen
+           WHERE order_id = $1 AND source_medical_appointment_id = $2"#,
     )
     .bind(order_id)
     .bind(appointment_ids[1])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(split.len(), 1);
+    assert_eq!(split[0].get::<String, _>("status"), "delivered");
+    assert_eq!(split[0].get::<String, _>("quantity"), "1");
+    assert_eq!(split[0].get::<String, _>("unit_price"), "60");
+    assert_eq!(
+        split[0].get::<Option<Uuid>, _>("agency_service_id"),
+        Some(agency_service_id)
+    );
+    assert_eq!(
+        split[0].get::<String, _>("description"),
+        "Organisation der Behandlung (Folgetermine)"
+    );
+    assert_eq!(
+        split[0].get::<Option<Uuid>, _>("provider_id"),
+        Some(provider_id)
+    );
+    let split_id = split[0].get::<Uuid, _>("id");
+    support::wait_until("split planned medical line audit", || async {
+        sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS(
+                   SELECT 1 FROM audit_log
+                   WHERE action = 'consume_planned_medical_order_leistung'
+                     AND entity_id = $1
+                     AND context->>'order_leistung_id' = $2
+                     AND context->>'split_from_order_leistung_id' = $3
+                     AND context->>'remaining_planned_quantity' = '2')"#,
+        )
+        .bind(order_id)
+        .bind(split_id.to_string())
+        .bind(planned_block.to_string())
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    })
+    .await;
+
+    complete(appointment_ids[2]).await;
+    let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
+    assert_eq!(
+        (block_status.as_str(), block_quantity.as_str()),
+        ("planned", "1")
+    );
+    complete(appointment_ids[3]).await;
+    let (block_status, block_quantity, _) = order_service_state(&pool, planned_block).await;
+    assert_eq!(
+        (block_status.as_str(), block_quantity.as_str()),
+        ("delivered", "1")
+    );
+    let block_appointment: Option<Uuid> = sqlx::query_scalar(
+        "SELECT source_medical_appointment_id FROM order_leistungen WHERE id = $1",
+    )
+    .bind(planned_block)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(second_line, 1);
+    assert_eq!(block_appointment, Some(appointment_ids[3]));
+
+    // Three units planned, three delivered: nothing counted twice.
+    let delivered_units: rust_decimal::Decimal = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(quantity), 0) FROM order_leistungen
+           WHERE order_id = $1 AND agency_service_id = $2 AND status = 'delivered'"#,
+    )
+    .bind(order_id)
+    .bind(agency_service_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(delivered_units, rust_decimal::Decimal::new(4, 0));
+    let line_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM order_leistungen WHERE order_id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(line_count, 5);
 }
 
 #[tokio::test]
