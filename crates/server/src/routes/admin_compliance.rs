@@ -8,7 +8,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;

@@ -1730,7 +1730,7 @@ async fn get_patient_financial_summary(
     let mut overdue_amount = Decimal::ZERO;
     let mut order_breakdown = Vec::new();
     let mut service_breakdown = std::collections::BTreeMap::<String, (Decimal, Decimal)>::new();
-    let as_of_date = to.unwrap_or_else(|| crate::app_time::today());
+    let as_of_date = to.unwrap_or_else(crate::app_time::today);
 
     for row in invoice_rows {
         let total_net = row

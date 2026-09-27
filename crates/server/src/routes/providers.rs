@@ -6455,7 +6455,7 @@ fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayloa
     }
 
     let valid_from =
-        parse_date(body.valid_from, "valid_from")?.unwrap_or_else(|| crate::app_time::today());
+        parse_date(body.valid_from, "valid_from")?.unwrap_or_else(crate::app_time::today);
     let valid_to = parse_date(body.valid_to, "valid_to")?;
 
     if let Some(valid_to) = valid_to

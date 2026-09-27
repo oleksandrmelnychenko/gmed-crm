@@ -2174,7 +2174,7 @@ async fn create_framework_contract(
     // takes effect (printed in the PDF) and defaults to today; an end date is
     // never stored.
     let valid_from = match parse_optional_date(body.valid_from.as_deref()) {
-        Ok(value) => Some(value.unwrap_or_else(|| crate::app_time::today())),
+        Ok(value) => Some(value.unwrap_or_else(crate::app_time::today)),
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     let valid_to: Option<NaiveDate> = None;
