@@ -7,7 +7,7 @@
 //! files GMED refuses move to `gmed-failed/` with the reason next to them,
 //! and transient failures are retried with backoff.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::api::{ApiError, Gmed, IntakeUpload, UploadedDocument};
+use crate::api::{ApiError, Gmed, IntakeUpload, MAX_UPLOAD_BYTES, UploadedDocument, too_large};
 use crate::scan::unique_path;
 
 pub const UPLOADED_DIR: &str = "gmed-uploaded";
@@ -82,8 +82,16 @@ pub fn upload_file(
         .and_then(|name| name.to_str())
         .ok_or_else(|| anyhow!("{} has no usable file name", path.display()))?
         .to_string();
+    // Refuse an oversized file before reading it into memory; watch mode
+    // treats this refusal as final and sets the file aside.
+    let size = fs::metadata(path)
+        .with_context(|| format!("read {}", path.display()))?
+        .len();
+    if size > MAX_UPLOAD_BYTES as u64 {
+        return Err(too_large(&file_name, size).into());
+    }
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    gmed.upload_intake(&IntakeUpload {
+    gmed.upload_intake(IntakeUpload {
         file_name,
         mime: mime.to_string(),
         bytes,
@@ -113,7 +121,7 @@ pub fn run(gmed: &Gmed, options: &WatchOptions, mut log: impl FnMut(&str)) -> Re
     let mut summary = WatchSummary::default();
     loop {
         let now = Instant::now();
-        let mut present = Vec::new();
+        let mut present = HashSet::new();
         for entry in
             fs::read_dir(&options.dir).with_context(|| format!("read {}", options.dir.display()))?
         {
@@ -125,7 +133,7 @@ pub fn run(gmed: &Gmed, options: &WatchOptions, mut log: impl FnMut(&str)) -> Re
             if !metadata.is_file() || !is_candidate(&path) {
                 continue;
             }
-            present.push(path.clone());
+            present.insert(path.clone());
             let modified = metadata.modified().ok();
             let state = tracked.entry(path.clone()).or_insert(Tracked {
                 size: metadata.len(),
@@ -359,6 +367,25 @@ mod tests {
         assert!(!dir.join("now.pdf").exists());
         assert!(dir.join("later.pdf").exists(), "kept for the next attempt");
         assert!(!dir.join(UPLOADED_DIR).exists());
+    }
+
+    #[test]
+    fn oversized_files_are_refused_before_reading() {
+        let server = MockServer::start(|_| MockReply::status(500));
+        let gmed = signed_in(&server, "watch-oversized-gmed");
+        let path = temp_dir("watch-oversized").join("huge.pdf");
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_UPLOAD_BYTES as u64 + 1)
+            .unwrap();
+        let error = upload_file(&gmed, &path, None, None).unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<ApiError>()
+                .is_some_and(ApiError::rejects_file),
+            "{error}"
+        );
+        assert!(server.requests().is_empty());
     }
 
     #[test]

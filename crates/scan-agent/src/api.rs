@@ -3,6 +3,8 @@
 //! queue.
 
 use std::fmt;
+use std::io::Cursor;
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -54,10 +56,32 @@ pub fn api_base(server: &str) -> Result<Url> {
     Ok(url)
 }
 
+/// Loopback only: `*.localhost` names resolve to the local machine, while
+/// other names (even reserved ones like `.test`) may point into a network.
 fn is_local_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "::1")
-        || host.ends_with(".localhost")
-        || host.ends_with(".test")
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]" | "::1") || host.ends_with(".localhost")
+}
+
+/// The local refusal for a document above GMED's upload limit.
+pub fn too_large(file_name: &str, size: u64) -> ApiError {
+    ApiError {
+        status: StatusCode::PAYLOAD_TOO_LARGE,
+        message: format!(
+            "{file_name} is {:.1} MB; GMED accepts at most 25 MB per document (scan in gray or at a lower dpi, or split it)",
+            size as f64 / 1_048_576.0
+        ),
+    }
+}
+
+/// Upload bytes shared between request attempts (a retry after a token
+/// refresh) without copying them.
+#[derive(Clone)]
+struct SharedBytes(Arc<Vec<u8>>);
+
+impl AsRef<[u8]> for SharedBytes {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
 }
 
 /// An answer from GMED other than success.
@@ -356,20 +380,14 @@ impl Gmed {
 
     /// File a document into the intake queue: status `draft`, no patient,
     /// origin `manual_intake`; staff link and classify it during review.
-    pub fn upload_intake(&self, upload: &IntakeUpload) -> Result<UploadedDocument> {
+    pub fn upload_intake(&self, upload: IntakeUpload) -> Result<UploadedDocument> {
         if upload.bytes.len() > MAX_UPLOAD_BYTES {
-            return Err(ApiError {
-                status: StatusCode::PAYLOAD_TOO_LARGE,
-                message: format!(
-                    "{} is {:.1} MB; GMED accepts at most 25 MB per document (scan in gray or at a lower dpi, or split it)",
-                    upload.file_name,
-                    upload.bytes.len() as f64 / 1_048_576.0
-                ),
-            }
-            .into());
+            return Err(too_large(&upload.file_name, upload.bytes.len() as u64).into());
         }
+        let length = upload.bytes.len() as u64;
+        let bytes = SharedBytes(Arc::new(upload.bytes));
         let response = self.authorized(|http, base, token| {
-            let file = multipart::Part::bytes(upload.bytes.clone())
+            let file = multipart::Part::reader_with_length(Cursor::new(bytes.clone()), length)
                 .file_name(upload.file_name.clone())
                 .mime_str(&upload.mime)?;
             let mut form = multipart::Form::new()
@@ -524,6 +542,10 @@ mod tests {
             assert_eq!(api_base(input).unwrap().as_str(), expected);
         }
         assert!(api_base("http://gmed.example.de").is_err());
+        assert!(
+            api_base("http://gmed.test").is_err(),
+            "only loopback may use plain http"
+        );
         assert!(api_base("").is_err());
     }
 
@@ -688,7 +710,7 @@ mod tests {
             title: None,
             notes: Some("Scanner: EPSON DS-790WN".into()),
         };
-        assert_eq!(gmed.upload_intake(&upload).unwrap().id, "doc-1");
+        assert_eq!(gmed.upload_intake(upload).unwrap().id, "doc-1");
         assert_eq!(refreshes.load(Ordering::SeqCst), 1);
         let stored = paths.load_session().unwrap().unwrap();
         assert_eq!(
@@ -753,7 +775,7 @@ mod tests {
             title: None,
             notes: None,
         };
-        let error = gmed.upload_intake(&upload).unwrap_err();
+        let error = gmed.upload_intake(upload).unwrap_err();
         let api_error = error.downcast_ref::<ApiError>().unwrap();
         assert!(api_error.rejects_file());
     }

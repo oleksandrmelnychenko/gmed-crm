@@ -82,7 +82,7 @@ gmed-scan watch ~/Documents/GMED-Scans --after-upload delete
 
 - Сесія лежить у теці користувача: `%APPDATA%\gmed-scan` (Windows), `~/Library/Application Support/gmed-scan` (macOS), `~/.config/gmed-scan` (Linux); інше місце задає `GMED_SCAN_HOME`. На Unix файл має права `0600`.
 - GMED ротує refresh-токен і вважає повторне використання старого крадіжкою: відкликає **всі** сесії користувача. Тому всі оновлення токена йдуть під файловим локом із перечитуванням сесії, і кілька запущених `gmed-scan` (наприклад `watch` і `scan`) не конфліктують.
-- До GMED тільки HTTPS (plain HTTP лише для `localhost`/`*.localhost`/`*.test`).
+- До GMED тільки HTTPS (plain HTTP лише для loopback: `localhost`, `127.0.0.1`, `::1`, `*.localhost`).
 - До сканера eSCL іде по HTTP або HTTPS із самопідписаним сертифікатом, який неможливо перевірити. `scanners --save` зберігає HTTPS-адресу (`_uscans`), якщо сканер її оголошує і вона відповідає: шифрування без автентифікації сканера. Якщо TLS сканера несумісний, зберігається HTTP-адреса з попередженням. Сканер має бути в довіреній мережі.
 - Сесію станції видно в GMED у списку сесій користувача (User-Agent `gmed-scan/<версія>`), її можна відкликати. `gmed-scan logout` завершує її і з самої станції.
 
