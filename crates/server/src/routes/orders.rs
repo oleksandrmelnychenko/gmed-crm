@@ -221,10 +221,34 @@ struct UpdateOrderFollowupFlowRequest {
     followup_1w_status: Option<String>,
     followup_1m_status: Option<String>,
     followup_6m_status: Option<String>,
+    /// Planned date (YYYY-MM-DD, "" clears) of a milestone marked scheduled.
+    followup_1w_date: Option<String>,
+    followup_1m_date: Option<String>,
+    followup_6m_date: Option<String>,
     package_end_date: Option<String>,
     package_end_status: Option<String>,
     results_handoff_status: Option<String>,
     followup_summary: Option<String>,
+}
+
+/// An optional date field of a partial update: `None` keeps the stored value,
+/// `Some(None)` clears it ("" in the request), `Some(Some(date))` sets it.
+fn parse_optional_date_update(
+    value: Option<&str>,
+    field: &str,
+) -> Result<Option<Option<chrono::NaiveDate>>, axum::response::Response> {
+    match value {
+        None => Ok(None),
+        Some(raw) if raw.trim().is_empty() => Ok(Some(None)),
+        Some(raw) => chrono::NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d")
+            .map(|date| Some(Some(date)))
+            .map_err(|_| {
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    &format!("Invalid {field} (YYYY-MM-DD)"),
+                )
+            }),
+    }
 }
 
 #[derive(Deserialize)]
@@ -2071,6 +2095,9 @@ async fn load_order_followup_readiness(
                   off.followup_1w_status,
                   off.followup_1m_status,
                   off.followup_6m_status,
+                  off.followup_1w_date,
+                  off.followup_1m_date,
+                  off.followup_6m_date,
                   off.package_end_date,
                   off.package_end_status,
                   off.results_handoff_status,
@@ -2226,6 +2253,24 @@ async fn load_order_followup_readiness(
     .await
     .unwrap_or_default();
 
+    // Follow-up reminders created from the order page are attached to this
+    // appointment of the order (the latest completed one, else the latest
+    // one still open), so they count for the order.
+    let reminder_anchor = sqlx::query(
+        r#"SELECT id, date
+           FROM appointments
+           WHERE order_id = $1 AND status <> 'cancelled'
+           ORDER BY (status = 'completed') DESC, date DESC, created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await
+    .unwrap_or_default();
+    let reminder_anchor_appointment_id = reminder_anchor
+        .as_ref()
+        .and_then(|row| row.try_get::<Uuid, _>("id").ok());
+
     let closure_anchor_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
         r#"SELECT created_at
            FROM workflow_lifecycle_events
@@ -2272,6 +2317,12 @@ async fn load_order_followup_readiness(
     let followup_6m_status: String = followup_row
         .try_get("followup_6m_status")
         .unwrap_or_else(|_| "pending".to_string());
+    let followup_1w_date: Option<chrono::NaiveDate> =
+        followup_row.try_get("followup_1w_date").unwrap_or_default();
+    let followup_1m_date: Option<chrono::NaiveDate> =
+        followup_row.try_get("followup_1m_date").unwrap_or_default();
+    let followup_6m_date: Option<chrono::NaiveDate> =
+        followup_row.try_get("followup_6m_date").unwrap_or_default();
     let package_end_date: Option<chrono::NaiveDate> =
         followup_row.try_get("package_end_date").unwrap_or_default();
     let package_end_status: String = followup_row
@@ -2321,12 +2372,21 @@ async fn load_order_followup_readiness(
         doctor_followup_status.as_str(),
         "not_required" | "completed"
     ) || doctor_followup_visits + doctor_followup_tasks > 0;
+    // A milestone is ready when it is done or not needed, when a follow-up
+    // visit or reminder exists for it, or when the follow-up section planned
+    // it: status "scheduled" with a date.
+    let followup_1w_planned = followup_1w_status == "scheduled" && followup_1w_date.is_some();
+    let followup_1m_planned = followup_1m_status == "scheduled" && followup_1m_date.is_some();
+    let followup_6m_planned = followup_6m_status == "scheduled" && followup_6m_date.is_some();
     let followup_1w_ready = matches!(followup_1w_status.as_str(), "not_required" | "completed")
-        || followup_1w_visits + followup_1w_reminders > 0;
+        || followup_1w_visits + followup_1w_reminders > 0
+        || followup_1w_planned;
     let followup_1m_ready = matches!(followup_1m_status.as_str(), "not_required" | "completed")
-        || followup_1m_visits + followup_1m_reminders > 0;
+        || followup_1m_visits + followup_1m_reminders > 0
+        || followup_1m_planned;
     let followup_6m_ready = matches!(followup_6m_status.as_str(), "not_required" | "completed")
-        || followup_6m_visits + followup_6m_reminders > 0;
+        || followup_6m_visits + followup_6m_reminders > 0
+        || followup_6m_planned;
 
     let effective_package_end_date = package_end_date.or(suggested_package_end_date);
     let package_end_required =
@@ -2350,7 +2410,10 @@ async fn load_order_followup_readiness(
         || followup_1w_reminders > 0
         || followup_1m_reminders > 0
         || followup_6m_reminders > 0
-        || package_end_reminders > 0;
+        || package_end_reminders > 0
+        || followup_1w_planned
+        || followup_1m_planned
+        || followup_6m_planned;
     let followup_activity_required = doctor_followup_status != "not_required"
         || followup_1w_status != "not_required"
         || followup_1m_status != "not_required"
@@ -2412,6 +2475,10 @@ async fn load_order_followup_readiness(
             "followup_1w_status": followup_1w_status,
             "followup_1m_status": followup_1m_status,
             "followup_6m_status": followup_6m_status,
+            "followup_1w_date": followup_1w_date.map(|value| value.to_string()),
+            "followup_1m_date": followup_1m_date.map(|value| value.to_string()),
+            "followup_6m_date": followup_6m_date.map(|value| value.to_string()),
+            "reminder_anchor_appointment_id": reminder_anchor_appointment_id,
             "package_end_date": package_end_date.map(|value| value.to_string()),
             "suggested_package_end_date": suggested_package_end_date.map(|value| value.to_string()),
             "package_end_status": package_end_status,
@@ -6172,6 +6239,9 @@ async fn update_followup_flow(
         && body.followup_1w_status.is_none()
         && body.followup_1m_status.is_none()
         && body.followup_6m_status.is_none()
+        && body.followup_1w_date.is_none()
+        && body.followup_1m_date.is_none()
+        && body.followup_6m_date.is_none()
         && body.package_end_date.is_none()
         && body.package_end_status.is_none()
         && body.results_handoff_status.is_none()
@@ -6260,6 +6330,22 @@ async fn update_followup_flow(
         None => None,
     };
 
+    let followup_1w_date =
+        match parse_optional_date_update(body.followup_1w_date.as_deref(), "followup_1w_date") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let followup_1m_date =
+        match parse_optional_date_update(body.followup_1m_date.as_deref(), "followup_1m_date") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    let followup_6m_date =
+        match parse_optional_date_update(body.followup_6m_date.as_deref(), "followup_6m_date") {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+
     if let Err(resp) = ensure_order_followup_flow_state(&state, order_id).await {
         return resp;
     }
@@ -6273,7 +6359,10 @@ async fn update_followup_flow(
                package_end_date = CASE WHEN $6::bool THEN $7 ELSE package_end_date END,
                package_end_status = COALESCE($8, package_end_status),
                results_handoff_status = COALESCE($9, results_handoff_status),
-               followup_summary = CASE WHEN $10::bool THEN $11 ELSE followup_summary END
+               followup_summary = CASE WHEN $10::bool THEN $11 ELSE followup_summary END,
+               followup_1w_date = CASE WHEN $12::bool THEN $13 ELSE followup_1w_date END,
+               followup_1m_date = CASE WHEN $14::bool THEN $15 ELSE followup_1m_date END,
+               followup_6m_date = CASE WHEN $16::bool THEN $17 ELSE followup_6m_date END
            WHERE order_id = $1"#,
     )
     .bind(order_id)
@@ -6287,6 +6376,12 @@ async fn update_followup_flow(
     .bind(results_handoff_status.clone())
     .bind(followup_summary_supplied)
     .bind(followup_summary.clone())
+    .bind(followup_1w_date.is_some())
+    .bind(followup_1w_date.flatten())
+    .bind(followup_1m_date.is_some())
+    .bind(followup_1m_date.flatten())
+    .bind(followup_6m_date.is_some())
+    .bind(followup_6m_date.flatten())
     .execute(&state.db)
     .await
     {
@@ -6296,6 +6391,9 @@ async fn update_followup_flow(
                 "followup_1w_status": followup_1w_status,
                 "followup_1m_status": followup_1m_status,
                 "followup_6m_status": followup_6m_status,
+                "followup_1w_date": followup_1w_date.map(|value| value.map(|date| date.to_string())),
+                "followup_1m_date": followup_1m_date.map(|value| value.map(|date| date.to_string())),
+                "followup_6m_date": followup_6m_date.map(|value| value.map(|date| date.to_string())),
                 "package_end_date": package_end_date.map(|value| value.to_string()),
                 "package_end_status": package_end_status,
                 "results_handoff_status": results_handoff_status,

@@ -459,6 +459,12 @@ export type OrderFollowupFlow = {
   followup_1w_status: FollowupStatus;
   followup_1m_status: FollowupStatus;
   followup_6m_status: FollowupStatus;
+  /** Planned dates of milestones marked scheduled (YYYY-MM-DD). */
+  followup_1w_date?: string | null;
+  followup_1m_date?: string | null;
+  followup_6m_date?: string | null;
+  /** Order appointment that follow-up reminders created from the order are attached to. */
+  reminder_anchor_appointment_id?: string | null;
   package_end_date: string | null;
   suggested_package_end_date: string | null;
   package_end_status: FollowupStatus;
@@ -594,6 +600,9 @@ export type OrderFollowupFormState = {
   followup1wStatus: FollowupStatus;
   followup1mStatus: FollowupStatus;
   followup6mStatus: FollowupStatus;
+  followup1wDate: string;
+  followup1mDate: string;
+  followup6mDate: string;
   packageEndDate: string;
   packageEndStatus: FollowupStatus;
   resultsHandoffStatus: ResultsHandoffStatus;

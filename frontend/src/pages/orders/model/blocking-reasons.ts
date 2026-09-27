@@ -202,6 +202,29 @@ const COMPLETION_FOLLOWUP_REASONS = new Set([
   "Results handoff must be completed or marked not required",
 ]);
 
+// Follow-up milestones are planned in the milestone planner of the follow-up
+// section, not in the calendar.
+const FOLLOWUP_MILESTONE_REASONS = new Set([
+  "1-week follow-up is not scheduled yet",
+  "1-month follow-up is not scheduled yet",
+  "6-month follow-up is not scheduled yet",
+  "No follow-up reminder, task or appointment has been launched yet",
+  "1-week follow-up must be completed or marked not required",
+  "1-month follow-up must be completed or marked not required",
+  "6-month follow-up must be completed or marked not required",
+]);
+
+/** DOM id of the follow-up milestone planner (see `OrderFollowupMilestones`). */
+export const FOLLOWUP_MILESTONES_ANCHOR_ID = "order-followup-milestones";
+
+/**
+ * Element inside the target section that resolves the blocker, if any: the
+ * "Open" link scrolls to it after opening the section.
+ */
+export function orderBlockingReasonAnchor(reason: string): string | null {
+  return FOLLOWUP_MILESTONE_REASONS.has(reason) ? FOLLOWUP_MILESTONES_ANCHOR_ID : null;
+}
+
 /**
  * Order workspace section where a lifecycle blocker is resolved; the "Open"
  * link of the blocker list navigates there. Reasons are the server's texts.

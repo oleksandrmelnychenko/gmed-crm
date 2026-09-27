@@ -686,3 +686,36 @@ test("cancelling an order needs a reason and shows what is cancelled and what st
   expect(writes.filter(write => write.path.endsWith("/status")).at(-1)?.body)
     .toEqual({status:"cancelled", reason:"Patient postponed the treatment"});
 });
+
+test("follow-up blockers open the milestone planner, which plans and creates the reminder with feedback", async ({page}) => {
+  const {order, writes} = await prepare(page);
+  const reason = "1-week follow-up is not scheduled yet";
+  Object.assign(order, {phase:"closure"});
+  Object.assign(order.lifecycle, {
+    current_stage:"closure", next_stage:"followup",
+    allowed_transitions:[{phase:"followup", blocked:true, reasons:[reason]}],
+  });
+  Object.assign(order.followup_flow, {
+    followup_ready:false, followup_1w_status:"pending", followup_1w_ready:false,
+    followup_1m_ready:true, followup_6m_ready:true, followup_1w_date:null,
+    followup_1w_visits:0, followup_1w_reminders:0, followup_1m_visits:0, followup_1m_reminders:0,
+    followup_6m_visits:0, followup_6m_reminders:0, followup_appointments_total:0,
+    package_end_reminders:0, results_portal_shares:0,
+    closure_anchor_at:"2026-09-28T10:00:00+02:00", reminder_anchor_appointment_id:"appointment-anchor",
+    blocking_reasons:[reason],
+  });
+  await page.goto(`/orders/${orderId}`);
+  await page.getByRole("button", {name:/Недельный контроль ещё не запланирован/}).click();
+  const planner = page.getByTestId("order-followup-milestones");
+  await expect(planner).toBeInViewport();
+  const week = planner.getByTestId("followup-milestone-post_1w");
+  await chooseComboboxOption(page, week.getByRole("combobox", {name:"Через 1 неделю: статус"}), /Запланировано/);
+  // Prefilled one week after the closure anchor, shown as DD.MM.YYYY.
+  await expect(week.getByLabel("Через 1 неделю: дата")).toHaveValue("05.10.2026");
+  await week.getByRole("button", {name:"Создать напоминание", exact:true}).click();
+  await expect(week.getByRole("status")).toHaveText("Напоминание на 05.10.2026 создано.");
+  const reminder = writes.find(write => write.path === "/appointments/appointment-anchor/reminders");
+  expect(reminder?.body).toMatchObject({title:"Контроль через 1 неделю", user_id:"order-test-user"});
+  expect(writes.find(write => write.path.endsWith("/followup-flow"))?.body)
+    .toEqual({followup_1w_status:"scheduled", followup_1w_date:"2026-10-05"});
+});

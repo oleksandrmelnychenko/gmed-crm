@@ -117,6 +117,7 @@ import {
 } from "./sections";
 import {
   isOrderReadinessGateApplicable,
+  orderBlockingReasonAnchor,
   orderBlockingReasonSection,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
@@ -244,6 +245,7 @@ import {
   OrderCancellationDialog,
 } from "./ui/order-cancellation";
 import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
+import { OrderFollowupMilestones } from "./ui/order-followup-milestones";
 import {
   OrderServiceGroupPanel,
   OrderServiceGroupWizard,
@@ -1630,6 +1632,22 @@ function useOrdersPageContent() {
   ]);
   const canManageDebt = hasCapability(user, "orders.economics");
   const orderSectionAnchorRef = useRef<HTMLDivElement>(null);
+  // Scrolls to an element of the section that is being opened; it renders
+  // after the navigation, so wait a few frames for it.
+  const scrollToOrderAnchor = useCallback((elementId: string) => {
+    let frames = 0;
+    const tick = () => {
+      const element = document.getElementById(elementId);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      frames += 1;
+      if (frames < 30) window.requestAnimationFrame(tick);
+      else orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.requestAnimationFrame(tick);
+  }, []);
   const shouldRenderOrderSection = (section: OrderSectionKey) =>
     !isOrderRouteDetail || activeOrderSection === normalizeOrderSectionKey(section);
 
@@ -2828,6 +2846,9 @@ function useOrdersPageContent() {
         followup_1w_status: followupForm.followup1wStatus,
         followup_1m_status: followupForm.followup1mStatus,
         followup_6m_status: followupForm.followup6mStatus,
+        followup_1w_date: followupForm.followup1wDate,
+        followup_1m_date: followupForm.followup1mDate,
+        followup_6m_date: followupForm.followup6mDate,
         package_end_date: followupForm.packageEndDate,
         package_end_status: followupForm.packageEndStatus,
         results_handoff_status: followupForm.resultsHandoffStatus,
@@ -4201,6 +4222,7 @@ function useOrdersPageContent() {
                         <ol className="divide-y divide-border/60">
                           {orderNextStepReasons.map((reason, index) => {
                             const targetSection = orderBlockingReasonSection(reason);
+                            const targetAnchor = orderBlockingReasonAnchor(reason);
                             return (
                               <li key={reason}>
                                 <button
@@ -4215,8 +4237,14 @@ function useOrdersPageContent() {
                                       ),
                                     );
                                     // The section opens below this list; bring it into view,
-                                    // also when it is already the active one.
-                                    orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                    // also when it is already the active one. A blocker with
+                                    // its own control (the follow-up milestone planner)
+                                    // scrolls to that control once it is rendered.
+                                    if (targetAnchor) {
+                                      scrollToOrderAnchor(targetAnchor);
+                                    } else {
+                                      orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                                    }
                                   }}
                                 >
                                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
@@ -6008,59 +6036,18 @@ function useOrdersPageContent() {
                               </option>
                             </NativeComboboxSelect>
                             </Field>
-                            <div className="grid gap-3 md:grid-cols-3">
-                              <NativeComboboxSelect
-                                value={followupForm.followup1wStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    followup1wStatus: event.target.value as OrderFollowupFormState["followup1wStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{`1W ${followupStatusLabel("pending")}`}</option>
-                                <option value="scheduled">{`1W ${followupStatusLabel("scheduled")}`}</option>
-                                <option value="completed">{`1W ${followupStatusLabel("completed")}`}</option>
-                                <option value="not_required">
-                                  {`1W ${followupStatusLabel("not_required")}`}
-                                </option>
-                              </NativeComboboxSelect>
-                              <NativeComboboxSelect
-                                value={followupForm.followup1mStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    followup1mStatus: event.target.value as OrderFollowupFormState["followup1mStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{`1M ${followupStatusLabel("pending")}`}</option>
-                                <option value="scheduled">{`1M ${followupStatusLabel("scheduled")}`}</option>
-                                <option value="completed">{`1M ${followupStatusLabel("completed")}`}</option>
-                                <option value="not_required">
-                                  {`1M ${followupStatusLabel("not_required")}`}
-                                </option>
-                              </NativeComboboxSelect>
-                              <NativeComboboxSelect
-                                value={followupForm.followup6mStatus}
-                                onChange={(event) =>
-                                  setFollowupForm((current) => ({
-                                    ...current,
-                                    followup6mStatus: event.target.value as OrderFollowupFormState["followup6mStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{`6M ${followupStatusLabel("pending")}`}</option>
-                                <option value="scheduled">{`6M ${followupStatusLabel("scheduled")}`}</option>
-                                <option value="completed">{`6M ${followupStatusLabel("completed")}`}</option>
-                                <option value="not_required">
-                                  {`6M ${followupStatusLabel("not_required")}`}
-                                </option>
-                              </NativeComboboxSelect>
-                            </div>
+                            <OrderFollowupMilestones
+                              orderId={orderDetail.id}
+                              patientId={detailPatientId || null}
+                              flow={orderDetail.followup_flow}
+                              form={followupForm}
+                              onFormChange={setFollowupForm}
+                              canManage={permissions.canManagePhase}
+                              currentUserId={user?.id ?? null}
+                              lang={lang}
+                              statusLabel={followupStatusLabel}
+                              onCreated={triggerReload}
+                            />
                             <div className="grid gap-3 md:grid-cols-2">
                               <Field label={l("orders_paketende")}>
                                 <Input

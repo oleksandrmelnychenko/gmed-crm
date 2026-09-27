@@ -1955,6 +1955,100 @@ async fn followup_flow_requires_explicit_milestones_before_order_enters_followup
     assert_eq!(status, StatusCode::OK);
 }
 
+/// A milestone marked "scheduled" with a date in the order's follow-up
+/// section satisfies the follow-up gate without a separate visit or reminder;
+/// "scheduled" without a date still blocks.
+#[tokio::test]
+async fn followup_flow_accepts_milestones_planned_with_a_date() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("order-followup-dates");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+    let visit_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status,
+                checklist_phase, created_by
+           ) VALUES ($1, $2, 'medical', 'Consultation', CURRENT_DATE - 1, 'completed', 'execution', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({
+            "doctor_followup_status": "not_required",
+            "followup_1w_status": "scheduled",
+            "followup_1m_status": "scheduled",
+            "followup_6m_status": "scheduled",
+            "followup_1w_date": "2026-10-05",
+            "followup_1m_date": "2026-10-28",
+            "package_end_status": "not_required",
+            "results_handoff_status": "not_required"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_1w_ready"], true, "{flow}");
+    assert_eq!(flow["followup_1m_ready"], true, "{flow}");
+    assert_eq!(flow["followup_6m_ready"], false, "{flow}");
+    assert_eq!(flow["followup_1w_date"], "2026-10-05");
+    assert_eq!(flow["followup_6m_date"], Value::Null);
+    assert_eq!(
+        flow["reminder_anchor_appointment_id"],
+        json!(visit_id.to_string())
+    );
+    assert_eq!(
+        flow["blocking_reasons"],
+        json!(["6-month follow-up is not scheduled yet"])
+    );
+
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({ "followup_6m_date": "2027-03-28" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_ready"], true, "{flow}");
+    assert_eq!(flow["blocking_reasons"], json!([]));
+
+    // Clearing a date blocks the milestone again; a bad date is rejected.
+    let (status, flow) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({ "followup_1w_date": "" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_1w_ready"], false, "{flow}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/followup-flow"),
+        &pm_bearer,
+        Some(json!({ "followup_1w_date": "05.10.2026" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
 #[tokio::test]
 async fn followup_flow_recognizes_localized_and_completed_reminders() {
     let Some((app, pool, _admin_id)) = test_context().await else {
