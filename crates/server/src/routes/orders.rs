@@ -5267,12 +5267,11 @@ async fn cancel_order_in_tx(
     .await
     .map_err(failed)?;
 
-    let settlement = crate::routes::invoices::termination_settlements::compute_order_settlement(
-        &mut **tx, order_id,
-    )
-    .await
-    .map_err(failed)?
-    .map(|settlement| settlement.preview_json());
+    let settlement =
+        crate::routes::invoices::termination_settlements::compute_order_settlement(tx, order_id)
+            .await
+            .map_err(failed)?
+            .map(|settlement| settlement.preview_json());
 
     Ok(OrderCancellation {
         previous_status,
