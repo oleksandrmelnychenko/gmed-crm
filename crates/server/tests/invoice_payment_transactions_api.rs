@@ -203,7 +203,7 @@ async fn record_payment(
             "amount_gross": amount,
             "payment_method": "bank_transfer",
             "payment_reference": reference,
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
             "note": format!("Internal {reference}")
         })),
     )
@@ -258,7 +258,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
             "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "payment_method": "cash",
-            "received_on": chrono::Utc::now().date_naive().to_string()
+            "received_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -282,7 +282,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
             "amount_gross": 40,
             "payment_method": "bank_transfer",
             "payment_reference": "BANK-001",
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
             "note": "Internal BANK-001"
         })),
     )
@@ -303,7 +303,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
             "amount_gross": 41,
             "payment_method": "bank_transfer",
             "payment_reference": "BANK-001",
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
             "note": "Internal BANK-001"
         })),
     )
@@ -318,7 +318,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
     assert_eq!(second["invoice"]["paid_amount"], "119");
     assert_eq!(second["invoice"]["status"], "paid");
     assert_eq!(second["invoice"]["balance_due"], "0");
-    let today = chrono::Utc::now().date_naive().to_string();
+    let today = gmed_server::app_time::today().to_string();
     assert_eq!(
         second["invoice"]["paid_at"]
             .as_str()
@@ -335,7 +335,7 @@ async fn multiple_payments_reversal_accounting_and_portal_visibility_are_consist
             "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "payment_method": "cash",
-            "received_on": chrono::Utc::now().date_naive().to_string()
+            "received_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -561,7 +561,7 @@ async fn payment_correction_reverses_the_original_and_appends_the_corrected_rece
     let payment = record_payment(&app, &billing, invoice_id, Uuid::new_v4(), 100, "WRONG").await;
     let payment_id = payment["payment_transaction_id"].as_str().unwrap();
     let correction_path = format!("/api/v1/invoices/{invoice_id}/payments/{payment_id}/correction");
-    let today = chrono::Utc::now().date_naive().to_string();
+    let today = gmed_server::app_time::today().to_string();
     let correction = |amount: i64, request_id: Uuid, reason: &str| {
         json!({
             "request_id": request_id,
@@ -781,7 +781,7 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
     )
     .await;
     let billing = auth_header_for(billing_id, "billing");
-    let today = chrono::Utc::now().date_naive().to_string();
+    let today = gmed_server::app_time::today().to_string();
     let receipt = |accept: bool| {
         json!({
             "request_id": Uuid::new_v4(),

@@ -1559,7 +1559,7 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
             validate_relation_payload_fields(relation)?;
         }
     }
-    if is_minor_birth_date(parsed_birth_date, chrono::Utc::now().date_naive())
+    if is_minor_birth_date(parsed_birth_date, crate::app_time::today())
         && !has_minor_guardian(req)
     {
         return Err(
@@ -1976,7 +1976,7 @@ fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), 
 }
 
 fn generate_patient_id(seq: i64) -> String {
-    let now = chrono::Utc::now();
+    let now = crate::app_time::local(chrono::Utc::now());
     format!("P-{}-{:04}", now.format("%Y%m%d"), seq)
 }
 
@@ -3409,7 +3409,7 @@ async fn update_patient(
         Err(response) => return response,
     };
     if (birth_date_supplied || emergency_contact_supplied || contacts_patch_supplied)
-        && is_minor_birth_date(birth_date, chrono::Utc::now().date_naive())
+        && is_minor_birth_date(birth_date, crate::app_time::today())
         && !has_guardian_or_parent_contact(
             emergency_contact_relation.as_deref(),
             emergency_contact_name.as_deref(),
@@ -5816,15 +5816,15 @@ fn parse_clinical_timestamp(
         .map(|value| value.with_timezone(&chrono::Utc))
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M")
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S")
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S%.f")
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .or_else(|_| {
             chrono::NaiveDate::parse_from_str(trimmed, "%Y-%m-%d")
@@ -5833,7 +5833,7 @@ fn parse_clinical_timestamp(
                         .and_hms_opt(0, 0, 0)
                         .expect("midnight is a valid time")
                 })
-                .map(|value| value.and_utc())
+                .map(crate::app_time::from_local)
         })
         .map_err(|_| {
             err(
@@ -7429,7 +7429,7 @@ pub(crate) async fn load_patient_recheck_readiness(
         // Passport validity is independent of whether an existing-customer
         // re-check is due, so report it even on the minimal payload (#6).
         let (passport_status, passport_days_until_expiry) =
-            passport_compliance_status(passport_expiry, chrono::Utc::now().date_naive());
+            passport_compliance_status(passport_expiry, crate::app_time::today());
         return Ok(Some(PatientRecheckReadiness {
             can_create_order: true,
             blocking_reasons: Vec::new(),
@@ -7550,7 +7550,7 @@ pub(crate) async fn load_patient_recheck_readiness(
         )
     })?;
 
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::app_time::today();
     // #6: surface passport expiry in compliance (a warning, never a hard gate on
     // order creation). No passport date on file is treated as "unknown".
     let (passport_status, passport_days_until_expiry) =
@@ -10373,7 +10373,7 @@ fn build_patient_detail_json(
             {
                 let (status, days) = passport_compliance_status(
                     patient.passport_expiry,
-                    chrono::Utc::now().date_naive(),
+                    crate::app_time::today(),
                 );
                 map.insert(
                     "passport_expiry".to_string(),
@@ -15064,9 +15064,7 @@ async fn get_patient_medikationsplan_pdf(
     }
     let russian = query.lang.as_deref() == Some("ru");
     let tx = |ru, de| if russian { ru } else { de };
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = crate::app_time::today();
     let fail = || {
         err(
             StatusCode::INTERNAL_SERVER_ERROR,

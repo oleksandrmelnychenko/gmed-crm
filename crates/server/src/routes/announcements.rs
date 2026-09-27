@@ -189,7 +189,7 @@ fn parse_admin_datetime(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     }
     for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"] {
         if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(value, fmt) {
-            return Some(naive.and_utc());
+            return Some(crate::app_time::from_local(naive));
         }
     }
     None

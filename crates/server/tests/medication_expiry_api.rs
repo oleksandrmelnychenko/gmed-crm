@@ -114,7 +114,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let ceo_bearer = auth_header_for(admin_id, "ceo");
 
-    let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
+    let expired_on = (gmed_server::app_time::today() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",

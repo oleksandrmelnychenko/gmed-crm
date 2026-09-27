@@ -77,7 +77,7 @@ async fn patient_import_without_order_is_listed_approved_and_paid_through_the_jo
     .await
     .unwrap();
     let settlement_path = format!("/api/v1/company-provider-liabilities/{id}/settlements");
-    let payment = |amount: &str| json!({ "request_id": Uuid::new_v4(), "financial_account_id": account_id, "amount_gross": amount, "paid_on": chrono::Utc::now().date_naive().to_string(), "payment_method": "bank_transfer" });
+    let payment = |amount: &str| json!({ "request_id": Uuid::new_v4(), "financial_account_id": account_id, "amount_gross": amount, "paid_on": gmed_server::app_time::today().to_string(), "payment_method": "bank_transfer" });
     let (status, _) = json_request(
         &app,
         "POST",
@@ -217,7 +217,7 @@ async fn patient_paid_state_is_auditable_idempotent_and_creates_no_company_cash_
     let payment_payload = json!({
         "request_id": request_id,
         "paid": true,
-        "paid_on": chrono::Utc::now().date_naive().to_string()
+        "paid_on": gmed_server::app_time::today().to_string()
     });
     let payment_path = format!("/api/v1/external-invoices/{external_id}/patient-payment");
     let (status, paid) = json_request(
@@ -266,7 +266,7 @@ async fn patient_paid_state_is_auditable_idempotent_and_creates_no_company_cash_
         Some(json!({
             "request_id": Uuid::new_v4(),
             "paid": false,
-            "paid_on": chrono::Utc::now().date_naive().to_string()
+            "paid_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -340,7 +340,7 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
             "request_id": Uuid::new_v4(),
             "financial_account_id": account_id,
             "amount_gross": "250",
-            "paid_on": chrono::Utc::now().date_naive().to_string(),
+            "paid_on": gmed_server::app_time::today().to_string(),
             "payment_method": "bank_transfer"
         })),
     )
@@ -496,7 +496,7 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
             "amount_gross": "250.00",
             "payment_method": "bank_transfer",
             "payment_reference": format!("PATIENT-{tag}"),
-            "received_on": chrono::Utc::now().date_naive().to_string()
+            "received_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -963,7 +963,7 @@ async fn company_invoice_import_validates_and_preserves_the_selected_provider() 
     .unwrap();
     let (status, payment) = json_request(&app, "POST", &format!("/api/v1/company-provider-liabilities/{invoice_id}/settlements"), &bearer, Some(json!({
         "request_id": Uuid::new_v4(), "financial_account_id": account_id,
-        "amount_gross": "119", "paid_on": chrono::Utc::now().date_naive().to_string(), "payment_method": "bank_transfer"
+        "amount_gross": "119", "paid_on": gmed_server::app_time::today().to_string(), "payment_method": "bank_transfer"
     }))).await;
     assert_eq!(status, StatusCode::OK, "{payment}");
     let (status, ledger) = json_request(
@@ -1179,7 +1179,7 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
     let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
 
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
-    let due_date = (chrono::Utc::now().date_naive() - chrono::Duration::days(3)).to_string();
+    let due_date = (gmed_server::app_time::today() - chrono::Duration::days(3)).to_string();
 
     let (status, created_body) = json_request(
         &app,
@@ -1255,7 +1255,7 @@ async fn deadline_scheduler_marks_approved_company_invoice_overdue_and_skips_una
     let tag = unique_tag("company-invoice-overdue");
     let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
     let bearer = auth_header_for(admin_id, "ceo");
-    let due_date = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
+    let due_date = (gmed_server::app_time::today() - chrono::Duration::days(2)).to_string();
 
     let mut invoice_ids = Vec::new();
     for suffix in ["approved", "received"] {

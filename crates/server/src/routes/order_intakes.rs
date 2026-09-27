@@ -871,7 +871,7 @@ async fn checks_tx(
         .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok());
     checks.push(passport_check(
         expiry,
-        chrono::Utc::now().date_naive(),
+        crate::app_time::today(),
         d.date_to,
     ));
     Ok(checks)

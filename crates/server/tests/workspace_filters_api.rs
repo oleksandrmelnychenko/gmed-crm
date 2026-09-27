@@ -1446,7 +1446,7 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
     .await;
 
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
-    let due_date = (chrono::Utc::now().date_naive() - chrono::Duration::days(3)).to_string();
+    let due_date = (gmed_server::app_time::today() - chrono::Duration::days(3)).to_string();
 
     let (status, created_body) = json_request(
         &app,
@@ -2219,7 +2219,7 @@ async fn permanent_medication_expiry_scheduler_creates_confirmation_work_without
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
 
-    let expired_on = (chrono::Utc::now().date_naive() - chrono::Duration::days(2)).to_string();
+    let expired_on = (gmed_server::app_time::today() - chrono::Duration::days(2)).to_string();
     let (status, body) = json_request(
         &app,
         "POST",
@@ -6019,7 +6019,7 @@ async fn concierge_preparation_is_due_ahead_of_the_service_and_skips_billing() {
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
-    let service_date = (chrono::Utc::now().date_naive() + chrono::Duration::days(20)).to_string();
+    let service_date = (gmed_server::app_time::today() + chrono::Duration::days(20)).to_string();
 
     let (status, body) = json_request(
         &app,
@@ -8281,9 +8281,7 @@ async fn attention_endpoint_flags_past_visit_with_unprocessed_follow_up() {
     };
 
     let tag = unique_tag("attention-past");
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     let appointment_date = (today - chrono::Days::new(1)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
 
@@ -8368,7 +8366,7 @@ async fn attention_endpoint_flags_upcoming_slot_with_preparation_gaps() {
     };
 
     let tag = unique_tag("attention-upcoming");
-    let appointment_date = (chrono::Utc::now().date_naive() + chrono::Days::new(1)).to_string();
+    let appointment_date = (gmed_server::app_time::today() + chrono::Days::new(1)).to_string();
 
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
@@ -8443,7 +8441,7 @@ async fn attention_endpoint_excludes_resolved_completed_visits() {
     };
 
     let tag = unique_tag("attention-resolved");
-    let appointment_date = (chrono::Utc::now().date_naive() - chrono::Days::new(2)).to_string();
+    let appointment_date = (gmed_server::app_time::today() - chrono::Days::new(2)).to_string();
 
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
@@ -8513,9 +8511,7 @@ async fn attention_endpoint_keeps_overdue_follow_up_after_appointment_completion
     };
 
     let tag = unique_tag("attention-completed-overdue");
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     let appointment_date = (today - chrono::Days::new(3)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today - chrono::Days::new(1));
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
@@ -8581,9 +8577,7 @@ async fn attention_endpoint_does_not_treat_future_follow_up_as_overdue_work() {
     };
 
     let tag = unique_tag("attention-future-follow-up");
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     let appointment_date = (today - chrono::Days::new(1)).to_string();
     let reminder_at = format!("{}T08:00:00+00:00", today + chrono::Days::new(7));
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
@@ -8696,9 +8690,7 @@ async fn appointment_completion_is_blocked_when_checklist_items_remain_open() {
 }
 
 fn berlin_today() -> chrono::NaiveDate {
-    chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive()
+    gmed_server::app_time::today()
 }
 
 async fn appointment_status(pool: &PgPool, appointment_id: Uuid) -> String {

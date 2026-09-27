@@ -132,7 +132,7 @@ async fn record_payment(app: &axum::Router, bearer: &str, invoice_id: &str, amou
             "amount_gross": amount,
             "payment_method": "bank_transfer",
             "payment_reference": "TERMINATION-TEST",
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -178,7 +178,7 @@ async fn contract_termination_stops_open_orders_and_settles_what_accrued() {
         Some(json!({
             "patient_id": patient_id,
             "status": "signed",
-            "valid_from": chrono::Utc::now().date_naive().to_string(),
+            "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -681,7 +681,7 @@ async fn terminating_a_contract_without_activity_closes_the_empty_settlement() {
         Some(json!({
             "patient_id": patient_id,
             "status": "signed",
-            "valid_from": chrono::Utc::now().date_naive().to_string(),
+            "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -758,7 +758,7 @@ async fn contract_termination_leaves_completed_orders_untouched() {
         Some(json!({
             "patient_id": patient_id,
             "status": "signed",
-            "valid_from": chrono::Utc::now().date_naive().to_string(),
+            "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -930,7 +930,7 @@ async fn contract_termination_detaches_unconfirmed_drafts_without_settling_them(
         Some(json!({
             "patient_id": patient_id,
             "status": "signed",
-            "valid_from": chrono::Utc::now().date_naive().to_string(),
+            "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -1110,7 +1110,7 @@ async fn termination_settlement_matches_legacy_invoice_lines_and_the_patient_bal
         Some(json!({
             "patient_id": patient_id,
             "status": "signed",
-            "valid_from": chrono::Utc::now().date_naive().to_string(),
+            "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -1337,7 +1337,7 @@ async fn termination_settlement_matches_legacy_invoice_lines_and_the_patient_bal
             "request_id": Uuid::new_v4(),
             "lines": [{ "line_index": 0, "amount_gross": "100" }],
             "reason": "Goodwill",
-            "issued_on": chrono::Utc::now().date_naive().to_string(),
+            "issued_on": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;

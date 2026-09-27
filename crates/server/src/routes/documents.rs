@@ -5949,7 +5949,7 @@ fn default_generated_document_name(
     };
     format!(
         "{base} · {patient_name} · {}",
-        generated_at.format("%Y-%m-%d")
+        crate::app_time::local(generated_at).format("%Y-%m-%d")
     )
 }
 
@@ -5981,7 +5981,7 @@ fn generated_typed_document_number(
         .to_ascii_uppercase();
     Some(format!(
         "{prefix}-{}-{suffix}",
-        generated_at.format("%Y%m%d")
+        crate::app_time::local(generated_at).format("%Y%m%d")
     ))
 }
 
@@ -5989,7 +5989,7 @@ fn generated_cost_estimate_document_number(
     generated_at: chrono::DateTime<chrono::Utc>,
     sequence: i64,
 ) -> String {
-    format!("VKS-{}-{sequence:04}", generated_at.format("%Y%m%d"))
+    format!("VKS-{}-{sequence:04}", crate::app_time::local(generated_at).format("%Y%m%d"))
 }
 
 fn generated_document_number_for_template(
@@ -6216,7 +6216,7 @@ fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String 
         title = escape_html(&title),
         draft_badge = escape_html(translated_label(&context.language, "draft_badge")),
         created_on = escape_html(translated_label(&context.language, "created_on")),
-        created_value = escape_html(&context.generated_at.format("%d.%m.%Y").to_string()),
+        created_value = escape_html(&crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()),
         patient_id_label = escape_html(translated_label(&context.language, "patient_id")),
         patient_pid = escape_html(&context.patient_pid),
         birth_date_label = escape_html(translated_label(&context.language, "birth_date")),
@@ -6297,7 +6297,7 @@ fn build_treatment_plan_pdf(
         &format!(
             "{}: {}",
             translated_label(&context.language, "created_on"),
-            context.generated_at.format("%d.%m.%Y")
+            crate::app_time::local(context.generated_at).format("%d.%m.%Y")
         ),
         11.0,
         false,
@@ -6853,7 +6853,7 @@ fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) ->
         title = escape_html(&title),
         draft_badge = escape_html(translated_label(&context.language, "draft_badge")),
         created_on = escape_html(translated_label(&context.language, "created_on")),
-        created_value = escape_html(&context.generated_at.format("%d.%m.%Y").to_string()),
+        created_value = escape_html(&crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()),
         patient_id_label = escape_html(translated_label(&context.language, "patient_id")),
         patient_pid = escape_html(&context.patient_pid),
         birth_date_label = escape_html(translated_label(&context.language, "birth_date")),
@@ -6928,7 +6928,7 @@ fn build_medication_summary_pdf(
         &format!(
             "{}: {}",
             translated_label(&context.language, "created_on"),
-            context.generated_at.format("%d.%m.%Y")
+            crate::app_time::local(context.generated_at).format("%d.%m.%Y")
         ),
         11.0,
         false,
@@ -7556,7 +7556,7 @@ fn build_framework_contract_html(context: &GeneratedFrameworkContractContext) ->
         title = escape_html(&title),
         draft_badge = escape_html(translated_label(&context.language, "draft_badge")),
         created_on = escape_html(translated_label(&context.language, "created_on")),
-        created_value = escape_html(&context.generated_at.format("%d.%m.%Y").to_string()),
+        created_value = escape_html(&crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()),
         patient_id_label = escape_html(translated_label(&context.language, "patient_id")),
         patient_pid = escape_html(&context.patient_pid),
         birth_date_label = escape_html(translated_label(&context.language, "birth_date")),
@@ -8533,7 +8533,7 @@ fn build_visa_invitation_html(context: &GeneratedVisaInvitationContext) -> Strin
         title = escape_html(&title),
         draft_badge = escape_html(translated_label(&context.language, "draft_badge")),
         created_on = escape_html(translated_label(&context.language, "created_on")),
-        created_value = escape_html(&context.generated_at.format("%d.%m.%Y").to_string()),
+        created_value = escape_html(&crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()),
         patient_id_label = escape_html(translated_label(&context.language, "patient_id")),
         patient_pid = escape_html(&context.patient_pid),
         birth_date_label = escape_html(translated_label(&context.language, "birth_date")),
@@ -8640,7 +8640,7 @@ fn build_visa_invitation_pdf(
         format!(
             "{}: {}",
             translated_label(&context.language, "created_on"),
-            context.generated_at.format("%d.%m.%Y")
+            crate::app_time::local(context.generated_at).format("%d.%m.%Y")
         ),
         format!(
             "{}: {}",
@@ -9236,7 +9236,7 @@ fn build_provider_template_html(context: &GeneratedProviderTemplateContext) -> S
         footer = escape_html(&format!(
             "{} {}",
             translated_provider_template_label(&context.language, "generated_on"),
-            context.generated_at.format("%d.%m.%Y %H:%M")
+            crate::app_time::local(context.generated_at).format("%d.%m.%Y %H:%M")
         )),
     )
 }
@@ -12529,7 +12529,7 @@ async fn generate_provider_document_from_template_internal(
     );
     replacements.insert("location", appointment_location.clone().unwrap_or_default());
     replacements.insert("order_number", order_number.clone().unwrap_or_default());
-    replacements.insert("today", chrono::Utc::now().date_naive().to_string());
+    replacements.insert("today", crate::app_time::today().to_string());
 
     let rendered_body = apply_provider_template_placeholders(template_body, &replacements);
     let generated_at = chrono::Utc::now();
@@ -12546,7 +12546,7 @@ async fn generate_provider_document_from_template_internal(
                 "{} · {} · {}",
                 template.default_auto_name,
                 patient_name,
-                generated_at.format("%Y-%m-%d")
+                crate::app_time::local(generated_at).format("%Y-%m-%d")
             )
         });
     let manual_text = normalize_generated_manual_text(body.manual_text.as_deref())?;
@@ -12694,7 +12694,7 @@ async fn generate_provider_document_from_template_internal(
         )),
         document_date: metadata
             .document_date
-            .or_else(|| Some(chrono::Utc::now().date_naive())),
+            .or_else(|| Some(crate::app_time::today())),
         source_person: metadata.source_person.as_deref(),
         source_institution: metadata
             .source_institution
@@ -13607,7 +13607,7 @@ async fn generate_document(
                 .map(|row| GeneratedAppointmentLine {
                     date: row
                         .try_get::<NaiveDate, _>("date")
-                        .unwrap_or_else(|_| chrono::Utc::now().date_naive()),
+                        .unwrap_or_else(|_| crate::app_time::today()),
                     time_start: row
                         .try_get::<Option<NaiveTime>, _>("time_start")
                         .unwrap_or_default(),
@@ -14127,7 +14127,7 @@ async fn generate_document(
                 sign_date: bindings
                     .sign_date
                     .or(body.document_date)
-                    .or_else(|| Some(generated_at.date_naive())),
+                    .or_else(|| Some(crate::app_time::date_of(generated_at))),
                 provider_name: appointment_context.as_ref().and_then(|row| {
                     row.try_get::<Option<String>, _>("provider_name")
                         .ok()
@@ -14563,7 +14563,7 @@ async fn generate_document(
                     .sign_date
                     .or(bindings.order_date)
                     .or(body.document_date)
-                    .or_else(|| Some(generated_at.date_naive())),
+                    .or_else(|| Some(crate::app_time::date_of(generated_at))),
                 line_items,
                 total_range,
                 agency: cost_estimate_agency,
@@ -14634,7 +14634,7 @@ async fn generate_document(
                 sign_date: bindings
                     .sign_date
                     .or(body.document_date)
-                    .or_else(|| Some(generated_at.date_naive())),
+                    .or_else(|| Some(crate::app_time::date_of(generated_at))),
                 generated_at,
             };
             let preview = admin_preview_html(
@@ -14956,7 +14956,7 @@ async fn generate_document(
         )),
         document_date: metadata
             .document_date
-            .or_else(|| Some(chrono::Utc::now().date_naive())),
+            .or_else(|| Some(crate::app_time::today())),
         source_person: metadata.source_person.as_deref(),
         source_institution: metadata.source_institution.as_deref().or(body
             .klinik
@@ -17351,7 +17351,7 @@ fn build_appointment_confirmation_pdf(
     let meta_date = if context.sign_date.is_some() {
         fmt_de_date(context.sign_date)
     } else {
-        context.generated_at.format("%d.%m.%Y").to_string()
+        crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()
     };
     let meta_doc_id = context
         .doc_id
@@ -22478,7 +22478,7 @@ async fn render_document_translation_pdf(
             is_medical,
             "internal",
         )),
-        document_date: Some(chrono::Utc::now().date_naive()),
+        document_date: Some(crate::app_time::today()),
         source_person: Some("document_translation"),
         source_institution: None,
         addressee_person: None,
@@ -22666,7 +22666,7 @@ async fn create_translated_document_from_translation(
             is_medical,
             "internal",
         )),
-        document_date: Some(chrono::Utc::now().date_naive()),
+        document_date: Some(crate::app_time::today()),
         source_person: Some("document_translation"),
         source_institution: None,
         addressee_person: None,
@@ -22868,7 +22868,7 @@ async fn create_translated_document_from_request(
             is_medical,
             "internal",
         )),
-        document_date: Some(chrono::Utc::now().date_naive()),
+        document_date: Some(crate::app_time::today()),
         source_person: Some("translation_request"),
         source_institution: None,
         addressee_person: None,
@@ -23417,7 +23417,7 @@ async fn upload_my_document(
                 "internal",
             )
         }),
-        document_date: Some(chrono::Utc::now().date_naive()),
+        document_date: Some(crate::app_time::today()),
         source_person: Some("patient_portal"),
         source_institution: None,
         addressee_person: None,
@@ -24201,7 +24201,7 @@ async fn upload_document_with_mode(
                 resolved_is_medical,
                 visibility.as_str(),
             ))),
-        document_date: document_date.or_else(|| Some(chrono::Utc::now().date_naive())),
+        document_date: document_date.or_else(|| Some(crate::app_time::today())),
         source_person: if manual_intake {
             source_person.as_deref()
         } else {

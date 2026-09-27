@@ -1903,7 +1903,7 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
             "amount_gross": "100",
             "payment_method": "bank_transfer",
             "payment_reference": "ADVANCE-SUPERSEDE",
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -2231,7 +2231,7 @@ async fn invoices_are_numbered_on_release_and_stay_released() {
     assert!(first["invoice_number"].is_null());
 
     // Due date before the invoice date: refused, and no number is consumed.
-    let yesterday = (chrono::Utc::now().date_naive() - chrono::Duration::days(1)).to_string();
+    let yesterday = (gmed_server::app_time::today() - chrono::Duration::days(1)).to_string();
     let (status, body) = post_invoice_status(
         &app,
         &billing_bearer,
@@ -2325,7 +2325,7 @@ async fn invoices_are_numbered_on_release_and_stay_released() {
     // The next release takes the next number: the cancelled draft left no gap.
     let second = create_draft_invoice(&app, &billing_bearer, quote_id).await;
     let second_id = second["id"].as_str().unwrap().to_string();
-    let due = (chrono::Utc::now().date_naive() + chrono::Duration::days(7)).to_string();
+    let due = (gmed_server::app_time::today() + chrono::Duration::days(7)).to_string();
     let (status, second_released) = post_invoice_status(
         &app,
         &billing_bearer,
@@ -2420,7 +2420,7 @@ async fn draft_invoice_offers_no_advance_and_is_dated_on_release() {
             "request_id": Uuid::new_v4(),
             "amount_gross": "50",
             "payment_method": "bank_transfer",
-            "received_on": chrono::Utc::now().date_naive().to_string(),
+            "received_on": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
@@ -3128,7 +3128,7 @@ async fn paid_invoice_and_external_invoice_materialize_accounting_ledger_without
             "request_id": Uuid::new_v4(),
             "financial_account_id": provider_payment_account_id,
             "amount_gross": "60.00",
-            "paid_on": chrono::Utc::now().date_naive().to_string(),
+            "paid_on": gmed_server::app_time::today().to_string(),
             "payment_method": "bank_transfer",
             "reference": "Clinic bill settlement"
         })),
@@ -3847,9 +3847,7 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
     .await;
     assert_eq!(status, StatusCode::OK, "{reminder}");
     let reminder_id = reminder["id"].as_str().unwrap().to_string();
-    let today = chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive();
+    let today = gmed_server::app_time::today();
     assert_eq!(
         reminder["payment_due_date"],
         (today + chrono::Duration::days(14)).to_string()

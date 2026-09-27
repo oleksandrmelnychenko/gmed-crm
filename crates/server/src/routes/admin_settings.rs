@@ -299,7 +299,7 @@ fn parse_activity_date_start(
     let Some(naive) = date.and_hms_opt(0, 0, 0) else {
         return Err("Invalid activity date");
     };
-    Ok(Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc)))
+    Ok(Some(crate::app_time::from_local(naive)))
 }
 
 fn parse_activity_date_to_exclusive(
@@ -321,7 +321,7 @@ fn parse_activity_date_to_exclusive(
     let Some(naive) = next_day.and_hms_opt(0, 0, 0) else {
         return Err("Invalid activity date");
     };
-    Ok(Some(DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc)))
+    Ok(Some(crate::app_time::from_local(naive)))
 }
 
 async fn list_activity(

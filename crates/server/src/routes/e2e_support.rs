@@ -771,7 +771,7 @@ async fn create_recurring_appointment_series(
 ) -> Result<SeededRecurringAppointment, String> {
     let series_id = Uuid::new_v4();
     let title = format!("Recurring therapy {tag}");
-    let first_date = (Utc::now() + Duration::days(14)).date_naive();
+    let first_date = crate::app_time::today() + Duration::days(14);
     let recurrence_count = 3_i32;
 
     for recurrence_index in 0..recurrence_count {

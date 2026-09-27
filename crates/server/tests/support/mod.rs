@@ -251,8 +251,8 @@ async fn connect_pool(
     database_name: &str,
     max_connections: u32,
 ) -> Result<PgPool, sqlx::Error> {
-    let connect_options =
-        PgConnectOptions::from_str(database_url).map(|options| options.database(database_name));
+    let connect_options = PgConnectOptions::from_str(database_url)
+        .map(|options| gmed_db::with_session_settings(options.database(database_name)));
 
     PgPoolOptions::new()
         .max_connections(max_connections)

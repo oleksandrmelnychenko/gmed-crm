@@ -553,7 +553,7 @@ async fn load_doctor_linked_patients_map(
                        COUNT(*)::bigint AS appointment_count,
                        0::bigint AS leistung_count,
                        0::bigint AS concierge_count,
-                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'UTC') AS last_interaction_at
+                       MAX((a.date::timestamp + COALESCE(a.time_start, TIME '00:00')) AT TIME ZONE 'Europe/Berlin') AS last_interaction_at
                 FROM requested r
                 JOIN appointments a
                   ON a.provider_id = r.provider_id

@@ -127,9 +127,9 @@ async fn insert_order_appointment(
     status: &str,
 ) {
     let date = match checklist_phase {
-        "execution" => Utc::now().date_naive() + Duration::days(10),
-        "followup" => Utc::now().date_naive() + Duration::days(20),
-        _ => Utc::now().date_naive(),
+        "execution" => gmed_server::app_time::today() + Duration::days(10),
+        "followup" => gmed_server::app_time::today() + Duration::days(20),
+        _ => gmed_server::app_time::today(),
     };
     sqlx::query(
         r#"INSERT INTO appointments (
@@ -183,7 +183,7 @@ async fn insert_order_appointment_with_context(
             }
         }
     };
-    let date = Utc::now().date_naive() + Duration::days(phase_offset + type_offset);
+    let date = gmed_server::app_time::today() + Duration::days(phase_offset + type_offset);
     sqlx::query(
         r#"INSERT INTO appointments (
                 patient_id, order_id, appointment_type, title, date,

@@ -273,19 +273,19 @@ async fn create_my_privacy_request(
     let notification_body = match request_type.as_str() {
         "restriction" => format!(
             "The patient submitted a processing restriction request. Due by {}.",
-            due_at.format("%Y-%m-%d")
+            crate::app_time::local(due_at).format("%Y-%m-%d")
         ),
         "third_party_revoke" => format!(
             "The patient requested revocation of third-party sharing consents. Due by {}.",
-            due_at.format("%Y-%m-%d")
+            crate::app_time::local(due_at).format("%Y-%m-%d")
         ),
         "erasure" => format!(
             "The patient submitted an erasure request. Due by {}.",
-            due_at.format("%Y-%m-%d")
+            crate::app_time::local(due_at).format("%Y-%m-%d")
         ),
         other => format!(
             "The patient submitted a data subject request ({other}). Due by {}.",
-            due_at.format("%Y-%m-%d")
+            crate::app_time::local(due_at).format("%Y-%m-%d")
         ),
     };
 

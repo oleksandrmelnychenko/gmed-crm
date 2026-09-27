@@ -465,7 +465,7 @@ async fn create_company_financial_account(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if opening_balance_on > Utc::now().date_naive() {
+    if opening_balance_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Opening balance date cannot be in the future",
@@ -615,7 +615,7 @@ async fn update_company_financial_account(
     };
     let opening_balance_on = match body.opening_balance_on.as_deref() {
         Some(value) => match parse_date(value, "opening_balance_on") {
-            Ok(value) if value <= Utc::now().date_naive() => Some(value),
+            Ok(value) if value <= crate::app_time::today() => Some(value),
             Ok(_) => {
                 return err(
                     StatusCode::UNPROCESSABLE_ENTITY,
@@ -815,7 +815,7 @@ async fn create_company_financial_account_adjustment(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if effective_on > Utc::now().date_naive() {
+    if effective_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Adjustment date cannot be in the future",
@@ -962,7 +962,7 @@ async fn reverse_company_financial_account_adjustment(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
     };
-    if effective_on > Utc::now().date_naive() {
+    if effective_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Reversal date cannot be in the future",

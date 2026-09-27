@@ -1433,7 +1433,7 @@ pub async fn sync_external_invoice_accounting_entries_from_current_state(
 
     let delta_vat = proportional_share(delta_gross, context.amount_vat, context.amount_gross);
     let delta_net = delta_gross - delta_vat;
-    let entry_date = context.paid_at.unwrap_or_else(Utc::now).date_naive();
+    let entry_date = crate::app_time::date_of(context.paid_at.unwrap_or_else(Utc::now));
 
     insert_accounting_entry(
         state,
@@ -1559,7 +1559,7 @@ async fn load_auto_dunning_candidates(
             status: row.try_get::<String, _>("status").unwrap_or_default(),
             due_date: row
                 .try_get::<NaiveDate, _>("due_date")
-                .unwrap_or_else(|_| Utc::now().date_naive()),
+                .unwrap_or_else(|_| crate::app_time::today()),
             total_gross: row
                 .try_get::<Decimal, _>("total_gross")
                 .unwrap_or(Decimal::ZERO),
@@ -1612,14 +1612,14 @@ fn next_auto_dunning_level(
 
     let first_sent_at = candidate.first_sent_at?;
     if candidate.second_sent_at.is_none()
-        && first_sent_at.date_naive() <= today - chrono::Duration::days(second_delay_days)
+        && crate::app_time::date_of(first_sent_at) <= today - chrono::Duration::days(second_delay_days)
     {
         return Some("second");
     }
 
     let second_sent_at = candidate.second_sent_at?;
     if candidate.collections_sent_at.is_none()
-        && second_sent_at.date_naive() <= today - chrono::Duration::days(collections_delay_days)
+        && crate::app_time::date_of(second_sent_at) <= today - chrono::Duration::days(collections_delay_days)
     {
         return Some("collections");
     }
@@ -1656,7 +1656,7 @@ async fn load_auto_dunning_delay_days(state: &AppState) -> Result<(i64, i64), sq
 pub async fn run_auto_dunning_scheduler_once(
     state: &AppState,
 ) -> Result<AutoDunningRunSummary, sqlx::Error> {
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let automation_actor_user_id = resolve_auto_dunning_actor_user_id(state).await?;
     let (second_delay_days, collections_delay_days) = load_auto_dunning_delay_days(state).await?;
     let mut summary = AutoDunningRunSummary::default();
@@ -2941,7 +2941,7 @@ async fn sync_reimbursed_financial_documents_for_paid_invoice(
         .unwrap_or_else(|_| serde_json::json!([]));
     let direct_document_ids = extract_external_document_ids(&line_items);
     let source_line_ids = extract_source_line_ids(&line_items);
-    let payment_date = paid_at.date_naive();
+    let payment_date = crate::app_time::date_of(paid_at);
 
     let updated_rows = sqlx::query(
         r#"WITH explicit_documents AS (
@@ -5387,7 +5387,7 @@ async fn get_accounting_ledger(
     for row in rows {
         let entry_date: NaiveDate = row
             .try_get("entry_date")
-            .unwrap_or_else(|_| Utc::now().date_naive());
+            .unwrap_or_else(|_| crate::app_time::today());
         let direction: String = row.try_get("direction").unwrap_or_default();
         let category: String = row.try_get("category").unwrap_or_default();
         let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
@@ -5559,7 +5559,7 @@ async fn export_accounting_ledger(
         .join(" ");
         let entry_date: NaiveDate = row
             .try_get("entry_date")
-            .unwrap_or_else(|_| Utc::now().date_naive());
+            .unwrap_or_else(|_| crate::app_time::today());
         let amount_net: Decimal = row.try_get("amount_net").unwrap_or(Decimal::ZERO);
         let amount_vat: Decimal = row.try_get("amount_vat").unwrap_or(Decimal::ZERO);
         let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
@@ -7930,7 +7930,7 @@ async fn create_invoice_payment(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
     }
     let received_on = match parse_optional_date(Some(body.received_on.as_str())) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => {
             return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date");
         }
@@ -8329,8 +8329,8 @@ async fn reverse_invoice_payment(
         }
     };
     let reversed_on = match parse_optional_date(body.reversed_on.as_deref()) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
@@ -8637,7 +8637,7 @@ async fn correct_invoice_payment(
     if !is_valid_invoice_payment_method(payment_method) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
     }
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let received_on = match parse_optional_date(Some(body.received_on.as_str())) {
         Ok(Some(value)) if value <= today => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment date"),
@@ -9080,7 +9080,7 @@ async fn create_invoice_credit_note(
         }
     };
     let issued_on = match parse_optional_date(Some(body.issued_on.as_str())) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid credit-note date"),
     };
     let selection = match body.selection() {
@@ -9181,7 +9181,7 @@ async fn create_invoice_credit_note(
     if issued_on
         < row
             .try_get::<DateTime<Utc>, _>("issued_at")
-            .map(|value| value.date_naive())
+            .map(crate::app_time::date_of)
             .unwrap_or(issued_on)
     {
         return err(
@@ -9452,8 +9452,8 @@ async fn reverse_invoice_credit_note(
         }
     };
     let issued_on = match parse_optional_date(body.issued_on.as_deref()) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
@@ -9876,7 +9876,7 @@ async fn create_invoice_refund(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund method");
     }
     let refunded_on = match parse_optional_date(Some(body.refunded_on.as_str())) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund date"),
     };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
@@ -10178,8 +10178,8 @@ async fn reverse_invoice_refund(
         }
     };
     let reversed_on = match parse_optional_date(body.reversed_on.as_deref()) {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
     let patient_id = match sqlx::query_scalar::<_, Uuid>(
@@ -11041,7 +11041,7 @@ async fn create_dunning_event(
         );
     }
 
-    let today = Utc::now().date_naive();
+    let today = crate::app_time::today();
     let Some(due_date) = ctx.due_date else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -11932,7 +11932,7 @@ async fn update_invoice_status(
         let effective_due_date = due_date.or(locked_invoice
             .try_get::<Option<NaiveDate>, _>("due_date")
             .unwrap_or_default());
-        if effective_due_date.is_some_and(|value| value >= Utc::now().date_naive()) {
+        if effective_due_date.is_some_and(|value| value >= crate::app_time::today()) {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Invoice is not past its due date",
@@ -12097,7 +12097,7 @@ async fn update_invoice_status(
             payment_delta,
             "legacy_import",
             Some("legacy-status-api"),
-            Utc::now().date_naive(),
+            crate::app_time::today(),
             auth.user_id,
         )
         .await

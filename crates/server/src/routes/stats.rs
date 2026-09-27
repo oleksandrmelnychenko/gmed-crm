@@ -2575,7 +2575,7 @@ async fn load_report_clinics(
                                    EPOCH FROM (
                                        MIN(d.created_at) - (
                                            (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                           AT TIME ZONE 'UTC'
+                                           AT TIME ZONE 'Europe/Berlin'
                                        )
                                    )
                                ) / 3600.0 AS turnaround_hours
@@ -2586,7 +2586,7 @@ async fn load_report_clinics(
                           AND d.status IN ('active', 'archived')
                           AND d.created_at >= (
                                 (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                AT TIME ZONE 'UTC'
+                                AT TIME ZONE 'Europe/Berlin'
                           )
                         GROUP BY a.id, a.date, a.time_start, a.time_end
                     ) item
@@ -2602,7 +2602,7 @@ async fn load_report_clinics(
                           AND d.status IN ('active', 'archived')
                           AND d.created_at >= (
                                 (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                AT TIME ZONE 'UTC'
+                                AT TIME ZONE 'Europe/Berlin'
                           )
                         GROUP BY a.id
                     ) item
@@ -3000,7 +3000,7 @@ async fn load_report_medical_providers(
                         UNION ALL
                         SELECT
                             (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                AT TIME ZONE 'UTC' AS activity_at
+                                AT TIME ZONE 'Europe/Berlin' AS activity_at
                         FROM appointments a
                         WHERE a.provider_id = p.id
                           AND a.status <> 'cancelled'
@@ -3526,7 +3526,7 @@ async fn load_report_doctors(
                                    EPOCH FROM (
                                        MIN(d.created_at) - (
                                            (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                           AT TIME ZONE 'UTC'
+                                           AT TIME ZONE 'Europe/Berlin'
                                        )
                                    )
                                ) / 3600.0 AS turnaround_hours
@@ -3537,7 +3537,7 @@ async fn load_report_doctors(
                           AND d.status IN ('active', 'archived')
                           AND d.created_at >= (
                                 (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                AT TIME ZONE 'UTC'
+                                AT TIME ZONE 'Europe/Berlin'
                           )
                         GROUP BY a.id, a.date, a.time_start, a.time_end
                     ) item
@@ -3553,7 +3553,7 @@ async fn load_report_doctors(
                           AND d.status IN ('active', 'archived')
                           AND d.created_at >= (
                                 (a.date::timestamp + COALESCE(a.time_end, a.time_start, TIME '00:00'))
-                                AT TIME ZONE 'UTC'
+                                AT TIME ZONE 'Europe/Berlin'
                           )
                         GROUP BY a.id
                     ) item

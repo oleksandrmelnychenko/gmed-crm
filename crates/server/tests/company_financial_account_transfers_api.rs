@@ -162,7 +162,7 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
         "source_account_id": source_account_id,
         "target_account_id": target_account_id,
         "amount": "30.00",
-        "effective_on": chrono::Utc::now().date_naive().to_string(),
+        "effective_on": gmed_server::app_time::today().to_string(),
         "reference": "Cash replenishment",
         "note": "Internal transfer test"
     });
@@ -187,7 +187,7 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
             "source_account_id": source_account_id,
             "target_account_id": usd_account_id,
             "amount": "30.00",
-            "effective_on": chrono::Utc::now().date_naive().to_string()
+            "effective_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -256,7 +256,7 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
         format!("/api/v1/company-financial-account-transfers/{transfer_id}/reversal");
     let reversal_body = json!({
         "request_id": Uuid::new_v4(),
-        "effective_on": chrono::Utc::now().date_naive().to_string(),
+        "effective_on": gmed_server::app_time::today().to_string(),
         "reference": "Transfer correction"
     });
     let (reverse_status, reversed) = request_json(

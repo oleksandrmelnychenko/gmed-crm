@@ -100,7 +100,7 @@ fn is_minor(date_of_birth: Option<NaiveDate>) -> bool {
     let Some(date_of_birth) = date_of_birth else {
         return false;
     };
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::app_time::today();
     let mut age = today.year() - date_of_birth.year();
     if (today.month(), today.day()) < (date_of_birth.month(), date_of_birth.day()) {
         age -= 1;

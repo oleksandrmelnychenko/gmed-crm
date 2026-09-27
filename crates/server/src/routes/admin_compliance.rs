@@ -3264,7 +3264,7 @@ fn resolve_consent_expires_at(
                         "Consent expiry date is invalid",
                     ));
                 };
-                Utc.from_utc_datetime(&naive)
+                crate::app_time::from_local(naive)
             } else {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,

@@ -390,7 +390,7 @@ async fn staff_statement_explains_invoices_advances_services_and_external_payers
             .any(|item| item["order_id"] == usd_order_id.to_string())
     );
 
-    let tomorrow = (chrono::Utc::now().date_naive() + chrono::Duration::days(1)).to_string();
+    let tomorrow = (gmed_server::app_time::today() + chrono::Duration::days(1)).to_string();
     let (period_status, period_statement) = request_json(
         &app,
         &format!("/api/v1/patients/{patient_id}/account-statement?from={tomorrow}"),

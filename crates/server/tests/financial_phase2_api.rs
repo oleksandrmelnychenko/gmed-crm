@@ -662,7 +662,7 @@ async fn clinic_expense_payer_controls_receivable_liability_and_cash_ledger() {
                     "request_id": Uuid::new_v4(),
                     "financial_account_id": account_id,
                     "amount_gross": amount.to_string(),
-                    "paid_on": chrono::Utc::now().date_naive(),
+                    "paid_on": gmed_server::app_time::today(),
                     "payment_method": "bank_transfer"
                 })),
             )

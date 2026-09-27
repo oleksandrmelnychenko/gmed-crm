@@ -138,7 +138,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
         "request_id": request_id,
         "amount_gross": 40,
         "reason": "Contracted service was not required",
-        "issued_on": chrono::Utc::now().date_naive().to_string(),
+        "issued_on": gmed_server::app_time::today().to_string(),
         "portal_visible": true
     });
 
@@ -199,7 +199,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
             "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "reason": "Forbidden",
-            "issued_on": chrono::Utc::now().date_naive().to_string()
+            "issued_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -253,7 +253,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
         summary["breakdown_by_service_type"][0]["revenue_gross"],
         "60"
     );
-    let cutoff = chrono::Utc::now().date_naive() - chrono::Duration::days(1);
+    let cutoff = gmed_server::app_time::today() - chrono::Duration::days(1);
     let (status, before_credit) = request_json(
         &ctx.app,
         "GET",
@@ -288,7 +288,7 @@ async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balance
             "amount_gross": 40,
             "payment_method": "bank_transfer",
             "payment_reference": format!("PAY-{tag}"),
-            "received_on": chrono::Utc::now().date_naive().to_string()
+            "received_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -332,7 +332,7 @@ async fn credit_note_guards_dates_allocations_and_cancelled_reactivation() {
             "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "reason": "Impossible chronology",
-            "issued_on": (chrono::Utc::now().date_naive() - chrono::Duration::days(10)).to_string()
+            "issued_on": (gmed_server::app_time::today() - chrono::Duration::days(10)).to_string()
         })),
     )
     .await;
@@ -384,7 +384,7 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
             "request_id": Uuid::new_v4(),
             "amount_gross": 80,
             "reason": "Reduced scope",
-            "issued_on": chrono::Utc::now().date_naive().to_string()
+            "issued_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -445,7 +445,7 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
             "request_id": Uuid::new_v4(),
             "amount_gross": 1,
             "reason": "Would undercut reconciliation",
-            "issued_on": chrono::Utc::now().date_naive().to_string()
+            "issued_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
@@ -516,7 +516,7 @@ async fn credit_note_requires_prepayment_allocations_to_be_released_first() {
                 "request_id": Uuid::new_v4(),
                 "amount_gross": 50,
                 "reason": "Would undercut applied prepayment",
-                "issued_on": chrono::Utc::now().date_naive().to_string()
+                "issued_on": gmed_server::app_time::today().to_string()
             })),
         )
         .await;
@@ -544,7 +544,7 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
 
     let ceo = auth_header(ctx.admin_id, "ceo");
     let patient = auth_header(patient_user_id, "patient");
-    let today = chrono::Utc::now().date_naive().to_string();
+    let today = gmed_server::app_time::today().to_string();
 
     let (status, payment) = request_json(
         &ctx.app,
@@ -884,7 +884,7 @@ async fn line_credit_notes_follow_line_vat_split_cash_accounting_and_print_a_doc
     .unwrap();
     let ceo = auth_header(ctx.admin_id, "ceo");
     let patient = auth_header(patient_user_id, "patient");
-    let today = chrono::Utc::now().date_naive().to_string();
+    let today = gmed_server::app_time::today().to_string();
 
     let (status, detail) = request_json(
         &ctx.app,

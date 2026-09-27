@@ -226,8 +226,8 @@ pub(crate) async fn load_credit_transfer_targets(
 
 fn transfer_date(value: Option<&str>) -> Result<NaiveDate, &'static str> {
     match parse_optional_date(value) {
-        Ok(Some(date)) if date <= Utc::now().date_naive() => Ok(date),
-        Ok(None) => Ok(Utc::now().date_naive()),
+        Ok(Some(date)) if date <= crate::app_time::today() => Ok(date),
+        Ok(None) => Ok(crate::app_time::today()),
         _ => Err("Invalid transfer date"),
     }
 }

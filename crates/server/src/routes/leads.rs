@@ -1105,7 +1105,7 @@ async fn validate_lead_contact_identity(
             let owner_guardians: Value =
                 conflict.try_get("guardians").unwrap_or_else(|_| json!([]));
             let candidate_name = normalized_person_name(candidate.first_name, candidate.last_name);
-            let today = chrono::Utc::now().date_naive();
+            let today = crate::app_time::today();
             let candidate_is_minor = is_minor_on(candidate.date_of_birth, today);
             let owner_is_minor = is_minor_on(owner_birth_date, today);
             let guardian_exception = (candidate_is_minor

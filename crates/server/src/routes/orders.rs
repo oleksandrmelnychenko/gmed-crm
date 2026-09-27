@@ -467,7 +467,7 @@ fn parse_optional_invoice_date(
     value: Option<&str>,
 ) -> Result<Option<chrono::NaiveDate>, axum::response::Response> {
     let parsed = parse_optional_order_date(value)?;
-    if parsed.is_some_and(|date| date > chrono::Utc::now().date_naive()) {
+    if parsed.is_some_and(|date| date > crate::app_time::today()) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Invoice date cannot be in the future",
@@ -8407,7 +8407,7 @@ async fn add_leistung(
                 row.try_get::<String, _>("currency")
                     .unwrap_or_else(|_| "EUR".to_string()),
                 row.try_get::<chrono::NaiveDate, _>("effective_price_date")
-                    .unwrap_or_else(|_| chrono::Utc::now().date_naive()),
+                    .unwrap_or_else(|_| crate::app_time::today()),
             ),
             Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
             Err(error) => {
@@ -9567,7 +9567,7 @@ async fn resolve_external_invoice_notification_recipients(
 pub async fn run_external_invoice_deadline_scheduler_once(
     state: &AppState,
 ) -> Result<ExternalInvoiceDeadlineRunSummary, sqlx::Error> {
-    let today = chrono::Utc::now().date_naive();
+    let today = crate::app_time::today();
     let mut summary = ExternalInvoiceDeadlineRunSummary::default();
     let recipients = resolve_external_invoice_notification_recipients(state).await?;
 

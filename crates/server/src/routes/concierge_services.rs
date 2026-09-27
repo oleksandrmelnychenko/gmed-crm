@@ -4679,11 +4679,11 @@ async fn load_non_medical_appointment_context(
                   appointment_type,
                   CASE
                       WHEN time_start IS NULL THEN NULL
-                      ELSE (date::timestamp + time_start) AT TIME ZONE 'UTC'
+                      ELSE (date::timestamp + time_start) AT TIME ZONE 'Europe/Berlin'
                   END AS starts_at,
                   CASE
                       WHEN time_end IS NULL THEN NULL
-                      ELSE (date::timestamp + time_end) AT TIME ZONE 'UTC'
+                      ELSE (date::timestamp + time_end) AT TIME ZONE 'Europe/Berlin'
                   END AS ends_at
            FROM appointments
            WHERE id = $1"#,

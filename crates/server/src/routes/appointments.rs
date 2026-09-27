@@ -8762,9 +8762,7 @@ async fn insert_task_record(
 }
 
 fn berlin_today() -> chrono::NaiveDate {
-    chrono::Utc::now()
-        .with_timezone(&chrono_tz::Europe::Berlin)
-        .date_naive()
+    crate::app_time::today()
 }
 
 /// Default lead times of the automatic concierge preparation: the concierge is
@@ -8857,28 +8855,7 @@ fn appointment_due_at(
 ) -> chrono::DateTime<chrono::Utc> {
     let default_hour = if fallback_hour < 24 { fallback_hour } else { 9 };
     let default_time = chrono::NaiveTime::from_hms_opt(default_hour, 0, 0).unwrap_or_default();
-    let local = date.and_time(time_start.unwrap_or(default_time));
-    if let Some(value) = chrono_tz::Europe::Berlin
-        .from_local_datetime(&local)
-        .earliest()
-    {
-        return value.with_timezone(&chrono::Utc);
-    }
-
-    // Spring-forward local times between 02:00 and 03:00 do not exist. Move to
-    // the first valid local instant instead of accidentally treating the value
-    // as UTC.
-    for minutes in 1..=180 {
-        let candidate = local + chrono::Duration::minutes(minutes);
-        if let Some(value) = chrono_tz::Europe::Berlin
-            .from_local_datetime(&candidate)
-            .earliest()
-        {
-            return value.with_timezone(&chrono::Utc);
-        }
-    }
-
-    unreachable!("Europe/Berlin must have a valid local instant within three hours")
+    crate::app_time::from_local(date.and_time(time_start.unwrap_or(default_time)))
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -349,7 +349,7 @@ async fn task_expense_endpoints_use_task_context_and_owner_permissions() {
         Uuid::new_v4(),
         "unpaid",
         false,
-        Utc::now().date_naive() - Duration::days(1),
+        gmed_server::app_time::today() - Duration::days(1),
     );
     let (status, created) = multipart_request(
         &context.app,
@@ -444,7 +444,7 @@ async fn legacy_service_submission_resolves_and_persists_the_linked_task() {
         Uuid::new_v4(),
         "unpaid",
         false,
-        Utc::now().date_naive() - Duration::days(1),
+        gmed_server::app_time::today() - Duration::days(1),
     );
     fields.push(("document_missing".to_string(), "true".to_string()));
 
@@ -487,7 +487,7 @@ async fn finance_can_post_and_reverse_a_task_native_expense() {
     let task_id = linked_task_id(&context.pool, service_id).await;
     let assignee = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
     let mut fields = submission_fields(Uuid::new_v4(), "patient", true, expense_date);
     fields.push(("document_missing".to_string(), "true".to_string()));
     let (status, created) = multipart_fields_request(
@@ -519,7 +519,7 @@ async fn finance_can_post_and_reverse_a_task_native_expense() {
         Some(json!({
             "request_id": Uuid::new_v4(),
             "reason": "Task settlement correction",
-            "reversed_on": Utc::now().date_naive(),
+            "reversed_on": gmed_server::app_time::today(),
         })),
     )
     .await;
@@ -541,7 +541,7 @@ async fn assigned_concierge_can_submit_expense_without_document_when_declared_mi
         Uuid::new_v4(),
         "unpaid",
         true,
-        Utc::now().date_naive() - Duration::days(1),
+        gmed_server::app_time::today() - Duration::days(1),
     );
     fields.push(("document_missing".to_string(), "true".to_string()));
 
@@ -598,7 +598,7 @@ async fn assigned_concierge_submits_private_idempotent_pending_receipt() {
     let owner = auth_header(concierge_id, "concierge");
     let other = auth_header(other_concierge_id, "concierge");
     let request_id = Uuid::new_v4();
-    let expense_date = Utc::now().date_naive() - Duration::days(2);
+    let expense_date = gmed_server::app_time::today() - Duration::days(2);
 
     let unrelated_external_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO external_invoices (
@@ -924,7 +924,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
     .unwrap();
     let concierge = auth_header(concierge_id, "concierge");
     let finance = auth_header(context.admin_id, "ceo");
-    let expense_date = Utc::now().date_naive() - Duration::days(3);
+    let expense_date = gmed_server::app_time::today() - Duration::days(3);
     let paid_on = expense_date + Duration::days(2);
 
     for (index, (paid_by, delivered, expected_receivable, expected_liability)) in [
@@ -1128,7 +1128,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 Some(json!({
                     "request_id": Uuid::new_v4(),
                     "reason": "Orderless expense lifecycle regression",
-                    "reversed_on": Utc::now().date_naive(),
+                    "reversed_on": gmed_server::app_time::today(),
                 })),
             )
             .await;
@@ -1229,7 +1229,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 Some(json!({
                     "request_id": Uuid::new_v4(),
                     "reason": "Must reverse later provider payment first",
-                    "reversed_on": Utc::now().date_naive()
+                    "reversed_on": gmed_server::app_time::today()
                 })),
             )
             .await;
@@ -1244,7 +1244,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 &finance,
                 Some(json!({
                     "request_id": Uuid::new_v4(),
-                    "paid_on": Utc::now().date_naive(),
+                    "paid_on": gmed_server::app_time::today(),
                     "note": "Settlement corrected before expense reversal"
                 })),
             )
@@ -1285,7 +1285,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 &finance,
                 Some(json!({
                     "request_id": Uuid::new_v4(),
-                    "paid_on": Utc::now().date_naive(),
+                    "paid_on": gmed_server::app_time::today(),
                     "note": "Canonical reversal before expense reversal"
                 })),
             )
@@ -1299,7 +1299,7 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 Some(json!({
                     "request_id": Uuid::new_v4(),
                     "reason": "Expense is no longer valid",
-                    "reversed_on": Utc::now().date_naive()
+                    "reversed_on": gmed_server::app_time::today()
                 })),
             )
             .await;
@@ -1340,7 +1340,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
     .unwrap();
     let concierge = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(2);
+    let expense_date = gmed_server::app_time::today() - Duration::days(2);
     let paid_on = expense_date + Duration::days(1);
 
     let (status, rejected_submission) = submit_fixture_expense(
@@ -1487,7 +1487,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": Uuid::new_v4(),
             "reason": "Patient invoice still uses this receipt",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1511,7 +1511,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": Uuid::new_v4(),
             "reason": "Allocation was released but patient invoice still charges it",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1534,7 +1534,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": reversal_request_id,
             "reason": "Card payment was voided",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1589,7 +1589,7 @@ async fn finance_rejects_or_reverses_without_losing_receipt_or_duplicating_ledge
         Some(json!({
             "request_id": reversal_request_id,
             "reason": "Card payment was voided",
-            "reversed_on": Utc::now().date_naive()
+            "reversed_on": gmed_server::app_time::today()
         })),
     )
     .await;
@@ -1640,7 +1640,7 @@ async fn receipt_upload_limit_accepts_camera_size_and_rejects_above_twenty_five_
     let (_patient_id, _provider_id, service_id, _order_id, _order_leistung_id) =
         seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
     let bearer = auth_header(concierge_id, "concierge");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
     let fields = submission_fields(Uuid::new_v4(), "patient", true, expense_date);
     let mut camera_jpeg = vec![0_u8; 3 * 1024 * 1024];
     camera_jpeg[..3].copy_from_slice(&[0xff, 0xd8, 0xff]);
@@ -1682,7 +1682,7 @@ async fn finance_review_queue_is_global_paginated_and_finance_only() {
     let billing_id = seed_user(&context.pool, "billing", &format!("queue-{tag}")).await;
     let concierge = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
 
     for index in 0..2 {
         let fixture_tag = format!("{tag}-{index}");
@@ -1810,7 +1810,7 @@ async fn receipts_of_an_appointment_task_land_on_its_order_and_gmed_paid_ones_ne
     .unwrap();
     let concierge = auth_header(concierge_id, "concierge");
     let billing = auth_header(billing_id, "billing");
-    let expense_date = Utc::now().date_naive() - Duration::days(1);
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
 
     let (status, created) = submit_fixture_expense(
         &context.app,

@@ -1220,7 +1220,7 @@ async fn submit_expense_for_scope(
         None => return err(StatusCode::UNPROCESSABLE_ENTITY, "vendor is required"),
     };
     let expense_date = match input.expense_date {
-        Some(value) if value <= Utc::now().date_naive() => value,
+        Some(value) if value <= crate::app_time::today() => value,
         Some(_) => {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -2522,7 +2522,7 @@ async fn post_expense_for_scope(
     }
     let agency_paid_on = if expense.paid_by == "agency" {
         match body.paid_on {
-            Some(value) if value >= expense.expense_date && value <= Utc::now().date_naive() => {
+            Some(value) if value >= expense.expense_date && value <= crate::app_time::today() => {
                 Some(value)
             }
             Some(_) => {
@@ -3255,7 +3255,7 @@ async fn reverse_expense_for_scope(
         Ok(value) => value,
         Err(response) => return response,
     };
-    if body.reversed_on > Utc::now().date_naive() {
+    if body.reversed_on > crate::app_time::today() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "reversed_on cannot be in the future",

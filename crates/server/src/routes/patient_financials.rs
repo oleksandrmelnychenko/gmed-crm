@@ -238,7 +238,7 @@ async fn load_open_termination_uninvoiced_movements(
         movements.push(SettlementMovement {
             id: format!("termination-uninvoiced:{order_id}"),
             kind: "termination_uninvoiced".to_string(),
-            entry_date: terminated_at.date_naive(),
+            entry_date: crate::app_time::date_of(terminated_at),
             occurred_at: terminated_at,
             order_id: Some(order_id),
             order_number: row.try_get("order_number")?,
@@ -632,7 +632,7 @@ async fn load_patient_settlement_ledger(
                 .unwrap_or_default(),
             entry_date: row
                 .try_get::<NaiveDate, _>("entry_date")
-                .unwrap_or_else(|_| Utc::now().date_naive()),
+                .unwrap_or_else(|_| crate::app_time::today()),
             occurred_at: row
                 .try_get::<DateTime<Utc>, _>("occurred_at")
                 .unwrap_or_else(|_| Utc::now()),
@@ -970,7 +970,7 @@ async fn load_patient_account_statement(
         items.push(serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "kind": if invoice_type == "advance" { "prepayment" } else { "invoice" },
-            "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("issued_at").map(|value| value.date_naive().to_string()).unwrap_or_default(),
+            "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("issued_at").map(|value| crate::app_time::date_of(value).to_string()).unwrap_or_default(),
             "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
             "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
             "document_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
@@ -1204,8 +1204,8 @@ async fn load_patient_account_statement(
                 };
             let created_at = row
                 .try_get::<chrono::DateTime<Utc>, _>("created_at")
-                .map(|value| value.date_naive())
-                .unwrap_or_else(|_| Utc::now().date_naive());
+                .map(crate::app_time::date_of)
+                .unwrap_or_else(|_| crate::app_time::today());
             let entry_date = row
                 .try_get::<Option<NaiveDate>, _>("invoice_date")
                 .unwrap_or_default()
@@ -1308,7 +1308,7 @@ async fn load_patient_account_statement(
             items.push(serde_json::json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "kind": "service",
-                "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| value.date_naive().to_string()).unwrap_or_default(),
+                "entry_date": row.try_get::<chrono::DateTime<Utc>, _>("created_at").map(|value| crate::app_time::date_of(value).to_string()).unwrap_or_default(),
                 "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
                 "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
                 "description": row.try_get::<String, _>("service_name").unwrap_or_default(),
@@ -1730,7 +1730,7 @@ async fn get_patient_financial_summary(
     let mut overdue_amount = Decimal::ZERO;
     let mut order_breakdown = Vec::new();
     let mut service_breakdown = std::collections::BTreeMap::<String, (Decimal, Decimal)>::new();
-    let as_of_date = to.unwrap_or_else(|| Utc::now().date_naive());
+    let as_of_date = to.unwrap_or_else(|| crate::app_time::today());
 
     for row in invoice_rows {
         let total_net = row
@@ -2167,7 +2167,7 @@ async fn create_patient_balance_adjustment(
         }
     };
     let effective_on = match parse_query_date(Some(body.effective_on.as_str()), "effective_on") {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid adjustment date"),
     };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
@@ -2391,8 +2391,8 @@ async fn reverse_patient_balance_adjustment(
         }
     };
     let effective_on = match parse_query_date(body.effective_on.as_deref(), "effective_on") {
-        Ok(Some(value)) if value <= Utc::now().date_naive() => value,
-        Ok(None) => Utc::now().date_naive(),
+        Ok(Some(value)) if value <= crate::app_time::today() => value,
+        Ok(None) => crate::app_time::today(),
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid reversal date"),
     };
 
