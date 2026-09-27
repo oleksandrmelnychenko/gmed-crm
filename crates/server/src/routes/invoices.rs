@@ -9607,20 +9607,31 @@ async fn reverse_invoice_credit_note(
     .await
     {
         Ok(id) => id,
-        Err(sqlx::Error::Database(db_error))
-            if matches!(
-                db_error.code().as_deref(),
-                Some("23505" | "23514" | "P0001")
-            ) =>
-        {
-            return err(StatusCode::CONFLICT, "Credit note was already reversed");
-        }
         Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, credit_note_id = %credit_note_id, "insert credit-note reversal");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to reverse credit note",
-            );
+            let failure = match &e {
+                sqlx::Error::Database(db_error) => credit_notes::classify_reversal_insert_error(
+                    db_error.code().as_deref(),
+                    db_error.constraint(),
+                    db_error.message(),
+                ),
+                _ => credit_notes::ReversalInsertFailure::Unexpected,
+            };
+            return match failure {
+                credit_notes::ReversalInsertFailure::AlreadyReversed => {
+                    err(StatusCode::CONFLICT, "Credit note was already reversed")
+                }
+                credit_notes::ReversalInsertFailure::BusinessRule(message) => {
+                    tracing::warn!(error = %e, invoice_id = %invoice_id, credit_note_id = %credit_note_id, "credit-note reversal refused by an invoice rule");
+                    err(StatusCode::UNPROCESSABLE_ENTITY, &message)
+                }
+                credit_notes::ReversalInsertFailure::Unexpected => {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, credit_note_id = %credit_note_id, "insert credit-note reversal");
+                    err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to reverse credit note",
+                    )
+                }
+            };
         }
     };
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
