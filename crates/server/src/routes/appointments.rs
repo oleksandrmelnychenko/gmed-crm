@@ -7571,8 +7571,7 @@ fn interpreter_report_billing_notes(
         ),
         format!("Bericht: {}", candidate.report_id),
     ]
-    .join("
-")
+    .join("\n")
 }
 
 /// Bills one approved interpreter report. The report consumes the order's
