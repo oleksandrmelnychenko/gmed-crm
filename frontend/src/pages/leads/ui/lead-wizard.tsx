@@ -3848,21 +3848,15 @@ export function LeadWizard({
     [draft, lines, paidAmount, prepayment, prepaymentAmount, step],
   );
 
+  // The confirmation covers what staff reviewed on the release step. Data is
+  // only edited on the other steps, so leaving the release step (or switching
+  // the lead) asks for it again. Saves and refreshes while staying there, e.g.
+  // completing the intake from the "Подтвердите данные обращения" blocker,
+  // replace the draft, document and quote objects without changing what was
+  // reviewed, and must not clear the tick.
   useEffect(() => {
     setConversionConfirmed(false);
-  }, [
-    leadId,
-    draft,
-    lines,
-    signedPatient,
-    signedAgency,
-    prepayment,
-    prepaymentAmount,
-    paidAmount,
-    quote?.id,
-    quote?.updated_at,
-    documents,
-  ]);
+  }, [leadId, step]);
 
   const ensureProspect = useCallback(async (
     medicalDraft: Draft,
