@@ -2078,7 +2078,7 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 
     // Final invoice from the new quote (1.5 h 107.10 + 119 + 59.50), and the
-    // advance paid against the old quote is credited to it.
+    // advance paid against the old quote is credited to it when it is released.
     let final_invoice = create_sent_invoice(
         &app,
         &pool,
@@ -2088,7 +2088,6 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
         "2026-10-31",
     )
     .await;
-    let final_invoice_id = final_invoice["id"].as_str().unwrap().to_string();
     assert_money_close(
         final_invoice["total_gross"]
             .as_str()
@@ -2097,19 +2096,11 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
             .unwrap(),
         285.60,
     );
-    let (status, applied) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/invoices/{final_invoice_id}/prepayment-allocations"),
-        &billing_bearer,
-        Some(json!({
-            "request_id": Uuid::new_v4(),
-            "advance_invoice_id": advance_id,
-            "amount_gross": "100",
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "apply advance: {applied}");
+    let applied = &final_invoice;
+    assert_eq!(
+        applied["prepayment_allocations"][0]["advance_invoice_id"], advance_id,
+        "apply advance: {applied}"
+    );
     assert_money_close(
         applied["prepayment_applied_amount"]
             .as_str()
@@ -2472,11 +2463,14 @@ async fn draft_invoice_offers_no_advance_and_is_dated_on_release() {
         .execute(&pool)
         .await
         .unwrap();
+    // Releasing the final invoice credits the paid advance automatically.
     let released = release_invoice(&app, &billing_bearer, &draft_id).await;
+    assert_eq!(released["prepayment_applied_amount"], "50", "{released}");
     assert_eq!(
-        released["available_prepayments"][0]["invoice_id"],
-        advance_id
+        released["prepayment_allocations"][0]["advance_invoice_id"], advance_id,
+        "{released}"
     );
+    assert_eq!(released["available_prepayments"], json!([]), "{released}");
     let issued_recently: bool = sqlx::query_scalar(
         "SELECT issued_at > now() - interval '1 hour' FROM invoices WHERE id = $1::uuid",
     )

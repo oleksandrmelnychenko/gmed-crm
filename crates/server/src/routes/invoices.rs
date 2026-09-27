@@ -12586,8 +12586,15 @@ mod tests {
         context.invoice_number = String::new();
         let text = pdf_text(&context);
         assert!(text.contains("ENTWURF – keine gültige Rechnung"), "{text}");
-        assert!(text.contains("Rechnungsnummer"));
-        assert!(!text.contains("INV-"), "{text}");
+        assert!(text.contains("Rechnungsnummer\nENTWURF"), "{text}");
+        assert!(invoice_pdf_filename(&context).starts_with("RECHNUNG-ENTWURF-"));
+        // A draft numbered before numbers moved to release keeps its stored
+        // number, but the preview still prints none. (The sample patient ID
+        // PT-INV-UNIT is printed, so the check names the invoice number.)
+        context.invoice_number = "INV-UNIT-1".to_string();
+        let text = pdf_text(&context);
+        assert!(text.contains("Rechnungsnummer\nENTWURF"), "{text}");
+        assert!(!text.contains("INV-UNIT-1"), "{text}");
         assert!(invoice_pdf_filename(&context).starts_with("RECHNUNG-ENTWURF-"));
     }
 

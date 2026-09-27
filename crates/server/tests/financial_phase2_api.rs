@@ -295,6 +295,27 @@ async fn partial_interims_allocate_quantities_and_final_consumes_only_remaining(
             .all(|item| item["billing_status"] == "awaiting_payment")
     );
 
+    // The drafts are released (and numbered) before they can be paid.
+    let drafts: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM invoices WHERE quote_id = $1 AND status = 'draft' ORDER BY created_at, id",
+    )
+    .bind(Uuid::parse_str(quote_id).unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(drafts.len(), 3);
+    for invoice_id in drafts {
+        let (status, released) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/invoices/{invoice_id}/status"),
+            &billing,
+            Some(json!({ "status": "sent" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "release response: {released:?}");
+    }
+
     sqlx::query(
         r#"UPDATE invoices
            SET paid_amount = total_gross, status = 'paid', paid_at = now()

@@ -119,6 +119,34 @@ async fn seed_invoice(
     gross: i64,
     hide_amounts: bool,
 ) -> Uuid {
+    seed_invoice_in_status(
+        pool,
+        order_id,
+        patient_id,
+        created_by,
+        tag,
+        invoice_type,
+        gross,
+        hide_amounts,
+        "sent",
+    )
+    .await
+}
+
+/// A released (`sent`) invoice carries its number; a draft is numbered only
+/// when it is released and can never return to draft afterwards.
+#[allow(clippy::too_many_arguments)]
+async fn seed_invoice_in_status(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    invoice_type: &str,
+    gross: i64,
+    hide_amounts: bool,
+    status: &str,
+) -> Uuid {
     let net = Decimal::new(gross, 0) * Decimal::new(100, 0) / Decimal::new(119, 0);
     let net = gmed_server::money::round_cents(net);
     let gross = Decimal::new(gross, 0);
@@ -128,7 +156,7 @@ async fn seed_invoice(
                 due_date, total_net, total_vat, total_gross, paid_amount,
                 line_items, notes, portal_visible, hide_amounts_from_patient, created_by
            ) VALUES (
-                $1, $2, $3, $4, 'sent', CURRENT_DATE + 14,
+                $1, $2, CASE WHEN $11 = 'draft' THEN NULL ELSE $3 END, $4, $11, CURRENT_DATE + 14,
                 $5, $6, $7, 0, $8, 'Payment journal test', true, $9, $10
            ) RETURNING id"#,
     )
@@ -151,6 +179,7 @@ async fn seed_invoice(
     }]))
     .bind(hide_amounts)
     .bind(created_by)
+    .bind(status)
     .fetch_one(pool)
     .await
     .unwrap()
@@ -459,7 +488,19 @@ async fn cash_payment_recompute_preserves_prepayment_allocations() {
     .await;
     let billing = auth_header_for(billing_id, "billing");
 
+    // The final invoice is already released, so the advance paid now is
+    // credited to it automatically.
     record_payment(&app, &billing, advance_id, Uuid::new_v4(), 60, "ADVANCE").await;
+    let allocated: Decimal = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(amount_gross), 0) FROM invoice_prepayment_allocations
+           WHERE target_invoice_id = $1 AND advance_invoice_id = $2"#,
+    )
+    .bind(settlement_id)
+    .bind(advance_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(allocated, Decimal::new(60, 0));
     let settlement_payment =
         record_payment(&app, &billing, settlement_id, Uuid::new_v4(), 59, "CASH").await;
     let settlement_payment_id = Uuid::parse_str(
@@ -471,17 +512,13 @@ async fn cash_payment_recompute_preserves_prepayment_allocations() {
 
     let (status, applied) = json_request(
         &app,
-        "POST",
-        &format!("/api/v1/invoices/{settlement_id}/prepayment-allocations"),
+        "GET",
+        &format!("/api/v1/invoices/{settlement_id}"),
         &billing,
-        Some(json!({
-            "request_id": Uuid::new_v4(),
-            "advance_invoice_id": advance_id,
-            "amount_gross": 60
-        })),
+        None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "prepayment response: {applied:?}");
+    assert_eq!(status, StatusCode::OK, "settlement invoice: {applied:?}");
     assert_eq!(applied["paid_amount"], "59");
     assert_eq!(applied["prepayment_applied_amount"], "60");
     assert_eq!(applied["status"], "paid");
@@ -1023,7 +1060,8 @@ async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net()
         .execute(&pool)
         .await
         .unwrap();
-    let final_invoice = seed_invoice(
+    // A draft: a released invoice can never return to draft.
+    let final_invoice = seed_invoice_in_status(
         &pool,
         order_id,
         patient_id,
@@ -1032,13 +1070,9 @@ async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net()
         "final",
         1000,
         false,
+        "draft",
     )
     .await;
-    sqlx::query("UPDATE invoices SET status = 'draft' WHERE id = $1")
-        .bind(final_invoice)
-        .execute(&pool)
-        .await
-        .unwrap();
     let billing = auth_header_for(billing_id, "billing");
     let manager = auth_header_for(manager_id, "patient_manager");
     record_payment(&app, &billing, first_advance, Uuid::new_v4(), 500, "ADV-1").await;

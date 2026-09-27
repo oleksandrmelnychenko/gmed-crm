@@ -474,11 +474,18 @@ async fn patient_billing_constructor_uses_closed_anchor_and_reserves_late_invoic
         row["id"] == invoice_without_order_id.to_string() && row["order_id"].is_null()
     }));
 
-    sqlx::query("UPDATE invoices SET status = 'sent' WHERE id = $1")
-        .bind(invoice_without_order_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    // Released through the API: a released invoice needs the number that the
+    // release assigns.
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_without_order_id}/status"),
+        &bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    assert!(released["invoice_number"].is_string(), "{released}");
     let (status, paid_invoice) = json_request(
         &app,
         "POST",
