@@ -721,7 +721,7 @@ function AppointmentInterpreterSection({
     }
   }
 
-  async function handleInterpreterResponse(response: InterpreterResponse) {
+  async function handleInterpreterResponse(response: InterpreterResponse, comment: string) {
     dispatchInterpreterState({
       type: "patch",
       value: { busyAction: `response:${response}` },
@@ -731,7 +731,10 @@ function AppointmentInterpreterSection({
         `/appointments/${detail.id}/interpreter-response`,
         {
           method: "POST",
-          body: JSON.stringify({ response }),
+          body: JSON.stringify({
+            response,
+            ...(response === "accepted" || !comment ? {} : { comment }),
+          }),
         },
       );
       onRefresh();
@@ -785,6 +788,7 @@ function AppointmentInterpreterSection({
           <InterpreterResponseControls
             busyAction={busyAction}
             interpreterResponse={detail.interpreter_response}
+            savedComment={detail.interpreter_response_comment ?? null}
             onResponse={handleInterpreterResponse}
           />
         </WritableScope>
@@ -862,10 +866,21 @@ function InterpreterAssignmentManagement({
         id: "response",
         label: t.users_status,
         accessor: (row) => responseLabel(row.interpreter_response ?? "pending"),
-        width: 170,
+        width: 240,
         render: (row) => (
-          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
-            {responseLabel(row.interpreter_response ?? "pending")}
+          <span className="flex min-w-0 flex-col items-start gap-0.5">
+            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+              {responseLabel(row.interpreter_response ?? "pending")}
+            </span>
+            {row.interpreter_response_comment ? (
+              <span
+                data-testid="interpreter-response-comment"
+                className="block max-w-full truncate text-xs text-muted-foreground"
+                title={row.interpreter_response_comment}
+              >
+                {row.interpreter_response_comment}
+              </span>
+            ) : null}
           </span>
         ),
       },
@@ -977,21 +992,30 @@ function InterpreterAssignmentManagement({
 function InterpreterResponseControls({
   busyAction,
   interpreterResponse,
+  savedComment,
   onResponse,
 }: {
   busyAction: string;
   interpreterResponse: InterpreterResponse | null;
-  onResponse: (response: InterpreterResponse) => void | Promise<void>;
+  savedComment: string | null;
+  onResponse: (response: InterpreterResponse, comment: string) => void | Promise<void>;
 }) {
+  const [comment, setComment] = useState(savedComment ?? "");
+  useEffect(() => setComment(savedComment ?? ""), [savedComment]);
+  const commentMissing = !comment.trim();
   return (
     <Section title={appointmentText("appointments_interpreter_response")}>
       <div className="flex flex-wrap gap-2">
-        {INTERPRETER_RESPONSE_OPTIONS.map((value) => (
+        {/* "pending" is the state before an answer, not an answer. */}
+        {INTERPRETER_RESPONSE_OPTIONS.filter((value) => value !== "pending").map((value) => (
           <Button
             key={value}
             variant={interpreterResponse === value ? "default" : "outline"}
-            disabled={Boolean(busyAction)}
-            onClick={() => void onResponse(value)}
+            disabled={
+              Boolean(busyAction)
+              || (value === "discussion_requested" && commentMissing)
+            }
+            onClick={() => void onResponse(value, comment.trim())}
           >
             {busyAction === `response:${value}` ? (
               <LoaderCircle className="size-4 animate-spin" />
@@ -1000,6 +1024,23 @@ function InterpreterResponseControls({
           </Button>
         ))}
       </div>
+      <label className="mt-3 block space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">
+          {appointmentText("appointments_interpreter_response_comment")}
+        </span>
+        <textarea
+          value={comment}
+          maxLength={1000}
+          rows={3}
+          className={textareaClassName}
+          disabled={Boolean(busyAction)}
+          onChange={(event) => setComment(event.target.value)}
+          placeholder={appointmentText("appointments_interpreter_response_comment_placeholder")}
+        />
+        <span className="block text-xs text-muted-foreground">
+          {appointmentText("appointments_interpreter_response_comment_hint")}
+        </span>
+      </label>
     </Section>
   );
 }

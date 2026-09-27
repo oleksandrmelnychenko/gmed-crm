@@ -315,6 +315,11 @@ async fn create_task(
                 }),
             )
             .await;
+            // Tasks from the appointment and patient pages are new work for
+            // their assignee exactly like work-center tasks.
+            if body.assigned_to != auth.user_id {
+                notify_new_task_assignee(&state, body.assigned_to, &title, task_id).await;
+            }
 
             (
                 StatusCode::CREATED,
@@ -333,6 +338,38 @@ async fn create_task(
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
     }
+}
+
+/// Sends the "New task" notification the work center sends for its tasks.
+async fn notify_new_task_assignee(state: &AppState, assignee: Uuid, title: &str, task_id: Uuid) {
+    let notification_id = match sqlx::query_scalar::<_, Uuid>(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           VALUES ($1, 'operational_task_assigned', 'New task', $2, 'concierge_task', $3)
+           RETURNING id"#,
+    )
+    .bind(assignee)
+    .bind(title)
+    .bind(task_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, task_id = %task_id, "notify new task assignee");
+            return;
+        }
+    };
+    crate::realtime::publish_notification_event(
+        state,
+        assignee,
+        "notification.created",
+        Some(notification_id),
+        serde_json::json!({
+            "entity_type": "concierge_task",
+            "entity_id": task_id,
+        }),
+    )
+    .await;
 }
 
 fn build_task_json(task_id: Uuid, row: &sqlx::postgres::PgRow) -> serde_json::Value {

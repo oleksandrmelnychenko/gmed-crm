@@ -55,11 +55,86 @@ export function localizedNotificationCopy(
           body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
         };
   }
+  const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
+  if (interpreterCopy) return interpreterCopy;
   const taskTitle = taskNotificationTitle(item, lang);
   if (taskTitle) {
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+const INTERPRETER_WORK_TITLES: Record<string, { de: string; ru: string }> = {
+  interpreter_report_submitted: {
+    de: "Dolmetscherbericht wartet auf Prüfung",
+    ru: "Отчёт переводчика ждёт проверки",
+  },
+  interpreter_report_approved: {
+    de: "Dolmetscherbericht bestätigt",
+    ru: "Отчёт переводчика подтверждён",
+  },
+  interpreter_report_rejected: {
+    de: "Dolmetscherbericht zur Überarbeitung zurückgegeben",
+    ru: "Отчёт переводчика возвращён на доработку",
+  },
+  interpreter_clarification_requested: {
+    de: "Dolmetscher benötigt eine Klärung",
+    ru: "Переводчику нужно уточнение",
+  },
+};
+
+type InterpreterWorkNotificationBody = {
+  appointment_title?: string | null;
+  appointment_date?: string | null;
+  time_start?: string | null;
+  interpreter_name?: string | null;
+  hours?: string | null;
+  reviewer_name?: string | null;
+  notes?: string | null;
+  comment?: string | null;
+};
+
+// Interpreter report and clarification notifications store their facts as
+// JSON; the wording follows the staff language.
+function interpreterWorkNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  const titles = INTERPRETER_WORK_TITLES[item.kind];
+  if (!titles) return null;
+  let data: InterpreterWorkNotificationBody = {};
+  try {
+    data = JSON.parse(item.body ?? "{}") ?? {};
+  } catch {
+    data = {};
+  }
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const date = data.appointment_date ? new Date(`${data.appointment_date}T00:00:00`) : null;
+  const when = [
+    date && Number.isFinite(date.getTime()) ? date.toLocaleDateString(locale) : null,
+    data.time_start,
+  ].filter(Boolean).join(" ");
+  const parts = [[data.appointment_title, when].filter(Boolean).join(" · ")];
+  const hours = Number(data.hours);
+  if (item.kind === "interpreter_report_submitted") {
+    parts.push([
+      data.interpreter_name,
+      Number.isFinite(hours) && hours > 0
+        ? `${hours.toLocaleString(locale)} ${lang === "de" ? "Std." : "ч"}`
+        : null,
+    ].filter(Boolean).join(" · "));
+  }
+  if (item.kind === "interpreter_report_approved" && data.reviewer_name) {
+    parts.push(`${lang === "de" ? "Bestätigt von" : "Подтвердил(а)"}: ${data.reviewer_name}`);
+  }
+  if (item.kind === "interpreter_report_rejected" && data.notes) {
+    parts.push(`${lang === "de" ? "Hinweis" : "Замечание"}: ${data.notes}`);
+  }
+  if (item.kind === "interpreter_clarification_requested") {
+    parts.push([data.interpreter_name, data.comment].filter(Boolean).join(": "));
+  }
+  const body = parts.filter(Boolean).join(" — ");
+  return { title: titles[lang], body: body || null };
 }
 
 // The server stores task notification titles as English templates; the body

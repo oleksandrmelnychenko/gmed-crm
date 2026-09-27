@@ -47,7 +47,10 @@ function AppointmentSnapshotSection({
       label: appointmentText("appointments_interpreter"),
       value: detail.interpreter_name || tr.common_not_set,
       meta: detail.interpreter_response
-        ? responseLabel(detail.interpreter_response)
+        ? [
+            responseLabel(detail.interpreter_response),
+            detail.interpreter_response_comment,
+          ].filter(Boolean).join(" · ")
         : tr.common_not_set,
     });
   }

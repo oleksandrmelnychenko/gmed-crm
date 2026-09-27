@@ -289,7 +289,12 @@ struct AssignInterpreter {
 #[derive(Deserialize)]
 struct InterpreterResponseReq {
     response: String,
+    /// Why the interpreter needs clarification or declines; shown to the
+    /// patient manager. Ignored for an acceptance.
+    comment: Option<String>,
 }
+
+const INTERPRETER_RESPONSE_COMMENT_MAX_CHARS: usize = 1000;
 
 #[derive(Deserialize)]
 struct ChecklistItem {
@@ -3822,7 +3827,8 @@ async fn get_appointment(
         r#"SELECT a.id, a.patient_id, a.provider_id, a.doctor_id, a.order_id, o.order_number, a.interpreter_id,
                   a.owner_user_id,
                   a.appointment_type, a.care_path_kind, a.followup_milestone, a.title, a.date, a.time_start, a.time_end, a.location,
-                  a.category, a.status, a.interpreter_response, a.checklist_phase,
+                  a.category, a.status, a.interpreter_response, a.interpreter_response_comment,
+                  a.checklist_phase,
                   a.preparation_notes, a.followup_notes, a.notes, a.created_at,
                   a.recurrence_series_id, a.recurrence_frequency, a.recurrence_interval,
                   a.recurrence_count, a.recurrence_until, a.recurrence_end_mode, a.recurrence_index,
@@ -4983,6 +4989,10 @@ async fn update_appointment(
                    time_end = $9,
                    location = $10,
                    interpreter_response = $11,
+                   interpreter_response_comment = CASE
+                       WHEN $11::text IS DISTINCT FROM interpreter_response THEN NULL
+                       ELSE interpreter_response_comment
+                   END,
                    care_path_kind = $12,
                    recurrence_frequency = $13,
                    recurrence_interval = $14,
@@ -5939,6 +5949,10 @@ async fn assign_interpreter(
                     WHEN interpreter_id IS DISTINCT FROM $2 THEN 'pending'
                     ELSE interpreter_response
                 END,
+                interpreter_response_comment = CASE
+                    WHEN interpreter_id IS DISTINCT FROM $2 THEN NULL
+                    ELSE interpreter_response_comment
+                END,
                 updated_at = now()
           WHERE id = $1",
     )
@@ -6036,6 +6050,24 @@ async fn interpreter_response(
             );
         }
     }
+    let comment = if body.response == "accepted" {
+        None
+    } else {
+        body.comment
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    if comment
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > INTERPRETER_RESPONSE_COMMENT_MAX_CHARS)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The comment must not exceed 1000 characters",
+        );
+    }
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
         Err(e) => {
@@ -6072,6 +6104,7 @@ async fn interpreter_response(
     let result = sqlx::query(
         r#"UPDATE appointments
            SET interpreter_response = $2,
+               interpreter_response_comment = $4,
                updated_at = now()
            WHERE id = $1
              AND interpreter_id = $3"#,
@@ -6079,6 +6112,7 @@ async fn interpreter_response(
     .bind(apt_id)
     .bind(&body.response)
     .bind(auth.user_id)
+    .bind(comment.as_deref())
     .execute(&mut *tx)
     .await;
     match result {
@@ -6089,10 +6123,30 @@ async fn interpreter_response(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let notifications = if body.response == "discussion_requested" {
+        match insert_interpreter_work_notifications(
+            &mut tx,
+            InterpreterWorkNotice::ClarificationRequested,
+            apt_id,
+            None,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "notify about interpreter clarification");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
 
@@ -6997,10 +7051,26 @@ async fn submit_report(
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "accept interpreter assignment on report submission");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    let notifications = match insert_interpreter_work_notifications(
+        &mut tx,
+        InterpreterWorkNotice::ReportSubmitted,
+        apt_id,
+        Some(report_id),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "notify report approvers");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "submit report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
 
     tracing::info!(by = %auth.user_id, apt = %apt_id, hours = %hours, "Interpreter report submitted");
     (
@@ -7008,6 +7078,174 @@ async fn submit_report(
         Json(serde_json::json!({"id": report_id})),
     )
         .into_response()
+}
+
+/// A change of an interpreter report or of the interpreter's response that
+/// someone else has to act on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterpreterWorkNotice {
+    /// A report waits for approval: notify the approvers.
+    ReportSubmitted,
+    /// The report was approved: notify its interpreter.
+    ReportApproved,
+    /// The report was returned for revision: notify its interpreter.
+    ReportRejected,
+    /// The interpreter needs clarification: notify the approvers.
+    ClarificationRequested,
+}
+
+impl InterpreterWorkNotice {
+    fn kind(self) -> &'static str {
+        match self {
+            InterpreterWorkNotice::ReportSubmitted => "interpreter_report_submitted",
+            InterpreterWorkNotice::ReportApproved => "interpreter_report_approved",
+            InterpreterWorkNotice::ReportRejected => "interpreter_report_rejected",
+            InterpreterWorkNotice::ClarificationRequested => "interpreter_clarification_requested",
+        }
+    }
+
+    /// Stored fallback; the staff UI renders the notification from its kind
+    /// and JSON body in the user's language.
+    fn title(self) -> &'static str {
+        match self {
+            InterpreterWorkNotice::ReportSubmitted => "Interpreter report submitted",
+            InterpreterWorkNotice::ReportApproved => "Interpreter report approved",
+            InterpreterWorkNotice::ReportRejected => "Interpreter report returned for revision",
+            InterpreterWorkNotice::ClarificationRequested => "Interpreter needs clarification",
+        }
+    }
+}
+
+/// Inserts the notifications of an interpreter report change inside the
+/// caller's transaction and returns `(notification_id, user_id)` pairs to
+/// publish after commit. Approvers are the patient managers and interpreter
+/// team leads who can open the appointment (its owner or assigned to the
+/// patient), falling back to the CEO; report decisions go to the report's
+/// interpreter. The actor is never notified about their own action.
+async fn insert_interpreter_work_notifications(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    notice: InterpreterWorkNotice,
+    appointment_id: Uuid,
+    report_id: Option<Uuid>,
+    actor_id: Uuid,
+) -> Result<Vec<(Uuid, Uuid)>, sqlx::Error> {
+    let body: serde_json::Value = sqlx::query_scalar(
+        r#"SELECT jsonb_build_object(
+                   'appointment_title', a.title,
+                   'appointment_date', a.date,
+                   'time_start', left(a.time_start::text, 5),
+                   'interpreter_name', interpreter.name,
+                   'hours', report.hours::text,
+                   'reviewer_name', reviewer.name,
+                   'notes', CASE WHEN report.approval_status = 'rejected' THEN report.notes END,
+                   'comment', CASE WHEN $2::uuid IS NULL THEN a.interpreter_response_comment END,
+                   'report_id', report.id
+               )
+           FROM appointments a
+           LEFT JOIN interpreter_reports report ON report.id = $2
+           LEFT JOIN users interpreter ON interpreter.id = COALESCE(report.interpreter_id, a.interpreter_id)
+           LEFT JOIN users reviewer ON reviewer.id = report.approved_by
+           WHERE a.id = $1"#,
+    )
+    .bind(appointment_id)
+    .bind(report_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    let body = body.to_string();
+    let rows = match notice {
+        InterpreterWorkNotice::ReportSubmitted | InterpreterWorkNotice::ClarificationRequested => {
+            let rows = sqlx::query(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   SELECT recipient.id, $2, $3, $4, 'appointment', a.id
+                   FROM appointments a
+                   JOIN users recipient
+                     ON recipient.is_active
+                    AND recipient.role IN ('patient_manager', 'teamlead_interpreter')
+                    AND recipient.id <> $5
+                    AND (
+                        recipient.id = a.owner_user_id
+                        OR EXISTS (
+                            SELECT 1 FROM patient_assignments assignment
+                            WHERE assignment.patient_id = a.patient_id
+                              AND assignment.user_id = recipient.id
+                              AND assignment.revoked_at IS NULL
+                        )
+                    )
+                   WHERE a.id = $1
+                   RETURNING id, user_id"#,
+            )
+            .bind(appointment_id)
+            .bind(notice.kind())
+            .bind(notice.title())
+            .bind(&body)
+            .bind(actor_id)
+            .fetch_all(&mut **tx)
+            .await?;
+            if rows.is_empty() {
+                sqlx::query(
+                    r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                       SELECT recipient.id, $2, $3, $4, 'appointment', $1
+                       FROM users recipient
+                       WHERE recipient.is_active
+                         AND recipient.role = 'ceo'
+                         AND recipient.id <> $5
+                       RETURNING id, user_id"#,
+                )
+                .bind(appointment_id)
+                .bind(notice.kind())
+                .bind(notice.title())
+                .bind(&body)
+                .bind(actor_id)
+                .fetch_all(&mut **tx)
+                .await?
+            } else {
+                rows
+            }
+        }
+        InterpreterWorkNotice::ReportApproved | InterpreterWorkNotice::ReportRejected => {
+            sqlx::query(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   SELECT interpreter.id, $2, $3, $4, 'appointment', $1
+                   FROM interpreter_reports report
+                   JOIN users interpreter ON interpreter.id = report.interpreter_id
+                   WHERE report.id = $6
+                     AND interpreter.is_active
+                     AND interpreter.id <> $5
+                   RETURNING id, user_id"#,
+            )
+            .bind(appointment_id)
+            .bind(notice.kind())
+            .bind(notice.title())
+            .bind(&body)
+            .bind(actor_id)
+            .bind(report_id)
+            .fetch_all(&mut **tx)
+            .await?
+        }
+    };
+    rows.iter()
+        .map(|row| Ok((row.try_get("id")?, row.try_get("user_id")?)))
+        .collect()
+}
+
+async fn publish_interpreter_work_notifications(
+    state: &AppState,
+    appointment_id: Uuid,
+    notifications: &[(Uuid, Uuid)],
+) {
+    for (notification_id, user_id) in notifications {
+        crate::realtime::publish_notification_event(
+            state,
+            *user_id,
+            "notification.created",
+            Some(*notification_id),
+            serde_json::json!({
+                "entity_type": "appointment",
+                "entity_id": appointment_id,
+            }),
+        )
+        .await;
+    }
 }
 
 async fn load_interpreter_hours_catalog_item(
@@ -8005,10 +8243,26 @@ async fn approve_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let notifications = match insert_interpreter_work_notifications(
+        &mut tx,
+        InterpreterWorkNotice::ReportApproved,
+        apt_id,
+        Some(report_id),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "notify interpreter about approval");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "approve report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
 
     let sync_summary = match sync_interpreter_report_billing_candidates(&state, Some(apt_id)).await
     {
@@ -8108,10 +8362,26 @@ async fn reject_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let notifications = match insert_interpreter_work_notifications(
+        &mut tx,
+        InterpreterWorkNotice::ReportRejected,
+        apt_id,
+        Some(report_id),
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "notify interpreter about rejection");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "reject report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
     Json(serde_json::json!({"ok": true, "report_id": report_id})).into_response()
 }
 
@@ -9150,6 +9420,7 @@ fn build_appointment_detail_json(
         "interpreter_id": if blocked { None::<Uuid> } else { interpreter_id },
         "interpreter_name": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default() },
         "interpreter_response": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response").unwrap_or_default() },
+        "interpreter_response_comment": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("interpreter_response_comment").unwrap_or_default() },
         "checklist_phase": if blocked { String::new() } else { row.try_get::<String, _>("checklist_phase").unwrap_or_default() },
         "preparation_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("preparation_notes").unwrap_or_default() },
         "followup_notes": if blocked { None::<String> } else { row.try_get::<Option<String>, _>("followup_notes").unwrap_or_default() },

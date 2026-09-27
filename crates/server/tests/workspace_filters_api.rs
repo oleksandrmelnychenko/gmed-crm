@@ -11094,6 +11094,265 @@ async fn assigned_interpreter_can_update_response_and_non_assignee_cannot() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+async fn notifications_of(pool: &PgPool, user_id: Uuid, kind: &str) -> Vec<Value> {
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT body FROM user_notifications
+           WHERE user_id = $1 AND kind = $2
+           ORDER BY created_at, id"#,
+    )
+    .bind(user_id)
+    .bind(kind)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .iter()
+    .map(|body| serde_json::from_str(body).unwrap())
+    .collect()
+}
+
+#[tokio::test]
+async fn interpreter_reports_and_clarifications_notify_whoever_acts_next() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("report-notices");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let outsider_id = seed_user(&pool, &format!("{tag}-outsider"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Report notices {tag}"),
+        "confirmed",
+        "2026-04-21",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let report_path = format!("/api/v1/appointments/{appointment_id}/report");
+    let submit = json!({ "hours": 2.5, "report_text": format!("Report {tag}") });
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(submit.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let submitted = notifications_of(&pool, manager_id, "interpreter_report_submitted").await;
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(
+        submitted[0]["appointment_title"],
+        format!("Report notices {tag}")
+    );
+    assert_eq!(submitted[0]["appointment_date"], "2026-04-21");
+    assert_eq!(
+        submitted[0]["interpreter_name"],
+        format!("interpreter {tag}")
+    );
+    assert!(
+        notifications_of(&pool, outsider_id, "interpreter_report_submitted")
+            .await
+            .is_empty()
+    );
+    assert!(
+        notifications_of(&pool, admin_id, "interpreter_report_submitted")
+            .await
+            .is_empty()
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{report_path}/reject"),
+        &bearer,
+        Some(json!({ "notes": "Bitte Stunden prüfen" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rejected = notifications_of(&pool, interpreter_id, "interpreter_report_rejected").await;
+    assert_eq!(rejected.len(), 1);
+    assert_eq!(rejected[0]["notes"], "Bitte Stunden prüfen");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(submit),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        notifications_of(&pool, manager_id, "interpreter_report_submitted")
+            .await
+            .len(),
+        2
+    );
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{report_path}/approve"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let approved = notifications_of(&pool, interpreter_id, "interpreter_report_approved").await;
+    assert_eq!(approved.len(), 1);
+    assert!(approved[0]["notes"].is_null());
+
+    // A second appointment: the interpreter asks for clarification.
+    let second_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Clarification {tag}"),
+        "planned",
+        "2026-12-01",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{second_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let response_path = format!("/api/v1/appointments/{second_id}/interpreter-response");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &response_path,
+        &interpreter_bearer,
+        Some(json!({ "response": "discussion_requested", "comment": "x".repeat(1001) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &response_path,
+        &interpreter_bearer,
+        Some(json!({ "response": "discussion_requested", "comment": "  Welche Adresse?  " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let clarification =
+        notifications_of(&pool, manager_id, "interpreter_clarification_requested").await;
+    assert_eq!(clarification.len(), 1);
+    assert_eq!(clarification[0]["comment"], "Welche Adresse?");
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{second_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(detail["interpreter_response_comment"], "Welche Adresse?");
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &response_path,
+        &interpreter_bearer,
+        Some(json!({ "response": "accepted", "comment": "ignored" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{second_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(detail["interpreter_response"], "accepted");
+    assert!(detail["interpreter_response_comment"].is_null(), "{detail}");
+}
+
+#[tokio::test]
+async fn tasks_created_from_the_appointment_page_notify_their_assignee() {
+    let Some((app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-task-notice");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Task notice {tag}"),
+        "planned",
+        "2026-12-01",
+    )
+    .await;
+    let manager_bearer = auth_header_for(manager_id, "patient_manager");
+
+    for (assignee, expected) in [(concierge_id, 1_i64), (manager_id, 0_i64)] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/tasks",
+            &manager_bearer,
+            Some(json!({
+                "title": "Book the airport pickup",
+                "assigned_to": assignee,
+                "appointment_id": appointment_id,
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let task_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT count(*) FROM user_notifications
+               WHERE user_id = $1 AND kind = 'operational_task_assigned'
+                 AND entity_type = 'concierge_task' AND entity_id = $2"#,
+        )
+        .bind(assignee)
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        // Self-assigned work needs no notification.
+        assert_eq!(count, expected);
+    }
+}
+
 #[tokio::test]
 async fn assigned_teamlead_can_update_interpreter_response() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {

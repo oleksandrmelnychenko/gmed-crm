@@ -55,6 +55,36 @@ describe("task notifications", () => {
   });
 });
 
+describe("interpreter work notifications", () => {
+  const notice = (kind: string, body: Record<string, unknown>) =>
+    ({ id: "n-2", kind, title: "English fallback", body: JSON.stringify(body), entity_type: "appointment", entity_id: "apt-1", is_read: false, created_at: "2026-09-26T10:00:00Z" }) as Notification;
+
+  it("tells approvers which report waits and interpreters how it was decided", () => {
+    const submitted = localizedNotificationCopy(notice("interpreter_report_submitted", {
+      appointment_title: "Kardiologie", appointment_date: "2026-09-26", time_start: "09:30", interpreter_name: "Iwan", hours: "2.50",
+    }), "ru");
+    expect(submitted.title).toBe("Отчёт переводчика ждёт проверки");
+    expect(submitted.body).toContain("Kardiologie");
+    expect(submitted.body).toContain("Iwan · 2,5 ч");
+
+    const rejected = localizedNotificationCopy(notice("interpreter_report_rejected", {
+      appointment_title: "Kardiologie", appointment_date: "2026-09-26", notes: "Stunden prüfen",
+    }), "de");
+    expect(rejected.title).toBe("Dolmetscherbericht zur Überarbeitung zurückgegeben");
+    expect(rejected.body).toContain("Hinweis: Stunden prüfen");
+
+    expect(localizedNotificationCopy(notice("interpreter_report_approved", { reviewer_name: "Anna" }), "ru").body)
+      .toBe("Подтвердил(а): Anna");
+    expect(localizedNotificationCopy(notice("interpreter_clarification_requested", { interpreter_name: "Iwan", comment: "Adresse?" }), "de").body)
+      .toBe("Iwan: Adresse?");
+  });
+
+  it("survives a body that is not JSON", () => {
+    const broken = { ...notice("interpreter_report_approved", {}), body: "plain text" };
+    expect(localizedNotificationCopy(broken, "ru")).toEqual({ title: "Отчёт переводчика подтверждён", body: null });
+  });
+});
+
 describe("oldestNewLead", () => {
   it("selects the earliest unprocessed lead for FIFO handling", () => {
     expect(

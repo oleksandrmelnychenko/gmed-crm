@@ -190,6 +190,8 @@ export type RecurringLineageHistoryItem = {
 };
 
 export type AppointmentDetail = AppointmentListItem & {
+  /** The interpreter's note to a "needs clarification" or declined answer. */
+  interpreter_response_comment?: string | null;
   category: string | null;
   preparation_notes: string | null;
   followup_notes: string | null;
