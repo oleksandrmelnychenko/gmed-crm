@@ -150,6 +150,9 @@ for (const lang of ["ru", "de"] as const) {
     const {writes, wizard} = await mount(page, lang);
     await expect(wizard.getByRole("heading", {name: "Anna Beispiel", exact: true})).toBeVisible();
     await expect(wizard.getByText(/P-REPEAT-001/)).toBeVisible();
+    // A repeat intake does not ask the acquisition question of the first intake again.
+    await expect(wizard.locator('[name="first_name"]')).toBeVisible();
+    await expect(wizard.getByRole("combobox", {name: lang === "ru" ? "Откуда вы о нас узнали?" : "Wie sind Sie auf uns aufmerksam geworden?"})).toHaveCount(0);
     const next = wizard.getByRole("button", {name: lang === "ru" ? "Далее" : "Weiter", exact: true});
     await next.dblclick();
     await expect(wizard.getByText("Penicillin", {exact: true})).toBeVisible();
