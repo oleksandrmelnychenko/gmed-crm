@@ -210,6 +210,15 @@ export type InvoiceRecipient = {
   has_postal_address: boolean;
 };
 
+/** The archived PDF of an issued invoice (GoBD): rendered once, served unchanged. */
+export type InvoiceStoredDocument = {
+  file_name: string;
+  sha256: string;
+  /** `release`, or `first_download` for invoices issued before documents were kept. */
+  generation_trigger: "release" | "first_download" | string;
+  generated_at: string;
+};
+
 /** A relative of the patient that can be chosen as the invoice payer. */
 export type PayerRelationOption = {
   id: string;
@@ -265,6 +274,7 @@ export type InvoiceItem = {
   visibility_note?: string | null;
   payer?: InvoicePayer;
   recipient?: InvoiceRecipient | null;
+  stored_document?: InvoiceStoredDocument | null;
   payer_relation_options?: PayerRelationOption[];
   created_at: string;
   updated_at: string;

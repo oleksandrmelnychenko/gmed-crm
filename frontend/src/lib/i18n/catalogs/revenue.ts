@@ -307,6 +307,9 @@ export interface RevenueTranslations {
   revenue_invoices_release_hint: string;
   revenue_invoices_due_date_before_invoice_date: string;
   revenue_invoices_due_date_locked: string;
+  revenue_invoices_document_draft_preview: string;
+  revenue_invoices_document_archived: string;
+  revenue_invoices_document_archived_on_first_download: string;
   revenue_invoices_save_payer: string;
   revenue_invoices_redaction_invoice_hidden: string;
   revenue_invoices_redaction_amounts_hidden: string;
@@ -1179,6 +1182,11 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_due_date_before_invoice_date: "Срок оплаты не может быть раньше даты счёта (сегодня).",
   revenue_invoices_due_date_locked:
     "Срок оплаты выпущенного счёта не меняется. Новый срок задаётся напоминанием об оплате.",
+  revenue_invoices_document_draft_preview:
+    "Предпросмотр черновика. PDF сохраняется в архив при выпуске счёта.",
+  revenue_invoices_document_archived: "Архивный PDF от {date}: выдаётся без изменений.",
+  revenue_invoices_document_archived_on_first_download:
+    "Счёт выпущен до архивирования PDF: копия сохранится при первом открытии и дальше не изменится.",
   revenue_invoices_save_payer: "Сохранить плательщика",
   revenue_invoices_redaction_invoice_hidden: "Счет скрыт от пациента",
   revenue_invoices_redaction_amounts_hidden: "Суммы скрыты от пациента",
@@ -1566,6 +1574,11 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoices_due_date_before_invoice_date: "Das Fälligkeitsdatum darf nicht vor dem Rechnungsdatum (heute) liegen.",
   revenue_invoices_due_date_locked:
     "Das Fälligkeitsdatum einer ausgestellten Rechnung bleibt unverändert. Eine neue Frist setzt die Zahlungserinnerung.",
+  revenue_invoices_document_draft_preview:
+    "Entwurfsvorschau. Das PDF wird bei der Ausstellung archiviert.",
+  revenue_invoices_document_archived: "Archiviertes PDF vom {date}: wird unverändert ausgegeben.",
+  revenue_invoices_document_archived_on_first_download:
+    "Vor der PDF-Archivierung ausgestellt: die Kopie wird beim ersten Abruf archiviert und bleibt dann unverändert.",
   revenue_invoices_save_payer: "Zahler speichern",
   revenue_invoices_redaction_invoice_hidden: "Rechnung vor Patient verborgen",
   revenue_invoices_redaction_amounts_hidden: "Beträge vor Patient verborgen",

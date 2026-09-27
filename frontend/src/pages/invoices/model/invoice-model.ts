@@ -105,6 +105,18 @@ export function invoiceStatusFormProblem(
   return null;
 }
 
+/**
+ * Which PDF a download serves: a live draft preview, the archived document, or
+ * (for invoices issued before documents were kept) the copy archived on the
+ * first download.
+ */
+export function invoiceDocumentState(
+  invoice: Pick<InvoiceItem, "status" | "released_at" | "stored_document">,
+): "draft_preview" | "archived" | "archived_on_first_download" {
+  if (!isInvoiceReleased(invoice)) return "draft_preview";
+  return invoice.stored_document ? "archived" : "archived_on_first_download";
+}
+
 /** A released invoice keeps its due date; one issued without it may still get one. */
 export function canEditInvoiceDueDate(
   invoice: Pick<InvoiceItem, "status" | "released_at" | "due_date">,

@@ -593,6 +593,43 @@ pub(super) fn embed_xml_in_pdf(
     Ok(output)
 }
 
+fn follow<'a>(document: &'a lopdf::Document, object: &'a Object) -> Option<&'a Object> {
+    match object {
+        Object::Reference(id) => document.get_object(*id).ok(),
+        other => Some(other),
+    }
+}
+
+/// The e-invoice XML embedded in a (stored) hybrid PDF, if it carries one.
+/// Serving it from the archived document keeps the XML identical to the
+/// invoice as issued, whatever changed in the settings since.
+pub(super) fn extract_xml_from_pdf(pdf: &[u8]) -> Option<String> {
+    let document = lopdf::Document::load_mem(pdf).ok()?;
+    let catalog = document.catalog().ok()?;
+    let names = follow(&document, catalog.get(b"Names").ok()?)?
+        .as_dict()
+        .ok()?;
+    let embedded = follow(&document, names.get(b"EmbeddedFiles").ok()?)?
+        .as_dict()
+        .ok()?;
+    let entries = follow(&document, embedded.get(b"Names").ok()?)?
+        .as_array()
+        .ok()?;
+    let filespec = entries.chunks(2).find_map(|pair| match pair {
+        [name, spec] if name.as_str().ok()? == ZUGFERD_XML_FILENAME.as_bytes() => Some(spec),
+        _ => None,
+    })?;
+    let filespec = follow(&document, filespec)?.as_dict().ok()?;
+    let files = follow(&document, filespec.get(b"EF").ok()?)?
+        .as_dict()
+        .ok()?;
+    let stream = follow(&document, files.get(b"F").ok()?)?.as_stream().ok()?;
+    let bytes = stream
+        .decompressed_content()
+        .unwrap_or_else(|_| stream.content.clone());
+    String::from_utf8(bytes).ok()
+}
+
 /// Reference invoice for the PDF tests and the CI validator run.
 #[cfg(test)]
 pub(super) fn test_sample() -> EInvoice {

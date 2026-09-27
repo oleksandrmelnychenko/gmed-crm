@@ -37,6 +37,7 @@ pub(crate) mod credit_notes;
 mod credit_transfers;
 mod document;
 mod release;
+mod stored_documents;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -4104,6 +4105,23 @@ async fn load_invoice_detail(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
     })?
     .map(|recipient| recipient.to_json());
+    // The archived document of an issued invoice (GoBD), when stored.
+    let stored_document = match state.db.acquire().await {
+        Ok(mut conn) => stored_documents::load(&mut conn, invoice_id, None).await,
+        Err(error) => Err(error),
+    }
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load stored invoice document");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .map(|document| {
+        json!({
+            "file_name": document.file_name,
+            "sha256": document.sha256,
+            "generation_trigger": document.generation_trigger,
+            "generated_at": document.generated_at.to_rfc3339(),
+        })
+    });
     // Relatives of the patient the payer can be picked from (staff only).
     let payer_relation_options = sqlx::query(
         r#"SELECT relation.id, relation.related_name, relation.relation_type,
@@ -4141,6 +4159,7 @@ async fn load_invoice_detail(
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
         "recipient": recipient,
+        "stored_document": stored_document,
         "payer_relation_options": payer_relation_options,
         "order_id": invoice_order_id,
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
@@ -10204,10 +10223,11 @@ async fn download_invoice_pdf(
         return resp;
     }
 
-    let pdf_bytes = match render_invoice_pdf(&state, &context).await {
-        Ok(bytes) => bytes,
-        Err(resp) => return resp,
-    };
+    let (pdf_bytes, file_name, source) =
+        match invoice_pdf_for_download(&state, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     state.audit_sender.try_send(audit::domain_event(
         "download_invoice_pdf",
@@ -10217,15 +10237,13 @@ async fn download_invoice_pdf(
         serde_json::json!({
             "invoice_number": context.invoice_number,
             "source": "staff_workspace",
+            "document": source,
         }),
     ));
 
-    let disposition = format!(
-        "inline; filename=\"{}\"",
-        invoice_pdf_filename(&context).replace('"', "")
-    );
+    let disposition = format!("inline; filename=\"{}\"", file_name.replace('"', ""));
 
-    invoice_pdf_response(pdf_bytes, disposition)
+    invoice_pdf_response(pdf_bytes, disposition, source)
 }
 
 async fn download_my_invoice_pdf(
@@ -10259,10 +10277,11 @@ async fn download_my_invoice_pdf(
         return err(StatusCode::FORBIDDEN, "Invoice PDF is hidden from patient");
     }
 
-    let pdf_bytes = match render_invoice_pdf(&state, &context).await {
-        Ok(bytes) => bytes,
-        Err(resp) => return resp,
-    };
+    let (pdf_bytes, file_name, source) =
+        match invoice_pdf_for_download(&state, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
 
     state.audit_sender.try_send(audit::domain_event(
         "download_portal_invoice_pdf",
@@ -10272,15 +10291,13 @@ async fn download_my_invoice_pdf(
         serde_json::json!({
             "invoice_number": context.invoice_number,
             "source": "patient_portal",
+            "document": source,
         }),
     ));
 
-    let disposition = format!(
-        "inline; filename=\"{}\"",
-        invoice_pdf_filename(&context).replace('"', "")
-    );
+    let disposition = format!("inline; filename=\"{}\"", file_name.replace('"', ""));
 
-    invoice_pdf_response(pdf_bytes, disposition)
+    invoice_pdf_response(pdf_bytes, disposition, source)
 }
 
 /// Invoice data for the ZUGFeRD XML, read from the same rows the PDF uses.
@@ -10492,11 +10509,17 @@ async fn download_invoice_zugferd_xml(
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
-    let loaded = match state.db.acquire().await {
-        Ok(mut conn) => load_einvoice(&mut conn, invoice_id).await,
-        Err(error) => Err(error),
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "acquire zugferd connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
     };
-    let invoice = match loaded {
+    let invoice = match load_einvoice(&mut conn, invoice_id).await {
         Ok(Some(invoice)) => invoice,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(error) => {
@@ -10507,24 +10530,45 @@ async fn download_invoice_zugferd_xml(
             );
         }
     };
-    let missing = zugferd::missing_requirements(&invoice);
-    if !missing.is_empty() {
-        return (
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(json!({
-                "message": format!("E-invoice is missing mandatory data: {}", missing.join(", ")),
-                "missing": missing,
-            })),
-        )
-            .into_response();
-    }
-    let xml = zugferd::build_cii_xml(&invoice);
+    // An issued invoice's e-invoice is the XML embedded in its stored
+    // document, so it cannot drift from the archived PDF.
+    let stored_xml = match stored_documents::load(&mut conn, invoice_id, None).await {
+        Ok(Some(document)) => match stored_documents::read_bytes(&document).await {
+            Ok(bytes) => zugferd::extract_xml_from_pdf(&bytes),
+            Err(resp) => return resp,
+        },
+        Ok(None) => None,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load stored invoice document for zugferd");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to build e-invoice",
+            );
+        }
+    };
+    let (xml, source) = match stored_xml {
+        Some(xml) => (xml, "stored"),
+        None => {
+            let missing = zugferd::missing_requirements(&invoice);
+            if !missing.is_empty() {
+                return (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Json(json!({
+                        "message": format!("E-invoice is missing mandatory data: {}", missing.join(", ")),
+                        "missing": missing,
+                    })),
+                )
+                    .into_response();
+            }
+            (zugferd::build_cii_xml(&invoice), "live")
+        }
+    };
     state.audit_sender.try_send(audit::domain_event(
         "download_invoice_zugferd_xml",
         Some(auth.user_id),
         "invoice",
         Some(invoice_id),
-        json!({ "invoice_number": invoice.number }),
+        json!({ "invoice_number": invoice.number, "document": source }),
     ));
     let filename = invoice
         .number
@@ -10546,6 +10590,7 @@ async fn download_invoice_zugferd_xml(
                 zugferd::ZUGFERD_XML_FILENAME
             ),
         )
+        .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
         .body(Body::from(xml))
     {
         Ok(response) => response,
@@ -10559,10 +10604,57 @@ async fn download_invoice_zugferd_xml(
     }
 }
 
-fn invoice_pdf_response(pdf_bytes: Vec<u8>, disposition: String) -> axum::response::Response {
+/// Response header naming where a served invoice document came from:
+/// `stored`, `stored-on-first-download` or `draft-preview`.
+const INVOICE_DOCUMENT_SOURCE_HEADER: &str = "x-gmed-invoice-document";
+
+/// The PDF a download serves: the stored document of a released invoice
+/// (stored now when it was released before documents were kept), or a live
+/// preview of a draft that is marked as such and never stored.
+async fn invoice_pdf_for_download(
+    state: &AppState,
+    context: &InvoicePdfContext,
+    actor: Uuid,
+) -> Result<(Vec<u8>, String, &'static str), axum::response::Response> {
+    if !context.released {
+        let bytes = render_invoice_pdf(state, context).await?;
+        return Ok((bytes, invoice_pdf_filename(context), "draft-preview"));
+    }
+    let mut conn = state.db.acquire().await.map_err(|error| {
+        tracing::error!(%error, invoice_id = %context.invoice_id, "acquire invoice document connection");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the invoice document",
+        )
+    })?;
+    let (bytes, file_name, source) =
+        stored_documents::released_invoice_pdf(&mut conn, context.invoice_id, actor).await?;
+    if source == stored_documents::InvoicePdfSource::StoredOnFirstDownload {
+        write_invoice_audit(
+            state,
+            actor,
+            "store_invoice_document",
+            context.invoice_id,
+            json!({
+                "trigger": stored_documents::TRIGGER_FIRST_DOWNLOAD,
+                "sha256": stored_documents::sha256_hex(&bytes),
+                "file_name": file_name,
+            }),
+        )
+        .await;
+    }
+    Ok((bytes, file_name, source.header_value()))
+}
+
+fn invoice_pdf_response(
+    pdf_bytes: Vec<u8>,
+    disposition: String,
+    source: &'static str,
+) -> axum::response::Response {
     match axum::response::Response::builder()
         .header("content-type", "application/pdf")
         .header("content-disposition", disposition)
+        .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
         .body(Body::from(pdf_bytes))
     {
         Ok(response) => response,
@@ -11701,8 +11793,31 @@ async fn update_invoice_status(
                 .unwrap_or_default();
             let paid_at_payload = paid_at.as_ref().map(|value| value.to_rfc3339());
 
+            // GoBD: the issued document is rendered once, inside the release,
+            // and kept; downloads serve this copy from now on. Anything the
+            // release changes above (number, dates, credited advances) is in it.
+            let stored_blob = if releasing {
+                match stored_documents::store_invoice_pdf(
+                    &mut *transaction,
+                    invoice_id,
+                    stored_documents::TRIGGER_RELEASE,
+                    Some(auth.user_id),
+                )
+                .await
+                {
+                    Ok((_, _, blob)) => blob,
+                    Err(resp) => return resp,
+                }
+            } else {
+                None
+            };
+            let stored_sha256 = stored_blob.as_ref().map(|blob| blob.sha256.clone());
+
             if let Err(e) = transaction.commit().await {
                 tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice status update");
+                if let Some(blob) = stored_blob {
+                    blob.discard().await;
+                }
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice",
@@ -11745,6 +11860,7 @@ async fn update_invoice_status(
                     "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
                     "released": releasing,
                     "invoice_number": released_number,
+                    "stored_document_sha256": stored_sha256,
                 }),
             ));
 
@@ -11864,13 +11980,20 @@ mod tests {
 
         let bytes = build_invoice_pdf(&context).unwrap();
         // The ZUGFeRD hybrid keeps the rendered pages readable and carries the XML.
+        let xml = super::zugferd::build_cii_xml(&super::zugferd::test_sample());
         let hybrid = super::zugferd::embed_xml_in_pdf(
             &bytes,
-            &super::zugferd::build_cii_xml(&super::zugferd::test_sample()),
+            &xml,
             &context.invoice_number,
             context.issued_at,
         )
         .unwrap();
+        // The XML served for a stored invoice is read back from its document.
+        assert_eq!(
+            super::zugferd::extract_xml_from_pdf(&hybrid).as_deref(),
+            Some(xml.as_str())
+        );
+        assert_eq!(super::zugferd::extract_xml_from_pdf(&bytes), None);
         // CI runs the official ZUGFeRD validator (PDF/A-3 + EN 16931) over this file.
         if let Ok(dir) = std::env::var("EINVOICE_SAMPLE_DIR") {
             std::fs::create_dir_all(&dir).unwrap();
@@ -11922,6 +12045,20 @@ mod tests {
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
+    }
+
+    /// A draft renders as a marked preview: no number, no invoice date.
+    #[test]
+    fn draft_preview_is_marked_and_carries_no_number() {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.released = false;
+        context.invoice_number = String::new();
+        let text = pdf_text(&context);
+        assert!(text.contains("ENTWURF – keine gültige Rechnung"), "{text}");
+        assert!(text.contains("Rechnungsnummer"));
+        assert!(!text.contains("INV-"), "{text}");
+        assert!(invoice_pdf_filename(&context).starts_with("RECHNUNG-ENTWURF-"));
     }
 
     /// § 14 Abs. 4 UStG content: recipient with address, service period, VAT

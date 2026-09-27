@@ -15,6 +15,7 @@ import {
   canPickInvoiceStatus,
   defaultReleaseDueDate,
   invoiceDisplayNumber,
+  invoiceDocumentState,
   invoiceStatusFormProblem,
   isInvoiceReleased,
   invoiceRecipientAddressLines,
@@ -69,6 +70,25 @@ describe("invoice release and numbering", () => {
     // Only the release checks the date; a draft may keep an old one until then.
     expect(invoiceStatusFormProblem(draft, { status: "draft", dueDate: "2026-09-01" }, today)).toBeNull();
     expect(defaultReleaseDueDate(today)).toBe("2026-10-11");
+  });
+
+  it("tells a draft preview from the archived document", () => {
+    expect(invoiceDocumentState({ status: "draft", released_at: null })).toBe("draft_preview");
+    expect(
+      invoiceDocumentState({
+        status: "sent",
+        released_at: "2026-09-27T10:00:00Z",
+        stored_document: {
+          file_name: "RECHNUNG-INV-1.pdf",
+          sha256: "0".repeat(64),
+          generation_trigger: "release",
+          generated_at: "2026-09-27T10:00:00Z",
+        },
+      }),
+    ).toBe("archived");
+    expect(
+      invoiceDocumentState({ status: "paid", released_at: "2026-01-02T10:00:00Z", stored_document: null }),
+    ).toBe("archived_on_first_download");
   });
 
   it("keeps the due date of a released invoice", () => {

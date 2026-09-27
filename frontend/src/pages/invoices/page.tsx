@@ -148,6 +148,7 @@ import {
   invoiceToPayerForm,
   invoiceToVisibilityForm,
   invoiceDisplayNumber,
+  invoiceDocumentState,
   invoiceStatusFormProblem,
   isInvoiceReleased,
   canEditInvoiceDueDate,
@@ -2611,6 +2612,22 @@ function useStaffInvoicesPageContent() {
                           </p>
                           <p className="mt-0.5 text-xs text-muted-foreground">
                             {invoiceTypeLabel(detail.invoice_type)} · PDF
+                          </p>
+                          <p
+                            className="mt-0.5 text-xs text-muted-foreground"
+                            data-testid="invoice-document-state"
+                          >
+                            {(() => {
+                              const state = invoiceDocumentState(detail);
+                              if (state === "draft_preview") return t.revenue_invoices_document_draft_preview;
+                              if (state === "archived_on_first_download") {
+                                return t.revenue_invoices_document_archived_on_first_download;
+                              }
+                              return t.revenue_invoices_document_archived.replace(
+                                "{date}",
+                                formatDateTime(detail.stored_document?.generated_at, locale),
+                              );
+                            })()}
                           </p>
                         </div>
                         <div className="flex min-w-0 flex-wrap items-center gap-2">

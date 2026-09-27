@@ -1563,8 +1563,8 @@ async fn invoice_list_returns_page_metadata_and_slices_results() {
         let quote = create_quote(&app, &billing_bearer, order_id).await;
         let quote_id = quote["id"].as_str().unwrap();
         let _invoice = create_sent_invoice(
-        &app,
-        &pool,
+            &app,
+            &pool,
             &billing_bearer,
             quote_id,
             "final",
@@ -2068,11 +2068,10 @@ async fn invoices_are_numbered_on_release_and_stay_released() {
     assert!(body["invoice_number"].is_null(), "{body}");
     assert!(body["released_at"].is_null(), "{body}");
 
-    let counter_before: i64 =
-        sqlx::query_scalar("SELECT last_value FROM invoice_number_counter")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let counter_before: i64 = sqlx::query_scalar("SELECT last_value FROM invoice_number_counter")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     let first = create_draft_invoice(&app, &billing_bearer, quote_id).await;
     let first_id = first["id"].as_str().unwrap().to_string();
@@ -2115,8 +2114,13 @@ async fn invoices_are_numbered_on_release_and_stay_released() {
     assert_eq!(due_on, issued_on + chrono::Duration::days(14));
 
     // No way back to draft, no new due date, no new payer.
-    let (status, body) =
-        post_invoice_status(&app, &billing_bearer, &first_id, json!({ "status": "draft" })).await;
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &first_id,
+        json!({ "status": "draft" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     let later = (due_on + chrono::Duration::days(30)).to_string();
     let (status, body) = post_invoice_status(
@@ -2151,13 +2155,19 @@ async fn invoices_are_numbered_on_release_and_stay_released() {
         .execute(&pool)
         .await
         .unwrap_err();
-    assert!(db_error.to_string().contains("cannot return to draft"), "{db_error}");
+    assert!(
+        db_error.to_string().contains("cannot return to draft"),
+        "{db_error}"
+    );
     let db_error = sqlx::query("UPDATE invoices SET invoice_number = 'INV-X' WHERE id = $1::uuid")
         .bind(&first_id)
         .execute(&pool)
         .await
         .unwrap_err();
-    assert!(db_error.to_string().contains("keeps its invoice number"), "{db_error}");
+    assert!(
+        db_error.to_string().contains("keeps its invoice number"),
+        "{db_error}"
+    );
 
     // The next release takes the next number: the cancelled draft left no gap.
     let second = create_draft_invoice(&app, &billing_bearer, quote_id).await;
@@ -2238,10 +2248,15 @@ async fn draft_invoice_offers_no_advance_and_is_dated_on_release() {
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap().to_string();
 
-    let advance =
-        create_sent_invoice(
+    let advance = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, &quote_id, "advance", "2026-10-15").await;
+        &pool,
+        &billing_bearer,
+        &quote_id,
+        "advance",
+        "2026-10-15",
+    )
+    .await;
     let advance_id = advance["id"].as_str().unwrap().to_string();
     let (status, payment) = json_request(
         &app,
@@ -2511,7 +2526,13 @@ async fn invoice_detail_includes_supporting_documents_for_cost_passthrough_line_
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-05-31").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-05-31",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, body) = json_request(
@@ -2593,7 +2614,13 @@ async fn paid_invoice_marks_linked_financial_supporting_documents_reimbursed() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-05-31").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-05-31",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
 
@@ -3064,10 +3091,15 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
 
-    let invoice =
-        create_sent_invoice(
+    let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", &invoice_due_date).await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        &invoice_due_date,
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
     let total_gross: f64 = invoice["total_gross"].as_str().unwrap().parse().unwrap();
@@ -3164,7 +3196,13 @@ async fn billing_can_run_first_and_second_dunning_then_collections() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-03-01").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-03-01",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, body) = json_request(
@@ -3251,7 +3289,13 @@ async fn dunning_sequence_requires_previous_step_and_billing_role() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-03-01").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-03-01",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let (status, _) = json_request(
@@ -3312,7 +3356,13 @@ async fn dunning_is_blocked_for_paid_invoice() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-03-01").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-03-01",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let total_gross = invoice["total_gross"]
         .as_str()
@@ -3588,7 +3638,13 @@ async fn staff_can_download_invoice_pdf_document() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-05-30").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-05-30",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let invoice_number = invoice["invoice_number"].as_str().unwrap();
 
@@ -3783,6 +3839,198 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
     assert!(text.contains("03.09.2026"), "{text}");
 }
 
+fn document_source(headers: &axum::http::HeaderMap) -> &str {
+    headers
+        .get("x-gmed-invoice-document")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(bytes))
+}
+
+/// GoBD: the issued invoice is rendered once at release and stored; every
+/// download serves that copy, whatever changes afterwards. Drafts render as
+/// previews and are never stored; invoices released before documents were
+/// kept get their copy on the first download.
+#[tokio::test]
+async fn released_invoice_document_is_stored_once_and_served_unchanged() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-stored-pdf");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Hauptstraße 1', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Archivierte Leistung", 100.0, "approved").await;
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    assert!(draft["stored_document"].is_null(), "{draft}");
+
+    // A draft previews live, marked as draft, and is not stored.
+    let (status, headers, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "draft-preview");
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(text.contains("ENTWURF"), "{text}");
+    let stored_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM invoice_documents WHERE invoice_id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(stored_count, 0);
+
+    // Release renders and stores the document.
+    let released = release_invoice(&app, &billing_bearer, &invoice_id).await;
+    let invoice_number = released["invoice_number"].as_str().unwrap().to_string();
+    assert_eq!(released["stored_document"]["generation_trigger"], "release");
+    let (stored_sha, stored_trigger): (String, String) = sqlx::query_as(
+        "SELECT sha256, generation_trigger FROM invoice_documents
+         WHERE invoice_id = $1::uuid AND document_kind = 'invoice'",
+    )
+    .bind(&invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_trigger, "release");
+    assert_eq!(released["stored_document"]["sha256"], stored_sha);
+
+    // Later changes to the agency or the patient do not reach the issued document.
+    sqlx::query(
+        "UPDATE system_settings SET value = to_jsonb('Umbenannte Agentur'::text) WHERE key = 'agency_name'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE patients SET address_street = 'Neue Straße 99' WHERE id = $1")
+        .bind(patient_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, headers, staff_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "stored");
+    assert_eq!(sha256_hex(&staff_bytes), stored_sha);
+    let text = pdf_extract::extract_text_from_mem(&staff_bytes).unwrap();
+    assert!(text.contains(&invoice_number));
+    assert!(text.contains("Hauptstraße 1"), "{text}");
+    assert!(!text.contains("Neue Straße 99"), "{text}");
+    assert!(!text.contains("Umbenannte Agentur"), "{text}");
+
+    let (status, headers, portal_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/pdf"),
+        &patient_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "stored");
+    assert_eq!(portal_bytes, staff_bytes);
+
+    // The e-invoice XML comes from the archived document too.
+    let (status, headers, xml) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/zugferd.xml"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    assert_eq!(document_source(&headers), "stored");
+    let xml = String::from_utf8(xml).unwrap();
+    assert!(xml.contains("GMED Test Agentur"), "{xml}");
+    assert!(!xml.contains("Umbenannte Agentur"), "{xml}");
+
+    // The stored row cannot be rewritten.
+    let db_error =
+        sqlx::query("UPDATE invoice_documents SET file_name = 'x.pdf' WHERE invoice_id = $1::uuid")
+            .bind(&invoice_id)
+            .execute(&pool)
+            .await
+            .unwrap_err();
+    assert!(
+        db_error.to_string().contains("cannot be changed"),
+        "{db_error}"
+    );
+
+    // An invoice released before documents were stored gets its copy on the
+    // first download, and that copy is served from then on.
+    let legacy_id = seed_sent_invoice_direct(&pool, order_id, patient_id, admin_id, &tag).await;
+    let (status, headers, first_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{legacy_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "stored-on-first-download");
+    let (status, headers, second_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{legacy_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "stored");
+    assert_eq!(first_bytes, second_bytes);
+    let legacy_trigger: String = sqlx::query_scalar(
+        "SELECT generation_trigger FROM invoice_documents WHERE invoice_id = $1",
+    )
+    .bind(legacy_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(legacy_trigger, "first_download");
+}
+
 #[tokio::test]
 async fn patient_can_download_own_invoice_pdf() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -3814,7 +4062,13 @@ async fn patient_can_download_own_invoice_pdf() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-05-30").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-05-30",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap();
     let (status, body) = json_request(
         &app,
@@ -3876,7 +4130,13 @@ async fn ceo_assistant_can_read_but_cannot_mutate_invoice_workspace() {
     let quote_id = quote["id"].as_str().unwrap();
     let invoice = create_sent_invoice(
         &app,
-        &pool, &billing_bearer, quote_id, "final", "2026-05-30").await;
+        &pool,
+        &billing_bearer,
+        quote_id,
+        "final",
+        "2026-05-30",
+    )
+    .await;
     let invoice_id = invoice["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(
