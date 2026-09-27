@@ -382,6 +382,9 @@ export type QuoteOption = {
   quote_number: string;
   status?: string;
   active_invoice_types?: string[];
+  /** The order's required prepayment: the default amount of an advance invoice. */
+  order_prepayment_amount?: string | null;
+  order_prepayment_required?: boolean;
   total_gross: unknown;
   line_items: InvoiceLineItem[];
 };
@@ -395,7 +398,11 @@ export type Filters = {
   invoiceType: string;
 };
 
+/** What an advance invoice bills: the order's required prepayment or selected positions. */
+export type AdvanceBasis = "prepayment" | "positions";
+
 export type CreateForm = {
+  advanceBasis: AdvanceBasis;
   quoteId: string;
   invoiceType: InvoiceType;
   dueDate: string;

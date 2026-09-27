@@ -22,6 +22,10 @@ import {
   invoiceRecipientAddressLines,
   payerFormToPayload,
   payerRelationOptionLabel,
+  effectiveAdvanceBasis,
+  netForGross,
+  prepaymentAdvanceSplit,
+  quoteRequiredPrepayment,
 } from "./invoice-model";
 import type { InvoiceLineItem, QuoteOption } from "./types";
 
@@ -332,5 +336,56 @@ describe("invoice creation selection", () => {
         lineQuantities: { "0": "1", "1": "1", "5": "1" },
       })).toBe(false);
     }
+  });
+});
+
+describe("prepayment advance invoices", () => {
+  const quoteLine = (lineGross: string, vatRate: string, isCostPassthrough = false) => ({
+    description: "Service",
+    quantity: "1",
+    unit_price: lineGross,
+    vat_rate: vatRate,
+    is_cost_passthrough: isCostPassthrough,
+    line_net: lineGross,
+    line_vat: "0",
+    line_gross: lineGross,
+  }) as InvoiceLineItem;
+  const quote = (orderPrepaymentAmount: string | null) => ({
+    id: "quote",
+    order_id: "order",
+    order_number: "A-1",
+    patient_id: "patient",
+    patient_name: "Patient",
+    patient_pid: "P-1",
+    quote_number: "Q-1",
+    total_gross: "669",
+    order_prepayment_amount: orderPrepaymentAmount,
+    line_items: [quoteLine("550", "0"), quoteLine("119", "19")],
+  }) as QuoteOption;
+
+  it("offers the order's required prepayment and falls back to positions without one", () => {
+    expect(quoteRequiredPrepayment(quote("500"))).toBe(500);
+    expect(quoteRequiredPrepayment(quote(null))).toBeNull();
+    const form = { ...blankCreateForm("quote"), invoiceType: "advance" as const };
+    expect(effectiveAdvanceBasis(form, quote("500"))).toBe("prepayment");
+    expect(effectiveAdvanceBasis({ ...form, advanceBasis: "positions" }, quote("500"))).toBe("positions");
+    expect(effectiveAdvanceBasis(form, quote(null))).toBe("positions");
+    expect(effectiveAdvanceBasis({ ...form, invoiceType: "final" }, quote("500"))).toBeNull();
+  });
+
+  it("splits the prepayment over the quote's VAT groups like the server", () => {
+    const split = prepaymentAdvanceSplit(quote("500").line_items, 500);
+    expect(split.lines).toEqual([
+      { vatRate: 0, isCostPassthrough: false, net: 411.06, vat: 0, gross: 411.06 },
+      { vatRate: 19, isCostPassthrough: false, net: 74.74, vat: 14.2, gross: 88.94 },
+    ]);
+    expect(split.gross).toBe(500);
+    expect(split.exceedsQuote).toBe(false);
+    expect(prepaymentAdvanceSplit(quote("500").line_items, 1000).exceedsQuote).toBe(true);
+  });
+
+  it("hits the agreed gross with a cent-exact net", () => {
+    expect(netForGross(150, 19)).toBe(126.05);
+    expect(netForGross(550, 0)).toBe(550);
   });
 });

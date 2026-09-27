@@ -209,6 +209,10 @@ struct CreateInvoiceRequest {
     due_date: Option<String>,
     notes: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
+    /// Advance invoices only: `prepayment` bills the order's required
+    /// prepayment as "Anzahlung" lines; `positions` (default) bills the
+    /// selected quote positions.
+    advance_basis: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -3568,6 +3572,156 @@ async fn build_selected_invoice_snapshot(
     })
 }
 
+/// Advance invoice for the order's required prepayment (e.g. 500 EUR of a
+/// 550 EUR quote) instead of the quote positions; without a configured
+/// prepayment the whole quote is billed. It is taxed like a positions
+/// advance: the amount is split over the quote's VAT groups (rate, and
+/// pass-through costs without VAT) in proportion to their gross, one
+/// "Anzahlung" line per group referencing the quote, so the VAT of the
+/// prepayment matches the services it pays for. A single-rate quote gets a
+/// single line. Advances consume no quote quantities.
+async fn build_prepayment_advance_snapshot(
+    state: &AppState,
+    ctx: &QuoteInvoiceContext,
+) -> Result<InvoiceCreationSnapshot, axum::response::Response> {
+    let required = sqlx::query_scalar::<_, Option<Decimal>>(
+        "SELECT NULLIF(prepayment_amount, 0) FROM orders WHERE id = $1",
+    )
+    .bind(ctx.order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, order_id = %ctx.order_id, "load required order prepayment");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the required prepayment",
+        )
+    })?;
+
+    let quote_items = ctx.line_items.as_array().cloned().unwrap_or_default();
+    let mut groups = BTreeMap::<(bool, Decimal), Decimal>::new();
+    for item in &quote_items {
+        let source_service_cancelled = ctx.order_contract_terminated
+            && item
+                .get("source_order_leistung_id")
+                .and_then(Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
+        if source_service_cancelled {
+            continue;
+        }
+        let gross = invoice_json_decimal(item, "line_gross")
+            .unwrap_or(Decimal::ZERO)
+            .round_cents();
+        if gross <= Decimal::ZERO {
+            continue;
+        }
+        let is_cost_passthrough = item
+            .get("is_cost_passthrough")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let vat_rate = if is_cost_passthrough {
+            Decimal::ZERO
+        } else {
+            invoice_json_decimal(item, "vat_rate")
+                .unwrap_or(Decimal::ZERO)
+                .round_commercial(2)
+        };
+        if vat_rate < Decimal::ZERO {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Quote contains invalid price or VAT data",
+            ));
+        }
+        *groups
+            .entry((is_cost_passthrough, vat_rate.normalize()))
+            .or_insert(Decimal::ZERO) += gross;
+    }
+    let quote_gross: Decimal = groups.values().copied().sum();
+    if quote_gross <= Decimal::ZERO {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Quote has no invoiceable line items",
+        ));
+    }
+    let amount = required.unwrap_or(quote_gross).round_cents();
+    if amount <= Decimal::ZERO {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The required prepayment must be greater than zero",
+        ));
+    }
+    if amount > quote_gross {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The required prepayment exceeds the quote total",
+        ));
+    }
+
+    let group_count = groups.len();
+    let mut remaining = amount;
+    let mut total_net = Decimal::ZERO;
+    let mut total_vat = Decimal::ZERO;
+    let mut total_gross = Decimal::ZERO;
+    let mut line_items = Vec::with_capacity(group_count);
+    for (position, ((is_cost_passthrough, vat_rate), group_gross)) in groups.into_iter().enumerate()
+    {
+        // The last group takes the rounding remainder, so the lines add up to
+        // the required prepayment.
+        let share = if position + 1 == group_count {
+            remaining
+        } else {
+            (amount * group_gross / quote_gross).round_cents()
+        };
+        remaining -= share;
+        if share <= Decimal::ZERO {
+            continue;
+        }
+        let unit_price = money::net_for_gross(share, vat_rate);
+        let (line_net, line_vat, line_gross) =
+            compute_invoice_line_parts(Decimal::ONE, unit_price, vat_rate);
+        let description = if group_count == 1 {
+            format!("Anzahlung gemäß Angebot {}", ctx.quote_number)
+        } else if is_cost_passthrough {
+            format!(
+                "Anzahlung gemäß Angebot {} – Anteil Auslagen",
+                ctx.quote_number
+            )
+        } else {
+            format!(
+                "Anzahlung gemäß Angebot {} – Anteil {} % USt.",
+                ctx.quote_number,
+                decimal_to_string(vat_rate)
+            )
+        };
+        total_net += line_net;
+        total_vat += line_vat;
+        total_gross += line_gross;
+        line_items.push(json!({
+            "description": description,
+            "quantity": "1",
+            "unit_price": decimal_to_string(unit_price),
+            "vat_rate": decimal_to_string(vat_rate),
+            "is_cost_passthrough": is_cost_passthrough,
+            "line_net": decimal_to_string(line_net),
+            "line_vat": decimal_to_string(line_vat),
+            "line_gross": decimal_to_string(line_gross),
+            "source": "advance_prepayment",
+            "quote_id": ctx.quote_id,
+            "quote_number": ctx.quote_number,
+            "quote_group_gross": decimal_to_string(group_gross),
+        }));
+    }
+
+    Ok(InvoiceCreationSnapshot {
+        total_net: total_net.round_cents(),
+        total_vat: total_vat.round_cents(),
+        total_gross: total_gross.round_cents(),
+        line_items: Value::Array(line_items),
+        allocations: Vec::new(),
+    })
+}
+
 async fn build_invoice_snapshot_with_approved_package_overages(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
@@ -6429,14 +6583,41 @@ async fn create_invoice_from_quote(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
 
-    let invoice_snapshot = match build_selected_invoice_snapshot(
-        &state,
-        &ctx,
-        &invoice_type,
-        body.line_items.as_deref(),
-    )
-    .await
+    let prepayment_basis = match body
+        .advance_basis
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
+        None | Some("positions") => false,
+        Some("prepayment") => true,
+        Some(_) => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "advance_basis must be prepayment or positions",
+            );
+        }
+    };
+    if prepayment_basis && invoice_type != "advance" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Only an advance invoice bills the required prepayment",
+        );
+    }
+    if prepayment_basis && body.line_items.is_some() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A prepayment advance invoice takes no position selection",
+        );
+    }
+
+    let invoice_snapshot = if prepayment_basis {
+        build_prepayment_advance_snapshot(&state, &ctx).await
+    } else {
+        build_selected_invoice_snapshot(&state, &ctx, &invoice_type, body.line_items.as_deref())
+            .await
+    };
+    let invoice_snapshot = match invoice_snapshot {
         Ok(value) => value,
         Err(resp) => return resp,
     };

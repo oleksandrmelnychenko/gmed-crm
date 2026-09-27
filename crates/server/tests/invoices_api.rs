@@ -1677,6 +1677,168 @@ async fn advance_invoice_does_not_consume_order_services() {
     assert_eq!(current_status, "approved");
 }
 
+/// The advance invoice can bill the order's required prepayment (500 EUR of a
+/// 669 EUR quote) instead of the quote positions: one "Anzahlung" line per VAT
+/// group of the quote, split in proportion to the group gross, so the advance
+/// is taxed like the services it pays for.
+#[tokio::test]
+async fn advance_invoice_bills_the_required_prepayment_as_anzahlung() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-prepayment-advance");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Organisation der Behandlung",
+        550.0,
+        0.0,
+        false,
+        "planned",
+    )
+    .await;
+    seed_order_leistung_finance(
+        &pool,
+        order_id,
+        "Dolmetscher",
+        100.0,
+        19.0,
+        false,
+        "planned",
+    )
+    .await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    let quote_number = quote["quote_number"].as_str().unwrap().to_string();
+    assert_eq!(quote["total_gross"], "669");
+
+    // The quote list offers the required prepayment as the advance amount.
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 1000 WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "The required prepayment exceeds the quote total"
+    );
+
+    sqlx::query("UPDATE orders SET prepayment_amount = 500 WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, quotes) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes?order_id={order_id}&invoiceable=true"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{quotes}");
+    assert_eq!(quotes[0]["order_prepayment_amount"], "500");
+    assert_eq!(quotes[0]["order_prepayment_required"], true);
+
+    // Only an advance bills the prepayment, and it takes no position selection.
+    for payload in [
+        json!({ "invoice_type": "interim", "advance_basis": "prepayment" }),
+        json!({
+            "invoice_type": "advance",
+            "advance_basis": "prepayment",
+            "line_items": [{ "line_index": 0, "quantity": "1" }]
+        }),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/quotes/{quote_id}/invoices"),
+            &billing_bearer,
+            Some(payload),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+
+    let (status, invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    assert_eq!(invoice["invoice_type"], "advance");
+    let invoice_id = Uuid::parse_str(invoice["id"].as_str().unwrap()).unwrap();
+
+    let (total_net, total_vat, total_gross, line_items): (
+        rust_decimal::Decimal,
+        rust_decimal::Decimal,
+        rust_decimal::Decimal,
+        Value,
+    ) = sqlx::query_as(
+        "SELECT total_net, total_vat, total_gross, line_items FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(total_gross, rust_decimal::Decimal::new(500, 0));
+    // 550 of 669 gross is at 0 % VAT, 119 at 19 %: 411.06 + 88.94 (74.74 net + 14.20 VAT).
+    assert_eq!(total_vat, rust_decimal::Decimal::new(1420, 2));
+    assert_eq!(total_net, rust_decimal::Decimal::new(48580, 2));
+    let lines = line_items.as_array().unwrap();
+    assert_eq!(lines.len(), 2, "{line_items}");
+    assert_eq!(lines[0]["vat_rate"], "0");
+    assert_eq!(lines[0]["line_gross"], "411.06");
+    assert_eq!(lines[1]["vat_rate"], "19");
+    assert_eq!(lines[1]["line_gross"], "88.94");
+    assert_eq!(lines[1]["line_vat"], "14.2");
+    for line in lines {
+        assert_eq!(line["source"], "advance_prepayment");
+        assert!(
+            line["description"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("Anzahlung gemäß Angebot {quote_number}")),
+            "{line}"
+        );
+    }
+
+    // The advance consumes no quote quantities: the final invoice still bills
+    // every position.
+    let allocations: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_order_line_allocations WHERE invoice_id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(allocations, 0);
+}
+
 /// A new quote for an order closes the order's older open quotes: nothing more
 /// can be invoiced from them, while an advance invoiced from the old quote stays
 /// creditable against the new quote's final invoice (prepayments are

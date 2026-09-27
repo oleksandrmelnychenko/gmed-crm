@@ -3,6 +3,7 @@ import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type {
   AccountingLedgerPayload,
+  AdvanceBasis,
   CreateForm,
   DunningEvent,
   Filters,
@@ -214,6 +215,7 @@ export function buildSearchParams(
 
 export function blankCreateForm(quoteId = ""): CreateForm {
   return {
+    advanceBasis: "prepayment",
     quoteId,
     invoiceType: "final",
     dueDate: "",
@@ -323,6 +325,94 @@ export function calculateInvoiceSelectionTotals(
       lineGrossByIndex: {} as Record<number, number>,
     },
   );
+}
+
+/** The order's required prepayment offered for an advance invoice, if configured. */
+export function quoteRequiredPrepayment(quote: QuoteOption | null | undefined): number | null {
+  const amount = Number(quote?.order_prepayment_amount ?? "");
+  return Number.isFinite(amount) && amount > 0 ? roundCents(amount) : null;
+}
+
+/**
+ * What the advance invoice bills: the required prepayment when the order has
+ * one (and the form did not switch to positions), otherwise the positions.
+ */
+export function effectiveAdvanceBasis(
+  form: Pick<CreateForm, "invoiceType" | "advanceBasis">,
+  quote: QuoteOption | null | undefined,
+): AdvanceBasis | null {
+  if (form.invoiceType !== "advance") return null;
+  return form.advanceBasis === "prepayment" && quoteRequiredPrepayment(quote) != null
+    ? "prepayment"
+    : "positions";
+}
+
+/** Net (in cents) of a single-unit line whose gross is `gross`; mirrors the server. */
+export function netForGross(gross: number, vatRate: number): number {
+  const target = toCents(gross);
+  const estimate = toCents(gross / (1 + vatRate / 100));
+  for (const offset of [0, -1, 1, -2, 2]) {
+    const net = (estimate + offset) / 100;
+    if (toCents(moneyLineAmounts(1, net, vatRate).gross) === target) return net;
+  }
+  return estimate / 100;
+}
+
+export type PrepaymentAdvanceLine = {
+  vatRate: number;
+  isCostPassthrough: boolean;
+  net: number;
+  vat: number;
+  gross: number;
+};
+
+/**
+ * The "Anzahlung" lines of a prepayment advance invoice, like the server
+ * builds them: the amount is split over the quote's VAT groups in proportion
+ * to their gross (the last group takes the rounding remainder), so the
+ * advance is taxed like the services it pays for.
+ */
+export function prepaymentAdvanceSplit(lines: InvoiceLineItem[], amount: number) {
+  const groups = new Map<string, { vatRate: number; isCostPassthrough: boolean; gross: number }>();
+  for (const line of lines) {
+    const gross = roundCents(Number(line.line_gross ?? 0));
+    if (!Number.isFinite(gross) || gross <= 0) continue;
+    const isCostPassthrough = Boolean(line.is_cost_passthrough);
+    const vatRate = isCostPassthrough ? 0 : roundCents(Number(line.vat_rate ?? 0));
+    if (!Number.isFinite(vatRate) || vatRate < 0) continue;
+    const key = `${isCostPassthrough ? 1 : 0}:${vatRate}`;
+    const group = groups.get(key) ?? { vatRate, isCostPassthrough, gross: 0 };
+    group.gross = roundCents(group.gross + gross);
+    groups.set(key, group);
+  }
+  const ordered = [...groups.values()].sort((left, right) =>
+    Number(left.isCostPassthrough) - Number(right.isCostPassthrough) || left.vatRate - right.vatRate,
+  );
+  const quoteGross = roundCents(ordered.reduce((sum, group) => sum + group.gross, 0));
+  const target = roundCents(amount);
+  const result: PrepaymentAdvanceLine[] = [];
+  if (quoteGross <= 0 || !Number.isFinite(target) || target <= 0) {
+    return { lines: result, net: 0, vat: 0, gross: 0, quoteGross, exceedsQuote: false };
+  }
+  let remaining = target;
+  ordered.forEach((group, index) => {
+    const share = index === ordered.length - 1
+      ? roundCents(remaining)
+      : roundCents((target * group.gross) / quoteGross);
+    remaining = roundCents(remaining - share);
+    if (share <= 0) return;
+    const net = netForGross(share, group.vatRate);
+    const amounts = moneyLineAmounts(1, net, group.vatRate);
+    result.push({ vatRate: group.vatRate, isCostPassthrough: group.isCostPassthrough, ...amounts });
+  });
+  return {
+    lines: result,
+    net: roundCents(result.reduce((sum, line) => sum + line.net, 0)),
+    vat: roundCents(result.reduce((sum, line) => sum + line.vat, 0)),
+    gross: roundCents(result.reduce((sum, line) => sum + line.gross, 0)),
+    quoteGross,
+    exceedsQuote: target > quoteGross,
+  };
 }
 
 export function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {

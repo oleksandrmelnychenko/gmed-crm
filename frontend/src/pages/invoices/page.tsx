@@ -141,6 +141,7 @@ import {
   buildInvoicesPath,
   buildSearchParams,
   createInvoiceLineSelection,
+  effectiveAdvanceBasis,
   isInvoiceSelectionValid,
   formatCurrency,
   formatDate,
@@ -1721,7 +1722,11 @@ function useStaffInvoicesPageContent() {
       setCreateError(text.chooseQuote);
       return;
     }
-    if (!isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm)) {
+    // An advance invoice bills the order's required prepayment unless staff
+    // switched to picking positions (or the order has no prepayment).
+    const prepaymentAdvance =
+      effectiveAdvanceBasis(createForm, selectedCreateQuote) === "prepayment";
+    if (!prepaymentAdvance && !isInvoiceSelectionValid(selectedCreateQuote.line_items, createForm)) {
       setCreateError(lang === "de" ? "Prüfen Sie die ausgewählten Positionen und Mengen." : "Проверьте выбранные позиции и количество.");
       return;
     }
@@ -1732,12 +1737,20 @@ function useStaffInvoicesPageContent() {
         line_index: lineIndex,
         quantity: Number(createForm.lineQuantities[String(lineIndex)] || 0),
       }));
-      const created = await createInvoice(createForm.quoteId, {
-        invoice_type: createForm.invoiceType,
-        due_date: createForm.dueDate || null,
-        notes: createForm.notes.trim() || null,
-        line_items: selectedLines,
-      });
+      const created = await createInvoice(createForm.quoteId, prepaymentAdvance
+        ? {
+            invoice_type: "advance",
+            advance_basis: "prepayment",
+            due_date: createForm.dueDate || null,
+            notes: createForm.notes.trim() || null,
+          }
+        : {
+            invoice_type: createForm.invoiceType,
+            ...(createForm.invoiceType === "advance" ? { advance_basis: "positions" } : {}),
+            due_date: createForm.dueDate || null,
+            notes: createForm.notes.trim() || null,
+            line_items: selectedLines,
+          });
       clearApiCache();
       setCreateOpen(false);
       setCreateForm(blankCreateForm(filters.quoteId));

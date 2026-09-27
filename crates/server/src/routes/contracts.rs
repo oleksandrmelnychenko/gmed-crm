@@ -3154,6 +3154,7 @@ async fn list_quotes(
                   q.superseded_by_quote_id, q.superseded_at,
                   successor.quote_number AS superseded_by_quote_number,
                   o.patient_id, o.source_lead_id, o.order_number, o.currency, o.contract_id,
+                  o.prepayment_required, NULLIF(o.prepayment_amount, 0) AS order_prepayment_amount,
                   COALESCE(p.first_name, l.first_name) AS subject_first_name,
                   COALESCE(p.last_name, l.last_name) AS subject_last_name,
                   p.patient_id AS patient_pid
@@ -3248,6 +3249,13 @@ async fn list_quotes(
                     "paid_amount": decimal_to_string(row.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                     "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
                     "active_invoice_types": row.try_get::<Vec<String>, _>("active_invoice_types").unwrap_or_default(),
+                    // The order's required prepayment: the default amount of
+                    // an advance invoice from this quote.
+                    "order_prepayment_required": row.try_get::<bool, _>("prepayment_required").unwrap_or(false),
+                    "order_prepayment_amount": row
+                        .try_get::<Option<Decimal>, _>("order_prepayment_amount")
+                        .unwrap_or_default()
+                        .map(decimal_to_string),
                     "line_items": add_remaining_quote_quantities(
                         row.try_get::<Value, _>("line_items").unwrap_or_else(|_| serde_json::json!([])),
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
