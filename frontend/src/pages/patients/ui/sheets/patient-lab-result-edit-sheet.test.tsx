@@ -129,6 +129,29 @@ describe("lab result correction form", () => {
     if (built.ok) expect(built.payload.measured_at).toBe(original);
   });
 
+  it("edits timed results in Berlin wall-clock time whatever the browser zone", () => {
+    // 28 Sep 00:30 in Berlin, still 27 Sep in UTC.
+    const original = "2026-09-27T22:30:45.123Z";
+    const form = patientLabCorrectionFormFromResult(labResult({
+      measured_at: original,
+      measured_at_precision: "datetime",
+    }));
+    expect(form.measuredAt).toBe("2026-09-28T00:30:45.123");
+
+    const unchanged = buildPatientLabCorrectionPayload({ ...form, correctionNote: "Confirmed timestamp" });
+    expect(unchanged.ok && unchanged.payload.measured_at).toBe(original);
+
+    // 27 Sep 23:30 in Berlin is 28 Sep 00:30 in Kyiv.
+    const edited = buildPatientLabCorrectionPayload({
+      ...form,
+      measuredAt: "2026-09-27T23:30",
+      correctionNote: "Corrected time",
+    });
+    expect(edited.ok && edited.payload.measured_at).toBe("2026-09-27T21:30:00.000Z");
+    expect(buildPatientLabCorrectionPayload({ ...form, measuredAt: "", correctionNote: "x" }))
+      .toEqual({ ok: false, error: "measured_at" });
+  });
+
   it("synchronizes OCR numeric value, comparator and stale flag from edited display text", () => {
     const form = patientLabCorrectionFormFromResult(labResult({
       result_text: "134",

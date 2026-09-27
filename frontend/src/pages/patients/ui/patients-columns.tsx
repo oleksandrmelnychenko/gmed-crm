@@ -8,6 +8,13 @@ import {
 } from "./shared/patient-form-primitives";
 import type { ColumnDef, FilterOption } from "@/components/data-table/types";
 import { countryNameForDisplay } from "@/components/ui/country-select";
+import {
+  appDateKey,
+  appDateKeyOf,
+  appDateTimeFormat,
+  dateOrInstant,
+  daysBetweenDateKeys,
+} from "@/lib/app-time-zone";
 import { formatUiText, getLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -15,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
 import { nationalityNameForDisplay } from "../model/nationalities";
 
-const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+const SHORT_DATE_FORMATTER = appDateTimeFormat("en-GB", {
   day: "2-digit",
   month: "2-digit",
   year: "numeric",
@@ -24,7 +31,7 @@ const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
 function formatShortDate(value?: string | null): string {
   if (!value) return "";
   try {
-    return SHORT_DATE_FORMATTER.format(new Date(`${value}T00:00:00`));
+    return SHORT_DATE_FORMATTER.format(dateOrInstant(value));
   } catch {
     return value;
   }
@@ -56,10 +63,10 @@ function formatRelativeDate(
   now: Date = new Date(),
 ): string {
   if (!value) return "";
-  const then = new Date(value);
-  if (!Number.isFinite(then.getTime())) return value;
-  const diffMs = now.getTime() - then.getTime();
-  const days = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  // Calendar days in German time: "today" means since Berlin midnight.
+  const day = appDateKeyOf(value);
+  if (!day) return value;
+  const days = daysBetweenDateKeys(day, appDateKey(now));
   if (days < 0) return formatShortDate(value);
   if (days === 0) return patientColumnText(tr, "relative_time_today");
   if (days < 7) return patientColumnText(tr, "relative_time_days_ago", { count: days });

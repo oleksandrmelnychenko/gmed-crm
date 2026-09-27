@@ -25,10 +25,12 @@ function slotWindow(
 ) {
   if (!date) return null;
   if (Boolean(timeStart) !== Boolean(timeEnd)) return null;
-  const start = new Date(`${date}T${timeStart || "00:00"}:00`);
-  const end = new Date(`${date}T${timeEnd || "00:00"}:00`);
+  // Naive Berlin wall times compared with each other: read them on a UTC
+  // time line so the browser zone and its DST changes play no part.
+  const start = new Date(`${date}T${timeStart || "00:00"}:00Z`);
+  const end = new Date(`${date}T${timeEnd || "00:00"}:00Z`);
   if (!timeEnd) {
-    end.setDate(end.getDate() + 1);
+    end.setUTCDate(end.getUTCDate() + 1);
   }
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
   return {

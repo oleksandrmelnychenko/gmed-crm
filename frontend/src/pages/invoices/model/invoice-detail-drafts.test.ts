@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   draftChanged,
   invoiceDetailHasUnsavedInput,
+  isoToday,
   newCreditNoteDraft,
   newPaymentDraft,
   newRefundDraft,
@@ -35,6 +36,15 @@ describe("newPaymentDraft", () => {
     });
     expect(newPaymentDraft("0", today).amountGross).toBe("");
     expect(newPaymentDraft(undefined, today).amountGross).toBe("");
+  });
+});
+
+describe("isoToday", () => {
+  it("is the Berlin calendar date", () => {
+    // 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(isoToday(new Date("2026-09-27T21:30:00Z"))).toBe("2026-09-27");
+    // 00:30 in Berlin, still 27 Sep in UTC.
+    expect(isoToday(new Date("2026-09-27T22:30:00Z"))).toBe("2026-09-28");
   });
 });
 

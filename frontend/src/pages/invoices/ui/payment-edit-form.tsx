@@ -6,6 +6,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { hasFormChanges } from "@/lib/form-changes";
+import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -112,7 +113,7 @@ export function PaymentEditForm({
         <Field label={de ? "Eingangsdatum" : "Дата поступления"}>
           <Input
             type="date"
-            max={new Date().toISOString().slice(0, 10)}
+            max={appDateKey()}
             value={form.receivedOn}
             onChange={(event) => set({ receivedOn: event.target.value })}
             className={inputClass}

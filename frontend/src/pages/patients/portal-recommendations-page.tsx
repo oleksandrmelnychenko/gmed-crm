@@ -23,6 +23,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateKeyOf, appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -1095,21 +1096,20 @@ function formatDocumentOption(document: StaffDocumentOption) {
 }
 
 function formatDateInput(value?: string | null) {
-  if (!value) return "";
-  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
+  // A due date saved from the date input is stored at 12:00 UTC; any other
+  // timestamp is shown on its Berlin calendar day.
+  return appDateKeyOf(value);
 }
 
 function formatStaffDate(value?: string | null) {
   if (!value) return "";
-  const parsed = new Date(value);
+  const parsed = dateOrInstant(value);
   if (Number.isNaN(parsed.getTime())) return value;
-  return parsed.toLocaleDateString(undefined, {
+  return appDateTimeFormat(undefined, {
     year: "numeric",
     month: "short",
     day: "2-digit",
-  });
+  }).format(parsed);
 }
 
 function ActionButton({

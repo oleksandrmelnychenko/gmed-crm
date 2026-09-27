@@ -24,6 +24,7 @@ import { getLang, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { appDateKey, appDateKeyOf, appDateTimeFormat } from "@/lib/app-time-zone";
 import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import {
@@ -227,7 +228,8 @@ export function groupPatientLabResults(rows: PatientLabResult[]) {
 }
 
 function patientLabMeasuredDate(row: Pick<PatientLabResult, "measured_at">): string | null {
-  const value = row.measured_at.slice(0, 10);
+  // Date-only results are stored at 00:00 UTC, which is the same Berlin day.
+  const value = appDateKeyOf(row.measured_at);
   return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
 }
 
@@ -336,15 +338,9 @@ function dateOnly(value: string | null | undefined): string | null {
   return value ? value.slice(0, 10) : null;
 }
 
-function localToday(): string {
-  const now = new Date();
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
 export function medicationHasEnded(
   medication: Pick<ClinicalMedication, "einnahme_bis">,
-  today = localToday(),
+  today = appDateKey(),
 ): boolean {
   const endDate = dateOnly(medication.einnahme_bis);
   return Boolean(endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < today);
@@ -1180,7 +1176,7 @@ function MedicationHoldDialog({
                 onChange={(checked) =>
                   onChange({
                     on_hold: checked,
-                    hold_from: checked ? (draft.hold_from ?? localToday()) : null,
+                    hold_from: checked ? (draft.hold_from ?? appDateKey()) : null,
                     hold_until: checked ? draft.hold_until : null,
                     hold_note: checked ? draft.hold_note : null,
                   })
@@ -1388,7 +1384,7 @@ export function PatientRecommendationsSection({
     [rec.valid_from, rec.valid_to].some(Boolean)
       ? `${rec.valid_from ?? "…"} – ${rec.valid_to ?? "…"}`
       : null;
-  const dueAtLabel = (rec: PatientRecommendation) => dateOnly(rec.due_at);
+  const dueAtLabel = (rec: PatientRecommendation) => appDateKeyOf(rec.due_at) || null;
 
   const isValid = (draft: RecommendationDraft) => draft.title.trim() !== "";
 
@@ -2443,7 +2439,7 @@ function MedicationHistoryTree({
                                 {action.label}
                               </Badge>
                               <span className="text-xs font-semibold text-foreground">
-                              {event.source_date || new Intl.DateTimeFormat(tx("ru-RU", "de-DE")).format(new Date(event.created_at))}
+                              {event.source_date || appDateTimeFormat(tx("ru-RU", "de-DE")).format(new Date(event.created_at))}
                               </span>
                               {status ? <span className="text-xs text-muted-foreground">{localizedMedicationStatus(status, tx)}</span> : null}
                             </div>

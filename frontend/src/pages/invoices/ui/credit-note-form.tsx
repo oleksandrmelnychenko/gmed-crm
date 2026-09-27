@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
+import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -218,7 +219,7 @@ export function CreditNoteForm({
           <Input
             type="date"
             min={minDate}
-            max={new Date().toISOString().slice(0, 10)}
+            max={appDateKey()}
             value={draft.issuedOn}
             onChange={(event) => onChange((current) => ({ ...current, issuedOn: event.target.value }))}
             className={inputClass}

@@ -94,6 +94,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
+import { appDateKey, appDateTimeFormat, dateKeyToDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -607,7 +608,7 @@ function formatDateTime(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
   try {
-    return new Intl.DateTimeFormat(runtimeLocale(), {
+    return appDateTimeFormat(runtimeLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
@@ -658,12 +659,14 @@ function formatGenerateDocumentError(
 function formatDate(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
+  const date = dateKeyToDate(value);
+  if (!date) return formatUnknownValue(value, tr);
   try {
-    return new Intl.DateTimeFormat(runtimeLocale(), {
+    return appDateTimeFormat(runtimeLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    }).format(date);
   } catch {
     return formatUnknownValue(value, tr);
   }
@@ -2467,7 +2470,7 @@ function StaffDocumentsPage({
       accessCategory:
         document.access_category ??
         resolveGeneratedDocumentAccessCategory(template, "internal"),
-      documentDate: document.document_date ?? new Date().toISOString().slice(0, 10),
+      documentDate: document.document_date ?? appDateKey(),
       sourcePerson: document.source_person ?? "",
       sourceInstitution: document.source_institution ?? document.klinik ?? "GMED",
       addresseePerson:

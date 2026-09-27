@@ -16,6 +16,7 @@ import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import { formatDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
@@ -172,9 +173,7 @@ export function OrderPipelinePanel({
     </Button>
   );
   const formatDate = (value: string) =>
-    new Intl.DateTimeFormat(locale, { day: "2-digit", month: "2-digit", year: "numeric" }).format(
-      new Date(`${value}T00:00:00`),
-    );
+    formatDateKey(value, locale, { day: "2-digit", month: "2-digit", year: "numeric" }) || value;
   const medical = pipeline.medical;
 
   return (

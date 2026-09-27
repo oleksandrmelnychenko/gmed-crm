@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, X } from "lucide-react";
 
+import { appDateTimeFormat, appWallClock } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   CURRENT_CUSTOMER_RELEASE,
@@ -12,7 +13,7 @@ function releaseDateLabel(value: string, lang: "ru" | "de") {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
 
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "numeric",
     month: "long",
     year: "numeric",
@@ -25,7 +26,8 @@ function compactBuildTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const pad = (part: number) => String(part).padStart(2, "0");
-  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${String(date.getFullYear()).slice(-2)} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const { year, month, day, hour, minute } = appWallClock(date);
+  return `${pad(day)}.${pad(month)}.${String(year).slice(-2)} ${pad(hour)}:${pad(minute)}`;
 }
 
 export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {

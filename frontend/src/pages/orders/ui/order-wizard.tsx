@@ -7,6 +7,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { CountrySelect, countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { createContract, createQuote, fetchAgencyServices, fetchContracts } from "@/pages/contracts/data/contracts-api";
@@ -324,7 +325,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
           </OrderWizardLinesTable>
           <OrderWizardSection title={tx("Условия оплаты", "Zahlungsbedingungen")}>
             <label className="flex items-center gap-2 text-xs font-medium"><input className={checkboxClass} type="checkbox" checked={data.prepayment_required} onChange={event => patch({ prepayment_required: event.target.checked })} />{tx("Предоплата предусмотрена", "Vorauszahlung vorgesehen")}</label>
-            {data.prepayment_required ? <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-2"><Field label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")}><Input aria-label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")} type="number" min="0" max={amount} step="0.01" value={data.prepayment_amount} onChange={event => patch({ prepayment_amount: event.target.value })} /></Field><Field label={tx("Срок оплаты", "Zahlungsfrist")}><Input type="date" value={data.prepayment_due_at?.slice(0, 10) ?? ""} onChange={event => patch({ prepayment_due_at: event.target.value ? `${event.target.value}T12:00:00Z` : null })} /></Field></div> : null}
+            {data.prepayment_required ? <div className="grid gap-3 sm:max-w-2xl sm:grid-cols-2"><Field label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")}><Input aria-label={tx("Сумма предоплаты, EUR", "Vorauszahlung, EUR")} type="number" min="0" max={amount} step="0.01" value={data.prepayment_amount} onChange={event => patch({ prepayment_amount: event.target.value })} /></Field><Field label={tx("Срок оплаты", "Zahlungsfrist")}><Input type="date" value={appDateKeyOf(data.prepayment_due_at)} onChange={event => patch({ prepayment_due_at: event.target.value ? `${event.target.value}T12:00:00Z` : null })} /></Field></div> : null}
             <Button type="button" variant="outline" className="h-auto min-h-9 whitespace-normal text-left" onClick={() => void run(async () => { await prepare(data); })}><Save className="size-3.5 shrink-0" />{tx("Сохранить услуги и подготовить смету", "Leistungen speichern und Kostenvoranschlag erstellen")}</Button>
           </OrderWizardSection>
         </> : null}

@@ -11,6 +11,7 @@ import {
 } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
+import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { PatientVitalMeasurement } from "@/pages/patients/model/detail-resource-types";
@@ -31,14 +32,9 @@ type FormState = {
   notes: string;
 };
 
-function toLocalDateTimeInput(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 function blankForm(): FormState {
   return {
-    measuredAt: toLocalDateTimeInput(new Date()),
+    measuredAt: isoToBerlinLocalInput(new Date()),
     bpSystolic: "",
     bpDiastolic: "",
     heartRate: "",
@@ -59,7 +55,7 @@ function numberToForm(value: number | null | undefined): string {
 function formFromMeasurement(measurement: PatientVitalMeasurement | null | undefined): FormState {
   if (!measurement) return blankForm();
   return {
-    measuredAt: toLocalDateTimeInput(new Date(measurement.measured_at)),
+    measuredAt: isoToBerlinLocalInput(measurement.measured_at),
     bpSystolic: numberToForm(measurement.bp_systolic),
     bpDiastolic: numberToForm(measurement.bp_diastolic),
     heartRate: numberToForm(measurement.heart_rate),
@@ -131,8 +127,8 @@ export function PatientVitalsSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const measuredAt = new Date(form.measuredAt);
-    if (Number.isNaN(measuredAt.getTime())) {
+    const measuredAt = berlinLocalInputToIso(form.measuredAt);
+    if (!measuredAt) {
       toast.error(l("patients_invalid_date_2"));
       return;
     }
@@ -147,7 +143,7 @@ export function PatientVitalsSheet({
       await apiFetch(endpoint, {
         method: "POST",
         body: JSON.stringify({
-          measured_at: measuredAt.toISOString(),
+          measured_at: measuredAt,
           bp_systolic: parseNumber(form.bpSystolic),
           bp_diastolic: parseNumber(form.bpDiastolic),
           heart_rate: parseInteger(form.heartRate),

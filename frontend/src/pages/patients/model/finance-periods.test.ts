@@ -46,11 +46,22 @@ describe("patient finance periods", () => {
     expect(() => buildPatientFinancePeriods(statement([], "0", "0"), { from: "2026-10-01", to: "2026-09-30" })).toThrow();
   });
   it("handles leap years, quarter boundaries and date validation", () => {
-    expect(patientFinanceDateRange("previous_month", new Date(2024, 2, 10))).toEqual({ from: "2024-02-01", to: "2024-02-29" });
-    expect(patientFinanceDateRange("previous_month", new Date(2026, 0, 10))).toEqual({ from: "2025-12-01", to: "2025-12-31" });
-    expect(patientFinanceDateRange("quarter", new Date(2026, 8, 10))).toEqual({ from: "2026-07-01", to: "2026-09-10" });
+    expect(patientFinanceDateRange("previous_month", new Date("2024-03-10T12:00:00Z"))).toEqual({ from: "2024-02-01", to: "2024-02-29" });
+    expect(patientFinanceDateRange("previous_month", new Date("2026-01-10T12:00:00Z"))).toEqual({ from: "2025-12-01", to: "2025-12-31" });
+    expect(patientFinanceDateRange("quarter", new Date("2026-09-10T12:00:00Z"))).toEqual({ from: "2026-07-01", to: "2026-09-10" });
     expect(isFinanceDate("2026-02-29")).toBe(false);
     expect(isFinanceDate("2024-02-29")).toBe(true);
     expect(buildPatientFinancePeriods(statement([], "0", "0"), { from: "9999-12-01", to: "9999-12-31" })).toHaveLength(1);
+  });
+  it("derives preset periods from the Berlin calendar day", () => {
+    // 30 Sep 23:30 in Berlin, already 1 Oct in Kyiv.
+    expect(patientFinanceDateRange("month", new Date("2026-09-30T21:30:00Z"))).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+    // 1 Oct 00:30 in Berlin, still 30 Sep in UTC.
+    expect(patientFinanceDateRange("month", new Date("2026-09-30T22:30:00Z"))).toEqual({ from: "2026-10-01", to: "2026-10-01" });
+    expect(patientFinanceDateRange("previous_month", new Date("2026-09-30T22:30:00Z"))).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+    expect(patientFinanceDateRange("quarter", new Date("2026-09-30T22:30:00Z"))).toEqual({ from: "2026-10-01", to: "2026-10-01" });
+    // New Year's Day 00:30 in Berlin, still 31 Dec in UTC.
+    expect(patientFinanceDateRange("year", new Date("2025-12-31T23:30:00Z"))).toEqual({ from: "2026-01-01", to: "2026-01-01" });
+    expect(patientFinanceDateRange("all", new Date("2026-09-27T21:30:00Z"))).toEqual({ from: "", to: "2026-09-27" });
   });
 });

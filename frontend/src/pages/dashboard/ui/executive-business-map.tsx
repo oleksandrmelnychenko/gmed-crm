@@ -7,6 +7,15 @@ import {
   Clock3,
 } from "lucide-react";
 
+import {
+  addDaysToDateKey,
+  appDateKey,
+  appDateKeyOf,
+  appDateTimeFormat,
+  dateOrInstant,
+  formatDateKey,
+  startOfMonthKey,
+} from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { localizeTimelineTitle } from "@/lib/timeline-labels";
 import { cn } from "@/lib/utils";
@@ -233,18 +242,17 @@ function isTaskOpen(task: TaskItem) {
 }
 
 function weeklyCashData(finance: ExecutiveFinanceSnapshot | null, locale: string): CashDatum[] {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  // Seven-day buckets of the current Berlin month, as calendar dates.
+  const today = appDateKey();
+  const start = startOfMonthKey(today);
   const weeks = Array.from({ length: 5 }, (_, index) => {
-    const from = new Date(start);
-    from.setDate(1 + index * 7);
-    const to = new Date(from);
-    to.setDate(from.getDate() + 6);
+    const from = addDaysToDateKey(start, index * 7);
+    const to = addDaysToDateKey(from, 6);
     return { from, to, inflow: 0, outflow: 0, net: 0 };
-  }).filter((week) => week.from <= now);
+  }).filter((week) => week.from <= today);
 
   finance?.cash_movements.forEach((movement) => {
-    const date = new Date(`${movement.entry_date}T12:00:00`);
+    const date = appDateKeyOf(movement.entry_date);
     const week = weeks.find((item) => date >= item.from && date <= item.to);
     if (!week) return;
     const amount = Math.abs(safeNumber(movement.signed_amount));
@@ -253,9 +261,9 @@ function weeklyCashData(finance: ExecutiveFinanceSnapshot | null, locale: string
     week.net += safeNumber(movement.signed_amount);
   });
 
-  const dayMonth = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short" });
+  const dayMonth = (key: string) => formatDateKey(key, locale, { day: "2-digit", month: "short" });
   return weeks.map((week) => ({
-    label: `${dayMonth.format(week.from)}–${dayMonth.format(week.to)}`,
+    label: `${dayMonth(week.from)}–${dayMonth(week.to)}`,
     inflow: week.inflow,
     outflow: week.outflow,
     net: week.net,
@@ -370,7 +378,7 @@ export function ExecutiveBusinessMap({
     () => new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     [locale],
   );
-  const date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+  const date = appDateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
 
   const decisionTasks = useMemo(
     () => tasks
@@ -405,10 +413,8 @@ export function ExecutiveBusinessMap({
   const statusLabel = (tone: "good" | "warning" | "danger") => tone === "good" ? copy.good : tone === "warning" ? copy.warning : copy.danger;
   const dueLabel = (task: TaskItem) => {
     if (!task.due_date) return copy.noDue;
-    const due = new Date(task.due_date);
-    const today = new Date();
-    const sameDay = due.toDateString() === today.toDateString();
-    return sameDay ? copy.today : new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short" }).format(due);
+    const sameDay = appDateKeyOf(task.due_date) === appDateKey();
+    return sameDay ? copy.today : appDateTimeFormat(locale, { day: "2-digit", month: "short" }).format(dateOrInstant(task.due_date));
   };
   const taskTone = (task: TaskItem): "good" | "warning" | "danger" => {
     if (task.due_date && new Date(task.due_date).getTime() < Date.now()) return "danger";
@@ -562,8 +568,8 @@ export function ExecutiveBusinessMap({
             {upcoming.length === 0 ? <p className="py-8 text-[12px] text-muted-foreground">{copy.noEvents}</p> : upcoming.slice(0, 5).map((appointment) => (
               <button key={appointment.id} type="button" onClick={() => go(`/appointments?appointment=${encodeURIComponent(appointment.id)}`)} className="flex w-full items-start gap-3 py-3 text-left group">
                 <span className="flex size-8 shrink-0 flex-col items-center justify-center border-r border-border pr-2 text-center">
-                  <span className="text-[9px] uppercase text-muted-foreground">{new Intl.DateTimeFormat(locale, { month: "short" }).format(new Date(appointment.date))}</span>
-                  <span className="text-[12px] font-semibold text-foreground">{new Intl.DateTimeFormat(locale, { day: "2-digit" }).format(new Date(appointment.date))}</span>
+                  <span className="text-[9px] uppercase text-muted-foreground">{appDateTimeFormat(locale, { month: "short" }).format(dateOrInstant(appointment.date))}</span>
+                  <span className="text-[12px] font-semibold text-foreground">{appDateTimeFormat(locale, { day: "2-digit" }).format(dateOrInstant(appointment.date))}</span>
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[11.5px] font-medium text-foreground group-hover:text-[var(--brand)]">{appointment.title || appointment.patient_name}</span>

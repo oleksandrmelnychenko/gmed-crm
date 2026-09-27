@@ -18,6 +18,7 @@ import { canAccessStaffRoute, staffHrefIfAllowed } from "@/lib/staff-route-acces
 import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { cachedDateTimeFormat } from "@/lib/intl-cache";
 import {
   useDebouncedRealtimeSubscription,
@@ -83,6 +84,9 @@ function compactDt(dt: string, lang: "ru" | "de") {
 }
 
 function compactTime(dt: string) {
+  // Message timestamps are UTC instants; show the German wall-clock time.
+  const berlin = isoToBerlinLocalInput(dt);
+  if (berlin) return berlin.slice(11, 16);
   const idx = dt.indexOf("T");
   return idx >= 0 ? dt.slice(idx + 1, idx + 6) : dt.slice(0, 5);
 }

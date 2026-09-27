@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   blankContractForm,
   contractActionErrorMessage,
+  contractToStatusForm,
+  formatDate,
+  formatDateTime,
   listAgencyServicePriceChoices,
   resolveAgencyServicePrice,
   validateCreateContractForm,
@@ -15,7 +18,7 @@ import {
   QUOTE_STATUSES,
   type ContractFormValidationMessages,
 } from "./contracts-model";
-import type { AgencyServiceItem } from "./types";
+import type { AgencyServiceItem, ContractItem } from "./types";
 
 const messages: ContractFormValidationMessages = {
   invalidConditionsJson: "Conditions must be valid JSON.",
@@ -243,5 +246,25 @@ describe("contractActionErrorMessage", () => {
         "Fallback",
       ),
     ).toBe("Contract already exists");
+  });
+});
+
+describe("contract dates in Berlin time", () => {
+  it("formats calendar dates and timestamps on their Berlin day", () => {
+    expect(formatDate("2026-09-27", "de-DE")).toBe(formatDate("2026-09-27T10:00:00Z", "de-DE"));
+    // 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(formatDate("2026-09-27T21:30:00Z", "de-DE")).toBe(formatDate("2026-09-27", "de-DE"));
+    // 00:30 in Berlin, still 27 Sep in UTC.
+    expect(formatDate("2026-09-27T22:30:00Z", "de-DE")).toBe(formatDate("2026-09-28", "de-DE"));
+    expect(formatDateTime("2026-09-27T21:30:00Z", "de-DE")).toContain("23:30");
+  });
+
+  it("prefills the signing time as Berlin wall-clock time", () => {
+    const form = contractToStatusForm({
+      status: "signed",
+      signed_at: "2026-09-27T22:30:00Z",
+      conditions: null,
+    } as unknown as ContractItem);
+    expect(form.signedAt).toBe("2026-09-28T00:30");
   });
 });

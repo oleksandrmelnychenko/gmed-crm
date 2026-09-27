@@ -12,6 +12,7 @@ import {
 } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { apiFetch } from "@/lib/api";
+import { berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { FormSection } from "../shared/patient-form-primitives";
@@ -54,11 +55,6 @@ function orderTypeLabel(
   }
 }
 
-function toLocalDateTimeInput(date: Date) {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 type FormState = {
   orderDate: string;
   orderType: OrderType;
@@ -70,7 +66,7 @@ type FormState = {
 
 function blankForm(): FormState {
   return {
-    orderDate: toLocalDateTimeInput(new Date()),
+    orderDate: isoToBerlinLocalInput(new Date()),
     orderType: ORDER_TYPE_OPTIONS[0],
     title: "",
     instructions: "",
@@ -103,8 +99,8 @@ export function PatientMedicalOrderSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const orderDate = new Date(form.orderDate);
-    if (Number.isNaN(orderDate.getTime())) {
+    const orderDate = berlinLocalInputToIso(form.orderDate);
+    if (!orderDate) {
       toast.error(l("patients_invalid_date_2"));
       return;
     }
@@ -122,7 +118,7 @@ export function PatientMedicalOrderSheet({
       await apiFetch(`/patients/${patientId}/medical-orders`, {
         method: "POST",
         body: JSON.stringify({
-          order_date: orderDate.toISOString(),
+          order_date: orderDate,
           order_type: form.orderType,
           title: form.title.trim(),
           instructions: form.instructions.trim(),

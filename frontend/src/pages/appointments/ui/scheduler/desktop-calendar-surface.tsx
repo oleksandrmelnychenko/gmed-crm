@@ -16,6 +16,7 @@ import {
   type RefObject,
 } from "react";
 
+import { berlinNowNaive } from "@/lib/app-time-zone";
 import {
   CALENDAR_FIRST_DAY,
   CALENDAR_WEEK_NUMBER_CALCULATION,
@@ -45,6 +46,11 @@ const FULL_CALENDAR_EVENT_TIME_FORMAT = {
   hour12: false,
   omitZeroMinute: false,
 } as const;
+// The calendar keeps FullCalendar's "local" zone and gets naive Berlin wall
+// times (events are `${date}T${time}` without an offset), so they render
+// unshifted in any browser zone. "Now" must be naive Berlin time as well, or
+// the today column and the now indicator follow the browser's clock.
+const berlinCalendarNow = () => berlinNowNaive();
 
 type AdaptiveEventHeights = {
   eventMinHeight: number;
@@ -334,6 +340,7 @@ export function DesktopCalendarSurface({
           slotMinTime="06:00:00"
           slotMaxTime="22:00:00"
           dayMaxEvents={3}
+          now={berlinCalendarNow}
           nowIndicator
           eventMinHeight={eventHeights.eventMinHeight}
           eventShortHeight={eventHeights.eventShortHeight}

@@ -1,5 +1,6 @@
 import { useCallback, useState, type SetStateAction } from "react";
 
+import { appDateKey } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 
 import { emptyCreditNoteSelection, type CreditNoteSelectionDraft } from "./credit-note";
@@ -44,8 +45,9 @@ export type DraftWithBaseline<T> = {
   baseline: T;
 };
 
+/** Today's date in Berlin as "YYYY-MM-DD". */
 export function isoToday(now = new Date()) {
-  return now.toISOString().slice(0, 10);
+  return appDateKey(now);
 }
 
 /** The payment form proposes the open balance, received today. */

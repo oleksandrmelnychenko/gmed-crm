@@ -1,3 +1,4 @@
+import { appWallClock, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import {
   formatMoneyAmount,
   moneyLineAmounts,
@@ -372,11 +373,12 @@ function calendarDateLabel(value: string): string | null {
   return match ? `${match[3]}.${match[2]}.${match[1]}` : null;
 }
 
-function localDateLabel(date: Date) {
-  return `${twoDigits(date.getDate())}.${twoDigits(date.getMonth() + 1)}.${date.getFullYear()}`;
+function berlinDateLabel(date: Date) {
+  const { year, month, day } = appWallClock(date);
+  return `${twoDigits(day)}.${twoDigits(month)}.${year}`;
 }
 
-/** DD.MM.YYYY of a calendar date or of a timestamp's local date. */
+/** DD.MM.YYYY of a calendar date or of a timestamp's Berlin date. */
 export function formatDate(
   value: string | null | undefined,
   _locale = "de-DE",
@@ -388,7 +390,7 @@ export function formatDate(
   if (calendarDate) return calendarDate;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return localDateLabel(date);
+  return berlinDateLabel(date);
 }
 
 export function numberFromUnknown(value: unknown) {
@@ -430,7 +432,7 @@ export function formatOptionalCurrency(
 }
 
 /**
- * "DD.MM.YYYY, HH:MM" of a timestamp in local time; a date-only value (a
+ * "DD.MM.YYYY, HH:MM" of a timestamp in Berlin time; a date-only value (a
  * calendar date or a UTC-midnight timestamp) shows the date alone.
  */
 export function formatDateTime(
@@ -444,7 +446,8 @@ export function formatDateTime(
   if (calendarDate) return calendarDate;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return `${localDateLabel(date)}, ${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
+  const { hour, minute } = appWallClock(date);
+  return `${berlinDateLabel(date)}, ${twoDigits(hour)}:${twoDigits(minute)}`;
 }
 
 /** DD.MM.YYYY; the same rules as {@link formatDate}. */
@@ -457,18 +460,12 @@ export function formatDateOnly(
 }
 
 function toDateTimeInputValue(value: string | null | undefined) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
+/** A `datetime-local` value, read as Berlin time, as an API timestamp; null when empty or invalid. */
 export function inputDateTimeToApiValue(value: string) {
-  if (!value.trim()) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
+  return berlinLocalInputToIso(value);
 }
 
 export function patientLabel(

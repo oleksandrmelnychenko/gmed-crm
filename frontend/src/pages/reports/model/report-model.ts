@@ -1,9 +1,10 @@
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { formatMoneyAmount } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 const DATE_FORMATTERS = {
-  "de-DE": new Intl.DateTimeFormat("de-DE"),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU"),
+  "de-DE": appDateTimeFormat("de-DE"),
+  "ru-RU": appDateTimeFormat("ru-RU"),
 } as const;
 
 function reportLocale(locale: string) {
@@ -26,9 +27,9 @@ export function formatReportDate(
   emptyLabel = "-",
 ) {
   if (!value) return emptyLabel;
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return emptyLabel;
-  return DATE_FORMATTERS[reportLocale(locale)].format(timestamp);
+  const date = dateOrInstant(value);
+  if (Number.isNaN(date.getTime())) return emptyLabel;
+  return DATE_FORMATTERS[reportLocale(locale)].format(date);
 }
 
 export function formatRating(value?: number | null, emptyLabel = "-") {

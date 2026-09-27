@@ -62,6 +62,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
+import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
@@ -707,7 +708,7 @@ function useStaffInvoicesPageContent() {
     return text.vatSource;
   };
   const canLoadOrderOptions = hasCapability(user, "orders.view") && access.canCreate;
-  const currentYear = String(new Date().getFullYear());
+  const currentYear = appDateKey().slice(0, 4);
   const canLoadQuoteOptions = hasCapability(user, "contracts.view");
 
   const initialPatientId = searchParams.get("patient") ?? "";
@@ -1820,7 +1821,7 @@ function useStaffInvoicesPageContent() {
     setPaymentError(null);
     try {
       await reverseInvoicePayment(detail.id, paymentId, {
-        reversed_on: new Date().toISOString().slice(0, 10),
+        reversed_on: appDateKey(),
         note: reversalNote.trim(),
       });
       setReversingPaymentId("");
@@ -1879,7 +1880,7 @@ function useStaffInvoicesPageContent() {
     try {
       await reverseInvoiceCreditNote(detail.id, creditNoteId, {
         reason: creditNoteReversalReason.trim(),
-        issued_on: new Date().toISOString().slice(0, 10),
+        issued_on: appDateKey(),
       });
       setReversingCreditNoteId("");
       setCreditNoteReversalReason("");
@@ -1920,7 +1921,7 @@ function useStaffInvoicesPageContent() {
     setRefundError(null);
     try {
       await reverseInvoiceRefund(detail.id, refundId, {
-        reversed_on: new Date().toISOString().slice(0, 10),
+        reversed_on: appDateKey(),
         reason: refundReversalReason.trim(),
       });
       setReversingRefundId("");
@@ -2852,7 +2853,7 @@ function useStaffInvoicesPageContent() {
                         <Field label={text.paymentDate}>
                           <Input
                             type="date"
-                            max={new Date().toISOString().slice(0, 10)}
+                            max={appDateKey()}
                             value={paymentForm.receivedOn}
                             onChange={(event) =>
                               setPaymentForm((current) => ({
@@ -3099,7 +3100,7 @@ function useStaffInvoicesPageContent() {
                         onChange={(update) => setCreditNoteForm(update)}
                         preview={creditNotePreview}
                         currency={detail.currency ?? "EUR"}
-                        minDate={detail.issued_at.slice(0, 10)}
+                        minDate={appDateKeyOf(detail.issued_at)}
                         busy={creditNoteBusy}
                         onSubmit={() => void handleCreateCreditNote()}
                       />
@@ -3254,8 +3255,8 @@ function useStaffInvoicesPageContent() {
                         <Field label={text.refundDate}>
                           <Input
                             type="date"
-                            min={detail.issued_at.slice(0, 10)}
-                            max={new Date().toISOString().slice(0, 10)}
+                            min={appDateKeyOf(detail.issued_at)}
+                            max={appDateKey()}
                             value={refundForm.refundedOn}
                             onChange={(event) =>
                               setRefundForm((current) => ({

@@ -1,3 +1,4 @@
+import { addDaysToDateKey, addMonthsToDateKey, appDateKey, startOfMonthKey } from "@/lib/app-time-zone";
 import type { PatientAccountMovement, PatientAccountStatement } from "./detail-tab-types";
 
 export type FinancePeriodPreset = "month" | "previous_month" | "quarter" | "year" | "all" | "custom";
@@ -13,16 +14,14 @@ export type PatientFinancePeriod = {
   count: number;
 };
 
-function localDate(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
+// Periods follow the Berlin calendar, whatever time zone the browser runs in.
 export function patientFinanceDateRange(preset: Exclude<FinancePeriodPreset, "custom">, today = new Date()): FinanceDateRange {
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  if (preset === "previous_month") return { from: localDate(new Date(year, month - 1, 1)), to: localDate(new Date(year, month, 0)) };
+  const todayKey = appDateKey(today);
+  const monthStart = startOfMonthKey(todayKey);
+  const month = Number(todayKey.slice(5, 7)) - 1;
+  if (preset === "previous_month") return { from: addMonthsToDateKey(monthStart, -1), to: addDaysToDateKey(monthStart, -1) };
   const startMonth = preset === "year" ? 0 : preset === "quarter" ? Math.floor(month / 3) * 3 : month;
-  return { from: preset === "all" ? "" : localDate(new Date(year, startMonth, 1)), to: localDate(today) };
+  return { from: preset === "all" ? "" : addMonthsToDateKey(monthStart, startMonth - month), to: todayKey };
 }
 
 export function isFinanceDate(value: string): boolean {

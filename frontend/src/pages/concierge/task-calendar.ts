@@ -1,4 +1,10 @@
 import {
+  addMonthsToDateKey,
+  appDateKey,
+  appDayStart,
+  startOfMonthKey,
+} from "@/lib/app-time-zone";
+import {
   addCalendarDays,
   startOfCalendarDay,
   startOfIsoWeek,
@@ -9,12 +15,36 @@ export { isoWeekNumber, startOfIsoWeek } from "@/lib/calendar-standards";
 
 export type TaskCalendarScale = "day" | "week" | "month";
 
+// Calendar days are Berlin days: each day is the instant of its Berlin
+// midnight, and "today" or "this month" is read on the Berlin wall clock.
+
 export function startOfTaskCalendarDay(date: Date) {
   return startOfCalendarDay(date);
 }
 
 export function addTaskCalendarDays(date: Date, amount: number) {
   return addCalendarDays(date, amount);
+}
+
+/** The Berlin calendar date ("YYYY-MM-DD") of a calendar day or instant. */
+export function taskCalendarDayKey(date: Date) {
+  return appDateKey(date);
+}
+
+/** Whether two instants fall on the same Berlin calendar day, e.g. a grid day and now. */
+export function isSameTaskCalendarDay(left: Date, right: Date) {
+  return taskCalendarDayKey(left) === taskCalendarDayKey(right);
+}
+
+/** Whether two instants fall in the same Berlin calendar month. */
+export function isSameTaskCalendarMonth(left: Date, right: Date) {
+  return taskCalendarDayKey(left).slice(0, 7) === taskCalendarDayKey(right).slice(0, 7);
+}
+
+/** Moves the calendar focus by whole months (day clamped to the target month) or by days/weeks. */
+export function shiftTaskCalendarFocus(focus: Date, scale: TaskCalendarScale, direction: number) {
+  if (scale === "month") return appDayStart(addMonthsToDateKey(taskCalendarDayKey(focus), direction));
+  return addTaskCalendarDays(focus, direction * (scale === "week" ? 7 : 1));
 }
 
 export function taskCalendarDays(scale: TaskCalendarScale, focus: Date) {
@@ -24,7 +54,7 @@ export function taskCalendarDays(scale: TaskCalendarScale, focus: Date) {
     return Array.from({ length: 7 }, (_, index) => addTaskCalendarDays(start, index));
   }
 
-  const first = new Date(focus.getFullYear(), focus.getMonth(), 1);
+  const first = appDayStart(startOfMonthKey(taskCalendarDayKey(focus)));
   const start = startOfIsoWeek(first);
   return Array.from({ length: 42 }, (_, index) => addTaskCalendarDays(start, index));
 }

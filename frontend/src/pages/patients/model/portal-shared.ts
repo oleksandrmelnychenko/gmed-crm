@@ -1,4 +1,5 @@
 import { apiFetchFile } from "@/lib/api";
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { formatMoneyAmount } from "@/lib/money";
 import {
   formatEnumLabelFromKeys,
@@ -643,21 +644,21 @@ function portalLocale(): PortalLocale {
 }
 
 const PORTAL_DATE_TIME_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", {
+  "en-GB": appDateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -667,17 +668,17 @@ const PORTAL_DATE_TIME_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
 };
 
 const PORTAL_DATE_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", {
+  "en-GB": appDateTimeFormat("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -941,7 +942,7 @@ export function formatPortalDate(value?: string | null) {
   if (!value) return portalNotSetLabel();
 
   try {
-    return PORTAL_DATE_FORMATTERS[portalLocale()].format(new Date(value));
+    return PORTAL_DATE_FORMATTERS[portalLocale()].format(dateOrInstant(value));
   } catch {
     return value;
   }

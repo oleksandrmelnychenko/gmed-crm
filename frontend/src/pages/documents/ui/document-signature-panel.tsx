@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ApiRequestError } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
@@ -231,7 +232,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <div className="space-y-1">
                 <AdminSectionTitle>{index === 0 ? tx("Текущий запрос", "Aktuelle Anfrage") : tx("Предыдущий запрос", "Frühere Anfrage")}</AdminSectionTitle>
-                <time dateTime={request.created_at} className="block text-[11px] text-muted-foreground">{new Date(request.created_at).toLocaleString(lang === "de" ? "de-DE" : "ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}</time>
+                <time dateTime={request.created_at} className="block text-[11px] text-muted-foreground">{appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(request.created_at))}</time>
               </div>
               <Badge role="status" variant="outline" className={`rounded-full text-[10px] ${requestStatusClassName(request.status)}`}>
                 {request.test_mode ? "TEST · " : ""}{tx(...statuses[request.status])}

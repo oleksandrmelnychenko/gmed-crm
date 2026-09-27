@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { conciergeTaskCode, type ConciergeTask, type ConciergeTaskStatus } from "@/pages/concierge/model";
@@ -224,9 +225,9 @@ type ProjectWorkflowViewProps = {
 
 function formatDate(value: string | null, lang: Lang) {
   if (!value) return null;
-  const date = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  const date = dateOrInstant(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "short",
     year: value.length === 10 ? "numeric" : undefined,

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, Field, Section, selectClass } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { fetchPatientConsents, savePatientConsent } from "@/pages/admin/data/admin-api";
 
@@ -34,7 +35,7 @@ const CONSENT_TYPES = [
 ] as const;
 
 function day(value: string | null) {
-  return value ? (value.split("T")[0] ?? value) : "—";
+  return value ? appDateKeyOf(value) || value : "—";
 }
 
 function isActive(consent: ConsentRecord) {

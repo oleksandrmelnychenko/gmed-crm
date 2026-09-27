@@ -38,6 +38,8 @@ import {
   toStaffPayload,
   updateTaxonomyAttributeValue,
   updateWeeklyAvailabilityIntervalValue,
+  compactDate,
+  compactDateTime,
 } from "./list-model";
 import type { ProviderPeopleRow } from "./people-types";
 import type { ProviderFilters, ProviderSummary } from "./types";
@@ -45,6 +47,16 @@ import type { ProviderFilters, ProviderSummary } from "./types";
 function paramsFromPath(path: string) {
   return new URL(path, "https://crm.test").searchParams;
 }
+
+describe("compact provider dates", () => {
+  it("shows calendar dates unshifted and timestamps in Berlin time", () => {
+    expect(compactDate("2026-09-28")).toMatch(/^28 Sep/);
+    expect(compactDate("not a date")).toBe("not a date");
+    // 28 Sep 00:30 in Berlin, still 27 Sep in UTC; 27 Sep 23:30 in Berlin, already 28 Sep in Kyiv.
+    expect(compactDateTime("2026-09-27T22:30:00Z")).toMatch(/^28 Sep\S* 2026,? 00:30$/);
+    expect(compactDateTime("2026-09-27T21:30:00Z")).toMatch(/^27 Sep\S* 2026,? 23:30$/);
+  });
+});
 
 describe("provider permissions", () => {
   it("lets Concierge create and edit non-medical providers without full registry access", () => {

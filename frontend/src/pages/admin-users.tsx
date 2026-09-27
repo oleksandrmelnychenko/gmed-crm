@@ -45,6 +45,7 @@ import {
 } from "@/components/ui-shell";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
@@ -130,13 +131,13 @@ const ADMIN_USER_REALTIME_EVENTS = [
   "session.revoked",
 ] as const;
 
-const ADMIN_USER_DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+const ADMIN_USER_DATE_FORMATTER = appDateTimeFormat("en-GB", {
   day: "2-digit",
   month: "short",
   year: "numeric",
 });
 
-const ADMIN_USER_DATE_TIME_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+const ADMIN_USER_DATE_TIME_FORMATTER = appDateTimeFormat("en-GB", {
   day: "2-digit",
   month: "short",
   year: "numeric",

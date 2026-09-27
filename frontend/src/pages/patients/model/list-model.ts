@@ -1,3 +1,4 @@
+import { appDateKeyOf, appWallClock, parseDateKey } from "@/lib/app-time-zone";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 
 export type PatientSummary = {
@@ -495,11 +496,12 @@ export type PatientsDictionary = Record<string, string>;
 
 export function computeAge(birthDate: string | null | undefined, now: Date = new Date()): number | null {
   if (!birthDate) return null;
-  const dob = new Date(birthDate);
-  if (!Number.isFinite(dob.getTime())) return null;
-  let age = now.getFullYear() - dob.getFullYear();
-  const m = now.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
+  const dob = parseDateKey(appDateKeyOf(birthDate));
+  if (!dob) return null;
+  const today = appWallClock(now);
+  let age = today.year - dob.year;
+  const m = today.month - dob.month;
+  if (m < 0 || (m === 0 && today.day < dob.day)) age -= 1;
   return age;
 }
 

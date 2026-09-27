@@ -1,4 +1,5 @@
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { appDateKey } from "@/lib/app-time-zone";
 
 import type {
   PortalAccountStatement,
@@ -101,7 +102,7 @@ export async function fetchPatientPortalWorkspace() {
 export function downloadPatientPortalExport() {
   return downloadApiFile(
     "/me/export?format=zip",
-    `patient-export-${new Date().toISOString().slice(0, 10)}.zip`,
+    `patient-export-${appDateKey()}.zip`,
   );
 }
 

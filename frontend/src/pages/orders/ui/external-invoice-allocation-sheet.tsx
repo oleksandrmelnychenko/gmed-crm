@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Banner, EmptyCell, Field, InfoRow, StatusBadge, tokens } from "@/components/ui-shell";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -319,7 +320,7 @@ export function ExternalInvoiceAllocationSheet({
                                   {allocation.invoice_number}
                                 </button>
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                  {allocation.created_by_name ?? "—"} · {new Date(allocation.created_at).toLocaleString(lang === "de" ? "de-DE" : "ru-RU")}
+                                  {allocation.created_by_name ?? "—"} · {appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).format(new Date(allocation.created_at))}
                                 </p>
                               </div>
                               <div className="flex items-center gap-2">

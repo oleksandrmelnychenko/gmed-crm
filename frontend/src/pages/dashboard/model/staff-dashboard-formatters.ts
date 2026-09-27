@@ -1,21 +1,22 @@
+import { appDateTimeFormat, appWallClock, dateOrInstant } from "@/lib/app-time-zone";
 import { getLang } from "@/lib/i18n";
 
 const MONTH_FORMATTERS = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", { month: "short" }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", { month: "short" }),
+  "de-DE": appDateTimeFormat("de-DE", { month: "short" }),
+  "ru-RU": appDateTimeFormat("ru-RU", { month: "short" }),
 } as const;
 
 const DAY_FORMATTERS = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", { day: "2-digit" }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", { day: "2-digit" }),
+  "de-DE": appDateTimeFormat("de-DE", { day: "2-digit" }),
+  "ru-RU": appDateTimeFormat("ru-RU", { day: "2-digit" }),
 } as const;
 
 const SHORT_DATE_FORMATTERS = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     day: "2-digit",
     month: "2-digit",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",
   }),
@@ -26,7 +27,7 @@ function dashboardLocale() {
 }
 
 export function greetingFor(name: string, tr: Record<string, string>) {
-  const hour = new Date().getHours();
+  const hour = appWallClock().hour;
   const prefix =
     hour < 12
       ? tr.dash_greeting_morning ?? tr.dash_greeting ?? tr.common_unknown
@@ -46,7 +47,7 @@ export function numberOrDash(value: number | null | undefined) {
 
 export function formatMonth(iso: string) {
   try {
-    return MONTH_FORMATTERS[dashboardLocale()].format(new Date(iso));
+    return MONTH_FORMATTERS[dashboardLocale()].format(dateOrInstant(iso));
   } catch {
     return iso.slice(5, 7);
   }
@@ -54,7 +55,7 @@ export function formatMonth(iso: string) {
 
 export function formatDay(iso: string) {
   try {
-    return DAY_FORMATTERS[dashboardLocale()].format(new Date(iso));
+    return DAY_FORMATTERS[dashboardLocale()].format(dateOrInstant(iso));
   } catch {
     return iso.slice(8, 10);
   }
@@ -62,7 +63,7 @@ export function formatDay(iso: string) {
 
 export function formatShortDate(iso: string) {
   try {
-    return SHORT_DATE_FORMATTERS[dashboardLocale()].format(new Date(iso));
+    return SHORT_DATE_FORMATTERS[dashboardLocale()].format(dateOrInstant(iso));
   } catch {
     return iso.slice(0, 10);
   }

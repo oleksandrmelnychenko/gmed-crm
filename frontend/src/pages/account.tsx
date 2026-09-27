@@ -14,6 +14,7 @@ import {
   type AccountSession,
 } from "@/lib/account";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { TwoFactorSection } from "@/pages/two-factor";
@@ -305,7 +306,7 @@ function SessionsSection() {
   };
 
   const formatDate = (value: string) =>
-    new Date(value).toLocaleString(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" });
+    appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 
   return (
     <Section

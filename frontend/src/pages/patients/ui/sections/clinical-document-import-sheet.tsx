@@ -34,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { clearApiCache } from "@/lib/api";
+import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
 import {
   createDocumentPreviewObjectUrl,
   revokeDocumentPreviewObjectUrl,
@@ -1376,7 +1377,7 @@ export function ClinicalDocumentImportSheet({
     candidates.filter((item) => item.target === target).length;
 
   function formatImportDate(value: string) {
-    return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(value));
@@ -1892,7 +1893,7 @@ export function ClinicalDocumentImportSheet({
           reference_low: null,
           reference_high: null,
           abnormal_flag: "unknown",
-          measured_on: new Date().toISOString().slice(0, 10),
+          measured_on: appDateKey(),
           semantic_role: "laboratory_observation",
           auto_select: true,
           review_reasons: [],
@@ -1901,7 +1902,7 @@ export function ClinicalDocumentImportSheet({
       }
       if (manualTarget === "vital") {
         return {
-          measured_at: new Date().toISOString().slice(0, 10),
+          measured_at: appDateKey(),
           units: {},
           assertion: "documented",
           semantic_role: "vital_measurement",

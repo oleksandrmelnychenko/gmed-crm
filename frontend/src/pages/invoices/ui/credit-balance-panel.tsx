@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Banner, StatusBadge, inputClass, selectClass, tokens } from "@/components/ui-shell";
+import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount, toCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -66,7 +67,7 @@ export function CreditBalancePanel({
   const openTargets = useMemo(() => targets ?? [], [targets]);
   const [targetId, setTargetId] = useState("");
   const [amountGross, setAmountGross] = useState("");
-  const [transferredOn, setTransferredOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [transferredOn, setTransferredOn] = useState(() => appDateKey());
   const [note, setNote] = useState("");
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
@@ -175,7 +176,7 @@ export function CreditBalancePanel({
             <Field label={t.finance_credit_transfer_date}>
               <Input
                 type="date"
-                max={new Date().toISOString().slice(0, 10)}
+                max={appDateKey()}
                 value={transferredOn}
                 onChange={(event) => setTransferredOn(event.target.value)}
                 className={inputClass}

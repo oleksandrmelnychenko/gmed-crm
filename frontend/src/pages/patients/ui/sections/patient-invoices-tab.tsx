@@ -44,6 +44,7 @@ import {
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { appDateKey, appDateKeyOf } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -216,7 +217,7 @@ function createBlankBalanceAdjustmentForm(currency = "EUR"): BalanceAdjustmentFo
     category: "correction",
     amount: "",
     currency,
-    effectiveOn: new Date().toISOString().slice(0, 10),
+    effectiveOn: appDateKey(),
     orderId: "",
     reason: "",
     note: "",
@@ -1310,11 +1311,12 @@ function usePatientInvoicesTabContent({
     );
     return invoices.filter((invoice) => invoiceIds.has(invoice.id));
   }, [effectiveFinancialSummary, hasFinanceFilters, invoices]);
+  // Like the server: overdue once the due date lies before today in Berlin.
   const invoiceIsOverdue = (invoice: InvoiceItem) =>
     invoice.status === "overdue" ||
-    (Boolean(invoice.due_date) &&
+    (Boolean(appDateKeyOf(invoice.due_date)) &&
       moneyValueNumber(invoice.balance_due) > 0 &&
-      new Date(invoice.due_date as string).getTime() < Date.now());
+      appDateKeyOf(invoice.due_date) < appDateKey());
   const invoiceColumns = useMemo<ColumnDef<InvoiceItem>[]>(
     () => [
       {

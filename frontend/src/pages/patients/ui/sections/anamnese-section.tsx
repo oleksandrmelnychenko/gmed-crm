@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
+import { appDateTimeFormat, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -106,7 +107,7 @@ function formatTimestamp(value: string | null | undefined, lang: string): string
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime())
     ? value
-    : new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
         day: "2-digit",
         month: "short",
         year: "numeric",
@@ -117,24 +118,6 @@ function formatTimestamp(value: string | null | undefined, lang: string): string
 
 function versionDate(version: ClinicalNarrative, lang: string): string {
   return formatTimestamp(version.anamnese_at ?? version.updated_at ?? version.created_at, lang) || "—";
-}
-
-function toLocalDateTimeInput(value: string | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value.slice(0, 16);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return [
-    date.getFullYear(),
-    "-",
-    pad(date.getMonth() + 1),
-    "-",
-    pad(date.getDate()),
-    "T",
-    pad(date.getHours()),
-    ":",
-    pad(date.getMinutes()),
-  ].join("");
 }
 
 export function AnamneseSection({
@@ -623,11 +606,11 @@ export function AnamneseSection({
                 type="datetime-local"
                 required
                 aria-invalid={anamnesisTimeMissing}
-                value={toLocalDateTimeInput(editing.anamnese_at)}
+                value={isoToBerlinLocalInput(editing.anamnese_at)}
                 onChange={(event) =>
                   setEditing((current) =>
                     current
-                      ? { ...current, anamnese_at: event.target.value || null }
+                      ? { ...current, anamnese_at: berlinLocalInputToIso(event.target.value) }
                       : current,
                   )
                 }

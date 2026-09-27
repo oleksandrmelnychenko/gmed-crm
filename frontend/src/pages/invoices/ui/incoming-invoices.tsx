@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { StaffLink } from "@/components/staff-link";
 import { apiFetch } from "@/lib/api";
+import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { fetchCompanyFinancialAccounts } from "@/pages/company-finance/data";
@@ -49,7 +50,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const [paymentChoice, setPaymentChoice] = useState<IncomingInvoice | null>(null);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [paidOn, setPaidOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [paidOn, setPaidOn] = useState(() => appDateKey());
   const [accounts, setAccounts] = useState<CompanyFinancialAccount[]>([]);
   const [opening, setOpening] = useState<string | null>(null);
   useFinanceAutoRefresh(() => setRefresh((value) => value + 1), busy);
@@ -181,7 +182,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     { id: "amount", label: tx("Сумма счёта", "Rechnungsbetrag"), accessor: row => Number(row.amount_gross), width: 150, render: row => <span className="font-mono tabular-nums">{money(row.amount_gross, row.currency)}</span> },
     { id: "paid", label: tx("Выплачено компанией", "Vom Unternehmen bezahlt"), accessor: row => Number(row.company_paid_gross), width: 180, render: row => <span className="font-mono tabular-nums">{money(row.company_paid_gross, row.currency)}</span> },
     { id: "remaining", label: tx("Осталось выплатить", "Noch zu zahlen"), accessor: row => Number(row.remaining_gross), width: 180, render: row => <span className={`font-mono font-semibold tabular-nums ${Number(row.remaining_gross) > 0 ? "text-rose-700 dark:text-rose-400" : ""}`}>{money(row.remaining_gross, row.currency)}</span> },
-    { id: "due", label: tx("Срок оплаты", "Fällig am"), accessor: row => row.due_date, width: 140, render: row => row.due_date ? new Date(`${row.due_date}T00:00:00`).toLocaleDateString(locale) : "—" },
+    { id: "due", label: tx("Срок оплаты", "Fällig am"), accessor: row => row.due_date, width: 140, render: row => row.due_date ? formatDateKey(row.due_date, locale, { year: "numeric", month: "numeric", day: "numeric" }) || row.due_date : "—" },
     { id: "patient", label: tx("Пациент", "Patient"), accessor: row => row.patient_name, width: 210, render: row => row.patient_id ? <StaffLink to={`/patients/${row.patient_id}`}>{row.patient_name || row.patient_pid}</StaffLink> : tx("Расход компании", "Unternehmensausgabe") },
     { id: "order", label: tx("Заказ", "Auftrag"), accessor: row => row.order_number ?? "", width: 155, render: row => row.order_id ? <StaffLink to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> : row.patient_id ? <StatusBadge tone="warning">{tx("Без заказа", "Ohne Auftrag")}</StatusBadge> : "—" },
   ];
@@ -194,7 +195,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
       emptyState={tx("Входящих счетов пока нет", "Noch keine Eingangsrechnungen")}
       rowActionsWidth={canManage ? 225 : 55} rowActions={row => <div className="flex items-center gap-2">
         {row.source_document_id ? <Button type="button" size="icon-sm" variant="outline" disabled={Boolean(opening)} aria-label={`${tx("Оригинал счёта", "Rechnungsoriginal")}: ${row.external_invoice_number}`} onClick={() => void preview(row)}>{opening === row.id ? <LoaderCircle className="size-4 animate-spin" /> : <Eye className="size-4" />}</Button> : null}
-        {canManage && !["cancelled", "expected"].includes(row.status) ? <Button type="button" size="sm" variant={row.paid_by === "unpaid" ? "default" : "outline"} disabled={paymentBusy} onClick={() => { setPaymentError(null); setPaidOn(new Date().toISOString().slice(0, 10)); setPaymentChoice(row); }}>{tx("Оплата", "Zahlung")}</Button> : null}
+        {canManage && !["cancelled", "expected"].includes(row.status) ? <Button type="button" size="sm" variant={row.paid_by === "unpaid" ? "default" : "outline"} disabled={paymentBusy} onClick={() => { setPaymentError(null); setPaidOn(appDateKey()); setPaymentChoice(row); }}>{tx("Оплата", "Zahlung")}</Button> : null}
       </div>} />
     <ProviderSettlementDialog liability={selected} accounts={accounts} locale={locale} onClose={() => setSelected(null)} onChanged={() => { setRefresh(value => value + 1); onChanged(); }} />
     <Dialog open={Boolean(paymentChoice)} onOpenChange={(open) => { if (!open && !paymentBusy) { setPaymentError(null); setPaymentChoice(null); } }}>
@@ -211,7 +212,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
         {paymentChoice ? <div className="space-y-4 p-4 sm:p-5">
           <label className="block space-y-1.5 text-xs font-medium text-muted-foreground">
             <span>{tx("Дата оплаты", "Zahlungsdatum")}</span>
-            <Input className="h-9 rounded-md bg-background text-sm text-foreground" type="date" max={new Date().toISOString().slice(0, 10)} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
+            <Input className="h-9 rounded-md bg-background text-sm text-foreground" type="date" max={appDateKey()} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
           </label>
           {paymentError ? <Banner tone="error">{paymentError}</Banner> : null}
           {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung bestätigen")}</Button></div></Banner> : null}

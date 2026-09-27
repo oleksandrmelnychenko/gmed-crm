@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { ApiRequestError } from "@/lib/api";
+import { appDateTimeFormat } from "@/lib/app-time-zone";
 import { useDatevText } from "./text";
 import { DATEV_MODULES, fetchDatevSetup, saveDatevSetup, type DatevProfile, type DatevSetup } from "./setup-api";
 import { DATEV_EXPORT_DOCS, DATEV_MODULE_NAMES, DATEV_PORTAL, datevSetupBrief, profileNumbersValid } from "./setup-model";
@@ -107,7 +108,7 @@ export function DatevConnectionDetails() {
         {error ? <div role="alert" className="space-y-2 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs leading-5 text-destructive"><p>{copy[error]}</p>{error === "conflict" ? <Button type="button" variant="outline" size="sm" className="h-8 rounded-md" onClick={reload}>{copy.reload}</Button> : null}</div> : null}
         {saved ? <p role="status" className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">{copy.saved}</p> : null}
         <div className="flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/20 px-3.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
-          <span className="text-xs leading-5 text-muted-foreground sm:mr-auto">{dirty ? copy.unsaved : setup.updated_at ? `${copy.savedAt}: ${new Date(setup.updated_at).toLocaleString(lang === "de" ? "de-DE" : "ru-RU")}` : null}</span>
+          <span className="text-xs leading-5 text-muted-foreground sm:mr-auto">{dirty ? copy.unsaved : setup.updated_at ? `${copy.savedAt}: ${appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).format(new Date(setup.updated_at))}` : null}</span>
           {dirty ? <Button type="button" variant="outline" size="sm" className="h-9 rounded-md sm:h-8" disabled={saving} onClick={() => { setDraft(setup.profile); setSaved(false); setError(null); }}>{copy.reset}</Button> : null}
           <DatevActionButton type="submit" size="sm" title={`DATEV · ${copy.save}`} description={operationDescription("profile", lang === "de")} context={<><p>{draft.company_name}</p><p>Beraternummer: {draft.consultant_number || "—"} · Mandantennummer: {draft.client_number || "—"}</p></>} contextKey={JSON.stringify(draft)} onConfirm={save} disabled={saving || !valid || (!dirty && !!setup.revision)}>{saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}DATEV · {saving ? copy.saving : copy.save}</DatevActionButton>
         </div>

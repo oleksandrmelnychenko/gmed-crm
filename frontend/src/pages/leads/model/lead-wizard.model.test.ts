@@ -148,6 +148,12 @@ describe("isMinor", () => {
     expect(isMinor("", today)).toBe(false);
     expect(isMinor("not-a-date", today)).toBe(false);
   });
+  it("counts the birthday by the Berlin date", () => {
+    // 00:30 on 8 Jul in Berlin, still 7 Jul in UTC: the 18th birthday has begun.
+    expect(isMinor("2008-07-08", new Date("2026-07-07T22:30:00Z"))).toBe(false);
+    // 23:30 on 8 Jul in Berlin, already 9 Jul in Kyiv: not yet 18.
+    expect(isMinor("2008-07-09", new Date("2026-07-08T21:30:00Z"))).toBe(true);
+  });
 });
 
 describe("stepIsComplete", () => {

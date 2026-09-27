@@ -1,3 +1,4 @@
+import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { toDateTimeLocalInput } from "@/pages/appointments/model/date-time";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
@@ -8,8 +9,9 @@ import type {
   PatientAssignment,
 } from "@/pages/appointments/model/types";
 
+/** A `datetime-local` value (Berlin wall clock) as a UTC instant for the API. */
 export function toRfc3339(localDateTime: string) {
-  return localDateTime ? new Date(localDateTime).toISOString() : "";
+  return berlinLocalInputToIso(localDateTime) ?? "";
 }
 
 export function parsePositiveIntegerInput(value: string) {

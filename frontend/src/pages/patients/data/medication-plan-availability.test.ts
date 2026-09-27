@@ -27,4 +27,9 @@ describe("medication plan availability", () => {
     const date = timestamp.startsWith("2026-09") ? "2026-09-08" : "2026-01-08";
     expect(hasCurrentPlanMedications([{ ...active, einnahme_von: date, einnahme_bis: date }], new Date(timestamp))).toBe(true);
   });
+  it("keeps the Berlin day when Kyiv is already on the next one", () => {
+    const lateEvening = new Date("2026-09-27T21:30:00Z");
+    expect(hasCurrentPlanMedications([{ ...active, einnahme_bis: "2026-09-27" }], lateEvening)).toBe(true);
+    expect(hasCurrentPlanMedications([{ ...active, einnahme_von: "2026-09-28" }], lateEvening)).toBe(false);
+  });
 });

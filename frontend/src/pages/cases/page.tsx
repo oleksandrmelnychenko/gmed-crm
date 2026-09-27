@@ -45,6 +45,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
+import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
 import {
@@ -251,15 +252,15 @@ function doctorOptionSearchText(doctor: DoctorOption, lang: SpecializationLabelL
 }
 
 const CASE_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": new Intl.DateTimeFormat("de-DE", {
+  "de-DE": appDateTimeFormat("de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }),
-  "ru-RU": new Intl.DateTimeFormat("ru-RU", {
+  "ru-RU": appDateTimeFormat("ru-RU", {
     dateStyle: "medium",
     timeStyle: "short",
   }),
-  "en-GB": new Intl.DateTimeFormat("en-GB", {
+  "en-GB": appDateTimeFormat("en-GB", {
     dateStyle: "medium",
     timeStyle: "short",
   }),
@@ -565,7 +566,7 @@ function useCasesPageContent() {
       caseUuid: "",
       hauptanfragegrund: "",
       zuweiser: "",
-      today: new Date().toISOString().slice(0, 10),
+      today: appDateKey(),
     }),
     [],
   );

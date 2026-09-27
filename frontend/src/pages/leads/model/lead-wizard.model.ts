@@ -1,4 +1,5 @@
 import type { LeadDetail } from "@/lib/api/types";
+import { appWallClock } from "@/lib/app-time-zone";
 import { moneyLineAmounts, roundCents } from "@/lib/money";
 import type {
   ClinicalMedication,
@@ -87,7 +88,7 @@ export function discoveryReferrerMissing(
   );
 }
 
-/** True when the person is younger than 18 on `today` — i.e. a child (#2). */
+/** True when the person is younger than 18 on the Berlin date of `today` — i.e. a child (#2). */
 export function isMinor(dateOfBirth: string, today: Date): boolean {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOfBirth);
   if (!match) return false;
@@ -102,9 +103,10 @@ export function isMinor(dateOfBirth: string, today: Date): boolean {
   ) {
     return false;
   }
-  let age = today.getFullYear() - year;
-  const monthDelta = today.getMonth() + 1 - month;
-  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < day)) {
+  const now = appWallClock(today);
+  let age = now.year - year;
+  const monthDelta = now.month - month;
+  if (monthDelta < 0 || (monthDelta === 0 && now.day < day)) {
     age -= 1;
   }
   return age < 18;

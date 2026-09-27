@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { appDateKeyOf } from "@/lib/app-time-zone";
 import type { Translations } from "@/lib/i18n";
 import { recordCompliancePrivacyRequestStep } from "@/pages/admin/data/admin-api";
 
@@ -24,7 +25,7 @@ const NOTIFY_CHANNELS = ["email", "portal", "postal_mail", "phone", "in_person"]
 const MIN_EXTENSION_REASON = 10;
 
 function day(value?: string) {
-  return value ? (value.split("T")[0] ?? value) : "";
+  return value ? appDateKeyOf(value) || value : "";
 }
 
 /**

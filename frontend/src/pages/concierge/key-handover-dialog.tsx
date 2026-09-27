@@ -8,6 +8,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { appDateTimeFormat, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -67,14 +68,13 @@ const copy = {
 } as const;
 
 function localDateTimeValue(value: Date) {
-  const shifted = new Date(value.getTime() - value.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+  return isoToBerlinLocalInput(value);
 }
 
 function formatDateTime(value: string, lang: Lang) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
+  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);

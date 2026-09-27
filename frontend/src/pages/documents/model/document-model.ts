@@ -12,6 +12,7 @@ import type {
   TemplateTextBlock,
   UploadFormState,
 } from "./types";
+import { appDateKey, appWallClock } from "@/lib/app-time-zone";
 import { formatUnknownValue, type Lang, type Translations } from "@/lib/i18n";
 import { hasCapability, type Actor } from "@/lib/permissions";
 import {
@@ -267,10 +268,11 @@ function formatDocumentDate(value?: string | Date | null) {
   if (!value) return "";
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return "";
+    const { year, month, day } = appWallClock(value);
     return [
-      String(value.getDate()).padStart(2, "0"),
-      String(value.getMonth() + 1).padStart(2, "0"),
-      String(value.getFullYear()).padStart(4, "0"),
+      String(day).padStart(2, "0"),
+      String(month).padStart(2, "0"),
+      String(year).padStart(4, "0"),
     ].join(".");
   }
   const trimmed = value.trim();
@@ -727,7 +729,7 @@ export function buildGeneratedDocumentManualTextDraft(input: {
   const title = form.titleOverride.trim() || template.label;
   lines.push(title);
   lines.push("");
-  lines.push(`${labels.documentDate}: ${form.documentDate || new Date().toISOString().slice(0, 10)}`);
+  lines.push(`${labels.documentDate}: ${form.documentDate || appDateKey()}`);
   if (patientLabel) lines.push(`${labels.ordersPatient}: ${patientLabel}`);
   if (input.orderNumber) lines.push(`${labels.ordersTitle}: ${input.orderNumber}`);
   if (input.appointment) {
@@ -1001,7 +1003,7 @@ export function emptyUploadForm(patientId = ""): UploadFormState {
     documentVariant: "original",
     documentLanguage: "",
     accessCategory: "internal",
-    documentDate: new Date().toISOString().slice(0, 10),
+    documentDate: appDateKey(),
     sourcePerson: "",
     sourceInstitution: "",
     addresseePerson: "",
@@ -1034,7 +1036,7 @@ export function emptyGenerateForm(patientId = ""): GenerateFormState {
     documentVariant: "original",
     documentLanguage: "de",
     accessCategory: "patient",
-    documentDate: new Date().toISOString().slice(0, 10),
+    documentDate: appDateKey(),
     sourcePerson: "",
     sourceInstitution: "GMED",
     addresseePerson: "",
