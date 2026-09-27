@@ -427,8 +427,9 @@ test.describe("staff appointments live workflows", () => {
             item.agency_service_key === "treatment_organization" &&
             item.source_medical_appointment_id === scenario.appointment.id &&
             (item.notes ?? "").includes(
-              `Automatisch aus abgeschlossenem medizinischem Termin ${scenario.appointment.id} erstellt`,
-            ),
+              "Automatisch aus dem abgeschlossenen medizinischen Termin erstellt",
+            ) &&
+            !(item.notes ?? "").includes(scenario.appointment.id),
         ),
       ).toBe(true);
     }).toPass({ timeout: 15_000 });

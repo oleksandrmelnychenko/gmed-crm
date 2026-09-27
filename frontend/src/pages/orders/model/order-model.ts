@@ -356,15 +356,39 @@ export function optString(value: string) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+// Dates in the order workspace read DD.MM.YYYY in every staff language
+// (docs/architecture/patient-order-wizard-plan_ua.md). A calendar date
+// ("2026-09-27") is never shifted through a time zone, and a date-only value
+// stored as a UTC-midnight timestamp shows no time of day ("03:00").
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const UTC_MIDNIGHT = /^(\d{4})-(\d{2})-(\d{2})T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)$/;
+
+function twoDigits(value: number) {
+  return String(value).padStart(2, "0");
+}
+
+function calendarDateLabel(value: string): string | null {
+  const match = CALENDAR_DATE.exec(value.trim()) ?? UTC_MIDNIGHT.exec(value.trim());
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : null;
+}
+
+function localDateLabel(date: Date) {
+  return `${twoDigits(date.getDate())}.${twoDigits(date.getMonth() + 1)}.${date.getFullYear()}`;
+}
+
+/** DD.MM.YYYY of a calendar date or of a timestamp's local date. */
 export function formatDate(
   value: string | null | undefined,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  const date = new Date(`${value}T00:00:00`);
+  const calendarDate = calendarDateLabel(value);
+  if (calendarDate) return calendarDate;
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(locale, { dateStyle: "medium" });
+  return localDateLabel(date);
 }
 
 export function numberFromUnknown(value: unknown) {
@@ -405,29 +429,31 @@ export function formatOptionalCurrency(
     : formatCurrency(value, currency, locale);
 }
 
+/**
+ * "DD.MM.YYYY, HH:MM" of a timestamp in local time; a date-only value (a
+ * calendar date or a UTC-midnight timestamp) shows the date alone.
+ */
 export function formatDateTime(
   value: string | null | undefined,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
+  void _locale;
   if (!value) return emptyLabel;
+  const calendarDate = calendarDateLabel(value);
+  if (calendarDate) return calendarDate;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  return `${localDateLabel(date)}, ${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
 }
 
+/** DD.MM.YYYY; the same rules as {@link formatDate}. */
 export function formatDateOnly(
   value: string | null | undefined,
   locale = "de-DE",
   emptyLabel = translateCatalog(getLang()).common_not_set,
 ) {
-  if (!value) return emptyLabel;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(locale, { dateStyle: "medium" });
+  return formatDate(value, locale, emptyLabel);
 }
 
 function toDateTimeInputValue(value: string | null | undefined) {

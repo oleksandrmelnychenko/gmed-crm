@@ -7145,10 +7145,11 @@ async fn sync_completed_medical_appointment_to_billing(
         .try_get::<Option<String>, _>("doctor_name")
         .unwrap_or_default();
 
+    // Readable text only: the appointment stays linked by reference
+    // (source_medical_appointment_id), not by raw IDs or catalog keys here.
     let mut context_notes = vec![
         format!("Termin: {appointment_title}"),
-        format!("Datum: {appointment_date}"),
-        format!("Katalogschlüssel: {}", catalog_item.service_key),
+        format!("Datum: {}", appointment_date.format("%d.%m.%Y")),
     ];
     if let Some(provider_name) = provider_name.as_deref()
         && !provider_name.trim().is_empty()
@@ -7198,9 +7199,8 @@ async fn sync_completed_medical_appointment_to_billing(
         return Ok(());
     }
 
-    let mut notes = vec![format!(
-        "Automatisch aus abgeschlossenem medizinischem Termin {appointment_id} erstellt"
-    )];
+    let mut notes =
+        vec!["Automatisch aus dem abgeschlossenen medizinischen Termin erstellt".to_string()];
     notes.extend(context_notes);
 
     let result = sqlx::query(
@@ -7558,16 +7558,21 @@ fn interpreter_report_billing_notes(
     candidate: &InterpreterReportBillingCandidate,
     headline: String,
 ) -> String {
+    // Readable text and a report reference only: the report text stays on the
+    // report, and no appointment IDs or catalog keys appear in the notes.
     [
         headline,
         format!("Dolmetscher: {}", candidate.interpreter_name),
         format!("Stunden: {}", candidate.hours.normalize()),
-        format!("Termin: {}", candidate.appointment_id),
-        format!("Termindatum: {}", candidate.appointment_date),
+        format!(
+            "Termin: {} am {}",
+            candidate.appointment_title,
+            candidate.appointment_date.format("%d.%m.%Y")
+        ),
         format!("Bericht: {}", candidate.report_id),
-        format!("Katalogschlüssel: {INTERPRETER_HOURS_SERVICE_KEY}"),
     ]
-    .join("\n")
+    .join("
+")
 }
 
 /// Bills one approved interpreter report. The report consumes the order's
@@ -7628,9 +7633,8 @@ async fn sync_interpreter_report_billing_candidate(
         let notes = interpreter_report_billing_notes(
             candidate,
             format!(
-                "Geplante Leistung ({} Std.) durch freigegebenen Dolmetscherbericht {} mit den tatsächlichen Stunden ersetzt",
-                planned_quantity.normalize(),
-                candidate.report_id
+                "Geplante Leistung ({} Std.) durch den freigegebenen Dolmetscherbericht mit den tatsächlichen Stunden ersetzt",
+                planned_quantity.normalize()
             ),
         );
         sqlx::query(
@@ -7666,14 +7670,13 @@ async fn sync_interpreter_report_billing_candidate(
     };
     let description = format!(
         "{} · {} · {}",
-        catalog_item.service_name, candidate.appointment_title, candidate.appointment_date
+        catalog_item.service_name,
+        candidate.appointment_title,
+        candidate.appointment_date.format("%d.%m.%Y")
     );
     let notes = interpreter_report_billing_notes(
         candidate,
-        format!(
-            "Automatisch aus freigegebenem Dolmetscherbericht {} erstellt",
-            candidate.report_id
-        ),
+        "Automatisch aus dem freigegebenen Dolmetscherbericht erstellt".to_string(),
     );
     let inserted = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO order_leistungen (

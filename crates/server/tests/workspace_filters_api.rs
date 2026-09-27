@@ -3821,12 +3821,18 @@ async fn completed_medical_appointment_auto_creates_order_leistung_from_agency_c
         leistungen[0]["agency_service_id"],
         agency_service_id.to_string()
     );
+    let auto_notes = leistungen[0]["notes"].as_str().unwrap_or_default();
     assert!(
-        leistungen[0]["notes"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("Automatisch aus abgeschlossenem medizinischem Termin")
+        auto_notes.contains("Automatisch aus dem abgeschlossenen medizinischen Termin erstellt"),
+        "{auto_notes}"
     );
+    // Readable notes: the appointment stays linked by reference, the notes
+    // show no raw IDs, catalog keys or ISO dates.
+    assert!(
+        !auto_notes.contains(&appointment_id.to_string()),
+        "{auto_notes}"
+    );
+    assert!(!auto_notes.contains("Katalogschlüssel"), "{auto_notes}");
 
     let (status, _) = json_request(
         &app,

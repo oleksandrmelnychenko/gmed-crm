@@ -246,6 +246,7 @@ import {
 } from "./ui/order-cancellation";
 import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
 import { OrderFollowupMilestones } from "./ui/order-followup-milestones";
+import { readableServiceLineNotes } from "./model/service-line-notes";
 import {
   OrderServiceGroupPanel,
   OrderServiceGroupWizard,
@@ -7367,9 +7368,9 @@ function useOrdersPageContent() {
                                   />
                                 </div>
 
-                                {leistung.notes ? (
-                                  <div className="border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
-                                    {leistung.notes}
+                                {readableServiceLineNotes(leistung.notes) ? (
+                                  <div className="whitespace-pre-line border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
+                                    {readableServiceLineNotes(leistung.notes)}
                                   </div>
                                 ) : null}
                               </article>

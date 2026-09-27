@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   blankLeistungForm,
   externalInvoiceStatusTransitions,
+  formatDate,
+  formatDateOnly,
+  formatDateTime,
   formatOptionalCurrency,
   leistungLineAmounts,
   sumLeistungGross,
@@ -30,6 +33,29 @@ describe("externalInvoiceStatusTransitions", () => {
   it("treats paid and cancelled invoices as terminal", () => {
     expect(externalInvoiceStatusTransitions("paid")).toEqual([]);
     expect(externalInvoiceStatusTransitions("cancelled")).toEqual([]);
+  });
+});
+
+describe("order workspace dates", () => {
+  it("shows every date as DD.MM.YYYY, whatever the staff language", () => {
+    expect(formatDate("2026-09-27", "ru-RU")).toBe("27.09.2026");
+    expect(formatDateOnly("2026-09-27", "ru-RU")).toBe("27.09.2026");
+    const timestamp = new Date(2026, 8, 27, 14, 5);
+    expect(formatDateTime(timestamp.toISOString(), "ru-RU")).toBe("27.09.2026, 14:05");
+    expect(formatDateOnly(timestamp.toISOString(), "de-DE")).toBe("27.09.2026");
+  });
+
+  it("does not show a time for date-only values", () => {
+    expect(formatDateTime("2026-09-27", "ru-RU")).toBe("27.09.2026");
+    // A date stored as a UTC-midnight timestamp is not "27.09.2026, 03:00".
+    expect(formatDateTime("2026-09-27T00:00:00+00:00", "ru-RU")).toBe("27.09.2026");
+    expect(formatDateTime("2026-09-27T00:00:00Z", "de-DE")).toBe("27.09.2026");
+    expect(formatDate("2026-09-27T00:00:00.000Z")).toBe("27.09.2026");
+  });
+
+  it("keeps empty and unparseable values readable", () => {
+    expect(formatDate(null, "de-DE", "—")).toBe("—");
+    expect(formatDateTime("not a date", "de-DE", "—")).toBe("not a date");
   });
 });
 
