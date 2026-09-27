@@ -69,6 +69,23 @@ export default defineConfig([
     },
   },
   {
+    // The stock dayjs adapter takes "today" from the browser's day; the date
+    // pickers get theirs from AppAdapterDayjs. no-restricted-syntax rather than
+    // no-restricted-imports, which the staff-navigation block below overrides.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/lib/app-date-adapter.ts', 'src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "ImportDeclaration[source.value='@mui/x-date-pickers/AdapterDayjs']",
+          message:
+            'Use AppAdapterDayjs from @/lib/app-date-adapter: the date pickers mark the Berlin date as today.',
+        },
+      ],
+    },
+  },
+  {
     files: ['src/pages/**/*.tsx', 'src/components/**/*.tsx'],
     ignores: [
       'src/pages/login.tsx',

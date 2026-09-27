@@ -13,9 +13,9 @@ import {
   useLocation,
 } from "react-router-dom";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
-import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import "dayjs/locale/de";
 import "dayjs/locale/ru";
+import { AppAdapterDayjs } from "@/lib/app-date-adapter";
 import { AuthProvider } from "@/lib/auth";
 import { RealtimeProvider } from "@/lib/realtime";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -463,7 +463,7 @@ export default function App() {
   const { lang } = useLang();
 
   return (
-    <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale={lang}>
+    <LocalizationProvider dateAdapter={AppAdapterDayjs} adapterLocale={lang}>
       <BrowserRouter>
         <AuthProvider>
           <RealtimeProvider>
