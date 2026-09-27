@@ -5989,7 +5989,10 @@ fn generated_cost_estimate_document_number(
     generated_at: chrono::DateTime<chrono::Utc>,
     sequence: i64,
 ) -> String {
-    format!("VKS-{}-{sequence:04}", crate::app_time::local(generated_at).format("%Y%m%d"))
+    format!(
+        "VKS-{}-{sequence:04}",
+        crate::app_time::local(generated_at).format("%Y%m%d")
+    )
 }
 
 fn generated_document_number_for_template(
@@ -17351,7 +17354,9 @@ fn build_appointment_confirmation_pdf(
     let meta_date = if context.sign_date.is_some() {
         fmt_de_date(context.sign_date)
     } else {
-        crate::app_time::local(context.generated_at).format("%d.%m.%Y").to_string()
+        crate::app_time::local(context.generated_at)
+            .format("%d.%m.%Y")
+            .to_string()
     };
     let meta_doc_id = context
         .doc_id

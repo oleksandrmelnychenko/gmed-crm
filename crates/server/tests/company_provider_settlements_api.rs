@@ -300,9 +300,7 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
     assert_eq!(statement_movements[3]["movement_type"], "reversal");
     assert_eq!(statement_movements[3]["running_balance"], "60");
 
-    let tomorrow = gmed_server::app_time::today()
-        .succ_opt()
-        .expect("tomorrow");
+    let tomorrow = gmed_server::app_time::today().succ_opt().expect("tomorrow");
     let opening_path = format!(
         "/api/v1/company-provider-statements/{provider_id}?currency=EUR&from={tomorrow}&to=2099-12-31"
     );

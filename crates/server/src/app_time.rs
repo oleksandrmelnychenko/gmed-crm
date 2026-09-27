@@ -47,12 +47,21 @@ mod tests {
     fn instants_after_german_midnight_belong_to_the_next_day() {
         // Summer time: UTC+2.
         let summer = Utc.with_ymd_and_hms(2026, 9, 27, 22, 30, 0).unwrap();
-        assert_eq!(date_of(summer), NaiveDate::from_ymd_opt(2026, 9, 28).unwrap());
+        assert_eq!(
+            date_of(summer),
+            NaiveDate::from_ymd_opt(2026, 9, 28).unwrap()
+        );
         // Winter time: UTC+1.
         let winter = Utc.with_ymd_and_hms(2026, 12, 31, 23, 30, 0).unwrap();
-        assert_eq!(date_of(winter), NaiveDate::from_ymd_opt(2027, 1, 1).unwrap());
+        assert_eq!(
+            date_of(winter),
+            NaiveDate::from_ymd_opt(2027, 1, 1).unwrap()
+        );
         let before = Utc.with_ymd_and_hms(2026, 12, 31, 22, 59, 0).unwrap();
-        assert_eq!(date_of(before), NaiveDate::from_ymd_opt(2026, 12, 31).unwrap());
+        assert_eq!(
+            date_of(before),
+            NaiveDate::from_ymd_opt(2026, 12, 31).unwrap()
+        );
     }
 
     fn wall(value: &str) -> NaiveDateTime {

@@ -1612,14 +1612,16 @@ fn next_auto_dunning_level(
 
     let first_sent_at = candidate.first_sent_at?;
     if candidate.second_sent_at.is_none()
-        && crate::app_time::date_of(first_sent_at) <= today - chrono::Duration::days(second_delay_days)
+        && crate::app_time::date_of(first_sent_at)
+            <= today - chrono::Duration::days(second_delay_days)
     {
         return Some("second");
     }
 
     let second_sent_at = candidate.second_sent_at?;
     if candidate.collections_sent_at.is_none()
-        && crate::app_time::date_of(second_sent_at) <= today - chrono::Duration::days(collections_delay_days)
+        && crate::app_time::date_of(second_sent_at)
+            <= today - chrono::Duration::days(collections_delay_days)
     {
         return Some("collections");
     }

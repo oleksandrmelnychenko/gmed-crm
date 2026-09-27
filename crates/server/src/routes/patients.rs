@@ -1559,8 +1559,7 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
             validate_relation_payload_fields(relation)?;
         }
     }
-    if is_minor_birth_date(parsed_birth_date, crate::app_time::today())
-        && !has_minor_guardian(req)
+    if is_minor_birth_date(parsed_birth_date, crate::app_time::today()) && !has_minor_guardian(req)
     {
         return Err(
             "Minor patients require a guardian/parent relation or guardian emergency contact",
@@ -10371,10 +10370,8 @@ fn build_patient_detail_json(
             insert_optional_string(map, "address_country", patient.address_country);
             insert_optional_string(map, "passport_number", patient.passport_number);
             {
-                let (status, days) = passport_compliance_status(
-                    patient.passport_expiry,
-                    crate::app_time::today(),
-                );
+                let (status, days) =
+                    passport_compliance_status(patient.passport_expiry, crate::app_time::today());
                 map.insert(
                     "passport_expiry".to_string(),
                     patient
