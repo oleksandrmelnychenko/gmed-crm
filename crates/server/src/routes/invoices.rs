@@ -1726,7 +1726,7 @@ pub async fn run_auto_dunning_scheduler_once(
         let mut transaction = state.db.begin().await?;
         let payment_due_date = dunning_letters::dunning_payment_due_date(
             invoice_document_date(Utc::now()),
-            dunning_letters::load_dunning_payment_term_days(&mut *transaction).await?,
+            dunning_letters::load_dunning_payment_term_days(&mut transaction).await?,
         );
         let inserted = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO invoice_dunning_events (
@@ -1748,7 +1748,7 @@ pub async fn run_auto_dunning_scheduler_once(
         let mut letter_blob = None;
         if let Some(dunning_event_id) = inserted {
             match dunning_letters::store_dunning_letter(
-                &mut *transaction,
+                &mut transaction,
                 candidate.invoice_id,
                 dunning_event_id,
                 Some(actor_user_id),
@@ -10908,7 +10908,7 @@ async fn create_dunning_event(
         Err(error) => return failed(error),
     };
     let payment_term_days =
-        match dunning_letters::load_dunning_payment_term_days(&mut *transaction).await {
+        match dunning_letters::load_dunning_payment_term_days(&mut transaction).await {
             Ok(days) => days,
             Err(error) => return failed(error),
         };
@@ -10951,7 +10951,7 @@ async fn create_dunning_event(
         return failed(error);
     }
     let letter = match dunning_letters::store_dunning_letter(
-        &mut *transaction,
+        &mut transaction,
         invoice_id,
         dunning_event_id,
         Some(auth.user_id),
@@ -11724,7 +11724,7 @@ async fn update_invoice_status(
     let invoice_date = invoice_document_date(Utc::now());
     let release_due_date = if releasing {
         let payment_term_days =
-            match release::load_invoice_payment_term_days(&mut *transaction).await {
+            match release::load_invoice_payment_term_days(&mut transaction).await {
                 Ok(days) => days,
                 Err(error) => {
                     tracing::error!(%error, %invoice_id, "load invoice payment term");
@@ -11974,7 +11974,7 @@ async fn update_invoice_status(
     // counter row stays locked only briefly. Drafts numbered before numbers
     // moved to release keep theirs.
     let release_number = if releasing && locked_invoice_number.is_none() {
-        match release::next_invoice_number(&mut *transaction, invoice_date).await {
+        match release::next_invoice_number(&mut transaction, invoice_date).await {
             Ok(number) => Some(number),
             Err(error) => {
                 tracing::error!(%error, %invoice_id, "assign invoice number");
@@ -12145,7 +12145,7 @@ async fn update_invoice_status(
             // release changes above (number, dates, credited advances) is in it.
             let stored_blob = if releasing {
                 match stored_documents::store_invoice_pdf(
-                    &mut *transaction,
+                    &mut transaction,
                     invoice_id,
                     stored_documents::TRIGGER_RELEASE,
                     Some(auth.user_id),
