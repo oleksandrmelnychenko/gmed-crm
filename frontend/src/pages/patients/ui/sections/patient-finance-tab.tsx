@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Banner, Field } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
+import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -91,7 +92,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
   }, [data, range, patientId, currency]);
   const effectiveCurrency = data?.currency ?? currency ?? "EUR";
   const amount = useCallback((value: bigint) => formatMoneyAmount(financeAmount(value), effectiveCurrency || "EUR"), [effectiveCurrency]);
-  const monthLabel = useCallback((value: string) => new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`)), [lang]);
+  const monthLabel = useCallback((value: string) => appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}-01T12:00:00Z`)), [lang]);
   const balanceLabel = (value: bigint) => value > 0n ? l.debt : value < 0n ? l.credit : l.settled;
   const periods = report.periods;
   const totals = periods.reduce((sum, period) => ({ invoices: sum.invoices + period.invoices, payments: sum.payments + period.payments, refunds: sum.refunds + period.refunds, adjustments: sum.adjustments + period.adjustments }), { invoices: 0n, payments: 0n, refunds: 0n, adjustments: 0n });
@@ -113,7 +114,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
     })),
   ];
   const movementColumns: ColumnDef<PatientAccountMovement>[] = [
-    { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "ru-RU").format(new Date(`${row.entry_date}T12:00:00`))}</span> },
+    { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{formatDateKey(row.entry_date, lang === "de" ? "de-DE" : "ru-RU")}</span> },
     { id: "kind", label: l.kind, accessor: row => row.id.startsWith("payment-balance:") ? l.imported : (l[row.kind as keyof typeof l] ?? l.unknown), width: 235 },
     { id: "document", label: l.document, accessor: row => row.document_number ?? "", width: 190, render: row => <span className="font-mono text-xs">{row.document_number || "—"}</span> },
     { id: "order", label: l.order, accessor: row => row.order_number ?? "", width: 180, render: row => <span className="font-mono text-xs">{row.order_number || "—"}</span> },

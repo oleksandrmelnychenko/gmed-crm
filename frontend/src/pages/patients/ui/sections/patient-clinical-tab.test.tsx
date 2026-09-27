@@ -402,6 +402,28 @@ describe("groupPatientLabResults", () => {
       .toEqual(["middle", "latest"]);
     expect(filterPatientLabResultsByPeriod(rows, "", "")).toBe(rows);
   });
+
+  it("puts timed lab results on their Berlin calendar day", () => {
+    const row = (id: string, measuredAt: string): PatientLabResult => ({
+      id,
+      measured_at: measuredAt,
+      analyte_name: "CRP",
+      result_text: "0.4",
+      abnormal_flag: "normal",
+      created_at: measuredAt,
+    });
+    // 27 Sep 23:30 in Berlin (28 Sep in Kyiv) and 28 Sep 00:30 in Berlin (27 Sep in UTC).
+    const rows = [row("late", "2026-09-27T21:30:00Z"), row("after-midnight", "2026-09-27T22:30:00Z")];
+
+    expect(patientLabLatestDate(rows)).toBe("2026-09-28");
+    expect(filterPatientLabResultsByPeriod(rows, "2026-09-27", "2026-09-27").map((item) => item.id))
+      .toEqual(["late"]);
+    expect(filterPatientLabResultsByPeriod(rows, "2026-09-28", "2026-09-28").map((item) => item.id))
+      .toEqual(["after-midnight"]);
+    // Date-only results stay on their stored calendar date.
+    expect(patientLabLatestDate([{ ...row("date-only", "2026-08-10T00:00:00Z"), measured_at_precision: "date" }]))
+      .toBe("2026-08-10");
+  });
 });
 
 describe("PatientClinicalTab laboratory history", () => {

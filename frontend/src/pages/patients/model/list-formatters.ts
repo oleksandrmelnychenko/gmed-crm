@@ -1,4 +1,5 @@
 import { getLang, t as translateCatalog } from "@/lib/i18n";
+import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
 
 import type {
   PatientDetail,
@@ -19,11 +20,11 @@ function localizedNotSetFallback() {
 export function formatPatientDate(value?: string | null, fallback?: string) {
   if (!value) return fallback ?? localizedNotSetFallback();
   try {
-    return new Intl.DateTimeFormat(patientLocale(), {
+    return appDateTimeFormat(patientLocale(), {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-    }).format(new Date(`${value}T00:00:00`));
+    }).format(dateOrInstant(value));
   } catch {
     return value;
   }
@@ -32,7 +33,7 @@ export function formatPatientDate(value?: string | null, fallback?: string) {
 export function formatPatientDateTime(value?: string | null, fallback?: string) {
   if (!value) return fallback ?? localizedNotSetFallback();
   try {
-    return new Intl.DateTimeFormat(patientLocale(), {
+    return appDateTimeFormat(patientLocale(), {
       day: "2-digit",
       month: "short",
       year: "numeric",

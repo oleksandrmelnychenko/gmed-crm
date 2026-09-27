@@ -300,8 +300,12 @@ describe("buildPatientLabelPrintHtml", () => {
     expect(html).toContain("70mm 37mm");
     expect(html).toContain("Herr Dr. Max Mustermann");
     expect(html).toContain("P-20260410-0001");
+    // The birth date is a calendar date: same day whatever the browser zone.
+    expect(html).toContain(`${tr.patient_label_print_dob} 10.04.1990`);
     expect(html).toContain(`${tr.patient_label_print_insurance} AXA`);
     expect(html).toContain("c/o GMED");
+    // Generated 12:00 UTC = 14:00 in Berlin (CEST).
+    expect(html).toContain(`${tr.patient_label_print_generated} 10.04.2026, 14:00`);
   });
 });
 

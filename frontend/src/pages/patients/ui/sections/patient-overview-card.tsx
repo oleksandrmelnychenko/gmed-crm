@@ -2,6 +2,14 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
+import {
+  appDateKey,
+  appDateKeyOf,
+  appDateTimeFormat,
+  appWallClock,
+  dateOrInstant,
+  parseDateKey,
+} from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
@@ -64,16 +72,9 @@ function certaintyPrefix(certainty: ClinicalDiagnosis["certainty"]): string {
   return "";
 }
 
-function localDateKey(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 export function medicationHasEndedForProfile(
   item: Pick<ClinicalMedication, "einnahme_bis">,
-  today = localDateKey(),
+  today = appDateKey(),
 ): boolean {
   const endDate = item.einnahme_bis?.trim().slice(0, 10);
   return Boolean(endDate && endDate < today);
@@ -292,7 +293,7 @@ export function PatientRecommendationOverviewItem({
   const doctor = recommendationDoctorLabel(rec, lang, tx);
   if (doctor) sub.push(doctor);
   sub.push(...splitLines(rec.description));
-  if (rec.due_at) sub.push(rec.due_at);
+  if (rec.due_at) sub.push(appDateKeyOf(rec.due_at) || rec.due_at);
 
   return (
     <li className="leading-snug">
@@ -331,12 +332,12 @@ function certaintyPrefixTextClass(certainty: ClinicalDiagnosis["certainty"]): st
 
 function computeAge(birthDate: string | null | undefined): number | null {
   if (!birthDate) return null;
-  const born = new Date(birthDate);
-  if (Number.isNaN(born.getTime())) return null;
-  const now = new Date();
-  let age = now.getFullYear() - born.getFullYear();
-  const monthDiff = now.getMonth() - born.getMonth();
-  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < born.getDate())) age -= 1;
+  const born = parseDateKey(appDateKeyOf(birthDate));
+  if (!born) return null;
+  const now = appWallClock();
+  let age = now.year - born.year;
+  const monthDiff = now.month - born.month;
+  if (monthDiff < 0 || (monthDiff === 0 && now.day < born.day)) age -= 1;
   return age >= 0 && age < 200 ? age : null;
 }
 
@@ -349,13 +350,13 @@ function genderText(gender: string | null | undefined, tx: Bilingual): string {
 
 function formatBirthDate(value: string | null | undefined, lang: string): string {
   if (!value) return "";
-  const d = new Date(value);
+  const d = dateOrInstant(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString(lang === "de" ? "de-DE" : "ru-RU", {
+  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-  });
+  }).format(d);
 }
 
 /** One labelled demographic field in the card header. */

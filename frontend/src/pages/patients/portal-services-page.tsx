@@ -32,6 +32,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
+import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
@@ -123,10 +124,7 @@ function createPatientServicesState(): PatientServicesState {
 }
 
 function toIsoDateTime(value: string) {
-  if (!value) return undefined;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return undefined;
-  return parsed.toISOString();
+  return berlinLocalInputToIso(value) ?? undefined;
 }
 
 function serviceStatusBadgeTone(status: string): StatusTone {

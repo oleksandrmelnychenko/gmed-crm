@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
+import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import {
   darreichungsformLabel,
@@ -56,15 +57,9 @@ function blankToNull(value: string): string | null {
   return value === "" ? null : value;
 }
 
-function localToday(): string {
-  const now = new Date();
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
 function medicationHasEnded(item: ClinicalMedication): boolean {
   const endDate = item.einnahme_bis?.slice(0, 10);
-  return Boolean(endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < localToday());
+  return Boolean(endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < appDateKey());
 }
 
 function medicationDateRangeValid(item: ClinicalMedication): boolean {
@@ -838,7 +833,7 @@ function MedicationHoldDialog({
                 checked={draft.on_hold}
                 onChange={(checked) => onChange({
                   on_hold: checked,
-                  hold_from: checked ? (draft.hold_from ?? localToday()) : null,
+                  hold_from: checked ? (draft.hold_from ?? appDateKey()) : null,
                   hold_until: checked ? draft.hold_until : null,
                   hold_note: checked ? draft.hold_note : null,
                 })}
