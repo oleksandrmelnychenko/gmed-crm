@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Tabs } from "@/components/ui/tabs";
 import type { Translations } from "@/lib/i18n";
-import { apiFetch } from "@/lib/api";
+import { ApiRequestError, apiFetch } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
 
@@ -644,11 +644,17 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
           if (cancelled) return;
           setClinicalImports(Array.isArray(items) ? items : []);
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          // Staff roles that need a patient assignment are refused until they
+          // are assigned; polling every few seconds would only repeat the 403.
+          if (error instanceof ApiRequestError && error.status === 403) {
+            window.clearInterval(timer);
+          }
+        });
     };
 
-    refreshClinicalImports();
     const timer = window.setInterval(refreshClinicalImports, 5_000);
+    refreshClinicalImports();
     return () => {
       cancelled = true;
       window.clearInterval(timer);
