@@ -284,7 +284,9 @@ export type PatientAccountMovement = {
     | "balance_adjustment_reversal"
     | "external_receivable"
     | "external_allocation"
-    | "external_allocation_reversal";
+    | "external_allocation_reversal"
+    /** Accrued but not yet invoiced amount of an open termination settlement. */
+    | "termination_uninvoiced";
   direction: "debit" | "credit";
   entry_date: string;
   occurred_at: string;

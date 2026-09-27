@@ -611,6 +611,7 @@ function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: st
     external_receivable: ["Externe Forderung", "Внешний долг"],
     external_allocation: ["Forderung zugeordnet", "Долг распределён"],
     external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
+    termination_uninvoiced: ["Kündigung: angefallen, noch nicht berechnet", "Расторжение: набежало, ещё не выставлено"],
   };
   return lang === "de" ? labels[kind][0] : labels[kind][1];
 }

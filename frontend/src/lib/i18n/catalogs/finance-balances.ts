@@ -72,6 +72,10 @@ export interface FinanceBalancesTranslations {
   finance_invoice_amount_to_pay: string;
   finance_statement_credit_balance: string;
   finance_statement_amount_to_pay: string;
+  finance_settlement_in_drafts: string;
+  finance_settlement_billable_now: string;
+  finance_settlement_unmatched_lines: string;
+  finance_settlement_basis: string;
 }
 
 export const financeBalancesRu: FinanceBalancesTranslations = {
@@ -148,6 +152,12 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_invoice_amount_to_pay: "К оплате с учётом аванса",
   finance_statement_credit_balance: "Переплата по счетам",
   finance_statement_amount_to_pay: "К оплате с учётом авансов и переплат",
+  finance_settlement_in_drafts: "в черновиках счетов: {amount}",
+  finance_settlement_billable_now: "финальный счёт выставит сейчас: {amount}",
+  finance_settlement_unmatched_lines:
+    "Строки счетов на {amount} не удалось сопоставить с услугами заказа — проверьте их перед закрытием расчёта.",
+  finance_settlement_basis:
+    "Итог = выставлено (за вычетом кредит-нот) + не выставлено − оплачено (включая авансы). Так же считается сальдо в карточке пациента.",
 };
 
 export const financeBalancesDe: FinanceBalancesTranslations = {
@@ -226,4 +236,10 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_invoice_amount_to_pay: "Zu zahlen nach Anzahlung",
   finance_statement_credit_balance: "Guthaben aus Rechnungen",
   finance_statement_amount_to_pay: "Zu zahlen nach Anzahlungen und Guthaben",
+  finance_settlement_in_drafts: "in Rechnungsentwürfen: {amount}",
+  finance_settlement_billable_now: "die Schlussrechnung berechnet jetzt: {amount}",
+  finance_settlement_unmatched_lines:
+    "Rechnungspositionen über {amount} konnten keiner Auftragsleistung zugeordnet werden – bitte vor dem Abschluss prüfen.",
+  finance_settlement_basis:
+    "Saldo = berechnet (abzüglich Rechnungskorrekturen) + nicht berechnet − bezahlt (inklusive Anzahlungen). Genauso wird der Saldo in der Patientenakte berechnet.",
 };

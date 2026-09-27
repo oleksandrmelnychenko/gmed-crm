@@ -1067,3 +1067,301 @@ async fn contract_termination_detaches_unconfirmed_drafts_without_settling_them(
     assert!(prepared_data["contract_id"].is_null(), "{prepared_data}");
     assert_eq!(revision, 1);
 }
+
+/// The settlement uses the account-statement basis and bills exactly what is
+/// not invoiced yet, also when an earlier invoice came from a legacy quote line
+/// without a service link: the flat fee of 1,000 € was already invoiced that
+/// way, only 29.30 € of interpreter time is open. Before, "create final
+/// invoice" billed the flat fee again (1,000 €) and the settlement and the
+/// patient card disagreed by the uninvoiced amount.
+#[tokio::test]
+async fn termination_settlement_matches_legacy_invoice_lines_and_the_patient_balance() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Legacy', 'Settlement', '1979-02-03', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    for user_id in [manager_id, billing_id] {
+        seed_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let manager = auth_header(manager_id, "patient_manager");
+    let billing = auth_header(billing_id, "billing");
+    let ceo = auth_header(admin_id, "ceo");
+
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &manager,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "signed",
+            "valid_from": chrono::Utc::now().date_naive().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, currency, created_by)
+           VALUES ($1, $2, $3::uuid, 'execution', 'active', 'EUR', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Flat fee 840.34 net + 19 % = 1,000.00; interpreter 24.62 net = 29.30.
+    for (description, price) in [
+        ("Organisation der Behandlung", cents(84034)),
+        ("Dolmetscherleistung", cents(2462)),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO order_leistungen (
+                   order_id, patient_id, description, quantity, unit_price, currency,
+                   vat_rate, status, delivered_at
+               ) VALUES ($1, $2, $3, 1, $4, 'EUR', 19, 'delivered', now())"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(description)
+        .bind(price)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // Released invoice from a hand-written quote: its line names no service.
+    let legacy_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status, due_date,
+               total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, $3, 'interim', 'sent', CURRENT_DATE + 14,
+                     840.34, 159.66, 1000, 0,
+                     '[{"description":"Organisation der Behandlung","quantity":"1","unit_price":"840.34","vat_rate":"19","is_cost_passthrough":false,"line_net":"840.34","line_vat":"159.66","line_gross":"1000","quote_line_index":0}]',
+                     $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-LEGACY-{tag}"))
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let advance_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status, due_date,
+               total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, $3, 'advance', 'sent', CURRENT_DATE + 14,
+                     588.24, 111.76, 700, 0, '[]', $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("ADV-{tag}"))
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    record_payment(&app, &billing, &advance_id.to_string(), "700").await;
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/terminate"),
+        &manager,
+        Some(json!({ "reason": "Patient terminated the contract" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    let snapshot = &terminated["settlements"][0];
+    assert_eq!(money(&snapshot["accrued_gross"]), cents(102930));
+    assert_eq!(money(&snapshot["invoiced_gross"]), cents(100000));
+    assert_eq!(money(&snapshot["uninvoiced_gross"]), cents(2930));
+    assert_eq!(money(&snapshot["paid_gross"]), cents(70000));
+    assert_eq!(money(&snapshot["balance_gross"]), cents(32930));
+
+    let (status, settlement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "settlement: {settlement:?}");
+    let current = &settlement["current"];
+    assert_eq!(money(&current["uninvoiced_gross"]), cents(2930));
+    assert_eq!(money(&current["billable_gross"]), cents(2930));
+    assert_eq!(money(&current["unmatched_invoiced_gross"]), Decimal::ZERO);
+    assert_eq!(money(&current["balance_gross"]), cents(32930));
+
+    // The patient card (staff account statement) owes the same amount.
+    let statement_balance = |statement: &Value| money(&statement["summary"]["calculated_balance"]);
+    let (status, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "statement: {statement:?}");
+    assert_eq!(statement_balance(&statement), cents(32930), "{statement:?}");
+    assert!(
+        statement["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|movement| movement["kind"] == "termination_uninvoiced"
+                && movement["debit"] == "29.3"),
+        "{statement:?}"
+    );
+
+    // The final invoice bills exactly the open 29.30, not the flat fee again.
+    let (status, final_invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/termination-settlement/final-invoice"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "final invoice: {final_invoice:?}"
+    );
+    assert_eq!(money(&final_invoice["total_gross"]), cents(2930));
+    assert_eq!(final_invoice["line_items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        final_invoice["line_items"][0]["description"],
+        "Dolmetscherleistung"
+    );
+    let final_invoice_id = final_invoice["id"].as_str().unwrap().to_string();
+
+    // The draft is still not released: the balance does not move.
+    let (status, settlement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(money(&settlement["current"]["draft_gross"]), cents(2930));
+    assert_eq!(
+        money(&settlement["current"]["billable_gross"]),
+        Decimal::ZERO
+    );
+    assert_eq!(money(&settlement["current"]["balance_gross"]), cents(32930));
+    let (_, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(statement_balance(&statement), cents(32930));
+
+    // Released: the settlement and the patient balance still agree.
+    let (status, sent) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice_id}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "release: {sent:?}");
+    let (_, settlement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        money(&settlement["current"]["invoiced_gross"]),
+        cents(102930)
+    );
+    assert_eq!(
+        money(&settlement["current"]["uninvoiced_gross"]),
+        Decimal::ZERO
+    );
+    assert_eq!(money(&settlement["current"]["balance_gross"]), cents(32930));
+    let (_, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(statement_balance(&statement), cents(32930));
+    assert!(
+        !statement["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|movement| movement["kind"] == "termination_uninvoiced")
+    );
+
+    // A credit note lowers the claim; it does not reopen the service.
+    let (status, credit) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{legacy_invoice_id}/credit-notes"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 0, "amount_gross": "100" }],
+            "reason": "Goodwill",
+            "issued_on": chrono::Utc::now().date_naive().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "credit: {credit:?}");
+    let (_, settlement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        money(&settlement["current"]["uninvoiced_gross"]),
+        Decimal::ZERO
+    );
+    assert_eq!(money(&settlement["current"]["balance_gross"]), cents(22930));
+    let (_, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(statement_balance(&statement), cents(22930));
+}

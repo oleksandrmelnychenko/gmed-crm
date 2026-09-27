@@ -26,7 +26,7 @@ const copy = {
     datesError: "Укажите корректные даты: начало периода не должно быть позже окончания.", dataError: "Не удалось сверить движения с остатком. Суммы не показаны — повторите загрузку.",
     reconciliation: "Остаток расчётный: есть суммы, требующие сверки. Они учитываются в таблице, но пока не подтверждены.",
     explanation: "Счета показаны с учётом кредит-нот, оплаты и возвраты — с учётом сторно. Прочие движения включают внешние требования и ручные корректировки. Нажмите на месяц, чтобы увидеть операции.",
-    invoice: "Выставлен счёт", credit_note: "Кредит-нота", credit_note_reversal: "Сторно кредит-ноты", payment: "Оплата", payment_reversal: "Сторно оплаты", refund: "Возврат", refund_reversal: "Сторно возврата", balance_adjustment: "Корректировка", balance_adjustment_reversal: "Сторно корректировки", external_receivable: "Внешнее требование", external_allocation: "Распределение внешнего требования", external_allocation_reversal: "Сторно распределения", imported: "Перенесённая оплата", unknown: "Прочая операция",
+    invoice: "Выставлен счёт", credit_note: "Кредит-нота", credit_note_reversal: "Сторно кредит-ноты", payment: "Оплата", payment_reversal: "Сторно оплаты", refund: "Возврат", refund_reversal: "Сторно возврата", balance_adjustment: "Корректировка", balance_adjustment_reversal: "Сторно корректировки", external_receivable: "Внешнее требование", external_allocation: "Распределение внешнего требования", external_allocation_reversal: "Сторно распределения", termination_uninvoiced: "Расторжение: набежало, ещё не выставлено", imported: "Перенесённая оплата", unknown: "Прочая операция",
   },
   de: {
     title: "Finanzen nach Zeitraum", from: "Zeitraum von", to: "Bis", currency: "Währung",
@@ -39,7 +39,7 @@ const copy = {
     datesError: "Gültige Daten eingeben: Der Beginn darf nicht nach dem Ende liegen.", dataError: "Buchungen und Saldo konnten nicht abgestimmt werden. Beträge werden nicht angezeigt. Bitte erneut laden.",
     reconciliation: "Der Saldo ist vorläufig: Einige Beträge müssen noch abgestimmt werden. Sie sind in der Tabelle berücksichtigt, aber noch nicht bestätigt.",
     explanation: "Rechnungen enthalten Gutschriften, Zahlungen und Erstattungen berücksichtigen Stornierungen. Sonstige Buchungen umfassen externe Forderungen und manuelle Korrekturen. Ein Klick auf einen Monat zeigt die Buchungen.",
-    invoice: "Rechnung", credit_note: "Gutschrift", credit_note_reversal: "Gutschriftstorno", payment: "Zahlung", payment_reversal: "Zahlungsstorno", refund: "Erstattung", refund_reversal: "Erstattungsstorno", balance_adjustment: "Kontokorrektur", balance_adjustment_reversal: "Korrekturstorno", external_receivable: "Externe Forderung", external_allocation: "Forderungszuordnung", external_allocation_reversal: "Zuordnungsstorno", imported: "Übernommene Zahlung", unknown: "Sonstige Buchung",
+    invoice: "Rechnung", credit_note: "Gutschrift", credit_note_reversal: "Gutschriftstorno", payment: "Zahlung", payment_reversal: "Zahlungsstorno", refund: "Erstattung", refund_reversal: "Erstattungsstorno", balance_adjustment: "Kontokorrektur", balance_adjustment_reversal: "Korrekturstorno", external_receivable: "Externe Forderung", external_allocation: "Forderungszuordnung", external_allocation_reversal: "Zuordnungsstorno", termination_uninvoiced: "Kündigung: angefallen, noch nicht berechnet", imported: "Übernommene Zahlung", unknown: "Sonstige Buchung",
   },
 } as const;
 

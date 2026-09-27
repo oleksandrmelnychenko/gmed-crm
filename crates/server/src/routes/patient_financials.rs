@@ -191,6 +191,66 @@ struct SettlementMovement {
     credit: Decimal,
 }
 
+/// Accrued, not yet invoiced amounts of the patient's open termination
+/// settlements, as debit movements of the account statement.
+async fn load_open_termination_uninvoiced_movements(
+    state: &AppState,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+    currency: &str,
+) -> Result<Vec<SettlementMovement>, sqlx::Error> {
+    let settlements = sqlx::query(
+        r#"SELECT settlement.order_id, settlement.terminated_at, orders.order_number
+           FROM order_termination_settlements settlement
+           JOIN orders ON orders.id = settlement.order_id
+           WHERE settlement.patient_id = $1
+             AND settlement.status = 'open'
+             AND UPPER(settlement.currency) = $2
+             AND ($3::uuid IS NULL OR settlement.order_id = $3)
+           ORDER BY settlement.terminated_at, settlement.order_id"#,
+    )
+    .bind(patient_id)
+    .bind(currency)
+    .bind(order_id)
+    .fetch_all(&state.db)
+    .await?;
+    if settlements.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut connection = state.db.acquire().await?;
+    let mut movements = Vec::new();
+    for row in settlements {
+        let order_id = row.try_get::<Uuid, _>("order_id")?;
+        let Some(settlement) =
+            crate::routes::invoices::termination_settlements::compute_order_settlement(
+                &mut connection,
+                order_id,
+            )
+            .await?
+        else {
+            continue;
+        };
+        let debit = settlement.statement_uninvoiced_gross();
+        if debit <= Decimal::ZERO {
+            continue;
+        }
+        let terminated_at = row.try_get::<DateTime<Utc>, _>("terminated_at")?;
+        movements.push(SettlementMovement {
+            id: format!("termination-uninvoiced:{order_id}"),
+            kind: "termination_uninvoiced".to_string(),
+            entry_date: terminated_at.date_naive(),
+            occurred_at: terminated_at,
+            order_id: Some(order_id),
+            order_number: row.try_get("order_number")?,
+            document_number: None,
+            description: "Termination settlement: accrued, not yet invoiced".to_string(),
+            debit,
+            credit: Decimal::ZERO,
+        });
+    }
+    Ok(movements)
+}
+
 struct SettlementLedger {
     opening_balance: Decimal,
     debit_total: Decimal,
@@ -590,6 +650,17 @@ async fn load_patient_settlement_ledger(
             credit: row.try_get::<Decimal, _>("credit").unwrap_or(Decimal::ZERO),
         })
         .collect::<Vec<_>>();
+    // An open termination settlement bills what accrued up to the
+    // termination. Until its final invoice is released, the accrued services
+    // not invoiced yet (and drafts) are part of what the patient owes, so the
+    // staff balance and the settlement show the same figure. Third-party costs
+    // are already here as external receivables; the portal shows invoices only.
+    if !portal_scope && to.is_none() && query.package_id.is_none() {
+        source_movements.extend(
+            load_open_termination_uninvoiced_movements(state, patient_id, query.order_id, currency)
+                .await?,
+        );
+    }
     source_movements.sort_by(|left, right| {
         left.entry_date
             .cmp(&right.entry_date)

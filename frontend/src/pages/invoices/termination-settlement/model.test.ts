@@ -5,6 +5,7 @@ import { ApiRequestError } from "@/lib/api";
 import {
   canCreateFinalInvoice,
   countDueInFull,
+  finalInvoiceAmount,
   isValidForceNote,
   settlementActionErrorMessage,
   settlementBalanceClass,
@@ -80,6 +81,22 @@ describe("termination settlement model", () => {
         current: { ...base.current, uninvoiced_gross: "50" },
       } satisfies Pick<TerminationSettlement, "status" | "current">),
     ).toBe(false);
+  });
+
+  it("offers the final invoice for what is billable now, or its existing draft", () => {
+    const base = { status: "open" as const, current: { ...figures, warnings: [] } };
+    // 29.30 uninvoiced service, 50 on another draft: the final invoice bills 29.30.
+    const open = { ...base, current: { ...base.current, uninvoiced_gross: "79.3", billable_gross: "29.3" } };
+    expect(canCreateFinalInvoice(open)).toBe(true);
+    expect(finalInvoiceAmount(open)).toBe(29.3);
+    const onlyDrafts = { ...base, current: { ...base.current, uninvoiced_gross: "50", billable_gross: "0" } };
+    expect(canCreateFinalInvoice(onlyDrafts)).toBe(false);
+    expect(
+      canCreateFinalInvoice({
+        ...onlyDrafts,
+        final_invoice: { id: "i", invoice_number: "INV-1", status: "draft", total_gross: "50" },
+      }),
+    ).toBe(true);
   });
 
   it("requires a note of at least three characters for a forced close", () => {
