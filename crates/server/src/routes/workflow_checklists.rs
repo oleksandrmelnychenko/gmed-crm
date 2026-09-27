@@ -1755,7 +1755,7 @@ fn checklist_sync_from_row(
 /// the order/patient checklist in step with its linked task; otherwise the
 /// checklist keeps counting a finished task as open and blocks order
 /// completion. Run it in the same transaction as the task status change and
-/// pass the result to [`publish_task_completed_checklist_items`] after commit.
+/// pass the result to [`publish_checklist_item_changes`] after commit.
 pub(crate) async fn complete_checklist_items_for_task<'e, E>(
     executor: E,
     task_id: Uuid,
@@ -1848,16 +1848,6 @@ pub(crate) async fn sync_checklist_items_for_task_status(
         }
         _ => Ok(Vec::new()),
     }
-}
-
-/// Audits and broadcasts checklist items closed by a completed task.
-pub(crate) async fn publish_task_completed_checklist_items(
-    state: &AppState,
-    actor_id: Uuid,
-    _task_id: Uuid,
-    items: &[TaskCompletedChecklistItem],
-) {
-    publish_checklist_item_changes(state, actor_id, items).await;
 }
 
 /// Audits and broadcasts checklist items that changed with their task.
