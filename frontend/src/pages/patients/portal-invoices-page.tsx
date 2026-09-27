@@ -41,6 +41,7 @@ import {
   formatPortalDate,
   formatPortalDateTime,
   invoiceTypeLabel,
+  downloadPortalCreditNotePdf,
   downloadPortalInvoicePdf,
   openPortalInvoicePdf,
   portalStatusLabel,
@@ -843,7 +844,7 @@ function usePatientInvoicesPageContent() {
                   <section className={cn("rounded-xl p-5", tokens.surface.card)}>
                     <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                       <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-                      <span>{lang === "de" ? "Rechnungskorrekturen" : "Корректировки счета"}</span>
+                      <span>{t.finance_credit_note_portal_title}</span>
                     </h2>
                     <p className={cn("mt-1", tokens.text.muted)}>
                       {lang === "de" ? "Hier sehen Sie freigegebene Gutschriften und Stornierungen." : "Здесь показаны доступные вам кредит-ноты и их отмены."}
@@ -853,12 +854,34 @@ function usePatientInvoicesPageContent() {
                         const isReversal = credit.transaction_type === "reversal";
                         return (
                           <div key={credit.id} className={cn("flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3", credit.is_reversed && "opacity-70")}>
-                            <div>
+                            <div className="min-w-0">
                               <div className="text-sm font-semibold text-foreground">{credit.document_number}</div>
                               <div className="mt-1 text-xs text-muted-foreground">{formatPortalDate(credit.issued_on)} · {credit.reason}</div>
+                              {(credit.line_items ?? []).map((line, index) => (
+                                <div key={`${index}-${line.description}`} className="mt-1 text-xs text-muted-foreground">
+                                  {line.description} · {line.vat_rate} % · {formatPortalCurrency(line.line_gross, detail.currency)}
+                                </div>
+                              ))}
                             </div>
-                            <div className="font-mono font-semibold tabular-nums text-emerald-700">
-                              {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross, detail.currency)}` : t.portal_invoices_hidden}
+                            <div className="text-right">
+                              <div className="font-mono font-semibold tabular-nums text-emerald-700">
+                                {credit.amounts_visible ? `${isReversal ? "+" : "−"}${formatPortalCurrency(credit.amount_gross, detail.currency)}` : t.portal_invoices_hidden}
+                              </div>
+                              {credit.pdf_available ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="mt-1 h-7 px-2 text-xs"
+                                  onClick={() => {
+                                    void downloadPortalCreditNotePdf(detail.id, credit.id, credit.document_number).catch(() => {
+                                      dispatchInvoicesState({ detailError: t.finance_credit_note_pdf_error });
+                                    });
+                                  }}
+                                >
+                                  {t.finance_credit_note_pdf}
+                                </Button>
+                              ) : null}
                             </div>
                           </div>
                         );

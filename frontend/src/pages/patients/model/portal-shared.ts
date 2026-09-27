@@ -166,8 +166,12 @@ export type PortalInvoiceCreditNoteTransaction = {
   is_reversed: boolean;
   amounts_visible: boolean;
   amount_gross: unknown;
+  amount_vat?: unknown;
   issued_on: string;
   created_at: string;
+  line_items?: { description: string; vat_rate: string; line_gross: string }[] | null;
+  /** The correction document can be downloaded. */
+  pdf_available?: boolean;
 };
 
 export type PortalInvoiceCreditNoteHistoryResponse = {
@@ -845,6 +849,7 @@ const PATIENT_INVOICE_LEDGER_DIRECTION_LABEL_KEYS = {
 
 const PATIENT_INVOICE_LEDGER_CATEGORY_LABEL_KEYS = {
   cost_passthrough_revenue: "patient_invoice_ledger_category_cost_passthrough_revenue",
+  patient_credit: "finance_accounting_category_patient_credit",
   provider_expense: "patient_invoice_ledger_category_provider_expense",
   service_revenue: "patient_invoice_ledger_category_service_revenue",
 } satisfies Partial<Record<string, TranslationKey>>;
@@ -1130,6 +1135,16 @@ export async function downloadPortalUpload(id: string, filename: string) {
 export async function downloadPortalInvoicePdf(id: string, filename: string) {
   const blob = await fetchPortalBlob(`/me/invoices/${id}/pdf`);
   downloadBlob(blob, filename || "invoice.pdf");
+}
+
+/** Correction document (Rechnungskorrektur) of a credit note shown in the portal. */
+export async function downloadPortalCreditNotePdf(
+  invoiceId: string,
+  creditNoteId: string,
+  documentNumber: string,
+) {
+  const blob = await fetchPortalBlob(`/me/invoices/${invoiceId}/credit-notes/${creditNoteId}/pdf`);
+  downloadBlob(blob, `RECHNUNGSKORREKTUR-${documentNumber || creditNoteId}.pdf`);
 }
 
 export async function openPortalInvoicePdf(id: string) {

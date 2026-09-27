@@ -762,3 +762,469 @@ async fn cash_refund_is_idempotent_append_only_and_keeps_settlement_balanced() {
             .unwrap_err();
     assert!(immutable_error.to_string().contains("append-only"));
 }
+
+/// A 19 % service (500 net, 95 VAT) and a 0 % pass-through hotel (481.50) on
+/// one EUR invoice, released five days ago and visible in the portal.
+async fn seed_mixed_rate_invoice(pool: &PgPool, admin_id: Uuid, tag: &str) -> (Uuid, Uuid, Uuid) {
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+                patient_id, first_name, last_name, birth_date, gender, created_by, languages
+           ) VALUES ($1, 'Mixed', 'Rates', '1985-03-04', 'diverse', $2, ARRAY['de'])
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross,
+                paid_amount, line_items, portal_visible,
+                hide_amounts_from_patient, created_by
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', now() - interval '5 days',
+                CURRENT_DATE + 10, 981.50, 95, 1076.50, 0,
+                '[{"description":"Behandlungsorganisation","quantity":"1","unit_price":"500","vat_rate":"19","is_cost_passthrough":false,"line_net":"500","line_vat":"95","line_gross":"595"},
+                  {"description":"Hotel","quantity":"3","unit_price":"160.5","vat_rate":"0","is_cost_passthrough":true,"line_net":"481.50","line_vat":"0","line_gross":"481.50"}]',
+                true, false, $4
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}"))
+    .bind(admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (patient_id, order_id, invoice_id)
+}
+
+async fn category_totals(pool: &PgPool, invoice_id: Uuid) -> Vec<(String, Decimal, Decimal)> {
+    sqlx::query(
+        r#"SELECT category, SUM(amount_gross) AS gross, SUM(amount_vat) AS vat
+           FROM accounting_entries
+           WHERE source_invoice_id = $1
+           GROUP BY category
+           HAVING SUM(amount_gross) <> 0 OR SUM(amount_vat) <> 0
+           ORDER BY category"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| (row.get("category"), row.get("gross"), row.get("vat")))
+    .collect()
+}
+
+async fn request_status_and_type(
+    app: &axum::Router,
+    path: &str,
+    bearer: &str,
+) -> (StatusCode, String, usize) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header("Authorization", bearer)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert!(
+        content_type != "application/pdf" || bytes.starts_with(b"%PDF"),
+        "PDF body expected"
+    );
+    (status, content_type, bytes.len())
+}
+
+#[tokio::test]
+async fn line_credit_notes_follow_line_vat_split_cash_accounting_and_print_a_document() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("credit-lines-{}", Uuid::new_v4().simple());
+    let (patient_id, order_id, invoice_id) =
+        seed_mixed_rate_invoice(&ctx.pool, ctx.admin_id, &tag).await;
+    let patient_user_id = seed_user(&ctx.pool, &tag, "patient").await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(patient_user_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let patient = auth_header(patient_user_id, "patient");
+    let today = chrono::Utc::now().date_naive().to_string();
+
+    let (status, detail) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail:?}");
+    assert_eq!(detail["creditable_lines"][1]["remaining_gross"], "481.5");
+    assert_eq!(detail["creditable_lines"][1]["vat_rate"], "0");
+
+    let (status, payment) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "1076.50",
+            "payment_method": "bank_transfer",
+            "received_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{payment:?}");
+    assert_eq!(
+        category_totals(&ctx.pool, invoice_id).await,
+        vec![
+            (
+                "cost_passthrough_revenue".to_string(),
+                Decimal::new(48150, 2),
+                Decimal::ZERO
+            ),
+            (
+                "service_revenue".to_string(),
+                Decimal::new(595, 0),
+                Decimal::new(95, 0)
+            ),
+        ]
+    );
+
+    // A bare amount is ambiguous on an invoice with two VAT rates.
+    let (status, ambiguous) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "481.50",
+            "reason": "Hotel not used",
+            "issued_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{ambiguous:?}");
+
+    let hotel_request = json!({
+        "request_id": Uuid::new_v4(),
+        "lines": [{ "line_index": 1 }],
+        "reason": "Hotel not used",
+        "issued_on": today,
+        "portal_visible": true
+    });
+    let (status, hotel) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(hotel_request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{hotel:?}");
+    assert_eq!(hotel["credit_mode"], "lines");
+    assert_eq!(hotel["amount_gross"], "481.5");
+    assert_eq!(hotel["amount_vat"], "0", "a 0 % line credits no VAT");
+    assert_eq!(hotel["invoice"]["credit_balance"], "481.5");
+    assert_eq!(hotel["invoice"]["refundable_cash_amount"], "481.5");
+    assert_eq!(
+        hotel["invoice"]["creditable_lines"][1]["remaining_gross"],
+        "0"
+    );
+    let hotel_id = hotel["credit_note_transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, replay) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(hotel_request),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay:?}");
+    assert_eq!(replay["idempotent_replay"], true);
+
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 1, "amount_gross": "0.01" }],
+            "reason": "Hotel line is already credited",
+            "issued_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // An amount within the 19 % rate credits 19 % VAT.
+    let (status, service) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "vat_rate": "19",
+            "amount_gross": "119",
+            "reason": "Goodwill on organisation",
+            "issued_on": today,
+            "portal_visible": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{service:?}");
+    assert_eq!(service["credit_mode"], "vat_rate");
+    assert_eq!(service["amount_vat"], "19");
+    assert_eq!(service["amount_net"], "100");
+    assert_eq!(service["invoice"]["credited_amount"], "600.5");
+    let service_id = service["credit_note_transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, history) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history:?}");
+    let hotel_entry = history["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == hotel_id.as_str())
+        .unwrap();
+    assert_eq!(hotel_entry["line_items"][0]["invoice_line_index"], 1);
+    assert_eq!(hotel_entry["line_items"][0]["is_cost_passthrough"], true);
+    assert_eq!(hotel_entry["vat_breakdown"][0]["vat_rate"], "0");
+    assert_eq!(hotel_entry["pdf_available"], true);
+
+    // Output VAT of the order is reduced only by the credited 19 % amount.
+    let (status, economics) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economics:?}");
+    assert_eq!(economics["actual"]["credited_vat"], "19");
+    assert_eq!(economics["actual"]["recognized_revenue_vat"], "76");
+
+    // Refunding the credit reverses cash exactly where it was credited.
+    let (status, refund) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/refunds"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "600.50",
+            "payment_method": "bank_transfer",
+            "refunded_on": today,
+            "reason": "Return credited amounts"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{refund:?}");
+    assert_eq!(
+        category_totals(&ctx.pool, invoice_id).await,
+        vec![(
+            "service_revenue".to_string(),
+            Decimal::new(476, 0),
+            Decimal::new(76, 0)
+        )],
+        "the hotel credit reverses pass-through revenue without VAT, the service credit 19 % VAT"
+    );
+
+    let (status, content_type, _) = request_status_and_type(
+        &ctx.app,
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{hotel_id}/pdf"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "application/pdf");
+    let (status, content_type, _) = request_status_and_type(
+        &ctx.app,
+        &format!("/api/v1/me/invoices/{invoice_id}/credit-notes/{hotel_id}/pdf"),
+        &patient,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "visible credit note PDF in the portal"
+    );
+    assert_eq!(content_type, "application/pdf");
+    let (status, _, _) = request_status_and_type(
+        &ctx.app,
+        &format!("/api/v1/me/invoices/{invoice_id}/credit-notes/{service_id}/pdf"),
+        &patient,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "internal credit note stays hidden"
+    );
+
+    let (status, portal) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/credit-notes"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{portal:?}");
+    assert_eq!(portal["items"].as_array().unwrap().len(), 1);
+    assert_eq!(portal["items"][0]["pdf_available"], true);
+    assert_eq!(portal["items"][0]["line_items"][0]["description"], "Hotel");
+
+    // A legacy pro-rata credit note (stored before line credits) still reads.
+    sqlx::query(
+        r#"INSERT INTO invoice_credit_note_transactions (
+                invoice_id, transaction_type, request_id, document_number, reason,
+                amount_net, amount_vat, amount_gross, currency, issued_on,
+                portal_visible, created_by
+           ) VALUES ($1, 'credit_note', $2, $3, 'Legacy pro-rata', 0.84, 0.16, 1, 'EUR',
+                     CURRENT_DATE, true, $4)"#,
+    )
+    .bind(invoice_id)
+    .bind(Uuid::new_v4())
+    .bind(format!("CN-LEGACY-{tag}"))
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, history) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history:?}");
+    let legacy = history["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["credit_mode"] == "legacy_pro_rata")
+        .unwrap();
+    assert!(legacy["line_items"].is_null());
+    let legacy_id = legacy["id"].as_str().unwrap();
+    let (status, content_type, _) = request_status_and_type(
+        &ctx.app,
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{legacy_id}/pdf"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "application/pdf");
+
+    // The reversal mirrors the credited lines, so VAT per rate reverses too.
+    let (status, reversed) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{service_id}/reversal"),
+        &ceo,
+        Some(json!({ "reason": "Goodwill withdrawn" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed:?}");
+    let reversal_id = reversed["reversal_transaction_id"].as_str().unwrap();
+    let reversal = sqlx::query(
+        "SELECT credit_mode, line_items, amount_vat FROM invoice_credit_note_transactions WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(reversal_id).unwrap())
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(reversal.get::<String, _>("credit_mode"), "vat_rate");
+    assert_eq!(
+        reversal.get::<Decimal, _>("amount_vat"),
+        Decimal::new(19, 0)
+    );
+    assert!(reversal.get::<Option<Value>, _>("line_items").is_some());
+    let (status, content_type, _) = request_status_and_type(
+        &ctx.app,
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes/{reversal_id}/pdf"),
+        &ceo,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(content_type, "application/pdf");
+
+    // The database refuses credited lines that do not add up.
+    let inconsistent = sqlx::query(
+        r#"INSERT INTO invoice_credit_note_transactions (
+                invoice_id, transaction_type, request_id, document_number, reason,
+                amount_net, amount_vat, amount_gross, currency, issued_on,
+                portal_visible, created_by, credit_mode, line_items
+           ) VALUES ($1, 'credit_note', $2, $3, 'Tampered', 10, 0, 10, 'EUR',
+                     CURRENT_DATE, true, $4, 'lines',
+                     '[{"invoice_line_index":0,"line_net":"5","line_vat":"0","line_gross":"5"}]')"#,
+    )
+    .bind(invoice_id)
+    .bind(Uuid::new_v4())
+    .bind(format!("CN-BAD-{tag}"))
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap_err();
+    assert!(
+        inconsistent
+            .to_string()
+            .contains("sum of its credited lines")
+    );
+}

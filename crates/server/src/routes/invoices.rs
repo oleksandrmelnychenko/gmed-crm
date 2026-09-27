@@ -31,6 +31,8 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+mod credit_note_pdf;
+pub(crate) mod credit_notes;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -62,6 +64,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/me/invoices/{invoice_id}/credit-notes",
             get(list_my_invoice_credit_notes),
+        )
+        .route(
+            "/me/invoices/{invoice_id}/credit-notes/{credit_note_id}/pdf",
+            get(credit_note_pdf::download_my_credit_note_pdf),
         )
         .route(
             "/me/invoices/{invoice_id}/refunds",
@@ -103,6 +109,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/credit-notes/{credit_note_id}/reversal",
             post(reverse_invoice_credit_note),
+        )
+        .route(
+            "/invoices/{invoice_id}/credit-notes/{credit_note_id}/pdf",
+            get(credit_note_pdf::download_credit_note_pdf),
         )
         .route(
             "/invoices/{invoice_id}/refunds",
@@ -252,13 +262,79 @@ struct ReverseInvoicePaymentRequest {
     note: String,
 }
 
+/// One invoice line to credit: in full, or with a gross amount.
+#[derive(Deserialize)]
+struct CreditNoteLineSelection {
+    line_index: usize,
+    amount_gross: Option<MoneyInput>,
+}
+
+/// A credit note credits selected invoice lines (`lines`), or `amount_gross`
+/// within one `vat_rate`. A bare `amount_gross` (older clients) is accepted
+/// only when the invoice has a single VAT rate.
 #[derive(Deserialize)]
 struct CreateInvoiceCreditNoteRequest {
     request_id: Uuid,
-    amount_gross: MoneyInput,
+    amount_gross: Option<MoneyInput>,
+    vat_rate: Option<MoneyInput>,
+    lines: Option<Vec<CreditNoteLineSelection>>,
     reason: String,
     issued_on: String,
     portal_visible: Option<bool>,
+}
+
+impl CreateInvoiceCreditNoteRequest {
+    fn selection(&self) -> Result<credit_notes::CreditSelection, &'static str> {
+        let amount = match &self.amount_gross {
+            Some(value) => Some(
+                value
+                    .parse_decimal()
+                    .ok_or("Invalid credit-note amount")?
+                    .round_cents(),
+            ),
+            None => None,
+        };
+        if let Some(lines) = &self.lines {
+            if self.vat_rate.is_some() || amount.is_some() {
+                return Err("Credit either invoice lines or an amount, not both");
+            }
+            let mut selected = Vec::with_capacity(lines.len());
+            for line in lines {
+                let amount = match &line.amount_gross {
+                    Some(value) => {
+                        let amount = value
+                            .parse_decimal()
+                            .ok_or("Invalid credit-note amount")?
+                            .round_cents();
+                        if amount <= Decimal::ZERO {
+                            return Err("Credit-note amount must be greater than zero");
+                        }
+                        Some(amount)
+                    }
+                    None => None,
+                };
+                selected.push((line.line_index, amount));
+            }
+            return Ok(credit_notes::CreditSelection::Lines(selected));
+        }
+        let amount = amount.ok_or("Invalid credit-note amount")?;
+        if amount <= Decimal::ZERO {
+            return Err("Credit-note amount must be greater than zero");
+        }
+        match &self.vat_rate {
+            Some(rate) => {
+                let rate = rate.parse_decimal().ok_or("Invalid VAT rate")?;
+                if rate < Decimal::ZERO || rate > Decimal::ONE_HUNDRED {
+                    return Err("Invalid VAT rate");
+                }
+                Ok(credit_notes::CreditSelection::VatRate {
+                    rate,
+                    amount_gross: amount,
+                })
+            }
+            None => Ok(credit_notes::CreditSelection::Amount(amount)),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -645,12 +721,14 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 
 /// Staff working context in the invoice detail that the patient portal must
 /// not receive: internal visibility notes, advances available for crediting,
-/// the supporting documents list and the contract link.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 4] = [
+/// the supporting documents list, the contract link and the credit-note form
+/// data.
+const STAFF_ONLY_INVOICE_KEYS: [&str; 5] = [
     "visibility_note",
     "available_prepayments",
     "supporting_documents",
     "contract_id",
+    "creditable_lines",
 ];
 
 /// Internal pricing and sourcing fields of an invoice line (VAT source
@@ -962,6 +1040,71 @@ async fn provider_payment_journal_target_gross(
     }))
 }
 
+/// Where the cash retained on an invoice (payments minus refunds) belongs, as
+/// `(category, gross, VAT)` booking targets.
+///
+/// The split follows the invoice after its active credit notes: a credited
+/// 0 % pass-through line no longer attracts cash, a credited 19 % line no
+/// longer attracts VAT. Only cash up to what the patient still has to pay in
+/// cash (adjusted total minus credited advances) is revenue; anything beyond
+/// it — an overpayment, or a credit note not yet refunded — is patient credit
+/// without VAT until it is refunded or moved to another invoice.
+fn invoice_cash_targets(
+    context: &InvoicePaymentContext,
+    credits: &[credit_notes::ExistingCredit],
+    retained_gross: Decimal,
+) -> [(&'static str, Decimal, Decimal); 3] {
+    let (_, passthrough_vat, passthrough_gross) = invoice_passthrough_totals(&context.line_items);
+    let (mut credited_gross, mut credited_vat) = (Decimal::ZERO, Decimal::ZERO);
+    let (mut credited_passthrough_gross, mut credited_passthrough_vat) =
+        (Decimal::ZERO, Decimal::ZERO);
+    for credit in credits {
+        credited_gross += credit.gross;
+        credited_vat += credit.vat;
+        let (gross, vat) = credit_notes::credited_passthrough(
+            credit,
+            passthrough_gross,
+            passthrough_vat,
+            context.total_gross,
+        );
+        credited_passthrough_gross += gross;
+        credited_passthrough_vat += vat;
+    }
+    let adjusted_gross = (context.total_gross - credited_gross).max(Decimal::ZERO);
+    let adjusted_vat = (context.total_vat - credited_vat).max(Decimal::ZERO);
+    let adjusted_passthrough_gross = (passthrough_gross - credited_passthrough_gross)
+        .max(Decimal::ZERO)
+        .min(adjusted_gross);
+    let adjusted_passthrough_vat = (passthrough_vat - credited_passthrough_vat)
+        .max(Decimal::ZERO)
+        .min(adjusted_vat);
+    let cash_capacity = (adjusted_gross - context.prepayment_applied_amount).max(Decimal::ZERO);
+    let revenue_gross = retained_gross.min(cash_capacity);
+    let passthrough_target =
+        proportional_share(revenue_gross, adjusted_passthrough_gross, adjusted_gross);
+    [
+        (
+            "service_revenue",
+            revenue_gross - passthrough_target,
+            proportional_share(
+                revenue_gross,
+                adjusted_vat - adjusted_passthrough_vat,
+                adjusted_gross,
+            ),
+        ),
+        (
+            "cost_passthrough_revenue",
+            passthrough_target,
+            proportional_share(revenue_gross, adjusted_passthrough_vat, adjusted_gross),
+        ),
+        (
+            "patient_credit",
+            retained_gross - revenue_gross,
+            Decimal::ZERO,
+        ),
+    ]
+}
+
 struct InvoiceCashLine {
     category: String,
     amount_net: Decimal,
@@ -1058,25 +1201,11 @@ async fn invoice_cash_lines(
         );
     }
     let retained_gross = previous_gross + signed_gross;
-    let (_, passthrough_vat, passthrough_gross) = invoice_passthrough_totals(&context.line_items);
-    let target_passthrough_gross =
-        proportional_share(retained_gross, passthrough_gross, context.total_gross);
-    let targets = [
-        (
-            "service_revenue",
-            retained_gross - target_passthrough_gross,
-            proportional_share(
-                retained_gross,
-                context.total_vat - passthrough_vat,
-                context.total_gross,
-            ),
-        ),
-        (
-            "cost_passthrough_revenue",
-            target_passthrough_gross,
-            proportional_share(retained_gross, passthrough_vat, context.total_gross),
-        ),
-    ];
+    let targets = invoice_cash_targets(
+        context,
+        &credit_notes::load_active_credits(transaction, context.invoice_id).await?,
+        retained_gross,
+    );
     Ok(targets
         .into_iter()
         .map(|(category, target_gross, target_vat)| {
@@ -3636,6 +3765,23 @@ async fn load_invoice_detail(
     let raw_line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
+    // What each line can still be credited, for the credit-note form.
+    let creditable_lines = {
+        let mut connection = state.db.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "acquire connection for creditable lines");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?;
+        let credits = credit_notes::load_active_credits(&mut connection, invoice_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice credit notes");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?;
+        credit_notes::creditable_lines(&raw_line_items, &credits)
+            .iter()
+            .map(credit_notes::CreditableLine::to_json)
+            .collect::<Vec<_>>()
+    };
     let direct_document_ids = extract_external_document_ids(&raw_line_items);
     let source_line_ids = extract_source_line_ids(&raw_line_items);
     let line_items = enrich_invoice_line_items(state, &raw_line_items).await?;
@@ -3813,6 +3959,7 @@ async fn load_invoice_detail(
         "prepayment_allocations": prepayment_allocations,
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": line_items,
+        "creditable_lines": creditable_lines,
         "supporting_documents": supporting_documents,
         "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
         "hide_amounts_from_patient": row.try_get::<bool, _>("hide_amounts_from_patient").unwrap_or(false),
@@ -6807,11 +6954,37 @@ async fn list_my_invoice_payments(
     }
 }
 
-fn invoice_credit_note_row_payload(
-    row: &sqlx::postgres::PgRow,
+/// What a reader of the credit-note history may see.
+#[derive(Clone, Copy)]
+struct CreditNoteHistoryView {
     staff_view: bool,
     amounts_visible: bool,
+    /// Credited lines name invoice lines; hidden when invoice lines are.
+    lines_visible: bool,
+    pdf_visible: bool,
+}
+
+impl CreditNoteHistoryView {
+    fn staff() -> Self {
+        Self {
+            staff_view: true,
+            amounts_visible: true,
+            lines_visible: true,
+            pdf_visible: true,
+        }
+    }
+}
+
+fn invoice_credit_note_row_payload(
+    row: &sqlx::postgres::PgRow,
+    view: CreditNoteHistoryView,
 ) -> Value {
+    let CreditNoteHistoryView {
+        staff_view,
+        amounts_visible,
+        lines_visible,
+        pdf_visible,
+    } = view;
     let transaction_type = row
         .try_get::<String, _>("transaction_type")
         .unwrap_or_default();
@@ -6823,7 +6996,28 @@ fn invoice_credit_note_row_payload(
     } else {
         amount_gross
     };
+    let credited_lines = credit_notes::parse_credit_note_lines(
+        row.try_get::<Option<Value>, _>("line_items")
+            .unwrap_or_default()
+            .as_ref(),
+    );
+    let (line_items, vat_breakdown) = match (&credited_lines, amounts_visible && lines_visible) {
+        (Some(lines), true) => (
+            Value::Array(
+                lines
+                    .iter()
+                    .map(credit_notes::CreditNoteLine::to_json)
+                    .collect(),
+            ),
+            credit_notes::vat_breakdown_json(lines),
+        ),
+        _ => (Value::Null, Value::Null),
+    };
     let mut payload = serde_json::json!({
+        "credit_mode": row.try_get::<String, _>("credit_mode").unwrap_or_else(|_| credit_notes::CREDIT_MODE_LEGACY.to_string()),
+        "line_items": line_items,
+        "vat_breakdown": vat_breakdown,
+        "pdf_available": pdf_visible && amounts_visible,
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_default(),
         "transaction_type": transaction_type,
@@ -6868,8 +7062,7 @@ fn invoice_credit_note_row_payload(
 async fn load_invoice_credit_note_history(
     state: &AppState,
     invoice_id: Uuid,
-    staff_view: bool,
-    amounts_visible: bool,
+    view: CreditNoteHistoryView,
 ) -> Result<Vec<Value>, sqlx::Error> {
     sqlx::query(
         r#"SELECT credit.id, credit.invoice_id, credit.transaction_type,
@@ -6877,6 +7070,7 @@ async fn load_invoice_credit_note_history(
                   credit.reason, credit.amount_net, credit.amount_vat,
                   credit.amount_gross, credit.currency, credit.issued_on,
                   credit.portal_visible, credit.created_by, credit.created_at,
+                  credit.credit_mode, credit.line_items,
                   creator.name AS created_by_name, creator.role AS created_by_role,
                   reversal.id AS reversed_by_transaction_id,
                   (reversal.id IS NOT NULL) AS is_reversed
@@ -6890,12 +7084,12 @@ async fn load_invoice_credit_note_history(
            ORDER BY credit.issued_on DESC, credit.created_at DESC, credit.id DESC"#,
     )
     .bind(invoice_id)
-    .bind(staff_view)
+    .bind(view.staff_view)
     .fetch_all(&state.db)
     .await
     .map(|rows| {
         rows.into_iter()
-            .map(|row| invoice_credit_note_row_payload(&row, staff_view, amounts_visible))
+            .map(|row| invoice_credit_note_row_payload(&row, view))
             .collect()
     })
 }
@@ -6928,7 +7122,8 @@ async fn list_invoice_credit_notes(
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
-    match load_invoice_credit_note_history(&state, invoice_id, true, true).await {
+    match load_invoice_credit_note_history(&state, invoice_id, CreditNoteHistoryView::staff()).await
+    {
         Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice credit notes");
@@ -6953,7 +7148,8 @@ async fn list_my_invoice_credit_notes(
         Err(resp) => return resp,
     };
     let invoice = match sqlx::query(
-        r#"SELECT patient_id, status, portal_visible, hide_amounts_from_patient
+        r#"SELECT patient_id, status, portal_visible, hide_amounts_from_patient,
+                  line_items_visible_to_patient, pdf_visible_to_patient
            FROM invoices WHERE id = $1"#,
     )
     .bind(invoice_id)
@@ -6984,7 +7180,17 @@ async fn list_my_invoice_credit_notes(
     let amounts_visible = !invoice
         .try_get::<bool, _>("hide_amounts_from_patient")
         .unwrap_or(true);
-    match load_invoice_credit_note_history(&state, invoice_id, false, amounts_visible).await {
+    let view = CreditNoteHistoryView {
+        staff_view: false,
+        amounts_visible,
+        lines_visible: invoice
+            .try_get::<bool, _>("line_items_visible_to_patient")
+            .unwrap_or(false),
+        pdf_visible: invoice
+            .try_get::<bool, _>("pdf_visible_to_patient")
+            .unwrap_or(false),
+    };
+    match load_invoice_credit_note_history(&state, invoice_id, view).await {
         Ok(items) => Json(serde_json::json!({ "items": items })).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list portal invoice credit notes");
@@ -8153,20 +8359,12 @@ async fn create_invoice_credit_note(
         Ok(Some(value)) if value <= Utc::now().date_naive() => value,
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid credit-note date"),
     };
-    let Some(amount_gross) = body.amount_gross.parse_decimal() else {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Invalid credit-note amount",
-        );
+    let selection = match body.selection() {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
-    let amount_gross = amount_gross.round_cents();
+    let request_selection = selection.to_json();
     let request_id = body.request_id;
-    if amount_gross <= Decimal::ZERO {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Credit-note amount must be greater than zero",
-        );
-    }
     let patient_id =
         match sqlx::query_scalar::<_, Uuid>("SELECT patient_id FROM invoices WHERE id = $1")
             .bind(invoice_id)
@@ -8268,7 +8466,7 @@ async fn create_invoice_credit_note(
         );
     }
     let existing_request = match sqlx::query(
-        r#"SELECT id, amount_gross, reason, issued_on, portal_visible
+        r#"SELECT id, amount_gross, reason, issued_on, portal_visible, request_selection
            FROM invoice_credit_note_transactions
            WHERE invoice_id = $1
              AND request_id = $2
@@ -8289,9 +8487,20 @@ async fn create_invoice_credit_note(
         }
     };
     if let Some(existing) = existing_request {
-        let exact_replay = existing
-            .try_get::<Decimal, _>("amount_gross")
-            .is_ok_and(|value| value == amount_gross)
+        // Credit notes recorded before line-level credits kept only the amount.
+        let same_selection = match existing
+            .try_get::<Option<Value>, _>("request_selection")
+            .unwrap_or_default()
+        {
+            Some(stored) => stored == request_selection,
+            None => match &selection {
+                credit_notes::CreditSelection::Amount(amount) => existing
+                    .try_get::<Decimal, _>("amount_gross")
+                    .is_ok_and(|value| value == *amount),
+                _ => false,
+            },
+        };
+        let exact_replay = same_selection
             && existing
                 .try_get::<String, _>("reason")
                 .is_ok_and(|value| value == reason)
@@ -8326,11 +8535,48 @@ async fn create_invoice_credit_note(
             Err(resp) => resp,
         };
     }
+    // VAT follows the credited lines: a 0 % pass-through line credits no VAT.
+    let existing_credits =
+        match credit_notes::load_active_credits(&mut transaction, invoice_id).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load active credit notes");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create credit note",
+                );
+            }
+        };
+    let creditable = credit_notes::creditable_lines(&context.line_items, &existing_credits);
+    let planned = match (&selection, creditable.is_empty()) {
+        (credit_notes::CreditSelection::Amount(amount), true) => {
+            Ok(credit_notes::CreditNotePlan::without_lines(
+                *amount,
+                context.total_vat,
+                context.total_gross,
+            ))
+        }
+        _ => credit_notes::plan_credit_note(&creditable, &selection),
+    };
+    let plan = match planned {
+        Ok(value) => value,
+        Err(error) => {
+            return err(
+                if error.is_conflict() {
+                    StatusCode::CONFLICT
+                } else {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                },
+                error.message(),
+            );
+        }
+    };
+    let amount_net = plan.net;
+    let amount_vat = plan.vat;
+    let amount_gross = plan.gross;
     if context.credited_amount + amount_gross > context.total_gross {
         return err(StatusCode::CONFLICT, "Credit note exceeds invoice total");
     }
-    let amount_vat = proportional_share(amount_gross, context.total_vat, context.total_gross);
-    let amount_net = amount_gross - amount_vat;
     let sequence = match sqlx::query_scalar::<_, i64>(
         "SELECT nextval('invoice_credit_note_number_seq')",
     )
@@ -8352,8 +8598,9 @@ async fn create_invoice_credit_note(
         r#"INSERT INTO invoice_credit_note_transactions (
                 invoice_id, transaction_type, request_id, document_number, reason,
                 amount_net, amount_vat, amount_gross, currency,
-                issued_on, portal_visible, created_by
-           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                issued_on, portal_visible, created_by,
+                credit_mode, line_items, request_selection
+           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -8367,6 +8614,9 @@ async fn create_invoice_credit_note(
     .bind(issued_on)
     .bind(portal_visible)
     .bind(auth.user_id)
+    .bind(plan.mode)
+    .bind(plan.line_items_json())
+    .bind(&request_selection)
     .fetch_one(&mut *transaction)
     .await
     {
@@ -8413,6 +8663,14 @@ async fn create_invoice_credit_note(
         serde_json::json!({
             "credit_note_transaction_id": credit_note_id,
             "document_number": document_number,
+            "credit_mode": plan.mode,
+            "credited_line_indexes": plan
+                .lines
+                .iter()
+                .map(|line| line.invoice_line_index)
+                .collect::<Vec<_>>(),
+            "amount_net": decimal_to_string(amount_net),
+            "amount_vat": decimal_to_string(amount_vat),
             "amount_gross": decimal_to_string(amount_gross),
             "currency": context.currency,
             "reason": reason,
@@ -8437,6 +8695,11 @@ async fn create_invoice_credit_note(
             StatusCode::CREATED,
             Json(serde_json::json!({
                 "credit_note_transaction_id": credit_note_id,
+                "document_number": document_number,
+                "credit_mode": plan.mode,
+                "amount_net": decimal_to_string(amount_net),
+                "amount_vat": decimal_to_string(amount_vat),
+                "amount_gross": decimal_to_string(amount_gross),
                 "invoice": invoice,
             })),
         )
@@ -8504,6 +8767,7 @@ async fn reverse_invoice_credit_note(
         r#"SELECT credit.amount_net, credit.amount_vat, credit.amount_gross,
                   credit.issued_on AS credit_issued_on,
                   credit.currency, credit.transaction_type, credit.portal_visible,
+                  credit.credit_mode, credit.line_items,
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
@@ -8586,8 +8850,9 @@ async fn reverse_invoice_credit_note(
         r#"INSERT INTO invoice_credit_note_transactions (
                 invoice_id, transaction_type, reverses_transaction_id,
                 document_number, reason, amount_net, amount_vat, amount_gross,
-                currency, issued_on, portal_visible, created_by
-           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                currency, issued_on, portal_visible, created_by,
+                credit_mode, line_items
+           ) VALUES ($1, 'reversal', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -8601,6 +8866,15 @@ async fn reverse_invoice_credit_note(
     .bind(issued_on)
     .bind(row.try_get::<bool, _>("portal_visible").unwrap_or(false))
     .bind(auth.user_id)
+    // The reversal mirrors the credited lines, so VAT per rate reverses too.
+    .bind(
+        row.try_get::<String, _>("credit_mode")
+            .unwrap_or_else(|_| credit_notes::CREDIT_MODE_LEGACY.to_string()),
+    )
+    .bind(
+        row.try_get::<Option<Value>, _>("line_items")
+            .unwrap_or_default(),
+    )
     .fetch_one(&mut *transaction)
     .await
     {

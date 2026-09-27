@@ -73,6 +73,8 @@ import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { IncomingInvoices } from "./ui/incoming-invoices";
 import { TerminationSettlementQueue } from "./termination-settlement/queue";
 import { PaymentEditForm } from "./ui/payment-edit-form";
+import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
+import { creditNoteSelectionPayload, previewCreditNote } from "./model/credit-note";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
@@ -110,6 +112,7 @@ import {
   createInvoice,
   fetchAccountingLedger,
   fetchAccountingLedgerExportBlob,
+  fetchCreditNotePdfBlob,
   fetchInvoiceLookups,
   fetchInvoicePdfBlob,
   fetchInvoiceZugferdXmlBlob,
@@ -244,6 +247,7 @@ const ACCOUNTING_DIRECTION_LABEL_KEYS = {
 const ACCOUNTING_CATEGORY_LABEL_KEYS = {
   service_revenue: "revenue_accounting_category_service_revenue",
   cost_passthrough_revenue: "revenue_accounting_category_cost_passthrough_revenue",
+  patient_credit: "finance_accounting_category_patient_credit",
   provider_expense: "revenue_accounting_category_provider_expense",
 } satisfies Partial<Record<string, TranslationKey>>;
 
@@ -304,6 +308,18 @@ async function downloadInvoicePdf(
   const link = document.createElement("a");
   link.href = url;
   link.download = filename || fallbackFilename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadCreditNotePdf(invoiceId: string, creditNoteId: string, documentNumber: string) {
+  const blob = await fetchCreditNotePdfBlob(invoiceId, creditNoteId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `RECHNUNGSKORREKTUR-${documentNumber || creditNoteId}.pdf`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -896,6 +912,10 @@ function useStaffInvoicesPageContent() {
     newCreditNoteDraft(),
   );
   const creditNoteForm = creditNoteDraft.draft;
+  const creditNotePreview = useMemo(
+    () => previewCreditNote(detail?.creditable_lines, creditNoteForm.selection),
+    [detail?.creditable_lines, creditNoteForm.selection],
+  );
   const [creditNoteBusy, setCreditNoteBusy] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
   const [reversingCreditNoteId, setReversingCreditNoteId] = useState("");
@@ -1773,13 +1793,13 @@ function useStaffInvoicesPageContent() {
   }
 
   async function handleCreateCreditNote() {
-    if (!detail || Number(creditNoteForm.amountGross) <= 0 || !creditNoteForm.reason.trim()) return;
+    if (!detail || creditNotePreview.error || !creditNoteForm.reason.trim()) return;
     setCreditNoteBusy(true);
     setCreditNoteError(null);
     try {
       await createInvoiceCreditNote(detail.id, {
         request_id: creditNoteForm.requestId,
-        amount_gross: Number(creditNoteForm.amountGross),
+        ...creditNoteSelectionPayload(detail.creditable_lines, creditNoteForm.selection),
         reason: creditNoteForm.reason.trim(),
         issued_on: creditNoteForm.issuedOn,
         portal_visible: creditNoteForm.portalVisible,
@@ -2958,67 +2978,27 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title={lang === "de" ? "Gutschriften" : "Кредит-ноты"}>
+                <SectionCard title={t.finance_credit_note_section_title}>
                   <div className="space-y-4">
                     <p className="text-sm text-muted-foreground">
-                      {lang === "de"
-                        ? "Rechnungskorrekturen werden dauerhaft protokolliert. Eine falsche Gutschrift wird storniert, nicht gelöscht."
-                        : "Корректировки счета сохраняются в журнале. Ошибочная кредит-нота отменяется, а не удаляется."}
+                      {t.finance_credit_note_section_description}
                     </p>
                     {access.canManage && !["draft", "cancelled"].includes(detail.status) && Number(detail.adjusted_total_gross ?? detail.total_gross) > 0 ? (
-                      <div className="grid gap-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-3">
-                        <Field label={lang === "de" ? "Bruttobetrag" : "Сумма брутто"}>
-                          <Input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
-                            max={String(detail.adjusted_total_gross ?? detail.total_gross)}
-                            value={creditNoteForm.amountGross}
-                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, amountGross: event.target.value }))}
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                        <Field label={lang === "de" ? "Datum" : "Дата"}>
-                          <Input
-                            type="date"
-                            min={detail.issued_at.slice(0, 10)}
-                            max={new Date().toISOString().slice(0, 10)}
-                            value={creditNoteForm.issuedOn}
-                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, issuedOn: event.target.value }))}
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                        <Field label={lang === "de" ? "Grund" : "Причина"} className="sm:col-span-2 lg:col-span-1">
-                          <Input
-                            value={creditNoteForm.reason}
-                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, reason: event.target.value }))}
-                            className={shellInputClassName}
-                          />
-                        </Field>
-                        <label className="flex items-center gap-2 text-sm text-foreground sm:col-span-2">
-                          <input
-                            type="checkbox"
-                            checked={creditNoteForm.portalVisible}
-                            onChange={(event) => setCreditNoteForm((current) => ({ ...current, portalVisible: event.target.checked }))}
-                          />
-                          {lang === "de" ? "Im Patientenportal anzeigen" : "Показывать в портале пациента"}
-                        </label>
-                        <div className="flex items-end lg:justify-end">
-                          <Button
-                            type="button"
-                            disabled={creditNoteBusy || Number(creditNoteForm.amountGross) <= 0 || Number(creditNoteForm.amountGross) > Number(detail.adjusted_total_gross ?? detail.total_gross) || !creditNoteForm.reason.trim() || !creditNoteForm.issuedOn}
-                            onClick={() => void handleCreateCreditNote()}
-                          >
-                            {creditNoteBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
-                            {lang === "de" ? "Gutschrift erstellen" : "Создать кредит-ноту"}
-                          </Button>
-                        </div>
-                      </div>
+                      <CreditNoteForm
+                        lines={detail.creditable_lines}
+                        draft={creditNoteForm}
+                        onChange={(update) => setCreditNoteForm(update)}
+                        preview={creditNotePreview}
+                        currency={detail.currency ?? "EUR"}
+                        minDate={detail.issued_at.slice(0, 10)}
+                        busy={creditNoteBusy}
+                        onSubmit={() => void handleCreateCreditNote()}
+                      />
                     ) : null}
                     {creditNoteError ? <ShellBanner tone="error">{creditNoteError}</ShellBanner> : null}
                     {creditNoteTransactions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
-                        {lang === "de" ? "Keine Gutschriften." : "Кредит-нот пока нет."}
+                        {t.finance_credit_note_empty}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -3031,28 +3011,50 @@ function useStaffInvoicesPageContent() {
                                 <div>
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span className="font-semibold text-foreground">{credit.document_number}</span>
+                                    {isReversal ? <StatusBadge tone="info">{t.finance_credit_note_reversal}</StatusBadge> : null}
                                     {credit.is_reversed ? <StatusBadge tone="neutral">{text.reversed}</StatusBadge> : null}
                                   </div>
                                   <div className="mt-1 text-xs text-muted-foreground">{formatDate(credit.issued_on, locale, t.common_not_set)} · {credit.reason}</div>
                                   <div className="mt-1 text-xs text-muted-foreground">
-                                    {credit.portal_visible ? (lang === "de" ? "Im Portal sichtbar" : "Видно в портале") : (lang === "de" ? "Nur intern" : "Только для сотрудников")}
+                                    {credit.portal_visible ? t.finance_credit_note_visible_in_portal : t.finance_credit_note_staff_only}
                                   </div>
+                                  <CreditNoteLinesSummary credit={credit} currency={detail.currency ?? "EUR"} />
                                 </div>
                                 <div className="text-right">
                                   <div className={cn("font-mono font-semibold tabular-nums", isReversal ? "text-foreground" : "text-emerald-700")}>{isReversal ? "+" : "−"}{formatMoney(credit.amount_gross, detail?.currency)}</div>
+                                  <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                                    {t.finance_credit_note_preview
+                                      .replace("{net}", formatMoney(credit.amount_net, detail?.currency))
+                                      .replace("{vat}", formatMoney(credit.amount_vat, detail?.currency))
+                                      .replace("{gross}", formatMoney(credit.amount_gross, detail?.currency))}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="mt-1 h-7 gap-1 px-2 text-xs"
+                                    onClick={() =>
+                                      void downloadCreditNotePdf(detail.id, credit.id, credit.document_number).catch(() =>
+                                        setCreditNoteError(t.finance_credit_note_pdf_error),
+                                      )
+                                    }
+                                  >
+                                    <Download className="size-3.5" />
+                                    {t.finance_credit_note_pdf}
+                                  </Button>
                                   {canReverse ? (
                                     <Button type="button" variant="ghost" size="sm" className="mt-1 h-7 px-2 text-xs" onClick={() => { setReversingCreditNoteId(credit.id); setCreditNoteReversalReason(""); }}>
-                                      {lang === "de" ? "Stornieren" : "Отменить"}
+                                      {t.finance_credit_note_reverse}
                                     </Button>
                                   ) : null}
                                 </div>
                               </div>
                               {reversingCreditNoteId === credit.id ? (
                                 <div className="mt-3 flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row">
-                                  <Input value={creditNoteReversalReason} onChange={(event) => setCreditNoteReversalReason(event.target.value)} placeholder={lang === "de" ? "Stornogrund" : "Причина отмены"} className={shellInputClassName} />
+                                  <Input value={creditNoteReversalReason} onChange={(event) => setCreditNoteReversalReason(event.target.value)} placeholder={t.finance_credit_note_reversal_reason} className={shellInputClassName} />
                                   <div className="flex gap-2">
                                     <Button type="button" variant="outline" onClick={() => { setReversingCreditNoteId(""); setCreditNoteReversalReason(""); }}>{t.common_cancel}</Button>
-                                    <Button type="button" disabled={creditNoteBusy || !creditNoteReversalReason.trim()} onClick={() => void handleReverseCreditNote(credit.id)}>{lang === "de" ? "Stornieren" : "Отменить"}</Button>
+                                    <Button type="button" disabled={creditNoteBusy || !creditNoteReversalReason.trim()} onClick={() => void handleReverseCreditNote(credit.id)}>{t.finance_credit_note_reverse}</Button>
                                   </div>
                                 </div>
                               ) : null}

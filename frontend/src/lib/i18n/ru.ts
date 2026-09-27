@@ -3,6 +3,7 @@ import { adminSystemRu } from "./catalogs/admin-system";
 import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
 import { extractedUiRu } from "./catalogs/extracted-ui";
+import { financeBalancesRu } from "./catalogs/finance-balances";
 import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
 import { revenueRu } from "./catalogs/revenue";
@@ -1779,6 +1780,7 @@ export const ru = {
   ...adminSystemRu,
   ...casesClinicalRu,
   ...clinicalRu,
+  ...financeBalancesRu,
   ...operationsRu,
   ...patientsPortalRu,
   ...revenueRu,

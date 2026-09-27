@@ -3,6 +3,7 @@ import { adminSystemDe } from "./catalogs/admin-system";
 import { casesClinicalDe } from "./catalogs/cases-clinical";
 import { clinicalDe } from "./catalogs/clinical";
 import { extractedUiDe } from "./catalogs/extracted-ui";
+import { financeBalancesDe } from "./catalogs/finance-balances";
 import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
 import { revenueDe } from "./catalogs/revenue";
@@ -1788,6 +1789,7 @@ export const de = {
   ...adminSystemDe,
   ...casesClinicalDe,
   ...clinicalDe,
+  ...financeBalancesDe,
   ...operationsDe,
   ...patientsPortalDe,
   ...revenueDe,

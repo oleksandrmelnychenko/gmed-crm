@@ -190,6 +190,10 @@ export function fetchInvoicePdfBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
 }
 
+export function fetchCreditNotePdfBlob(invoiceId: string, creditNoteId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/credit-notes/${creditNoteId}/pdf`);
+}
+
 export function fetchInvoiceZugferdXmlBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/zugferd.xml`);
 }

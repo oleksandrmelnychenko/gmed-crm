@@ -74,6 +74,26 @@ export type InvoicePaymentHistoryResponse = {
   items: InvoicePaymentTransaction[];
 };
 
+/** One credited invoice line of a credit note. */
+export type InvoiceCreditNoteLine = {
+  invoice_line_index: number;
+  description: string;
+  quantity: string | null;
+  unit_price: string | null;
+  vat_rate: string;
+  is_cost_passthrough: boolean;
+  line_net: string;
+  line_vat: string;
+  line_gross: string;
+};
+
+export type InvoiceCreditNoteVatRate = {
+  vat_rate: string;
+  net: string;
+  vat: string;
+  gross: string;
+};
+
 export type InvoiceCreditNoteTransaction = {
   id: string;
   invoice_id: string;
@@ -91,8 +111,29 @@ export type InvoiceCreditNoteTransaction = {
   currency: string;
   issued_on: string;
   portal_visible: boolean;
+  /** `legacy_pro_rata` credit notes predate line credits and carry no lines. */
+  credit_mode?: "lines" | "vat_rate" | "legacy_pro_rata";
+  line_items?: InvoiceCreditNoteLine[] | null;
+  vat_breakdown?: InvoiceCreditNoteVatRate[] | null;
+  pdf_available?: boolean;
   created_by_name?: string;
   created_at: string;
+};
+
+/** What an invoice line can still be credited (staff invoice detail). */
+export type InvoiceCreditableLine = {
+  line_index: number;
+  description: string;
+  quantity: string | null;
+  unit_price: string | null;
+  vat_rate: string;
+  is_cost_passthrough: boolean;
+  line_net: string;
+  line_vat: string;
+  line_gross: string;
+  credited_gross: string;
+  remaining_gross: string;
+  remaining_vat?: string;
 };
 
 export type InvoiceCreditNoteHistoryResponse = {
@@ -193,6 +234,7 @@ export type InvoiceItem = {
   supporting_documents?: SupportingDocument[];
   available_prepayments?: InvoicePrepaymentOption[];
   prepayment_allocations?: InvoicePrepaymentAllocation[];
+  creditable_lines?: InvoiceCreditableLine[];
 };
 
 export type InvoiceListResponse = {
