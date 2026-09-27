@@ -534,6 +534,7 @@ async fn can_receive_appointment_event(
             interpreter_id,
             owner_user_id,
         },
+        access::AppointmentAccess::Read,
     )
     .await
     .map_err(|e| {

@@ -1007,3 +1007,176 @@ async fn interpreter_sees_only_its_own_appointments_of_an_assigned_patient() {
         "{body}"
     );
 }
+
+async fn seed_pending_report(pool: &PgPool, appointment_id: Uuid, interpreter_id: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO interpreter_reports (appointment_id, interpreter_id, hours, report_text)
+           VALUES ($1, $2, 1.5, 'Visit went as planned')
+           RETURNING id"#,
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn interpreter_team_lead_reviews_team_reports_without_patient_assignment() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("teamlead-team-reports");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let interpreter_id = seed_staff_user(&pool, &format!("{tag}-i"), "interpreter").await;
+    let teamlead_id = seed_staff_user(&pool, &format!("{tag}-t"), "teamlead_interpreter").await;
+    // Only the interpreter is linked to the patient; the team lead is not.
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+
+    let approved_visit = seed_interpreter_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        interpreter_id,
+        admin_id,
+        &format!("Team visit {tag}"),
+        "Briefing",
+        "2026-05-04",
+    )
+    .await;
+    let rejected_visit = seed_interpreter_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        interpreter_id,
+        admin_id,
+        &format!("Second team visit {tag}"),
+        "Briefing",
+        "2026-05-06",
+    )
+    .await;
+    let unrelated_visit = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &format!("Visit without interpreter {tag}"),
+        "2026-05-07",
+    )
+    .await;
+    let approved_report = seed_pending_report(&pool, approved_visit, interpreter_id).await;
+    let rejected_report = seed_pending_report(&pool, rejected_visit, interpreter_id).await;
+    let bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments?patient_id={patient_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(response_contains_resource(&body, approved_visit), "{body}");
+    assert!(response_contains_resource(&body, rejected_visit), "{body}");
+    // Team context covers interpreter appointments only.
+    assert!(
+        !response_contains_resource(&body, unrelated_visit),
+        "{body}"
+    );
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{unrelated_visit}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    let (status, report) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/appointments/{approved_visit}/report"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["approval_status"], "pending");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{approved_visit}/report/approve"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["report_id"], approved_report.to_string());
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{rejected_visit}/report/reject"),
+        &bearer,
+        Some(json!({ "notes": "Please split the hours" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["report_id"], rejected_report.to_string());
+
+    let statuses: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT id, approval_status FROM interpreter_reports WHERE id = ANY($1) ORDER BY id",
+    )
+    .bind(vec![approved_report, rejected_report])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    for (id, status) in statuses {
+        let expected = if id == approved_report {
+            "approved"
+        } else {
+            "rejected"
+        };
+        assert_eq!(status, expected, "{id}");
+    }
+
+    // The team context is a read and review scope: without a patient
+    // assignment the team lead does not re-plan or edit the visit.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{approved_visit}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": teamlead_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // A plain interpreter still cannot review reports.
+    let other_visit = seed_interpreter_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        interpreter_id,
+        admin_id,
+        &format!("Third team visit {tag}"),
+        "Briefing",
+        "2026-05-08",
+    )
+    .await;
+    seed_pending_report(&pool, other_visit, interpreter_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{other_visit}/report/approve"),
+        &auth_header_for(interpreter_id, "interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+}

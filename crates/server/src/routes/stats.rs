@@ -1678,6 +1678,21 @@ async fn load_patient_manager_kpis(state: &AppState) -> Result<Vec<Value>, sqlx:
         .collect())
 }
 
+/// Share of submitted interpreter hours (approved + still pending) that is
+/// approved. `utilization_rate_pct` compares approved report hours with the
+/// scheduled length of completed visits, so it can read 100 % while a report
+/// is still waiting for review; this rate drops below 100 % as soon as one is
+/// pending. `None` when nothing was submitted in the window.
+fn hours_approval_rate_pct(approved: Decimal, pending: Decimal) -> Option<f64> {
+    let submitted = approved + pending;
+    (submitted > Decimal::ZERO).then(|| {
+        ((approved / submitted) * Decimal::from(100))
+            .round_commercial(1)
+            .to_f64()
+            .unwrap_or(0.0)
+    })
+}
+
 async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT
@@ -1688,6 +1703,13 @@ async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Err
                  FROM interpreter_reports
                  WHERE approval_status = 'approved'
                    AND created_at >= now() - interval '30 days') AS approved_hours_30d,
+                (SELECT COALESCE(SUM(hours), 0)
+                 FROM interpreter_reports
+                 WHERE approval_status = 'pending'
+                   AND created_at >= now() - interval '30 days') AS pending_hours_30d,
+                (SELECT COUNT(*)::bigint
+                 FROM interpreter_reports
+                 WHERE approval_status = 'pending') AS pending_reports,
                 (SELECT COALESCE(SUM(
                     EXTRACT(EPOCH FROM (time_end - time_start)) / 3600.0
                  )::numeric, 0)
@@ -1733,10 +1755,16 @@ async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Err
     } else {
         0.0
     };
+    let pending = row
+        .try_get::<Decimal, _>("pending_hours_30d")
+        .unwrap_or(Decimal::ZERO);
 
     Ok(json!({
         "team_size": row.try_get::<i64, _>("team_size").unwrap_or(0),
         "approved_hours_30d": decimal_to_string(approved),
+        "pending_hours_30d": decimal_to_string(pending),
+        "pending_reports": row.try_get::<i64, _>("pending_reports").unwrap_or(0),
+        "hours_approval_rate_pct": hours_approval_rate_pct(approved, pending),
         "booked_hours_30d": decimal_to_string(booked),
         "upcoming_hours_30d": decimal_to_string(
             row.try_get::<Decimal, _>("upcoming_hours_30d").unwrap_or(Decimal::ZERO)
@@ -1763,6 +1791,19 @@ async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Err
                       AND ir.approval_status = 'approved'
                       AND ir.created_at >= now() - interval '30 days'
                 ) AS approved_hours_30d,
+                (
+                    SELECT COALESCE(SUM(ir.hours), 0)
+                    FROM interpreter_reports ir
+                    WHERE ir.interpreter_id = u.id
+                      AND ir.approval_status = 'pending'
+                      AND ir.created_at >= now() - interval '30 days'
+                ) AS pending_hours_30d,
+                (
+                    SELECT COUNT(*)::bigint
+                    FROM interpreter_reports ir
+                    WHERE ir.interpreter_id = u.id
+                      AND ir.approval_status = 'pending'
+                ) AS pending_reports,
                 (
                     SELECT COALESCE((
                         SUM(EXTRACT(EPOCH FROM (a.time_end - a.time_start)) / 3600.0)
@@ -1824,11 +1865,17 @@ async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Err
             } else {
                 0.0
             };
+            let pending = row
+                .try_get::<Decimal, _>("pending_hours_30d")
+                .unwrap_or(Decimal::ZERO);
 
             json!({
                 "user_id": row.try_get::<uuid::Uuid, _>("id").unwrap_or_else(|_| uuid::Uuid::nil()),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "approved_hours_30d": decimal_to_string(approved),
+                "pending_hours_30d": decimal_to_string(pending),
+                "pending_reports": row.try_get::<i64, _>("pending_reports").unwrap_or(0),
+                "hours_approval_rate_pct": hours_approval_rate_pct(approved, pending),
                 "booked_hours_30d": decimal_to_string(booked),
                 "upcoming_hours_30d": decimal_to_string(
                     row.try_get::<Decimal, _>("upcoming_hours_30d").unwrap_or(Decimal::ZERO)
@@ -5967,4 +6014,26 @@ async fn load_top_providers(state: &AppState, clause: &str) -> Result<Vec<Value>
             })
         })
         .collect())
+}
+
+#[cfg(test)]
+mod hours_approval_rate_tests {
+    use super::*;
+
+    #[test]
+    fn a_pending_report_keeps_the_approval_rate_below_one_hundred_percent() {
+        assert_eq!(
+            hours_approval_rate_pct(Decimal::from(2), Decimal::ZERO),
+            Some(100.0)
+        );
+        assert_eq!(
+            hours_approval_rate_pct(Decimal::from(2), Decimal::from(2)),
+            Some(50.0)
+        );
+        assert_eq!(
+            hours_approval_rate_pct(Decimal::ZERO, Decimal::new(15, 1)),
+            Some(0.0)
+        );
+        assert_eq!(hours_approval_rate_pct(Decimal::ZERO, Decimal::ZERO), None);
+    }
 }

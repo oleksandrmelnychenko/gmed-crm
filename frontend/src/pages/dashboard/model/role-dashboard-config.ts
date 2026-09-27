@@ -105,9 +105,11 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
         primaryModules: modules("teamlead_interpreter"),
         metrics: [
           metric(lang, "team_size", { ru: "Сотрудники", de: "Teammitglieder" }, { ru: "активная команда", de: "aktives Team" }),
+          metric(lang, "pending_reports", { ru: "Отчёты на проверке", de: "Berichte zur Freigabe" }, { ru: "ждут вашего решения", de: "warten auf Ihre Entscheidung" }),
           metric(lang, "completed_appointments_30d", { ru: "Завершённые приёмы", de: "Abgeschlossene Termine" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
           metric(lang, "upcoming_hours_30d", { ru: "Будущие часы", de: "Geplante Stunden" }, { ru: "следующие 30 дней", de: "nächste 30 Tage" }, "hours"),
-          metric(lang, "utilization_rate_pct", { ru: "Подтверждение часов", de: "Stundenfreigabe" }, { ru: "утверждено от отработанного", de: "freigegeben vs. gebucht" }, "percent"),
+          // Approved share of the submitted hours: a pending report keeps it below 100 %.
+          metric(lang, "hours_approval_rate_pct", { ru: "Подтверждение часов", de: "Stundenfreigabe" }, { ru: "утверждено от поданного", de: "freigegeben vs. eingereicht" }, "percent"),
           metric(lang, "approved_hours_30d", { ru: "Подтверждено", de: "Freigegeben" }, { ru: "часов за 30 дней", de: "Stunden in 30 Tagen" }, "hours"),
           metric(lang, "avg_feedback_score", { ru: "Оценка команды", de: "Teambewertung" }, { ru: "средний балл", de: "Durchschnitt" }, "score"),
         ],
@@ -116,7 +118,7 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
           l(lang, { ru: "Проверить отчёты и подтверждение часов", de: "Berichte und Stundenfreigaben prüfen" }),
           l(lang, { ru: "Сбалансировать загрузку команды", de: "Teamauslastung ausgleichen" }),
         ],
-        preview: { team_size: 7, completed_appointments_30d: 42, upcoming_hours_30d: 64.5, utilization_rate_pct: 91, approved_hours_30d: 118, avg_feedback_score: 4.8 },
+        preview: { team_size: 7, pending_reports: 3, completed_appointments_30d: 42, upcoming_hours_30d: 64.5, hours_approval_rate_pct: 91, approved_hours_30d: 118, avg_feedback_score: 4.8 },
       };
     case "interpreter":
       return {
@@ -127,7 +129,8 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
           metric(lang, "completed_appointments_30d", { ru: "Завершённые приёмы", de: "Abgeschlossene Termine" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
           metric(lang, "upcoming_hours_30d", { ru: "Предстоящие часы", de: "Anstehende Stunden" }, { ru: "следующие 30 дней", de: "nächste 30 Tage" }, "hours"),
           metric(lang, "approved_hours_30d", { ru: "Подтверждено", de: "Freigegeben" }, { ru: "часов к оплате", de: "abrechenbare Stunden" }, "hours"),
-          metric(lang, "utilization_rate_pct", { ru: "Подтверждение", de: "Freigabequote" }, { ru: "утверждено от отработанного", de: "freigegeben vs. gebucht" }, "percent"),
+          metric(lang, "hours_approval_rate_pct", { ru: "Подтверждение", de: "Freigabequote" }, { ru: "утверждено от поданного", de: "freigegeben vs. eingereicht" }, "percent"),
+          metric(lang, "pending_reports", { ru: "На проверке", de: "In Prüfung" }, { ru: "отчёты ждут решения", de: "Berichte warten auf Freigabe" }),
           metric(lang, "booked_hours_30d", { ru: "Отработано", de: "Gebucht" }, { ru: "часов за 30 дней", de: "Stunden in 30 Tagen" }, "hours"),
           metric(lang, "avg_feedback_score", { ru: "Моя оценка", de: "Meine Bewertung" }, { ru: "средний балл", de: "Durchschnitt" }, "score"),
         ],
@@ -136,7 +139,7 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
           l(lang, { ru: "Внести и отправить часы на подтверждение", de: "Stunden erfassen und freigeben lassen" }),
           l(lang, { ru: "Закрыть отчёты по завершённым приёмам", de: "Berichte zu abgeschlossenen Terminen schließen" }),
         ],
-        preview: { completed_appointments_30d: 16, upcoming_hours_30d: 24, approved_hours_30d: 38, utilization_rate_pct: 95, booked_hours_30d: 40, avg_feedback_score: 4.9 },
+        preview: { completed_appointments_30d: 16, upcoming_hours_30d: 24, approved_hours_30d: 38, hours_approval_rate_pct: 95, pending_reports: 1, booked_hours_30d: 40, avg_feedback_score: 4.9 },
       };
     case "concierge":
       return {

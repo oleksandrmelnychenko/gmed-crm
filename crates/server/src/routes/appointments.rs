@@ -1679,6 +1679,13 @@ async fn list_appointments(
                       AND scoped_assignment.user_id = $16
                       AND scoped_assignment.revoked_at IS NULL
                 ))
+                OR ($20::boolean AND (
+                    a.interpreter_id IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM interpreter_reports team_report
+                        WHERE team_report.appointment_id = a.id
+                    )
+                ))
              )
            ORDER BY CASE WHEN $17::boolean THEN a.date END ASC,
                     CASE WHEN $17::boolean THEN a.time_start END ASC,
@@ -1705,6 +1712,7 @@ async fn list_appointments(
     .bind(calendar_window)
     .bind(row_cap)
     .bind(scope.via_patient_assignment)
+    .bind(scope.interpreter_team)
     .fetch_all(&state.db)
     .await
     {
@@ -1931,6 +1939,10 @@ async fn list_attention_items(
                       AND scoped_assignment.user_id = $16
                       AND scoped_assignment.revoked_at IS NULL
                 ))
+                OR ($22::boolean AND (
+                    a.interpreter_id IS NOT NULL
+                    OR latest_report.approval_status IS NOT NULL
+                ))
              )
            ORDER BY CASE WHEN $19::boolean THEN a.date END ASC,
                     CASE WHEN $19::boolean THEN a.time_start END ASC,
@@ -1959,6 +1971,7 @@ async fn list_attention_items(
     .bind(calendar_window)
     .bind(row_cap)
     .bind(scope.via_patient_assignment)
+    .bind(scope.interpreter_team)
     .fetch_all(&state.db)
     .await
     {
@@ -3909,7 +3922,7 @@ async fn delete_appointment(
         current.try_get("recurrence_series_id").unwrap_or_default();
     let recurrence_index: i32 = current.try_get("recurrence_index").unwrap_or_default();
 
-    match can_access_appointment(
+    match can_change_appointment(
         &state,
         &auth,
         apt_id,
@@ -4303,7 +4316,7 @@ async fn update_appointment(
         );
     }
 
-    match can_access_appointment(
+    match can_change_appointment(
         &state,
         &auth,
         apt_id,
@@ -5328,7 +5341,7 @@ async fn update_status(
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -5750,7 +5763,7 @@ async fn assign_interpreter(
     {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6046,7 +6059,7 @@ async fn add_checklist_item(
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
         return resp;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6154,7 +6167,7 @@ async fn complete_checklist(
     if let Err(resp) = ensure_checklist_access(&state, &auth, apt_id).await {
         return resp;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6315,7 +6328,7 @@ async fn add_reminder(
     if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -6395,7 +6408,7 @@ async fn complete_reminder(
     ]) {
         return e;
     }
-    match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
+    match can_change_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
@@ -8045,13 +8058,18 @@ async fn ensure_appointment_communication_access(
         return Err(err(StatusCode::NOT_FOUND, "Appointment not found"));
     };
 
-    match can_access_appointment(
+    match appointment_in_scope(
         state,
         auth,
         appointment_id,
         Some(context.patient_id),
         context.interpreter_id,
         context.owner_user_id,
+        if manage {
+            access::AppointmentAccess::Change
+        } else {
+            access::AppointmentAccess::Read
+        },
     )
     .await
     {
@@ -9831,6 +9849,8 @@ async fn ensure_patient_access(
     }
 }
 
+/// Read access to one appointment (detail, report, reminders, communication),
+/// including the interpreter team lead's team context.
 async fn can_access_appointment(
     state: &AppState,
     auth: &AuthUser,
@@ -9838,6 +9858,50 @@ async fn can_access_appointment(
     patient_id: Option<Uuid>,
     interpreter_id: Option<Uuid>,
     owner_user_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    appointment_in_scope(
+        state,
+        auth,
+        appointment_id,
+        patient_id,
+        interpreter_id,
+        owner_user_id,
+        access::AppointmentAccess::Read,
+    )
+    .await
+}
+
+/// Change access to one appointment. The team lead's team context is a read
+/// and report-review scope; changing an appointment keeps the previous rule
+/// (own appointment, owner, or patient assignment).
+async fn can_change_appointment(
+    state: &AppState,
+    auth: &AuthUser,
+    appointment_id: Uuid,
+    patient_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    appointment_in_scope(
+        state,
+        auth,
+        appointment_id,
+        patient_id,
+        interpreter_id,
+        owner_user_id,
+        access::AppointmentAccess::Change,
+    )
+    .await
+}
+
+async fn appointment_in_scope(
+    state: &AppState,
+    auth: &AuthUser,
+    appointment_id: Uuid,
+    patient_id: Option<Uuid>,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    mode: access::AppointmentAccess,
 ) -> Result<bool, axum::response::Response> {
     if auth.role == Role::Ceo {
         return Ok(true);
@@ -9884,6 +9948,7 @@ async fn can_access_appointment(
             interpreter_id,
             owner_user_id,
         },
+        mode,
     )
     .await
     .map_err(|e| {

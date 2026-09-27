@@ -74,6 +74,10 @@ pub struct AppointmentScope {
     pub as_owner: bool,
     /// Every appointment of a patient the caller is assigned to.
     pub via_patient_assignment: bool,
+    /// Every appointment that involves an interpreter (booked, or with an
+    /// interpreter report): the interpreter team lead plans the team and
+    /// approves its reports without being assigned to each patient.
+    pub interpreter_team: bool,
 }
 
 impl AppointmentScope {
@@ -83,6 +87,7 @@ impl AppointmentScope {
             as_interpreter: false,
             as_owner: false,
             via_patient_assignment: false,
+            interpreter_team: false,
         };
         match role {
             Role::Ceo => Self { all: true, ..none },
@@ -95,6 +100,7 @@ impl AppointmentScope {
                 as_interpreter: true,
                 as_owner: true,
                 via_patient_assignment: true,
+                interpreter_team: true,
                 ..none
             },
             Role::PatientManager | Role::Concierge => Self {
@@ -112,6 +118,16 @@ impl AppointmentScope {
         }
     }
 
+    /// The scope for changing an appointment: the team lead's team context
+    /// is a read and report-review scope, not a licence to edit the visits of
+    /// patients it is not assigned to.
+    pub fn for_change(self) -> Self {
+        Self {
+            interpreter_team: false,
+            ..self
+        }
+    }
+
     /// Whether the scope admits an appointment without a database lookup.
     /// `None` means the answer depends on the caller's patient assignment.
     pub fn admits_directly(
@@ -123,15 +139,23 @@ impl AppointmentScope {
         if self.all
             || (self.as_interpreter && interpreter_id == Some(user_id))
             || (self.as_owner && owner_user_id == Some(user_id))
+            || (self.interpreter_team && interpreter_id.is_some())
         {
             return Some(true);
         }
-        if self.via_patient_assignment {
+        if self.via_patient_assignment || self.interpreter_team {
             None
         } else {
             Some(false)
         }
     }
+}
+
+/// Whether an appointment is read or changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppointmentAccess {
+    Read,
+    Change,
 }
 
 /// The appointment and the caller of an appointment-level check.
@@ -150,12 +174,28 @@ pub struct AppointmentRow {
 pub async fn can_view_appointment_row(
     pool: &DbPool,
     row: AppointmentRow,
+    access: AppointmentAccess,
 ) -> Result<bool, sqlx::Error> {
-    let scope = AppointmentScope::for_role(row.role);
+    let scope = match access {
+        AppointmentAccess::Read => AppointmentScope::for_role(row.role),
+        AppointmentAccess::Change => AppointmentScope::for_role(row.role).for_change(),
+    };
     if let Some(decision) =
         scope.admits_directly(row.user_id, row.interpreter_id, row.owner_user_id)
     {
         return Ok(decision);
+    }
+    // An interpreter report keeps the visit in the team lead's scope even
+    // after the interpreter was taken off the appointment.
+    if scope.interpreter_team
+        && sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM interpreter_reports WHERE appointment_id = $1)",
+        )
+        .bind(row.appointment_id)
+        .fetch_one(pool)
+        .await?
+    {
+        return Ok(true);
     }
     if scope.via_patient_assignment {
         has_active_patient_assignment(pool, row.patient_id, row.user_id).await
@@ -420,6 +460,40 @@ mod tests {
             Some(false)
         );
         assert_eq!(scope.admits_directly(me, None, None), Some(false));
+    }
+
+    #[test]
+    fn interpreter_team_lead_sees_every_interpreter_appointment() {
+        let me = Uuid::new_v4();
+        let interpreter = Uuid::new_v4();
+        let scope = AppointmentScope::for_role(Role::TeamleadInterpreter);
+        assert!(scope.interpreter_team);
+        assert_eq!(
+            scope.admits_directly(me, Some(interpreter), None),
+            Some(true)
+        );
+        // Without a booked interpreter the patient assignment (or a report,
+        // checked against the database) decides.
+        assert_eq!(scope.admits_directly(me, None, None), None);
+        for role in [Role::Interpreter, Role::PatientManager, Role::Concierge] {
+            assert!(
+                !AppointmentScope::for_role(role).interpreter_team,
+                "{role:?}"
+            );
+        }
+        assert_eq!(
+            AppointmentScope::for_role(Role::Concierge).admits_directly(
+                me,
+                Some(interpreter),
+                None
+            ),
+            None
+        );
+        // Changing an appointment stays with the previous rule.
+        let change = scope.for_change();
+        assert!(!change.interpreter_team);
+        assert_eq!(change.admits_directly(me, Some(interpreter), None), None);
+        assert_eq!(change.admits_directly(me, Some(me), None), Some(true));
     }
 
     #[test]
