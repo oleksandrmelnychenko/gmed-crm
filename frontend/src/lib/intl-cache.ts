@@ -1,3 +1,5 @@
+import { appDateTimeFormat } from "@/lib/app-time-zone";
+
 /**
  * Module-level caches for Intl formatters. Constructing Intl objects allocates
  * dozens of objects per locale lookup; table cells and list rows call these
@@ -19,19 +21,15 @@ export function cachedNumberFormat(
   return formatter;
 }
 
-const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>();
-
+/**
+ * Renders in the app time zone (Europe/Berlin) unless the options name an
+ * explicit `timeZone`; see `@/lib/app-time-zone`.
+ */
 export function cachedDateTimeFormat(
   locale: string,
   options?: Intl.DateTimeFormatOptions,
 ): Intl.DateTimeFormat {
-  const key = `${locale}:${JSON.stringify(options ?? {})}`;
-  let formatter = dateTimeFormatters.get(key);
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat(locale, options);
-    dateTimeFormatters.set(key, formatter);
-  }
-  return formatter;
+  return appDateTimeFormat(locale, options);
 }
 
 const regionDisplayNames = new Map<string, Intl.DisplayNames | null>();
