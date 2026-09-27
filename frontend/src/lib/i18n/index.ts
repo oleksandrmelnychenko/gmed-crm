@@ -634,6 +634,9 @@ export interface Translations
   settings_concierge_preparation_hint: string;
   settings_concierge_reminder_lead_hours: string;
   settings_concierge_prep_lead_hours: string;
+  settings_interpreter_access: string;
+  settings_interpreter_access_hint: string;
+  settings_interpreter_booking_access_days: string;
   settings_sessions: string;
   settings_active_sessions: string;
   settings_logout_user: string;

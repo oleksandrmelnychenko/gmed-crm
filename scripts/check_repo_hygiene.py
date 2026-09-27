@@ -34,6 +34,9 @@ FORBIDDEN_TRACKED_PATHS = (
 # keeps the migration visible during review without weakening the audit budget.
 # 20260927131600 closes checklist items of completed tasks and writes their
 # audit rows inside the migration transaction (no handler insert).
+# 20260928100000 marks interpreter booking links and audits them inside the
+# migration transaction; runtime link changes write their audit rows through
+# `audit::write_in_transaction` (no handler insert).
 AUDIT_INSERT_BUDGET = 6
 AUDIT_SEARCH_PATH = "crates/server/src/routes/"
 AUDIT_PATTERN = "INSERT INTO audit_log"

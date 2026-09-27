@@ -89,7 +89,7 @@ impl AuthUser {
     }
 }
 
-fn parse_role(role_str: &str) -> Option<Role> {
+pub(crate) fn parse_role(role_str: &str) -> Option<Role> {
     match role_str {
         "ceo" => Some(Role::Ceo),
         "ceo_assistant" => Some(Role::CeoAssistant),

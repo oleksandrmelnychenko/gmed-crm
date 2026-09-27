@@ -4369,7 +4369,8 @@ async fn ensure_prospect_assignments(
            ON CONFLICT (patient_id, user_id) DO UPDATE
            SET assigned_by = EXCLUDED.assigned_by,
                assigned_at = now(),
-               revoked_at = NULL"#,
+               revoked_at = NULL,
+               source = 'manual'"#,
     )
     .bind(patient_id)
     .bind(actor_id)
@@ -5975,7 +5976,8 @@ async fn convert_lead(
            ON CONFLICT (patient_id, user_id) DO UPDATE
            SET assigned_by = EXCLUDED.assigned_by,
                assigned_at = now(),
-               revoked_at = NULL"#,
+               revoked_at = NULL,
+               source = 'manual'"#,
     )
     .bind(patient_id)
     .bind(auth.user_id)

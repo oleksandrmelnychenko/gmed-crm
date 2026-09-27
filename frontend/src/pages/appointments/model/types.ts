@@ -779,4 +779,6 @@ export type HandoffStakeholder = {
   name: string;
   role: string;
   badges: string[];
+  /** The server accepts a reminder about this appointment for the person. */
+  canReceiveReminder: boolean;
 };

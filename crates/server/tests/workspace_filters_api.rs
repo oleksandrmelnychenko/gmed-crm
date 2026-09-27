@@ -7725,6 +7725,8 @@ async fn assign_interpreter_creates_patient_assignment_idempotently() {
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
 
+    // An upcoming visit: the booking link lasts until 14 days after it.
+    let visit_date = (gmed_server::app_time::today() + chrono::Duration::days(5)).to_string();
     let appointment_id = seed_appointment(
         &pool,
         patient_id,
@@ -7733,7 +7735,7 @@ async fn assign_interpreter_creates_patient_assignment_idempotently() {
         admin_id,
         &format!("Appointment {tag}"),
         "confirmed",
-        "2026-04-24",
+        &visit_date,
     )
     .await;
 
@@ -7757,21 +7759,20 @@ async fn assign_interpreter_creates_patient_assignment_idempotently() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let assignment_exists: bool = sqlx::query_scalar(
-        r#"SELECT EXISTS(
-            SELECT 1
-            FROM patient_assignments
-            WHERE patient_id = $1
-              AND user_id = $2
-              AND revoked_at IS NULL
-        )"#,
+    let active_booking_links: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)
+           FROM patient_assignments
+           WHERE patient_id = $1
+             AND user_id = $2
+             AND source = 'interpreter_booking'
+             AND revoked_at IS NULL"#,
     )
     .bind(patient_id)
     .bind(interpreter_id)
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(assignment_exists);
+    assert_eq!(active_booking_links, 1);
 }
 
 #[tokio::test]
@@ -7891,6 +7892,108 @@ async fn reminders_can_be_created_by_pm_and_completed_by_assignee() {
     let items = body.as_array().unwrap();
     let completed = items.iter().find(|item| item["id"] == reminder_id).unwrap();
     assert_eq!(completed["is_completed"], true);
+}
+
+#[tokio::test]
+async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("reminder-recipients");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let booked_interpreter = seed_user(&pool, &format!("{tag}-booked"), "interpreter").await;
+    let other_interpreter = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let assigned_concierge = seed_user(&pool, &format!("{tag}-c1"), "concierge").await;
+    let unassigned_concierge = seed_user(&pool, &format!("{tag}-c2"), "concierge").await;
+    for user_id in [
+        pm_id,
+        booked_interpreter,
+        other_interpreter,
+        assigned_concierge,
+    ] {
+        seed_patient_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        pm_id,
+        &format!("Visit {tag}"),
+        "confirmed",
+        "2026-11-02",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'accepted' WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .bind(booked_interpreter)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let remind = |user_id: Uuid| {
+        let app = app.clone();
+        let bearer = pm_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/appointments/{appointment_id}/reminders"),
+                &bearer,
+                Some(json!({
+                    "user_id": user_id,
+                    "remind_at": "2026-11-01T08:00:00Z",
+                    "title": "Prepare the visit"
+                })),
+            )
+            .await
+        }
+    };
+
+    let (status, body) = remind(booked_interpreter).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = remind(assigned_concierge).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // Linked to the patient but not booked on this visit: the interpreter
+    // could neither see nor complete the reminder.
+    let (status, body) = remind(other_interpreter).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "An interpreter can only be reminded of an appointment they are booked on"
+    );
+    let (status, body) = remind(unassigned_concierge).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "The selected user has no access to this appointment or its patient"
+    );
+
+    // A declined booking no longer counts.
+    sqlx::query("UPDATE appointments SET interpreter_response = 'declined' WHERE id = $1")
+        .bind(appointment_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = remind(booked_interpreter).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let stored: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT user_id FROM reminders WHERE appointment_id = $1 ORDER BY created_at",
+    )
+    .bind(appointment_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, vec![booked_interpreter, assigned_concierge]);
 }
 
 #[tokio::test]
@@ -15389,4 +15492,151 @@ async fn concierge_and_interpreter_team_lead_read_only_their_part_of_an_order() 
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+async fn seed_agency_service(pool: &PgPool, service_key: &str, created_by: Uuid) {
+    sqlx::query(
+        r#"INSERT INTO agency_service_catalog (
+               service_key, service_name, unit_label, unit_price, currency,
+               vat_rate, is_active, valid_from, created_by
+           ) VALUES ($1, $1, 'unit', 120, 'EUR', 19, true, CURRENT_DATE, $2)"#,
+    )
+    .bind(service_key)
+    .bind(created_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn concierge_marks_only_service_lines_delivered() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("concierge-deliver");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let clinic_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let partner_id =
+        seed_provider_with_type(&pool, &format!("{tag}-partner"), "non_medical", "Germany").await;
+    let transfer_key = format!("airport_transfer-{tag}");
+    let organisation_key = format!("organisation_treatment_5doc-{tag}");
+    seed_agency_service(&pool, &transfer_key, admin_id).await;
+    seed_agency_service(&pool, &organisation_key, admin_id).await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-DELIVER-{tag}"),
+        "execution",
+        "active",
+        "Treatment",
+    )
+    .await;
+    let medical_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(clinic_id),
+        None,
+        &format!("Consultation {tag}"),
+        "",
+    )
+    .await;
+    let partner_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(partner_id),
+        None,
+        &format!("Hotel {tag}"),
+        "",
+    )
+    .await;
+    // The agency's own transfer has no partner; it is a service line too.
+    let agency_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some(&transfer_key),
+        &format!("Airport transfer {tag}"),
+        "",
+    )
+    .await;
+    let interpreter_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some("interpreter_hours"),
+        &format!("Interpreter hours {tag}"),
+        "",
+    )
+    .await;
+    let organisation_line = seed_order_line(
+        &pool,
+        order_id,
+        None,
+        Some(&organisation_key),
+        &format!("Treatment organisation {tag}"),
+        "",
+    )
+    .await;
+
+    let concierge_id = seed_user(&pool, &format!("{tag}-c"), "concierge").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let concierge = auth_header_for(concierge_id, "concierge");
+
+    // The concierge's order part lists both service lines.
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        line_ids(&detail),
+        vec![partner_line.to_string(), agency_line.to_string()]
+    );
+
+    let deliver = |line: Uuid| format!("/api/v1/orders/{order_id}/leistungen/{line}/deliver");
+    for line in [medical_line, interpreter_line, organisation_line] {
+        let (status, body) = json_request(&app, "POST", &deliver(line), &concierge, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{line}: {body}");
+        assert_eq!(
+            body["message"],
+            "A concierge can mark only service and logistics lines as delivered, not medical services"
+        );
+    }
+    for line in [partner_line, agency_line] {
+        let (status, body) = json_request(&app, "POST", &deliver(line), &concierge, None).await;
+        assert_eq!(status, StatusCode::OK, "{line}: {body}");
+    }
+    let (status, _) = json_request(&app, "POST", &deliver(Uuid::new_v4()), &concierge, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The patient manager keeps delivering any line.
+    let manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &deliver(medical_line),
+        &auth_header_for(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let delivered: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM order_leistungen WHERE order_id = $1 AND delivered_at IS NOT NULL",
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let mut delivered = delivered;
+    delivered.sort();
+    let mut expected = vec![medical_line, partner_line, agency_line];
+    expected.sort();
+    assert_eq!(delivered, expected);
 }

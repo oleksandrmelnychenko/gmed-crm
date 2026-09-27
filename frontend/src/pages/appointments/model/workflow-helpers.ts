@@ -1,6 +1,10 @@
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { toDateTimeLocalInput } from "@/pages/appointments/model/date-time";
 import { appointmentText } from "@/pages/appointments/model/labels";
+import {
+  activePatientAssigneeIds,
+  canRemindAboutAppointment,
+} from "@/pages/appointments/model/staff-roles";
 import type {
   AppointmentDetail,
   ConciergeServiceDraftState,
@@ -74,6 +78,7 @@ export function buildHandoffStakeholders(
       name: assignment.user_name,
       role: assignment.user_role,
       badges: [patientBadge],
+      canReceiveReminder: false,
     });
   }
 
@@ -87,6 +92,7 @@ export function buildHandoffStakeholders(
         name: detail.owner_name,
         role: detail.owner_role ?? "",
         badges: [ownerBadge],
+        canReceiveReminder: false,
       });
     }
   }
@@ -103,8 +109,14 @@ export function buildHandoffStakeholders(
         name: detail.interpreter_name,
         role: "interpreter",
         badges: [interpreterBadge],
+        canReceiveReminder: false,
       });
     }
+  }
+
+  const assigneeIds = activePatientAssigneeIds(activeAssignments);
+  for (const item of items.values()) {
+    item.canReceiveReminder = canRemindAboutAppointment(item, detail, assigneeIds);
   }
 
   return Array.from(items.values()).sort((left, right) =>

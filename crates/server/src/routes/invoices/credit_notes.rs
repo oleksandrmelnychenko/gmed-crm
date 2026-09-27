@@ -618,6 +618,74 @@ pub(crate) async fn load_active_credits(
         .collect()
 }
 
+/// Unique index that allows one reversal per credit note.
+const REVERSAL_UNIQUE_INDEX: &str = "uq_invoice_credit_note_transaction_reversal";
+/// Duplicate check of `validate_invoice_credit_note_transaction()`.
+const REVERSAL_DUPLICATE_TRIGGER_MESSAGE: &str = "credit note was already reversed";
+
+/// Why the database refused to store a credit-note reversal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReversalInsertFailure {
+    /// The credit note already has its reversal (a concurrent reversal won).
+    AlreadyReversed,
+    /// Another invoice rule enforced by a trigger, with a message for staff.
+    BusinessRule(String),
+    /// Anything else; the caller logs it and answers with a server error.
+    Unexpected,
+}
+
+/// Only the unique reversal index and the trigger's duplicate check mean
+/// "already reversed". Every other trigger rule (inactive invoice, changed
+/// currency, a reversal that no longer matches its credit note) keeps its own
+/// message, and constraint or connection failures are unexpected.
+pub(crate) fn classify_reversal_insert_error(
+    code: Option<&str>,
+    constraint: Option<&str>,
+    message: &str,
+) -> ReversalInsertFailure {
+    let message = message.trim();
+    match code {
+        Some("23505") if constraint == Some(REVERSAL_UNIQUE_INDEX) => {
+            ReversalInsertFailure::AlreadyReversed
+        }
+        Some("P0001") if message == REVERSAL_DUPLICATE_TRIGGER_MESSAGE => {
+            ReversalInsertFailure::AlreadyReversed
+        }
+        // Triggers raise business rules as P0001, some as 23514 without a
+        // constraint name; a named check constraint is a data invariant.
+        Some("P0001") => ReversalInsertFailure::BusinessRule(reversal_rule_message(message)),
+        Some("23514") if constraint.is_none() && !message.is_empty() => {
+            ReversalInsertFailure::BusinessRule(reversal_rule_message(message))
+        }
+        _ => ReversalInsertFailure::Unexpected,
+    }
+}
+
+fn reversal_rule_message(trigger_message: &str) -> String {
+    match trigger_message {
+        "credit notes require an active released invoice" => {
+            "A credit note can only be reversed on an active released invoice".to_string()
+        }
+        "credit note currency must match invoice currency" => {
+            "The credit note's currency no longer matches the invoice currency".to_string()
+        }
+        "credit-note reversal must match its original transaction" => {
+            "The reversal no longer matches the credit note it reverses".to_string()
+        }
+        "credit-note reversal date cannot precede the original credit note" => {
+            "Reversal date cannot precede the credit-note date".to_string()
+        }
+        "" => "The invoice rules refused the credit-note reversal".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -821,5 +889,70 @@ mod tests {
             credited_passthrough(&legacy, dec("481.50"), Decimal::ZERO, dec("999.99")),
             (dec("48.15"), Decimal::ZERO)
         );
+    }
+
+    #[test]
+    fn only_the_duplicate_reversal_reads_as_already_reversed() {
+        assert_eq!(
+            classify_reversal_insert_error(
+                Some("23505"),
+                Some("uq_invoice_credit_note_transaction_reversal"),
+                "duplicate key value violates unique constraint",
+            ),
+            ReversalInsertFailure::AlreadyReversed
+        );
+        assert_eq!(
+            classify_reversal_insert_error(Some("P0001"), None, "credit note was already reversed"),
+            ReversalInsertFailure::AlreadyReversed
+        );
+        // Other trigger rules keep their own message.
+        assert_eq!(
+            classify_reversal_insert_error(
+                Some("P0001"),
+                None,
+                "credit notes require an active released invoice",
+            ),
+            ReversalInsertFailure::BusinessRule(
+                "A credit note can only be reversed on an active released invoice".to_string()
+            )
+        );
+        assert_eq!(
+            classify_reversal_insert_error(
+                Some("P0001"),
+                None,
+                "adjusted patient invoice gross cannot be lower than active source allocations",
+            ),
+            ReversalInsertFailure::BusinessRule(
+                "Adjusted patient invoice gross cannot be lower than active source allocations"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            classify_reversal_insert_error(
+                Some("23514"),
+                None,
+                "A released invoice needs an invoice number"
+            ),
+            ReversalInsertFailure::BusinessRule(
+                "A released invoice needs an invoice number".to_string()
+            )
+        );
+        // A duplicate document number, a check constraint or a lost connection
+        // are server errors, not a finished reversal.
+        for (code, constraint) in [
+            (
+                Some("23505"),
+                Some("invoice_credit_note_transactions_document_number_key"),
+            ),
+            (Some("23514"), Some("invoices_credited_amount_valid")),
+            (Some("40001"), None),
+            (None, None),
+        ] {
+            assert_eq!(
+                classify_reversal_insert_error(code, constraint, "failure"),
+                ReversalInsertFailure::Unexpected,
+                "{code:?} {constraint:?}"
+            );
+        }
     }
 }

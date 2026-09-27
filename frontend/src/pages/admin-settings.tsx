@@ -14,6 +14,7 @@ import {
   RefreshCcw,
   ScrollText,
   ShieldCheck,
+  UserRoundCheck,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -105,7 +106,13 @@ type SettingFieldMeta = {
   rows?: number;
 };
 
-type SettingsGroupId = "tokens" | "agency" | "documents" | "clinical" | "concierge";
+type SettingsGroupId =
+  | "tokens"
+  | "agency"
+  | "documents"
+  | "clinical"
+  | "concierge"
+  | "interpreter_access";
 
 type SettingsGroup = {
   id: SettingsGroupId;
@@ -205,6 +212,16 @@ const CONCIERGE_SETTING_FIELDS: SettingFieldMeta[] = [
   },
 ];
 
+// How long a booking keeps an interpreter linked to the patient.
+const INTERPRETER_ACCESS_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "interpreter_booking_access_days",
+    labelKey: "settings_interpreter_booking_access_days",
+    inputType: "number",
+    min: 1,
+  },
+];
+
 const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: "tokens",
@@ -245,6 +262,14 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     fields: CONCIERGE_SETTING_FIELDS,
     icon: BellRing,
     tone: "sky",
+  },
+  {
+    id: "interpreter_access",
+    titleKey: "settings_interpreter_access",
+    descriptionKey: "settings_interpreter_access_hint",
+    fields: INTERPRETER_ACCESS_SETTING_FIELDS,
+    icon: UserRoundCheck,
+    tone: "emerald",
   },
 ];
 

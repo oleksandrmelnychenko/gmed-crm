@@ -361,6 +361,101 @@ async fn credit_note_guards_dates_allocations_and_cancelled_reactivation() {
     );
 }
 
+/// Sets an invoice status without the status triggers, standing in for a
+/// state the reversal handler does not check itself.
+async fn force_invoice_status(pool: &PgPool, invoice_id: Uuid, status: &str) {
+    let mut transaction = pool.begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE invoices SET status = $2 WHERE id = $1")
+        .bind(invoice_id)
+        .bind(status)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+}
+
+async fn reversal_count(pool: &PgPool, invoice_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_credit_note_transactions
+         WHERE invoice_id = $1 AND transaction_type = 'reversal'",
+    )
+    .bind(invoice_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn credit_note_reversal_reports_other_invoice_rules_instead_of_already_reversed() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("credit-reversal-rules-{}", Uuid::new_v4().simple());
+    let (_patient_id, invoice_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let (status, created) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 40,
+            "reason": "Service not required",
+            "issued_on": gmed_server::app_time::today().to_string()
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created:?}");
+    let credit_id = created["credit_note_transaction_id"].as_str().unwrap();
+    let reversal_path = format!("/api/v1/invoices/{invoice_id}/credit-notes/{credit_id}/reversal");
+
+    // The invoice trigger refuses a reversal on an inactive invoice; that is
+    // its own rule, not a finished reversal.
+    force_invoice_status(&ctx.pool, invoice_id, "cancelled").await;
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &reversal_path,
+        &ceo,
+        Some(json!({ "reason": "Correction entered in error" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    assert_eq!(
+        body["message"],
+        "A credit note can only be reversed on an active released invoice"
+    );
+    assert!(!body.to_string().contains("already reversed"), "{body:?}");
+    assert_eq!(reversal_count(&ctx.pool, invoice_id).await, 0);
+
+    force_invoice_status(&ctx.pool, invoice_id, "sent").await;
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &reversal_path,
+        &ceo,
+        Some(json!({ "reason": "Correction entered in error" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &reversal_path,
+        &ceo,
+        Some(json!({ "reason": "Second attempt" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+    assert_eq!(body["message"], "Credit note was already reversed");
+    assert_eq!(reversal_count(&ctx.pool, invoice_id).await, 1);
+}
+
 #[tokio::test]
 async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
