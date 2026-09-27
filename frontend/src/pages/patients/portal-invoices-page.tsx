@@ -33,6 +33,7 @@ import {
   fetchPortalInvoiceCreditNotes,
   fetchPortalInvoicePayments,
   fetchPortalInvoiceRefunds,
+  fetchPortalInvoiceDunningLetters,
   fetchPortalInvoices,
   uploadPortalPaymentProof,
 } from "@/pages/patients/data/portal-api";
@@ -43,11 +44,13 @@ import {
   invoiceTypeLabel,
   downloadPortalCreditNotePdf,
   downloadPortalInvoicePdf,
+  downloadPortalDunningLetter,
   openPortalInvoicePdf,
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalAccountStatement,
+  PortalDunningLetter,
   PortalInvoiceItem,
   PortalInvoiceCreditNoteTransaction,
   PortalInvoiceLineItem,
@@ -129,6 +132,7 @@ interface PatientInvoicesState {
   detailPayments: PortalInvoicePaymentTransaction[];
   detailCreditNotes: PortalInvoiceCreditNoteTransaction[];
   detailRefunds: PortalInvoiceRefundTransaction[];
+  detailDunningLetters: PortalDunningLetter[];
   detailBusy: boolean;
   detailError: string;
   uploadOpen: boolean;
@@ -155,6 +159,7 @@ const INITIAL_PATIENT_INVOICES_STATE: PatientInvoicesState = {
   detailPayments: [],
   detailCreditNotes: [],
   detailRefunds: [],
+  detailDunningLetters: [],
   detailBusy: false,
   detailError: "",
   uploadOpen: false,
@@ -188,6 +193,7 @@ function usePatientInvoicesPageContent() {
     detailPayments,
     detailCreditNotes,
     detailRefunds,
+    detailDunningLetters,
     detailBusy,
     detailError,
     error,
@@ -271,7 +277,14 @@ function usePatientInvoicesPageContent() {
 
   useEffect(() => {
     if (!selectedInvoiceId) {
-      dispatchInvoicesState({ detail: null, detailPayments: [], detailCreditNotes: [], detailRefunds: [], detailError: "" });
+      dispatchInvoicesState({
+        detail: null,
+        detailPayments: [],
+        detailCreditNotes: [],
+        detailRefunds: [],
+        detailDunningLetters: [],
+        detailError: "",
+      });
       return;
     }
 
@@ -281,13 +294,18 @@ function usePatientInvoicesPageContent() {
       dispatchInvoicesState({ detailBusy: true });
       try {
         const invoice = await fetchPortalInvoiceDetail(selectedInvoiceId);
-        const [payments, creditNotes, refunds] = await Promise.all([
+        const [payments, creditNotes, refunds, dunningLetters] = await Promise.all([
           invoiceAmountsVisible(invoice)
             ? fetchPortalInvoicePayments(selectedInvoiceId).then((response) => response.items)
             : Promise.resolve([]),
           fetchPortalInvoiceCreditNotes(selectedInvoiceId).then((response) => response.items),
           invoiceAmountsVisible(invoice)
             ? fetchPortalInvoiceRefunds(selectedInvoiceId).then((response) => response.items)
+            : Promise.resolve([]),
+          invoicePdfVisible(invoice)
+            ? fetchPortalInvoiceDunningLetters(selectedInvoiceId)
+                .then((response) => (Array.isArray(response?.items) ? response.items : []))
+                .catch(() => [])
             : Promise.resolve([]),
         ]);
         if (cancelled) return;
@@ -296,6 +314,7 @@ function usePatientInvoicesPageContent() {
           detailPayments: payments,
           detailCreditNotes: creditNotes,
           detailRefunds: refunds,
+          detailDunningLetters: dunningLetters,
           detailError: "",
           detailBusy: false,
         });
@@ -1012,6 +1031,59 @@ function usePatientInvoicesPageContent() {
                           </div>
                         );
                       })}
+                    </div>
+                  </section>
+                ) : null}
+
+                {detailDunningLetters.length > 0 ? (
+                  <section
+                    className={cn("rounded-xl p-5", tokens.surface.card)}
+                    data-testid="portal-dunning-letters"
+                  >
+                    <h2 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
+                      <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
+                      <span>{lang === "de" ? "Zahlungserinnerungen und Mahnungen" : "Напоминания и требования об оплате"}</span>
+                    </h2>
+                    <p className={cn("mt-1", tokens.text.muted)}>
+                      {lang === "de"
+                        ? "Jedes Schreiben nennt den offenen Betrag und die neue Zahlungsfrist."
+                        : "В каждом письме указаны сумма к оплате и новый срок оплаты."}
+                    </p>
+                    <div className="mt-5 space-y-2">
+                      {detailDunningLetters.map((letter) => (
+                        <div
+                          key={letter.id}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/70 p-3"
+                        >
+                          <div>
+                            <div className="text-sm font-semibold text-foreground">{letter.title}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {formatPortalDate(letter.sent_at)}
+                              {letter.payment_due_date
+                                ? ` · ${lang === "de" ? "zahlbar bis" : "оплатить до"} ${formatPortalDate(letter.payment_due_date)}`
+                                : ""}
+                              {` · ${formatPortalCurrency(letter.balance_due, detail.currency)}`}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1.5 rounded-lg"
+                            onClick={() => {
+                              void downloadPortalDunningLetter(detail.id, letter).catch((err) => {
+                                dispatchInvoicesState({
+                                  detailError:
+                                    err instanceof Error ? err.message : t.portal_invoices_failed_to_download_invoice_pdf,
+                                });
+                              });
+                            }}
+                          >
+                            <Download className="size-3.5" />
+                            PDF
+                          </Button>
+                        </div>
+                      ))}
                     </div>
                   </section>
                 ) : null}

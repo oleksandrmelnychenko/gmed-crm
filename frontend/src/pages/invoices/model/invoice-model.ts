@@ -448,6 +448,21 @@ export function isCoveredByPrepaymentOnly(
   );
 }
 
+/**
+ * File name of a dunning letter: the stored one, else the name the server
+ * gives it (Zahlungserinnerung, 1. Mahnung, 2. Mahnung).
+ */
+export function dunningLetterFileName(
+  event: Pick<DunningEvent, "level" | "letter">,
+  invoiceNumber: string | null | undefined,
+) {
+  if (event.letter?.file_name) return event.letter.file_name;
+  const prefix =
+    event.level === "first" ? "ZAHLUNGSERINNERUNG" : event.level === "second" ? "1-MAHNUNG" : "2-MAHNUNG";
+  const number = (invoiceNumber ?? "").replace(/[/\\:*?"<>|]/g, "-").trim();
+  return `${prefix}-${number || "RECHNUNG"}.pdf`;
+}
+
 export function nextDunningLevel(events: DunningEvent[]) {
   const levels = new Set(events.map((event) => event.level));
   if (!levels.has("first")) return "first";

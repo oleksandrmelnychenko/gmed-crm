@@ -14,6 +14,7 @@ import {
   canEditInvoiceDueDate,
   canPickInvoiceStatus,
   defaultReleaseDueDate,
+  dunningLetterFileName,
   invoiceDisplayNumber,
   invoiceDocumentState,
   invoiceStatusFormProblem,
@@ -100,6 +101,22 @@ describe("invoice release and numbering", () => {
     expect(canEditInvoiceDueDate(released)).toBe(false);
     expect(canEditInvoiceDueDate({ ...released, due_date: null })).toBe(true);
     expect(canEditInvoiceDueDate({ status: "draft", released_at: null, due_date: "2026-10-04" })).toBe(true);
+  });
+});
+
+describe("dunning letters", () => {
+  it("names the letter by its level unless the stored name is known", () => {
+    expect(dunningLetterFileName({ level: "first", letter: null }, "INV-20260927-0042")).toBe(
+      "ZAHLUNGSERINNERUNG-INV-20260927-0042.pdf",
+    );
+    expect(dunningLetterFileName({ level: "second" }, "INV/1")).toBe("1-MAHNUNG-INV-1.pdf");
+    expect(dunningLetterFileName({ level: "collections" }, null)).toBe("2-MAHNUNG-RECHNUNG.pdf");
+    expect(
+      dunningLetterFileName(
+        { level: "first", letter: { file_name: "stored.pdf", generated_at: null } },
+        "INV-1",
+      ),
+    ).toBe("stored.pdf");
   });
 });
 

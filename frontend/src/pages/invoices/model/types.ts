@@ -299,6 +299,10 @@ export type DunningEvent = {
   level: "first" | "second" | "collections" | string;
   note: string | null;
   due_date_snapshot: string | null;
+  /** New payment deadline the letter sets. */
+  payment_due_date?: string | null;
+  /** The stored letter (Zahlungserinnerung, 1. or 2. Mahnung). */
+  letter?: { file_name: string; generated_at: string | null } | null;
   balance_due: unknown;
   sent_at: string;
   created_at: string;

@@ -3615,6 +3615,213 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     .await
     .unwrap();
     assert_eq!(auto_dunning_audit_count, 3);
+
+    // Every automatic step sent its letter, with a new deadline.
+    let letters: i64 = sqlx::query_scalar(
+        r#"SELECT count(*)::bigint
+           FROM invoice_documents letter
+           JOIN invoice_dunning_events event ON event.id = letter.dunning_event_id
+           WHERE letter.document_kind = 'dunning_letter'
+             AND event.note LIKE '[system auto-dunning]%'
+             AND event.payment_due_date IS NOT NULL
+             AND event.invoice_id IN ($1, $2, $3)"#,
+    )
+    .bind(invoice_first_id)
+    .bind(invoice_second_id)
+    .bind(invoice_collections_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(letters, 3);
+}
+
+/// Each dunning step sends a stored letter (Zahlungserinnerung, 1. and
+/// 2. Mahnung) naming the invoice, the open amount and a new deadline; staff
+/// download it from the invoice, the patient from the portal. Events recorded
+/// before letters existed get theirs on the first download.
+#[tokio::test]
+async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("dunning-letters");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Hauptstraße 1', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Mahnbare Leistung", 100.0, "approved").await;
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let invoice = create_sent_invoice(
+        &app,
+        &pool,
+        &billing_bearer,
+        quote["id"].as_str().unwrap(),
+        "final",
+        "2026-03-01",
+    )
+    .await;
+    let invoice_id = invoice["id"].as_str().unwrap().to_string();
+    let invoice_number = invoice["invoice_number"].as_str().unwrap().to_string();
+
+    let (status, reminder) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &billing_bearer,
+        Some(json!({ "level": "first" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reminder}");
+    let reminder_id = reminder["id"].as_str().unwrap().to_string();
+    let today = chrono::Utc::now()
+        .with_timezone(&chrono_tz::Europe::Berlin)
+        .date_naive();
+    assert_eq!(
+        reminder["payment_due_date"],
+        (today + chrono::Duration::days(14)).to_string()
+    );
+    assert_eq!(
+        reminder["letter"]["file_name"],
+        format!("ZAHLUNGSERINNERUNG-{invoice_number}.pdf")
+    );
+
+    let (status, headers, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/dunning/{reminder_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "stored");
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(text.contains("Zahlungserinnerung"), "{text}");
+    assert!(text.contains(&invoice_number), "{text}");
+    assert!(text.contains("119,00 €"), "{text}");
+    assert!(text.contains("Neue Zahlungsfrist"), "{text}");
+    assert!(
+        text.contains(&(today + chrono::Duration::days(14)).format("%d.%m.%Y").to_string()),
+        "{text}"
+    );
+    assert!(text.contains("Hauptstraße 1"), "{text}");
+
+    let (status, first_notice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &billing_bearer,
+        Some(json!({ "level": "second" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{first_notice}");
+
+    // An event recorded before letters existed gets its letter on download.
+    let legacy_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoice_dunning_events (
+                invoice_id, level, note, due_date_snapshot, balance_due, created_by
+           ) VALUES ($1::uuid, 'collections', 'Legacy step', '2026-03-01', 119, $2)
+           RETURNING id"#,
+    )
+    .bind(&invoice_id)
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, headers, first_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/dunning/{legacy_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(document_source(&headers), "stored-on-first-download");
+    let text = pdf_extract::extract_text_from_mem(&first_bytes).unwrap();
+    assert!(text.contains("2. Mahnung"), "{text}");
+    assert!(text.contains("Inkassounternehmen"), "{text}");
+    let (_, headers, second_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/dunning/{legacy_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(document_source(&headers), "stored");
+    assert_eq!(first_bytes, second_bytes);
+
+    let (status, events) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let events = events.as_array().unwrap();
+    assert_eq!(events.len(), 3);
+    assert!(events.iter().all(|event| event["letter"]["file_name"].is_string()));
+
+    // The patient sees the letters in the portal.
+    let (status, letters) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/dunning"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{letters}");
+    let titles = letters["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(titles, vec!["Zahlungserinnerung", "1. Mahnung", "2. Mahnung"]);
+    let (status, _, portal_bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/dunning/{reminder_id}/pdf"),
+        &patient_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(portal_bytes, bytes);
+
+    // Hidden amounts hide the letters too.
+    sqlx::query("UPDATE invoices SET hide_amounts_from_patient = true WHERE id = $1::uuid")
+        .bind(&invoice_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}/dunning"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

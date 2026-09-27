@@ -199,6 +199,21 @@ export type PortalInvoiceRefundHistoryResponse = {
   items: PortalInvoiceRefundTransaction[];
 };
 
+/** A payment reminder or dunning notice sent for an invoice, with its letter. */
+export type PortalDunningLetter = {
+  id: string;
+  level: "first" | "second" | "collections" | string;
+  sent_at: string;
+  payment_due_date: string | null;
+  balance_due: unknown;
+  title: string;
+  file_name: string;
+};
+
+export type PortalDunningLetterResponse = {
+  items: PortalDunningLetter[];
+};
+
 export type PortalAccountStatementItem = {
   id: string;
   kind: "invoice" | "prepayment" | "credit_note" | "credit_note_reversal";
@@ -1158,4 +1173,12 @@ export async function downloadPortalCreditNotePdf(
 export async function openPortalInvoicePdf(id: string) {
   const blob = await fetchPortalBlob(`/me/invoices/${id}/pdf`);
   openBlobPreview(blob);
+}
+
+export async function downloadPortalDunningLetter(
+  invoiceId: string,
+  letter: Pick<PortalDunningLetter, "id" | "file_name">,
+) {
+  const blob = await fetchPortalBlob(`/me/invoices/${invoiceId}/dunning/${letter.id}/pdf`);
+  downloadBlob(blob, letter.file_name || "mahnung.pdf");
 }

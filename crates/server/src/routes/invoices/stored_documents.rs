@@ -26,9 +26,11 @@ use crate::routes::documents::{
 };
 
 pub(super) const KIND_INVOICE: &str = "invoice";
+pub(super) const KIND_DUNNING_LETTER: &str = "dunning_letter";
 
 pub(super) const TRIGGER_RELEASE: &str = "release";
 pub(super) const TRIGGER_FIRST_DOWNLOAD: &str = "first_download";
+pub(super) const TRIGGER_DUNNING: &str = "dunning";
 
 /// A stored document row.
 #[derive(Clone, Debug)]

@@ -204,6 +204,10 @@ export function fetchCreditNotePdfBlob(invoiceId: string, creditNoteId: string) 
   return fetchProtectedBlob(`/invoices/${invoiceId}/credit-notes/${creditNoteId}/pdf`);
 }
 
+export function fetchDunningLetterBlob(invoiceId: string, dunningEventId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/dunning/${dunningEventId}/pdf`);
+}
+
 export function fetchInvoiceZugferdXmlBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/zugferd.xml`);
 }

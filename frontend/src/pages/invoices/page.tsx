@@ -117,6 +117,7 @@ import {
   fetchAccountingLedgerExportBlob,
   fetchCreditNotePdfBlob,
   fetchInvoiceLookups,
+  fetchDunningLetterBlob,
   fetchInvoicePdfBlob,
   fetchInvoiceZugferdXmlBlob,
   fetchInvoiceWorkspace,
@@ -159,6 +160,7 @@ import {
   invoicesPermissions,
   isCoveredByPrepaymentOnly,
   nextDunningLevel,
+  dunningLetterFileName,
 } from "./model/invoice-model";
 import type {
   AccountingEntry,
@@ -332,6 +334,18 @@ async function downloadCreditNotePdf(invoiceId: string, creditNoteId: string, do
   const link = document.createElement("a");
   link.href = url;
   link.download = `RECHNUNGSKORREKTUR-${documentNumber || creditNoteId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadDunningLetter(invoiceId: string, dunningEventId: string, filename: string) {
+  const blob = await fetchDunningLetterBlob(invoiceId, dunningEventId);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -3732,6 +3746,49 @@ function useStaffInvoicesPageContent() {
                           <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
                             {formatDateTime(event.sent_at, locale, t.common_not_set)}
                           </span>
+                        ),
+                      },
+                      {
+                        id: "payment_due_date",
+                        label: t.revenue_invoices_dunning_new_deadline,
+                        accessor: (event) => event.payment_due_date ?? "",
+                        filterType: "date",
+                        sortable: true,
+                        width: 150,
+                        render: (event) => (
+                          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
+                            {formatDate(event.payment_due_date, locale, t.common_not_set)}
+                          </span>
+                        ),
+                      },
+                      {
+                        id: "letter",
+                        label: t.revenue_invoices_dunning_letter,
+                        accessor: (event) => dunningLetterFileName(event, detail?.invoice_number),
+                        width: 170,
+                        render: (event) => (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 gap-1.5 rounded-lg text-xs"
+                            title={dunningLetterFileName(event, detail?.invoice_number)}
+                            onClick={() => {
+                              if (!detail) return;
+                              void downloadDunningLetter(
+                                detail.id,
+                                event.id,
+                                dunningLetterFileName(event, detail.invoice_number),
+                              ).catch((error) =>
+                                setDunningError(
+                                  error instanceof Error ? error.message : text.pdfDownloadError,
+                                ),
+                              );
+                            }}
+                          >
+                            <Download className="size-3.5" />
+                            {t.revenue_invoices_dunning_letter_download}
+                          </Button>
                         ),
                       },
                       {

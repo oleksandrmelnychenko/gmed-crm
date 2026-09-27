@@ -7,6 +7,7 @@ import type {
   PortalConciergeServiceItem,
   PortalDocumentAlertsSummary,
   PortalDocumentItem,
+  PortalDunningLetterResponse,
   PortalFeedbackItem,
   PortalFollowupMilestoneItem,
   PortalInvoiceCreditNoteHistoryResponse,
@@ -241,6 +242,10 @@ export function fetchPortalInvoiceRefunds(invoiceId: string) {
   return apiFetch<PortalInvoiceRefundHistoryResponse>(
     `/me/invoices/${invoiceId}/refunds`,
   );
+}
+
+export function fetchPortalInvoiceDunningLetters(invoiceId: string) {
+  return apiFetch<PortalDunningLetterResponse>(`/me/invoices/${invoiceId}/dunning`);
 }
 
 export function uploadPortalPaymentProof(formData: FormData) {

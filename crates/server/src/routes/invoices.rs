@@ -36,6 +36,7 @@ mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
 mod document;
+mod dunning_letters;
 mod release;
 mod stored_documents;
 pub(crate) mod termination_settlements;
@@ -81,6 +82,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/me/invoices/{invoice_id}/pdf",
             get(download_my_invoice_pdf),
+        )
+        .route(
+            "/me/invoices/{invoice_id}/dunning",
+            get(list_my_dunning_letters),
+        )
+        .route(
+            "/me/invoices/{invoice_id}/dunning/{dunning_event_id}/pdf",
+            get(download_my_dunning_letter),
         )
         .route("/invoices/accounting-ledger", get(get_accounting_ledger))
         .route(
@@ -151,6 +160,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/dunning",
             get(list_dunning_events).post(create_dunning_event),
+        )
+        .route(
+            "/invoices/{invoice_id}/dunning/{dunning_event_id}/pdf",
+            get(download_dunning_letter),
         )
         .route(
             "/quotes/{quote_id}/invoices",
@@ -1708,10 +1721,18 @@ pub async fn run_auto_dunning_scheduler_once(
         }
 
         let note = auto_dunning_note(level);
-        let inserted = sqlx::query(
+        // The event and its letter are written together: a dunning step
+        // without the letter it sends is not recorded.
+        let mut transaction = state.db.begin().await?;
+        let payment_due_date = dunning_letters::dunning_payment_due_date(
+            invoice_document_date(Utc::now()),
+            dunning_letters::load_dunning_payment_term_days(&mut *transaction).await?,
+        );
+        let inserted = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO invoice_dunning_events (
-                    invoice_id, level, note, due_date_snapshot, balance_due, created_by
-               ) VALUES ($1, $2, $3, $4, $5, $6)
+                    invoice_id, level, note, due_date_snapshot, balance_due, created_by,
+                    payment_due_date
+               ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                ON CONFLICT (invoice_id, level) DO NOTHING
                RETURNING id"#,
         )
@@ -1721,8 +1742,32 @@ pub async fn run_auto_dunning_scheduler_once(
         .bind(Some(candidate.due_date))
         .bind(balance_due)
         .bind(actor_user_id)
-        .fetch_optional(&state.db)
+        .bind(payment_due_date)
+        .fetch_optional(&mut *transaction)
         .await?;
+        let mut letter_blob = None;
+        if let Some(dunning_event_id) = inserted {
+            match dunning_letters::store_dunning_letter(
+                &mut *transaction,
+                candidate.invoice_id,
+                dunning_event_id,
+                Some(actor_user_id),
+            )
+            .await
+            {
+                Ok(letter) => letter_blob = letter.and_then(|letter| letter.blob),
+                Err(_) => {
+                    tracing::error!(invoice_id = %candidate.invoice_id, dunning_level = level, "auto dunning letter could not be stored; retried on the next run");
+                    continue;
+                }
+            }
+        }
+        if let Err(error) = transaction.commit().await {
+            if let Some(blob) = letter_blob {
+                blob.discard().await;
+            }
+            return Err(error);
+        }
 
         if inserted.is_some() {
             summary.dunning_events_created += 1;
@@ -1736,6 +1781,8 @@ pub async fn run_auto_dunning_scheduler_once(
                     "level": level,
                     "balance_due": decimal_to_string(balance_due),
                     "due_date_snapshot": candidate.due_date.to_string(),
+                    "payment_due_date": payment_due_date.to_string(),
+                    "dunning_event_id": inserted,
                 }),
             )
             .await;
@@ -10668,6 +10715,74 @@ fn invoice_pdf_response(
     }
 }
 
+/// Dunning events of an invoice with their letters. Events recorded before
+/// letters existed show the deadline their letter will carry.
+async fn load_dunning_event_rows(
+    state: &AppState,
+    invoice_id: Uuid,
+) -> Result<Vec<Value>, sqlx::Error> {
+    let mut conn = state.db.acquire().await?;
+    let term_days = dunning_letters::load_dunning_payment_term_days(&mut conn).await?;
+    let rows = sqlx::query(
+        r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
+                  ide.sent_at, ide.created_at, ide.payment_due_date,
+                  u.name AS created_by_name, u.role AS created_by_role,
+                  letter.file_name AS letter_file_name,
+                  letter.generated_at AS letter_generated_at
+           FROM invoice_dunning_events ide
+           JOIN users u ON u.id = ide.created_by
+           LEFT JOIN invoice_documents letter ON letter.dunning_event_id = ide.id
+           WHERE ide.invoice_id = $1
+           ORDER BY ide.sent_at, ide.created_at"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let sent_at = row
+                .try_get::<DateTime<Utc>, _>("sent_at")
+                .unwrap_or_else(|_| Utc::now());
+            let payment_due_date = row
+                .try_get::<Option<NaiveDate>, _>("payment_due_date")
+                .unwrap_or_default()
+                .unwrap_or_else(|| {
+                    dunning_letters::dunning_payment_due_date(
+                        invoice_document_date(sent_at),
+                        term_days,
+                    )
+                });
+            let letter = row
+                .try_get::<Option<String>, _>("letter_file_name")
+                .unwrap_or_default()
+                .map(|file_name| {
+                    json!({
+                        "file_name": file_name,
+                        "generated_at": row
+                            .try_get::<Option<DateTime<Utc>>, _>("letter_generated_at")
+                            .unwrap_or_default()
+                            .map(|value| value.to_rfc3339()),
+                    })
+                });
+            json!({
+                "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "invoice_id": invoice_id,
+                "level": row.try_get::<String, _>("level").unwrap_or_default(),
+                "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+                "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
+                "payment_due_date": payment_due_date.to_string(),
+                "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
+                "sent_at": sent_at.to_rfc3339(),
+                "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+                "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
+                "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
+                "letter": letter,
+            })
+        })
+        .collect())
+}
+
 async fn list_dunning_events(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -10688,38 +10803,8 @@ async fn list_dunning_events(
         return resp;
     }
 
-    match sqlx::query(
-        r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
-                  ide.sent_at, ide.created_at, u.name AS created_by_name, u.role AS created_by_role
-           FROM invoice_dunning_events ide
-           JOIN users u ON u.id = ide.created_by
-           WHERE ide.invoice_id = $1
-           ORDER BY ide.sent_at, ide.created_at"#,
-    )
-    .bind(invoice_id)
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => {
-            let items = rows
-                .into_iter()
-                .map(|row| {
-                    serde_json::json!({
-                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
-                        "invoice_id": ctx.invoice_id,
-                        "level": row.try_get::<String, _>("level").unwrap_or_default(),
-                        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
-                        "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
-                        "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
-                        "sent_at": row.try_get::<DateTime<Utc>, _>("sent_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                        "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                        "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
-                        "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
-                    })
-                })
-                .collect::<Vec<_>>();
-            Json(items).into_response()
-        }
+    match load_dunning_event_rows(&state, ctx.invoice_id).await {
+        Ok(items) => Json(items).into_response(),
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "list invoice dunning");
             err(
@@ -10804,11 +10889,39 @@ async fn create_dunning_event(
         return err(status, message);
     }
 
-    match sqlx::query(
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, invoice_id = %invoice_id, "create invoice dunning");
+        match &error {
+            sqlx::Error::Database(db_error) if db_error.code().as_deref() == Some("23505") => err(
+                StatusCode::CONFLICT,
+                "This dunning level already exists for this invoice",
+            ),
+            _ => err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create invoice dunning event",
+            ),
+        }
+    };
+    // The event, the overdue status and the letter it sends are one step.
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => return failed(error),
+    };
+    let payment_term_days =
+        match dunning_letters::load_dunning_payment_term_days(&mut *transaction).await {
+            Ok(days) => days,
+            Err(error) => return failed(error),
+        };
+    let payment_due_date = dunning_letters::dunning_payment_due_date(
+        invoice_document_date(Utc::now()),
+        payment_term_days,
+    );
+    let dunning_event_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_dunning_events (
-                invoice_id, level, note, due_date_snapshot, balance_due, created_by
-           ) VALUES ($1, $2, $3, $4, $5, $6)
-           RETURNING id, level, note, due_date_snapshot, balance_due, sent_at, created_at"#,
+                invoice_id, level, note, due_date_snapshot, balance_due, created_by,
+                payment_due_date
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id"#,
     )
     .bind(invoice_id)
     .bind(body.level.clone())
@@ -10816,71 +10929,305 @@ async fn create_dunning_event(
     .bind(Some(due_date))
     .bind(balance_due)
     .bind(auth.user_id)
-    .fetch_one(&state.db)
+    .bind(payment_due_date)
+    .fetch_one(&mut *transaction)
     .await
     {
-        Ok(row) => {
-            let dunning_event_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
-            let _ = sqlx::query(
-                "UPDATE invoices
-                 SET status = CASE
-                     WHEN status IN ('paid', 'cancelled', 'overdue') THEN status
-                     ELSE 'overdue'
-                 END
-                 WHERE id = $1",
-            )
-            .bind(invoice_id)
-            .execute(&state.db)
-            .await;
-
-            write_invoice_audit(
-                &state,
-                auth.user_id,
-                "create_invoice_dunning_event",
-                invoice_id,
-                serde_json::json!({
-                    "level": body.level,
-                    "balance_due": decimal_to_string(balance_due),
-                    "due_date_snapshot": due_date.to_string(),
-                }),
-            )
-            .await;
-
-            crate::realtime::publish_invoice_event(
-                &state,
-                Some(auth.user_id),
-                "invoice.dunning_created",
-                invoice_id,
-                serde_json::json!({
-                    "dunning_event_id": dunning_event_id,
-                    "level": body.level,
-                    "status": "overdue",
-                    "balance_due": decimal_to_string(balance_due),
-                    "due_date_snapshot": due_date.to_string(),
-                }),
-            )
-            .await;
-
-            Json(serde_json::json!({
-                "id": dunning_event_id,
-                "invoice_id": invoice_id,
-                "level": row.try_get::<String, _>("level").unwrap_or_default(),
-                "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
-                "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
-                "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
-                "sent_at": row.try_get::<DateTime<Utc>, _>("sent_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-            }))
-            .into_response()
+        Ok(id) => id,
+        Err(error) => return failed(error),
+    };
+    if let Err(error) = sqlx::query(
+        "UPDATE invoices
+         SET status = CASE
+             WHEN status IN ('paid', 'cancelled', 'overdue') THEN status
+             ELSE 'overdue'
+         END
+         WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .execute(&mut *transaction)
+    .await
+    {
+        return failed(error);
+    }
+    let letter = match dunning_letters::store_dunning_letter(
+        &mut *transaction,
+        invoice_id,
+        dunning_event_id,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        Ok(Some(letter)) => letter,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => return resp,
+    };
+    let letter_sha256 = stored_documents::sha256_hex(&letter.bytes);
+    if let Err(error) = transaction.commit().await {
+        if let Some(blob) = letter.blob {
+            blob.discard().await;
         }
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "create invoice dunning");
+        return failed(error);
+    }
+
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "create_invoice_dunning_event",
+        invoice_id,
+        serde_json::json!({
+            "level": body.level,
+            "dunning_event_id": dunning_event_id,
+            "balance_due": decimal_to_string(balance_due),
+            "due_date_snapshot": due_date.to_string(),
+            "payment_due_date": payment_due_date.to_string(),
+            "letter_file_name": letter.file_name,
+            "letter_sha256": letter_sha256,
+        }),
+    )
+    .await;
+
+    crate::realtime::publish_invoice_event(
+        &state,
+        Some(auth.user_id),
+        "invoice.dunning_created",
+        invoice_id,
+        serde_json::json!({
+            "dunning_event_id": dunning_event_id,
+            "level": body.level,
+            "status": "overdue",
+            "balance_due": decimal_to_string(balance_due),
+            "due_date_snapshot": due_date.to_string(),
+            "payment_due_date": payment_due_date.to_string(),
+        }),
+    )
+    .await;
+
+    match load_dunning_event_rows(&state, invoice_id).await {
+        Ok(items) => items
+            .into_iter()
+            .find(|item| item["id"] == json!(dunning_event_id))
+            .map(|item| Json(item).into_response())
+            .unwrap_or_else(|| err(StatusCode::NOT_FOUND, "Dunning event not found")),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load created dunning event");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create invoice dunning event",
+                "Failed to load invoice dunning event",
             )
         }
     }
+}
+
+fn dunning_letter_response(
+    bytes: Vec<u8>,
+    file_name: &str,
+    source: &'static str,
+) -> axum::response::Response {
+    invoice_pdf_response(
+        bytes,
+        format!("inline; filename=\"{}\"", file_name.replace('"', "")),
+        source,
+    )
+}
+
+async fn download_dunning_letter(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, dunning_event_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let Some(ctx) = (match load_invoice_dunning_context(&state, invoice_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    }) else {
+        return err(StatusCode::NOT_FOUND, "Invoice not found");
+    };
+    if let Err(resp) = ensure_patient_access(&state, &auth, ctx.patient_id).await {
+        return resp;
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "acquire dunning letter connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the dunning letter",
+            );
+        }
+    };
+    let (bytes, file_name, source) = match dunning_letters::dunning_letter_pdf(
+        &mut conn,
+        invoice_id,
+        dunning_event_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Dunning event not found"),
+        Err(resp) => return resp,
+    };
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "download_dunning_letter",
+        invoice_id,
+        json!({
+            "dunning_event_id": dunning_event_id,
+            "document": source,
+            "source": "staff_workspace",
+        }),
+    )
+    .await;
+    dunning_letter_response(bytes, &file_name, source)
+}
+
+/// The patient's own invoice whose PDF the patient may see, if so.
+async fn portal_invoice_with_documents(
+    state: &AppState,
+    auth: &AuthUser,
+    invoice_id: Uuid,
+) -> Result<(Uuid, String), axum::response::Response> {
+    auth.require_any_role(&[Role::Patient])?;
+    let patient_id = resolve_self_patient_id(state, auth.user_id).await?;
+    let row = sqlx::query(
+        r#"SELECT i.patient_id, i.released_at IS NOT NULL AS released, i.portal_visible,
+                  i.hide_amounts_from_patient, i.pdf_visible_to_patient, p.languages
+           FROM invoices i
+           JOIN patients p ON p.id = i.patient_id
+           WHERE i.id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %invoice_id, "load portal dunning access");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Invoice not found"))?;
+    if row.try_get::<Uuid, _>("patient_id").ok() != Some(patient_id)
+        || !row.try_get::<bool, _>("released").unwrap_or(false)
+        || !row.try_get::<bool, _>("portal_visible").unwrap_or(false)
+    {
+        return Err(err(StatusCode::NOT_FOUND, "Invoice not found"));
+    }
+    if row
+        .try_get::<bool, _>("hide_amounts_from_patient")
+        .unwrap_or(true)
+        || !row
+            .try_get::<bool, _>("pdf_visible_to_patient")
+            .unwrap_or(false)
+    {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "Invoice documents are hidden from patient",
+        ));
+    }
+    let language = resolve_invoice_pdf_language(
+        &row.try_get::<Vec<String>, _>("languages")
+            .unwrap_or_default(),
+    );
+    Ok((patient_id, language))
+}
+
+async fn list_my_dunning_letters(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    let (_, language) = match portal_invoice_with_documents(&state, &auth, invoice_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let invoice_number = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT invoice_number FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or_default()
+    .unwrap_or_default();
+    match load_dunning_event_rows(&state, invoice_id).await {
+        Ok(rows) => {
+            let items = rows
+                .into_iter()
+                .map(|row| {
+                    let level = row["level"].as_str().unwrap_or_default().to_string();
+                    let file_name = row["letter"]["file_name"]
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| {
+                            dunning_letters::dunning_letter_filename(&level, &invoice_number)
+                        });
+                    json!({
+                        "id": row["id"],
+                        "level": level,
+                        "title": dunning_letters::dunning_letter_title(&language, &level),
+                        "sent_at": row["sent_at"],
+                        "payment_due_date": row["payment_due_date"],
+                        "balance_due": row["balance_due"],
+                        "file_name": file_name,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Json(json!({ "items": items })).into_response()
+        }
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "list portal dunning letters");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to list dunning letters",
+            )
+        }
+    }
+}
+
+async fn download_my_dunning_letter(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((invoice_id, dunning_event_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if let Err(resp) = portal_invoice_with_documents(&state, &auth, invoice_id).await {
+        return resp;
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "acquire portal dunning letter connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the dunning letter",
+            );
+        }
+    };
+    let (bytes, file_name, source) = match dunning_letters::dunning_letter_pdf(
+        &mut conn,
+        invoice_id,
+        dunning_event_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Dunning event not found"),
+        Err(resp) => return resp,
+    };
+    write_invoice_audit(
+        &state,
+        auth.user_id,
+        "download_dunning_letter",
+        invoice_id,
+        json!({
+            "dunning_event_id": dunning_event_id,
+            "document": source,
+            "source": "patient_portal",
+        }),
+    )
+    .await;
+    dunning_letter_response(bytes, &file_name, source)
 }
 
 async fn update_invoice_visibility(
