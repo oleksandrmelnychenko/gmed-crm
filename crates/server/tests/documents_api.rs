@@ -1741,6 +1741,13 @@ async fn interpreter_sees_only_released_medical_documents_for_assigned_patient()
         seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
     let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    // Documents filed on an appointment open for that appointment's interpreter.
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(appointment_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
 
     let internal_id = seed_document(
@@ -1788,6 +1795,55 @@ async fn interpreter_sees_only_released_medical_documents_for_assigned_patient()
         &app,
         "GET",
         &format!("/api/v1/documents/{internal_id}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A released document of another interpreter's visit of the same patient
+    // stays closed: the patient link does not widen the appointment scope.
+    let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    let other_appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-other"),
+    )
+    .await;
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(other_appointment_id)
+        .bind(other_interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other_released_id = seed_document(
+        &pool,
+        admin_id,
+        patient_id,
+        other_appointment_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-other-released"),
+    )
+    .await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.to_string().contains(&other_released_id.to_string()));
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{other_released_id}"),
         &interpreter_bearer,
         None,
     )
