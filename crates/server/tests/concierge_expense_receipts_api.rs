@@ -2,7 +2,7 @@ mod support;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use chrono::{Duration, Utc};
+use chrono::Duration;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::{PgPool, Row};
