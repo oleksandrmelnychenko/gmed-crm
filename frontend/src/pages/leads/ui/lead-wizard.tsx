@@ -2706,6 +2706,8 @@ export function LeadWizard({
   const [prepaymentAmount, setPrepaymentAmount] = useState("");
   const [prepaymentDeadline, setPrepaymentDeadline] = useState("");
   const [commercialFlagsBusyCount, setCommercialFlagsBusyCount] = useState(0);
+  // Typed prepayment values committed on blur; shown as saving, never blocking.
+  const [commercialFlagsBackgroundCount, setCommercialFlagsBackgroundCount] = useState(0);
   const [conversionConfirmed, setConversionConfirmed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -5090,11 +5092,26 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
+  /**
+   * Persists commercial flags on the order. A `background` save commits a
+   * typed value when its field loses focus: it keeps the other controls
+   * enabled, because that blur usually comes from a click on the next control,
+   * and disabling it between mousedown and click swallowed that first click.
+   * Actions started meanwhile send the same typed values via ensureCommercial,
+   * and the per-flag request versions keep a stale response from winning.
+   */
   async function saveFlags(
     patchValue: CommercialFlagsPatch,
     rollbackValue: CommercialFlagsPatch,
+    { background = false }: { background?: boolean } = {},
   ) {
-    setCommercialFlagsBusyCount((current) => current + 1);
+    const existingOrderId = order?.id;
+    // Without an order the save creates it first, which must block the wizard.
+    const blocking = !background || !existingOrderId;
+    const setFlagsCount = blocking
+      ? setCommercialFlagsBusyCount
+      : setCommercialFlagsBackgroundCount;
+    setFlagsCount((current) => current + 1);
     const flagKeys = Object.keys(patchValue) as CommercialFlagKey[];
     const requestVersions = new Map(
       flagKeys.map((key) => {
@@ -5104,12 +5121,14 @@ ${serviceCommentLines.join("\n")}`
       }),
     );
     const targetLeadId = leadId;
-    const existingOrderId = order?.id;
     if (!existingOrderId) setBusy("flags");
-    setError("");
+    // Clearing a shown error moves the footer; a background save does it only
+    // after the click that caused the blur has landed.
+    if (blocking) setError("");
     try {
       if (existingOrderId) {
         const saved = await updateOrderCommercialBasis(existingOrderId, patchValue);
+        if (!blocking && hydrated.current === targetLeadId) setError("");
         flagKeys.forEach((key) => {
           if (commercialFlagRequestVersionRef.current[key] === requestVersions.get(key)) {
             commercialFlagRequestVersionRef.current[key] += 1;
@@ -5155,7 +5174,7 @@ ${serviceCommentLines.join("\n")}`
       }
     } finally {
       if (!existingOrderId) setBusy(null);
-      setCommercialFlagsBusyCount((current) => Math.max(0, current - 1));
+      setFlagsCount((current) => Math.max(0, current - 1));
     }
   }
 
@@ -7790,6 +7809,7 @@ ${serviceCommentLines.join("\n")}`
                             void saveFlags(
                               { prepayment_amount: normalizedAmount },
                               { prepayment_amount: String(order.prepayment_amount ?? "") },
+                              { background: true },
                             );
                           }
                         }}
@@ -7815,6 +7835,7 @@ ${serviceCommentLines.join("\n")}`
                           void saveFlags(
                             { prepayment_due_at: nextDueAt },
                             { prepayment_due_at: order?.prepayment_due_at ?? "" },
+                            { background: true },
                           );
                         }}
                         disabled={isBusy}
@@ -8161,7 +8182,7 @@ ${serviceCommentLines.join("\n")}`
                 ) : null}
               </span>
               <span role="status" className="inline-flex items-center gap-1.5">
-                {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount > 0 ? (
+                {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
                   ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
                   : autosaveStatus === "dirty" ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
