@@ -763,6 +763,100 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_number(name: str, default: float, minimum: float = 0) -> float:
+    try:
+        return max(minimum, float(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+@dataclass(frozen=True)
+class DecodeGuard:
+    """CTranslate2 decoding limits against runaway output.
+
+    ``disable_unk`` keeps the model from emitting ``<unk>`` (decoded as "⁇")
+    for characters its vocabulary lacks (the tc-big models do this for "–",
+    "„", "ґ", "°" ...). The output length is capped relative to the source:
+    ``min(max_length, ratio * source_tokens + extra)``.
+
+    ``no_repeat_ngram_size`` blocks a token n-gram from repeating. Applied to
+    every sentence it corrupts clinical text that legitimately repeats short
+    token sequences ("140 mmol/l, 4,1 mmol/l" became "ммоль/1л", "mg/dl" became
+    "мг/л", "1-0-0" became "10-0"), so by default (``repeat_mode="loop"``) it is
+    only used to re-decode a sentence whose first output is a runaway: an
+    n-gram (n <= 4) repeated ``loop_repeats`` times in a row, or output that
+    reached the length cap. ``repeat_mode="always"`` blocks on every decode,
+    ``"off"`` never. Environment: ``MT_DISABLE_UNK`` (1/0),
+    ``MT_NO_REPEAT_NGRAM``, ``MT_NO_REPEAT_MODE``, ``MT_MAX_LENGTH_RATIO``,
+    ``MT_MAX_LENGTH_EXTRA``, ``MT_MAX_DECODING_LENGTH``.
+    """
+
+    disable_unk: bool = True
+    no_repeat_ngram_size: int = 3
+    repeat_mode: str = "loop"
+    length_ratio: float = 1.5
+    length_extra: int = 10
+    max_length: int = 512
+    loop_repeats: int = 4
+
+    @classmethod
+    def from_env(cls) -> "DecodeGuard":
+        default = cls()
+        mode = os.environ.get("MT_NO_REPEAT_MODE", default.repeat_mode).strip().lower()
+        return cls(
+            disable_unk=os.environ.get("MT_DISABLE_UNK", "1").strip().lower() not in ("0", "false", "no", "off"),
+            no_repeat_ngram_size=int(_env_number("MT_NO_REPEAT_NGRAM", default.no_repeat_ngram_size)),
+            repeat_mode=mode if mode in ("loop", "always", "off") else default.repeat_mode,
+            length_ratio=_env_number("MT_MAX_LENGTH_RATIO", default.length_ratio, 0.5),
+            length_extra=int(_env_number("MT_MAX_LENGTH_EXTRA", default.length_extra)),
+            max_length=int(_env_number("MT_MAX_DECODING_LENGTH", default.max_length, 1)),
+        )
+
+    def max_decoding_length(self, source_tokens: int) -> int:
+        return max(1, min(self.max_length, int(self.length_ratio * source_tokens) + self.length_extra))
+
+    def options(self, batch: list[list[str]], block_repeats: bool = False) -> dict[str, object]:
+        """``translate_batch`` keyword arguments; the cap follows the longest source."""
+        longest = max((len(tokens) for tokens in batch), default=0)
+        block = self.repeat_mode == "always" or (block_repeats and self.repeat_mode == "loop")
+        return {
+            "disable_unk": self.disable_unk,
+            "no_repeat_ngram_size": self.no_repeat_ngram_size if block else 0,
+            "max_decoding_length": self.max_decoding_length(longest),
+        }
+
+    def runaway(self, tokens: list[str], cap: int) -> bool:
+        """Output that hit the length cap or repeats one n-gram ``loop_repeats`` times in a row."""
+        if len(tokens) >= cap:
+            return True
+        repeats = max(2, self.loop_repeats)
+        for size in range(1, 5):
+            for start in range(len(tokens) - size * repeats + 1):
+                gram = tokens[start:start + size]
+                if all(tokens[start + k * size:start + (k + 1) * size] == gram for k in range(1, repeats)):
+                    return True
+        return False
+
+    def retries(self) -> bool:
+        return self.repeat_mode == "loop" and self.no_repeat_ngram_size > 0
+
+
+def _load_vocabularies(directory: Path) -> tuple[frozenset[str] | None, frozenset[str] | None]:
+    """Source and target token sets of a converted CTranslate2 model (None if absent)."""
+    def read(stem: str) -> frozenset[str] | None:
+        for suffix in (".json", ".txt"):
+            path = directory / f"{stem}{suffix}"
+            if path.is_file():
+                text = path.read_text(encoding="utf-8")
+                return frozenset(json.loads(text) if suffix == ".json" else text.splitlines())
+        return None
+
+    shared = read("shared_vocabulary")
+    if shared is not None:
+        return shared, shared
+    return read("source_vocabulary"), read("target_vocabulary")
+
+
 class CTranslate2Backend:
     """LRU of loaded OPUS-MT models converted to CTranslate2 int8.
 
@@ -771,10 +865,13 @@ class CTranslate2Backend:
     bounded by ``MT_THREADS`` per loaded model.
     """
 
-    def __init__(self, model_dir: Path | None = None, max_loaded: int | None = None, threads: int | None = None) -> None:
+    def __init__(self, model_dir: Path | None = None, max_loaded: int | None = None, threads: int | None = None,
+                 guard: DecodeGuard | None = None) -> None:
         self.model_dir = Path(model_dir or os.environ.get("MT_MODEL_DIR", "/app/mt-models"))
         self.max_loaded = max_loaded or _env_int("MT_MAX_LOADED_MODELS", 2)
         self.threads = threads or _env_int("MT_THREADS", 2)
+        self.guard = guard or DecodeGuard.from_env()
+        self._vocab: dict[str, tuple[frozenset[str] | None, frozenset[str] | None]] = {}
         self._loaded: OrderedDict[str, tuple[object, object, object, threading.Lock]] = OrderedDict()
         self._registry_lock = threading.Lock()
         self._spm: dict[str, tuple[object, object]] = {}
@@ -798,22 +895,44 @@ class CTranslate2Backend:
                 self._spm[model] = entry
             return entry
 
+    def _vocabularies(self, model: str) -> tuple[frozenset[str] | None, frozenset[str] | None]:
+        with self._registry_lock:
+            entry = self._vocab.get(model)
+            if entry is None:
+                entry = _load_vocabularies(self.model_dir / model)
+                self._vocab[model] = entry
+            return entry
+
     def unencodable(self, model: str, chars: set[str]) -> set[str]:
         """Characters the model would turn into unk or change by normalization.
 
         Letters are checked against the source vocabulary only (the target
         vocabulary legitimately lacks the source script); symbols and digits
-        must survive both, because the model copies them into the output.
+        must survive both, because the model copies them into the output. A
+        symbol whose SentencePiece pieces are missing from the model vocabulary
+        (e.g. "°", "–", "±" in the tc-big models) also counts: the model sees
+        it as ``<unk>``. Letters are not held to that stricter test, so a
+        missing letter such as "ґ" is never masked in the middle of a word.
         """
         source, target = self._tokenizers(model)
+        source_vocab, target_vocab = self._vocabularies(model)
         unknown: set[str] = set()
         for char in chars:
-            processors = (source,) if char.isalpha() else (source, target)
-            for processor in processors:
+            checks = ((source, None),) if char.isalpha() else ((source, source_vocab), (target, target_vocab))
+            for processor, vocab in checks:
                 ids = processor.encode(char)
                 if processor.unk_id() in ids or processor.decode(ids) != char:
                     unknown.add(char)
                     break
+                if vocab is not None:
+                    # Word-initial pieces ("▁–") and the bare piece used inside
+                    # a word ("38,7°C") must both be known to the model.
+                    pieces = processor.encode(char, out_type=str)
+                    if processor.piece_to_id(char) != processor.unk_id():
+                        pieces.append(char)
+                    if any(piece not in vocab for piece in pieces):
+                        unknown.add(char)
+                        break
         return unknown
 
     def _get(self, model: str) -> tuple[object, object, object, threading.Lock]:
@@ -849,11 +968,29 @@ class CTranslate2Backend:
         prefix = [tag] if tag else []
         # "</s>" is required: without it the tc-big models repeat phrases.
         batch = [prefix + source.encode(text, out_type=str) + ["</s>"] for text in texts]
+        # Sentences of similar length share a batch, so the length cap of the
+        # decode guard follows each sentence closely.
+        order = sorted(range(len(batch)), key=lambda index: len(batch[index]))
+        outputs: list[str] = [""] * len(batch)
         with lock:
-            results = translator.translate_batch(
-                batch, beam_size=beam_size, max_batch_size=16, max_decoding_length=512,
-            )
-        return [target.decode(result.hypotheses[0]) for result in results]
+            for start in range(0, len(order), 16):
+                indices = order[start:start + 16]
+                chunk = [batch[index] for index in indices]
+                options = self.guard.options(chunk)
+                results = translator.translate_batch(chunk, beam_size=beam_size, max_batch_size=16, **options)
+                hypotheses = [result.hypotheses[0] for result in results]
+                runaway = [k for k, tokens in enumerate(hypotheses)
+                           if self.guard.retries() and self.guard.runaway(tokens, options["max_decoding_length"])]
+                if runaway:
+                    again = [chunk[k] for k in runaway]
+                    retried = translator.translate_batch(
+                        again, beam_size=beam_size, max_batch_size=16, **self.guard.options(again, block_repeats=True),
+                    )
+                    for k, result in zip(runaway, retried, strict=True):
+                        hypotheses[k] = result.hypotheses[0]
+                for index, tokens in zip(indices, hypotheses, strict=True):
+                    outputs[index] = target.decode(tokens)
+        return outputs
 
 
 _default_engine: MTEngine | None = None

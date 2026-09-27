@@ -436,3 +436,132 @@ def test_german_rewrites_and_phrase_terms():
     assert backend.calls[0][3] == ["Sie fühle sich sehr schwach.", "Appetit XQ1 vermindert.", "Stuhlgang XQ1."]
     result = engine(FakeBackend()).translate("• Ambulant erworbene Pneumonie (J15.9)\nKein Pflegegrad.", "de", "ru", [])
     assert result.text == "• Внебольничная пневмония (J15.9)\nСтепень ухода (Pflegegrad) не установлена."
+
+
+# -- CTranslate2 decode guard ----------------------------------------------
+
+from app.mt_engine import CTranslate2Backend, DecodeGuard  # noqa: E402
+
+
+def test_decode_guard_defaults_and_length_cap():
+    guard = DecodeGuard()
+    assert guard.max_decoding_length(10) == 25
+    assert guard.max_decoding_length(1000) == 512
+    # n-gram blocking is off on the first decode (it corrupts "mmol/l" lists and dosing schemes)
+    assert guard.options([["a"] * 4, ["b"] * 20]) == {
+        "disable_unk": True, "no_repeat_ngram_size": 0, "max_decoding_length": 40,
+    }
+    assert guard.options([["a"] * 4], block_repeats=True)["no_repeat_ngram_size"] == 3
+    assert DecodeGuard(repeat_mode="always").options([["a"]])["no_repeat_ngram_size"] == 3
+    assert DecodeGuard(repeat_mode="off").options([["a"]], block_repeats=True)["no_repeat_ngram_size"] == 0
+
+
+def test_decode_guard_detects_runaway_output():
+    guard = DecodeGuard()
+    sentence = "▁Na ▁140 ▁mmol / l , ▁K ▁4 ▁mmol / l , ▁Cl ▁102 ▁mmol / l .".split()
+    assert not guard.runaway(sentence, 100)
+    assert not guard.runaway("▁1 - 0 - 0".split(), 100)
+    assert guard.runaway("▁a ▁b , ▁x , ▁x , ▁x , ▁x ,".split(), 100)
+    assert guard.runaway(["▁x"] * 4, 100)
+    assert guard.runaway(["▁a", "▁b"], 2)
+
+
+def test_decode_guard_reads_environment(monkeypatch):
+    monkeypatch.setenv("MT_DISABLE_UNK", "0")
+    monkeypatch.setenv("MT_NO_REPEAT_NGRAM", "4")
+    monkeypatch.setenv("MT_NO_REPEAT_MODE", "always")
+    monkeypatch.setenv("MT_MAX_LENGTH_RATIO", "2")
+    monkeypatch.setenv("MT_MAX_LENGTH_EXTRA", "5")
+    monkeypatch.setenv("MT_MAX_DECODING_LENGTH", "30")
+    guard = DecodeGuard.from_env()
+    assert guard == DecodeGuard(False, 4, "always", 2.0, 5, 30)
+    assert guard.max_decoding_length(20) == 30
+    monkeypatch.setenv("MT_NO_REPEAT_NGRAM", "not-a-number")
+    monkeypatch.setenv("MT_NO_REPEAT_MODE", "sometimes")
+    assert DecodeGuard.from_env().no_repeat_ngram_size == 3
+    assert DecodeGuard.from_env().repeat_mode == "loop"
+
+
+class _Tokenizer:
+    """Character-level stand-in for a SentencePiece processor."""
+
+    def __init__(self, unknown=()):
+        self.unknown = set(unknown)
+
+    def unk_id(self):
+        return 0
+
+    def encode(self, text, out_type=int):
+        if out_type is str:
+            return list(text)
+        return [0 if char in self.unknown else ord(char) for char in text]
+
+    def piece_to_id(self, piece):
+        return 0 if piece in self.unknown else 1
+
+    def decode(self, pieces):
+        return "".join(piece if isinstance(piece, str) else chr(piece) for piece in pieces)
+
+
+class _Result:
+    def __init__(self, tokens):
+        self.hypotheses = [tokens]
+
+
+class _Translator:
+    def __init__(self):
+        self.calls = []
+
+    def translate_batch(self, batch, **options):
+        self.calls.append((batch, options))
+        results = []
+        for tokens in batch:
+            tokens = [token for token in tokens if token != "</s>"]
+            if tokens[:4] == list("loop") and not options["no_repeat_ngram_size"]:
+                tokens = tokens + ["x"] * 6  # runaway repetition
+            results.append(_Result(tokens))
+        return results
+
+
+def test_translate_passes_guard_options_and_keeps_order(tmp_path):
+    import threading
+
+    backend = CTranslate2Backend(tmp_path, guard=DecodeGuard())
+    translator = _Translator()
+    backend._get = lambda model: (translator, _Tokenizer(), _Tokenizer(), threading.Lock())
+    texts = ["long sentence here"] + [f"s{i}" for i in range(16)]
+    out = backend.translate("de-zle", texts, None, 4)
+    assert out == texts
+    assert len(translator.calls) == 2
+    short_batch, short_options = translator.calls[0]
+    long_batch, long_options = translator.calls[1]
+    assert short_options["disable_unk"] is True and short_options["no_repeat_ngram_size"] == 0
+    assert short_options["max_decoding_length"] < long_options["max_decoding_length"]
+    assert long_options["max_decoding_length"] == int(1.5 * max(len(tokens) for tokens in long_batch)) + 10
+
+
+def test_only_runaway_outputs_are_redecoded_with_ngram_blocking(tmp_path):
+    import threading
+
+    backend = CTranslate2Backend(tmp_path, guard=DecodeGuard())
+    translator = _Translator()
+    backend._get = lambda model: (translator, _Tokenizer(), _Tokenizer(), threading.Lock())
+    out = backend.translate("zle-de", ["fine", "loop me"], None, 4)
+    assert out == ["fine", "loop me"]
+    assert len(translator.calls) == 2
+    retried_batch, retried_options = translator.calls[1]
+    assert retried_options["no_repeat_ngram_size"] == 3
+    assert ["".join(tokens[:-1]) for tokens in retried_batch] == ["loop me"]
+
+
+def test_symbols_missing_from_model_vocabulary_are_unencodable(tmp_path):
+    import json
+
+    model = tmp_path / "de-zle"
+    model.mkdir()
+    (model / "shared_vocabulary.json").write_text(json.dumps(list("abc,.1") + ["\u2581"]), encoding="utf-8")
+    backend = CTranslate2Backend(tmp_path, guard=DecodeGuard())
+    backend._tokenizers = lambda name: (_Tokenizer(unknown={"®"}), _Tokenizer())
+    # "°" encodes without unk but is not in the model vocabulary; "ґ" is a
+    # letter and must not be masked; "®" is unknown to SentencePiece itself.
+    assert backend.unencodable("de-zle", {"°", "ґ", "®", ",", "a", "1"}) == {"°", "®"}
