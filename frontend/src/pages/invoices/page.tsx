@@ -99,6 +99,7 @@ import {
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
+import { patientRelationTypeLabel } from "@/pages/patients/model/detail-model";
 import { cn } from "@/lib/utils";
 import {
   dunningLevelTone,
@@ -146,6 +147,9 @@ import {
   invoiceToStatusForm,
   invoiceToPayerForm,
   invoiceToVisibilityForm,
+  invoiceRecipientAddressLines,
+  payerFormToPayload,
+  payerRelationOptionLabel,
   invoicesPermissions,
   isCoveredByPrepaymentOnly,
   nextDunningLevel,
@@ -411,6 +415,10 @@ function createInvoiceUiState(seed: InvoiceCreateSeed): InvoiceUiState {
       contactEmail: "",
       contactPhone: "",
       contactRelationship: "",
+      addressStreet: "",
+      addressZip: "",
+      addressCity: "",
+      addressCountry: "",
       notes: "",
     },
     payerBusy: false,
@@ -1966,14 +1974,7 @@ function useStaffInvoicesPageContent() {
     if (!selectedInvoiceId) return;
     setPayerBusy(true);
     try {
-      await updateInvoicePayer(selectedInvoiceId, {
-        payer_patient_relation_id: payerForm.payerPatientRelationId || null,
-        payer_contact_name: payerForm.contactName.trim() || null,
-        payer_contact_email: payerForm.contactEmail.trim() || null,
-        payer_contact_phone: payerForm.contactPhone.trim() || null,
-        payer_contact_relationship: payerForm.contactRelationship.trim() || null,
-        payer_notes: payerForm.notes.trim() || null,
-      });
+      await updateInvoicePayer(selectedInvoiceId, payerFormToPayload(payerForm));
       setPayerError(null);
       setReloadToken((current) => current + 1);
       setPayerDialogOpen(false);
@@ -3640,6 +3641,24 @@ function useStaffInvoicesPageContent() {
                           value={detail.payer?.contact_phone ?? t.common_not_set}
                         />
                       </div>
+                      {detail.recipient ? (
+                        <div className="mt-4 space-y-1 text-sm" data-testid="invoice-recipient">
+                          <p className="text-xs text-muted-foreground">
+                            {detail.recipient.is_payer
+                              ? t.revenue_invoices_recipient_payer
+                              : t.revenue_invoices_recipient_patient}
+                          </p>
+                          <p className="font-medium">{detail.recipient.name}</p>
+                          {invoiceRecipientAddressLines(detail.recipient).map((line) => (
+                            <p key={line}>{line}</p>
+                          ))}
+                          {!detail.recipient.has_postal_address ? (
+                            <StatusBadge tone="warning">
+                              {t.revenue_invoices_recipient_address_missing}
+                            </StatusBadge>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </section>
                   </div>
 
@@ -4318,9 +4337,8 @@ function useStaffInvoicesPageContent() {
             <div className="space-y-4 rounded-xl p-4">
               {payerError ? <ShellBanner tone="error">{payerError}</ShellBanner> : null}
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label={t.revenue_invoices_payer_relation_id}>
-                  <Input
-                    className={shellInputClassName}
+                <Field label={t.revenue_invoices_payer_relation}>
+                  <NativeComboboxSelect
                     value={payerForm.payerPatientRelationId}
                     onChange={(event) =>
                       setPayerForm((current) => ({
@@ -4328,9 +4346,16 @@ function useStaffInvoicesPageContent() {
                         payerPatientRelationId: event.target.value,
                       }))
                     }
+                    className={selectClassName}
                     disabled={!access.canManage || payerBusy}
-                    placeholder={t.revenue_invoices_optional_uuid}
-                  />
+                  >
+                    <option value="">{t.revenue_invoices_payer_relation_none}</option>
+                    {(detail?.payer_relation_options ?? []).map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {payerRelationOptionLabel(option, patientRelationTypeLabel)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
                 </Field>
                 <Field label={t.revenue_invoices_contact_name}>
                   <Input
@@ -4379,6 +4404,61 @@ function useStaffInvoicesPageContent() {
                       setPayerForm((current) => ({
                         ...current,
                         contactRelationship: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <p className="text-xs text-muted-foreground sm:col-span-2">
+                  {t.revenue_invoices_payer_address_hint}
+                </p>
+                <Field label={t.revenue_invoices_payer_address_street} className="sm:col-span-2">
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.addressStreet}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        addressStreet: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_payer_address_zip}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.addressZip}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        addressZip: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_payer_address_city}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.addressCity}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        addressCity: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canManage || payerBusy}
+                  />
+                </Field>
+                <Field label={t.revenue_invoices_payer_address_country}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.addressCountry}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        addressCountry: event.target.value,
                       }))
                     }
                     disabled={!access.canManage || payerBusy}

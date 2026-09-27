@@ -11,6 +11,9 @@ import {
   isCoveredByPrepaymentOnly,
   formatCurrency,
   formatDate,
+  invoiceRecipientAddressLines,
+  payerFormToPayload,
+  payerRelationOptionLabel,
 } from "./invoice-model";
 import type { InvoiceLineItem, QuoteOption } from "./types";
 
@@ -27,6 +30,81 @@ it("formats both date-only values and timestamps as a date", () => {
   expect(formatDate("2026-09-25T12:00:00+00:00", "de-DE")).not.toContain("T");
   expect(formatDate("2026-09-25T12:00:00+00:00", "de-DE")).toContain("2026");
   expect(formatDate(null, "de-DE", "—")).toBe("—");
+});
+
+describe("invoice payer and recipient", () => {
+  it("sends the payer relation and address with blank fields cleared", () => {
+    expect(
+      payerFormToPayload({
+        payerPatientRelationId: "",
+        contactName: "  Ivan Payer ",
+        contactEmail: "",
+        contactPhone: " ",
+        contactRelationship: "father",
+        addressStreet: "Kyivska 5",
+        addressZip: "01001",
+        addressCity: " Kyiv ",
+        addressCountry: "",
+        notes: "",
+      }),
+    ).toEqual({
+      payer_patient_relation_id: null,
+      payer_contact_name: "Ivan Payer",
+      payer_contact_email: null,
+      payer_contact_phone: null,
+      payer_contact_relationship: "father",
+      payer_address_street: "Kyivska 5",
+      payer_address_zip: "01001",
+      payer_address_city: "Kyiv",
+      payer_address_country: null,
+      payer_notes: null,
+    });
+  });
+
+  it("labels a relative offered as payer by name, relation and patient number", () => {
+    const relationLabel = (value: string) => (value === "parent" ? "Parent" : value);
+    expect(
+      payerRelationOptionLabel(
+        {
+          id: "r1",
+          related_name: "Dad",
+          relation_type: "parent",
+          related_patient_name: "Otto Muster",
+          related_patient_pid: "PT-7",
+          has_address: true,
+        },
+        relationLabel,
+      ),
+    ).toBe("Otto Muster (Parent, PT-7)");
+    expect(
+      payerRelationOptionLabel(
+        { id: "r2", related_name: "Aunt", relation_type: "relative", has_address: false },
+        relationLabel,
+      ),
+    ).toBe("Aunt (relative)");
+  });
+
+  it("prints the recipient address as street, postcode with city and country", () => {
+    expect(
+      invoiceRecipientAddressLines({
+        name: "Ivan Payer",
+        street: "Kyivska 5",
+        zip: "01001",
+        city: "Kyiv",
+        country: "Ukraine",
+        is_payer: true,
+        has_postal_address: true,
+      }),
+    ).toEqual(["Kyivska 5", "01001 Kyiv", "Ukraine"]);
+    expect(
+      invoiceRecipientAddressLines({
+        name: "X",
+        city: "Kyiv",
+        is_payer: false,
+        has_postal_address: false,
+      }),
+    ).toEqual(["Kyiv"]);
+  });
 });
 
 it("formats the invoice currency without converting or relabelling the amount", () => {

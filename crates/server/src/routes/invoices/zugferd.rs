@@ -172,13 +172,25 @@ impl TaxGroup {
     }
 }
 
-fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
-    if line.vat_rate > Decimal::ZERO {
-        ("S", None)
-    } else if line.is_cost_passthrough {
-        ("E", Some(PASSTHROUGH_EXEMPTION))
+/// Why a line carries no VAT, as the e-invoice states it. The printed invoice
+/// uses the same wording so the visible document and the embedded XML agree.
+pub(super) fn line_exemption_reason(
+    vat_rate: Decimal,
+    is_cost_passthrough: bool,
+) -> Option<&'static str> {
+    if vat_rate > Decimal::ZERO {
+        None
+    } else if is_cost_passthrough {
+        Some(PASSTHROUGH_EXEMPTION)
     } else {
-        ("E", Some(ZERO_RATE_EXEMPTION))
+        Some(ZERO_RATE_EXEMPTION)
+    }
+}
+
+fn line_tax(line: &EInvoiceLine) -> (&'static str, Option<&'static str>) {
+    match line_exemption_reason(line.vat_rate, line.is_cost_passthrough) {
+        None => ("S", None),
+        Some(reason) => ("E", Some(reason)),
     }
 }
 

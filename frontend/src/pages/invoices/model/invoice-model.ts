@@ -8,10 +8,12 @@ import type {
   Filters,
   InvoiceItem,
   InvoiceLineItem,
+  InvoiceRecipient,
   InvoiceStatus,
   InvoiceType,
   InvoicesPermissions,
   PayerForm,
+  PayerRelationOption,
   QuoteOption,
   StatusForm,
   VisibilityForm,
@@ -274,8 +276,52 @@ export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
     contactEmail: invoice.payer?.contact_email ?? "",
     contactPhone: invoice.payer?.contact_phone ?? "",
     contactRelationship: invoice.payer?.contact_relationship ?? "",
+    addressStreet: invoice.payer?.address_street ?? "",
+    addressZip: invoice.payer?.address_zip ?? "",
+    addressCity: invoice.payer?.address_city ?? "",
+    addressCountry: invoice.payer?.address_country ?? "",
     notes: invoice.payer?.notes ?? "",
   };
+}
+
+/** Body of POST /invoices/{id}/payer; blank fields clear the stored value. */
+export function payerFormToPayload(form: PayerForm) {
+  const text = (value: string) => value.trim() || null;
+  return {
+    payer_patient_relation_id: form.payerPatientRelationId || null,
+    payer_contact_name: text(form.contactName),
+    payer_contact_email: text(form.contactEmail),
+    payer_contact_phone: text(form.contactPhone),
+    payer_contact_relationship: text(form.contactRelationship),
+    payer_address_street: text(form.addressStreet),
+    payer_address_zip: text(form.addressZip),
+    payer_address_city: text(form.addressCity),
+    payer_address_country: text(form.addressCountry),
+    payer_notes: text(form.notes),
+  };
+}
+
+/** Label of a relative offered as payer: name, relation and patient number. */
+export function payerRelationOptionLabel(
+  option: PayerRelationOption,
+  relationTypeLabel: (value: string) => string,
+) {
+  const name = option.related_patient_name?.trim() || option.related_name;
+  const details = [relationTypeLabel(option.relation_type), option.related_patient_pid]
+    .filter(Boolean)
+    .join(", ");
+  return details ? `${name} (${details})` : name;
+}
+
+/** Address lines of the invoice recipient as printed under the name. */
+export function invoiceRecipientAddressLines(recipient: InvoiceRecipient) {
+  const locality = [recipient.zip, recipient.city]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" ");
+  return [recipient.street?.trim(), locality, recipient.country?.trim()].filter(
+    (value): value is string => Boolean(value),
+  );
 }
 
 export function formatDate(

@@ -3343,6 +3343,149 @@ async fn staff_can_download_invoice_pdf_document() {
     assert!(pdf_text.contains("Approved PDF line"));
 }
 
+async fn seed_agency_invoice_settings(pool: &PgPool, admin_id: Uuid) {
+    for (key, value) in [
+        ("agency_name", "GMED Test Agentur"),
+        ("agency_address", "Albert-Schweitzer-Straße 56\n81735 München"),
+        ("agency_country_code", "DE"),
+        ("agency_tax_number", "143/999/00001"),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO system_settings (key, value, description, updated_by)
+               VALUES ($1, to_jsonb($2::text), $1, $3)
+               ON CONFLICT (key)
+               DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by"#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(admin_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+/// The payer is the invoice recipient on the printed invoice and the
+/// e-invoice buyer alike, with the payer's own address, never the patient's.
+#[tokio::test]
+async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-recipient");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Patientenweg 9', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let service_id =
+        seed_order_leistung(&pool, order_id, "Dolmetscherstunde", 100.0, "approved").await;
+    sqlx::query("UPDATE order_leistungen SET delivered_at = '2026-09-03T10:00:00Z' WHERE id = $1")
+        .bind(service_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(draft["recipient"]["name"], format!("First {tag} Last {tag}"));
+    assert_eq!(draft["recipient"]["street"], "Patientenweg 9");
+    assert_eq!(draft["recipient"]["is_payer"], false);
+
+    let relation_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_relations (patient_id, related_name, relation_type)
+           VALUES ($1, 'Ivan Zahler', 'parent') RETURNING id"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payer"),
+        &billing_bearer,
+        Some(json!({
+            "payer_patient_relation_id": relation_id,
+            "payer_contact_name": null,
+            "payer_address_street": "Kyivska 5",
+            "payer_address_zip": "01001",
+            "payer_address_city": "Kyiv",
+            "payer_address_country": "Ukraine",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["payer"]["address_city"], "Kyiv");
+    assert_eq!(updated["recipient"]["name"], "Ivan Zahler");
+    assert_eq!(updated["recipient"]["street"], "Kyivska 5");
+    assert_eq!(updated["recipient"]["is_payer"], true);
+    assert_eq!(updated["recipient"]["has_postal_address"], true);
+    assert_eq!(updated["payer_relation_options"][0]["id"], relation_id.to_string());
+
+    release_invoice(&app, &billing_bearer, &invoice_id).await;
+
+    let (status, _, xml) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/zugferd.xml"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    let buyer = xml
+        .split("<ram:BuyerTradeParty>")
+        .nth(1)
+        .and_then(|rest| rest.split("</ram:BuyerTradeParty>").next())
+        .unwrap();
+    assert!(buyer.contains("<ram:Name>Ivan Zahler</ram:Name>"), "{buyer}");
+    assert!(buyer.contains("<ram:LineOne>Kyivska 5</ram:LineOne>"), "{buyer}");
+    assert!(buyer.contains("<ram:CountryID>UA</ram:CountryID>"), "{buyer}");
+    assert!(!buyer.contains("Patientenweg"), "{buyer}");
+
+    let (status, _, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    assert!(text.contains("Ivan Zahler"), "{text}");
+    assert!(text.contains("Kyivska 5"), "{text}");
+    assert!(text.contains("01001 Kyiv"), "{text}");
+    assert!(!text.contains("Patientenweg 9"), "{text}");
+    assert!(!text.contains("01.01.1990"), "birth date must not be printed");
+    assert!(text.contains("Leistungsdatum"), "{text}");
+    assert!(text.contains("03.09.2026"), "{text}");
+}
+
 #[tokio::test]
 async fn patient_can_download_own_invoice_pdf() {
     let Some((app, pool, admin_id)) = test_context().await else {

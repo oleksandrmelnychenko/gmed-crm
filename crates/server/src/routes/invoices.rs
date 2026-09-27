@@ -35,6 +35,7 @@ pub(crate) mod advance_application;
 mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
+mod document;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -406,6 +407,10 @@ struct UpdateInvoicePayerRequest {
     payer_contact_phone: Option<String>,
     payer_contact_relationship: Option<String>,
     payer_notes: Option<String>,
+    payer_address_street: Option<String>,
+    payer_address_zip: Option<String>,
+    payer_address_city: Option<String>,
+    payer_address_country: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -537,8 +542,12 @@ struct InvoicePdfLineItem {
     quantity: String,
     unit_price: String,
     vat_rate: String,
+    vat_rate_value: Decimal,
     is_cost_passthrough: bool,
     line_gross: String,
+    line_net: Decimal,
+    line_vat: Decimal,
+    line_gross_value: Decimal,
 }
 
 #[derive(Clone)]
@@ -574,16 +583,16 @@ struct InvoicePdfContext {
     total_net: String,
     total_vat: String,
     total_gross: String,
-    credited_amount: String,
     /// Advance payments credited against this invoice.
     prepayment_applied_amount: String,
-    paid_amount: String,
-    balance_due: String,
     notes: Option<String>,
     patient_pid: String,
     patient_name: String,
     patient_title: Option<String>,
-    birth_date: Option<NaiveDate>,
+    /// Rechnungsempfänger: the payer when one is set, the patient otherwise.
+    recipient: document::InvoiceRecipient,
+    /// Leistungszeitraum (first and last service day).
+    service_period: Option<(NaiveDate, NaiveDate)>,
     order_number: String,
     quote_number: Option<String>,
     language: String,
@@ -751,8 +760,9 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 /// Staff working context in the invoice detail that the patient portal must
 /// not receive: internal visibility notes, advances available for crediting,
 /// the supporting documents list, the contract link, the credit-note form
-/// data and credit transfers (internal notes, other invoices).
-const STAFF_ONLY_INVOICE_KEYS: [&str; 7] = [
+/// data, credit transfers (internal notes, other invoices) and the patient's
+/// relatives offered as payers.
+const STAFF_ONLY_INVOICE_KEYS: [&str; 8] = [
     "visibility_note",
     "available_prepayments",
     "supporting_documents",
@@ -760,6 +770,7 @@ const STAFF_ONLY_INVOICE_KEYS: [&str; 7] = [
     "creditable_lines",
     "credit_transfers",
     "credit_transfer_targets",
+    "payer_relation_options",
 ];
 
 /// Internal pricing and sourcing fields of an invoice line (VAT source
@@ -1827,19 +1838,6 @@ fn invoice_pdf_text_width_mm(text: &str, font_size_pt: f32) -> f32 {
     pt_to_mm(font_size_pt) * em_total
 }
 
-fn truncate_invoice_pdf_text(text: &str, font_size_pt: f32, width_mm: f32) -> String {
-    let original = text.trim();
-    let mut value = original.to_string();
-    while !value.is_empty() && invoice_pdf_text_width_mm(&value, font_size_pt) > width_mm {
-        value.pop();
-    }
-    if value.len() < original.len() && value.len() > 3 {
-        value.truncate(value.len().saturating_sub(3));
-        value.push_str("...");
-    }
-    value
-}
-
 fn wrap_invoice_text(text: &str, font_size_pt: f32, available_width_mm: f32) -> Vec<String> {
     let normalized = text.trim();
     if normalized.is_empty() {
@@ -2091,18 +2089,47 @@ impl InvoicePdfLayout {
         }
     }
 
+    /// Two-column card of labelled values. Each label sits above its value and
+    /// long values wrap instead of being cut: identifiers such as the invoice
+    /// or order number must be printed in full.
     fn meta_grid(&mut self, cells: &[(&str, String)]) {
         if cells.is_empty() {
             return;
         }
         const COLUMN_GAP_MM: f32 = 10.0;
         const CARD_PADDING_X_MM: f32 = 5.0;
-        const CARD_PADDING_Y_MM: f32 = 4.0;
-        const ROW_HEIGHT_MM: f32 = 8.5;
+        const CARD_PADDING_Y_MM: f32 = 3.5;
+        const ROW_GAP_MM: f32 = 2.4;
+        const LABEL_SIZE_PT: f32 = 7.0;
+        const VALUE_SIZE_PT: f32 = 9.5;
+
+        let label_height_mm = invoice_pdf_line_height_mm(LABEL_SIZE_PT, 1.3);
+        let value_line_height_mm = invoice_pdf_line_height_mm(VALUE_SIZE_PT, 1.3);
+        let column_width_mm = (INVOICE_PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
+        let text_width_mm = column_width_mm - CARD_PADDING_X_MM * 2.0;
+        let wrapped = cells
+            .iter()
+            .map(|(_, value)| {
+                let lines = wrap_invoice_text(value, VALUE_SIZE_PT, text_width_mm);
+                if lines.is_empty() {
+                    vec!["—".to_string()]
+                } else {
+                    lines
+                }
+            })
+            .collect::<Vec<_>>();
+        let row_heights = wrapped
+            .chunks(2)
+            .map(|row| {
+                let lines = row.iter().map(Vec::len).max().unwrap_or(1) as f32;
+                label_height_mm + lines * value_line_height_mm
+            })
+            .collect::<Vec<_>>();
+        let card_height_mm = CARD_PADDING_Y_MM * 2.0
+            + row_heights.iter().sum::<f32>()
+            + ROW_GAP_MM * (row_heights.len().saturating_sub(1)) as f32;
 
         self.spacer(4.0);
-        let row_count = cells.len().div_ceil(2);
-        let card_height_mm = CARD_PADDING_Y_MM * 2.0 + row_count as f32 * ROW_HEIGHT_MM;
         self.ensure_space(card_height_mm);
         let card_top_mm = self.y_mm;
         let card_bottom_mm = card_top_mm - card_height_mm;
@@ -2151,41 +2178,41 @@ impl InvoicePdfLayout {
             );
         }
 
-        let column_width_mm = (INVOICE_PDF_CONTENT_WIDTH_MM - COLUMN_GAP_MM) / 2.0;
-        for (index, (label, value)) in cells.iter().enumerate() {
-            let row = index / 2;
-            let column = index % 2;
-            let column_left_mm =
-                INVOICE_PDF_LEFT_MARGIN_MM + column as f32 * (column_width_mm + COLUMN_GAP_MM);
-            let text_x_mm = column_left_mm + CARD_PADDING_X_MM;
-            let column_right_mm = column_left_mm + column_width_mm - CARD_PADDING_X_MM;
-            let baseline_y_mm = card_top_mm - CARD_PADDING_Y_MM - 3.2 - row as f32 * ROW_HEIGHT_MM;
-            let label_size_pt = 7.0;
-            let value_size_pt = 9.5;
-            let value_width_mm = invoice_pdf_text_width_mm(value, value_size_pt);
-            let value_x_mm = (column_right_mm - value_width_mm).max(text_x_mm + 18.0);
-            append_invoice_pdf_text_line(
-                &mut self.page_ops,
-                label,
-                text_x_mm,
-                baseline_y_mm,
-                label_size_pt,
-                &self.regular_font,
-                InvoicePdfColor::Muted,
-            );
-            append_invoice_pdf_text_line(
-                &mut self.page_ops,
-                &truncate_invoice_pdf_text(
-                    value,
-                    value_size_pt,
-                    (column_right_mm - value_x_mm).max(24.0),
-                ),
-                value_x_mm,
-                baseline_y_mm,
-                value_size_pt,
-                &self.bold_font,
-                InvoicePdfColor::Body,
-            );
+        let mut row_top_mm = card_top_mm - CARD_PADDING_Y_MM;
+        for (row_index, row_height_mm) in row_heights.iter().enumerate() {
+            for column in 0..2 {
+                let index = row_index * 2 + column;
+                let (Some((label, _)), Some(lines)) = (cells.get(index), wrapped.get(index)) else {
+                    continue;
+                };
+                let text_x_mm = INVOICE_PDF_LEFT_MARGIN_MM
+                    + column as f32 * (column_width_mm + COLUMN_GAP_MM)
+                    + CARD_PADDING_X_MM;
+                append_invoice_pdf_text_line(
+                    &mut self.page_ops,
+                    label,
+                    text_x_mm,
+                    row_top_mm - pt_to_mm(LABEL_SIZE_PT),
+                    LABEL_SIZE_PT,
+                    &self.regular_font,
+                    InvoicePdfColor::Muted,
+                );
+                for (line_index, line) in lines.iter().enumerate() {
+                    append_invoice_pdf_text_line(
+                        &mut self.page_ops,
+                        line,
+                        text_x_mm,
+                        row_top_mm
+                            - label_height_mm
+                            - pt_to_mm(VALUE_SIZE_PT)
+                            - line_index as f32 * value_line_height_mm,
+                        VALUE_SIZE_PT,
+                        &self.bold_font,
+                        InvoicePdfColor::Body,
+                    );
+                }
+            }
+            row_top_mm -= row_height_mm + ROW_GAP_MM;
         }
         self.y_mm = card_bottom_mm;
         self.spacer(6.0);
@@ -2342,10 +2369,62 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "page_label") => "Страница",
         ("en", "page_label") => "Page",
         (_, "page_label") => "Seite",
-        ("uk", "issued_on") => "Виставлено",
-        ("ru", "issued_on") => "Выставлен",
-        ("en", "issued_on") => "Issued on",
-        (_, "issued_on") => "Ausgestellt am",
+        ("uk", "issued_on") => "Дата рахунку",
+        ("ru", "issued_on") => "Дата счёта",
+        ("en", "issued_on") => "Invoice date",
+        (_, "issued_on") => "Rechnungsdatum",
+        ("uk", "invoice_number") => "Номер рахунку",
+        ("ru", "invoice_number") => "Номер счёта",
+        ("en", "invoice_number") => "Invoice number",
+        (_, "invoice_number") => "Rechnungsnummer",
+        ("uk", "recipient_heading") => "Одержувач рахунку",
+        ("ru", "recipient_heading") => "Получатель счёта",
+        ("en", "recipient_heading") => "Bill to",
+        (_, "recipient_heading") => "Rechnungsempfänger",
+        ("uk", "service_period") => "Період надання послуг",
+        ("ru", "service_period") => "Период оказания услуг",
+        ("en", "service_period") => "Service period",
+        (_, "service_period") => "Leistungszeitraum",
+        ("uk", "service_date") => "Дата надання послуг",
+        ("ru", "service_date") => "Дата оказания услуг",
+        ("en", "service_date") => "Service date",
+        (_, "service_date") => "Leistungsdatum",
+        ("uk", "column_net") => "Нетто",
+        ("ru", "column_net") => "Нетто",
+        ("en", "column_net") => "Net",
+        (_, "column_net") => "Netto",
+        ("uk", "column_vat") => "ПДВ",
+        ("ru", "column_vat") => "НДС",
+        ("en", "column_vat") => "VAT",
+        (_, "column_vat") => "MwSt.",
+        ("uk", "column_gross") => "Брутто",
+        ("ru", "column_gross") => "Брутто",
+        ("en", "column_gross") => "Gross",
+        (_, "column_gross") => "Brutto",
+        ("uk", "vat_group_zero_rated") => "0 % (звільнено від ПДВ)",
+        ("ru", "vat_group_zero_rated") => "0 % (освобождено от НДС)",
+        ("en", "vat_group_zero_rated") => "0 % (VAT exempt)",
+        (_, "vat_group_zero_rated") => "0 % (steuerbefreit)",
+        ("uk", "vat_group_passthrough") => "Перевиставлені витрати (0 %)",
+        ("ru", "vat_group_passthrough") => "Перевыставленные расходы (0 %)",
+        ("en", "vat_group_passthrough") => "Pass-through costs (0 %)",
+        (_, "vat_group_passthrough") => "Durchlaufende Posten (0 %)",
+        ("uk", "vat_total_row") => "Разом",
+        ("ru", "vat_total_row") => "Итого",
+        ("en", "vat_total_row") => "Total",
+        (_, "vat_total_row") => "Summe",
+        ("uk", "invoice_amount") => "Сума рахунку",
+        ("ru", "invoice_amount") => "Сумма счёта",
+        ("en", "invoice_amount") => "Invoice total",
+        (_, "invoice_amount") => "Rechnungsbetrag",
+        ("uk", "amount_payable") => "До сплати",
+        ("ru", "amount_payable") => "К оплате",
+        ("en", "amount_payable") => "Amount due",
+        (_, "amount_payable") => "Zahlbetrag",
+        ("uk", "vat_exemption_note") => "Звільнення від ПДВ",
+        ("ru", "vat_exemption_note") => "Освобождение от НДС",
+        ("en", "vat_exemption_note") => "VAT exemption",
+        (_, "vat_exemption_note") => "Steuerbefreiung",
         ("uk", "due_date") => "Термін оплати",
         ("ru", "due_date") => "Срок оплаты",
         ("en", "due_date") => "Due date",
@@ -2358,10 +2437,6 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "patient_name") => "Пациент",
         ("en", "patient_name") => "Patient",
         (_, "patient_name") => "Patient",
-        ("uk", "birth_date") => "Дата народження",
-        ("ru", "birth_date") => "Дата рождения",
-        ("en", "birth_date") => "Birth date",
-        (_, "birth_date") => "Geburtsdatum",
         ("uk", "order_number") => "Замовлення",
         ("ru", "order_number") => "Заказ",
         ("en", "order_number") => "Order",
@@ -2378,10 +2453,6 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "tax_number") => "Налоговый номер",
         ("en", "tax_number") => "Tax number",
         (_, "tax_number") => "Steuernummer",
-        ("uk", "status") => "Статус",
-        ("ru", "status") => "Статус",
-        ("en", "status") => "Status",
-        (_, "status") => "Status",
         ("uk", "invoice_type") => "Тип рахунку",
         ("ru", "invoice_type") => "Тип счёта",
         ("en", "invoice_type") => "Invoice type",
@@ -2499,36 +2570,6 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
     }
 }
 
-fn invoice_pdf_status_label(language: &str, value: &str) -> &'static str {
-    match (language, value) {
-        ("uk", "draft") => "Чернетка",
-        ("uk", "sent") => "Надіслано",
-        ("uk", "partially_paid") => "Частково сплачено",
-        ("uk", "paid") => "Сплачено",
-        ("uk", "overdue") => "Прострочено",
-        ("uk", "cancelled") => "Скасовано",
-        ("ru", "draft") => "Черновик",
-        ("ru", "sent") => "Отправлен",
-        ("ru", "partially_paid") => "Частично оплачен",
-        ("ru", "paid") => "Оплачен",
-        ("ru", "overdue") => "Просрочен",
-        ("ru", "cancelled") => "Отменён",
-        ("en", "draft") => "Draft",
-        ("en", "sent") => "Sent",
-        ("en", "partially_paid") => "Partially paid",
-        ("en", "paid") => "Paid",
-        ("en", "overdue") => "Overdue",
-        ("en", "cancelled") => "Cancelled",
-        (_, "draft") => "Entwurf",
-        (_, "sent") => "Versandt",
-        (_, "partially_paid") => "Teilbezahlt",
-        (_, "paid") => "Bezahlt",
-        (_, "overdue") => "Überfällig",
-        (_, "cancelled") => "Storniert",
-        _ => "Status",
-    }
-}
-
 fn invoice_pdf_type_label(language: &str, value: &str) -> &'static str {
     match (language, value) {
         ("uk", "advance") => "Авансовий",
@@ -2581,16 +2622,33 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
 
     items
         .iter()
-        .map(|item| InvoicePdfLineItem {
-            description: invoice_pdf_value_to_string(item.get("description")),
-            quantity: invoice_pdf_value_to_string(item.get("quantity")),
-            unit_price: invoice_pdf_value_to_string(item.get("unit_price")),
-            vat_rate: invoice_pdf_value_to_string(item.get("vat_rate")),
-            is_cost_passthrough: item
-                .get("is_cost_passthrough")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
+        .map(|item| {
+            let vat_rate_value = invoice_json_decimal(item, "vat_rate").unwrap_or(Decimal::ZERO);
+            // Legacy lines may lack stored amounts; derive them the way new
+            // lines are computed.
+            let (net, vat, gross) = compute_invoice_line_parts(
+                invoice_json_decimal(item, "quantity").unwrap_or(Decimal::ONE),
+                invoice_json_decimal(item, "unit_price").unwrap_or(Decimal::ZERO),
+                vat_rate_value,
+            );
+            let line_net = invoice_json_decimal(item, "line_net").unwrap_or(net);
+            let line_vat = invoice_json_decimal(item, "line_vat").unwrap_or(vat);
+            let line_gross_value = invoice_json_decimal(item, "line_gross").unwrap_or(gross);
+            InvoicePdfLineItem {
+                description: invoice_pdf_value_to_string(item.get("description")),
+                quantity: invoice_pdf_value_to_string(item.get("quantity")),
+                unit_price: invoice_pdf_value_to_string(item.get("unit_price")),
+                vat_rate: invoice_pdf_value_to_string(item.get("vat_rate")),
+                vat_rate_value,
+                is_cost_passthrough: item
+                    .get("is_cost_passthrough")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                line_gross: invoice_pdf_value_to_string(item.get("line_gross")),
+                line_net,
+                line_vat,
+                line_gross_value,
+            }
         })
         .collect()
 }
@@ -3754,6 +3812,8 @@ async fn load_invoice_detail(
                   i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
                   i.payer_patient_relation_id, i.payer_contact_name, i.payer_contact_email,
                   i.payer_contact_phone, i.payer_contact_relationship, i.payer_notes,
+                  i.payer_address_street, i.payer_address_zip, i.payer_address_city,
+                  i.payer_address_country,
                   i.payer_updated_at,
                   o.order_number, i.currency, o.contract_id, q.quote_number,
                   p.first_name, p.last_name, p.patient_id AS patient_pid,
@@ -4010,11 +4070,53 @@ async fn load_invoice_detail(
     } else {
         Vec::new()
     };
+    let recipient = match state.db.acquire().await {
+        Ok(mut conn) => document::load_invoice_recipient(&mut conn, invoice_id).await,
+        Err(error) => Err(error),
+    }
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice recipient");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .map(|recipient| recipient.to_json());
+    // Relatives of the patient the payer can be picked from (staff only).
+    let payer_relation_options = sqlx::query(
+        r#"SELECT relation.id, relation.related_name, relation.relation_type,
+                  relative.patient_id AS related_patient_pid,
+                  NULLIF(btrim(concat_ws(' ', relative.first_name, relative.last_name)), '')
+                      AS related_patient_name,
+                  COALESCE(btrim(relative.address_street), '') <> '' AS has_address
+           FROM patient_relations relation
+           LEFT JOIN patients relative ON relative.id = relation.related_patient_id
+           WHERE relation.patient_id = $1
+           ORDER BY relation.is_emergency_contact DESC, relation.created_at, relation.id"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payer relations");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?
+    .into_iter()
+    .map(|relation| {
+        json!({
+            "id": relation.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "related_name": relation.try_get::<String, _>("related_name").unwrap_or_default(),
+            "relation_type": relation.try_get::<String, _>("relation_type").unwrap_or_default(),
+            "related_patient_pid": relation.try_get::<Option<String>, _>("related_patient_pid").unwrap_or_default(),
+            "related_patient_name": relation.try_get::<Option<String>, _>("related_patient_name").unwrap_or_default(),
+            "has_address": relation.try_get::<bool, _>("has_address").unwrap_or(false),
+        })
+    })
+    .collect::<Vec<_>>();
 
     Ok(Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
+        "recipient": recipient,
+        "payer_relation_options": payer_relation_options,
         "order_id": invoice_order_id,
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
         "contract_id": row.try_get::<Option<Uuid>, _>("contract_id").unwrap_or_default(),
@@ -4067,6 +4169,10 @@ async fn load_invoice_detail(
             "relation_type": row.try_get::<Option<String>, _>("payer_relation_type").unwrap_or_default(),
             "relation_patient_name": row.try_get::<Option<String>, _>("payer_relation_patient_name").unwrap_or_default(),
             "relation_patient_pid": row.try_get::<Option<String>, _>("payer_relation_patient_pid").unwrap_or_default(),
+            "address_street": row.try_get::<Option<String>, _>("payer_address_street").unwrap_or_default(),
+            "address_zip": row.try_get::<Option<String>, _>("payer_address_zip").unwrap_or_default(),
+            "address_city": row.try_get::<Option<String>, _>("payer_address_city").unwrap_or_default(),
+            "address_country": row.try_get::<Option<String>, _>("payer_address_country").unwrap_or_default(),
             "notes": row.try_get::<Option<String>, _>("payer_notes").unwrap_or_default(),
             "updated_at": row.try_get::<Option<DateTime<Utc>>, _>("payer_updated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         },
@@ -4080,66 +4186,82 @@ async fn load_invoice_pdf_context(
     state: &AppState,
     invoice_id: Uuid,
 ) -> Result<Option<InvoicePdfContext>, axum::response::Response> {
-    let row = sqlx::query(
-        r#"SELECT i.id, i.patient_id, i.invoice_number, i.invoice_type, i.status,
-                  i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
-                  i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.line_items, i.notes,
-                  i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
-                  o.order_number, i.currency, q.quote_number,
-                  p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
-                  p.birth_date, p.languages,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_holder') AS agency_bank_holder,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
-           FROM invoices i
-           LEFT JOIN orders o ON o.id = i.order_id
-           JOIN patients p ON p.id = i.patient_id
-           LEFT JOIN quotes q ON q.id = i.quote_id
-           WHERE i.id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice pdf context");
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, invoice_id = %invoice_id, "load invoice pdf context");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load invoice PDF context",
         )
-    })?;
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    load_invoice_pdf_context_on(&mut conn, invoice_id)
+        .await
+        .map_err(failed)
+}
 
-    let Some(row) = row else {
+/// Everything printed on the invoice, read through one connection so a
+/// release can render the document inside its own transaction.
+async fn load_invoice_pdf_context_on(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+) -> Result<Option<InvoicePdfContext>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT i.id, i.patient_id, i.order_id, i.invoice_number, i.invoice_type, i.status,
+                  i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
+                  i.prepayment_applied_amount, i.line_items, i.notes,
+                  i.portal_visible, i.hide_amounts_from_patient, i.pdf_visible_to_patient,
+                  o.order_number, i.currency, q.quote_number,
+                  p.patient_id AS patient_pid, p.title, p.first_name, p.last_name,
+                  p.languages,
+                  {recipient_columns},
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_holder') AS agency_bank_holder,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
+           FROM invoices i
+           LEFT JOIN orders o ON o.id = i.order_id
+           JOIN patients p ON p.id = i.patient_id
+           LEFT JOIN quotes q ON q.id = i.quote_id
+           {recipient_joins}
+           WHERE i.id = $1"#,
+        recipient_columns = document::RECIPIENT_COLUMNS,
+        recipient_joins = document::RECIPIENT_JOINS,
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
         return Ok(None);
     };
 
     let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    let total_gross = row
-        .try_get::<Decimal, _>("total_gross")
-        .unwrap_or(Decimal::ZERO);
-    let paid_amount = row
-        .try_get::<Decimal, _>("paid_amount")
-        .unwrap_or(Decimal::ZERO);
-    let credited_amount = row
-        .try_get::<Decimal, _>("credited_amount")
-        .unwrap_or(Decimal::ZERO);
-    let prepayment_applied_amount = row
-        .try_get::<Decimal, _>("prepayment_applied_amount")
-        .unwrap_or(Decimal::ZERO);
     let line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
     let languages = row
         .try_get::<Vec<String>, _>("languages")
         .unwrap_or_default();
+    let service_period = document::load_invoice_service_period(
+        conn,
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        &line_items,
+    )
+    .await?;
+    let setting = |key: &str| {
+        row.try_get::<Option<String>, _>(key)
+            .unwrap_or_default()
+            .filter(|value| !value.trim().is_empty())
+    };
 
     Ok(Some(InvoicePdfContext {
         currency: row
@@ -4148,7 +4270,8 @@ async fn load_invoice_pdf_context(
         invoice_id,
         patient_id,
         invoice_number: row
-            .try_get::<String, _>("invoice_number")
+            .try_get::<Option<String>, _>("invoice_number")
+            .unwrap_or_default()
             .unwrap_or_default(),
         invoice_type: row.try_get::<String, _>("invoice_type").unwrap_or_default(),
         status: row.try_get::<String, _>("status").unwrap_or_default(),
@@ -4173,17 +4296,14 @@ async fn load_invoice_pdf_context(
             row.try_get::<Decimal, _>("total_vat")
                 .unwrap_or(Decimal::ZERO),
         ),
-        total_gross: decimal_to_string(total_gross),
-        credited_amount: decimal_to_string(credited_amount),
-        prepayment_applied_amount: decimal_to_string(prepayment_applied_amount),
-        paid_amount: decimal_to_string(paid_amount),
-        balance_due: decimal_to_string(invoice_balance_due(
-            &row.try_get::<String, _>("status").unwrap_or_default(),
-            total_gross,
-            credited_amount,
-            paid_amount,
-            prepayment_applied_amount,
-        )),
+        total_gross: decimal_to_string(
+            row.try_get::<Decimal, _>("total_gross")
+                .unwrap_or(Decimal::ZERO),
+        ),
+        prepayment_applied_amount: decimal_to_string(
+            row.try_get::<Decimal, _>("prepayment_applied_amount")
+                .unwrap_or(Decimal::ZERO),
+        ),
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -4202,9 +4322,8 @@ async fn load_invoice_pdf_context(
             .unwrap_or_default()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
-        birth_date: row
-            .try_get::<Option<NaiveDate>, _>("birth_date")
-            .unwrap_or_default(),
+        recipient: document::resolve_invoice_recipient(&document::recipient_source_from_row(&row)),
+        service_period,
         order_number: row
             .try_get::<Option<String>, _>("order_number")
             .unwrap_or_default()
@@ -4215,60 +4334,79 @@ async fn load_invoice_pdf_context(
         language: resolve_invoice_pdf_language(&languages),
         line_items: parse_invoice_pdf_line_items(&line_items),
         agency: InvoicePdfAgency {
-            name: row
-                .try_get::<Option<String>, _>("agency_name")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty())
+            name: setting("agency_name")
                 .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
-            care_of: row
-                .try_get::<Option<String>, _>("agency_care_of")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            address: row
-                .try_get::<Option<String>, _>("agency_address")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            phone: row
-                .try_get::<Option<String>, _>("agency_phone")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            email: row
-                .try_get::<Option<String>, _>("agency_email")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            website: row
-                .try_get::<Option<String>, _>("agency_website")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_holder: row
-                .try_get::<Option<String>, _>("agency_bank_holder")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_name: row
-                .try_get::<Option<String>, _>("agency_bank_name")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_swift: row
-                .try_get::<Option<String>, _>("agency_bank_swift")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            bank_iban: row
-                .try_get::<Option<String>, _>("agency_bank_iban")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            vat_id: row
-                .try_get::<Option<String>, _>("agency_vat_id")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
-            tax_number: row
-                .try_get::<Option<String>, _>("agency_tax_number")
-                .unwrap_or_default()
-                .filter(|value| !value.trim().is_empty()),
+            care_of: setting("agency_care_of"),
+            address: setting("agency_address"),
+            phone: setting("agency_phone"),
+            email: setting("agency_email"),
+            website: setting("agency_website"),
+            bank_holder: setting("agency_bank_holder"),
+            bank_name: setting("agency_bank_name"),
+            bank_swift: setting("agency_bank_swift"),
+            bank_iban: setting("agency_bank_iban"),
+            vat_id: setting("agency_vat_id"),
+            tax_number: setting("agency_tax_number"),
         },
     }))
 }
 
+/// The agency's name and address on one line, printed small above the
+/// recipient like the return address of a letter.
+fn invoice_pdf_sender_line(agency: &InvoicePdfAgency) -> String {
+    let mut parts = vec![agency.name.trim().to_string()];
+    if let Some(address) = agency.address.as_deref() {
+        parts.extend(
+            address
+                .replace('\r', "\n")
+                .split(['\n', ','])
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .map(ToOwned::to_owned),
+        );
+    }
+    parts.join(" · ")
+}
+
+fn format_invoice_pdf_service_period(
+    language: &str,
+    period: (NaiveDate, NaiveDate),
+) -> (&'static str, String) {
+    let (first, last) = period;
+    if first == last {
+        (
+            invoice_pdf_label(language, "service_date"),
+            format_invoice_pdf_date(Some(first)),
+        )
+    } else {
+        (
+            invoice_pdf_label(language, "service_period"),
+            format!(
+                "{} – {}",
+                format_invoice_pdf_date(Some(first)),
+                format_invoice_pdf_date(Some(last))
+            ),
+        )
+    }
+}
+
+fn invoice_pdf_vat_group_label(language: &str, row: &document::VatBreakdownRow) -> String {
+    match row.kind {
+        document::VatGroupKind::Taxed => format!(
+            "{} %",
+            format_invoice_pdf_number(language, &row.rate.to_string())
+        ),
+        document::VatGroupKind::ZeroRated => {
+            invoice_pdf_label(language, "vat_group_zero_rated").to_string()
+        }
+        document::VatGroupKind::Passthrough => {
+            invoice_pdf_label(language, "vat_group_passthrough").to_string()
+        }
+    }
+}
+
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
+    let language = context.language.as_str();
     let mut document = PdfDocument::new(&context.invoice_number);
     let (regular_handle, bold_handle) = add_unicode_pdf_fonts(&mut document)?;
 
@@ -4285,12 +4423,51 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     let mut layout = InvoicePdfLayout::new(
         context.invoice_number.clone(),
         invoice_pdf_brand(&context.agency),
-        invoice_pdf_label(&context.language, "page_label").to_string(),
+        invoice_pdf_label(language, "page_label").to_string(),
         regular_handle,
         bold_handle,
     );
+
+    // Recipient block (§ 14 Abs. 4 Nr. 1 UStG): the payer when one is set.
+    layout.text_block(
+        &invoice_pdf_sender_line(&context.agency),
+        7.0,
+        false,
+        0.0,
+        InvoicePdfColor::Muted,
+        0.0,
+        1.5,
+    );
+    layout.text_block(
+        invoice_pdf_label(language, "recipient_heading"),
+        7.0,
+        false,
+        0.0,
+        InvoicePdfColor::Muted,
+        0.0,
+        0.5,
+    );
+    let recipient_name = if context.recipient.name.trim().is_empty() {
+        patient_line.clone()
+    } else {
+        context.recipient.name.clone()
+    };
+    layout.text_block(
+        &recipient_name,
+        10.5,
+        true,
+        0.0,
+        InvoicePdfColor::Body,
+        0.0,
+        0.0,
+    );
+    for line in context.recipient.address_lines() {
+        layout.text_block(&line, 10.0, false, 0.0, InvoicePdfColor::Body, 0.0, 0.0);
+    }
+    layout.spacer(6.0);
+
     layout.text_block_centered(
-        invoice_pdf_type_label(&context.language, &context.invoice_type),
+        invoice_pdf_type_label(language, &context.invoice_type),
         10.5,
         true,
         InvoicePdfColor::Primary,
@@ -4298,7 +4475,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         1.0,
     );
     layout.text_block_centered(
-        &invoice_pdf_label(&context.language, "invoice_title").to_uppercase(),
+        &invoice_pdf_label(language, "invoice_title").to_uppercase(),
         18.0,
         true,
         InvoicePdfColor::Body,
@@ -4308,39 +4485,36 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     let mut meta_cells = vec![
         (
-            invoice_pdf_label(&context.language, "issued_on"),
+            invoice_pdf_label(language, "invoice_number"),
+            context.invoice_number.clone(),
+        ),
+        (
+            invoice_pdf_label(language, "issued_on"),
             format_invoice_pdf_date(Some(invoice_document_date(context.issued_at))),
         ),
         (
-            invoice_pdf_label(&context.language, "patient_name"),
-            patient_line,
-        ),
-        (
-            invoice_pdf_label(&context.language, "due_date"),
+            invoice_pdf_label(language, "due_date"),
             format_invoice_pdf_date(context.due_date),
         ),
-        (
-            invoice_pdf_label(&context.language, "status"),
-            invoice_pdf_status_label(&context.language, &context.status).to_string(),
-        ),
-        (
-            invoice_pdf_label(&context.language, "patient_id"),
-            context.patient_pid.clone(),
-        ),
-        (
-            invoice_pdf_label(&context.language, "birth_date"),
-            format_invoice_pdf_date(context.birth_date),
-        ),
     ];
+    if let Some(period) = context.service_period {
+        let (label, value) = format_invoice_pdf_service_period(language, period);
+        meta_cells.push((label, value));
+    }
+    meta_cells.push((invoice_pdf_label(language, "patient_name"), patient_line));
+    meta_cells.push((
+        invoice_pdf_label(language, "patient_id"),
+        context.patient_pid.clone(),
+    ));
     if !context.order_number.is_empty() {
         meta_cells.push((
-            invoice_pdf_label(&context.language, "order_number"),
+            invoice_pdf_label(language, "order_number"),
             context.order_number.clone(),
         ));
     }
     if let Some(quote_number) = context.quote_number.as_deref() {
         meta_cells.push((
-            invoice_pdf_label(&context.language, "quote_number"),
+            invoice_pdf_label(language, "quote_number"),
             quote_number.to_string(),
         ));
     }
@@ -4351,13 +4525,13 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         ("tax_number", context.agency.tax_number.as_deref()),
     ] {
         if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
-            meta_cells.push((invoice_pdf_label(&context.language, key), value.to_string()));
+            meta_cells.push((invoice_pdf_label(language, key), value.to_string()));
         }
     }
     layout.meta_grid(&meta_cells);
 
     layout.text_block(
-        invoice_pdf_label(&context.language, "items_heading"),
+        invoice_pdf_label(language, "items_heading"),
         14.0,
         true,
         0.0,
@@ -4368,7 +4542,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     if context.line_items.is_empty() {
         layout.text_block(
-            invoice_pdf_label(&context.language, "no_items"),
+            invoice_pdf_label(language, "no_items"),
             11.0,
             false,
             0.0,
@@ -4380,27 +4554,27 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         layout.table_row(
             &[
                 (
-                    invoice_pdf_label(&context.language, "item_description"),
+                    invoice_pdf_label(language, "item_description"),
                     82.0,
                     InvoicePdfCellAlign::Left,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_quantity"),
+                    invoice_pdf_label(language, "item_quantity"),
                     18.0,
                     InvoicePdfCellAlign::Right,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_unit_price"),
+                    invoice_pdf_label(language, "item_unit_price"),
                     27.0,
                     InvoicePdfCellAlign::Right,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_vat_rate"),
+                    invoice_pdf_label(language, "item_vat_rate"),
                     18.0,
                     InvoicePdfCellAlign::Right,
                 ),
                 (
-                    invoice_pdf_label(&context.language, "item_total"),
+                    invoice_pdf_label(language, "item_total"),
                     29.0,
                     InvoicePdfCellAlign::Right,
                 ),
@@ -4413,21 +4587,18 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             let mut description = item.description.trim().to_string();
             if item.is_cost_passthrough {
                 description.push_str(" · ");
-                description.push_str(invoice_pdf_label(&context.language, "cost_passthrough"));
+                description.push_str(invoice_pdf_label(language, "cost_passthrough"));
             }
             let quantity = if item.quantity.trim().is_empty() {
                 "1".to_string()
             } else {
-                format_invoice_pdf_number(&context.language, &item.quantity)
+                format_invoice_pdf_number(language, &item.quantity)
             };
             let quantity = quantity.as_str();
             let vat_rate = if item.vat_rate.trim().is_empty() {
                 "—".to_string()
             } else {
-                format!(
-                    "{}%",
-                    format_invoice_pdf_number(&context.language, &item.vat_rate)
-                )
+                format!("{}%", format_invoice_pdf_number(language, &item.vat_rate))
             };
             let unit_price = format_invoice_pdf_money(&item.unit_price, &context.currency);
             let total = format_invoice_pdf_money(&item.line_gross, &context.currency);
@@ -4444,60 +4615,133 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
                 false,
             );
         }
-        layout.spacer(4.0);
+        layout.spacer(6.0);
     }
 
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "total_net"),
-        &format_invoice_pdf_money(&context.total_net, &context.currency),
-        false,
-        false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "total_vat"),
-        &format_invoice_pdf_money(&context.total_vat, &context.currency),
-        false,
-        false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "total_gross"),
-        &format_invoice_pdf_money(&context.total_gross, &context.currency),
+    // Net, VAT and gross per rate (§ 14 Abs. 4 Nr. 7 und 8 UStG).
+    let breakdown = document::vat_breakdown(&context.line_items);
+    if !breakdown.is_empty() {
+        layout.table_row(
+            &[
+                (
+                    invoice_pdf_label(language, "item_vat_rate"),
+                    72.0,
+                    InvoicePdfCellAlign::Left,
+                ),
+                (
+                    invoice_pdf_label(language, "column_net"),
+                    34.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+                (
+                    invoice_pdf_label(language, "column_vat"),
+                    34.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+                (
+                    invoice_pdf_label(language, "column_gross"),
+                    34.0,
+                    InvoicePdfCellAlign::Right,
+                ),
+            ],
+            true,
+            true,
+            false,
+        );
+        for row in &breakdown {
+            let label = invoice_pdf_vat_group_label(language, row);
+            let net = format_invoice_pdf_money(&row.net.to_string(), &context.currency);
+            let vat = format_invoice_pdf_money(&row.vat.to_string(), &context.currency);
+            let gross = format_invoice_pdf_money(&row.gross.to_string(), &context.currency);
+            layout.table_row(
+                &[
+                    (&label, 72.0, InvoicePdfCellAlign::Left),
+                    (&net, 34.0, InvoicePdfCellAlign::Right),
+                    (&vat, 34.0, InvoicePdfCellAlign::Right),
+                    (&gross, 34.0, InvoicePdfCellAlign::Right),
+                ],
+                false,
+                false,
+                false,
+            );
+        }
+    }
+    let total_net = format_invoice_pdf_money(&context.total_net, &context.currency);
+    let total_vat = format_invoice_pdf_money(&context.total_vat, &context.currency);
+    let total_gross = format_invoice_pdf_money(&context.total_gross, &context.currency);
+    layout.table_row(
+        &[
+            (
+                invoice_pdf_label(language, "vat_total_row"),
+                72.0,
+                InvoicePdfCellAlign::Left,
+            ),
+            (&total_net, 34.0, InvoicePdfCellAlign::Right),
+            (&total_vat, 34.0, InvoicePdfCellAlign::Right),
+            (&total_gross, 34.0, InvoicePdfCellAlign::Right),
+        ],
         true,
         false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "credited_amount"),
-        &format_invoice_pdf_deduction(&context.credited_amount, &context.currency),
-        false,
         false,
     );
-    // The balance below already nets out credited advances, so the printed
-    // summary has to show them for the arithmetic to add up.
-    if !invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
+    layout.spacer(3.0);
+
+    // Credited advances reduce what is still to pay (§ 14 Abs. 5 UStG), so
+    // the document shows them for the arithmetic to add up. Payments and
+    // credit notes recorded later are not part of the issued invoice.
+    if invoice_pdf_amount_is_zero(&context.prepayment_applied_amount) {
         layout.summary_row(
-            invoice_pdf_label(&context.language, "prepayment_applied"),
+            invoice_pdf_label(language, "invoice_amount"),
+            &total_gross,
+            true,
+            true,
+        );
+    } else {
+        let gross = Decimal::from_str_exact(context.total_gross.trim()).unwrap_or(Decimal::ZERO);
+        let prepayment = Decimal::from_str_exact(context.prepayment_applied_amount.trim())
+            .unwrap_or(Decimal::ZERO);
+        layout.summary_row(
+            invoice_pdf_label(language, "invoice_amount"),
+            &total_gross,
+            true,
+            false,
+        );
+        layout.summary_row(
+            invoice_pdf_label(language, "prepayment_applied"),
             &format_invoice_pdf_deduction(&context.prepayment_applied_amount, &context.currency),
             false,
             false,
         );
+        layout.summary_row(
+            invoice_pdf_label(language, "amount_payable"),
+            &format_invoice_pdf_money(
+                &(gross - prepayment).max(Decimal::ZERO).to_string(),
+                &context.currency,
+            ),
+            true,
+            true,
+        );
     }
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "paid_amount"),
-        &format_invoice_pdf_money(&context.paid_amount, &context.currency),
-        false,
-        false,
-    );
-    layout.summary_row(
-        invoice_pdf_label(&context.language, "balance_due"),
-        &format_invoice_pdf_money(&context.balance_due, &context.currency),
-        true,
-        true,
-    );
 
-    let bank_cells = invoice_pdf_bank_cells(&context.language, &context.agency);
+    if let Some(reason) = document::zero_rate_exemption_note(&context.line_items) {
+        layout.text_block(
+            &format!(
+                "{}: {reason}",
+                invoice_pdf_label(language, "vat_exemption_note")
+            ),
+            8.5,
+            false,
+            0.0,
+            InvoicePdfColor::Muted,
+            3.0,
+            0.0,
+        );
+    }
+
+    let bank_cells = invoice_pdf_bank_cells(language, &context.agency);
     if !bank_cells.is_empty() {
         layout.text_block(
-            invoice_pdf_label(&context.language, "payment_details"),
+            invoice_pdf_label(language, "payment_details"),
             13.0,
             true,
             0.0,
@@ -4523,7 +4767,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     if let Some(notes) = &context.notes {
         layout.text_block(
-            invoice_pdf_label(&context.language, "notes_heading"),
+            invoice_pdf_label(language, "notes_heading"),
             14.0,
             true,
             0.0,
@@ -9937,11 +10181,10 @@ async fn download_invoice_pdf(
         return resp;
     }
 
-    let pdf_bytes = match build_invoice_pdf(&context) {
+    let pdf_bytes = match render_invoice_pdf(&state, &context).await {
         Ok(bytes) => bytes,
-        Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
+        Err(resp) => return resp,
     };
-    let pdf_bytes = attach_zugferd_xml(&state, &context, pdf_bytes).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "download_invoice_pdf",
@@ -9993,11 +10236,10 @@ async fn download_my_invoice_pdf(
         return err(StatusCode::FORBIDDEN, "Invoice PDF is hidden from patient");
     }
 
-    let pdf_bytes = match build_invoice_pdf(&context) {
+    let pdf_bytes = match render_invoice_pdf(&state, &context).await {
         Ok(bytes) => bytes,
-        Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
+        Err(resp) => return resp,
     };
-    let pdf_bytes = attach_zugferd_xml(&state, &context, pdf_bytes).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "download_portal_invoice_pdf",
@@ -10020,29 +10262,34 @@ async fn download_my_invoice_pdf(
 
 /// Invoice data for the ZUGFeRD XML, read from the same rows the PDF uses.
 async fn load_einvoice(
-    state: &AppState,
+    conn: &mut sqlx::PgConnection,
     invoice_id: Uuid,
 ) -> Result<Option<zugferd::EInvoice>, sqlx::Error> {
-    let Some(row) = sqlx::query(
+    let sql = format!(
         r#"SELECT i.invoice_number, i.invoice_type, i.issued_at, i.created_at, i.due_date,
                   i.currency, i.total_gross, i.prepayment_applied_amount, i.line_items, i.notes,
-                  i.payer_contact_name, i.payer_contact_email, o.order_number,
-                  p.first_name, p.last_name, p.email AS patient_email,
-                  p.address_street, p.address_zip, p.address_city,
-                  p.address_country, p.residence_country,
-                  (SELECT jsonb_object_agg(key, value #>> '{}') FROM system_settings
+                  o.order_number,
+                  {recipient_columns},
+                  (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
                     WHERE key LIKE 'agency\_%') AS agency
            FROM invoices i
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN orders o ON o.id = i.order_id
+           {recipient_joins}
            WHERE i.id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await?
+        recipient_columns = document::RECIPIENT_COLUMNS,
+        recipient_joins = document::RECIPIENT_JOINS,
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_optional(conn)
+        .await?
     else {
         return Ok(None);
     };
+    // The buyer is the recipient printed on the invoice: the payer with the
+    // payer's own address, or the patient.
+    let recipient = document::resolve_invoice_recipient(&document::recipient_source_from_row(&row));
 
     let agency = row
         .try_get::<Option<Value>, _>("agency")
@@ -10064,11 +10311,6 @@ async fn load_einvoice(
 
     let (seller_street, seller_postcode, seller_city) =
         zugferd::split_german_address(&setting("agency_address").unwrap_or_default());
-    let patient_name = [optional("first_name"), optional("last_name")]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
     let lines = row
         .try_get::<Value, _>("line_items")
         .ok()
@@ -10122,15 +10364,12 @@ async fn load_einvoice(
             tax_number: setting("agency_tax_number"),
         },
         buyer: zugferd::EInvoiceParty {
-            name: optional("payer_contact_name").unwrap_or(patient_name),
-            address_line: optional("address_street"),
-            postcode: optional("address_zip"),
-            city: optional("address_city"),
-            country_code: crate::routes::patients::patient_label_country_code(
-                optional("address_country").as_deref(),
-                optional("residence_country").as_deref(),
-            ),
-            email: optional("payer_contact_email").or(optional("patient_email")),
+            name: recipient.name,
+            address_line: recipient.street,
+            postcode: recipient.zip,
+            city: recipient.city,
+            country_code: recipient.country_code,
+            email: recipient.email,
             vat_id: None,
             tax_number: None,
         },
@@ -10145,17 +10384,42 @@ async fn load_einvoice(
     }))
 }
 
+/// The printed invoice, as a ZUGFeRD hybrid when the e-invoice can be built.
+async fn render_invoice_pdf_on(
+    conn: &mut sqlx::PgConnection,
+    context: &InvoicePdfContext,
+) -> Result<Vec<u8>, &'static str> {
+    let pdf = build_invoice_pdf(context)?;
+    Ok(attach_zugferd_xml(conn, context, pdf).await)
+}
+
+async fn render_invoice_pdf(
+    state: &AppState,
+    context: &InvoicePdfContext,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let mut conn = state.db.acquire().await.map_err(|error| {
+        tracing::error!(%error, invoice_id = %context.invoice_id, "acquire invoice pdf connection");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build invoice PDF",
+        )
+    })?;
+    render_invoice_pdf_on(&mut conn, context)
+        .await
+        .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))
+}
+
 /// Turns the rendered PDF into a ZUGFeRD hybrid when the invoice is released
 /// and every mandatory EN 16931 field is known; otherwise the PDF stays as is.
 async fn attach_zugferd_xml(
-    state: &AppState,
+    conn: &mut sqlx::PgConnection,
     context: &InvoicePdfContext,
     pdf: Vec<u8>,
 ) -> Vec<u8> {
     if context.status == "draft" {
         return pdf;
     }
-    let invoice = match load_einvoice(state, context.invoice_id).await {
+    let invoice = match load_einvoice(conn, context.invoice_id).await {
         Ok(Some(invoice)) => invoice,
         Ok(None) => return pdf,
         Err(error) => {
@@ -10205,7 +10469,11 @@ async fn download_invoice_zugferd_xml(
     if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
         return resp;
     }
-    let invoice = match load_einvoice(&state, invoice_id).await {
+    let loaded = match state.db.acquire().await {
+        Ok(mut conn) => load_einvoice(&mut conn, invoice_id).await,
+        Err(error) => Err(error),
+    };
+    let invoice = match loaded {
         Ok(Some(invoice)) => invoice,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
         Err(error) => {
@@ -10689,6 +10957,10 @@ async fn update_invoice_payer(
     let payer_contact_phone = normalize_optional(body.payer_contact_phone.as_deref());
     let payer_contact_relationship = normalize_optional(body.payer_contact_relationship.as_deref());
     let payer_notes = normalize_optional(body.payer_notes.as_deref());
+    let payer_address_street = normalize_optional(body.payer_address_street.as_deref());
+    let payer_address_zip = normalize_optional(body.payer_address_zip.as_deref());
+    let payer_address_city = normalize_optional(body.payer_address_city.as_deref());
+    let payer_address_country = normalize_optional(body.payer_address_country.as_deref());
 
     match sqlx::query(
         r#"UPDATE invoices
@@ -10699,7 +10971,11 @@ async fn update_invoice_payer(
                payer_contact_relationship = $6,
                payer_notes = $7,
                payer_updated_by = $8,
-               payer_updated_at = now()
+               payer_updated_at = now(),
+               payer_address_street = $9,
+               payer_address_zip = $10,
+               payer_address_city = $11,
+               payer_address_country = $12
            WHERE id = $1"#,
     )
     .bind(invoice_id)
@@ -10710,6 +10986,10 @@ async fn update_invoice_payer(
     .bind(payer_contact_relationship.clone())
     .bind(payer_notes.clone())
     .bind(auth.user_id)
+    .bind(payer_address_street)
+    .bind(payer_address_zip)
+    .bind(payer_address_city)
+    .bind(payer_address_country)
     .execute(&state.db)
     .await
     {
@@ -11391,20 +11671,14 @@ async fn update_invoice_status(
 #[cfg(test)]
 mod tests {
     use super::{
-        InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, invoice_pdf_filename,
+        InvoicePdfAgency, InvoicePdfContext, build_invoice_pdf, document, invoice_pdf_filename,
         invoice_pdf_footer_line,
     };
     use chrono::{NaiveDate, Utc};
     use uuid::Uuid;
 
-    #[test]
-    fn invoice_footer_includes_current_and_total_pages() {
-        assert_eq!(invoice_pdf_footer_line("Page", 2, 5), "Page: 2/5");
-    }
-
-    #[test]
-    fn invoice_pdf_preserves_cyrillic_text() {
-        let mut context = InvoicePdfContext {
+    fn sample_context() -> InvoicePdfContext {
+        InvoicePdfContext {
             currency: "EUR".to_string(),
             invoice_id: Uuid::new_v4(),
             patient_id: Uuid::new_v4(),
@@ -11419,15 +11693,22 @@ mod tests {
             total_net: "145.00".to_string(),
             total_vat: "0.00".to_string(),
             total_gross: "145.00".to_string(),
-            credited_amount: "0.00".to_string(),
             prepayment_applied_amount: "0.00".to_string(),
-            paid_amount: "0.00".to_string(),
-            balance_due: "145.00".to_string(),
             notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
             patient_name: "Макс Мюллер".to_string(),
             patient_title: Some("Dr.".to_string()),
-            birth_date: Some(NaiveDate::from_ymd_opt(1990, 1, 1).unwrap()),
+            recipient: document::InvoiceRecipient {
+                name: "Dr. Макс Мюллер".to_string(),
+                street: Some("Хрещатик 1".to_string()),
+                zip: Some("01001".to_string()),
+                city: Some("Київ".to_string()),
+                country: Some("Україна".to_string()),
+                country_code: Some("UA".to_string()),
+                email: None,
+                is_payer: false,
+            },
+            service_period: None,
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
             language: "ru".to_string(),
@@ -11451,7 +11732,22 @@ mod tests {
                 vat_id: None,
                 tax_number: Some("143/999/00001".to_string()),
             },
-        };
+        }
+    }
+
+    fn pdf_text(context: &InvoicePdfContext) -> String {
+        let bytes = build_invoice_pdf(context).unwrap();
+        pdf_extract::extract_text_from_mem(&bytes).unwrap()
+    }
+
+    #[test]
+    fn invoice_footer_includes_current_and_total_pages() {
+        assert_eq!(invoice_pdf_footer_line("Page", 2, 5), "Page: 2/5");
+    }
+
+    #[test]
+    fn invoice_pdf_preserves_cyrillic_text() {
+        let mut context = sample_context();
 
         let bytes = build_invoice_pdf(&context).unwrap();
         // The ZUGFeRD hybrid keeps the rendered pages readable and carries the XML.
@@ -11493,30 +11789,121 @@ mod tests {
         assert_eq!(invoice_pdf_filename(&context), "RECHNUNG-INV-UNIT-1.pdf");
         context.order_number.clear();
         context.quote_number = None;
-        let no_order_bytes = build_invoice_pdf(&context).unwrap();
-        let no_order_text = pdf_extract::extract_text_from_mem(&no_order_bytes).unwrap();
+        let no_order_text = pdf_text(&context);
         assert!(!no_order_text.contains("ORD-UNIT-1"));
         assert!(!no_order_text.contains("Q-UNIT-1"));
-        assert!(no_order_text.contains("01.01.1990"));
         context.currency = "USD".to_string();
-        let usd_bytes = build_invoice_pdf(&context).unwrap();
-        let usd_text = pdf_extract::extract_text_from_mem(&usd_bytes).unwrap();
+        let usd_text = pdf_text(&context);
         assert!(usd_text.contains("145,00 USD"));
         assert!(!usd_text.contains("€"));
         assert!(!extracted_text.contains("Предоплата"));
-        // A final invoice with a credited advance: 145 - 45 advance = 100 open.
+        // A final invoice with a credited advance: 145 - 45 advance = 100 to pay.
         context.currency = "EUR".to_string();
         context.language = "de".to_string();
         context.prepayment_applied_amount = "45.00".to_string();
-        context.balance_due = "100.00".to_string();
-        let prepaid_bytes = build_invoice_pdf(&context).unwrap();
-        let prepaid_text = pdf_extract::extract_text_from_mem(&prepaid_bytes).unwrap();
+        let prepaid_text = pdf_text(&context);
         assert!(prepaid_text.contains("Anzahlungen"));
         assert!(prepaid_text.contains("-45,00 €"));
+        assert!(prepaid_text.contains("Zahlbetrag"));
         assert!(prepaid_text.contains("100,00 €"));
         if let Ok(path) = std::env::var("INVOICE_PDF_TEST_OUTPUT") {
             std::fs::write(path, &bytes).unwrap();
         }
+    }
+
+    /// § 14 Abs. 4 UStG content: recipient with address, service period, VAT
+    /// per rate with the exemption reason; no settlement status and no birth
+    /// date on the document.
+    #[test]
+    fn invoice_pdf_carries_the_mandatory_invoice_content() {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.order_number = "A-20260927-0001-FAMILIE-KOPF-2".to_string();
+        context.recipient = document::InvoiceRecipient {
+            name: "Ivan Zahler".to_string(),
+            street: Some("Kyivska 5".to_string()),
+            zip: Some("01001".to_string()),
+            city: Some("Kyiv".to_string()),
+            country: Some("Ukraine".to_string()),
+            country_code: Some("UA".to_string()),
+            email: None,
+            is_payer: true,
+        };
+        context.service_period = Some((
+            NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 5).unwrap(),
+        ));
+        context.total_net = "400.00".to_string();
+        context.total_vat = "19.00".to_string();
+        context.total_gross = "419.00".to_string();
+        context.line_items = super::parse_invoice_pdf_line_items(&serde_json::json!([
+            {
+                "description": "Dolmetscherstunden", "quantity": "2", "unit_price": "50",
+                "vat_rate": "19", "line_net": "100", "line_vat": "19", "line_gross": "119",
+                "is_cost_passthrough": false
+            },
+            {
+                "description": "Terminorganisation", "quantity": "1", "unit_price": "100",
+                "vat_rate": "0", "line_net": "100", "line_vat": "0", "line_gross": "100",
+                "is_cost_passthrough": false
+            },
+            {
+                "description": "Klinikrechnung", "quantity": "1", "unit_price": "200",
+                "vat_rate": "0", "line_net": "200", "line_vat": "0", "line_gross": "200",
+                "is_cost_passthrough": true
+            }
+        ]));
+
+        let text = pdf_text(&context);
+        assert!(text.contains("Rechnungsempfänger"), "{text}");
+        assert!(text.contains("Ivan Zahler"));
+        assert!(text.contains("Kyivska 5"));
+        assert!(text.contains("01001 Kyiv"));
+        assert!(text.contains("Ukraine"));
+        // Return address line of the agency above the recipient.
+        assert!(text.contains("Albert-Schweitzer-Straße 56 · 81735 München"));
+        assert!(text.contains("Leistungszeitraum"));
+        assert!(text.contains("01.09.2026 – 05.09.2026"));
+        assert!(text.contains("Rechnungsnummer"));
+        assert!(text.contains("Rechnungsdatum"));
+        // The full order number, however long.
+        assert!(
+            text.contains("A-20260927-0001-FAMILIE-KOPF-2"),
+            "{text}"
+        );
+        // VAT breakdown per rate and the totals.
+        assert!(text.contains("19 %"));
+        assert!(text.contains("0 % (steuerbefreit)"));
+        assert!(text.contains("Durchlaufende Posten (0 %)"));
+        assert!(text.contains("119,00 €"));
+        assert!(text.contains("200,00 €"));
+        assert!(text.contains("Summe"));
+        assert!(text.contains("Rechnungsbetrag"));
+        assert!(text.contains("419,00 €"));
+        assert!(text.contains("Steuerbefreiung: Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG"));
+        // Settlement state and the patient's birth date are not invoice content.
+        for absent in [
+            "Status",
+            "Bezahlt",
+            "Offener Betrag",
+            "Geburtsdatum",
+            "01.01.1990",
+        ] {
+            assert!(!text.contains(absent), "{absent} must not be printed");
+        }
+
+        // A single service day prints as the service date; no exempt line, no note.
+        context.service_period = Some((
+            NaiveDate::from_ymd_opt(2026, 9, 3).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 3).unwrap(),
+        ));
+        context
+            .line_items
+            .retain(|line| line.vat_rate_value > rust_decimal::Decimal::ZERO);
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistungsdatum"));
+        assert!(text.contains("03.09.2026"));
+        assert!(!text.contains("§ 4 Nr. 14"));
     }
 }
 
@@ -11534,6 +11921,7 @@ mod patient_invoice_redaction_tests {
             "available_prepayments": [{ "invoice_number": "INV-A", "available_amount": "700" }],
             "supporting_documents": [{ "auto_name": "Hotel original.pdf" }],
             "contract_id": "c",
+            "payer_relation_options": [{ "related_name": "Brother" }],
             "payer": { "contact_name": "Ivan", "notes": "calls after 6pm" },
             "prepayment_allocations": [{ "amount_gross": "300" }],
             "portal_visibility": {
@@ -11560,6 +11948,7 @@ mod patient_invoice_redaction_tests {
             "available_prepayments",
             "supporting_documents",
             "contract_id",
+            "payer_relation_options",
         ] {
             assert!(invoice.get(key).is_none(), "{key}");
         }

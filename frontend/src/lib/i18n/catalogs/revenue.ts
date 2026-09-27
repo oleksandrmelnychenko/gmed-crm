@@ -287,13 +287,21 @@ export interface RevenueTranslations {
   revenue_invoices_visibility_note: string;
   revenue_invoices_save_visibility: string;
   revenue_invoices_current_payer: string;
-  revenue_invoices_payer_relation_id: string;
+  revenue_invoices_payer_relation: string;
+  revenue_invoices_payer_relation_none: string;
   revenue_invoices_contact_name: string;
   revenue_invoices_email: string;
   revenue_invoices_phone: string;
   revenue_invoices_relationship: string;
   revenue_invoices_payer_notes: string;
-  revenue_invoices_optional_uuid: string;
+  revenue_invoices_payer_address_hint: string;
+  revenue_invoices_payer_address_street: string;
+  revenue_invoices_payer_address_zip: string;
+  revenue_invoices_payer_address_city: string;
+  revenue_invoices_payer_address_country: string;
+  revenue_invoices_recipient_payer: string;
+  revenue_invoices_recipient_patient: string;
+  revenue_invoices_recipient_address_missing: string;
   revenue_invoices_save_payer: string;
   revenue_invoices_redaction_invoice_hidden: string;
   revenue_invoices_redaction_amounts_hidden: string;
@@ -1143,13 +1151,22 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoices_visibility_note: "Примечание о видимости",
   revenue_invoices_save_visibility: "Сохранить видимость",
   revenue_invoices_current_payer: "Текущий плательщик",
-  revenue_invoices_payer_relation_id: "ID связи плательщика",
+  revenue_invoices_payer_relation: "Плательщик из связей пациента",
+  revenue_invoices_payer_relation_none: "Не выбран",
   revenue_invoices_contact_name: "Контактное имя",
   revenue_invoices_email: "Электронная почта",
   revenue_invoices_phone: "Телефон",
   revenue_invoices_relationship: "Отношение",
   revenue_invoices_payer_notes: "Примечания по плательщику",
-  revenue_invoices_optional_uuid: "необязательный UUID",
+  revenue_invoices_payer_address_hint:
+    "Адрес плательщика печатается в счёте. Если плательщик — пациент из связей, берётся адрес из его карточки, пока поля ниже пусты.",
+  revenue_invoices_payer_address_street: "Улица и дом",
+  revenue_invoices_payer_address_zip: "Индекс",
+  revenue_invoices_payer_address_city: "Город",
+  revenue_invoices_payer_address_country: "Страна",
+  revenue_invoices_recipient_payer: "Получатель счёта — плательщик",
+  revenue_invoices_recipient_patient: "Получатель счёта — пациент",
+  revenue_invoices_recipient_address_missing: "Нет почтового адреса получателя: счёт без адреса неполный",
   revenue_invoices_save_payer: "Сохранить плательщика",
   revenue_invoices_redaction_invoice_hidden: "Счет скрыт от пациента",
   revenue_invoices_redaction_amounts_hidden: "Суммы скрыты от пациента",
@@ -1514,13 +1531,22 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoices_visibility_note: "Sichtbarkeitsnotiz",
   revenue_invoices_save_visibility: "Sichtbarkeit speichern",
   revenue_invoices_current_payer: "Aktueller Zahler",
-  revenue_invoices_payer_relation_id: "Zahler-Beziehungs-ID",
+  revenue_invoices_payer_relation: "Zahler aus den Beziehungen des Patienten",
+  revenue_invoices_payer_relation_none: "Keine Auswahl",
   revenue_invoices_contact_name: "Kontaktname",
   revenue_invoices_email: "E-Mail",
   revenue_invoices_phone: "Telefon",
   revenue_invoices_relationship: "Beziehung",
   revenue_invoices_payer_notes: "Zahlernotizen",
-  revenue_invoices_optional_uuid: "optionale UUID",
+  revenue_invoices_payer_address_hint:
+    "Die Zahleranschrift wird auf die Rechnung gedruckt. Ist der Zahler ein Patient aus den Beziehungen, gilt dessen Anschrift, solange die Felder unten leer sind.",
+  revenue_invoices_payer_address_street: "Straße und Hausnummer",
+  revenue_invoices_payer_address_zip: "PLZ",
+  revenue_invoices_payer_address_city: "Ort",
+  revenue_invoices_payer_address_country: "Land",
+  revenue_invoices_recipient_payer: "Rechnungsempfänger – Zahler",
+  revenue_invoices_recipient_patient: "Rechnungsempfänger – Patient",
+  revenue_invoices_recipient_address_missing: "Anschrift des Rechnungsempfängers fehlt: ohne Anschrift ist die Rechnung unvollständig",
   revenue_invoices_save_payer: "Zahler speichern",
   revenue_invoices_redaction_invoice_hidden: "Rechnung vor Patient verborgen",
   revenue_invoices_redaction_amounts_hidden: "Beträge vor Patient verborgen",

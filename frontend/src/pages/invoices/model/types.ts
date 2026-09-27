@@ -191,8 +191,33 @@ type InvoicePayer = {
   relation_type?: string | null;
   relation_patient_name?: string | null;
   relation_patient_pid?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  address_city?: string | null;
+  address_country?: string | null;
   notes?: string | null;
   updated_at?: string | null;
+};
+
+/** Rechnungsempfänger printed on the invoice: the payer when set, else the patient. */
+export type InvoiceRecipient = {
+  name: string;
+  street?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  country?: string | null;
+  is_payer: boolean;
+  has_postal_address: boolean;
+};
+
+/** A relative of the patient that can be chosen as the invoice payer. */
+export type PayerRelationOption = {
+  id: string;
+  related_name: string;
+  relation_type: string;
+  related_patient_pid?: string | null;
+  related_patient_name?: string | null;
+  has_address: boolean;
 };
 
 export type InvoiceItem = {
@@ -236,6 +261,8 @@ export type InvoiceItem = {
   portal_visibility?: InvoicePortalVisibility;
   visibility_note?: string | null;
   payer?: InvoicePayer;
+  recipient?: InvoiceRecipient | null;
+  payer_relation_options?: PayerRelationOption[];
   created_at: string;
   updated_at: string;
   line_items?: InvoiceLineItem[];
@@ -384,6 +411,10 @@ export type PayerForm = {
   contactEmail: string;
   contactPhone: string;
   contactRelationship: string;
+  addressStreet: string;
+  addressZip: string;
+  addressCity: string;
+  addressCountry: string;
   notes: string;
 };
 
