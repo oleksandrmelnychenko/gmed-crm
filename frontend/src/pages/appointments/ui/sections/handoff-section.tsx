@@ -15,6 +15,7 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
+import { formatDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
@@ -202,7 +203,7 @@ function AppointmentHandoffSectionContent({
       toast.success(
         `${followUpPresetTitle(preset.id)}: ${
           lang === "de" ? "Erinnerung angelegt" : "напоминание создано"
-        } (${new Date(remindAt).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}).`,
+        } (${formatDateKey(remindAt.slice(0, 10), "de-DE", { day: "2-digit", month: "2-digit", year: "numeric" })}).`,
       );
       onRefresh();
     } catch (error) {
