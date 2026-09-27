@@ -68,7 +68,6 @@ struct InterpreterReportBillingCandidate {
     appointment_date: chrono::NaiveDate,
     interpreter_name: String,
     hours: rust_decimal::Decimal,
-    report_text: Option<String>,
     approved_by: Option<Uuid>,
     approved_at: Option<chrono::DateTime<chrono::Utc>>,
 }
@@ -7262,7 +7261,6 @@ async fn load_interpreter_report_billing_candidates(
                   a.date AS appointment_date,
                   u.name AS interpreter_name,
                   ir.hours,
-                  ir.report_text,
                   ir.approved_by,
                   ir.approved_at
            FROM interpreter_reports ir
@@ -7300,9 +7298,6 @@ async fn load_interpreter_report_billing_candidates(
             hours: row
                 .try_get::<rust_decimal::Decimal, _>("hours")
                 .unwrap_or(rust_decimal::Decimal::ZERO),
-            report_text: row
-                .try_get::<Option<String>, _>("report_text")
-                .unwrap_or_default(),
             approved_by: row
                 .try_get::<Option<Uuid>, _>("approved_by")
                 .unwrap_or_default(),
@@ -7394,23 +7389,26 @@ enum InterpreterReportBillingOutcome {
     },
 }
 
+/// Billing notes of an order line created from an approved interpreter report.
+///
+/// The line references the report (id, hours, visit date) instead of copying
+/// its free text: the report describes the visit and can carry medical
+/// content, while order lines are read by billing. The text itself stays on
+/// the report, behind the appointment's access rules.
 fn interpreter_report_billing_notes(
     candidate: &InterpreterReportBillingCandidate,
     headline: String,
 ) -> String {
-    let mut parts = vec![
+    [
         headline,
         format!("Dolmetscher: {}", candidate.interpreter_name),
         format!("Stunden: {}", candidate.hours.normalize()),
         format!("Termin: {}", candidate.appointment_id),
+        format!("Termindatum: {}", candidate.appointment_date),
+        format!("Bericht: {}", candidate.report_id),
         format!("Katalogschlüssel: {INTERPRETER_HOURS_SERVICE_KEY}"),
-    ];
-    if let Some(text) = candidate.report_text.as_ref().map(|value| value.trim())
-        && !text.is_empty()
-    {
-        parts.push(format!("Report: {text}"));
-    }
-    parts.join("\n")
+    ]
+    .join("\n")
 }
 
 /// Bills one approved interpreter report. The report consumes the order's

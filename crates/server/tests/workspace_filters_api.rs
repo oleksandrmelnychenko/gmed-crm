@@ -3200,6 +3200,88 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
         leistungen[0]["agency_service_id"],
         agency_service_id.to_string()
     );
+    // The billing line references the report instead of copying its text.
+    let report_text = format!("Interpreter completed support for {tag}");
+    let notes = leistungen[0]["notes"].as_str().unwrap_or_default();
+    assert!(notes.contains(&format!("Bericht: {report_id}")), "{notes}");
+    assert!(notes.contains("Stunden: 2.5"), "{notes}");
+    assert!(!notes.contains(&report_text), "{notes}");
+
+    // A line written before the change still stores the copied text. Billing
+    // (no medical view) reads and searches it without the text; roles with
+    // medical access keep the history as stored.
+    sqlx::query(
+        "UPDATE order_leistungen SET notes = notes || E'\\nReport: ' || $2 WHERE id = $1::uuid",
+    )
+    .bind(billing_leistung_id)
+    .bind(&report_text)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let billing_id = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let (status, billing_order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billing_order}");
+    assert!(
+        !billing_order.to_string().contains(&report_text),
+        "{billing_order}"
+    );
+    assert!(
+        billing_order["leistungen"][0]["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&format!("Bericht: {report_id}")),
+        "{billing_order}"
+    );
+    let (status, billing_lines) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billing_lines}");
+    assert!(
+        !billing_lines.to_string().contains(&report_text),
+        "{billing_lines}"
+    );
+    let (status, billing_search) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders?search=completed%20support%20for%20{tag}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{billing_search}");
+    assert!(
+        !billing_search.to_string().contains(&order_id.to_string()),
+        "{billing_search}"
+    );
+    let (status, ceo_order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ceo_order}");
+    assert!(
+        ceo_order["leistungen"][0]["notes"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(&report_text),
+        "{ceo_order}"
+    );
 }
 
 struct InterpreterReportFixture<'a> {

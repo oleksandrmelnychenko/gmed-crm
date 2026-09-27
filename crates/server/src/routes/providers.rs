@@ -10153,7 +10153,10 @@ async fn load_provider_interactions_json(
                        ol.description AS title,
                        NULL::text AS appointment_type,
                        NULL::text AS location,
-                       ol.notes AS notes,
+                       -- Lines billed from an interpreter report may carry the
+                       -- report's free text; it stays with the appointment.
+                       CASE WHEN ol.source_interpreter_report_id IS NULL
+                            THEN ol.notes END AS notes,
                        COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS occurred_at,
                        ol.quantity AS quantity,
                        ol.unit_price AS unit_price,

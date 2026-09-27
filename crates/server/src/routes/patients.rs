@@ -8102,11 +8102,15 @@ async fn get_patient_service_report(
                   d.name AS doctor_name,
                   ol.is_cost_passthrough,
                   ol.notes,
+                  ol.source_interpreter_report_id,
+                  source_report.report_text AS source_report_text,
                   ol.delivered_at,
                   ol.approved_at,
                   COALESCE(ol.approved_at, ol.delivered_at, ol.created_at) AS effective_at
            FROM order_leistungen ol
            JOIN orders o ON o.id = ol.order_id
+           LEFT JOIN interpreter_reports source_report
+             ON source_report.id = ol.source_interpreter_report_id
            LEFT JOIN providers p ON p.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            WHERE o.patient_id = $1
@@ -8182,7 +8186,12 @@ async fn get_patient_service_report(
                 "doctor_id": row.try_get::<Option<Uuid>, _>("doctor_id").unwrap_or_default(),
                 "doctor_name": row.try_get::<Option<String>, _>("doctor_name").unwrap_or_default(),
                 "is_cost_passthrough": row.try_get::<bool, _>("is_cost_passthrough").unwrap_or(false),
-                "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                "notes": super::orders::order_line_notes_for_reader(
+                    &auth,
+                    row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    row.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                    row.try_get::<Option<String>, _>("source_report_text").unwrap_or_default().as_deref(),
+                ),
                 "delivered_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivered_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                 "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                 "effective_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("effective_at").map(|value| value.to_rfc3339()).unwrap_or_default(),

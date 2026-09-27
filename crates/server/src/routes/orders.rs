@@ -522,7 +522,12 @@ async fn list_orders(
                         LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
                         WHERE ol.order_id = o.id
                           AND de_normalize(concat_ws(' ',
-                                ol.description, ol.notes, pr.name, d.name
+                                ol.description,
+                                -- Notes copied from an interpreter report are
+                                -- not searchable for readers who may not see them.
+                                CASE WHEN $9::boolean AND ol.source_interpreter_report_id IS NOT NULL
+                                     THEN NULL ELSE ol.notes END,
+                                pr.name, d.name
                               )) LIKE de_normalize($1)
                   )
            )
@@ -581,6 +586,7 @@ async fn list_orders(
     .bind(query.provider_id)
     .bind(query.doctor_id)
     .bind(query.provider_taxonomy_node_id)
+    .bind(!auth.can(Capability::PatientsMedicalView))
     .fetch_all(&state.db)
     .await
     {
@@ -3241,8 +3247,11 @@ async fn get_order(
                   billing.all_invoices_paid, billing.any_payment,
                   billing.invoice_references,
                   doc.auto_name AS external_document_auto_name,
-                  doc.original_filename AS external_document_filename
+                  doc.original_filename AS external_document_filename,
+                  source_report.report_text AS source_report_text
            FROM order_leistungen ol
+           LEFT JOIN interpreter_reports source_report
+             ON source_report.id = ol.source_interpreter_report_id
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            LEFT JOIN LATERAL (
@@ -3359,7 +3368,12 @@ async fn get_order(
             "approved_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "cancelled_at": l.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|v| v.to_rfc3339()),
             "cancellation_reason": l.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
-            "notes": l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+            "notes": order_line_notes_for_reader(
+                &auth,
+                l.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
+                l.try_get::<Option<String>, _>("source_report_text").unwrap_or_default().as_deref(),
+            ),
             "client_reference": l.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
             "provider_id": l.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
             "provider_name": l.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
@@ -3573,6 +3587,59 @@ async fn get_order(
         "created_at": created_at, "updated_at": updated_at,
     }))
     .into_response()
+}
+
+/// Notes of an order line as a reader may see them.
+///
+/// Lines billed from an approved interpreter report used to copy the report's
+/// free text into their notes (`Report: …`). The report describes the visit
+/// and can carry medical content, while billing reads order lines. New lines
+/// only reference the report; for the lines written before, a reader without
+/// `patients.medical.view` (billing) gets the reference instead of the text.
+/// The stored notes stay unchanged (history is not rewritten), and the report
+/// itself remains readable where the appointment's access rules allow it.
+pub(crate) fn order_line_notes_for_reader(
+    auth: &AuthUser,
+    notes: Option<String>,
+    source_report_id: Option<Uuid>,
+    source_report_text: Option<&str>,
+) -> Option<String> {
+    if auth.can(Capability::PatientsMedicalView) {
+        return notes;
+    }
+    redact_interpreter_report_text(notes, source_report_id, source_report_text)
+}
+
+fn redact_interpreter_report_text(
+    notes: Option<String>,
+    source_report_id: Option<Uuid>,
+    source_report_text: Option<&str>,
+) -> Option<String> {
+    let Some(report_id) = source_report_id else {
+        return notes;
+    };
+    let notes = notes?;
+    let reference = format!("Bericht: {report_id}");
+    if let Some(text) = source_report_text
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
+        let copied = format!("Report: {text}");
+        if notes.contains(&copied) {
+            return Some(notes.replace(&copied, &reference));
+        }
+    }
+    // Fall back to hiding everything from a copied `Report:` line on when the
+    // exact text cannot be matched (e.g. whitespace changed on the report).
+    let marker = if notes.starts_with("Report: ") {
+        Some(0)
+    } else {
+        notes.find("\nReport: ").map(|index| index + 1)
+    };
+    Some(match marker {
+        Some(index) => format!("{}{reference}", &notes[..index]),
+        None => notes,
+    })
 }
 
 fn economics_money(value: rust_decimal::Decimal) -> String {
@@ -7475,8 +7542,11 @@ async fn list_leistungen(
                   ol.planned_partner_cost_net, ol.planned_partner_cost_vat,
                   ol.planned_partner_cost_gross,
                   doc.auto_name AS external_document_auto_name,
-                  doc.original_filename AS external_document_filename
+                  doc.original_filename AS external_document_filename,
+                  source_report.report_text AS source_report_text
            FROM order_leistungen ol
+           LEFT JOIN interpreter_reports source_report
+             ON source_report.id = ol.source_interpreter_report_id
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            LEFT JOIN LATERAL (
@@ -7499,6 +7569,15 @@ async fn list_leistungen(
         Ok(rows) => {
             let mut items = Vec::with_capacity(rows.len());
             for r in rows {
+                let notes = order_line_notes_for_reader(
+                    &auth,
+                    r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    r.try_get::<Option<Uuid>, _>("source_interpreter_report_id")
+                        .unwrap_or_default(),
+                    r.try_get::<Option<String>, _>("source_report_text")
+                        .unwrap_or_default()
+                        .as_deref(),
+                );
                 items.push(serde_json::json!({
                     "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
                     "patient_id": r.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
@@ -7511,7 +7590,7 @@ async fn list_leistungen(
                     "status": r.try_get::<String, _>("status").unwrap_or_default(),
                     "cancelled_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default(),
                     "cancellation_reason": r.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
-                    "notes": r.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    "notes": notes,
                     "client_reference": r.try_get::<Option<String>, _>("client_reference").unwrap_or_default(),
                     "provider_id": r.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
                     "provider_name": r.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
@@ -10169,6 +10248,56 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copied_interpreter_report_text_is_replaced_by_a_reference() {
+        let report_id = Uuid::new_v4();
+        let text = "Patient reported chest pain;\nnext visit cardiology";
+        let notes = format!(
+            "Automatisch aus freigegebenem Dolmetscherbericht {report_id} erstellt\nStunden: 2\nReport: {text}"
+        );
+        let redacted =
+            redact_interpreter_report_text(Some(notes.clone()), Some(report_id), Some(text))
+                .expect("notes stay");
+        assert!(!redacted.contains("chest pain"), "{redacted}");
+        assert!(!redacted.contains("cardiology"), "{redacted}");
+        assert!(redacted.contains("Stunden: 2"), "{redacted}");
+        assert!(
+            redacted.ends_with(&format!("Bericht: {report_id}")),
+            "{redacted}"
+        );
+
+        // A later manual note after the copied block is kept when the report
+        // text matches exactly.
+        let with_follow_up = format!("{notes}\nManuell: Rechnung an Kasse");
+        let redacted =
+            redact_interpreter_report_text(Some(with_follow_up), Some(report_id), Some(text))
+                .expect("notes stay");
+        assert!(
+            redacted.contains("Manuell: Rechnung an Kasse"),
+            "{redacted}"
+        );
+        assert!(!redacted.contains("chest pain"), "{redacted}");
+
+        // Without a matching text the copied block is cut from its marker on.
+        let redacted = redact_interpreter_report_text(
+            Some(format!("Stunden: 2\nReport: {text}")),
+            Some(report_id),
+            Some("edited later"),
+        )
+        .expect("notes stay");
+        assert_eq!(redacted, format!("Stunden: 2\nBericht: {report_id}"));
+
+        // Lines that are not billed from a report are left untouched.
+        assert_eq!(
+            redact_interpreter_report_text(Some("Report: manual".to_string()), None, None),
+            Some("Report: manual".to_string())
+        );
+        assert_eq!(
+            redact_interpreter_report_text(None, Some(report_id), Some(text)),
+            None
+        );
+    }
 
     #[test]
     fn order_service_period_accepts_empty_or_forward_ranges() {
