@@ -216,6 +216,21 @@ struct NotificationDelivery {
     user_id: Uuid,
 }
 
+/// Notification bodies carry the receipt facts as JSON; the staff UI words
+/// them in its language (the stored titles are English fallbacks).
+fn expense_notification_body(vendor: &str, amount_gross: Decimal, currency: &str) -> String {
+    serde_json::json!({
+        "vendor": vendor,
+        "amount_gross": amount_gross.round_cents().to_string(),
+        "currency": currency,
+    })
+    .to_string()
+}
+
+fn expense_reason_notification_body(reason: &str) -> String {
+    serde_json::json!({ "reason": reason }).to_string()
+}
+
 async fn insert_finance_review_notifications(
     transaction: &mut Transaction<'_, Postgres>,
     expense_id: Uuid,
@@ -242,10 +257,7 @@ async fn insert_finance_review_notifications(
     )
     .bind(expense_id)
     .bind(actor_user_id)
-    .bind(format!(
-        "A new receipt from {vendor} for {} {currency} is waiting for financial review.",
-        amount_gross.round_cents()
-    ))
+    .bind(expense_notification_body(vendor, amount_gross, currency))
     .fetch_all(&mut **transaction)
     .await?;
 
@@ -2891,11 +2903,10 @@ async fn post_expense_for_scope(
         auth.user_id,
         "concierge_expense_posted",
         "Concierge expense approved",
-        &format!(
-            "The receipt from {} for {} {} was approved and posted.",
-            expense.vendor_name,
-            expense.amount_gross.round_cents(),
-            expense.currency
+        &expense_notification_body(
+            &expense.vendor_name,
+            expense.amount_gross,
+            &expense.currency,
         ),
     )
     .await
@@ -3094,7 +3105,7 @@ async fn reject_expense_for_scope(
         auth.user_id,
         "concierge_expense_rejected",
         "Concierge expense rejected",
-        &format!("The submitted receipt was rejected. Reason: {reason}"),
+        &expense_reason_notification_body(&reason),
     )
     .await
     {
@@ -3659,7 +3670,7 @@ async fn reverse_expense_for_scope(
         auth.user_id,
         "concierge_expense_reversed",
         "Concierge expense reversed",
-        &format!("The posted expense was reversed. Reason: {reason}"),
+        &expense_reason_notification_body(&reason),
     )
     .await
     {

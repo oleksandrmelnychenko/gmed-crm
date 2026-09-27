@@ -9,6 +9,7 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 import { cn } from "@/lib/utils";
 
 import {
@@ -97,7 +98,7 @@ export function AppointmentRemindersTable({
   rowActions?: (item: ReminderEntry) => ReactNode;
   rowActionsWidth?: number;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const pagination = useDataTablePagination(
     reminders as ReminderEntry[],
@@ -108,7 +109,7 @@ export function AppointmentRemindersTable({
       {
         id: "title",
         label: tr.appointments_title_col ?? tr.appointments_title,
-        accessor: (item) => item.title,
+        accessor: (item) => localizeTaskTitle(item.title, lang),
         filterType: "text",
         sortable: true,
         required: true,
@@ -119,9 +120,9 @@ export function AppointmentRemindersTable({
               "block truncate text-xs font-medium text-foreground",
               item.is_completed && "text-muted-foreground line-through",
             )}
-            title={item.title}
+            title={localizeTaskTitle(item.title, lang)}
           >
-            {item.title}
+            {localizeTaskTitle(item.title, lang)}
           </span>
         ),
       },
@@ -180,20 +181,20 @@ export function AppointmentRemindersTable({
       {
         id: "description",
         label: tr.contracts_notes,
-        accessor: (item) => item.description ?? "",
+        accessor: (item) => localizeTaskNote(item.description, lang),
         filterType: "text",
         width: 300,
         render: (item) => (
           <span
             className="block truncate text-xs text-foreground"
-            title={item.description ?? undefined}
+            title={localizeTaskNote(item.description, lang) || undefined}
           >
-            {item.description?.trim() || tr.common_not_set}
+            {localizeTaskNote(item.description, lang).trim() || tr.common_not_set}
           </span>
         ),
       },
     ],
-    [tr],
+    [lang, tr],
   );
 
   return (
@@ -226,7 +227,7 @@ export function AppointmentTasksTable({
   rowActions?: (item: TaskEntry) => ReactNode;
   rowActionsWidth?: number;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const pagination = useDataTablePagination(
     tasks as TaskEntry[],
@@ -237,7 +238,7 @@ export function AppointmentTasksTable({
       {
         id: "title",
         label: tr.appointments_title_col ?? tr.appointments_title,
-        accessor: (item) => item.title,
+        accessor: (item) => localizeTaskTitle(item.title, lang),
         filterType: "text",
         sortable: true,
         required: true,
@@ -248,9 +249,9 @@ export function AppointmentTasksTable({
               "block truncate text-xs font-medium text-foreground",
               item.status === "completed" && "text-muted-foreground line-through",
             )}
-            title={item.title}
+            title={localizeTaskTitle(item.title, lang)}
           >
-            {item.title}
+            {localizeTaskTitle(item.title, lang)}
           </span>
         ),
       },
@@ -333,20 +334,20 @@ export function AppointmentTasksTable({
       {
         id: "description",
         label: tr.contracts_notes,
-        accessor: (item) => item.description ?? "",
+        accessor: (item) => localizeTaskNote(item.description, lang),
         filterType: "text",
         width: 300,
         render: (item) => (
           <span
             className="block truncate text-xs text-foreground"
-            title={item.description ?? undefined}
+            title={localizeTaskNote(item.description, lang) || undefined}
           >
-            {item.description?.trim() || tr.common_not_set}
+            {localizeTaskNote(item.description, lang).trim() || tr.common_not_set}
           </span>
         ),
       },
     ],
-    [tr],
+    [lang, tr],
   );
 
   return (

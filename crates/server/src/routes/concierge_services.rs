@@ -275,8 +275,10 @@ pub(crate) async fn bootstrap_default_service(
 
     let assigned_concierge_id = load_first_assigned_concierge_id(state, ctx.patient_id).await?;
     let title = ctx.title.clone();
-    let service_kind = derive_service_kind(ctx.category.as_deref(), &title);
     let taxonomy_node_id = load_primary_provider_taxonomy_node_id(state, ctx.provider_id).await?;
+    let taxonomy_code = load_taxonomy_code(state, taxonomy_node_id).await;
+    let service_kind =
+        derive_service_kind(taxonomy_code.as_deref(), ctx.category.as_deref(), &title);
 
     let service_id = sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO concierge_services (
@@ -348,9 +350,14 @@ pub(crate) async fn mark_services_ready_for_billing(
 
     if existing_count == 0 {
         let assigned_concierge_id = load_first_assigned_concierge_id(state, ctx.patient_id).await?;
-        let service_kind = derive_service_kind(ctx.category.as_deref(), &ctx.title);
         let taxonomy_node_id =
             load_primary_provider_taxonomy_node_id(state, ctx.provider_id).await?;
+        let taxonomy_code = load_taxonomy_code(state, taxonomy_node_id).await;
+        let service_kind = derive_service_kind(
+            taxonomy_code.as_deref(),
+            ctx.category.as_deref(),
+            &ctx.title,
+        );
         let service_id = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO concierge_services (
                     patient_id, appointment_id, provider_id, assigned_concierge_id, service_kind, taxonomy_node_id,
@@ -634,9 +641,14 @@ async fn create_my_concierge_service(
     let patient_label = load_patient_label(&state, patient_id)
         .await
         .unwrap_or_else(|| "Patient".to_string());
-    let timing_hint = starts_at
-        .map(|value| value.format("%Y-%m-%d %H:%M UTC").to_string())
-        .unwrap_or_else(|| "No preferred slot".to_string());
+    // The staff UI words the notification in its language from these facts.
+    let notification_body = serde_json::json!({
+        "patient_label": patient_label,
+        "service_kind": service_kind,
+        "title": body.title.trim(),
+        "starts_at": starts_at.map(|value| value.to_rfc3339()),
+    })
+    .to_string();
     if let Ok(notification_rows) = sqlx::query(
         r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
            SELECT DISTINCT pa.user_id, 'concierge_service_request', $2, $3, 'concierge_service', $1
@@ -650,12 +662,7 @@ async fn create_my_concierge_service(
     )
     .bind(service_id)
     .bind(format!("Patient service request: {patient_label}"))
-    .bind(format!(
-        "Requested {} support for '{}'. Preferred slot: {}.",
-        service_kind_label(&service_kind),
-        body.title.trim(),
-        timing_hint
-    ))
+    .bind(notification_body)
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -3697,6 +3704,9 @@ async fn create_concierge_service(
             value
         }
         None => derive_service_kind(
+            load_taxonomy_code(&state, taxonomy_node_id)
+                .await
+                .as_deref(),
             appointment_ctx
                 .as_ref()
                 .and_then(|ctx| ctx.category.as_deref()),
@@ -5000,6 +5010,20 @@ async fn validate_non_medical_taxonomy_node(
     }
 }
 
+/// Code of a partner category, used to derive a service kind; a lookup
+/// failure only means the kind is derived from the title.
+async fn load_taxonomy_code(state: &AppState, taxonomy_node_id: Option<Uuid>) -> Option<String> {
+    let taxonomy_node_id = taxonomy_node_id?;
+    sqlx::query_scalar::<_, String>("SELECT code FROM provider_taxonomy_nodes WHERE id = $1")
+        .bind(taxonomy_node_id)
+        .fetch_optional(&state.db)
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(error = %error, taxonomy_node_id = %taxonomy_node_id, "load taxonomy code for service kind");
+            None
+        })
+}
+
 async fn load_primary_provider_taxonomy_node_id(
     state: &AppState,
     provider_id: Option<Uuid>,
@@ -5337,18 +5361,60 @@ fn is_valid_billing_status(value: &str) -> bool {
     matches!(value, "draft" | "ready" | "billed" | "settled" | "waived")
 }
 
-fn derive_service_kind(category: Option<&str>, title: &str) -> String {
-    let normalized = format!(
-        "{} {}",
-        category.unwrap_or_default().to_lowercase(),
-        title.to_lowercase()
-    );
+/// The service kind a non-medical partner category implies, when it is
+/// unambiguous. Restaurants, culture, wellness and similar partners are
+/// "other" whatever their booking is called.
+fn service_kind_for_taxonomy(code: &str) -> Option<&'static str> {
+    match code {
+        "nonmedical_hotels" | "nonmedical_private_accommodation" => Some("hotel"),
+        "nonmedical_chauffeur" => Some("chauffeur"),
+        "nonmedical_ground_transport" | "nonmedical_car_rental" => Some("transfer"),
+        "nonmedical_aviation" | "nonmedical_business_aviation" => Some("flight"),
+        "nonmedical_restaurants"
+        | "nonmedical_cafe"
+        | "nonmedical_bars"
+        | "nonmedical_catering"
+        | "nonmedical_private_cook"
+        | "nonmedical_gastronomy_nutrition"
+        | "nonmedical_culture"
+        | "nonmedical_spa_wellness"
+        | "nonmedical_wellness_freizeit"
+        | "nonmedical_sport"
+        | "nonmedical_nightclubs"
+        | "nonmedical_legal"
+        | "nonmedical_admin_legal"
+        | "nonmedical_government_offices" => Some("other"),
+        _ => None,
+    }
+}
+
+/// Derives the service kind of a service created without an explicit one:
+/// from the partner category first, then from an appointment category that
+/// already names a kind, and only then from words of the category and title.
+fn derive_service_kind(taxonomy_code: Option<&str>, category: Option<&str>, title: &str) -> String {
+    if let Some(kind) = taxonomy_code.and_then(service_kind_for_taxonomy) {
+        return kind.to_string();
+    }
+    let category = category.unwrap_or_default().trim().to_lowercase();
+    if is_valid_service_kind(&category) {
+        return category;
+    }
+    let normalized = format!("{category} {}", title.to_lowercase());
+    let words = normalized
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>();
+    let has_word = |candidates: &[&str]| words.iter().any(|word| candidates.contains(word));
+    // A ticket alone is a museum, theatre or event ticket; only an air
+    // ticket books a flight.
+    let air_ticket = has_word(&["ticket", "tickets"])
+        && has_word(&["air", "plane", "airline", "airlines", "boarding"]);
 
     if normalized.contains("hotel") {
         "hotel".to_string()
-    } else if normalized.contains("vip") && normalized.contains("terminal") {
+    } else if has_word(&["vip"]) && normalized.contains("terminal") {
         "vip_terminal".to_string()
-    } else if normalized.contains("flight") || normalized.contains("ticket") {
+    } else if normalized.contains("flight") || air_ticket {
         "flight".to_string()
     } else if normalized.contains("chauffeur") || normalized.contains("driver") {
         "chauffeur".to_string()
@@ -5358,18 +5424,6 @@ fn derive_service_kind(category: Option<&str>, title: &str) -> String {
         "translation_support".to_string()
     } else {
         "other".to_string()
-    }
-}
-
-fn service_kind_label(value: &str) -> &'static str {
-    match value {
-        "hotel" => "hotel",
-        "transfer" => "transfer",
-        "vip_terminal" => "VIP terminal",
-        "flight" => "flight",
-        "chauffeur" => "chauffeur",
-        "translation_support" => "translation support",
-        _ => "additional",
     }
 }
 
@@ -5543,6 +5597,13 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
     let Some(service) = value.as_object_mut() else {
         return value;
     };
+    // The UI names a redacted service in the viewer's language
+    // ("Сервисный запрос" / "Serviceanfrage"); the English title is only a
+    // fallback for API clients.
+    service.insert(
+        "title_redacted".to_string(),
+        serde_json::Value::Bool(redaction.medical_appointment || redaction.medical_provider),
+    );
     if redaction.medical_appointment {
         service.insert(
             "title".to_string(),
@@ -5641,4 +5702,47 @@ async fn load_patient_label(state: &AppState, patient_id: Uuid) -> Option<String
             format!("{pid} · {name}")
         }
     })
+}
+
+#[cfg(test)]
+mod service_kind_tests {
+    use super::derive_service_kind;
+
+    #[test]
+    fn a_ticket_alone_is_not_a_flight() {
+        assert_eq!(derive_service_kind(None, None, "Museum tickets"), "other");
+        assert_eq!(
+            derive_service_kind(None, None, "Ticket für die Oper"),
+            "other"
+        );
+        assert_eq!(
+            derive_service_kind(None, None, "Plane ticket to Kyiv"),
+            "flight"
+        );
+        assert_eq!(derive_service_kind(None, None, "Flight home"), "flight");
+    }
+
+    #[test]
+    fn the_partner_category_and_an_explicit_category_win_over_the_title() {
+        assert_eq!(
+            derive_service_kind(
+                Some("nonmedical_restaurants"),
+                None,
+                "Hotel restaurant dinner"
+            ),
+            "other"
+        );
+        assert_eq!(
+            derive_service_kind(Some("nonmedical_hotels"), None, "Room"),
+            "hotel"
+        );
+        assert_eq!(
+            derive_service_kind(None, Some("transfer"), "Hotel pickup"),
+            "transfer"
+        );
+        assert_eq!(
+            derive_service_kind(Some("nonmedical_other"), Some("Freizeit"), "VIP terminal"),
+            "vip_terminal"
+        );
+    }
 }

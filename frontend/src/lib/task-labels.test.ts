@@ -31,6 +31,27 @@ describe("generated workflow task labels", () => {
     expect(localizeTaskNote("Auto-generated from patient workflow checklist", "de")).toBe("Automatisch aus der Patientencheckliste erstellt");
   });
 
+  it.each(["de", "ru"] as const)("localizes the appointment's generated concierge work in %s", (lang) => {
+    // Exercise the actual server constants so new untranslated texts fail here.
+    const appointments = readFileSync(new URL("../../../crates/server/src/routes/appointments.rs", import.meta.url), "utf8");
+    const checklistBlock = appointments.match(/const CONCIERGE_CHECKLIST_ITEMS[^=]*= \[([\s\S]*?)\];/)?.[1] ?? "";
+    const checklistTexts = [...checklistBlock.matchAll(/"(?:preparation|execution|followup)",\s*"([^"]+)"/g)].map((match) => match[1]);
+    expect(checklistTexts).toHaveLength(4);
+    for (const text of checklistTexts) {
+      expect(localizeTaskTitle(text, lang)).not.toBe(text);
+    }
+    const prefixes = [...appointments.matchAll(/const CONCIERGE_(?:COORDINATE_TASK|RECEIPTS_TASK|REMINDER)_PREFIX: &str = "([^"]+)";/g)].map((match) => match[1]);
+    expect(prefixes).toHaveLength(3);
+    for (const prefix of prefixes) {
+      const localized = localizeTaskTitle(`${prefix} Restaurant Vabene`, lang);
+      expect(localized).not.toContain(prefix);
+      expect(localized).toContain("Restaurant Vabene");
+    }
+    expect(localizeTaskNote("Confirm provider details, logistics and patient-facing service delivery", lang)).not.toMatch(/Confirm provider/);
+    expect(localizeTaskNote("Gather confirmations and receipts after the non-medical service", lang)).not.toMatch(/Gather/);
+    expect(localizeTaskNote("Prepare non-medical support for appointment on 2026-10-05", lang)).toContain("05.10.2026");
+  });
+
   it("preserves custom user text, including English, and empty notes", () => {
     for (const lang of ["de", "ru"] as const) {
       expect(localizeTaskTitle("Call the clinic", lang)).toBe("Call the clinic");

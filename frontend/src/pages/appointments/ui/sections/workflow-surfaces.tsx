@@ -29,6 +29,7 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { localizeTaskTitle } from "@/lib/task-labels";
 import {
   fetchPatientInterpreterHistory,
   fetchInterpreterSuggestions,
@@ -1109,7 +1110,7 @@ function AppointmentChecklistSection({
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [{ form, sheetOpen, submitBusy, completingId }, dispatchChecklistState] =
     useReducer(checklistSectionReducer, CHECKLIST_SECTION_INITIAL_STATE);
@@ -1211,7 +1212,7 @@ function AppointmentChecklistSection({
       {
         id: "item",
         label: appointmentText("appointments_checklist"),
-        accessor: (item) => item.item_text,
+        accessor: (item) => localizeTaskTitle(item.item_text, lang),
         filterType: "text",
         sortable: true,
         required: true,
@@ -1224,9 +1225,9 @@ function AppointmentChecklistSection({
                 ? "text-muted-foreground line-through"
                 : "text-foreground",
             )}
-            title={item.item_text}
+            title={localizeTaskTitle(item.item_text, lang)}
           >
-            {item.item_text}
+            {localizeTaskTitle(item.item_text, lang)}
           </span>
         ),
       },
@@ -1277,7 +1278,7 @@ function AppointmentChecklistSection({
           ),
       },
     ],
-    [t, tr],
+    [lang, t, tr],
   );
 
   return (

@@ -23,6 +23,8 @@ export type ConciergeKeyAction = (typeof CONCIERGE_KEY_ACTIONS)[number];
 
 export type ConciergeService = {
   id: string;
+  /** The title is a placeholder hiding a medical appointment or provider. */
+  title_redacted?: boolean;
   patient_id: string;
   patient_name: string;
   patient_pid: string;
@@ -810,7 +812,9 @@ export function conciergeServiceDisplayTitle(
   service: ConciergeService,
   lang: "de" | "ru",
 ): string {
-  if (service.appointment_id) {
+  // The server replaces the title of a service tied to a medical appointment
+  // or provider with an English placeholder for roles that may not see it.
+  if (service.appointment_id || service.title_redacted) {
     return conciergeServiceTaxonomyLabel(service, lang) ||
       (lang === "ru" ? "Сервисный запрос" : "Serviceanfrage");
   }

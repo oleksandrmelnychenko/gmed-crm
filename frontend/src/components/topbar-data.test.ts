@@ -85,6 +85,37 @@ describe("interpreter work notifications", () => {
   });
 });
 
+describe("concierge expense and service request notifications", () => {
+  const notice = (kind: string, body: string | null, title = "English fallback") =>
+    ({ id: "n-3", kind, title, body, entity_type: "concierge_expense", entity_id: "e-1", is_read: false, created_at: "2026-09-26T10:00:00Z" }) as Notification;
+
+  it("words receipt decisions in the staff language", () => {
+    const submitted = localizedNotificationCopy(notice("concierge_expense_submitted", JSON.stringify({ vendor: "Blumen Koch", amount_gross: "45.50", currency: "EUR" })), "de");
+    expect(submitted.title).toBe("Concierge-Beleg wartet auf Prüfung");
+    expect(submitted.body).toContain("Blumen Koch");
+    expect(submitted.body).toContain("45,50");
+    expect(localizedNotificationCopy(notice("concierge_expense_rejected", JSON.stringify({ reason: "Unleserlich" })), "ru"))
+      .toEqual({ title: "Чек консьержа отклонён", body: "Причина: Unleserlich" });
+  });
+
+  it("recovers the facts of receipts notified before the change", () => {
+    const legacy = localizedNotificationCopy(notice("concierge_expense_submitted", "A new receipt from Blumen Koch for 45.50 EUR is waiting for financial review."), "ru");
+    expect(legacy.title).toBe("Чек консьержа ждёт проверки");
+    expect(legacy.body).toContain("Blumen Koch");
+    expect(localizedNotificationCopy(notice("concierge_expense_reversed", "The posted expense was reversed. Reason: Doppelt"), "de").body)
+      .toBe("Grund: Doppelt");
+  });
+
+  it("names the requested service kind and slot", () => {
+    const copy = localizedNotificationCopy(
+      notice("concierge_service_request", JSON.stringify({ patient_label: "PT-1 · Anna", service_kind: "transfer", title: "Airport pickup", starts_at: null }), "Patient service request: PT-1 · Anna"),
+      "ru",
+    );
+    expect(copy.title).toBe("Запрос услуги от пациента: PT-1 · Anna");
+    expect(copy.body).toBe("Трансфер · Airport pickup · без желаемого времени");
+  });
+});
+
 describe("oldestNewLead", () => {
   it("selects the earliest unprocessed lead for FIFO handling", () => {
     expect(

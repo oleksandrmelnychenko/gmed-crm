@@ -57,11 +57,109 @@ export function localizedNotificationCopy(
   }
   const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
   if (interpreterCopy) return interpreterCopy;
+  const expenseCopy = conciergeExpenseNotificationCopy(item, lang);
+  if (expenseCopy) return expenseCopy;
+  const serviceRequestCopy = conciergeServiceRequestNotificationCopy(item, lang);
+  if (serviceRequestCopy) return serviceRequestCopy;
   const taskTitle = taskNotificationTitle(item, lang);
   if (taskTitle) {
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+function parseNotificationBody<T extends object>(body: string | null): T | null {
+  try {
+    const value = JSON.parse(body ?? "");
+    return value && typeof value === "object" ? (value as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+const CONCIERGE_EXPENSE_TITLES: Record<string, { de: string; ru: string }> = {
+  concierge_expense_submitted: {
+    de: "Concierge-Beleg wartet auf Prüfung",
+    ru: "Чек консьержа ждёт проверки",
+  },
+  concierge_expense_posted: {
+    de: "Concierge-Beleg bestätigt",
+    ru: "Чек консьержа подтверждён",
+  },
+  concierge_expense_rejected: {
+    de: "Concierge-Beleg abgelehnt",
+    ru: "Чек консьержа отклонён",
+  },
+  concierge_expense_reversed: {
+    de: "Concierge-Ausgabe storniert",
+    ru: "Расход консьержа сторнирован",
+  },
+};
+
+// Receipt notifications carry vendor, amount and reason as JSON. Rows written
+// before that carry an English sentence; its facts are recovered for display.
+function conciergeExpenseNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  const titles = CONCIERGE_EXPENSE_TITLES[item.kind];
+  if (!titles) return null;
+  const data = parseNotificationBody<{
+    vendor?: string;
+    amount_gross?: string;
+    currency?: string;
+    reason?: string;
+  }>(item.body) ?? legacyExpenseNotificationFacts(item.body ?? "");
+  const reasonLabel = lang === "de" ? "Grund" : "Причина";
+  if (data.reason) return { title: titles[lang], body: `${reasonLabel}: ${data.reason}` };
+  if (data.vendor || data.amount_gross) {
+    const amount = data.amount_gross
+      ? formatMoneyAmount(data.amount_gross, data.currency ?? "EUR")
+      : null;
+    return { title: titles[lang], body: [data.vendor, amount].filter(Boolean).join(" · ") };
+  }
+  return { title: titles[lang], body: item.body };
+}
+
+function legacyExpenseNotificationFacts(body: string) {
+  const reason = body.match(/Reason: (.*)$/s)?.[1]?.trim();
+  if (reason) return { reason };
+  const receipt = body.match(/receipt from (.+) for (-?[\d.]+) ([A-Z]{3})/);
+  return receipt
+    ? { vendor: receipt[1], amount_gross: receipt[2], currency: receipt[3] }
+    : {};
+}
+
+const SERVICE_KIND_LABELS: Record<string, { de: string; ru: string }> = {
+  hotel: { de: "Hotel", ru: "Отель" },
+  transfer: { de: "Transfer", ru: "Трансфер" },
+  vip_terminal: { de: "VIP-Terminal", ru: "VIP-терминал" },
+  flight: { de: "Flug", ru: "Перелёт" },
+  chauffeur: { de: "Chauffeur", ru: "Водитель" },
+  translation_support: { de: "Übersetzungsunterstützung", ru: "Помощь с переводом" },
+  other: { de: "Sonstiges", ru: "Другое" },
+};
+
+function conciergeServiceRequestNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "concierge_service_request") return null;
+  const data = parseNotificationBody<{
+    patient_label?: string;
+    service_kind?: string;
+    title?: string;
+    starts_at?: string | null;
+  }>(item.body);
+  const patient = data?.patient_label ?? item.title.replace(/^Patient service request:\s*/, "");
+  const title = `${lang === "de" ? "Serviceanfrage des Patienten" : "Запрос услуги от пациента"}: ${patient}`;
+  if (!data) return { title, body: item.body };
+  const start = data.starts_at ? new Date(data.starts_at) : null;
+  const slot = start && Number.isFinite(start.getTime())
+    ? start.toLocaleString(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium", timeStyle: "short" })
+    : lang === "de" ? "ohne Wunschtermin" : "без желаемого времени";
+  const kind = SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
+  return { title, body: [kind, data.title, slot].filter(Boolean).join(" · ") };
 }
 
 const INTERPRETER_WORK_TITLES: Record<string, { de: string; ru: string }> = {

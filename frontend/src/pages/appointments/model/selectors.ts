@@ -5,6 +5,7 @@ import {
   type Translations,
 } from "@/lib/i18n";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
+import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 import {
   communicationChannelLabel,
   communicationDirectionLabel,
@@ -343,7 +344,10 @@ function localizeKnownTimelineText(
       return item.label;
     }
   }
-  return value;
+  // Generated concierge tasks, reminders and checklist items.
+  const lang = getLang();
+  const title = localizeTaskTitle(value, lang);
+  return title === value ? localizeTaskNote(value, lang) : title;
 }
 
 function formatInterpreterMobileAgendaDateLabel(

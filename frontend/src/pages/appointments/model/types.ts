@@ -362,6 +362,8 @@ export type TaskEntry = {
 
 export type ConciergeServiceEntry = {
   id: string;
+  /** The title is a placeholder hiding a medical appointment or provider. */
+  title_redacted?: boolean;
   patient_id: string;
   patient_name: string;
   patient_pid: string;
