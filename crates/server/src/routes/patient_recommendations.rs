@@ -180,6 +180,9 @@ async fn create_patient_recommendation(
         },
         None => "aktiv",
     };
+    // A recommendation created with a clinical outcome starts in the matching
+    // status (one lifecycle, see `lifecycle_for_status`).
+    let initial_status = status_for_lifecycle(lifecycle_status, "active");
     let recommended_on = match validate_optional_date(body.recommended_on.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -231,7 +234,7 @@ async fn create_patient_recommendation(
            ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7, $8,
-                $9, $10, 'active', $11,
+                $9, $10, $22, $11,
                 $12, $13, $14, $15, $16,
                 $17, $18, $19, $20,
                 $21, $21
@@ -259,6 +262,7 @@ async fn create_patient_recommendation(
     .bind(outcome_at.as_deref())
     .bind(note_intern.as_deref())
     .bind(auth.user_id)
+    .bind(initial_status)
     .fetch_one(&state.db)
     .await
     {
@@ -428,6 +432,19 @@ async fn update_patient_recommendation(
     };
     let outcome_note = normalize_optional_text(body.outcome_note.as_deref());
     let note_intern = normalize_optional_text(body.note_intern.as_deref());
+    let current_status = current.try_get::<String, _>("status").unwrap_or_default();
+    let current_lifecycle = current
+        .try_get::<String, _>("lifecycle_status")
+        .unwrap_or_default();
+    let (next_status, next_lifecycle) = match resolve_recommendation_state(
+        &current_status,
+        &current_lifecycle,
+        status,
+        lifecycle_status,
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
 
     if let Err(e) = sqlx::query(
         r#"UPDATE patient_recommendations
@@ -440,14 +457,14 @@ async fn update_patient_recommendation(
                source_order_id = COALESCE($9, source_order_id),
                due_at = COALESCE($10, due_at),
                priority = COALESCE($11, priority),
-               status = COALESCE($12, status),
+               status = $12,
                portal_visible = COALESCE($13, portal_visible),
                recommended_on = COALESCE($14, recommended_on),
                valid_from = COALESCE($15, valid_from),
                valid_to = COALESCE($16, valid_to),
                reminder_lead_days = COALESCE($17, reminder_lead_days),
                reminder_at = COALESCE($18, reminder_at),
-               lifecycle_status = COALESCE($19, lifecycle_status),
+               lifecycle_status = $19,
                outcome_note = COALESCE($20, outcome_note),
                outcome_at = COALESCE($21, outcome_at),
                note_intern = COALESCE($22, note_intern),
@@ -465,14 +482,14 @@ async fn update_patient_recommendation(
     .bind(body.source_order_id)
     .bind(due_at)
     .bind(priority.as_deref())
-    .bind(status)
+    .bind(&next_status)
     .bind(body.portal_visible)
     .bind(recommended_on.as_deref())
     .bind(valid_from.as_deref())
     .bind(valid_to.as_deref())
     .bind(reminder_lead_days)
     .bind(reminder_at.as_deref())
-    .bind(lifecycle_status)
+    .bind(&next_lifecycle)
     .bind(outcome_note.as_deref())
     .bind(outcome_at.as_deref())
     .bind(note_intern.as_deref())
@@ -492,7 +509,13 @@ async fn update_patient_recommendation(
         Some(auth.user_id),
         "patient",
         Some(patient_id),
-        json!({ "recommendation_id": recommendation_id }),
+        json!({
+            "recommendation_id": recommendation_id,
+            "from_status": current_status,
+            "status": next_status,
+            "from_lifecycle_status": current_lifecycle,
+            "lifecycle_status": next_lifecycle,
+        }),
     ));
 
     crate::realtime::publish_patient_event(
@@ -666,6 +689,7 @@ async fn create_my_recommendation_decision(
                decision_note = $3,
                decided_at = now(),
                status = $4,
+               lifecycle_status = $7,
                updated_by = $5
            WHERE id = $1 AND patient_id = $6"#,
     )
@@ -675,6 +699,7 @@ async fn create_my_recommendation_decision(
     .bind(next_status)
     .bind(auth.user_id)
     .bind(patient_id)
+    .bind(lifecycle_for_status(next_status))
     .execute(&state.db)
     .await
     {
@@ -1244,6 +1269,123 @@ fn normalize_status(value: &str) -> Result<&'static str, axum::response::Respons
             "Invalid recommendation status",
         )),
     }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn resolve(
+        current: (&str, &str),
+        status: Option<&'static str>,
+        lifecycle: Option<&'static str>,
+    ) -> Option<(String, String)> {
+        resolve_recommendation_state(current.0, current.1, status, lifecycle).ok()
+    }
+
+    fn pair(status: &str, lifecycle: &str) -> Option<(String, String)> {
+        Some((status.to_string(), lifecycle.to_string()))
+    }
+
+    #[test]
+    fn status_and_lifecycle_cannot_disagree() {
+        let active = ("active", "aktiv");
+        // The clinical tab records an outcome: the status follows.
+        assert_eq!(
+            resolve(active, None, Some("erfolg")),
+            pair("completed", "erfolg")
+        );
+        assert_eq!(
+            resolve(active, None, Some("nicht_erfolgt")),
+            pair("cancelled", "nicht_erfolgt")
+        );
+        assert_eq!(
+            resolve(("declined", "nicht_erfolgt"), None, Some("nicht_erfolgt")),
+            pair("declined", "nicht_erfolgt")
+        );
+        // The staff page changes the status: the lifecycle follows, also when
+        // the unchanged lifecycle is sent along.
+        assert_eq!(
+            resolve(active, Some("completed"), None),
+            pair("completed", "erfolg")
+        );
+        assert_eq!(
+            resolve(active, Some("superseded"), Some("aktiv")),
+            pair("superseded", "unbekannt")
+        );
+        // An unchanged status with a new lifecycle follows the lifecycle.
+        assert_eq!(
+            resolve(active, Some("active"), Some("erfolg")),
+            pair("completed", "erfolg")
+        );
+        // Two different changes that contradict each other are refused.
+        assert_eq!(resolve(active, Some("declined"), Some("erfolg")), None);
+        assert_eq!(resolve(active, None, None), pair("active", "aktiv"));
+    }
+}
+
+/// `status` and `lifecycle_status` are one lifecycle (owner decision
+/// 2026-09-28, enforced by `patient_recommendations_status_lifecycle_check`):
+/// the clinical lifecycle that belongs to a status.
+fn lifecycle_for_status(status: &str) -> &'static str {
+    match status {
+        "active" => "aktiv",
+        "completed" => "erfolg",
+        "declined" | "cancelled" => "nicht_erfolgt",
+        _ => "unbekannt",
+    }
+}
+
+/// The status for a clinical lifecycle chosen in the clinical tab; "not
+/// done" keeps a declined or cancelled status and otherwise cancels.
+fn status_for_lifecycle(lifecycle: &str, current_status: &str) -> &'static str {
+    match lifecycle {
+        "aktiv" => "active",
+        "erfolg" => "completed",
+        "nicht_erfolgt" if current_status == "declined" => "declined",
+        "nicht_erfolgt" => "cancelled",
+        _ => "superseded",
+    }
+}
+
+/// Resolves the requested status and lifecycle against the current ones.
+/// A field the client merely echoed back (unchanged) follows the one it
+/// changed; two changed fields must agree (422 otherwise).
+#[allow(clippy::result_large_err)]
+fn resolve_recommendation_state(
+    current_status: &str,
+    current_lifecycle: &str,
+    status: Option<&'static str>,
+    lifecycle: Option<&'static str>,
+) -> Result<(String, String), axum::response::Response> {
+    let resolved = match (status, lifecycle) {
+        (None, None) => (current_status.to_string(), current_lifecycle.to_string()),
+        (Some(status), None) => (status.to_string(), lifecycle_for_status(status).to_string()),
+        (None, Some(lifecycle)) if lifecycle == lifecycle_for_status(current_status) => {
+            (current_status.to_string(), lifecycle.to_string())
+        }
+        (None, Some(lifecycle)) => (
+            status_for_lifecycle(lifecycle, current_status).to_string(),
+            lifecycle.to_string(),
+        ),
+        (Some(status), Some(lifecycle)) if lifecycle_for_status(status) == lifecycle => {
+            (status.to_string(), lifecycle.to_string())
+        }
+        (Some(status), Some(lifecycle)) if lifecycle == current_lifecycle => {
+            (status.to_string(), lifecycle_for_status(status).to_string())
+        }
+        (Some(status), Some(lifecycle)) if status == current_status => (
+            status_for_lifecycle(lifecycle, current_status).to_string(),
+            lifecycle.to_string(),
+        ),
+        (Some(_), Some(_)) => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Recommendation status and lifecycle status do not match",
+            ));
+        }
+    };
+    Ok(resolved)
 }
 
 fn normalize_lifecycle_status(value: &str) -> Result<&'static str, axum::response::Response> {
