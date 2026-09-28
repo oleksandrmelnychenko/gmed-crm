@@ -8801,6 +8801,47 @@ async fn add_leistung(
     {
         return resp;
     }
+    // A new service (or a changed provider on an upserted line) needs an
+    // active, not archived provider (owner decision 2026-09-28, Q11).
+    if let Some(provider_id) = body.provider_id {
+        let existing_provider: Option<Option<Uuid>> = match client_reference.as_deref() {
+            Some(reference) => match sqlx::query_scalar(
+                "SELECT provider_id FROM order_leistungen WHERE order_id = $1 AND client_reference = $2",
+            )
+            .bind(order_id)
+            .bind(reference)
+            .fetch_optional(&state.db)
+            .await
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::error!(error = %e, order_id = %order_id, "Failed to load existing service line");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
+                }
+            },
+            None => None,
+        };
+        if existing_provider != Some(Some(provider_id)) {
+            match crate::services::assignment_eligibility::provider_accepts_new_work(
+                &state.db,
+                provider_id,
+            )
+            .await
+            {
+                Ok(Some(false)) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        crate::services::assignment_eligibility::INACTIVE_PROVIDER_MESSAGE,
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, provider_id = %provider_id, "Failed to check provider status");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to add service");
+                }
+            }
+        }
+    }
     let external_document_id = match resolve_external_document_id_for_leistung(
         &state,
         order_id,

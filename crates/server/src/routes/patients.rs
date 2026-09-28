@@ -9644,6 +9644,27 @@ async fn assign_patient(
         ));
     }
 
+    // Blocked, terminated or AVV-less interpreters take no new patients
+    // (owner decision 2026-09-28, Q11).
+    if matches!(target_role.as_str(), "interpreter" | "teamlead_interpreter") {
+        match crate::services::assignment_eligibility::interpreter_block_reason(
+            &state.db,
+            body.user_id,
+        )
+        .await
+        {
+            Ok(None) => {}
+            Ok(Some(reason)) => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, reason)),
+            Err(e) => {
+                tracing::error!(error = %e, user_id = %body.user_id, "Failed to check interpreter status");
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to validate assignment target",
+                ));
+            }
+        }
+    }
+
     let assignment_already_active = sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS(
                SELECT 1

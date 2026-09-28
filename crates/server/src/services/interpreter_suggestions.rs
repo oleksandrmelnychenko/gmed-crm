@@ -27,7 +27,7 @@ pub async fn load_appointment_interpreter_suggestions(
     pool: &gmed_db::DbPool,
     appointment_id: Uuid,
 ) -> Result<Vec<InterpreterSuggestion>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(&format!(
         r#"WITH target AS (
                 SELECT a.id, a.patient_id, COALESCE(p.languages, ARRAY[]::text[]) AS patient_languages
                 FROM appointments a
@@ -89,11 +89,14 @@ pub async fn load_appointment_interpreter_suggestions(
            LEFT JOIN feedback ON feedback.interpreter_id = u.id
            LEFT JOIN languages lang ON lang.interpreter_id = u.id
            WHERE COALESCE(pref.preference, 'neutral') <> 'avoid'
+             -- not blocked, terminated or without AVV (owner decision 2026-09-28)
+             AND {assignable}
            ORDER BY COALESCE(history.previous_appointment_count, 0) DESC,
                     feedback.average_feedback_score DESC NULLS LAST,
                     u.name
            LIMIT 50"#,
-    )
+        assignable = crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
+    ))
     .bind(appointment_id)
     .fetch_all(pool)
     .await?;

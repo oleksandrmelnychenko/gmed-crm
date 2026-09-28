@@ -71,6 +71,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import { assignableInterpreterOptions } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { hasAppointmentFormChanges } from "@/pages/appointments/model/form-factories";
@@ -985,7 +986,7 @@ function useCreateAppointmentSheetContent({
                       className={createSheetSelectClassName}
                     >
                       <option value="">{tr.common_not_set}</option>
-                      {interpreters.map((member) => (
+                      {assignableInterpreterOptions(interpreters, form.interpreterId).map((member) => (
                         <option key={member.id} value={member.id}>
                           {staffLabel(member)}
                         </option>

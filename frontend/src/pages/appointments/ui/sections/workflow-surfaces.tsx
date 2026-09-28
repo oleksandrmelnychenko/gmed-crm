@@ -110,6 +110,7 @@ import type {
   TaskEntry,
   TaskFormState,
 } from "@/pages/appointments/model/types";
+import { assignableInterpreterOptions } from "@/pages/appointments/model/types";
 import {
   CHECKLIST_PHASES,
   FOLLOW_UP_PRESETS,
@@ -981,7 +982,7 @@ function InterpreterAssignmentManagement({
                 className={selectClassName}
               >
                 <option value="">{t.common_not_set}</option>
-                {interpreters.map((member) => (
+                {assignableInterpreterOptions(interpreters, assignInterpreterId).map((member) => (
                   <option key={member.id} value={member.id}>
                     {member.name} · {roleLabel(member.role)}
                   </option>

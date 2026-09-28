@@ -3808,6 +3808,9 @@ async fn create_concierge_service(
             if let Err(resp) = validate_non_medical_provider(&state, provider_id).await {
                 return resp;
             }
+            if let Err(resp) = ensure_provider_accepts_new_work(&state, provider_id).await {
+                return resp;
+            }
             Some(provider_id)
         }
         (None, Some(service_provider_id), _) => Some(service_provider_id),
@@ -4142,6 +4145,15 @@ async fn update_concierge_service(
 
     if let Some(provider_id) = provider_id_update
         && let Err(resp) = validate_non_medical_provider(&state, provider_id).await
+    {
+        return resp;
+    }
+    let current_provider_id = existing
+        .try_get::<Option<Uuid>, _>("provider_id")
+        .unwrap_or_default();
+    if let Some(provider_id) = provider_id_update
+        && Some(provider_id) != current_provider_id
+        && let Err(resp) = ensure_provider_accepts_new_work(&state, provider_id).await
     {
         return resp;
     }
@@ -5076,6 +5088,31 @@ async fn load_active_concierge_role(
         Ok(Some(role))
     } else {
         Ok(None)
+    }
+}
+
+/// A new concierge service (or a changed provider) needs an active, not
+/// archived provider; existing services keep theirs (owner decision
+/// 2026-09-28, Q11).
+async fn ensure_provider_accepts_new_work(
+    state: &AppState,
+    provider_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    match crate::services::assignment_eligibility::provider_accepts_new_work(&state.db, provider_id)
+        .await
+    {
+        Ok(Some(false)) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            crate::services::assignment_eligibility::INACTIVE_PROVIDER_MESSAGE,
+        )),
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to check provider status");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider",
+            ))
+        }
     }
 }
 

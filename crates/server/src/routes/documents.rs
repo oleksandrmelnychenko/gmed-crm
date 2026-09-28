@@ -21333,7 +21333,13 @@ async fn update_document_translation_request(
             if user_id == Uuid::nil() {
                 Some(None)
             } else {
-                if let Err(resp) = validate_translation_assignee(&state, user_id).await {
+                // A kept assignee is not checked again (existing records stay).
+                let current_assignee = request_row
+                    .try_get::<Option<Uuid>, _>("assigned_to")
+                    .unwrap_or_default();
+                if current_assignee != Some(user_id)
+                    && let Err(resp) = validate_translation_assignee(&state, user_id).await
+                {
                     return resp;
                 }
                 Some(Some(user_id))
@@ -22989,13 +22995,18 @@ async fn validate_translation_assignee(
     user_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let allowed = sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-              SELECT 1
-              FROM users
-              WHERE id = $1
-                AND is_active = true
-                AND role IN ('ceo', 'patient_manager', 'teamlead_interpreter', 'interpreter', 'concierge')
-           )"#,
+        &format!(
+            r#"SELECT EXISTS(
+                  SELECT 1
+                  FROM users u
+                  WHERE u.id = $1
+                    AND u.is_active = true
+                    AND u.role IN ('ceo', 'patient_manager', 'teamlead_interpreter', 'interpreter', 'concierge')
+                    -- blocked, terminated or AVV-less interpreters take no new work
+                    AND {}
+               )"#,
+            crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
+        ),
     )
     .bind(user_id)
     .fetch_one(&state.db)
