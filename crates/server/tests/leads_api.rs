@@ -747,6 +747,8 @@ async fn create_and_get_lead() {
     assert_eq!(body["email"], "test@example.com");
     assert_eq!(body["qualification_status"], "new");
     assert_eq!(body["lead_type"], "console");
+    // A first intake is not a repeat intake of an existing patient.
+    assert!(body["repeat_patient_id"].is_null(), "{body}");
 
     let (status, list) = json_request(
         &app,
@@ -4076,6 +4078,19 @@ async fn repeat_intake_shows_overdue_debt_and_is_marked_in_the_list() {
         .expect("repeat lead is listed")
         .clone();
     assert_eq!(listed["repeat_patient_id"], patient.to_string());
+
+    // The detail carries the same marker, so the wizard opened from the leads
+    // list runs in repeat mode just like the one opened from the patient.
+    let patient_pid: String = sqlx::query_scalar("SELECT patient_id FROM patients WHERE id = $1")
+        .bind(patient)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["repeat_patient_id"], patient.to_string());
+    assert_eq!(detail["repeat_patient_pid"], patient_pid);
 
     // An overdue invoice on an earlier order puts the patient into debt management.
     let earlier_order: Uuid = sqlx::query_scalar(

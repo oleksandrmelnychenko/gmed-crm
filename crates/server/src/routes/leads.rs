@@ -2487,6 +2487,11 @@ async fn get_lead(
                   notes, user_agent, created_at, updated_at,
                   requested_specialties, wizard_state, status_changed_at,
                   intake_model, prospect_patient_id, referrer_patient_id,
+                  repeat_patient_id,
+                  (
+                      SELECT p.patient_id FROM patients p
+                      WHERE p.id = leads.repeat_patient_id
+                  ) AS repeat_patient_pid,
                   (
                       SELECT p.patient_id FROM patients p
                       WHERE p.id = leads.referrer_patient_id
@@ -2846,6 +2851,21 @@ async fn get_lead(
             .flatten()
             .map(|id| json!(id))
             .unwrap_or(Value::Null),
+    );
+    // A repeat intake of an existing patient. The wizard switches to its
+    // repeat mode (document review, debt check, no new patient card) from
+    // this field, whether the lead is opened from the patient or the leads list.
+    obj.insert(
+        "repeat_patient_id".into(),
+        row.try_get::<Option<Uuid>, _>("repeat_patient_id")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "repeat_patient_pid".into(),
+        s_opt(&row, "repeat_patient_pid"),
     );
     obj.insert(
         "referrer_patient_id".into(),
