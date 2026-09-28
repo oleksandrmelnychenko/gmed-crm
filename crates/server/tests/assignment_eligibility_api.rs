@@ -8,8 +8,8 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use sqlx::PgPool;
-use tower::ServiceExt;
 use std::sync::atomic::{AtomicU32, Ordering};
+use tower::ServiceExt;
 
 use uuid::Uuid;
 
