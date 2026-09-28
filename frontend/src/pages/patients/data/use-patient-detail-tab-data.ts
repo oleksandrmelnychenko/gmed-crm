@@ -244,7 +244,10 @@ export function usePatientDetailTabData({
             ] = canViewCareHistory
               ? await Promise.all([
                   apiFetch<OrderItem[]>(`/patients/${id}/orders`, { signal }).catch(() => []),
-                  apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal }).catch(() => []),
+                  // Billing reads the care history without the calendar.
+                  canViewAppointments
+                    ? apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal }).catch(() => [])
+                    : Promise.resolve([]),
                   apiFetch<DocumentAlerts>(`/patients/${id}/document-alerts`, { signal }).catch(() => null),
                 ])
               : [[], [], null];
@@ -438,6 +441,7 @@ export function usePatientDetailTabData({
     };
   }, [
     activeTab,
+    canViewAppointments,
     canViewCareHistory,
     deferredTimelineSearch,
     id,

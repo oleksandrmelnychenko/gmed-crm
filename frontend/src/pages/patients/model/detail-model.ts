@@ -246,13 +246,17 @@ const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * `/patients/{id}/appointments`: the care-history roles plus the concierge,
- * who reads a patient's appointments (medical ones as blocked slots) but not
- * the orders or the timeline, and the interpreter, who gets only the
- * appointments it runs or owns.
+ * `/patients/{id}/appointments`: the care-history roles without billing (no
+ * `appointments.view`: it learns about medical visits from the billing
+ * handoff task, not from the calendar) plus the concierge, who reads a
+ * patient's appointments (medical ones as blocked slots) but not the orders
+ * or the timeline, and the interpreter, who gets only the appointments it
+ * runs or owns.
  */
 const PATIENT_APPOINTMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
-  ...PATIENT_CARE_HISTORY_SERVER_ROLES,
+  "ceo",
+  "patient_manager",
+  "teamlead_interpreter",
   "concierge",
   "interpreter",
 ]);
@@ -338,13 +342,13 @@ export function canViewPatientCareHistorySurface(actor?: Actor) {
 }
 
 /**
- * The appointments tab: the care-history rule widened to the concierge, who
- * holds `appointments.view`. Billing keeps reaching the tab through
- * `orders.view`, as before the split.
+ * The appointments tab needs `appointments.view`, as the server does: the
+ * concierge (blocked medical slots) and the interpreter (own visits) see it,
+ * billing does not.
  */
 export function canViewPatientAppointmentsSurface(actor?: Actor) {
   return (
-    hasAnyCapability(actor, ["orders.view", "appointments.view"]) &&
+    hasCapability(actor, "appointments.view") &&
     serverAdmitsRole(actor, PATIENT_APPOINTMENTS_SERVER_ROLES)
   );
 }

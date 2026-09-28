@@ -394,6 +394,23 @@ describe("patient surface access helpers", () => {
     expect(canManagePatientProfile("billing")).toBe(false);
   });
 
+  it("hides the appointments tab from Billing (no appointments.view) but keeps orders and the timeline", () => {
+    expect(canViewPatientAppointmentsSurface("billing")).toBe(false);
+    expect(canViewPatientCareHistorySurface("billing")).toBe(true);
+    const access = {
+      canViewOperationalSurface: true,
+      canViewCareHistory: true,
+      canViewAppointments: false,
+      canViewAssignments: false,
+      canViewDocuments: true,
+      canViewContracts: true,
+      canViewInvoices: true,
+    };
+    expect(normalizePatientDetailTab("appointments", access)).toBe("profile");
+    expect(normalizePatientDetailTab("timeline", access)).toBe("timeline");
+    expect(normalizePatientDetailTab("orders", access)).toBe("orders");
+  });
+
   it("keeps sales outside patient-bound commercial and document surfaces", () => {
     expect(canViewPatientOperationalSurface("sales")).toBe(false);
     expect(canViewPatientDocumentsSurface("sales")).toBe(false);
