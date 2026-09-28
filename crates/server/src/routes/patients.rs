@@ -205,7 +205,9 @@ pub(crate) struct PatientViewRuleScope {
 }
 
 impl PatientViewRuleScope {
-    fn decision(&self, patient_id: Uuid) -> Option<bool> {
+    /// The explicit rule deciding the view of one patient, if any (`None`
+    /// leaves the role baseline in control, as in `has_patient_access`).
+    pub(crate) fn decision(&self, patient_id: Uuid) -> Option<bool> {
         self.all
             .iter()
             .chain(
