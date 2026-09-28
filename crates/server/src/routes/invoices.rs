@@ -3412,6 +3412,7 @@ async fn build_selected_invoice_snapshot(
     let mut allocations = Vec::new();
     let mut incomplete_final_lines = BTreeSet::new();
     let mut consumed_requested_lines = BTreeSet::new();
+    let mut skipped_cancelled_lines = false;
 
     for (line_index, source_item) in quote_items.iter().enumerate() {
         let quoted_quantity = invoice_json_decimal(source_item, "quantity")
@@ -3423,19 +3424,21 @@ async fn build_selected_invoice_snapshot(
                 "Quote contains an invalid line quantity",
             ));
         }
-        let source_service_cancelled = ctx.order_contract_terminated
-            && source_item
-                .get("source_order_leistung_id")
-                .and_then(Value::as_str)
-                .and_then(|value| Uuid::parse_str(value).ok())
-                .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
+        // A cancelled service (by staff, an order cancellation or a contract
+        // termination) is never billed, even from an older open quote.
+        let source_service_cancelled = source_item
+            .get("source_order_leistung_id")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
         if source_service_cancelled {
             if requested.contains_key(&line_index) {
                 return Err(err(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    "A service cancelled by contract termination cannot be invoiced",
+                    "A cancelled service cannot be invoiced",
                 ));
             }
+            skipped_cancelled_lines = true;
             continue;
         }
         let already_allocated = allocated
@@ -3568,8 +3571,20 @@ async fn build_selected_invoice_snapshot(
     let first_settlement = invoice_type != "advance" && allocated.is_empty();
     let selected_all_lines = requested_items.is_none();
     if first_settlement && selected_all_lines && !ctx.order_contract_terminated {
+        // The whole quote is billed as stored, unless a cancelled service
+        // was left out: then the recomputed lines and totals are the base.
+        let base = if skipped_cancelled_lines {
+            (total_net, total_vat, total_gross, selected_items)
+        } else {
+            (
+                ctx.total_net,
+                ctx.total_vat,
+                ctx.total_gross,
+                ctx.line_items.as_array().cloned().unwrap_or_default(),
+            )
+        };
         let mut snapshot =
-            build_invoice_snapshot_with_approved_package_overages(state, ctx).await?;
+            build_invoice_snapshot_with_approved_package_overages(state, ctx, base).await?;
         snapshot.allocations = allocations;
         return Ok(snapshot);
     }
@@ -3612,12 +3627,11 @@ async fn build_prepayment_advance_snapshot(
     let quote_items = ctx.line_items.as_array().cloned().unwrap_or_default();
     let mut groups = BTreeMap::<(bool, Decimal), Decimal>::new();
     for item in &quote_items {
-        let source_service_cancelled = ctx.order_contract_terminated
-            && item
-                .get("source_order_leistung_id")
-                .and_then(Value::as_str)
-                .and_then(|value| Uuid::parse_str(value).ok())
-                .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
+        let source_service_cancelled = item
+            .get("source_order_leistung_id")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .is_some_and(|service_id| ctx.cancelled_source_line_ids.contains(&service_id));
         if source_service_cancelled {
             continue;
         }
@@ -3736,12 +3750,13 @@ async fn build_prepayment_advance_snapshot(
 async fn build_invoice_snapshot_with_approved_package_overages(
     state: &AppState,
     ctx: &QuoteInvoiceContext,
+    (mut total_net, mut total_vat, mut total_gross, mut line_items): (
+        Decimal,
+        Decimal,
+        Decimal,
+        Vec<Value>,
+    ),
 ) -> Result<InvoiceCreationSnapshot, axum::response::Response> {
-    let mut total_net = ctx.total_net;
-    let mut total_vat = ctx.total_vat;
-    let mut total_gross = ctx.total_gross;
-    let mut line_items = ctx.line_items.as_array().cloned().unwrap_or_default();
-
     let overage_rows = sqlx::query(
         r#"SELECT spc.id AS consumption_id,
                   spc.patient_service_package_id,
@@ -12248,8 +12263,16 @@ async fn update_invoice_status(
         Ok(result) if result.rows_affected() > 0 => {
             if requested_status == "cancelled"
                 && let Err(e) = sqlx::query(
+                    // A service billed ahead of delivery (e.g. an advance)
+                    // returns to the stage it had really reached, not to
+                    // `approved`: otherwise it would count as owed work.
                     r#"UPDATE order_leistungen service
-                       SET status = 'approved'
+                       SET status = CASE
+                               WHEN service.approved_at IS NOT NULL
+                                    OR service.approved_by IS NOT NULL THEN 'approved'
+                               WHEN service.delivered_at IS NOT NULL THEN 'delivered'
+                               ELSE 'planned'
+                           END
                        WHERE service.status = 'invoiced'
                          AND service.id IN (
                              SELECT order_leistung_id

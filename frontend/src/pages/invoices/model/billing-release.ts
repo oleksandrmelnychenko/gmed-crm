@@ -47,9 +47,9 @@ const INVOICE_CREATION_ERRORS: Record<string, LocalizedText> = {
     de: "Die Schlussrechnung muss alle verbleibenden Mengen enthalten. Verwenden Sie für eine Teilauswahl eine Zwischenrechnung.",
     ru: "Финальный счёт должен включать весь остаток. Для части позиций выберите промежуточный счёт.",
   },
-  "A service cancelled by contract termination cannot be invoiced": {
-    de: "Eine Leistung wurde mit der Vertragskündigung storniert und kann nicht abgerechnet werden. Entfernen Sie sie aus der Auswahl.",
-    ru: "Услуга отменена при расторжении договора, по ней нельзя выставить счёт. Уберите её из выбора.",
+  "A cancelled service cannot be invoiced": {
+    de: "Eine Leistung wurde storniert und kann nicht abgerechnet werden. Entfernen Sie sie aus der Auswahl.",
+    ru: "Услуга отменена, по ней нельзя выставить счёт. Уберите её из выбора.",
   },
   "Quote has no invoiceable line items": {
     de: "Dieses Angebot enthält keine abrechenbaren Positionen. Prüfen Sie die Leistungen im Auftrag.",

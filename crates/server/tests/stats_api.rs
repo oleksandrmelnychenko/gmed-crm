@@ -1418,6 +1418,65 @@ async fn ceo_assistant_can_open_reports_forecasting_and_risk_workspaces() {
     );
 }
 
+/// A draft invoice is not issued: it is neither billed nor owed, so it raises
+/// no outstanding-balance risk. A released invoice does.
+#[tokio::test]
+async fn billing_risks_count_released_invoices_not_drafts() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("risk-draft");
+    let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
+    let draft_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-d"), "active").await;
+    let sent_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-s"), "active").await;
+    sqlx::query(
+        "UPDATE orders SET billing_release_status = 'granted', phase = 'intake' WHERE id = ANY($1)",
+    )
+    .bind(vec![draft_order, sent_order])
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_invoice(
+        &pool,
+        draft_order,
+        patient_id,
+        admin_id,
+        &tag,
+        "draft",
+        1190,
+        0,
+        "NULL",
+        "NULL",
+    )
+    .await;
+    seed_invoice(
+        &pool,
+        sent_order,
+        patient_id,
+        admin_id,
+        &tag,
+        "sent",
+        1190,
+        0,
+        "CURRENT_DATE + 14",
+        "NULL",
+    )
+    .await;
+
+    let ceo = auth_header_for(admin_id, "ceo");
+    let (status, body) = json_request(&app, "GET", "/api/v1/stats/risk-analysis", &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let alerts = body["billing"]["alerts"].as_array().unwrap();
+    let alert_for = |order_id: Uuid| {
+        alerts
+            .iter()
+            .find(|alert| alert["order_id"] == order_id.to_string())
+    };
+    assert!(alert_for(draft_order).is_none(), "{body}");
+    let sent_alert = alert_for(sent_order).expect("released invoice is owed");
+    assert_eq!(sent_alert["outstanding_balance"], "1190", "{sent_alert}");
+}
+
 #[tokio::test]
 async fn operational_roles_without_analytics_scope_are_forbidden_from_stats_workspaces() {
     let Some((app, pool, _admin_id)) = test_context().await else {

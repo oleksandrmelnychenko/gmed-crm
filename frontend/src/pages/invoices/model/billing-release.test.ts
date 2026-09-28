@@ -18,7 +18,7 @@ const SERVER_MESSAGES = [
   "Invoice line quantity must be greater than zero",
   "Invoice line was selected more than once",
   "Quote contains an invalid line quantity",
-  "A service cancelled by contract termination cannot be invoiced",
+  "A cancelled service cannot be invoiced",
   "Selected quantity exceeds the remaining quote line quantity",
   "Quote contains invalid price or VAT data",
   "A final invoice must include every remaining quote line quantity",
