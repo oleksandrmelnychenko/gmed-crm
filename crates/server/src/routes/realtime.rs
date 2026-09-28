@@ -325,6 +325,28 @@ async fn can_receive_event(
         }
     }
 
+    // An interpreter sees only the documents opened to him, not every document
+    // of a patient he is linked to (owner decision 2026-09-28), so document
+    // events follow the document rule instead of the patient link — both ways:
+    // a document shared to him reaches him without a patient link.
+    if auth.role == Role::Interpreter {
+        if event.entity_type == "document" {
+            return crate::routes::documents::current_user_can_view_document(
+                state,
+                auth,
+                event.entity_id,
+            )
+            .await;
+        }
+        if event.entity_type == "patient"
+            && let Some(document_id) = payload_uuid(event, "document_id")
+            && !crate::routes::documents::current_user_can_view_document(state, auth, document_id)
+                .await?
+        {
+            return Ok(false);
+        }
+    }
+
     match event.entity_type.as_str() {
         "patient" => {
             let patient_id = event.patient_id.unwrap_or(event.entity_id);
@@ -392,9 +414,13 @@ async fn can_receive_event(
 }
 
 fn payload_appointment_id(event: &RealtimeEvent) -> Option<Uuid> {
+    payload_uuid(event, "appointment_id")
+}
+
+fn payload_uuid(event: &RealtimeEvent, key: &str) -> Option<Uuid> {
     event
         .payload
-        .get("appointment_id")
+        .get(key)
         .and_then(|value| value.as_str())
         .and_then(|value| Uuid::parse_str(value).ok())
 }
