@@ -208,7 +208,6 @@ export interface ClinicalTranslations {
   appointments_workflow_occurrence: string;
   appointments_workflow_occurrences: string;
   appointments_workflow_add_task: string;
-  appointments_billing_mirror_task: string;
   appointments_billing_select_assignee: string;
   appointments_billing_open_chat: string;
   appointments_billing_create_handoff: string;
@@ -429,7 +428,6 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_workflow_occurrence: "приёмом",
   appointments_workflow_occurrences: "приёмами",
   appointments_workflow_add_task: "Добавить задачу",
-  appointments_billing_mirror_task: "Отразить эту передачу в бухгалтерию как задачу",
   appointments_billing_select_assignee: "Выберите ответственного из бухгалтерии",
   appointments_billing_open_chat: "Открыть черновик чата с бухгалтерией",
   appointments_billing_create_handoff: "Создать передачу в бухгалтерию",
@@ -650,7 +648,6 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_workflow_occurrence: "Termin",
   appointments_workflow_occurrences: "Termine",
   appointments_workflow_add_task: "Aufgabe hinzufügen",
-  appointments_billing_mirror_task: "Diese Abrechnungsübergabe als Aufgabe spiegeln",
   appointments_billing_select_assignee: "Abrechnungszuständigen auswählen",
   appointments_billing_open_chat: "Abrechnungs-Chatentwurf öffnen",
   appointments_billing_create_handoff: "Abrechnungsübergabe erstellen",

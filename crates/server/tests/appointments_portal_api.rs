@@ -359,45 +359,90 @@ async fn it_admin_has_no_appointment_patient_or_provider_workspace() {
 }
 
 #[tokio::test]
-async fn patient_manager_can_select_it_admin_as_appointment_owner() {
+async fn appointment_owner_must_be_able_to_open_and_work_on_the_appointment() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
 
-    let tag = unique_tag("appointment-it-admin-owner");
+    let tag = unique_tag("appointment-owner-roles");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let patient_manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
     let it_admin_id = seed_user(&pool, &format!("{tag}-it"), "it_admin").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-bill"), "billing").await;
+    let assistant_id = seed_user(&pool, &format!("{tag}-asst"), "ceo_assistant").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-conc"), "concierge").await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
 
     seed_patient_assignment(&pool, patient_id, patient_manager_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, teamlead_id, admin_id).await;
 
     let pm_bearer = auth_header_for(patient_manager_id, "patient_manager");
+    let create = |bearer: String, owner_user_id: Uuid, date: &'static str| {
+        let app = app.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                "/api/v1/appointments",
+                &bearer,
+                Some(json!({
+                    "patient_id": patient_id,
+                    "owner_user_id": owner_user_id,
+                    "appointment_type": "internal",
+                    "title": "Internal coordination",
+                    "date": date,
+                    "time_start": "09:00",
+                    "time_end": "09:30"
+                })),
+            )
+            .await
+        }
+    };
+
+    // An owner who could not open the appointment (IT, billing) or not work
+    // on it (interpreter, CEO assistant) is refused.
+    for owner in [it_admin_id, interpreter_id, billing_id, assistant_id] {
+        let (status, body) = create(pm_bearer.clone(), owner, "2026-06-10").await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+        assert_eq!(
+            body["message"],
+            "owner_user_id must reference an active user who can open and work on appointments (CEO, patient manager, interpreter team lead or concierge)"
+        );
+    }
+    let owned: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM appointments WHERE patient_id = $1 AND owner_user_id = ANY($2)",
+    )
+    .bind(patient_id)
+    .bind(vec![it_admin_id, interpreter_id, billing_id, assistant_id])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(owned, 0);
+
+    // A concierge owner opens the appointment it owns.
+    let (status, body) = create(pm_bearer.clone(), concierge_id, "2026-06-10").await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let appointment_id = body["id"].as_str().unwrap().to_string();
     let (status, body) = json_request(
         &app,
         "GET",
-        "/api/v1/appointments/meta/staff",
-        &pm_bearer,
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &auth_header_for(concierge_id, "concierge"),
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(
-        body.as_array()
-            .unwrap()
-            .iter()
-            .any(|item| { item["id"] == it_admin_id.to_string() && item["role"] == "it_admin" }),
-        "IT admin must be available in appointment owner options"
-    );
+    assert_eq!(status, StatusCode::OK, "{body:?}");
+    assert_eq!(body["owner_role"], "concierge");
 
+    // Handing the appointment to an IT admin later is refused as well.
     let (status, body) = json_request(
         &app,
         "POST",
-        "/api/v1/appointments",
+        &format!("/api/v1/appointments/{appointment_id}/update"),
         &pm_bearer,
         Some(json!({
-            "patient_id": patient_id,
             "owner_user_id": it_admin_id,
-            "appointment_type": "internal",
             "title": "Internal coordination",
             "date": "2026-06-10",
             "time_start": "09:00",
@@ -405,20 +450,51 @@ async fn patient_manager_can_select_it_admin_as_appointment_owner() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::CREATED, "{body:?}");
-    let appointment_id = body["id"].as_str().unwrap().to_string();
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
 
-    let (status, body) = json_request(
-        &app,
-        "GET",
-        &format!("/api/v1/appointments/{appointment_id}"),
-        &pm_bearer,
-        None,
+    // The interpreter team lead no longer hands appointments to interpreters.
+    let (status, body) = create(
+        auth_header_for(teamlead_id, "teamlead_interpreter"),
+        interpreter_id,
+        "2026-06-12",
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["owner_user_id"], it_admin_id.to_string());
-    assert_eq!(body["owner_role"], "it_admin");
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    let (status, body) = create(
+        auth_header_for(teamlead_id, "teamlead_interpreter"),
+        teamlead_id,
+        "2026-06-12",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+
+    // An appointment an IT admin already owns keeps saving while the owner
+    // stays unchanged.
+    let legacy_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, owner_user_id, appointment_type, title, date, status, created_by
+           ) VALUES ($1, $2, 'internal', 'Legacy slot', '2026-06-11', 'planned', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(it_admin_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{legacy_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "owner_user_id": it_admin_id,
+            "title": "Legacy slot renamed",
+            "date": "2026-06-11"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body:?}");
 }
 
 #[tokio::test]

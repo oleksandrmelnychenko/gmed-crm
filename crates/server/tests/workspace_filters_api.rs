@@ -5300,6 +5300,127 @@ async fn teamlead_only_sees_assigned_patients_and_appointments() {
 }
 
 #[tokio::test]
+async fn appointment_payload_reports_whether_the_caller_can_change_it() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-can-edit");
+    let team_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-team")).await;
+    let own_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-own")).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-conc"), "concierge").await;
+    seed_patient_assignment(&pool, own_patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(&pool, team_patient_id, concierge_id, admin_id).await;
+
+    // A visit of the team (a booked interpreter) for a patient the team lead
+    // is not assigned to, and a visit of the team lead's own patient.
+    let team_visit = seed_appointment(
+        &pool,
+        team_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Team visit",
+        "confirmed",
+        "2026-10-05",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'accepted' WHERE id = $1",
+    )
+    .bind(team_visit)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let own_visit = seed_appointment(
+        &pool,
+        own_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Own patient visit",
+        "planned",
+        "2026-10-06",
+    )
+    .await;
+
+    let detail_can_edit = |bearer: String, appointment_id: Uuid| {
+        let app = app.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/appointments/{appointment_id}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["can_edit"].as_bool().expect("can_edit flag")
+        }
+    };
+    let listed_can_edit = |bearer: String| {
+        let app = app.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                "/api/v1/appointments?date_from=2026-10-05&date_to=2026-10-06",
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body.as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| {
+                    item["id"] == team_visit.to_string() || item["id"] == own_visit.to_string()
+                })
+                .map(|item| {
+                    (
+                        item["id"].as_str().unwrap().to_string(),
+                        item["can_edit"].as_bool().expect("can_edit flag"),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        }
+    };
+
+    // The team lead opens the team visit to review its report but cannot
+    // change it; the server refuses the edit the flag withholds.
+    let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+    assert!(!detail_can_edit(teamlead_bearer.clone(), team_visit).await);
+    assert!(detail_can_edit(teamlead_bearer.clone(), own_visit).await);
+    let listed = listed_can_edit(teamlead_bearer.clone()).await;
+    assert_eq!(listed.get(&team_visit.to_string()), Some(&false));
+    assert_eq!(listed.get(&own_visit.to_string()), Some(&true));
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{team_visit}/update"),
+        &teamlead_bearer,
+        Some(json!({ "title": "Team visit moved", "date": "2026-10-07" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // The CEO changes every appointment; the booked interpreter has no
+    // appointments.edit; the concierge sees the medical visit as a blocked slot.
+    assert!(detail_can_edit(admin_bearer.clone(), team_visit).await);
+    assert!(!detail_can_edit(auth_header_for(interpreter_id, "interpreter"), team_visit).await);
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    assert!(!detail_can_edit(concierge_bearer.clone(), team_visit).await);
+    let listed = listed_can_edit(concierge_bearer).await;
+    assert_eq!(listed.get(&team_visit.to_string()), Some(&false));
+}
+
+#[tokio::test]
 async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -6068,7 +6189,7 @@ async fn concierge_preparation_is_due_ahead_of_the_service_and_skips_billing() {
     .unwrap();
     assert_eq!(prep_lead, 2.0);
 
-    // Billing has nothing to prepare for a concierge booking.
+    // Billing is never reminded about an appointment it cannot open.
     let (status, body) = json_request(
         &app,
         "POST",
@@ -7911,6 +8032,7 @@ async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
     let other_interpreter = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
     let assigned_concierge = seed_user(&pool, &format!("{tag}-c1"), "concierge").await;
     let unassigned_concierge = seed_user(&pool, &format!("{tag}-c2"), "concierge").await;
+    let billing = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
     for user_id in [
         pm_id,
         booked_interpreter,
@@ -7977,6 +8099,15 @@ async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
     assert_eq!(
         body["message"],
         "The selected user has no access to this appointment or its patient"
+    );
+    // Billing has no appointments.view: it could neither see nor complete a
+    // reminder about this medical visit (it learns about it through the
+    // billing handoff).
+    let (status, body) = remind(billing).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "This role does not take part in this appointment's preparation"
     );
 
     // A declined booking no longer counts.
@@ -8320,7 +8451,8 @@ async fn ceo_can_load_and_manage_appointment_workflow_resources() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
-    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let appointment_id = seed_appointment(
         &pool,
         patient_id,
@@ -8360,7 +8492,7 @@ async fn ceo_can_load_and_manage_appointment_workflow_resources() {
         &format!("/api/v1/appointments/{appointment_id}/reminders"),
         &bearer,
         Some(json!({
-            "user_id": billing_id,
+            "user_id": pm_id,
             "remind_at": "2026-08-10T12:00:00Z",
             "title": "CEO workflow reminder"
         })),
@@ -9775,7 +9907,7 @@ async fn appointments_list_supports_owner_filter() {
 }
 
 #[tokio::test]
-async fn teamlead_can_create_appointment_for_assigned_interpreter_owner() {
+async fn teamlead_books_an_interpreter_but_keeps_the_ownership() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -9791,26 +9923,38 @@ async fn teamlead_can_create_appointment_for_assigned_interpreter_owner() {
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
 
     let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        "/api/v1/appointments",
-        &teamlead_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "provider_id": provider_id,
-            "doctor_id": doctor_id,
-            "owner_user_id": interpreter_id,
-            "interpreter_id": interpreter_id,
-            "appointment_type": "medical",
-            "title": "Interpreter-covered consultation",
-            "date": "2026-05-07",
-            "time_start": "13:00",
-            "time_end": "14:00"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
+    let create = |owner_user_id: Option<Uuid>| {
+        let app = app.clone();
+        let bearer = teamlead_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                "/api/v1/appointments",
+                &bearer,
+                Some(json!({
+                    "patient_id": patient_id,
+                    "provider_id": provider_id,
+                    "doctor_id": doctor_id,
+                    "owner_user_id": owner_user_id,
+                    "interpreter_id": interpreter_id,
+                    "appointment_type": "medical",
+                    "title": "Interpreter-covered consultation",
+                    "date": "2026-05-07",
+                    "time_start": "13:00",
+                    "time_end": "14:00"
+                })),
+            )
+            .await
+        }
+    };
+
+    // An interpreter cannot work on (edit) an appointment, so it cannot own one.
+    let (status, body) = create(Some(interpreter_id)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, body) = create(None).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
     let appointment_id = body["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(
@@ -9822,7 +9966,7 @@ async fn teamlead_can_create_appointment_for_assigned_interpreter_owner() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["owner_user_id"], interpreter_id.to_string());
+    assert_eq!(body["owner_user_id"], teamlead_id.to_string());
     assert_eq!(body["interpreter_id"], interpreter_id.to_string());
 }
 
@@ -10032,37 +10176,50 @@ async fn teamlead_cannot_reassign_owner_to_patient_manager_during_reschedule() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/appointments/{appointment_id}/update"),
-        &teamlead_bearer,
-        Some(json!({
-            "provider_id": provider_id,
-            "doctor_id": doctor_id,
-            "owner_user_id": interpreter_id,
-            "interpreter_id": interpreter_id,
-            "title": "Interpreter-owned follow-up",
-            "date": "2026-05-15",
-            "time_start": "10:30",
-            "time_end": "11:30",
-            "location": "Remote"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    let reassign = |owner_user_id: Uuid| {
+        let app = app.clone();
+        let bearer = teamlead_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/appointments/{appointment_id}/update"),
+                &bearer,
+                Some(json!({
+                    "provider_id": provider_id,
+                    "doctor_id": doctor_id,
+                    "owner_user_id": owner_user_id,
+                    "interpreter_id": interpreter_id,
+                    "title": "Team lead follow-up",
+                    "date": "2026-05-15",
+                    "time_start": "10:30",
+                    "time_end": "11:30",
+                    "location": "Remote"
+                })),
+            )
+            .await
+        }
+    };
+
+    // An interpreter cannot work on (edit) an appointment, so it cannot own one.
+    let (status, body) = reassign(interpreter_id).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let other_teamlead_id = seed_user(&pool, &format!("{tag}-tl2"), "teamlead_interpreter").await;
+    let (status, body) = reassign(other_teamlead_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["ok"], true);
 
     let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/appointments/{appointment_id}"),
-        &teamlead_bearer,
+        &auth_header_for(admin_id, "ceo"),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["owner_user_id"], interpreter_id.to_string());
+    assert_eq!(body["owner_user_id"], other_teamlead_id.to_string());
 }
 
 #[tokio::test]

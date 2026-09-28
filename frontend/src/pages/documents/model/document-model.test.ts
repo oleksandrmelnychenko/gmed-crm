@@ -15,6 +15,7 @@ import {
   formatBusinessDocumentNumber,
   intakeOpenAction,
   intakeReviewNeedsClassification,
+  isMedicalDocumentClassification,
   patientDocumentAddresseeLabel,
   reviewEditForm,
   withDocumentCategory,
@@ -736,6 +737,24 @@ describe("document intake review", () => {
       category: "administrative",
       isMedical: false,
       accessCategory: "internal",
+    });
+  });
+
+  it("recognises a medical category or document type like the server", () => {
+    expect(isMedicalDocumentClassification("medical_arztbrief", "", categories)).toBe(true);
+    expect(isMedicalDocumentClassification(" Medical_Arztbrief ", null, categories)).toBe(true);
+    expect(isMedicalDocumentClassification("administrative", "medical_arztbrief", categories)).toBe(
+      true,
+    );
+    expect(isMedicalDocumentClassification("administrative", "invoice", categories)).toBe(false);
+    expect(isMedicalDocumentClassification("", "", categories)).toBe(false);
+  });
+
+  it("sets the medical access category when a medical category is chosen", () => {
+    const flaggedOnly = { ...emptyUploadForm(), isMedical: true, accessCategory: "internal" as const };
+    expect(withDocumentCategory(flaggedOnly, "medical_arztbrief", categories)).toMatchObject({
+      isMedical: true,
+      accessCategory: "medical",
     });
   });
 

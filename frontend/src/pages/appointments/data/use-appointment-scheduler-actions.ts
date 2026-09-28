@@ -14,6 +14,7 @@ import {
   formatScheduleConflictError,
 } from "@/pages/appointments/model/schedule-warnings";
 import { toDateInput, toTimeInput } from "@/pages/appointments/model/date-time";
+import { canRescheduleAppointmentItem } from "@/pages/appointments/model/selectors";
 import type {
   AppointmentListItem,
   AppointmentRecurringActionScope,
@@ -56,7 +57,11 @@ export function useAppointmentSchedulerActions({
   const handleInlineReschedule = useCallback(
     async (info: EventDropArg | EventResizeDoneArg) => {
       const source = appointmentsIndex.get(info.event.id);
-      if (!source || !canEditSchedule || source.is_blocked || !info.event.start) {
+      if (
+        !source ||
+        !canRescheduleAppointmentItem(canEditSchedule, source) ||
+        !info.event.start
+      ) {
         info.revert();
         return;
       }

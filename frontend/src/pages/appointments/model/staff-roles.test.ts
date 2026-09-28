@@ -4,20 +4,21 @@ import {
   activePatientAssigneeIds,
   canRemindAboutAppointment,
   filterAppointmentOwnerOptions,
+  isAppointmentOwnerRole,
   isAppointmentReminderRecipient,
   isAppointmentTaskAssignableRole,
 } from "./staff-roles";
 
 describe("appointment reminder recipients", () => {
-  it("leaves billing out of concierge bookings and IT out of every reminder", () => {
-    expect(isAppointmentReminderRecipient("billing", "non_medical")).toBe(false);
-    expect(isAppointmentReminderRecipient("billing", "medical")).toBe(true);
-    expect(isAppointmentReminderRecipient("it_admin", "medical")).toBe(false);
-    expect(isAppointmentReminderRecipient("concierge", "non_medical")).toBe(true);
+  it("leaves billing and IT, who cannot open appointments, out of every reminder", () => {
+    expect(isAppointmentReminderRecipient("billing")).toBe(false);
+    expect(isAppointmentReminderRecipient("it_admin")).toBe(false);
+    expect(isAppointmentReminderRecipient("sales")).toBe(false);
+    expect(isAppointmentReminderRecipient("concierge")).toBe(true);
+    expect(isAppointmentReminderRecipient("interpreter")).toBe(true);
   });
 
   const visit = {
-    type: "medical",
     status: "confirmed",
     interpreter_id: "interpreter-1",
     interpreter_response: "accepted",
@@ -56,8 +57,12 @@ describe("appointment reminder recipients", () => {
     expect(remindable("interpreter-1", "teamlead_interpreter")).toBe(true);
     expect(remindable("teamlead-9", "teamlead_interpreter")).toBe(false);
     expect(remindable("ceo-1", "ceo")).toBe(true);
-    expect(remindable("billing-1", "billing")).toBe(true);
-    expect(remindable("billing-1", "billing", { ...visit, type: "non_medical" })).toBe(false);
+    // Billing is not a reminder recipient on any visit, not even as an
+    // assignee or owner: it cannot open appointments.
+    expect(remindable("billing-1", "billing")).toBe(false);
+    expect(
+      remindable("billing-1", "billing", { ...visit, owner_user_id: "billing-1" }),
+    ).toBe(false);
     expect(remindable("it-1", "it_admin")).toBe(false);
     expect(remindable("sales-1", "sales")).toBe(false);
   });
@@ -75,43 +80,38 @@ const staff = [
 ];
 
 describe("appointment staff roles", () => {
-  it("keeps IT admin selectable for CEO and patient manager owners", () => {
-    expect(
-      filterAppointmentOwnerOptions(staff, "patient_manager", "pm-1").map(
-        (member) => member.id,
-      ),
-    ).toEqual([
-      "ceo-1",
-      "pm-1",
-      "teamlead-1",
-      "teamlead-2",
-      "interpreter-1",
-      "concierge-1",
-      "it-1",
-    ]);
+  it("offers as owners only roles that can open and work on appointments", () => {
+    for (const role of ["ceo", "patient_manager"]) {
+      expect(
+        filterAppointmentOwnerOptions(staff, role, `${role}-me`).map(
+          (member) => member.id,
+        ),
+      ).toEqual(["ceo-1", "pm-1", "teamlead-1", "teamlead-2", "concierge-1"]);
+    }
+    expect(isAppointmentOwnerRole("it_admin")).toBe(false);
+    expect(isAppointmentOwnerRole("interpreter")).toBe(false);
+    expect(isAppointmentOwnerRole("billing")).toBe(false);
+    expect(isAppointmentOwnerRole("ceo_assistant")).toBe(false);
+    expect(isAppointmentOwnerRole("concierge")).toBe(true);
   });
 
-  it("limits teamlead ownership to self, teamleads and interpreters", () => {
+  it("limits teamlead ownership to self and other teamleads", () => {
     expect(
       filterAppointmentOwnerOptions(
         staff,
         "teamlead_interpreter",
         "teamlead-1",
       ).map((member) => member.id),
-    ).toEqual(["teamlead-1", "teamlead-2", "interpreter-1"]);
+    ).toEqual(["teamlead-1", "teamlead-2"]);
   });
 
-  it("limits concierge and IT admin ownership to self", () => {
+  it("limits concierge ownership to self and offers IT admin nothing", () => {
     expect(
       filterAppointmentOwnerOptions(staff, "concierge", "concierge-1").map(
         (member) => member.id,
       ),
     ).toEqual(["concierge-1"]);
-    expect(
-      filterAppointmentOwnerOptions(staff, "it_admin", "it-1").map(
-        (member) => member.id,
-      ),
-    ).toEqual(["it-1"]);
+    expect(filterAppointmentOwnerOptions(staff, "it_admin", "it-1")).toEqual([]);
   });
 
   it("excludes IT admin from task assignees", () => {

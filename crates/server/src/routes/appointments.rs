@@ -1260,10 +1260,7 @@ async fn convert_appointment_request(
                 }
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
-                );
+                return err(StatusCode::UNPROCESSABLE_ENTITY, APPOINTMENT_OWNER_REFUSED);
             }
             Err(resp) => return resp,
         }
@@ -1642,7 +1639,14 @@ async fn list_appointments(
                   d.name AS doctor_name,
                   u.name AS interpreter_name,
                   owner.name AS owner_name,
-                  owner.role AS owner_role
+                  owner.role AS owner_role,
+                  ($19::boolean AND EXISTS (
+                      SELECT 1
+                      FROM patient_assignments caller_assignment
+                      WHERE caller_assignment.patient_id = a.patient_id
+                        AND caller_assignment.user_id = $16
+                        AND caller_assignment.revoked_at IS NULL
+                  )) AS caller_has_assignment
            FROM appointments a
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN providers pr ON pr.id = a.provider_id
@@ -1830,7 +1834,14 @@ async fn list_attention_items(
                   reminders.next_due_at AS next_reminder_due_at,
                   COALESCE(comms.open_count, 0) AS open_communication_count,
                   comms.next_due_at AS next_communication_due_at,
-                  latest_report.approval_status AS latest_report_status
+                  latest_report.approval_status AS latest_report_status,
+                  ($21::boolean AND EXISTS (
+                      SELECT 1
+                      FROM patient_assignments caller_assignment
+                      WHERE caller_assignment.patient_id = a.patient_id
+                        AND caller_assignment.user_id = $16
+                        AND caller_assignment.revoked_at IS NULL
+                  )) AS caller_has_assignment
            FROM appointments a
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN providers pr ON pr.id = a.provider_id
@@ -2349,10 +2360,7 @@ async fn create_appointment(
                 Some(owner_role)
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
-                );
+                return err(StatusCode::UNPROCESSABLE_ENTITY, APPOINTMENT_OWNER_REFUSED);
             }
             Err(resp) => return resp,
         }
@@ -3955,6 +3963,29 @@ async fn get_appointment(
                 }
                 None => Vec::new(),
             };
+            // The detail tells the client whether the change actions will be
+            // accepted, so it does not offer an edit the server refuses (the
+            // team lead's team context is read-only).
+            let appointment_type: String = a.try_get("appointment_type").unwrap_or_default();
+            let can_edit = if auth.can(Capability::AppointmentsEdit)
+                && !is_blocked_slot(&auth, &appointment_type)
+            {
+                match can_change_appointment(
+                    &state,
+                    &auth,
+                    appointment_id,
+                    Some(patient_id),
+                    interpreter_id,
+                    owner_user_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            } else {
+                false
+            };
 
             Json(build_appointment_detail_json(
                 &auth,
@@ -3964,6 +3995,7 @@ async fn get_appointment(
                 interpreter_id,
                 recurring_scope_preview,
                 recurring_lineage_history,
+                can_edit,
             ))
             .into_response()
         }
@@ -4582,10 +4614,7 @@ async fn update_appointment(
                 }
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
-                );
+                return err(StatusCode::UNPROCESSABLE_ENTITY, APPOINTMENT_OWNER_REFUSED);
             }
             Err(resp) => return resp,
         }
@@ -6590,8 +6619,7 @@ async fn add_reminder(
         Err(resp) => return resp,
     };
     let row = match sqlx::query(
-        r#"SELECT patient_id, appointment_type, status, interpreter_id,
-                  interpreter_response, owner_user_id
+        r#"SELECT patient_id, status, interpreter_id, interpreter_response, owner_user_id
            FROM appointments
            WHERE id = $1"#,
     )
@@ -6610,7 +6638,6 @@ async fn add_reminder(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     };
     let appointment = ReminderAppointment {
-        appointment_type: row.try_get("appointment_type").unwrap_or_default(),
         status: row.try_get("status").unwrap_or_default(),
         interpreter_id: row.try_get("interpreter_id").unwrap_or_default(),
         interpreter_response: row.try_get("interpreter_response").unwrap_or_default(),
@@ -9544,6 +9571,31 @@ fn build_conflict_item_json(
     })
 }
 
+/// Whether the caller may change the appointment (edit, reschedule, status,
+/// interpreter, checklist, reminders, communication). It is the rule
+/// `can_change_appointment` enforces, decided from the appointment row, on
+/// top of the role's `appointments.edit` and the concierge's blocked medical
+/// slot. The interpreter team lead's team context is a read scope, so a team
+/// appointment of a patient it is not assigned to is not changeable.
+/// `assigned_to_patient` is the caller's active assignment to the patient.
+fn caller_can_edit_appointment(
+    auth: &AuthUser,
+    appointment_type: &str,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    assigned_to_patient: bool,
+) -> bool {
+    if !auth.can(Capability::AppointmentsEdit) || is_blocked_slot(auth, appointment_type) {
+        return false;
+    }
+    let scope = access::AppointmentScope::for_role(auth.role).for_change();
+    scope
+        .admits_directly(auth.user_id, interpreter_id, owner_user_id)
+        .unwrap_or(scope.via_patient_assignment && assigned_to_patient)
+}
+
+/// List item of an appointment. The row carries `caller_has_assignment` (the
+/// caller's active assignment to the patient) for `can_edit`.
 fn build_appointment_list_json(
     auth: &AuthUser,
     row: &sqlx::postgres::PgRow,
@@ -9554,6 +9606,16 @@ fn build_appointment_list_json(
         .try_get::<String, _>("appointment_type")
         .unwrap_or_default();
     let blocked = is_blocked_slot(auth, &appointment_type);
+    let can_edit = caller_can_edit_appointment(
+        auth,
+        &appointment_type,
+        row.try_get::<Option<Uuid>, _>("interpreter_id")
+            .unwrap_or_default(),
+        row.try_get::<Option<Uuid>, _>("owner_user_id")
+            .unwrap_or_default(),
+        row.try_get::<bool, _>("caller_has_assignment")
+            .unwrap_or(false),
+    );
     let patient_name = format!(
         "{} {}",
         row.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -9598,9 +9660,11 @@ fn build_appointment_list_json(
         "recurrence_series_size": if blocked { 1 } else { row.try_get::<i64, _>("recurrence_series_size").map(|value| value as i32).unwrap_or(1) },
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
+        "can_edit": can_edit,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_appointment_detail_json(
     auth: &AuthUser,
     row: &sqlx::postgres::PgRow,
@@ -9609,6 +9673,7 @@ fn build_appointment_detail_json(
     interpreter_id: Option<Uuid>,
     recurring_scope_preview: Vec<serde_json::Value>,
     recurring_lineage_history: Vec<serde_json::Value>,
+    can_edit: bool,
 ) -> serde_json::Value {
     let appointment_type = row
         .try_get::<String, _>("appointment_type")
@@ -9667,24 +9732,12 @@ fn build_appointment_detail_json(
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
+        "can_edit": can_edit,
     })
-}
-
-/// Who may be reminded about an appointment. IT administration does not work
-/// on appointments, and billing has nothing to prepare for a non-medical
-/// (concierge) booking; billing learns about medical visits through the
-/// billing handoff instead.
-fn reminder_recipient_allowed(role: &str, appointment_type: &str) -> bool {
-    match role {
-        "it_admin" => false,
-        "billing" => appointment_type != "non_medical",
-        _ => true,
-    }
 }
 
 /// The appointment facts that decide who may be reminded about it.
 struct ReminderAppointment {
-    appointment_type: String,
     status: String,
     interpreter_id: Option<Uuid>,
     interpreter_response: Option<String>,
@@ -9699,31 +9752,30 @@ const REMINDER_NO_APPOINTMENT_ACCESS: &str =
     "The selected user has no access to this appointment or its patient";
 
 /// Why a reminder cannot go to this user, if it cannot. The recipient must be
-/// able to open the appointment and complete the reminder: an interpreter only
-/// while booked on it (not declined, the visit not cancelled); every other
-/// role by its own appointment scope (owner, patient assignment, …), billing
-/// by the rule above.
+/// able to open the appointment and complete the reminder, so a role without
+/// `appointments.view` is never a recipient: IT administration does not work
+/// on appointments, and billing learns about visits through the billing
+/// handoff (a task), not through appointment reminders. An interpreter is a
+/// recipient only while booked on the appointment (not declined, the visit not
+/// cancelled); every other role by its own appointment scope (owner, patient
+/// assignment, …).
 fn reminder_recipient_refusal(
     role: &str,
     user_id: Uuid,
     appointment: &ReminderAppointment,
     assigned_to_patient: bool,
 ) -> Option<&'static str> {
-    if !reminder_recipient_allowed(role, &appointment.appointment_type) {
-        return Some(REMINDER_ROLE_REFUSED);
-    }
     let Some(role) = crate::auth::middleware::parse_role(role) else {
         return Some(REMINDER_ROLE_REFUSED);
     };
     match role {
+        role if !role.can(Capability::AppointmentsView) => Some(REMINDER_ROLE_REFUSED),
         Role::Interpreter => {
             let booked = appointment.interpreter_id == Some(user_id)
                 && appointment.status != "cancelled"
                 && appointment.interpreter_response.as_deref() != Some("declined");
             (!booked).then_some(REMINDER_INTERPRETER_NOT_BOOKED)
         }
-        Role::Billing => None,
-        role if !role.can(Capability::AppointmentsView) => Some(REMINDER_ROLE_REFUSED),
         role => {
             let scope = access::AppointmentScope::for_role(role).for_change();
             let admitted = scope
@@ -9750,23 +9802,27 @@ async fn load_active_interpreter_role(
     }
 }
 
+/// Whether a role can own (curate) an appointment. The owner must be able to
+/// open the appointment and work on it: `appointments.view` and
+/// `appointments.edit`, with the appointments it owns inside its change scope
+/// (CEO, patient manager, interpreter team lead, concierge). IT
+/// administration, billing, interpreters and the CEO assistant cannot.
+fn is_appointment_owner_role(role: Role) -> bool {
+    let scope = access::AppointmentScope::for_role(role).for_change();
+    role.can(Capability::AppointmentsView)
+        && role.can(Capability::AppointmentsEdit)
+        && (scope.all || scope.as_owner)
+}
+
+const APPOINTMENT_OWNER_REFUSED: &str = "owner_user_id must reference an active user who can open and work on appointments (CEO, patient manager, interpreter team lead or concierge)";
+
+/// The role of an active user who can own an appointment, if the user can.
 async fn load_active_appointment_owner_role(
     state: &AppState,
     user_id: Uuid,
 ) -> Result<Option<String>, axum::response::Response> {
-    sqlx::query_scalar::<_, String>(
-        r#"SELECT role
-           FROM users
-           WHERE id = $1
-             AND is_active = true
-             AND role IN (
-                'ceo',
-                'patient_manager',
-                'teamlead_interpreter',
-                'interpreter',
-                'concierge',
-                'it_admin'
-             )"#,
+    let role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM users WHERE id = $1 AND is_active = true",
     )
     .bind(user_id)
     .fetch_optional(&state.db)
@@ -9777,7 +9833,10 @@ async fn load_active_appointment_owner_role(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to validate owner",
         )
-    })
+    })?;
+    Ok(role.filter(|role| {
+        crate::auth::middleware::parse_role(role).is_some_and(is_appointment_owner_role)
+    }))
 }
 
 #[allow(clippy::result_large_err)]
@@ -9788,15 +9847,15 @@ fn validate_owner_assignment_rules(
 ) -> Result<(), axum::response::Response> {
     match auth.role {
         Role::Ceo | Role::PatientManager => Ok(()),
+        // Interpreters cannot own appointments (see `is_appointment_owner_role`),
+        // so the team lead hands ownership only to itself or another team lead.
         Role::TeamleadInterpreter => {
-            if owner_user_id == auth.user_id
-                || matches!(owner_role, "interpreter" | "teamlead_interpreter")
-            {
+            if owner_user_id == auth.user_id || owner_role == "teamlead_interpreter" {
                 Ok(())
             } else {
                 Err(err(
                     StatusCode::FORBIDDEN,
-                    "Teamlead can only assign ownership to self or interpreters",
+                    "Teamlead can only assign ownership to self or another interpreter team lead",
                 ))
             }
         }
@@ -10869,12 +10928,25 @@ mod tests {
     }
 
     #[test]
-    fn concierge_bookings_do_not_remind_billing_or_it() {
-        assert!(!reminder_recipient_allowed("billing", "non_medical"));
-        assert!(reminder_recipient_allowed("billing", "medical"));
-        assert!(!reminder_recipient_allowed("it_admin", "medical"));
-        assert!(reminder_recipient_allowed("concierge", "non_medical"));
-        assert!(reminder_recipient_allowed("patient_manager", "non_medical"));
+    fn only_roles_that_open_and_work_on_appointments_can_own_them() {
+        for role in [
+            Role::Ceo,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Concierge,
+        ] {
+            assert!(is_appointment_owner_role(role), "{role:?}");
+        }
+        for role in [
+            Role::ItAdmin,
+            Role::Billing,
+            Role::Interpreter,
+            Role::CeoAssistant,
+            Role::Sales,
+            Role::Patient,
+        ] {
+            assert!(!is_appointment_owner_role(role), "{role:?}");
+        }
     }
 
     #[test]
@@ -10883,7 +10955,6 @@ mod tests {
         let owner = Uuid::new_v4();
         let other = Uuid::new_v4();
         let visit = |status: &str, response: Option<&str>| ReminderAppointment {
-            appointment_type: "medical".to_string(),
             status: status.to_string(),
             interpreter_id: Some(interpreter),
             interpreter_response: response.map(str::to_string),
@@ -10944,20 +11015,9 @@ mod tests {
             None
         );
 
-        // The existing role rules stay.
-        assert_eq!(
-            reminder_recipient_refusal("billing", other, &booked, false),
-            None
-        );
-        let concierge_booking = ReminderAppointment {
-            appointment_type: "non_medical".to_string(),
-            ..visit("confirmed", None)
-        };
-        assert_eq!(
-            reminder_recipient_refusal("billing", other, &concierge_booking, true),
-            Some(REMINDER_ROLE_REFUSED)
-        );
-        for role in ["it_admin", "sales", "patient", "unknown"] {
+        // Roles without appointments.view can neither open the appointment nor
+        // complete its reminder: billing (on any visit), IT and the rest.
+        for role in ["billing", "it_admin", "sales", "patient", "unknown"] {
             assert_eq!(
                 reminder_recipient_refusal(role, other, &booked, true),
                 Some(REMINDER_ROLE_REFUSED),

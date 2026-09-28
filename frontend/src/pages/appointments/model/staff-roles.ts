@@ -1,3 +1,5 @@
+import { hasCapability } from "@/lib/permissions";
+
 const APPOINTMENT_TASK_ASSIGNABLE_ROLES = new Set([
   "patient_manager",
   "teamlead_interpreter",
@@ -14,32 +16,36 @@ type StaffLike = {
   role: string;
 };
 
+/**
+ * Whether a role can own (curate) an appointment (mirrors the server): the
+ * owner must be able to open the appointment and work on it, i.e. hold
+ * `appointments.view` and `appointments.edit` (CEO, patient manager,
+ * interpreter team lead, concierge; each opens the appointments it owns).
+ * IT administration, billing, interpreters and the CEO assistant cannot.
+ */
+export function isAppointmentOwnerRole(role: string) {
+  return (
+    hasCapability(role, "appointments.view") &&
+    hasCapability(role, "appointments.edit")
+  );
+}
+
 export function canSelectAppointmentOwner(
   currentUserRole: string | undefined,
   currentUserId: string | undefined,
   target: StaffLike,
 ) {
+  if (!isAppointmentOwnerRole(target.role)) return false;
   switch (currentUserRole) {
     case "ceo":
     case "patient_manager":
-      return [
-        "ceo",
-        "patient_manager",
-        "teamlead_interpreter",
-        "interpreter",
-        "concierge",
-        "it_admin",
-      ].includes(target.role);
+      return true;
     case "teamlead_interpreter":
       return (
-        target.id === currentUserId ||
-        target.role === "interpreter" ||
-        target.role === "teamlead_interpreter"
+        target.id === currentUserId || target.role === "teamlead_interpreter"
       );
     case "concierge":
       return target.id === currentUserId && target.role === "concierge";
-    case "it_admin":
-      return target.id === currentUserId && target.role === "it_admin";
     default:
       return false;
   }
@@ -56,17 +62,15 @@ export function filterAppointmentOwnerOptions<T extends StaffLike>(
 }
 
 /**
- * Who may be reminded about an appointment (mirrors the server): IT
- * administration never, billing not for a non-medical (concierge) booking.
+ * Who may be reminded about an appointment at all (mirrors the server): only
+ * roles that can open appointments (`appointments.view`). IT administration
+ * and billing never; billing learns about visits through the billing handoff.
  */
-export function isAppointmentReminderRecipient(role: string, appointmentType: string) {
-  if (role === "it_admin") return false;
-  if (role === "billing") return appointmentType !== "non_medical";
-  return true;
+export function isAppointmentReminderRecipient(role: string) {
+  return hasCapability(role, "appointments.view");
 }
 
 export type ReminderAppointmentLike = {
-  type: string;
   status: string;
   interpreter_id: string | null;
   interpreter_response?: string | null;
@@ -88,21 +92,19 @@ export function activePatientAssigneeIds(
  * and complete the reminder. An interpreter only while booked on it (not
  * declined, the visit not cancelled); patient managers, concierges and team
  * leads as its owner or as assignees of the patient (a team lead also as the
- * booked interpreter); the CEO, the CEO assistant and billing (by the rule
- * above) always.
+ * booked interpreter); the CEO and the CEO assistant always.
  */
 export function canRemindAboutAppointment(
   member: StaffLike,
   appointment: ReminderAppointmentLike,
   patientAssigneeIds: ReadonlySet<string>,
 ) {
-  if (!isAppointmentReminderRecipient(member.role, appointment.type)) return false;
+  if (!isAppointmentReminderRecipient(member.role)) return false;
   const ownerOrAssignee =
     member.id === appointment.owner_user_id || patientAssigneeIds.has(member.id);
   switch (member.role) {
     case "ceo":
     case "ceo_assistant":
-    case "billing":
       return true;
     case "interpreter":
       return (
