@@ -1256,7 +1256,7 @@ export const ru = {
   invoices_amount: "Сумма",
   invoices_issued_at: "Выставлен",
   invoices_due_at: "Срок оплаты",
-  invoices_paid_at: "Оплачен",
+  invoices_paid_at: "Дата оплаты",
   invoices_draft: "Черновик",
   invoices_issued: "Выставлен",
   invoices_paid: "Оплачен",

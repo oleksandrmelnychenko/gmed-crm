@@ -151,6 +151,7 @@ import {
   invoiceToPayerForm,
   invoiceToVisibilityForm,
   invoiceDisplayNumber,
+  invoiceIssuedAt,
   invoiceDocumentState,
   invoiceStatusFormProblem,
   isInvoiceReleased,
@@ -164,6 +165,7 @@ import {
   nextDunningLevel,
   dunningLetterFileName,
 } from "./model/invoice-model";
+import { localizeInvoiceError } from "./model/invoice-errors";
 import type {
   AccountingEntry,
   AccountingLedgerPayload,
@@ -628,6 +630,12 @@ function useStaffInvoicesPageContent() {
         ? "Unveränderbares Journal einzelner Zahlungen und Stornierungen."
         : "Неизменяемый журнал отдельных платежей и их сторнирований.",
     recordPayment: lang === "de" ? "Zahlung erfassen" : "Записать платёж",
+    draftHiddenFromPortal:
+      lang === "de" ? "Erst nach dem Ausstellen sichtbar" : "Появится после выпуска счёта",
+    payerLockedAfterRelease:
+      lang === "de"
+        ? "Der Zahler steht auf der ausgestellten Rechnung. Für einen anderen Zahler die Rechnung stornieren und neu ausstellen."
+        : "Плательщик указан в выпущенном счёте. Чтобы сменить плательщика, отмените счёт и выпустите новый.",
     paymentEntry: lang === "de" ? "Zahlungseingang" : "Поступление",
     paymentAmount: lang === "de" ? "Eingang brutto" : "Сумма брутто",
     paymentMethod: lang === "de" ? "Zahlungsart" : "Способ оплаты",
@@ -1108,7 +1116,7 @@ function useStaffInvoicesPageContent() {
         group: "audit",
         sortable: true,
         width: 170,
-        render: (row) => formatDateTime(row.issued_at, locale, t.common_not_set),
+        render: (row) => formatDateTime(invoiceIssuedAt(row), locale, t.common_not_set),
       },
       {
         id: "patient_name",
@@ -1781,7 +1789,7 @@ function useStaffInvoicesPageContent() {
       setPrepaymentRequestId(crypto.randomUUID());
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setPrepaymentError(error instanceof Error ? error.message : t.common_error);
+      setPrepaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPrepaymentBusy(false);
     }
@@ -1809,7 +1817,7 @@ function useStaffInvoicesPageContent() {
       }));
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : t.common_error);
+      setPaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPaymentBusy(false);
     }
@@ -1828,7 +1836,7 @@ function useStaffInvoicesPageContent() {
       setReversalNote("");
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : t.common_error);
+      setPaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPaymentBusy(false);
     }
@@ -1846,7 +1854,7 @@ function useStaffInvoicesPageContent() {
       setEditingPaymentId("");
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : t.common_error);
+      setPaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPaymentBusy(false);
     }
@@ -1867,7 +1875,7 @@ function useStaffInvoicesPageContent() {
       resetCreditNoteForm(newCreditNoteDraft());
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setCreditNoteError(error instanceof Error ? error.message : t.common_error);
+      setCreditNoteError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setCreditNoteBusy(false);
     }
@@ -1886,7 +1894,7 @@ function useStaffInvoicesPageContent() {
       setCreditNoteReversalReason("");
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setCreditNoteError(error instanceof Error ? error.message : t.common_error);
+      setCreditNoteError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setCreditNoteBusy(false);
     }
@@ -1909,7 +1917,7 @@ function useStaffInvoicesPageContent() {
       resetRefundForm(newRefundDraft());
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setRefundError(error instanceof Error ? error.message : t.common_error);
+      setRefundError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setRefundBusy(false);
     }
@@ -1928,7 +1936,7 @@ function useStaffInvoicesPageContent() {
       setRefundReversalReason("");
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setRefundError(error instanceof Error ? error.message : t.common_error);
+      setRefundError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setRefundBusy(false);
     }
@@ -1943,7 +1951,7 @@ function useStaffInvoicesPageContent() {
       setDetail(updated);
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setPrepaymentError(error instanceof Error ? error.message : t.common_error);
+      setPrepaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPrepaymentBusy(false);
     }
@@ -1983,7 +1991,7 @@ function useStaffInvoicesPageContent() {
       setReloadToken((current) => current + 1);
       setStatusDialogOpen(false);
     } catch (error) {
-      setStatusError(error instanceof Error ? error.message : t.common_error);
+      setStatusError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setStatusBusy(false);
     }
@@ -2005,7 +2013,7 @@ function useStaffInvoicesPageContent() {
       setReloadToken((current) => current + 1);
       setVisibilityDialogOpen(false);
     } catch (error) {
-      setVisibilityError(error instanceof Error ? error.message : t.common_error);
+      setVisibilityError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setVisibilityBusy(false);
     }
@@ -2021,7 +2029,7 @@ function useStaffInvoicesPageContent() {
       setReloadToken((current) => current + 1);
       setPayerDialogOpen(false);
     } catch (error) {
-      setPayerError(error instanceof Error ? error.message : t.common_error);
+      setPayerError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPayerBusy(false);
     }
@@ -2588,7 +2596,7 @@ function useStaffInvoicesPageContent() {
       }}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
           <AdminSheetScaffold
-            title={detail ? `${detail.invoice_number} / ${detail.patient_name}` : t.invoices_title}
+            title={detail ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} / ${detail.patient_name}` : t.invoices_title}
             description={text.detailSheetDescription}
           >
             {detailBusy ? <LoadingState label={t.common_loading} /> : detailError ? <ShellBanner tone="error">{detailError}</ShellBanner> : !detail ? <EmptyState title={text.noInvoiceSelected} description={text.noInvoiceSelectedDescription} /> : (
@@ -2736,7 +2744,7 @@ function useStaffInvoicesPageContent() {
                       <SummaryLine label={t.invoices_patient} value={detail.patient_pid} />
                       <SummaryLine label={t.orders_title} value={detail.order_number ?? text.noOrder} />
                       <SummaryLine label={text.createQuoteSection} value={detail.quote_number ?? t.common_not_set} />
-                      <SummaryLine label={t.invoices_issued_at} value={formatDateTime(detail.issued_at, locale, t.common_not_set)} />
+                      <SummaryLine label={t.invoices_issued_at} value={formatDateTime(invoiceIssuedAt(detail), locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_due_at} value={formatDate(detail.due_date, locale, t.common_not_set)} />
                       <SummaryLine label={t.invoices_paid_at} value={formatDate(detail.paid_at, locale, t.common_not_set)} />
                       <SummaryLine label={text.grossTotal} value={formatMoney(detail.total_gross, detail?.currency)} />
@@ -3622,7 +3630,11 @@ function useStaffInvoicesPageContent() {
                         <MiniMetric
                           label={t.revenue_invoices_preview_portal}
                           value={
-                            detail.portal_visibility?.visible_to_patient
+                            // The portal never lists drafts (server rule); the
+                            // visibility flags apply once the invoice is released.
+                            !isInvoiceReleased(detail)
+                              ? text.draftHiddenFromPortal
+                              : detail.portal_visibility?.visible_to_patient
                               ? t.revenue_invoices_visible
                               : t.revenue_invoices_hidden_from_patient
                           }
@@ -3674,11 +3686,17 @@ function useStaffInvoicesPageContent() {
                         size="icon"
                         className="absolute right-4 top-4 size-8 rounded-lg"
                         onClick={() => setPayerDialogOpen(true)}
-                        disabled={!access.canManage}
+                        // The payer is printed on the issued invoice; the server
+                        // refuses changes after release (cancel and reissue).
+                        disabled={!access.canManage || isInvoiceReleased(detail)}
                         aria-label={t.common_edit}
+                        title={isInvoiceReleased(detail) ? text.payerLockedAfterRelease : undefined}
                       >
                         <Pencil className="size-3.5" />
                       </Button>
+                      {isInvoiceReleased(detail) && access.canManage ? (
+                        <p className="mt-2 text-xs text-muted-foreground">{text.payerLockedAfterRelease}</p>
+                      ) : null}
                       <div className="mt-5 grid gap-1.5 md:grid-cols-2">
                         <MiniMetric
                           label={t.revenue_invoices_contact_name}

@@ -17,6 +17,7 @@ import {
   defaultReleaseDueDate,
   dunningLetterFileName,
   invoiceDisplayNumber,
+  invoiceIssuedAt,
   invoiceDocumentState,
   invoiceStatusFormProblem,
   isInvoiceReleased,
@@ -73,6 +74,15 @@ describe("invoice release and numbering", () => {
     expect(isInvoiceReleased({ status: "cancelled", released_at: null })).toBe(false);
     expect(isInvoiceReleased({ status: "cancelled", released_at: "2026-09-27T10:00:00Z" })).toBe(true);
     expect(isInvoiceReleased({ status: "sent" })).toBe(true);
+  });
+
+  it("shows no invoice date for a draft: it gets one only on release", () => {
+    const created = "2026-09-28T07:23:00Z";
+    expect(invoiceIssuedAt({ status: "draft", released_at: null, issued_at: created })).toBeNull();
+    expect(invoiceIssuedAt({ status: "cancelled", released_at: null, issued_at: created })).toBeNull();
+    expect(
+      invoiceIssuedAt({ status: "sent", released_at: "2026-09-28T07:25:00Z", issued_at: "2026-09-28T07:25:00Z" }),
+    ).toBe("2026-09-28T07:25:00Z");
   });
 
   it("requires a due date on or after the invoice date when releasing", () => {
