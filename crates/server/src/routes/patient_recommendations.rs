@@ -1271,59 +1271,6 @@ fn normalize_status(value: &str) -> Result<&'static str, axum::response::Respons
     }
 }
 
-#[cfg(test)]
-mod lifecycle_tests {
-    use super::*;
-
-    fn resolve(
-        current: (&str, &str),
-        status: Option<&'static str>,
-        lifecycle: Option<&'static str>,
-    ) -> Option<(String, String)> {
-        resolve_recommendation_state(current.0, current.1, status, lifecycle).ok()
-    }
-
-    fn pair(status: &str, lifecycle: &str) -> Option<(String, String)> {
-        Some((status.to_string(), lifecycle.to_string()))
-    }
-
-    #[test]
-    fn status_and_lifecycle_cannot_disagree() {
-        let active = ("active", "aktiv");
-        // The clinical tab records an outcome: the status follows.
-        assert_eq!(
-            resolve(active, None, Some("erfolg")),
-            pair("completed", "erfolg")
-        );
-        assert_eq!(
-            resolve(active, None, Some("nicht_erfolgt")),
-            pair("cancelled", "nicht_erfolgt")
-        );
-        assert_eq!(
-            resolve(("declined", "nicht_erfolgt"), None, Some("nicht_erfolgt")),
-            pair("declined", "nicht_erfolgt")
-        );
-        // The staff page changes the status: the lifecycle follows, also when
-        // the unchanged lifecycle is sent along.
-        assert_eq!(
-            resolve(active, Some("completed"), None),
-            pair("completed", "erfolg")
-        );
-        assert_eq!(
-            resolve(active, Some("superseded"), Some("aktiv")),
-            pair("superseded", "unbekannt")
-        );
-        // An unchanged status with a new lifecycle follows the lifecycle.
-        assert_eq!(
-            resolve(active, Some("active"), Some("erfolg")),
-            pair("completed", "erfolg")
-        );
-        // Two different changes that contradict each other are refused.
-        assert_eq!(resolve(active, Some("declined"), Some("erfolg")), None);
-        assert_eq!(resolve(active, None, None), pair("active", "aktiv"));
-    }
-}
-
 /// `status` and `lifecycle_status` are one lifecycle (owner decision
 /// 2026-09-28, enforced by `patient_recommendations_status_lifecycle_check`):
 /// the clinical lifecycle that belongs to a status.
@@ -1704,4 +1651,57 @@ pub fn spawn_recommendation_reminder_scheduler(state: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn resolve(
+        current: (&str, &str),
+        status: Option<&'static str>,
+        lifecycle: Option<&'static str>,
+    ) -> Option<(String, String)> {
+        resolve_recommendation_state(current.0, current.1, status, lifecycle).ok()
+    }
+
+    fn pair(status: &str, lifecycle: &str) -> Option<(String, String)> {
+        Some((status.to_string(), lifecycle.to_string()))
+    }
+
+    #[test]
+    fn status_and_lifecycle_cannot_disagree() {
+        let active = ("active", "aktiv");
+        // The clinical tab records an outcome: the status follows.
+        assert_eq!(
+            resolve(active, None, Some("erfolg")),
+            pair("completed", "erfolg")
+        );
+        assert_eq!(
+            resolve(active, None, Some("nicht_erfolgt")),
+            pair("cancelled", "nicht_erfolgt")
+        );
+        assert_eq!(
+            resolve(("declined", "nicht_erfolgt"), None, Some("nicht_erfolgt")),
+            pair("declined", "nicht_erfolgt")
+        );
+        // The staff page changes the status: the lifecycle follows, also when
+        // the unchanged lifecycle is sent along.
+        assert_eq!(
+            resolve(active, Some("completed"), None),
+            pair("completed", "erfolg")
+        );
+        assert_eq!(
+            resolve(active, Some("superseded"), Some("aktiv")),
+            pair("superseded", "unbekannt")
+        );
+        // An unchanged status with a new lifecycle follows the lifecycle.
+        assert_eq!(
+            resolve(active, Some("active"), Some("erfolg")),
+            pair("completed", "erfolg")
+        );
+        // Two different changes that contradict each other are refused.
+        assert_eq!(resolve(active, Some("declined"), Some("erfolg")), None);
+        assert_eq!(resolve(active, None, None), pair("active", "aktiv"));
+    }
 }
