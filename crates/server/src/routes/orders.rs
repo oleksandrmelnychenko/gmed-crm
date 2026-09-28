@@ -1130,6 +1130,39 @@ fn next_order_phase(current: &str) -> Option<&'static str> {
     }
 }
 
+const ORDER_STEPS_LOCKED_CODE: &str = "order_steps_locked";
+
+/// The planning, preparation, execution and follow-up steps record how an
+/// order went; once it is completed or cancelled they are locked (owner
+/// decision 2026-09-28).
+async fn ensure_order_steps_open(
+    state: &AppState,
+    order_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let status = sqlx::query_scalar::<_, String>("SELECT status FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, %order_id, "load order status before a step change");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load order")
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Order not found"))?;
+    if matches!(status.as_str(), "completed" | "cancelled") {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "Conflict",
+                "message": "The steps of a completed or cancelled order cannot be changed",
+                "code": ORDER_STEPS_LOCKED_CODE,
+                "order_status": status,
+            })),
+        )
+            .into_response());
+    }
+    Ok(())
+}
+
 fn allowed_order_statuses(current: &str) -> &'static [&'static str] {
     match current {
         "active" => &["paused", "completed", "cancelled"],
@@ -5192,6 +5225,8 @@ struct OrderCancellation {
     closed_quotes: Vec<crate::routes::contracts::ClosedOrderQuote>,
     rejected_amendment_ids: Vec<Uuid>,
     settlement: Option<serde_json::Value>,
+    /// Open checklist items resolved as "not required" (`order_cancelled`).
+    checklist_changes: Vec<crate::routes::workflow_checklists::ChecklistItemSync>,
 }
 
 impl OrderCancellation {
@@ -5333,6 +5368,15 @@ async fn cancel_order_in_tx(
         )
         .await?;
 
+    // Open checklist work of the order no longer applies; its tasks are
+    // cancelled with it (owner decision 2026-09-28).
+    let checklist_changes =
+        crate::routes::workflow_checklists::resolve_items_of_cancelled_order_in_tx(
+            tx, order_id, actor_id,
+        )
+        .await
+        .map_err(failed)?;
+
     let closed_quotes = crate::routes::contracts::close_open_order_quotes_for_cancelled_order_tx(
         tx, order_id, actor_id,
     )
@@ -5383,6 +5427,7 @@ async fn cancel_order_in_tx(
         closed_quotes,
         rejected_amendment_ids,
         settlement,
+        checklist_changes,
     })
 }
 
@@ -5483,6 +5528,12 @@ async fn cancel_order(
         auth.user_id,
         order_id,
         &cancellation.cancelled_appointment_ids,
+    )
+    .await;
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        state,
+        auth.user_id,
+        &cancellation.checklist_changes,
     )
     .await;
 
@@ -6032,6 +6083,9 @@ async fn update_planning_preparation(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
+    if let Err(resp) = ensure_order_steps_open(&state, order_id).await {
+        return resp;
+    }
 
     if body.treatment_plan_status.is_none()
         && body.treatment_plan_note.is_none()
@@ -6226,6 +6280,9 @@ async fn update_execution_flow(
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
+    }
+    if let Err(resp) = ensure_order_steps_open(&state, order_id).await {
+        return resp;
     }
 
     if body.arrival_status.is_none()
@@ -6427,6 +6484,9 @@ async fn update_followup_flow(
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
+    }
+    if let Err(resp) = ensure_order_steps_open(&state, order_id).await {
+        return resp;
     }
 
     if body.doctor_followup_status.is_none()

@@ -26018,9 +26018,14 @@ pub(crate) async fn auto_send_provider_preparation_documents_for_confirmed_appoi
         || result.portal_release_count > 0
     {
         if let Err(error) = sqlx::query(
+            // The steps of a completed or cancelled order are locked.
             r#"INSERT INTO order_planning_preparation (
                     order_id, preparation_documents_status, preparation_documents_sent_at, preparation_documents_sent_by
-               ) VALUES ($1, 'sent', now(), $2)
+               )
+               SELECT o.id, 'sent', now(), $2
+               FROM orders o
+               WHERE o.id = $1
+                 AND o.status NOT IN ('completed', 'cancelled')
                ON CONFLICT (order_id) DO UPDATE
                SET preparation_documents_status = 'sent',
                    preparation_documents_sent_at = COALESCE(order_planning_preparation.preparation_documents_sent_at, now()),
