@@ -1,4 +1,6 @@
 import { appDateKey } from "@/lib/app-time-zone";
+import type { Lang } from "@/lib/i18n";
+import { localizeTaskTitle } from "@/lib/task-labels";
 import {
   conciergeTaskScheduledAt,
   isConciergeTaskActive,
@@ -16,6 +18,15 @@ const PRIORITY_WEIGHT: Record<string, number> = {
 /** Whether two instants fall on the same Berlin calendar day. */
 function isSameAppDay(left: Date, right: Date): boolean {
   return appDateKey(left) === appDateKey(right);
+}
+
+/**
+ * The title of a task in a dashboard list. System tasks carry an English
+ * template ("Order checklist: …") that is translated from the UI text
+ * catalog, the same way the task manager shows it.
+ */
+export function dashboardTaskTitle(task: Pick<ConciergeTask, "title">, lang: Lang): string {
+  return localizeTaskTitle(task.title, lang);
 }
 
 export function isConciergeTaskDueToday(task: ConciergeTask, now: Date): boolean {

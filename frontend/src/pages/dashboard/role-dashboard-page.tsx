@@ -22,7 +22,6 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { primaryModulesFor } from "@/lib/role-cabinets";
 import { listStaffNavItems } from "@/lib/staff-route-access";
-import { localizeTimelineTitle } from "@/lib/timeline-labels";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import {
@@ -35,6 +34,7 @@ import {
 } from "@/pages/concierge/model";
 
 import {
+  dashboardTaskTitle,
   isConciergeTaskDueToday,
   roleDashboardFocusTasks,
 } from "./model/role-dashboard-focus";
@@ -516,7 +516,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
                         </span>
                       </span>
                       <span className="mt-1 block break-words text-[12.5px] font-medium leading-5 text-foreground">
-                        {localizeTimelineTitle(task.title, (key) => tr[key] ?? key)}
+                        {dashboardTaskTitle(task, lang)}
                       </span>
                       {context ? (
                         <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">

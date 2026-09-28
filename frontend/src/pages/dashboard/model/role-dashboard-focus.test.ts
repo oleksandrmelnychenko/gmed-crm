@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { ConciergeTask } from "@/pages/concierge/model";
 
-import { isConciergeTaskDueToday, roleDashboardFocusTasks } from "./role-dashboard-focus";
+import {
+  dashboardTaskTitle,
+  isConciergeTaskDueToday,
+  roleDashboardFocusTasks,
+} from "./role-dashboard-focus";
 
 function task(overrides: Partial<ConciergeTask>): ConciergeTask {
   return {
@@ -87,5 +91,25 @@ describe("role dashboard focus", () => {
     // 27 Sep 00:30 in Berlin (26 Sep in UTC) and 28 Sep 00:30 in Berlin (27 Sep in UTC).
     expect(isConciergeTaskDueToday(task({ due_at: "2026-09-26T22:30:00Z" }), lateEvening)).toBe(true);
     expect(isConciergeTaskDueToday(task({ due_at: "2026-09-27T22:30:00Z" }), lateEvening)).toBe(false);
+  });
+});
+
+describe("dashboardTaskTitle", () => {
+  it("translates generated checklist tasks instead of showing the catalog key", () => {
+    const generated = task({
+      title: "Order checklist: Coordinate travel, accommodation or external support handoff",
+    });
+    expect(dashboardTaskTitle(generated, "ru")).toBe(
+      "Координировать поездку, проживание или внешнюю поддержку",
+    );
+    expect(dashboardTaskTitle(generated, "de")).toBe(
+      "Reise, Unterkunft oder externe Supportübergabe koordinieren",
+    );
+  });
+
+  it("keeps a title a person wrote", () => {
+    expect(dashboardTaskTitle(task({ title: "Hotelzimmer bestätigen" }), "ru")).toBe(
+      "Hotelzimmer bestätigen",
+    );
   });
 });
