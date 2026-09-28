@@ -70,6 +70,7 @@ async fn main() {
     gmed_server::services::order_payment_tracking::spawn_scheduler(app_state.clone());
     gmed_server::routes::cases::spawn_medication_expiry_scheduler(app_state.clone());
     gmed_server::routes::orders::spawn_external_invoice_deadline_scheduler(app_state.clone());
+    gmed_server::routes::contracts::spawn_quote_expiry_scheduler(app_state.clone());
     gmed_server::routes::appointments::spawn_interpreter_report_billing_sync_scheduler(
         app_state.clone(),
     );

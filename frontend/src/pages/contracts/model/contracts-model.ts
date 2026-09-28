@@ -43,19 +43,19 @@ export function hasAgencyServiceFormChanges(current: AgencyServiceFormState, ini
   return hasFormChanges(comparable(current), comparable(initial));
 }
 
-/** Every status a framework contract row can carry (filters and labels). */
+/**
+ * Every status a framework contract row can carry (filters and labels). A
+ * framework contract has no dates, so there is no "expired" status (retired
+ * 2026-09-28; former rows are terminated).
+ */
 export const CONTRACT_STATUSES: ContractStatus[] = [
   "draft",
   "sent",
   "signed",
-  "expired",
   "terminated",
 ];
 
-/**
- * Statuses staff may set by hand. Termination has its own action and
- * "expired" is a legacy status: framework contracts are open-ended.
- */
+/** Statuses staff may set by hand. Termination has its own action. */
 export const CONTRACT_MANUAL_STATUSES: ContractStatus[] = ["draft", "sent", "signed"];
 
 /** Only signed or sent contracts can be terminated. */
@@ -63,9 +63,9 @@ export function canTerminateContractStatus(status: string) {
   return status === "signed" || status === "sent";
 }
 
-/** Terminated and legacy expired contracts are read-only. */
+/** Terminated contracts are read-only. */
 export function isContractClosed(status: string) {
-  return status === "terminated" || status === "expired";
+  return status === "terminated";
 }
 
 export const TERMINATION_REASON_MIN = 3;
@@ -84,6 +84,34 @@ export const QUOTE_STATUSES: QuoteStatus[] = [
   "rejected",
   "expired",
 ];
+
+/**
+ * A quote is valid through its "valid until" day (Europe/Berlin date key
+ * `YYYY-MM-DD`); from the next day on it has expired and the server expires
+ * it automatically.
+ */
+export function quoteValidityPassed(validUntil: string | null | undefined, todayKey: string) {
+  const day = validUntil?.slice(0, 10);
+  return Boolean(day) && (day as string) < todayKey;
+}
+
+/**
+ * Statuses staff may choose for a quote: an expired quote, or one whose
+ * validity date has passed, is no offer any more and cannot be accepted or
+ * reopened; a new quote is created instead.
+ */
+export function selectableQuoteStatuses(
+  current: string,
+  validUntil: string | null | undefined,
+  todayKey: string,
+): QuoteStatus[] {
+  if (current === "expired" || quoteValidityPassed(validUntil, todayKey)) {
+    return QUOTE_STATUSES.filter(
+      (status) => status === current || status === "rejected" || status === "expired",
+    );
+  }
+  return QUOTE_STATUSES;
+}
 
 /** Every status a quote row can carry (filters and labels). */
 export const QUOTE_FILTER_STATUSES: Array<QuoteStatus | QuoteSystemStatus> = [

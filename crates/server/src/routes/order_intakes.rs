@@ -576,15 +576,38 @@ async fn save(
             AND NOT EXISTS(SELECT 1 FROM documents n WHERE n.replaces_document_id=d.id))")
             .bind(id).bind(&context).fetch_one(&mut *tx).await.map_err(db_error)?;
         if signed_framework {
-            sqlx::query(
-                "UPDATE framework_contracts SET status='signed',signed_at=COALESCE(signed_at,now())
-                WHERE id=$1 AND patient_id=$2 AND status IN ('draft','sent')",
+            let signed = sqlx::query_scalar::<_, String>(
+                "UPDATE framework_contracts contract SET status='signed',signed_at=COALESCE(contract.signed_at,now())
+                FROM framework_contracts previous
+                WHERE previous.id=contract.id AND contract.id=$1 AND contract.patient_id=$2
+                  AND contract.status IN ('draft','sent')
+                RETURNING previous.status",
             )
             .bind(body.data.contract_id)
             .bind(patient)
-            .execute(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(db_error)?;
+            // The automatic signature is audited with the status change.
+            if let (Some(previous_status), Some(contract_id)) = (signed, body.data.contract_id) {
+                audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        "update_framework_contract_status",
+                        Some(auth.user_id),
+                        "framework_contract",
+                        Some(contract_id),
+                        json!({
+                            "previous_status": previous_status,
+                            "status": "signed",
+                            "source": "order_intake_signed_document",
+                            "order_id": id,
+                        }),
+                    ),
+                )
+                .await
+                .map_err(db_error)?;
+            }
         }
     }
     if body.action == Action::Confirm {

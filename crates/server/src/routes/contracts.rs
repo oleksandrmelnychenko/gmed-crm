@@ -262,14 +262,22 @@ struct QuoteVersionSnapshotInput {
     line_items: Value,
     notes: Option<String>,
     change_reason: Option<String>,
-    created_by: Uuid,
+    /// `None` for a change the system made (automatic quote expiry).
+    created_by: Option<Uuid>,
 }
 
+/// A framework contract has no dates (owner decision): it runs from signature
+/// until it is terminated, so there is no `expired` status (existing rows were
+/// migrated to `terminated` by 20260928211200).
 fn is_valid_contract_status(value: &str) -> bool {
-    matches!(
-        value,
-        "draft" | "sent" | "signed" | "expired" | "terminated"
-    )
+    matches!(value, "draft" | "sent" | "signed" | "terminated")
+}
+
+/// A signed contract goes back to draft or sent only while no order runs
+/// under it (status active or paused): those orders were accepted on the
+/// signed contract.
+fn contract_status_rollback_blocked(current: &str, next: &str, running_orders: i64) -> bool {
+    current == "signed" && matches!(next, "draft" | "sent") && running_orders > 0
 }
 
 fn patient_contract_status(framework_status: &str) -> &str {
@@ -287,7 +295,7 @@ async fn sync_patient_contract_status_tx(
     // termination, so a signed contract is the effective patient status even
     // if another contract is edited afterwards. In the absence of one, prefer
     // the most advanced actionable contract (sent, then draft) over historical
-    // expired/terminated records.
+    // terminated records.
     let framework_status = sqlx::query_scalar::<_, String>(
         r#"SELECT status
            FROM framework_contracts
@@ -296,9 +304,8 @@ async fn sync_patient_contract_status_tx(
                       WHEN 'signed' THEN 0
                       WHEN 'sent' THEN 1
                       WHEN 'draft' THEN 2
-                      WHEN 'expired' THEN 3
-                      WHEN 'terminated' THEN 4
-                      ELSE 5
+                      WHEN 'terminated' THEN 3
+                      ELSE 4
                     END,
                     updated_at DESC,
                     created_at DESC,
@@ -331,6 +338,156 @@ async fn sync_patient_contract_status_tx(
     .await?;
 
     Ok(Some(status))
+}
+
+/// A quote is valid through its `valid_until` day (a Europe/Berlin calendar
+/// day); from the next day on it has expired. Without a date it stays valid.
+fn quote_validity_passed(valid_until: Option<NaiveDate>, today: NaiveDate) -> bool {
+    valid_until.is_some_and(|date| date < today)
+}
+
+const QUOTE_EXPIRY_CHECK_INTERVAL_SECS: u64 = 60 * 60;
+
+#[derive(Debug, Default)]
+pub struct QuoteExpiryRunSummary {
+    pub expired: u64,
+}
+
+/// Expire open offers whose validity date has passed: `draft` and `sent`
+/// quotes with `valid_until` before today (Europe/Berlin). Accepted quotes are
+/// agreed and stay; a quote an invoice was already issued from stays too (it
+/// is the basis of that invoice). Each expiry writes a version snapshot and
+/// its audit row in the same transaction; nobody is recorded as the actor.
+pub async fn run_quote_expiry_once(state: &AppState) -> Result<QuoteExpiryRunSummary, sqlx::Error> {
+    let today = crate::app_time::today();
+    let mut summary = QuoteExpiryRunSummary::default();
+    let candidates = sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT quote.id
+           FROM quotes quote
+           WHERE quote.status IN ('draft', 'sent')
+             AND quote.valid_until < $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoices invoice
+                 WHERE invoice.quote_id = quote.id AND invoice.status <> 'cancelled'
+             )
+           ORDER BY quote.valid_until, quote.id"#,
+    )
+    .bind(today)
+    .fetch_all(&state.db)
+    .await?;
+
+    for quote_id in candidates {
+        let mut tx = state.db.begin().await?;
+        let row = sqlx::query(
+            r#"UPDATE quotes quote
+               SET status = 'expired'
+               FROM quotes previous
+               WHERE previous.id = quote.id
+                 AND quote.id = $1
+                 AND quote.status IN ('draft', 'sent')
+                 AND quote.valid_until < $2
+                 AND NOT EXISTS (
+                     SELECT 1 FROM invoices invoice
+                     WHERE invoice.quote_id = quote.id AND invoice.status <> 'cancelled'
+                 )
+               RETURNING quote.order_id, quote.quote_number, previous.status AS previous_status,
+                         quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
+                         order_recorded_cash_paid(quote.order_id) AS paid_amount,
+                         order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                         quote.line_items, quote.notes"#,
+        )
+        .bind(quote_id)
+        .bind(today)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(row) = row else {
+            tx.rollback().await?;
+            continue;
+        };
+        let order_id = row.try_get::<Uuid, _>("order_id")?;
+        let quote_number = row.try_get::<String, _>("quote_number")?;
+        let previous_status = row.try_get::<String, _>("previous_status")?;
+        let valid_until = row.try_get::<Option<NaiveDate>, _>("valid_until")?;
+        insert_quote_version_snapshot(
+            &mut tx,
+            &QuoteVersionSnapshotInput {
+                quote_id,
+                order_id,
+                quote_number: quote_number.clone(),
+                status: "expired".to_string(),
+                total_net: row.try_get::<Decimal, _>("total_net")?,
+                total_vat: row.try_get::<Decimal, _>("total_vat")?,
+                total_gross: row.try_get::<Decimal, _>("total_gross")?,
+                valid_until,
+                paid_amount: row
+                    .try_get::<Option<Decimal>, _>("paid_amount")?
+                    .unwrap_or(Decimal::ZERO),
+                paid_at: row.try_get::<Option<DateTime<Utc>>, _>("paid_at")?,
+                line_items: row.try_get::<Value, _>("line_items")?,
+                notes: row.try_get::<Option<String>, _>("notes")?,
+                change_reason: Some("expired".to_string()),
+                created_by: None,
+            },
+        )
+        .await?;
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "auto_expire_quote",
+                None,
+                "quote",
+                Some(quote_id),
+                json!({
+                    "quote_number": quote_number,
+                    "order_id": order_id,
+                    "previous_status": previous_status,
+                    "status": "expired",
+                    "valid_until": valid_until.map(|date| date.to_string()),
+                }),
+            ),
+        )
+        .await?;
+        tx.commit().await?;
+        summary.expired += 1;
+        crate::realtime::publish_quote_event(
+            state,
+            None,
+            "quote.status_changed",
+            quote_id,
+            json!({
+                "status": "expired",
+                "previous_status": previous_status,
+                "order_id": order_id,
+                "reason": "valid_until_passed",
+            }),
+        )
+        .await;
+    }
+    Ok(summary)
+}
+
+pub fn spawn_quote_expiry_scheduler(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            QUOTE_EXPIRY_CHECK_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            match run_quote_expiry_once(&state).await {
+                Ok(summary) if summary.expired > 0 => {
+                    tracing::info!(
+                        expired = summary.expired,
+                        "Quote expiry scheduler expired quotes"
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::error!(error = %error, "Quote expiry scheduler failed");
+                }
+            }
+        }
+    });
 }
 
 /// Quote statuses a list can filter by. `superseded` is set only by the system
@@ -776,7 +933,7 @@ pub(crate) async fn close_open_order_quotes_for_cancelled_order_tx(
             line_items: row.try_get::<Value, _>("line_items")?,
             notes: row.try_get::<Option<String>, _>("notes")?,
             change_reason: Some("order_cancelled".to_string()),
-            created_by: actor_user_id,
+            created_by: Some(actor_user_id),
         };
         insert_quote_version_snapshot(tx, &snapshot).await?;
         closed.push(ClosedOrderQuote {
@@ -872,7 +1029,7 @@ async fn supersede_open_order_quotes_tx(
             line_items: row.try_get::<Value, _>("line_items")?,
             notes: row.try_get::<Option<String>, _>("notes")?,
             change_reason: Some("superseded".to_string()),
-            created_by: actor_user_id,
+            created_by: Some(actor_user_id),
         };
         insert_quote_version_snapshot(tx, &snapshot).await?;
         superseded.push(SupersededQuote {
@@ -2159,10 +2316,10 @@ async fn create_framework_contract(
     if !is_valid_contract_status(&status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
-    if matches!(status.as_str(), "terminated" | "expired") {
+    if status == "terminated" {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "A new framework contract cannot start terminated or expired",
+            "A new framework contract cannot start terminated",
         );
     }
 
@@ -2257,6 +2414,30 @@ async fn create_framework_contract(
             } else {
                 None
             };
+            if let Err(e) = audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "create_framework_contract",
+                    Some(auth.user_id),
+                    "framework_contract",
+                    Some(contract_id),
+                    serde_json::json!({
+                        "contract_number": contract_number,
+                        "patient_id": subject.patient_id(),
+                        "lead_id": subject.lead_id(),
+                        "status": status,
+                        "patient_contract_status": patient_contract_status,
+                    }),
+                ),
+            )
+            .await
+            {
+                tracing::error!(error = %e, contract_id = %contract_id, "audit framework contract creation");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create contract",
+                );
+            }
             if let Err(e) = tx.commit().await {
                 tracing::error!(error = %e, contract_id = %contract_id, "commit framework contract creation");
                 return err(
@@ -2264,19 +2445,6 @@ async fn create_framework_contract(
                     "Failed to create contract",
                 );
             }
-            state.audit_sender.try_send(audit::domain_event(
-                "create_framework_contract",
-                Some(auth.user_id),
-                "framework_contract",
-                Some(contract_id),
-                serde_json::json!({
-                    "contract_number": contract_number,
-                    "patient_id": subject.patient_id(),
-                    "lead_id": subject.lead_id(),
-                    "status": status,
-                    "patient_contract_status": patient_contract_status,
-                }),
-            ));
             crate::realtime::publish_contract_event(
                 &state,
                 Some(auth.user_id),
@@ -2423,12 +2591,6 @@ async fn update_framework_contract_status(
                 "Use the terminate action to end a framework contract",
             );
         }
-        "expired" => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Framework contracts do not expire",
-            );
-        }
         _ => {}
     }
 
@@ -2494,6 +2656,40 @@ async fn update_framework_contract_status(
         }
     };
 
+    let locked = match sqlx::query(
+        r#"SELECT contract.status,
+                  (SELECT COUNT(*) FROM orders o
+                    WHERE o.contract_id = contract.id
+                      AND o.status IN ('active', 'paused')) AS running_orders
+           FROM framework_contracts contract
+           WHERE contract.id = $1
+           FOR UPDATE OF contract"#,
+    )
+    .bind(contract_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(e) => {
+            tracing::error!(error = %e, contract_id = %contract_id, "lock framework contract status");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update framework contract",
+            );
+        }
+    };
+    let previous_status: String = locked.try_get("status").unwrap_or_default();
+    let running_orders: i64 = locked.try_get("running_orders").unwrap_or(0);
+    if contract_status_rollback_blocked(&previous_status, &body.status, running_orders) {
+        return err(
+            StatusCode::CONFLICT,
+            &format!(
+                "The contract is signed and {running_orders} order(s) run under it; it cannot go back to draft or sent"
+            ),
+        );
+    }
+
     match sqlx::query(
         r#"UPDATE framework_contracts
            SET status = $2,
@@ -2527,6 +2723,31 @@ async fn update_framework_contract_status(
             } else {
                 None
             };
+            let realtime_payload = serde_json::json!({
+                "status": body.status,
+                "signed_at": signed_at.map(|v| v.to_rfc3339()),
+                "patient_contract_status": patient_contract_status,
+            });
+            let mut audit_context = realtime_payload.clone();
+            audit_context["previous_status"] = serde_json::json!(previous_status);
+            if let Err(e) = audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "update_framework_contract_status",
+                    Some(auth.user_id),
+                    "framework_contract",
+                    Some(contract_id),
+                    audit_context,
+                ),
+            )
+            .await
+            {
+                tracing::error!(error = %e, contract_id = %contract_id, "audit framework contract status update");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update framework contract",
+                );
+            }
             if let Err(e) = tx.commit().await {
                 tracing::error!(error = %e, contract_id = %contract_id, "commit framework contract status update");
                 return err(
@@ -2534,18 +2755,6 @@ async fn update_framework_contract_status(
                     "Failed to update framework contract",
                 );
             }
-            let realtime_payload = serde_json::json!({
-                "status": body.status,
-                "signed_at": signed_at.map(|v| v.to_rfc3339()),
-                "patient_contract_status": patient_contract_status,
-            });
-            state.audit_sender.try_send(audit::domain_event(
-                "update_framework_contract_status",
-                Some(auth.user_id),
-                "framework_contract",
-                Some(contract_id),
-                realtime_payload.clone(),
-            ));
             crate::realtime::publish_contract_event(
                 &state,
                 Some(auth.user_id),
@@ -2710,9 +2919,6 @@ async fn terminate_framework_contract(
         },
         None => None,
     };
-    if let Err(e) = tx.commit().await {
-        return failed(e);
-    }
 
     let payload = json!({
         "status": "terminated",
@@ -2720,13 +2926,41 @@ async fn terminate_framework_contract(
         "reason": reason,
         "patient_contract_status": patient_contract_status,
     });
-    state.audit_sender.try_send(audit::domain_event(
+    // The contract status and the amount changes rejected with its orders are
+    // audited in the termination transaction.
+    let mut audit_events = vec![audit::domain_event(
         "terminate_framework_contract",
         Some(auth.user_id),
         "framework_contract",
         Some(contract_id),
         payload.clone(),
-    ));
+    )];
+    for order in &terminated_orders {
+        audit_events.extend(order.rejected_amendment_ids.iter().map(|amendment_id| {
+            audit::domain_event(
+                "reject_order_amendment",
+                Some(auth.user_id),
+                "order_amendment",
+                Some(*amendment_id),
+                json!({
+                    "order_id": order.order_id(),
+                    "previous_status": "pending",
+                    "status": "rejected",
+                    "cause": "contract_terminated",
+                    "contract_id": contract_id,
+                }),
+            )
+        }));
+    }
+    for event in &audit_events {
+        if let Err(e) = audit::write_in_transaction(&mut tx, event).await {
+            return failed(e);
+        }
+    }
+    if let Err(e) = tx.commit().await {
+        return failed(e);
+    }
+
     crate::realtime::publish_contract_event(
         &state,
         Some(auth.user_id),
@@ -3365,6 +3599,12 @@ async fn create_quote(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    if quote_validity_passed(valid_until, crate::app_time::today()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The quote validity date cannot be in the past",
+        );
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3538,7 +3778,7 @@ async fn create_quote(
         line_items: line_items_value,
         notes: body.notes.clone(),
         change_reason: Some("initial_snapshot".to_string()),
-        created_by: auth.user_id,
+        created_by: Some(auth.user_id),
     };
 
     if let Err(e) = insert_quote_version_snapshot(&mut tx, &snapshot).await {
@@ -3864,9 +4104,10 @@ async fn list_quote_versions(
         r#"SELECT qv.id, qv.version_number, qv.order_id, qv.quote_number, qv.status,
                   qv.total_net, qv.total_vat, qv.total_gross, qv.valid_until, qv.paid_amount,
                   qv.paid_at, qv.line_items, qv.notes, qv.change_reason, qv.created_at,
-                  u.name AS created_by_name, u.role AS created_by_role
+                  COALESCE(u.name, 'System') AS created_by_name,
+                  COALESCE(u.role, 'system') AS created_by_role
            FROM quote_versions qv
-           JOIN users u ON u.id = qv.created_by
+           LEFT JOIN users u ON u.id = qv.created_by
            WHERE qv.quote_id = $1
            ORDER BY qv.version_number DESC, qv.created_at DESC"#,
     )
@@ -3958,6 +4199,7 @@ async fn update_quote_status(
 
     let quote_context = match sqlx::query(
         r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items, o.total_estimated,
+                  q.valid_until,
                   o.status AS order_status,
                   EXISTS (
                       SELECT 1 FROM quotes other
@@ -3988,6 +4230,31 @@ async fn update_quote_status(
         return err(
             StatusCode::CONFLICT,
             "A superseded quote is closed; use the quote that replaced it",
+        );
+    }
+    // An expired quote is no longer an offer: it cannot be accepted, and a
+    // quote whose validity date has passed cannot be accepted or reopened
+    // (the expiry scheduler would close it again). A new quote is created.
+    let valid_until = quote_context
+        .try_get::<Option<NaiveDate>, _>("valid_until")
+        .unwrap_or_default();
+    let validity_passed = quote_validity_passed(valid_until, crate::app_time::today());
+    let expired_on = valid_until
+        .map(|date| date.format("%d.%m.%Y").to_string())
+        .unwrap_or_default();
+    if body.status == "accepted" && previous_status == "expired" {
+        return err(
+            StatusCode::CONFLICT,
+            "The quote has expired and cannot be accepted; create a new quote",
+        );
+    }
+    if validity_passed
+        && body.status != previous_status
+        && matches!(body.status.as_str(), "draft" | "sent" | "accepted")
+    {
+        return err(
+            StatusCode::CONFLICT,
+            &format!("The quote was valid until {expired_on}; create a new quote"),
         );
     }
     // Reopening a closed (rejected or expired) quote must not undo what closed
@@ -4113,7 +4380,7 @@ async fn update_quote_status(
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default(),
         change_reason: Some("status_update".to_string()),
-        created_by: auth.user_id,
+        created_by: Some(auth.user_id),
     };
 
     if let Err(e) = insert_quote_version_snapshot(&mut tx, &snapshot).await {
@@ -4176,9 +4443,36 @@ mod tests {
     #[test]
     fn framework_contract_status_maps_to_patient_profile_domain() {
         assert_eq!(patient_contract_status("draft"), "not_started");
-        for status in ["sent", "signed", "expired", "terminated"] {
+        for status in ["sent", "signed", "terminated"] {
             assert_eq!(patient_contract_status(status), status);
         }
+    }
+
+    #[test]
+    fn contracts_have_no_expired_status() {
+        assert!(!super::is_valid_contract_status("expired"));
+        for status in ["draft", "sent", "signed", "terminated"] {
+            assert!(super::is_valid_contract_status(status));
+        }
+    }
+
+    #[test]
+    fn a_signed_contract_with_running_orders_stays_signed() {
+        use super::contract_status_rollback_blocked as blocked;
+        assert!(blocked("signed", "draft", 1));
+        assert!(blocked("signed", "sent", 2));
+        assert!(!blocked("signed", "sent", 0));
+        assert!(!blocked("signed", "signed", 3));
+        assert!(!blocked("sent", "draft", 3));
+    }
+
+    #[test]
+    fn quotes_expire_after_their_valid_until_day() {
+        use super::quote_validity_passed as passed;
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        assert!(!passed(None, today));
+        assert!(!passed(Some(today), today));
+        assert!(passed(today.pred_opt(), today));
     }
 
     fn quote_line(quantity: f64, unit_price: f64, vat_rate: f64) -> QuoteLineItemInput {
