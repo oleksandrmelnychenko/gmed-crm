@@ -269,16 +269,20 @@ async fn get_company_financial_position(
                  AND target.status NOT IN ('draft', 'cancelled')
                GROUP BY allocation.external_invoice_id
            ), external_positions AS (
+               -- Patient receivable per the view: a supplier invoice that a
+               -- billed order service covers is GMED's cost, not a claim.
                SELECT external.patient_id,
                       COALESCE(SUM(GREATEST(
-                          external.patient_receivable_gross - COALESCE(allocation.allocated, 0),
+                          receivable.patient_receivable_gross - COALESCE(allocation.allocated, 0),
                           0
                       )), 0) AS external_receivable
                FROM external_invoices external
+               JOIN external_invoice_receivable_balances receivable
+                 ON receivable.external_invoice_id = external.id
                LEFT JOIN external_allocations allocation
                  ON allocation.external_invoice_id = external.id
                WHERE external.status <> 'cancelled'
-                 AND external.patient_receivable_gross > 0
+                 AND receivable.patient_receivable_gross > 0
                  AND UPPER(external.currency) = $1
                GROUP BY external.patient_id
            ), manual_positions AS (

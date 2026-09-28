@@ -7696,7 +7696,15 @@ function useOrdersPageContent() {
                                               </option>
                                             ))}
                                           </NativeComboboxSelect>
-                                          {(numberFromUnknown(invoice.patient_receivable_gross) ?? 0) > 0 ? (
+                                          {invoice.order_service_billed && invoice.paid_by !== "patient" ? (
+                                            <p className="text-xs leading-snug text-muted-foreground">
+                                              {lang === "de"
+                                                ? "GMED-Kosten der Leistung: dem Patienten wird die Leistung berechnet, keine Zuordnung nötig."
+                                                : "Расход GMED по услуге: пациенту выставляется услуга, связывать со счётом не нужно."}
+                                            </p>
+                                          ) : null}
+                                          {(numberFromUnknown(invoice.patient_receivable_gross) ?? 0) > 0 ||
+                                          (numberFromUnknown(invoice.allocated_receivable_gross) ?? 0) > 0 ? (
                                             <Button
                                               type="button"
                                               variant="outline"

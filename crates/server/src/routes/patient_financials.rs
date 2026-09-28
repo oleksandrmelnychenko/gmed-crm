@@ -305,9 +305,16 @@ async fn load_patient_settlement_ledger(
                         )
                  )
            ), scoped_external AS (
+               -- Supplier invoices that are a patient receivable. One that a
+               -- billed order service covers is GMED's cost of that service:
+               -- neither it nor a manual link of it to a patient invoice is
+               -- part of the patient's account (receivable view is 0).
                SELECT external.*, orders.order_number,
-                      COALESCE(expense.vendor_name, provider.name) AS provider_name
+                      COALESCE(expense.vendor_name, provider.name) AS provider_name,
+                      receivable.patient_receivable_gross AS receivable_gross
                FROM external_invoices external
+               JOIN external_invoice_receivable_balances receivable
+                 ON receivable.external_invoice_id = external.id
                LEFT JOIN orders ON orders.id = external.order_id
                LEFT JOIN providers provider ON provider.id = external.provider_id
                LEFT JOIN concierge_expense_review_events expense_review
@@ -318,7 +325,7 @@ async fn load_patient_settlement_ledger(
                WHERE external.patient_id = $1
                  AND $5::boolean = false
                  AND external.status <> 'cancelled'
-                 AND external.patient_receivable_gross > 0
+                 AND receivable.patient_receivable_gross > 0
                  AND ($3::uuid IS NULL OR external.order_id = $3)
                  AND ($4::uuid IS NULL OR EXISTS (
                         SELECT 1
@@ -547,7 +554,7 @@ async fn load_patient_settlement_ledger(
                   external.order_number,
                   external.external_invoice_number,
                   COALESCE(external.provider_name, 'External provider'),
-                  external.patient_receivable_gross,
+                  external.receivable_gross,
                   0::numeric
            FROM scoped_external external
            WHERE $2::date IS NULL
@@ -1122,7 +1129,9 @@ async fn load_patient_account_statement(
                       external.external_invoice_number, external.invoice_date,
                       external.created_at, external.status, external.paid_by,
                       external.service_delivered, external.amount_gross,
-                      external.currency, external.patient_receivable_gross,
+                      external.currency, balance.patient_receivable_gross,
+                      balance.order_service_billed,
+                      external.patient_receivable_gross AS source_receivable_gross,
                       CASE WHEN $3::date IS NULL THEN balance.allocated_receivable_gross ELSE COALESCE((
                           SELECT SUM(allocation.amount_gross)
                           FROM external_invoice_patient_invoice_allocations allocation
@@ -1133,7 +1142,7 @@ async fn load_patient_account_statement(
                             AND patient_invoice.status NOT IN ('draft', 'cancelled')
                       ), 0) END AS allocated_receivable_gross,
                       CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
-                          external.patient_receivable_gross - COALESCE((
+                          balance.patient_receivable_gross - COALESCE((
                               SELECT SUM(allocation.amount_gross)
                               FROM external_invoice_patient_invoice_allocations allocation
                               JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
@@ -1195,17 +1204,25 @@ async fn load_patient_account_statement(
                 .try_get::<Decimal, _>("provider_liability_gross")
                 .unwrap_or(Decimal::ZERO);
             external_receivable += remaining_receivable;
-            let payment_state =
-                if receivable > Decimal::ZERO && remaining_receivable <= Decimal::ZERO {
-                    "reconciled_to_patient_invoice"
-                } else {
-                    match paid_by.as_str() {
-                        "patient" => "patient_paid",
-                        "agency" => "gmed_paid_patient_due",
-                        _ if service_delivered => "provider_unpaid_patient_due",
-                        _ => "provider_unpaid",
-                    }
-                };
+            let order_service_billed = row
+                .try_get::<bool, _>("order_service_billed")
+                .unwrap_or(false);
+            let source_receivable = row
+                .try_get::<Decimal, _>("source_receivable_gross")
+                .unwrap_or(Decimal::ZERO);
+            let payment_state = if order_service_billed && source_receivable > Decimal::ZERO {
+                // GMED's cost of a service the patient is billed for.
+                "order_service_cost"
+            } else if receivable > Decimal::ZERO && remaining_receivable <= Decimal::ZERO {
+                "reconciled_to_patient_invoice"
+            } else {
+                match paid_by.as_str() {
+                    "patient" => "patient_paid",
+                    "agency" => "gmed_paid_patient_due",
+                    _ if service_delivered => "provider_unpaid_patient_due",
+                    _ => "provider_unpaid",
+                }
+            };
             let created_at = row
                 .try_get::<chrono::DateTime<Utc>, _>("created_at")
                 .map(crate::app_time::date_of)
@@ -1586,7 +1603,7 @@ async fn get_patient_financial_summary(
                   CASE WHEN UPPER(external.currency) = $6
                              AND (receivable_order.id IS NULL OR UPPER(receivable_order.currency) = $6)
                        THEN CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
-                       external.patient_receivable_gross - COALESCE((
+                       balance.patient_receivable_gross - COALESCE((
                           SELECT SUM(allocation.amount_gross)
                           FROM external_invoice_patient_invoice_allocations allocation
                           JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id

@@ -60,7 +60,7 @@ async fn list(
                    settlement.settlement_status, settlement.latest_payment_on, settlement.payment_count,
                    receivable.patient_receivable_gross AS receivable_patient_receivable_gross,
                    receivable.allocated_receivable_gross,
-                   receivable.remaining_receivable_gross
+                   receivable.remaining_receivable_gross, receivable.order_service_billed
             FROM external_invoices external
             LEFT JOIN orders ON orders.id = external.order_id
             LEFT JOIN patients patient ON patient.id = external.patient_id
@@ -89,6 +89,7 @@ async fn list(
                 'patient_receivable_gross', receivable_patient_receivable_gross::text,
                 'allocated_receivable_gross', allocated_receivable_gross::text,
                 'remaining_receivable_gross', remaining_receivable_gross::text,
+                'order_service_billed', order_service_billed,
                 'settlement_status', settlement_status, 'latest_payment_on', latest_payment_on, 'payment_count', payment_count,
                 'liability_kind', CASE WHEN remaining_provider_liability_gross <= 0 THEN 'settled' WHEN status = 'expected' THEN 'expected' ELSE 'payable' END,
                 'order_id', order_id, 'order_number', order_number, 'patient_id', patient_id, 'patient_pid', patient_pid,

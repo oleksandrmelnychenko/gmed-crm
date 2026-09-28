@@ -5984,6 +5984,7 @@ async fn get_patient_billing_workspace(
                     'patient_receivable_gross', receivable.patient_receivable_gross::text,
                     'allocated_receivable_gross', receivable.allocated_receivable_gross::text,
                     'remaining_receivable_gross', receivable.remaining_receivable_gross::text,
+                    'order_service_billed', receivable.order_service_billed,
                     'source_order_id', external.order_id,
                     'source_order_number', source_order.order_number,
                     'latest_patient_invoice_id', allocation_summary.latest_invoice_id,
@@ -6299,18 +6300,34 @@ async fn create_patient_billing_invoice(
                 "Incoming invoice is not ready to bill to this patient",
             );
         }
-        let remaining = match sqlx::query_scalar::<_, Decimal>(
-            "SELECT remaining_receivable_gross FROM external_invoice_receivable_balances WHERE external_invoice_id = $1",
+        // Only a cost no billed order service covers is re-billed at cost.
+        let remaining = match sqlx::query_as::<_, (Decimal, bool)>(
+            r#"SELECT remaining_receivable_gross, order_service_billed
+               FROM external_invoice_receivable_balances WHERE external_invoice_id = $1"#,
         )
         .bind(external_id)
         .fetch_optional(&mut *transaction)
         .await
         {
-            Ok(Some(value)) if value > Decimal::ZERO => value.round_cents(),
-            Ok(_) => return err(StatusCode::CONFLICT, "Incoming invoice was already included in a patient invoice"),
+            Ok(Some((value, _))) if value > Decimal::ZERO => value.round_cents(),
+            Ok(Some((_, true))) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Incoming invoice is the cost of an order service that is billed to the patient",
+                );
+            }
+            Ok(_) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Incoming invoice was already included in a patient invoice",
+                );
+            }
             Err(error) => {
                 tracing::error!(%error, %external_id, "load patient receivable balance");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create invoice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
             }
         };
         let provider_name = source

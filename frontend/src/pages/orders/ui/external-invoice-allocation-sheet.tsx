@@ -208,6 +208,13 @@ export function ExternalInvoiceAllocationSheet({
 
               {workspace ? (
                 <>
+                  {workspace.order_service_billed ? (
+                    <p className="text-sm text-muted-foreground">
+                      {lang === "de"
+                        ? "Die Eingangsrechnung ist GMED-Kosten einer Auftragsleistung, die dem Patienten berechnet wird. Sie ist keine Patientenforderung; eine Zuordnung ändert keine Patientensalden."
+                        : "Входящий счёт — расход GMED по услуге заказа, которая выставляется пациенту. Это не долг пациента; распределение не меняет баланс пациента."}
+                    </p>
+                  ) : null}
                   <div className="grid gap-3 sm:grid-cols-3">
                     <InfoRow
                       className={cn("rounded-xl px-3 py-3", tokens.surface.mutedCard)}

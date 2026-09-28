@@ -160,6 +160,8 @@ export type ExternalInvoice = {
   patient_receivable_gross: unknown;
   allocated_receivable_gross: unknown;
   remaining_receivable_gross: unknown;
+  /** Attributed to an order service billed to the patient: a GMED cost, no patient receivable. */
+  order_service_billed?: boolean;
   provider_liability_gross: unknown;
   company_paid_gross?: unknown;
   provider_settlement_status?: "unpaid" | "partial" | "paid" | "paid_by_patient";
@@ -204,6 +206,7 @@ export type ExternalInvoiceAllocationWorkspace = {
   patient_receivable_gross: string;
   allocated_receivable_gross: string;
   remaining_receivable_gross: string;
+  order_service_billed?: boolean;
   allocations: ExternalInvoiceAllocation[];
   candidate_invoices: ExternalInvoiceAllocationCandidate[];
 };

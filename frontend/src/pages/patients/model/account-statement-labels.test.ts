@@ -22,6 +22,12 @@ describe("accountStatementStateLabel", () => {
   it("labels a corrected invoice", () => {
     expect(accountStatementStateLabel("invoice_adjustment", "ru")).toBe("Счёт скорректирован");
   });
+
+  it("labels a supplier invoice that an order service bills as a GMED cost", () => {
+    expect(accountStatementStateLabel("order_service_cost", "ru")).toBe(
+      "Расход GMED — пациенту выставляется услуга заказа",
+    );
+  });
 });
 
 describe("credit transfers in the statement", () => {

@@ -3672,6 +3672,7 @@ async fn get_order(
                   provider_settlement.settlement_status,
                   receivable.allocated_receivable_gross,
                   receivable.remaining_receivable_gross,
+                  receivable.order_service_billed,
                   ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
                   COALESCE(pr.name, NULLIF(BTRIM(ei.supplier_name), '')) AS provider_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
@@ -3734,6 +3735,7 @@ async fn get_order(
             "patient_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "allocated_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "remaining_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+            "order_service_billed": row.try_get::<bool, _>("order_service_billed").unwrap_or(false),
             "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "company_paid_gross": row.try_get::<rust_decimal::Decimal, _>("company_paid_gross").unwrap_or(rust_decimal::Decimal::ZERO),
             "provider_settlement_status": row.try_get::<String, _>("settlement_status").unwrap_or_default(),
@@ -6676,7 +6678,7 @@ async fn load_external_invoice_allocation_workspace(
         r#"SELECT external.id, external.patient_id, external.external_invoice_number,
                   external.currency, external.status, balances.patient_receivable_gross,
                   balances.allocated_receivable_gross,
-                  balances.remaining_receivable_gross
+                  balances.remaining_receivable_gross, balances.order_service_billed
            FROM external_invoices external
            JOIN external_invoice_receivable_balances balances
              ON balances.external_invoice_id = external.id
@@ -6809,6 +6811,7 @@ async fn load_external_invoice_allocation_workspace(
         "patient_receivable_gross": external.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
         "allocated_receivable_gross": external.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
         "remaining_receivable_gross": external.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO).to_string(),
+        "order_service_billed": external.try_get::<bool, _>("order_service_billed").unwrap_or(false),
         "allocations": allocations,
         "candidate_invoices": candidates,
     })))
@@ -6875,6 +6878,9 @@ async fn create_external_invoice_allocation(
             );
         }
     };
+    // Bounded by the stored payer-based receivable. For a cost that a billed
+    // order service covers, the link stays possible but changes no patient
+    // figure: the receivable view counts neither the cost nor its links.
     let external = match sqlx::query(
         r#"SELECT patient_id, currency, status, patient_receivable_gross
            FROM external_invoices
@@ -7238,6 +7244,7 @@ async fn list_external_invoices(
                   provider_settlement.settlement_status,
                   receivable.allocated_receivable_gross,
                   receivable.remaining_receivable_gross,
+                  receivable.order_service_billed,
                   ei.received_at, ei.paid_at, ei.notes, ei.created_at, ei.updated_at,
                   COALESCE(pr.name, NULLIF(BTRIM(ei.supplier_name), '')) AS provider_name,
                   provider_taxonomy.id AS provider_taxonomy_node_id,
@@ -7291,6 +7298,7 @@ async fn list_external_invoices(
                     "patient_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("patient_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "allocated_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("allocated_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "remaining_receivable_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_receivable_gross").unwrap_or(rust_decimal::Decimal::ZERO),
+                    "order_service_billed": row.try_get::<bool, _>("order_service_billed").unwrap_or(false),
                     "provider_liability_gross": row.try_get::<rust_decimal::Decimal, _>("remaining_provider_liability_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "company_paid_gross": row.try_get::<rust_decimal::Decimal, _>("company_paid_gross").unwrap_or(rust_decimal::Decimal::ZERO),
                     "provider_settlement_status": row.try_get::<String, _>("settlement_status").unwrap_or_default(),

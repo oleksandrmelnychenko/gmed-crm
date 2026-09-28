@@ -10,8 +10,9 @@
 //! * flat fees marked `due_in_full_on_termination` in the catalog (the
 //!   treatment-organisation Pauschale), even if they were still planned;
 //! * third-party costs (external/provider invoices of the order that are a
-//!   patient receivable) unless a delivered pass-through order line already
-//!   represents them.
+//!   patient receivable) unless they are attributed to an order service this
+//!   settlement bills, regular or pass-through: then they are GMED's cost of
+//!   that service and the service line is the patient's claim.
 //!
 //! One basis, the same as the patient's account statement:
 //!
@@ -458,8 +459,11 @@ pub(crate) async fn compute_order_settlement(
         }
     }
 
-    // Supplier/clinic invoices that are a patient receivable. A delivered
-    // pass-through order line already bills the same cost, so it wins.
+    // Supplier/clinic invoices that are a patient receivable. One attributed to
+    // a service this settlement bills (regular or pass-through) is GMED's cost
+    // of that service, not a third-party cost to bill on top. A service that
+    // termination cancels bills nothing, so the cost GMED paid for it is billed
+    // at cost; the live receivable view agrees once the service is cancelled.
     let external_rows = sqlx::query(
         r#"SELECT external.id, external.status, external.paid_by, external.external_invoice_number,
                   external.invoice_date, external.source_document_id,
@@ -468,10 +472,13 @@ pub(crate) async fn compute_order_settlement(
                   COALESCE(NULLIF(BTRIM(provider.name), ''), external.supplier_name, 'Provider')
                       AS provider_name,
                   settlement.remaining_provider_liability_gross,
-                  receivable.remaining_receivable_gross
+                  GREATEST(external.patient_receivable_gross - receivable.allocated_receivable_gross, 0)
+                      AS remaining_receivable_gross
            FROM external_invoices external
            LEFT JOIN providers provider ON provider.id = external.provider_id
            LEFT JOIN order_leistungen linked_service ON linked_service.id = external.order_leistung_id
+           LEFT JOIN agency_service_catalog linked_catalog
+             ON linked_catalog.id = linked_service.agency_service_id
            JOIN external_invoice_provider_settlement_balances settlement
              ON settlement.external_invoice_id = external.id
            JOIN external_invoice_receivable_balances receivable
@@ -480,9 +487,11 @@ pub(crate) async fn compute_order_settlement(
              AND external.invoice_scope = 'patient_order'
              AND external.status <> 'cancelled'
              AND external.patient_receivable_gross > 0
-             AND NOT (
-                 COALESCE(linked_service.is_cost_passthrough, false)
-                 AND linked_service.status IN ('delivered', 'approved', 'invoiced')
+             AND NOT COALESCE(
+                 linked_service.status IN ('delivered', 'approved', 'invoiced')
+                 OR (linked_service.status = 'planned'
+                     AND COALESCE(linked_catalog.due_in_full_on_termination, false)),
+                 false
              )
            ORDER BY external.invoice_date NULLS LAST, external.created_at, external.id"#,
     )

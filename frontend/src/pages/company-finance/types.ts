@@ -340,6 +340,8 @@ export type CompanyConciergeExpenseItem = {
     intended_patient_receivable_gross: string;
     /** A not yet paid receipt: the patient share is booked on delivery. */
     patient_receivable_after_delivery?: boolean;
+    /** Receipt of an order service billed to the patient: a GMED cost, no receivable. */
+    order_service_billed?: boolean;
     intended_company_paid_gross: string;
     intended_provider_liability_gross: string;
   };
