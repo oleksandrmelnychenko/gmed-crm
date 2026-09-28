@@ -217,7 +217,14 @@ function participatesInTaskManager(role: string | null | undefined) {
   return hasCapability(role, "tasks.use");
 }
 
+/** Roles that may create tasks for the concierge (the CEO assistant too). */
 const MANAGEMENT_ROLES = new Set(["ceo_assistant", "billing", "patient_manager", "sales"]);
+/**
+ * Roles with higher-role rights over concierge-created tasks. The CEO
+ * assistant is read-only: it changes only the tasks it created itself
+ * (owner decision 2026-09-28, mirrors the server).
+ */
+const CONCIERGE_TASK_SUPERVISOR_ROLES = new Set(["billing", "patient_manager", "sales"]);
 
 function canManageConciergeTaskCreatorRole(
   actorRole: string | null | undefined,
@@ -225,7 +232,7 @@ function canManageConciergeTaskCreatorRole(
 ) {
   if (!actorRole || !creatorRole) return false;
   if (actorRole === "ceo") return creatorRole !== "ceo";
-  if (MANAGEMENT_ROLES.has(actorRole)) return creatorRole === "concierge";
+  if (CONCIERGE_TASK_SUPERVISOR_ROLES.has(actorRole)) return creatorRole === "concierge";
   if (actorRole === "teamlead_interpreter") return creatorRole === "interpreter";
   return false;
 }

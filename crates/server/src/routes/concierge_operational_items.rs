@@ -1989,6 +1989,27 @@ pub(crate) async fn update_item_status(
     } else {
         None
     };
+    // The assignee learns how the author decided on the work it handed in.
+    let assignee_notification = match review_decision_title(&previous_status, &body.status) {
+        Some(decision)
+            if auth.user_id != assigned_to && assigned_to != assigned_by && can_review =>
+        {
+            match insert_task_notification(
+                &mut tx,
+                assigned_to,
+                "operational_task_review_decision",
+                decision,
+                &title,
+                item_id,
+            )
+            .await
+            {
+                Ok(value) => Some(value),
+                Err(response) => return response,
+            }
+        }
+        _ => None,
+    };
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, item_id = %item_id, "commit concierge task status update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -2023,6 +2044,9 @@ pub(crate) async fn update_item_status(
     )
     .await;
     if let Some(notification) = creator_notification {
+        publish_pending_notification(&state, notification, item_id).await;
+    }
+    if let Some(notification) = assignee_notification {
         publish_pending_notification(&state, notification, item_id).await;
     }
 
@@ -2131,7 +2155,11 @@ async fn close_children(
         assigned_to: Uuid,
         assigned_by: Uuid,
     }
+    // The review rule holds per sub-task (owner decision 2026-09-28): only
+    // its creator or a higher role may complete or cancel it. Sub-tasks the
+    // actor may not close stay open and are reported back as skipped.
     let mut open_children = Vec::with_capacity(children.len());
+    let mut skipped_ids = Vec::new();
     for row in &children {
         let child = OpenChild {
             id: row.try_get("id").unwrap_or_else(|_| Uuid::nil()),
@@ -2143,16 +2171,9 @@ async fn close_children(
         let creator_role = row
             .try_get::<String, _>("assigned_by_role")
             .unwrap_or_default();
-        if !can_collaborate_on_operational_item(
-            &auth,
-            child.assigned_to,
-            child.assigned_by,
-            &creator_role,
-        ) {
-            return err(
-                StatusCode::FORBIDDEN,
-                "Some sub-tasks can only be closed by their creator, assignee or a higher role",
-            );
+        if !can_mutate_operational_item(&auth, child.assigned_by, &creator_role) {
+            skipped_ids.push(child.id);
+            continue;
         }
         open_children.push(child);
     }
@@ -2224,6 +2245,24 @@ async fn close_children(
                 Err(response) => return response,
             }
         }
+        if let Some(title) = review_decision_title(&child.status, &body.status)
+            && auth.user_id != child.assigned_to
+            && child.assigned_to != child.assigned_by
+        {
+            match insert_task_notification(
+                &mut tx,
+                child.assigned_to,
+                "operational_task_review_decision",
+                title,
+                &child.title,
+                child.id,
+            )
+            .await
+            {
+                Ok(value) => notifications.push((value, child.id)),
+                Err(response) => return response,
+            }
+        }
     }
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, item_id = %item_id, "commit closing sub-tasks");
@@ -2270,8 +2309,25 @@ async fn close_children(
     Json(serde_json::json!({
         "closed_count": open_children.len(),
         "closed_ids": open_children.iter().map(|child| child.id).collect::<Vec<_>>(),
+        "skipped_count": skipped_ids.len(),
+        "skipped_ids": skipped_ids,
     }))
     .into_response()
+}
+
+/// The notification title for the assignee when the author (or a higher
+/// role) decides on a task the assignee handed in for review: accepted
+/// (completed), returned (back in progress) or cancelled.
+fn review_decision_title(previous_status: &str, status: &str) -> Option<&'static str> {
+    if previous_status != "review" {
+        return None;
+    }
+    match status {
+        "completed" => Some("Task accepted"),
+        "in_progress" | "open" => Some("Task returned for rework"),
+        "cancelled" => Some("Task cancelled after review"),
+        _ => None,
+    }
 }
 
 async fn archive_item(
@@ -3811,9 +3867,16 @@ async fn lock_item_access(
     let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
     let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
         && patient_scope_opens_tasks(auth.role);
-    if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
-        && (for_update || (!project_access && !patient_access))
-    {
+    // Changing a task needs collaboration rights; reading it also works
+    // through read-only oversight (CEO assistant), a project or the patient.
+    let allowed = if for_update {
+        can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
+    } else {
+        can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
+            || project_access
+            || patient_access
+    };
+    if !allowed {
         return Err(err(
             StatusCode::FORBIDDEN,
             "Only the task assignee, creator, project member, or a higher role can access this task",
@@ -5002,15 +5065,24 @@ fn operational_role_name(role: Role) -> Option<&'static str> {
     }
 }
 
+/// Higher role over a task's creator: may edit, close, archive and review
+/// the task. The CEO assistant is read-only (owner decision 2026-09-28): it
+/// may create tasks and change the ones it created, but has no higher-role
+/// rights over the tasks of others.
 fn can_manage_operational_role(actor_role: Role, creator_role: &str) -> bool {
     match actor_role {
         Role::Ceo => true,
-        Role::CeoAssistant | Role::Billing | Role::PatientManager | Role::Sales => {
-            creator_role == "concierge"
-        }
+        Role::Billing | Role::PatientManager | Role::Sales => creator_role == "concierge",
         Role::TeamleadInterpreter => creator_role == "interpreter",
         _ => false,
     }
+}
+
+/// Read-only oversight: the roles above a creator, and the CEO assistant,
+/// which reads the tasks of the roles it oversees without changing them.
+fn can_oversee_operational_role(actor_role: Role, creator_role: &str) -> bool {
+    can_manage_operational_role(actor_role, creator_role)
+        || (actor_role == Role::CeoAssistant && creator_role == "concierge")
 }
 
 fn can_assign_operational_role(actor_role: Role, target_role: &str) -> bool {
@@ -5065,6 +5137,7 @@ fn can_view_operational_item(
     assigned_by_role: &str,
 ) -> bool {
     can_collaborate_on_operational_item(auth, assigned_to, assigned_by, assigned_by_role)
+        || can_oversee_operational_role(auth.role, assigned_by_role)
 }
 
 fn is_allowed_status_transition(from: &str, to: &str, can_review: bool) -> bool {
@@ -5346,6 +5419,46 @@ mod work_center_tests {
             manager,
             "ceo"
         ));
+    }
+
+    #[test]
+    fn ceo_assistant_changes_only_its_own_tasks_and_reads_concierge_tasks() {
+        let assistant = actor(Uuid::new_v4(), Role::CeoAssistant);
+        let concierge = Uuid::new_v4();
+        // Tasks of the concierge: visible, but not editable or closable.
+        assert!(!can_mutate_operational_item(
+            &assistant,
+            concierge,
+            "concierge"
+        ));
+        assert!(!can_collaborate_on_operational_item(
+            &assistant,
+            Uuid::new_v4(),
+            concierge,
+            "concierge"
+        ));
+        assert!(can_view_operational_item(
+            &assistant,
+            Uuid::new_v4(),
+            concierge,
+            "concierge"
+        ));
+        // Its own tasks stay fully in its hands.
+        assert!(can_mutate_operational_item(
+            &assistant,
+            assistant.user_id,
+            "ceo_assistant"
+        ));
+        // It may still create tasks for the concierge.
+        assert!(can_assign_operational_role(Role::CeoAssistant, "concierge"));
+        // The other management roles keep their rights.
+        for role in [Role::Billing, Role::PatientManager, Role::Sales] {
+            assert!(can_mutate_operational_item(
+                &actor(Uuid::new_v4(), role),
+                concierge,
+                "concierge"
+            ));
+        }
     }
 
     #[test]

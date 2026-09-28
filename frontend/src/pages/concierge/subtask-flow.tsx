@@ -12,8 +12,10 @@ import {
 const copy = {
   de: {
     closeTitle: "Offene Unteraufgaben",
-    closeMessage: (title: string, count: number, archive: boolean) =>
-      `„${title}“ hat noch ${count} offene Unteraufgabe(n) oder Termin(e). Sollen sie beim ${archive ? "Archivieren" : "Abschließen"} ebenfalls geschlossen werden?`,
+    closeMessage: (title: string, count: number, action: ParentCloseAction) =>
+      `„${title}“ hat noch ${count} offene Unteraufgabe(n) oder Termin(e). Sollen sie beim ${action === "archive" ? "Archivieren" : action === "cancel" ? "Stornieren" : "Abschließen"} ebenfalls geschlossen werden?`,
+    skipped: (count: number) =>
+      `${count} Unteraufgabe(n) bleiben offen: nur ihr Ersteller oder eine höhere Rolle darf sie schließen.`,
     closeAll: "Alle schließen",
     keepOpen: "Offen lassen",
     cancel: "Abbrechen",
@@ -26,8 +28,10 @@ const copy = {
   },
   ru: {
     closeTitle: "Открытые подзадачи",
-    closeMessage: (title: string, count: number, archive: boolean) =>
-      `У задачи «${title}» остаются открытыми подзадачи или события: ${count}. Закрыть их вместе с ${archive ? "переносом задачи в архив" : "завершением задачи"}?`,
+    closeMessage: (title: string, count: number, action: ParentCloseAction) =>
+      `У задачи «${title}» остаются открытыми подзадачи или события: ${count}. Закрыть их вместе с ${action === "archive" ? "переносом задачи в архив" : action === "cancel" ? "отменой задачи" : "завершением задачи"}?`,
+    skipped: (count: number) =>
+      `Подзадачи остались открытыми (${count}): закрыть их может только автор или вышестоящая роль.`,
     closeAll: "Закрыть все",
     keepOpen: "Оставить открытыми",
     cancel: "Отмена",
@@ -40,12 +44,22 @@ const copy = {
   },
 } as const;
 
+export type ParentCloseAction = "complete" | "cancel" | "archive";
+
+/** The status a parent's open sub-tasks are closed with, or null. */
+export function subtaskCloseStatus(status: string): "completed" | "cancelled" | null {
+  return status === "completed" || status === "cancelled" ? status : null;
+}
+
 /**
  * Closes the open sub-tasks and events below a task (any depth) with the
- * parent's new status, before the parent itself is completed or archived.
+ * parent's new status, before the parent itself is completed, cancelled or
+ * archived. The server applies the review rule per sub-task: only those the
+ * actor may close (its creator or a higher role) are closed, the others stay
+ * open and are reported as `skipped_count`.
  */
 export async function closeOpenSubtasks(taskId: string, status: "completed" | "cancelled") {
-  const result = await apiFetch<{ closed_count: number }>(
+  const result = await apiFetch<{ closed_count: number; skipped_count?: number }>(
     `/concierge-operational-items/${taskId}/close-children`,
     { method: "POST", body: JSON.stringify({ status }) },
   );
@@ -53,13 +67,29 @@ export async function closeOpenSubtasks(taskId: string, status: "completed" | "c
   return result;
 }
 
+/** A notice about sub-tasks the actor was not allowed to close, or null. */
+export function skippedSubtasksNotice(
+  result: { skipped_count?: number } | null | undefined,
+  lang: Lang,
+): string | null {
+  const skipped = result?.skipped_count ?? 0;
+  return skipped > 0 ? copy[lang].skipped(skipped) : null;
+}
+
 export type ParentCloseRequest = {
   task: ConciergeTask;
   openCount: number;
   archive: boolean;
+  /** The parent's new status when it is completed or cancelled. */
+  status?: "completed" | "cancelled";
   /** Runs the parent's change, closing its sub-tasks first when asked. */
   run: (closeChildren: boolean) => Promise<void>;
 };
+
+function parentCloseAction(request: ParentCloseRequest): ParentCloseAction {
+  if (request.archive) return "archive";
+  return request.status === "cancelled" ? "cancel" : "complete";
+}
 
 /** Asks what happens to open sub-tasks when their parent is closed. */
 export function ParentCloseChoiceDialog({
@@ -81,7 +111,7 @@ export function ParentCloseChoiceDialog({
     <DirtyDismissConfirmDialog
       open={Boolean(request)}
       title={labels.closeTitle}
-      message={request ? labels.closeMessage(localizeTaskTitle(request.task.title, lang), request.openCount, request.archive) : ""}
+      message={request ? labels.closeMessage(localizeTaskTitle(request.task.title, lang), request.openCount, parentCloseAction(request)) : ""}
       cancelLabel={labels.cancel}
       confirmLabel={labels.keepOpen}
       saveLabel={labels.closeAll}

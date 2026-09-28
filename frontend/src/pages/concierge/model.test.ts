@@ -153,6 +153,11 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canModifyConciergeTask(createdByConcierge, "creator", "concierge")).toBe(true);
     expect(canModifyConciergeTask(createdByConcierge, "peer", "concierge")).toBe(false);
     expect(canModifyConciergeTask(createdByConcierge, "manager", "patient_manager")).toBe(true);
+    // The read-only CEO assistant changes only the tasks it created itself.
+    expect(canModifyConciergeTask(createdByConcierge, "assistant", "ceo_assistant")).toBe(false);
+    expect(
+      canModifyConciergeTask(task({ assigned_by: "assistant", assigned_by_role: "ceo_assistant" }), "assistant", "ceo_assistant"),
+    ).toBe(true);
     expect(canModifyConciergeTask(task({ assigned_by_role: "billing" }), "lead", "teamlead_interpreter")).toBe(false);
     expect(canModifyConciergeTask(task({ assigned_by_role: null }), "ceo", "ceo")).toBe(true);
   });

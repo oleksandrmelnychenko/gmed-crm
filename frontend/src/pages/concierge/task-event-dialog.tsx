@@ -46,7 +46,7 @@ import {
   taskAttachmentFileKey,
   uploadConciergeTaskAttachment,
 } from "./task-attachments";
-import { closeOpenSubtasks, ParentCloseChoiceDialog, type ParentCloseRequest } from "./subtask-flow";
+import { closeOpenSubtasks, ParentCloseChoiceDialog, subtaskCloseStatus, type ParentCloseRequest } from "./subtask-flow";
 
 const copy = {
   de: {
@@ -569,11 +569,12 @@ export function ConciergeTaskEventDialog({
     setScheduleError("");
     // Completing a parent here asks about its open sub-tasks exactly like the
     // status actions of the work center do.
-    const openChildren = item && !createdTaskRef.current && status === "completed" && item.status !== "completed"
+    const closeStatus = subtaskCloseStatus(status);
+    const openChildren = item && !createdTaskRef.current && closeStatus && item.status !== status
       ? item.child_open_count ?? 0
       : 0;
-    if (openChildren > 0 && item) {
-      setParentCloseRequest({ task: item, openCount: openChildren, archive: false, run: (closeChildren) => save(closeChildren) });
+    if (openChildren > 0 && item && closeStatus) {
+      setParentCloseRequest({ task: item, openCount: openChildren, archive: false, status: closeStatus, run: (closeChildren) => save(closeChildren) });
       return;
     }
     await save(false);
@@ -587,7 +588,7 @@ export function ConciergeTaskEventDialog({
       const retryingAttachmentUpload = Boolean(saved);
       if (!saved && closeChildren && item) {
         try {
-          await closeOpenSubtasks(item.id, "completed");
+          await closeOpenSubtasks(item.id, subtaskCloseStatus(status) ?? "completed");
         } catch {
           setScheduleError(labels.closeChildrenFailed);
           return;
