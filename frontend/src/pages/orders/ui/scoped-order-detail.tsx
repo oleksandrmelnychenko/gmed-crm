@@ -1,7 +1,15 @@
+import { CheckCircle2, LoaderCircle } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui-shell";
-import type { Lang } from "@/lib/i18n";
+import { t as translationsFor, type Lang } from "@/lib/i18n";
 
 import { orderPhaseTone, orderStatusTone } from "../appearance/status-appearance";
+import {
+  canDeliverScopedLine,
+  scopedLineName,
+  scopedLineQuantity,
+} from "../model/scoped-order-lines";
 import type { OrderDetail } from "../model/types";
 
 type ScopedOrderDetailProps = {
@@ -12,6 +20,12 @@ type ScopedOrderDetailProps = {
   statusLabel: (value: string) => string;
   lineStatusLabel: (value: string) => string;
   formatDate: (value: string | null | undefined) => string;
+  /** Role of the viewer; only a concierge records its service lines as delivered. */
+  viewerRole?: string | null;
+  /** Records a service line as delivered; the page reloads the order afterwards. */
+  onDeliverLine?: (lineId: string) => void;
+  deliveringLineId?: string | null;
+  error?: string | null;
 };
 
 const copy = {
@@ -24,6 +38,7 @@ const copy = {
     quantity: "Menge",
     status: "Status",
     delivered: "Erbracht",
+    markDelivered: "Als erbracht markieren",
     empty: "In diesem Auftrag gibt es keine Leistungen aus Ihrem Bereich.",
     concierge_services:
       "Nur Ansicht: Sie sehen den Zeitraum, den Status und die Service- und Logistikleistungen dieses Auftrags. Medizinische Leistungen, Preise, Notizen und Finanzdaten sind ausgeblendet.",
@@ -39,6 +54,7 @@ const copy = {
     quantity: "Кол-во",
     status: "Статус",
     delivered: "Оказано",
+    markDelivered: "Отметить как оказанную",
     empty: "В этом заказе нет услуг из вашей зоны ответственности.",
     concierge_services:
       "Только просмотр: вы видите период, статус и сервисные и логистические услуги заказа. Медицинские услуги, цены, заметки и финансы скрыты.",
@@ -47,15 +63,11 @@ const copy = {
   },
 } as const;
 
-function quantityLabel(quantity: unknown, unit: string | null | undefined) {
-  const value = typeof quantity === "number" || typeof quantity === "string" ? String(quantity) : "";
-  return unit ? `${value} ${unit}` : value;
-}
-
 /**
  * Read-only order view for the roles that see only their part of an order
  * (concierge: service lines, interpreter team lead: interpreter lines). The
- * server already reduced the payload; this view renders nothing else.
+ * server already reduced the payload; this view renders nothing else. The
+ * only action is the concierge recording a service line as delivered.
  */
 export function ScopedOrderDetail({
   detail,
@@ -65,8 +77,13 @@ export function ScopedOrderDetail({
   statusLabel,
   lineStatusLabel,
   formatDate,
+  viewerRole,
+  onDeliverLine,
+  deliveringLineId,
+  error,
 }: ScopedOrderDetailProps) {
   const labels = copy[lang];
+  const translations = translationsFor(lang);
   const scopeHint =
     detail.read_scope === "interpreter_team" ? labels.interpreter_team : labels.concierge_services;
 
@@ -122,21 +139,51 @@ export function ScopedOrderDetail({
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
-              {detail.leistungen.map((line) => (
-                <tr key={line.id}>
-                  <td className="px-4 py-2">{line.agency_service_name || line.description}</td>
-                  <td className="px-4 py-2 text-muted-foreground">{line.provider_name ?? "—"}</td>
-                  <td className="px-4 py-2 font-mono text-xs tabular-nums">
-                    {quantityLabel(line.quantity, line.agency_service_unit_label)}
-                  </td>
-                  <td className="px-4 py-2">{lineStatusLabel(line.status)}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">{formatDate(line.delivered_at)}</td>
-                </tr>
-              ))}
+              {detail.leistungen.map((line) => {
+                const deliverable =
+                  Boolean(onDeliverLine) && canDeliverScopedLine(detail, line, viewerRole);
+                const delivering = deliveringLineId === line.id;
+                return (
+                  <tr key={line.id}>
+                    <td className="px-4 py-2">{scopedLineName(line, translations)}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{line.provider_name ?? "—"}</td>
+                    <td className="px-4 py-2 font-mono text-xs tabular-nums">
+                      {scopedLineQuantity(line, translations)}
+                    </td>
+                    <td className="px-4 py-2">{lineStatusLabel(line.status)}</td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {deliverable ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 rounded-md px-2 text-xs"
+                          disabled={Boolean(deliveringLineId)}
+                          onClick={() => onDeliverLine?.(line.id)}
+                        >
+                          {delivering ? (
+                            <LoaderCircle className="size-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="size-3.5" />
+                          )}
+                          {labels.markDelivered}
+                        </Button>
+                      ) : (
+                        formatDate(line.delivered_at)
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </section>
+      {error ? (
+        <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

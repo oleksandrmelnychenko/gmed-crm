@@ -3843,6 +3843,10 @@ function useOrdersPageContent() {
                 statusLabel={orderStatusLabel}
                 lineStatusLabel={leistungStatusLabel}
                 formatDate={formatDateOnlyLabel}
+                viewerRole={user?.role}
+                onDeliverLine={(lineId) => void handleDeliverLeistung(lineId)}
+                deliveringLineId={approvingLeistungId}
+                error={detailError}
               />
             ) : (
               <div className="min-w-0 space-y-4 rounded-xl">
