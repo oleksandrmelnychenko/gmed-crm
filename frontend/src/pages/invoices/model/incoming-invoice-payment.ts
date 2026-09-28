@@ -31,10 +31,12 @@ type PatientBillingInvoice = PatientPaymentInvoice & {
   patient_receivable_gross: string;
   allocated_receivable_gross: string;
   remaining_receivable_gross: string;
+  order_service_billed?: boolean;
 };
 
 export type PatientBillingState =
   | "not_required"
+  | "order_service"
   | "billed"
   | "partially_billed"
   | "not_billed"
@@ -43,7 +45,9 @@ export type PatientBillingState =
 /**
  * Where a supplier invoice stands in billing the patient. A patient cost that
  * GMed has not paid yet (and that is not delivered) has no receivable yet: it
- * becomes billable after payment, it is not "not required".
+ * becomes billable after payment, it is not "not required". A supplier invoice
+ * of an order service billed to the patient is GMED's cost of that service:
+ * the patient pays the service line, not the supplier invoice.
  */
 export function patientBillingState(invoice: PatientBillingInvoice): PatientBillingState {
   if (
@@ -54,6 +58,7 @@ export function patientBillingState(invoice: PatientBillingInvoice): PatientBill
   ) {
     return "not_required";
   }
+  if (invoice.order_service_billed) return "order_service";
   const receivable = Number(invoice.patient_receivable_gross);
   if (receivable <= 0) return "after_payment";
   if (Number(invoice.remaining_receivable_gross) <= 0) return "billed";

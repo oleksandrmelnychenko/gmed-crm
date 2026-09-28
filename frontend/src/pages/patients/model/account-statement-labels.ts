@@ -38,6 +38,10 @@ const STATEMENT_STATE_LABELS: Record<string, Pair> = {
   invoice_adjustment: ["Rechnung korrigiert", "Счёт скорректирован"],
   patient_paid: ["Vom Patienten bezahlt", "Оплачено пациентом"],
   gmed_paid_patient_due: ["Von GMED bezahlt – Patient schuldet", "Оплачено GMED — долг пациента"],
+  order_service_cost: [
+    "GMED-Kosten – über die Auftragsleistung berechnet",
+    "Расход GMED — пациенту выставляется услуга заказа",
+  ],
   provider_unpaid_patient_due: [
     "Anbieter offen – Patient schuldet nach Leistung",
     "Поставщику не оплачено — долг пациента за оказанную услугу",

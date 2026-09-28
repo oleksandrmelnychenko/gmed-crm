@@ -1757,6 +1757,7 @@ function usePatientInvoicesTabContent({
             "patient_paid",
             "invoiced",
             "reconciled_to_patient_invoice",
+            "order_service_cost",
           ].includes(item.payment_state);
           return (
             <span

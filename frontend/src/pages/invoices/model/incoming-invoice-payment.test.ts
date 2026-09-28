@@ -32,6 +32,13 @@ describe("incoming invoice patient billing state", () => {
     expect(patientBillingState({ ...paid, allocated_receivable_gross: "481.50", remaining_receivable_gross: "0" })).toBe("billed");
   });
 
+  it("treats the supplier invoice of an order service billed to the patient as GMED's cost", () => {
+    const covered = { ...hotel, status: "paid", paid_by: "agency", remaining_gross: "0", order_service_billed: true };
+    expect(patientBillingState(covered)).toBe("order_service");
+    expect(patientBillingState({ ...covered, allocated_receivable_gross: "481.50" })).toBe("order_service");
+    expect(patientBillingState({ ...covered, paid_by: "patient" })).toBe("not_required");
+  });
+
   it("needs no patient invoice for company costs, patient-paid or cancelled invoices", () => {
     expect(patientBillingState({ ...hotel, patient_id: null, invoice_scope: "company" })).toBe("not_required");
     expect(patientBillingState({ ...hotel, status: "paid", paid_by: "patient" })).toBe("not_required");

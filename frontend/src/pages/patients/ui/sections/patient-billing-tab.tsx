@@ -56,6 +56,8 @@ type BillingExpense = {
   patient_receivable_gross: string;
   allocated_receivable_gross: string;
   remaining_receivable_gross: string;
+  /** Attributed to an order service billed to the patient: not re-billed. */
+  order_service_billed?: boolean;
   source_order_id: string | null;
   source_order_number: string | null;
   latest_patient_invoice_id: string | null;
@@ -114,6 +116,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     late: "Kosten können auftragsübergreifend oder ohne Auftrag berechnet werden. Auch später eingehende Belege bleiben verfügbar.",
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMed", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
+    orderService: "Über die Auftragsleistung",
   } : {
     title: "Выставление пациенту", subtitle: "Соберите услуги и оплаченные GMed внешние расходы в одном счёте.",
     order: "Заказ (необязательно)", noOrder: "Без заказа", currency: "Валюта", quote: "Предложение с услугами", noQuote: "Только расходы — без предложения", type: "Тип счёта",
@@ -126,6 +129,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     late: "Расходы можно объединить по пациенту из разных заказов или выставить без заказа. Поздние документы также остаются доступными.",
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMed", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
+    orderService: "Через услугу заказа",
   };
 
   useEffect(() => {
@@ -227,6 +231,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
 
   const expenseState = (expense: BillingExpense) => {
     if (expense.paid_by === "patient") return copy.notRequired;
+    // GMED's cost of an order service: the patient pays the service line.
+    if (expense.order_service_billed) return copy.orderService;
     if (Number(expense.remaining_receivable_gross) <= 0 && Number(expense.patient_receivable_gross) > 0) return copy.reserved;
     if (expense.billable) return copy.ready;
     return copy.afterPayment;

@@ -180,6 +180,7 @@ const textByLanguage = {
     balance: "Финансовые последствия",
     patientReceivable: "К оплате пациентом",
     afterDelivery: "начисляется после оказания услуги",
+    orderServiceCost: "расход GMED: пациенту выставляется услуга заказа",
     companyPaid: "Оплачено GMED",
     providerLiability: "Долг поставщику",
     postingPending: "Будет создано после подтверждения",
@@ -296,6 +297,7 @@ const textByLanguage = {
     balance: "Finanzielle Auswirkungen",
     patientReceivable: "Patientenforderung",
     afterDelivery: "wird nach Erbringung der Leistung gebucht",
+    orderServiceCost: "GMED-Kosten: dem Patienten wird die Auftragsleistung berechnet",
     companyPaid: "Von GMED bezahlt",
     providerLiability: "Anbieterverbindlichkeit",
     postingPending: "Wird erst nach Bestätigung erzeugt",
@@ -1035,6 +1037,9 @@ export function ConciergeExpenseReviewPanel({
                               && selected.balance_consequence.posting_pending
                               && selected.balance_consequence.patient_receivable_after_delivery
                               ? <span className="block text-[10px] text-muted-foreground">{text.afterDelivery}</span>
+                              : null}
+                            {label === text.patientReceivable && selected.balance_consequence.order_service_billed
+                              ? <span className="block text-[10px] text-muted-foreground">{text.orderServiceCost}</span>
                               : null}
                           </div>
                         ))}

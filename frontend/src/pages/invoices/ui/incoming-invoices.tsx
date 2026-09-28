@@ -31,6 +31,7 @@ type IncomingInvoice = CompanyProviderLiability & {
   patient_receivable_gross: string;
   allocated_receivable_gross: string;
   remaining_receivable_gross: string;
+  order_service_billed?: boolean;
 };
 type Props = { canManage: boolean; patientId: string; orderId: string; reloadToken: number; onChanged: () => void };
 
@@ -118,6 +119,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
   const patientBillingLabel = (row: IncomingInvoice) => {
     switch (patientBillingState(row)) {
       case "not_required": return tx("Не требуется", "Nicht erforderlich");
+      case "order_service": return tx("Через услугу заказа", "Über die Auftragsleistung");
       case "billed": return tx("Выставлено / в черновике", "Berechnet / im Entwurf");
       case "partially_billed": return tx("Частично выставлено", "Teilweise berechnet");
       case "not_billed": return tx("Не выставлено", "Nicht berechnet");
