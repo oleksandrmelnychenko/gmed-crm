@@ -7,6 +7,7 @@ import {
 } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
+import { blankPartnerCostAmounts } from "./partner-cost-amounts";
 import type {
   CreateOrderFormState,
   ExternalInvoiceFormState,
@@ -149,9 +150,7 @@ export function blankLeistungForm(): LeistungFormState {
     unitPrice: "",
     currency: "EUR",
     vatRate: "19",
-    plannedPartnerCostNet: "",
-    plannedPartnerCostVat: "",
-    plannedPartnerCostGross: "",
+    plannedPartnerCost: blankPartnerCostAmounts(),
     providerId: "",
     doctorId: "",
     externalDocumentId: "",

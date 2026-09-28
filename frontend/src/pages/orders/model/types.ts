@@ -1,5 +1,7 @@
 import type { SpecializationItem } from "@/pages/providers/model/types";
 
+import type { PartnerCostAmounts } from "./partner-cost-amounts";
+
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
 export type OrderStatus = "active" | "paused" | "completed" | "cancelled";
 export type LeistungStatus = "planned" | "delivered" | "approved" | "invoiced" | "cancelled";
@@ -797,9 +799,7 @@ export type LeistungFormState = {
   unitPrice: string;
   currency: string;
   vatRate: string;
-  plannedPartnerCostNet: string;
-  plannedPartnerCostVat: string;
-  plannedPartnerCostGross: string;
+  plannedPartnerCost: PartnerCostAmounts;
   providerId: string;
   doctorId: string;
   externalDocumentId: string;

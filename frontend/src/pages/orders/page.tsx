@@ -70,7 +70,6 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
-import { roundCents, toCents } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   agencyServiceDescriptionLabel,
@@ -131,6 +130,14 @@ import {
   resolveCreateOrderSubmitBlock,
 } from "./model/create-order-gate";
 import { mergeOrderDraft } from "./model/order-draft";
+import {
+  editPartnerCostAmounts,
+  partnerCostAmountsError,
+  partnerCostAmountsForSubmit,
+  partnerCostAmountsFrom,
+  partnerCostAmountsHint,
+  type PartnerCostAmounts,
+} from "./model/partner-cost-amounts";
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
 import {
   canCancelLeistung,
@@ -1121,9 +1128,7 @@ function useOrdersPageContent() {
   const [plannedCostEditor, setPlannedCostEditor] = useState<{
     leistungId: string;
     serviceName: string;
-    amountNet: string;
-    amountVat: string;
-    amountGross: string;
+    amounts: PartnerCostAmounts;
     reason: string;
     requestId: string;
   } | null>(null);
@@ -2877,15 +2882,7 @@ function useOrdersPageContent() {
     const quantity = Number(leistungForm.quantity.replace(",", "."));
     const unitPrice = Number(leistungForm.unitPrice.replace(",", "."));
     const vatRate = Number(leistungForm.vatRate.replace(",", "."));
-    const plannedCostNet = Number(
-      (leistungForm.plannedPartnerCostNet || "0").replace(",", "."),
-    );
-    const plannedCostVat = Number(
-      (leistungForm.plannedPartnerCostVat || "0").replace(",", "."),
-    );
-    const plannedCostGross = Number(
-      (leistungForm.plannedPartnerCostGross || "0").replace(",", "."),
-    );
+    const plannedCost = partnerCostAmountsForSubmit(leistungForm.plannedPartnerCost);
 
     if (!leistungForm.description.trim()) {
       setLeistungError(l("orders_error_description_required"));
@@ -2903,17 +2900,8 @@ function useOrdersPageContent() {
       setLeistungError(l("orders_error_vat_numeric"));
       return;
     }
-    if (
-      !Number.isFinite(plannedCostNet) || plannedCostNet < 0 ||
-      !Number.isFinite(plannedCostVat) || plannedCostVat < 0 ||
-      !Number.isFinite(plannedCostGross) || plannedCostGross < 0 ||
-      Math.abs(plannedCostNet + plannedCostVat - plannedCostGross) > 0.005
-    ) {
-      setLeistungError(
-        lang === "de"
-          ? "Geplante Partnerkosten: Bruttobetrag muss Nettobetrag plus Mehrwertsteuer entsprechen."
-          : "Плановая стоимость партнёра: сумма с налогом должна быть равна сумме без налога плюс налог.",
-      );
+    if (!plannedCost) {
+      setLeistungError(partnerCostAmountsError(lang));
       return;
     }
 
@@ -2929,9 +2917,9 @@ function useOrdersPageContent() {
         quantity,
         unit_price: unitPrice,
         vat_rate: vatRate,
-        planned_partner_cost_net: plannedCostNet,
-        planned_partner_cost_vat: plannedCostVat,
-        planned_partner_cost_gross: plannedCostGross,
+        planned_partner_cost_net: plannedCost.net,
+        planned_partner_cost_vat: plannedCost.vat,
+        planned_partner_cost_gross: plannedCost.gross,
         is_cost_passthrough: leistungForm.isCostPassthrough,
         provider_id: optString(leistungForm.providerId),
         doctor_id: optString(leistungForm.doctorId),
@@ -2949,23 +2937,27 @@ function useOrdersPageContent() {
     }
   }
 
+  function editLeistungPartnerCost(field: "net" | "vat" | "gross", value: string) {
+    setLeistungForm((current) => ({
+      ...current,
+      plannedPartnerCost: editPartnerCostAmounts(current.plannedPartnerCost, field, value),
+    }));
+  }
+
+  function editPlannedCostEditorAmount(field: "net" | "vat" | "gross", value: string) {
+    setPlannedCostEditor((current) =>
+      current
+        ? { ...current, amounts: editPartnerCostAmounts(current.amounts, field, value) }
+        : current,
+    );
+  }
+
   async function handlePlannedCostSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedOrderId || !plannedCostEditor) return;
-    const net = Number(plannedCostEditor.amountNet.replace(",", "."));
-    const vat = Number(plannedCostEditor.amountVat.replace(",", "."));
-    const gross = Number(plannedCostEditor.amountGross.replace(",", "."));
-    if (
-      !Number.isFinite(net) || net < 0 ||
-      !Number.isFinite(vat) || vat < 0 ||
-      !Number.isFinite(gross) || gross < 0 ||
-      toCents(net) + toCents(vat) !== toCents(gross)
-    ) {
-      setPlannedCostError(
-        lang === "de"
-          ? "Bruttobetrag muss dem Nettobetrag zuzüglich Mehrwertsteuer entsprechen."
-          : "Сумма с налогом должна быть равна сумме без налога плюс налог.",
-      );
+    const amounts = partnerCostAmountsForSubmit(plannedCostEditor.amounts);
+    if (!amounts) {
+      setPlannedCostError(partnerCostAmountsError(lang));
       return;
     }
     if (!plannedCostEditor.reason.trim()) {
@@ -2984,9 +2976,9 @@ function useOrdersPageContent() {
         plannedCostEditor.leistungId,
         {
           request_id: plannedCostEditor.requestId,
-          amount_net: roundCents(net).toFixed(2),
-          amount_vat: roundCents(vat).toFixed(2),
-          amount_gross: roundCents(gross).toFixed(2),
+          amount_net: amounts.net.toFixed(2),
+          amount_vat: amounts.vat.toFixed(2),
+          amount_gross: amounts.gross.toFixed(2),
           reason: plannedCostEditor.reason.trim(),
         },
       );
@@ -7293,9 +7285,11 @@ function useOrdersPageContent() {
                                           setPlannedCostEditor({
                                             leistungId: leistung.id,
                                             serviceName: normalizeLeistungDescription(leistung.description),
-                                            amountNet: String(leistung.planned_partner_cost_net ?? "0"),
-                                            amountVat: String(leistung.planned_partner_cost_vat ?? "0"),
-                                            amountGross: String(leistung.planned_partner_cost_gross ?? "0"),
+                                            amounts: partnerCostAmountsFrom(
+                                              leistung.planned_partner_cost_net,
+                                              leistung.planned_partner_cost_vat,
+                                              leistung.planned_partner_cost_gross,
+                                            ),
                                             reason: "",
                                             requestId: crypto.randomUUID(),
                                           });
@@ -8156,25 +8150,29 @@ function useOrdersPageContent() {
                   <div className="grid gap-3">
                     <Field label={lang === "de" ? "Betrag ohne Mehrwertsteuer" : "Сумма без налога"}>
                       <Input
-                        value={plannedCostEditor.amountNet}
-                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountNet: event.target.value }) : current)}
+                        inputMode="decimal"
+                        value={plannedCostEditor.amounts.net}
+                        onChange={(event) => editPlannedCostEditorAmount("net", event.target.value)}
                         className={inputClassName}
                       />
                     </Field>
                     <Field label={lang === "de" ? "Mehrwertsteuer" : "Налог на добавленную стоимость"}>
                       <Input
-                        value={plannedCostEditor.amountVat}
-                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountVat: event.target.value }) : current)}
+                        inputMode="decimal"
+                        value={plannedCostEditor.amounts.vat}
+                        onChange={(event) => editPlannedCostEditorAmount("vat", event.target.value)}
                         className={inputClassName}
                       />
                     </Field>
                     <Field label={lang === "de" ? "Betrag mit Mehrwertsteuer" : "Сумма с налогом"}>
                       <Input
-                        value={plannedCostEditor.amountGross}
-                        onChange={(event) => setPlannedCostEditor((current) => current ? ({ ...current, amountGross: event.target.value }) : current)}
+                        inputMode="decimal"
+                        value={plannedCostEditor.amounts.gross}
+                        onChange={(event) => editPlannedCostEditorAmount("gross", event.target.value)}
                         className={inputClassName}
                       />
                     </Field>
+                    <p className="text-xs text-muted-foreground">{partnerCostAmountsHint(lang)}</p>
                     <Field label={lang === "de" ? "Grund der Änderung" : "Причина изменения"}>
                       <textarea
                         value={plannedCostEditor.reason}
@@ -9294,42 +9292,33 @@ function useOrdersPageContent() {
                 <Field htmlFor="order-service-plannedPartnerCostNet" label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
                   <Input
                     id="order-service-plannedPartnerCostNet"
-                    value={leistungForm.plannedPartnerCostNet}
-                    onChange={(event) =>
-                      setLeistungForm((current) => ({
-                        ...current,
-                        plannedPartnerCostNet: event.target.value,
-                      }))
-                    }
+                    inputMode="decimal"
+                    value={leistungForm.plannedPartnerCost.net}
+                    onChange={(event) => editLeistungPartnerCost("net", event.target.value)}
                     className={inputClassName}
                   />
                 </Field>
                 <Field htmlFor="order-service-plannedPartnerCostVat" label={lang === "de" ? "Mehrwertsteuer auf geplante Partnerkosten" : "Налог на плановые затраты партнёра"}>
                   <Input
                     id="order-service-plannedPartnerCostVat"
-                    value={leistungForm.plannedPartnerCostVat}
-                    onChange={(event) =>
-                      setLeistungForm((current) => ({
-                        ...current,
-                        plannedPartnerCostVat: event.target.value,
-                      }))
-                    }
+                    inputMode="decimal"
+                    value={leistungForm.plannedPartnerCost.vat}
+                    onChange={(event) => editLeistungPartnerCost("vat", event.target.value)}
                     className={inputClassName}
                   />
                 </Field>
                 <Field htmlFor="order-service-plannedPartnerCostGross" label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}>
                   <Input
                     id="order-service-plannedPartnerCostGross"
-                    value={leistungForm.plannedPartnerCostGross}
-                    onChange={(event) =>
-                      setLeistungForm((current) => ({
-                        ...current,
-                        plannedPartnerCostGross: event.target.value,
-                      }))
-                    }
+                    inputMode="decimal"
+                    value={leistungForm.plannedPartnerCost.gross}
+                    onChange={(event) => editLeistungPartnerCost("gross", event.target.value)}
                     className={inputClassName}
                   />
                 </Field>
+                <p className="text-xs text-muted-foreground md:col-span-3">
+                  {partnerCostAmountsHint(lang)}
+                </p>
                 </> : null}
               </div>
             </OrderSheetSection>
