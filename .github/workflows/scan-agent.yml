@@ -1,8 +1,10 @@
 name: Scan Agent
 
 # Cross-platform build of the gmed-scan station agent (crates/scan-agent)
-# and its installers: a Windows MSI, a macOS package (universal binary plus
-# the "GMED Scan" app) and a plain Linux binary, kept as workflow artifacts.
+# and its installers: a Windows MSI, a macOS package (the "GMED Scan" app
+# with a universal binary) and a Linux tarball. Each installer is installed
+# on its runner before it is kept as a workflow artifact. A tag
+# `scan-agent-v<crate version>` also publishes them as a GitHub release.
 # Linux clippy and tests also run in the CI `rust` job as part of the
 # workspace. This workflow builds only this crate and never touches the
 # server images or any deployment.
@@ -14,6 +16,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - scan-agent-v*
     paths:
       - crates/scan-agent/**
       - Cargo.lock
@@ -53,13 +57,20 @@ jobs:
       - name: Build release binary
         run: cargo build -p gmed-scan --locked --release
 
+      # A tarball keeps the executable bit that a bare artifact file loses.
+      - name: Package binary
+        run: |
+          version="$(grep -m1 '^version' crates/scan-agent/Cargo.toml | cut -d'"' -f2)"
+          tar -czf "gmed-scan-$version-linux-x86_64.tar.gz" -C target/release gmed-scan
+          tar -tvzf "gmed-scan-$version-linux-x86_64.tar.gz"
+
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: gmed-scan-linux-x86_64
-          path: target/release/gmed-scan
+          path: gmed-scan-*-linux-x86_64.tar.gz
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
   windows:
     runs-on: windows-latest
@@ -70,12 +81,17 @@ jobs:
     env:
       # aws-lc-sys (rustls crypto) uses its prebuilt NASM objects.
       AWS_LC_SYS_PREBUILT_NASM: "1"
+      # Static C runtime: a PC without the Visual C++ Redistributable has no
+      # VCRUNTIME140.dll, and the MSI does not ship one.
+      RUSTFLAGS: "-C target-feature=+crt-static"
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -88,18 +104,97 @@ jobs:
       - name: Build release binary
         run: cargo build -p gmed-scan --locked --release
 
+      - name: Check that the binary needs no Visual C++ runtime
+        run: |
+          sysroot="$(cygpath -u "$(rustc --print sysroot)")"
+          readobj="$sysroot/lib/rustlib/x86_64-pc-windows-msvc/bin/llvm-readobj.exe"
+          imports="$("$readobj" --coff-imports target/release/gmed-scan.exe | sed -n 's/^ *Name: //p' | sort -u)"
+          echo "$imports"
+          if grep -qiE '^(vcruntime|msvcp|api-ms-win-crt-)' <<<"$imports"; then
+            echo "::error::gmed-scan.exe still loads the dynamic Visual C++ runtime"
+            exit 1
+          fi
+
       - name: Build MSI
         run: |
           version="$(grep -m1 '^version' crates/scan-agent/Cargo.toml | cut -d'"' -f2)"
           dotnet tool install --global wix --version 5.0.2
           export PATH="$HOME/.dotnet/tools:$PATH"
+          wix extension add -g WixToolset.Firewall.wixext/5.0.2
           # WiX is a Windows program: hand it Windows paths.
-          wix build "$(cygpath -w crates/scan-agent/packaging/windows/gmed-scan.wxs)" \
-            -arch x64 \
-            -d Version="$version" \
-            -d BinaryPath="$(cygpath -w "$PWD/target/release/gmed-scan.exe")" \
-            -o "gmed-scan-$version-windows-x64.msi"
+          build_msi() {
+            wix build "$(cygpath -w crates/scan-agent/packaging/windows/gmed-scan.wxs)" \
+              -arch x64 \
+              -ext WixToolset.Firewall.wixext \
+              -d Version="$version" \
+              -d BinaryPath="$(cygpath -w "$PWD/target/release/gmed-scan.exe")" \
+              -o "$(cygpath -w "$1")"
+          }
+          build_msi "gmed-scan-$version-windows-x64.msi"
+          # A second build of the same version (new ProductCode) for the
+          # upgrade check; not published.
+          build_msi "$RUNNER_TEMP/gmed-scan-rebuild.msi"
           ls -l gmed-scan-*.msi
+
+      - name: Install, upgrade and remove the MSI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Msi([string[]] $arguments) {
+            $process = Start-Process msiexec.exe -ArgumentList $arguments -Wait -PassThru
+            if ($process.ExitCode -notin 0, 3010) { throw "msiexec $arguments failed with exit code $($process.ExitCode)" }
+          }
+          function Get-Installed {
+            @(Get-ChildItem HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall |
+              Get-ItemProperty -ErrorAction SilentlyContinue |
+              Where-Object DisplayName -eq 'GMED Scan')
+          }
+          function Get-ScanRules {
+            @(Get-NetFirewallRule -Direction Inbound | Where-Object DisplayName -like 'GMED Scan*')
+          }
+          $msi = (Resolve-Path gmed-scan-*-windows-x64.msi).Path
+          $rebuild = Join-Path $env:RUNNER_TEMP 'gmed-scan-rebuild.msi'
+          $exe = 'C:\Program Files\GMED Scan\gmed-scan.exe'
+
+          Invoke-Msi @('/i', "`"$msi`"", '/qn', '/l*v', "`"$env:RUNNER_TEMP\msi-install.log`"")
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'the installed gmed-scan.exe does not run' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'Machine') -notlike '*GMED Scan*') { throw 'the install folder is not on the system PATH' }
+          foreach ($shortcut in "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\GMED Scan.lnk", "$env:PUBLIC\Desktop\GMED Scan.lnk") {
+            if (-not (Test-Path $shortcut)) { throw "missing shortcut $shortcut" }
+          }
+          $rules = Get-ScanRules
+          if ($rules.Count -ne 1) { throw "expected one GMED Scan firewall rule, found $($rules.Count)" }
+          $port = $rules[0] | Get-NetFirewallPortFilter
+          $program = ($rules[0] | Get-NetFirewallApplicationFilter).Program
+          $remote = ($rules[0] | Get-NetFirewallAddressFilter).RemoteAddress
+          "$($rules[0].DisplayName): $($port.Protocol) $($port.LocalPort), $program, remote $remote, profile $($rules[0].Profile), action $($rules[0].Action)"
+          if ($port.Protocol -ne 'UDP' -or $port.LocalPort -ne '5353' -or $program -ne $exe -or $remote -ne 'LocalSubnet' -or $rules[0].Action -ne 'Allow') {
+            throw 'unexpected firewall rule'
+          }
+
+          # A rebuild of the same version must replace the installed one.
+          Invoke-Msi @('/i', "`"$rebuild`"", '/qn', '/l*v', "`"$env:RUNNER_TEMP\msi-upgrade.log`"")
+          $installed = Get-Installed
+          if ($installed.Count -ne 1) { throw "the rebuild was installed beside the old one ($($installed.Count) entries)" }
+          & $exe --version
+          if ((Get-ScanRules).Count -ne 1) { throw 'the upgrade duplicated or lost the firewall rule' }
+
+          Invoke-Msi @('/x', $installed[0].PSChildName, '/qn', '/l*v', "`"$env:RUNNER_TEMP\msi-uninstall.log`"")
+          if (Test-Path $exe) { throw 'gmed-scan.exe is still there after the uninstall' }
+          if ((Get-ScanRules).Count -ne 0) { throw 'the firewall rule was left behind' }
+          if ([Environment]::GetEnvironmentVariable('Path', 'Machine') -like '*GMED Scan*') { throw 'the PATH entry was left behind' }
+          if ((Get-Installed).Count -ne 0) { throw 'GMED Scan is still registered after the uninstall' }
+          'MSI install, same-version upgrade and uninstall work.'
+
+      - name: Upload installer logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gmed-scan-windows-msi-logs
+          path: ${{ runner.temp }}/msi-*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -109,7 +204,7 @@ jobs:
             gmed-scan-*-windows-x64.msi
             target/release/gmed-scan.exe
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
   macos:
     runs-on: macos-latest
@@ -145,10 +240,86 @@ jobs:
             "gmed-scan-$version-macos-universal.pkg"
           ls -l gmed-scan-*.pkg
 
+      - name: Install the package and start the station
+        run: |
+          version="$(grep -m1 '^version' crates/scan-agent/Cargo.toml | cut -d'"' -f2)"
+          pkg="gmed-scan-$version-macos-universal.pkg"
+          app="/Applications/GMED Scan.app"
+          before="$(stat -f '%Su:%Sg %Lp' /usr/local/bin 2>/dev/null || echo missing)"
+          sudo installer -pkg "$pkg" -target /
+          after="$(stat -f '%Su:%Sg %Lp' /usr/local/bin)"
+          echo "/usr/local/bin: $before -> $after"
+          if [[ "$before" != missing && "$before" != "$after" ]]; then
+            echo "::error::the installer changed the owner or mode of /usr/local/bin"
+            exit 1
+          fi
+          # Native universal launcher and tool: no Rosetta prompt on Apple
+          # silicon, runs on Intel Macs.
+          for binary in "$app/Contents/MacOS/GMED Scan" "$app/Contents/MacOS/gmed-scan"; do
+            archs="$(lipo -archs "$binary")"
+            echo "$binary: $archs"
+            [[ " $archs " == *" arm64 "* && " $archs " == *" x86_64 "* ]]
+          done
+          test "$(readlink /usr/local/bin/gmed-scan)" = "$app/Contents/MacOS/gmed-scan"
+          gmed-scan --version | grep -Fx "gmed-scan $version"
+          # The station as Terminal starts it: without a session and without
+          # input it asks to sign in and stops cleanly.
+          output="$(GMED_SCAN_HOME="$RUNNER_TEMP/gmed-scan-home" "$app/Contents/Resources/station.command" </dev/null 2>&1 || true)"
+          echo "$output"
+          grep -F "GMED Scan $version" <<<"$output"
+          grep -F "Sign in to GMED." <<<"$output"
+          # Installing again (an update) keeps one app and the link.
+          sudo installer -pkg "$pkg" -target /
+          test -L /usr/local/bin/gmed-scan
+          pkgutil --pkg-info com.gmedhealth.scan
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: gmed-scan-macos-universal
           path: gmed-scan-*-macos-universal.pkg
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
+
+  # A tag scan-agent-v<version> publishes the installers that were built and
+  # installed above as a GitHub release: a stable download for the clinics.
+  release:
+    if: startsWith(github.ref, 'refs/tags/scan-agent-v')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check the tag against the crate version
+        run: |
+          version="$(grep -m1 '^version' crates/scan-agent/Cargo.toml | cut -d'"' -f2)"
+          if [[ "$GITHUB_REF_NAME" != "scan-agent-v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the crate version $version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gmed-scan-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          files=(gmed-scan-*-windows-x64.msi gmed-scan-*-macos-universal.pkg gmed-scan-*-linux-x86_64.tar.gz)
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          gh release create "$GITHUB_REF_NAME" "${files[@]}" SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "GMED Scan $VERSION" \
+            --latest=false \
+            --notes "Scan station installers (unsigned). Installation and first start: docs/engineering/05_scan-station_ua.md."

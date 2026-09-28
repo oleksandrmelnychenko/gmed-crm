@@ -3,28 +3,47 @@
   Per-machine Windows installer for the GMED scan station (WiX Toolset 5).
 
   Installs gmed-scan.exe into "Program Files\GMED Scan", adds that folder to
-  the system PATH (for the command line and folder watching), and creates
-  "GMED Scan" shortcuts in the Start menu and on the desktop that open the
-  interactive station. Built by .github/workflows/scan-agent.yml:
+  the system PATH (for the command line and folder watching), opens the
+  Windows firewall for Bonjour answers from the local subnet (scanner
+  discovery), and creates "GMED Scan" shortcuts in the Start menu and on the
+  desktop that open the interactive station. Built by
+  .github/workflows/scan-agent.yml:
 
-    wix build gmed-scan.wxs -arch x64 -d Version=0.1.0 -d BinaryPath=...\gmed-scan.exe -o gmed-scan.msi
+    wix extension add -g WixToolset.Firewall.wixext/5.0.2
+    wix build gmed-scan.wxs -arch x64 -ext WixToolset.Firewall.wixext -d Version=0.2.0 -d BinaryPath=...\gmed-scan.exe -o gmed-scan.msi
 
   The UpgradeCode must never change: it lets a newer MSI replace an older one.
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:fw="http://wixtoolset.org/schemas/v4/wxs/firewall">
   <Package Name="GMED Scan"
            Manufacturer="GMED"
            Version="$(var.Version)"
            UpgradeCode="E16877E3-B0AC-4E1F-A9A9-84AE9B1238F0"
            Scope="perMachine"
            Compressed="yes">
-    <MajorUpgrade DowngradeErrorMessage="A newer version of GMED Scan is already installed." />
+    <!-- Every CI build gets a new ProductCode; a rebuild of the same version
+         must replace the installed one instead of installing beside it. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of GMED Scan is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="GMED Scan">
         <Component Id="ScanAgent">
-          <File Id="GmedScanExe" Source="$(var.BinaryPath)" Name="gmed-scan.exe" KeyPath="yes" />
+          <File Id="GmedScanExe" Source="$(var.BinaryPath)" Name="gmed-scan.exe" KeyPath="yes">
+            <!-- Scanner discovery listens on UDP 5353 (mDNS). Without this
+                 rule Windows drops the scanners' answers (or asks an
+                 administrator at the first search). Local subnet only; all
+                 profiles, since Windows marks a new network "Public". -->
+            <fw:FirewallException Id="ScannerDiscovery"
+                                  Name="GMED Scan - scanner discovery (Bonjour)"
+                                  Description="Lets GMED Scan receive Bonjour (mDNS) answers from network scanners on the local subnet."
+                                  Protocol="udp"
+                                  Port="5353"
+                                  Scope="localSubnet"
+                                  Profile="all" />
+          </File>
           <Environment Id="PathEntry"
                        Name="PATH"
                        Value="[INSTALLFOLDER]"

@@ -196,14 +196,11 @@ pub fn run(gmed: &Gmed, options: &WatchOptions, mut log: impl FnMut(&str)) -> Re
                         .downcast_ref::<ApiError>()
                         .is_some_and(ApiError::rejects_file) =>
                 {
-                    let target = move_into(&options.dir, FAILED_DIR, &path).with_context(|| {
-                        format!("GMED refused {name} but it could not be moved aside")
-                    })?;
                     let reason = format!("{error:#}");
-                    let _ = fs::write(
-                        target.with_extension(format!("{}.error.txt", extension_of(&target))),
-                        format!("{reason}\n"),
-                    );
+                    let target =
+                        set_aside(&options.dir, FAILED_DIR, &path, &reason).with_context(|| {
+                            format!("GMED refused {name} but it could not be moved aside")
+                        })?;
                     log(&format!(
                         "GMED refused {name}: {reason} (moved to {})",
                         target.display()
@@ -247,6 +244,17 @@ fn extension_of(path: &Path) -> String {
 fn backoff(interval: Duration, attempts: u32) -> Duration {
     let factor = 2u32.saturating_pow(attempts.min(16));
     interval.saturating_mul(factor).min(MAX_BACKOFF)
+}
+
+/// Move a file GMED refused into `root/subdir`, with the reason next to it
+/// in `<file>.error.txt`, so it is not sent again.
+pub fn set_aside(root: &Path, subdir: &str, path: &Path, reason: &str) -> Result<PathBuf> {
+    let target = move_into(root, subdir, path)?;
+    let _ = fs::write(
+        target.with_extension(format!("{}.error.txt", extension_of(&target))),
+        format!("{reason}\n"),
+    );
+    Ok(target)
 }
 
 fn move_into(root: &Path, subdir: &str, path: &Path) -> Result<PathBuf> {

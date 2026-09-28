@@ -128,6 +128,10 @@ pub struct Config {
     pub server: Option<String>,
     /// Default scanner (eSCL root URL).
     pub scanner: Option<String>,
+    /// The default scanner's Bonjour identity (UUID or service name), used
+    /// to find it again when its address changes. `None` for an address
+    /// typed by hand.
+    pub scanner_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -208,9 +212,24 @@ mod tests {
         assert_eq!(paths.load_config().unwrap(), Config::default());
         let config = Config {
             server: Some("https://gmed.example".into()),
-            scanner: None,
+            scanner: Some("http://192.168.1.20/eSCL/".into()),
+            scanner_id: Some("4a3f-epson".into()),
         };
         paths.save_config(&config).unwrap();
         assert_eq!(paths.load_config().unwrap(), config);
+    }
+
+    #[test]
+    fn reads_a_config_written_before_the_scanner_id_existed() {
+        let paths = Paths::at(temp_dir("config-0-1"));
+        fs::create_dir_all(paths.dir()).unwrap();
+        fs::write(
+            paths.config_file(),
+            br#"{ "server": "https://gmed.example", "scanner": "http://192.168.1.20/eSCL/" }"#,
+        )
+        .unwrap();
+        let config = paths.load_config().unwrap();
+        assert_eq!(config.scanner.as_deref(), Some("http://192.168.1.20/eSCL/"));
+        assert_eq!(config.scanner_id, None);
     }
 }

@@ -14,6 +14,9 @@ const SERVICE_TYPES: [(&str, &str); 2] = [
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FoundScanner {
+    /// Stable identity: the announced UUID, else the service name. Both
+    /// survive a new IP address.
+    pub id: String,
     pub name: String,
     pub model: Option<String>,
     /// eSCL root URLs, HTTPS first, e.g. `https://192.168.1.20:443/eSCL/`.
@@ -67,7 +70,8 @@ pub fn discover(timeout: Duration) -> Result<Vec<FoundScanner>> {
                     .map(str::to_ascii_lowercase)
                     .unwrap_or_else(|| name.clone());
                 let url = format!("{scheme}://{host}:{}/{resource}/", service.get_port());
-                let entry = found.entry(key).or_insert_with(|| FoundScanner {
+                let entry = found.entry(key.clone()).or_insert_with(|| FoundScanner {
+                    id: key,
                     name,
                     model: None,
                     urls: Vec::new(),
@@ -84,4 +88,14 @@ pub fn discover(timeout: Duration) -> Result<Vec<FoundScanner>> {
     }
     let _ = daemon.shutdown();
     Ok(found.into_values().collect())
+}
+
+/// What to check when no scanner answers or a scanner cannot be reached:
+/// macOS silently blocks the local network for Terminal without permission.
+pub fn local_network_hint() -> &'static str {
+    if cfg!(target_os = "macos") {
+        " On macOS, Terminal needs the Local Network permission: System Settings > Privacy & Security > Local Network."
+    } else {
+        ""
+    }
 }

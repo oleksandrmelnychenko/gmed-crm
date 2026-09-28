@@ -1,0 +1,12 @@
+#!/bin/sh
+# postinstall of the GMED Scan package: put the command line tool on the
+# default PATH. A symlink into the app, so the installer never changes
+# /usr/local/bin itself (Homebrew on Intel Macs owns that folder).
+#
+# $3 is the target volume ("/" for the startup disk).
+set -eu
+volume="${3%/}"
+mkdir -p "$volume/usr/local/bin"
+# Replaces the plain binary that GMED Scan 0.1.0 installed there.
+ln -sfn "/Applications/GMED Scan.app/Contents/MacOS/gmed-scan" "$volume/usr/local/bin/gmed-scan"
+exit 0
