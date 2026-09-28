@@ -232,11 +232,50 @@ describe("buildAppointmentTimelineEvents", () => {
       kind: "workflow",
       tone: "info",
     });
-    expect(events.map((item) => item.occurredAt)).toEqual(
-      [...events.map((item) => item.occurredAt)].toSorted((left, right) =>
-        right.localeCompare(left)
-      )
+    const instants = events.map((item) => new Date(item.occurredAt).getTime());
+    expect(instants).toEqual(instants.toSorted((left, right) => right - left));
+  });
+
+  it("places the slot at its Berlin wall-clock time and names the interpreter response", () => {
+    const events = buildAppointmentTimelineEvents({
+      detail: {
+        id: "apt-berlin",
+        title: "Clinic follow-up",
+        date: "2026-09-28",
+        time_start: "09:00:00",
+        time_end: "10:00:00",
+        patient_pid: "PT-1",
+        patient_name: "Anna Muster",
+        provider_name: "Klinik Mitte",
+        doctor_name: null,
+        interpreter_name: "Iryna Kovalenko",
+        interpreter_response: "accepted",
+        // Created at 09:07 Berlin, after the 09:00 slot started.
+        created_at: "2026-09-28T07:07:26.397183+00:00",
+      },
+      checklist: [],
+      reminders: [],
+      tasks: [],
+      services: [],
+      report: null,
+      communications: [],
+    });
+
+    const slot = events.find((item) => item.id === "slot:apt-berlin");
+    const interpreter = events.find((item) => item.id === "interpreter:apt-berlin");
+    // 09:00 CEST is 07:00 UTC in any browser time zone (e.g. Europe/Kyiv).
+    expect(slot?.occurredAt).toBe("2026-09-28T07:00:00.000Z");
+    expect(interpreter?.occurredAt).toBe("2026-09-28T07:00:00.000Z");
+    expect(interpreter?.detail).toBe(
+      `Iryna Kovalenko · ${t(getLang()).appointment_interpreter_response_accepted}`,
     );
+    expect(interpreter?.detail).not.toContain("accepted");
+    // Newest first: the creation (07:07 UTC) comes before the 07:00 UTC slot.
+    expect(events.map((item) => item.id)).toEqual([
+      "created:apt-berlin",
+      "slot:apt-berlin",
+      "interpreter:apt-berlin",
+    ]);
   });
 
   it("marks rejected review events as danger and carries reviewer notes", () => {

@@ -1,4 +1,8 @@
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import {
+  appDateTimeFormat,
+  berlinLocalInputToIso,
+  dateOrInstant,
+} from "@/lib/app-time-zone";
 import {
   formatUiText,
   getLang,
@@ -10,6 +14,7 @@ import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 import {
   communicationChannelLabel,
   communicationDirectionLabel,
+  responseLabel,
 } from "@/pages/appointments/model/labels";
 import { patientPermissions } from "@/pages/patients/model/list-model";
 import type {
@@ -622,6 +627,11 @@ export function buildAppointmentTimelineEvents(args: {
     },
   ];
 
+  // The slot is a Berlin wall-clock time without an offset. As an instant it
+  // is shown (and sorted) like every other entry, whatever zone the browser is in.
+  const slotAt =
+    berlinLocalInputToIso(`${detail.date}T${detail.time_start ?? "09:00"}`) ??
+    detail.date;
   const events: AppointmentTimelineEvent[] = [
     {
       id: `created:${detail.id}`,
@@ -633,7 +643,7 @@ export function buildAppointmentTimelineEvents(args: {
     },
     {
       id: `slot:${detail.id}`,
-      occurredAt: `${detail.date}T${detail.time_start ?? "09:00"}`,
+      occurredAt: slotAt,
       title: labels.appointments_timeline_scheduled_slot,
       detail: [
         buildSlotLabel(detail),
@@ -658,7 +668,7 @@ export function buildAppointmentTimelineEvents(args: {
   if (detail.interpreter_name || detail.interpreter_response) {
     events.push({
       id: `interpreter:${detail.id}`,
-      occurredAt: `${detail.date}T${detail.time_start ?? "09:00"}`,
+      occurredAt: slotAt,
       title: !detail.interpreter_name
         ? labels.appointments_timeline_interpreter_pending
         : detail.interpreter_response === "accepted"
@@ -668,7 +678,10 @@ export function buildAppointmentTimelineEvents(args: {
             : detail.interpreter_response === "discussion_requested"
               ? labels.appointments_timeline_interpreter_discussion
               : labels.appointments_timeline_interpreter_assigned,
-      detail: [detail.interpreter_name, detail.interpreter_response]
+      detail: [
+        detail.interpreter_name,
+        detail.interpreter_response ? responseLabel(detail.interpreter_response) : "",
+      ]
         .filter(Boolean)
         .join(" · "),
       kind: "interpreter",
@@ -822,7 +835,13 @@ export function buildAppointmentTimelineEvents(args: {
     }
   }
 
+  // Entries mix "Z" and "+00:00" offsets (and a bare date as a fallback), so
+  // they are ordered by instant, not by their text.
+  const instantOf = (value: string) => {
+    const time = dateOrInstant(value).getTime();
+    return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
+  };
   return events
     .filter((item) => Boolean(item.occurredAt))
-    .toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+    .toSorted((left, right) => instantOf(right.occurredAt) - instantOf(left.occurredAt));
 }
