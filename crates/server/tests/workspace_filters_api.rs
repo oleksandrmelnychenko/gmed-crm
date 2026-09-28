@@ -10176,37 +10176,50 @@ async fn teamlead_cannot_reassign_owner_to_patient_manager_during_reschedule() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/appointments/{appointment_id}/update"),
-        &teamlead_bearer,
-        Some(json!({
-            "provider_id": provider_id,
-            "doctor_id": doctor_id,
-            "owner_user_id": interpreter_id,
-            "interpreter_id": interpreter_id,
-            "title": "Interpreter-owned follow-up",
-            "date": "2026-05-15",
-            "time_start": "10:30",
-            "time_end": "11:30",
-            "location": "Remote"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
+    let reassign = |owner_user_id: Uuid| {
+        let app = app.clone();
+        let bearer = teamlead_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/appointments/{appointment_id}/update"),
+                &bearer,
+                Some(json!({
+                    "provider_id": provider_id,
+                    "doctor_id": doctor_id,
+                    "owner_user_id": owner_user_id,
+                    "interpreter_id": interpreter_id,
+                    "title": "Team lead follow-up",
+                    "date": "2026-05-15",
+                    "time_start": "10:30",
+                    "time_end": "11:30",
+                    "location": "Remote"
+                })),
+            )
+            .await
+        }
+    };
+
+    // An interpreter cannot work on (edit) an appointment, so it cannot own one.
+    let (status, body) = reassign(interpreter_id).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let other_teamlead_id = seed_user(&pool, &format!("{tag}-tl2"), "teamlead_interpreter").await;
+    let (status, body) = reassign(other_teamlead_id).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["ok"], true);
 
     let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/appointments/{appointment_id}"),
-        &teamlead_bearer,
+        &auth_header_for(admin_id, "ceo"),
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["owner_user_id"], interpreter_id.to_string());
+    assert_eq!(body["owner_user_id"], other_teamlead_id.to_string());
 }
 
 #[tokio::test]
