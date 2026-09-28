@@ -146,6 +146,10 @@ async fn unlock_user(
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
+    // Same rule as `/users/{id}/unlock`: an existing CEO is the CEO's.
+    if let Err(e) = super::users::ensure_can_touch_account(&state, &auth, user_id).await {
+        return e;
+    }
 
     let _ = sqlx::query!(
         "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
@@ -181,6 +185,10 @@ async fn force_password_reset(
     Path(user_id): Path<Uuid>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
+        return e;
+    }
+    // Same rule as `/users/{id}/reset-password`: an existing CEO is the CEO's.
+    if let Err(e) = super::users::ensure_can_touch_account(&state, &auth, user_id).await {
         return e;
     }
 

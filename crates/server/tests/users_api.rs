@@ -906,3 +906,127 @@ async fn it_admin_manages_users_but_never_the_ceo() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
+
+async fn seed_pending_login(pool: &PgPool, user_id: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO pending_logins (user_id, ip_address, user_agent)
+           VALUES ($1, '203.0.113.7', 'users-api test')
+           RETURNING id"#,
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// The account-security actions of the technical cabinet (MFA, sessions,
+/// lockout, forced password reset, pending logins), one request each for
+/// `user_id`, in an order that keeps every later action applicable.
+fn account_security_requests(user_id: Uuid, approve: Uuid, reject: Uuid) -> Vec<(String, Value)> {
+    vec![
+        (
+            format!("/api/v1/admin/mfa/pending/{approve}/approve"),
+            json!(null),
+        ),
+        (
+            format!("/api/v1/admin/mfa/pending/{reject}/reject"),
+            json!(null),
+        ),
+        (
+            format!("/api/v1/admin/mfa/user/{user_id}/toggle"),
+            json!({ "enabled": true }),
+        ),
+        (
+            format!("/api/v1/admin/sessions/user/{user_id}/revoke"),
+            json!(null),
+        ),
+        (format!("/api/v1/admin/users/{user_id}/unlock"), json!(null)),
+        (
+            format!("/api/v1/admin/users/{user_id}/force-password-reset"),
+            json!(null),
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn it_admin_security_actions_never_reach_an_existing_ceo() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let it_admin_id = seed_user(&pool, "users-api-security", "it_admin").await;
+    let it_admin = auth_header_for(it_admin_id, "it_admin");
+    let ceo_id = seed_user(&pool, "users-api-security-target", "ceo").await;
+    let staff_id = seed_user(&pool, "users-api-security-target", "patient_manager").await;
+    for user_id in [ceo_id, staff_id] {
+        sqlx::query(
+            "UPDATE users SET failed_login_attempts = 5, locked_until = now() + interval '1 hour' WHERE id = $1",
+        )
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // Every account-security action on an existing CEO is refused to the
+    // technical admin and leaves the account as it was.
+    let ceo_approve = seed_pending_login(&pool, ceo_id).await;
+    let ceo_reject = seed_pending_login(&pool, ceo_id).await;
+    for (path, body) in account_security_requests(ceo_id, ceo_approve, ceo_reject) {
+        let (status, response) = json_request(&app, "POST", &path, &it_admin, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
+    }
+    let (mfa_required, locked, reset_required): (bool, bool, bool) = sqlx::query_as(
+        "SELECT mfa_required, locked_until IS NOT NULL, password_reset_required FROM users WHERE id = $1",
+    )
+    .bind(ceo_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!mfa_required && locked && !reset_required);
+    let open_ceo_pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pending_logins WHERE user_id = $1 AND status = 'pending'",
+    )
+    .bind(ceo_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open_ceo_pending, 2);
+
+    // The same actions on any other account stay with the technical admin.
+    let staff_approve = seed_pending_login(&pool, staff_id).await;
+    let staff_reject = seed_pending_login(&pool, staff_id).await;
+    for (path, body) in account_security_requests(staff_id, staff_approve, staff_reject) {
+        let (status, response) = json_request(&app, "POST", &path, &it_admin, body).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {response}");
+    }
+    let (mfa_required, locked, reset_required): (bool, bool, bool) = sqlx::query_as(
+        "SELECT mfa_required, locked_until IS NOT NULL, password_reset_required FROM users WHERE id = $1",
+    )
+    .bind(staff_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(mfa_required && !locked && reset_required);
+
+    // The CEO keeps every one of them for a CEO account.
+    let ceo = auth_header_for(admin_id, "ceo");
+    for (path, body) in account_security_requests(ceo_id, ceo_approve, ceo_reject) {
+        let (status, response) = json_request(&app, "POST", &path, &ceo, body).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {response}");
+    }
+    let (mfa_required, locked, reset_required): (bool, bool, bool) = sqlx::query_as(
+        "SELECT mfa_required, locked_until IS NOT NULL, password_reset_required FROM users WHERE id = $1",
+    )
+    .bind(ceo_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(mfa_required && !locked && reset_required);
+
+    // An unknown account or pending login is still a 404, not a 403.
+    let unknown = Uuid::new_v4();
+    for (path, body) in account_security_requests(unknown, unknown, unknown) {
+        let (status, response) = json_request(&app, "POST", &path, &it_admin, body).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}: {response}");
+    }
+}
