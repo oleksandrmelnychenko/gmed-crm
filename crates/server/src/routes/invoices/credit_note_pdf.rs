@@ -78,6 +78,9 @@ pub(crate) struct CreditNotePdfContext {
     pub agency: PatientPdfBrand,
     pub vat_id: Option<String>,
     pub tax_number: Option<String>,
+    /// The corrected invoice's addressee (payer or patient). A correction is
+    /// sent to the same party as the invoice and names it like the invoice.
+    pub(super) recipient: Option<super::document::InvoiceRecipient>,
 }
 
 fn setting(row: &sqlx::postgres::PgRow, column: &str) -> Option<String> {
@@ -155,7 +158,12 @@ pub(crate) async fn load_credit_note_pdf_context(
     let issued_at = row
         .try_get::<DateTime<Utc>, _>("issued_at")
         .unwrap_or_else(|_| Utc::now());
+    let recipient = {
+        let mut conn = state.db.acquire().await?;
+        super::document::load_invoice_recipient(&mut conn, invoice_id).await?
+    };
     Ok(Some(CreditNotePdfContext {
+        recipient,
         credit_note_id,
         invoice_id,
         patient_id: row.try_get("patient_id")?,
@@ -711,6 +719,32 @@ pub(crate) fn build_credit_note_pdf(
         bold,
     };
 
+    // Address block as on the invoice: sender line, then the addressee.
+    if let Some(recipient) = &context.recipient {
+        let sender = std::iter::once(context.agency.name.trim().to_string())
+            .chain(
+                context
+                    .agency
+                    .address
+                    .as_deref()
+                    .unwrap_or_default()
+                    .replace('\r', "\n")
+                    .split(['\n', ','])
+                    .map(str::trim)
+                    .filter(|part| !part.is_empty())
+                    .map(ToOwned::to_owned),
+            )
+            .collect::<Vec<_>>()
+            .join(" · ");
+        layout.paragraph(&sender, 7.5, false, Tone::Muted);
+        layout.space(1.0);
+        layout.paragraph(&recipient.name, 11.0, true, Tone::Body);
+        for line in recipient.address_lines() {
+            layout.paragraph(&line, 10.5, false, Tone::Body);
+        }
+        layout.space(8.0);
+    }
+
     layout.paragraph(
         &label(
             language,
@@ -1076,7 +1110,27 @@ mod tests {
             },
             vat_id: Some("DE123456789".to_string()),
             tax_number: None,
+            recipient: Some(super::super::document::InvoiceRecipient {
+                name: "Ivan Zahler".to_string(),
+                street: Some("Hauptstraße 1".to_string()),
+                zip: Some("10115".to_string()),
+                city: Some("Berlin".to_string()),
+                country: Some("Deutschland".to_string()),
+                country_code: Some("DE".to_string()),
+                email: None,
+                is_payer: true,
+            }),
         }
+    }
+
+    #[test]
+    fn credit_note_is_addressed_like_the_invoice() {
+        // The walkthrough's Rechnungskorrektur had no addressee at all.
+        let bytes = build_credit_note_pdf(&context(None, "credit_note")).unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(text.contains("Ivan Zahler"), "{text}");
+        assert!(text.contains("Hauptstraße 1"), "{text}");
+        assert!(text.contains("10115 Berlin"), "{text}");
     }
 
     #[test]
