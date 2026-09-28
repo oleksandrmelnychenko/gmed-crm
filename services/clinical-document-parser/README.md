@@ -250,6 +250,26 @@ pivots through English. Attribution and licenses: `MT_MODELS_NOTICE`
 `/app/mt-models`), `MT_MAX_LOADED_MODELS` (default 2, about 250 MB RAM per
 tc-big model) and `MT_THREADS` (default 2 intra-op threads per model).
 
+Per-language model routing (optional, off by default): `MT_MODEL_ROUTES` is a
+comma-separated list of `src>tgt:model` overrides for direct pairs, e.g.
+`de>uk:de-zle-opus_ft_clean_0_3,uk>de:zle-de-opus_ft_clean_0_3`; unlisted pairs
+keep their baseline model. Routed models are looked up in `MT_MODEL_DIR`, then in
+`MT_EXTRA_MODEL_DIR` (a read-only folder of extra CTranslate2 packages, which
+never shadows an installed baseline name). A routed model that is missing falls
+back to the baseline with a warning. DEV mounts such a folder through
+`docker-compose.dev-mt-ft.yml` (see that file for rollback).
+
+Decode guard (`DecodeGuard` in `app/mt_engine.py`): the model may not emit
+`<unk>` (`MT_DISABLE_UNK`, default 1), output is capped at
+`min(MT_MAX_DECODING_LENGTH=512, MT_MAX_LENGTH_RATIO=1.5 × source tokens +
+MT_MAX_LENGTH_EXTRA=10)`, and a sentence whose output is a runaway (an n-gram
+repeated four times in a row, or the cap reached) is decoded again with
+`no_repeat_ngram_size=MT_NO_REPEAT_NGRAM` (default 3). `MT_NO_REPEAT_MODE`
+(`loop` default, `always`, `off`): blocking repeats on every decode corrupts
+unit lists and dosing schemes ("mmol/l", "1-0-0"), so it is not the default.
+Symbols whose pieces are missing from the model vocabulary (°, –, ±, ×, µ ...)
+are masked and restored verbatim like other unencodable characters.
+
 Output is a draft for human review. PDF line wraps are reflowed first: a line
 continues into the next when it does not end a sentence and the next line
 starts lowercase, follows a line-break hyphen (`fokal-` + `neurologisches`) or

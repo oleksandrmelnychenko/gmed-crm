@@ -347,9 +347,8 @@ function ProviderDoctorFields({
           onChange={(event) => {
             const id = event.target.value || null;
             const doctor = doctors.find((d) => d.id === id);
+            // The chosen provider stays as chosen; the list is only filtered to its branch.
             onChange({
-              provider_id: doctor?.selected_provider_id ?? draft.provider_id,
-              provider_name: doctor?.selected_provider_name ?? draft.provider_name,
               doctor_id: id,
               doctor_name: doctor?.name ?? null,
               doctor_title: doctor?.title ?? null,
