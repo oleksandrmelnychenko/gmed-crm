@@ -42,7 +42,10 @@ async fn json_request(
     let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
         .await
         .unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(json!(null)))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
 }
 
 fn tag() -> String {
@@ -97,7 +100,12 @@ async fn seed_provider(pool: &PgPool) -> (Uuid, Uuid) {
     (provider_id, doctor_id)
 }
 
-fn appointment_body(patient_id: Uuid, provider_id: Uuid, doctor_id: Uuid, interpreter_id: Option<Uuid>) -> Value {
+fn appointment_body(
+    patient_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Uuid,
+    interpreter_id: Option<Uuid>,
+) -> Value {
     json!({
         "patient_id": patient_id,
         "provider_id": provider_id,
@@ -142,13 +150,12 @@ async fn inactive_or_archived_providers_take_no_new_appointments() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
-    let (is_active, archived): (bool, bool) = sqlx::query_as(
-        "SELECT is_active, archived_at IS NOT NULL FROM providers WHERE id = $1",
-    )
-    .bind(provider_id)
-    .fetch_one(&ctx.pool)
-    .await
-    .unwrap();
+    let (is_active, archived): (bool, bool) =
+        sqlx::query_as("SELECT is_active, archived_at IS NOT NULL FROM providers WHERE id = $1")
+            .bind(provider_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
     assert!(!is_active && archived);
     let (status, body) = json_request(
         &ctx.app,
@@ -164,15 +171,31 @@ async fn inactive_or_archived_providers_take_no_new_appointments() {
     // Hidden from the registry, visible under the explicit inactive filter.
     let listed = |body: &Value| {
         body.as_array()
-            .map(|items| items.iter().any(|item| item["id"] == provider_id.to_string()))
+            .map(|items| {
+                items
+                    .iter()
+                    .any(|item| item["id"] == provider_id.to_string())
+            })
             .unwrap_or(false)
     };
-    let (status, body) =
-        json_request(&ctx.app, "GET", "/api/v1/providers?active_only=false", &ceo, None).await;
+    let (status, body) = json_request(
+        &ctx.app,
+        "GET",
+        "/api/v1/providers?active_only=false",
+        &ceo,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(!listed(&body));
-    let (status, body) =
-        json_request(&ctx.app, "GET", "/api/v1/providers?is_active=false", &ceo, None).await;
+    let (status, body) = json_request(
+        &ctx.app,
+        "GET",
+        "/api/v1/providers?is_active=false",
+        &ceo,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(listed(&body));
 
@@ -208,7 +231,12 @@ async fn inactive_or_archived_providers_take_no_new_appointments() {
     assert_eq!(status, StatusCode::CREATED, "{body}");
 }
 
-async fn seed_interpreter(pool: &PgPool, status: &str, employment_kind: &str, avv: Option<&str>) -> Uuid {
+async fn seed_interpreter(
+    pool: &PgPool,
+    status: &str,
+    employment_kind: &str,
+    avv: Option<&str>,
+) -> Uuid {
     let user_id = seed_user(pool, "interpreter").await;
     sqlx::query(
         "INSERT INTO interpreter_profile_details (user_id, status, employment_kind) VALUES ($1, $2, $3)",
@@ -220,12 +248,14 @@ async fn seed_interpreter(pool: &PgPool, status: &str, employment_kind: &str, av
     .await
     .unwrap();
     if let Some(avv) = avv {
-        sqlx::query("INSERT INTO interpreter_compliance_profiles (user_id, avv_status) VALUES ($1, $2)")
-            .bind(user_id)
-            .bind(avv)
-            .execute(pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO interpreter_compliance_profiles (user_id, avv_status) VALUES ($1, $2)",
+        )
+        .bind(user_id)
+        .bind(avv)
+        .execute(pool)
+        .await
+        .unwrap();
     }
     user_id
 }
@@ -257,14 +287,25 @@ async fn blocked_terminated_or_avv_less_interpreters_are_not_assignable() {
             "POST",
             "/api/v1/appointments",
             &ceo,
-            Some(appointment_body(patient_id, provider_id, doctor_id, Some(interpreter))),
+            Some(appointment_body(
+                patient_id,
+                provider_id,
+                doctor_id,
+                Some(interpreter),
+            )),
         )
         .await;
         assert_eq!(status, expected, "{interpreter}: {body}");
     }
 
-    let (status, body) =
-        json_request(&ctx.app, "GET", "/api/v1/appointments/meta/interpreters", &ceo, None).await;
+    let (status, body) = json_request(
+        &ctx.app,
+        "GET",
+        "/api/v1/appointments/meta/interpreters",
+        &ceo,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let assignable = |id: Uuid| {
         body.as_array()

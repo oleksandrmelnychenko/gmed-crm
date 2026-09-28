@@ -565,7 +565,9 @@ pub fn spawn_worker(state: AppState) {
             match closure::close_stuck_requests(&state).await {
                 Ok(0) => {}
                 Ok(closed) => tracing::info!(closed, "Closed untrackable signature requests"),
-                Err(error) => tracing::warn!(%error, "Closing untrackable signature requests failed"),
+                Err(error) => {
+                    tracing::warn!(%error, "Closing untrackable signature requests failed")
+                }
             }
             for _ in 0..20 {
                 match poll_one(&state, None).await {

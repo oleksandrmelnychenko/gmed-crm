@@ -1721,7 +1721,15 @@ async fn the_session_sweeper_revokes_idle_and_expired_sessions() {
     let mut families = Vec::new();
     for _ in 0..3 {
         let pair = tokens::create_session(
-            &pool, TEST_SECRET, user_id, "billing", None, None, None, None, &settings,
+            &pool,
+            TEST_SECRET,
+            user_id,
+            "billing",
+            None,
+            None,
+            None,
+            None,
+            &settings,
         )
         .await
         .expect("session");
@@ -1737,11 +1745,13 @@ async fn the_session_sweeper_revokes_idle_and_expired_sessions() {
     .execute(&pool)
     .await
     .unwrap();
-    sqlx::query("UPDATE refresh_tokens SET expires_at = now() - interval '1 minute' WHERE family_id = $1")
-        .bind(expired)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE refresh_tokens SET expires_at = now() - interval '1 minute' WHERE family_id = $1",
+    )
+    .bind(expired)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (idle_count, expired_count) = tokens::revoke_stale_families(&pool, &settings)
         .await

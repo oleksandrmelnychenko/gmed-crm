@@ -34,8 +34,11 @@ pub async fn interpreter_block_reason(
 ) -> Result<Option<&'static str>, sqlx::Error> {
     let row: Option<(String, bool)> = sqlx::query_as(
         r#"SELECT ipd.status,
-                  ((ipd.employment_kind = 'external' OR ipd.contract_type = 'freelancer')
-                   AND COALESCE(icp.avv_status, '') <> 'signed') AS avv_missing
+                  COALESCE(
+                      (ipd.employment_kind = 'external' OR ipd.contract_type = 'freelancer')
+                      AND COALESCE(icp.avv_status, '') <> 'signed',
+                      false
+                  ) AS avv_missing
            FROM interpreter_profile_details ipd
            LEFT JOIN interpreter_compliance_profiles icp ON icp.user_id = ipd.user_id
            WHERE ipd.user_id = $1"#,
@@ -46,7 +49,9 @@ pub async fn interpreter_block_reason(
     Ok(match row {
         Some((status, _)) if status == "blocked" => Some("Interpreter is blocked"),
         Some((status, _)) if status == "terminated" => Some("Interpreter contract has ended"),
-        Some((_, true)) => Some("External interpreter has no signed AVV (data processing agreement)"),
+        Some((_, true)) => {
+            Some("External interpreter has no signed AVV (data processing agreement)")
+        }
         _ => None,
     })
 }

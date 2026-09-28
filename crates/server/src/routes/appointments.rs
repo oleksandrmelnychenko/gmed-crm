@@ -2202,16 +2202,14 @@ async fn list_interpreters(
         Role::Concierge,
     ])?;
 
-    match sqlx::query(
-        &format!(
-            r#"SELECT u.id, u.name, u.role, ({}) AS assignable
+    match sqlx::query(&format!(
+        r#"SELECT u.id, u.name, u.role, ({}) AS assignable
                FROM users u
                WHERE u.is_active = true
                  AND u.role IN ('interpreter', 'teamlead_interpreter')
                ORDER BY u.name"#,
-            crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
-        ),
-    )
+        crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
+    ))
     .fetch_all(&state.db)
     .await
     {

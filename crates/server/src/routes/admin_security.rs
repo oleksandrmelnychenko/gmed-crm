@@ -459,10 +459,12 @@ async fn load_clinical_import_health(state: &AppState) -> serde_json::Value {
     let attention = count("stale_processing") > 0
         || count("stale_applying") > 0
         || count("failed_last_24h") > 0
-        || oldest_queued_seconds.is_some_and(|seconds| seconds > CLINICAL_IMPORT_QUEUE_ATTENTION_SECONDS);
+        || oldest_queued_seconds
+            .is_some_and(|seconds| seconds > CLINICAL_IMPORT_QUEUE_ATTENTION_SECONDS);
+    let operational_status = if attention { "attention" } else { "healthy" };
     serde_json::json!({
         "available": true,
-        "operational_status": if attention { "attention" } else { "healthy" },
+        "operational_status": operational_status,
         "queued": count("queued"),
         "processing": count("processing"),
         "stale_processing": count("stale_processing"),

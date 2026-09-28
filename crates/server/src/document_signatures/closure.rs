@@ -30,7 +30,8 @@ const MAX_REASON_CHARS: usize = 2000;
 /// The poller can no longer resolve the request: an unknown submission without
 /// a provider id, or the provider answers "not found". Healthy pending
 /// requests (waiting for signers) are never closed by the age cap.
-pub(crate) const UNTRACKABLE_CONDITION: &str = "((r.status = 'submission_unknown' AND r.provider_request_id IS NULL)
+pub(crate) const UNTRACKABLE_CONDITION: &str =
+    "((r.status = 'submission_unknown' AND r.provider_request_id IS NULL)
       OR (r.status IN ('pending', 'submission_unknown') AND r.last_error = 'provider_not_found'))";
 
 pub(crate) fn normalize_stuck_days(value: i64) -> i64 {
@@ -182,7 +183,11 @@ fn checked_reason(reason: &str) -> Result<String, Response> {
 
 /// Whether staff may give up a request: untrackable, still unconfirmed, or
 /// failing to poll. A healthy pending request is withdrawn instead.
-pub(crate) fn can_abandon(status: &str, provider_request_id: Option<Uuid>, last_error: Option<&str>) -> bool {
+pub(crate) fn can_abandon(
+    status: &str,
+    provider_request_id: Option<Uuid>,
+    last_error: Option<&str>,
+) -> bool {
     match status {
         "submission_unknown" => true,
         "pending" => provider_request_id.is_none() || last_error.is_some(),
@@ -350,9 +355,20 @@ mod unit {
     #[test]
     fn only_untracked_or_failing_requests_can_be_abandoned() {
         assert!(can_abandon("submission_unknown", None, None));
-        assert!(can_abandon("pending", Some(Uuid::nil()), Some("provider_not_found")));
+        assert!(can_abandon(
+            "pending",
+            Some(Uuid::nil()),
+            Some("provider_not_found")
+        ));
         assert!(!can_abandon("pending", Some(Uuid::nil()), None));
-        for status in ["completed", "needs_review", "declined", "withdrawn", "expired", "error"] {
+        for status in [
+            "completed",
+            "needs_review",
+            "declined",
+            "withdrawn",
+            "expired",
+            "error",
+        ] {
             assert!(!can_abandon(status, None, Some("x")));
         }
     }

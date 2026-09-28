@@ -2462,7 +2462,10 @@ async fn abandon_import(
         Ok(tx) => tx,
         Err(error) => {
             tracing::error!(error = %error, import_id = %import_id, "begin abandon clinical import");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to abandon import",
+            );
         }
     };
     let updated = sqlx::query(
@@ -2488,7 +2491,10 @@ async fn abandon_import(
         }
         Err(error) => {
             tracing::error!(error = %error, import_id = %import_id, "abandon clinical import");
-            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to abandon import",
+            );
         }
     };
     if let Err(error) = audit::write_in_transaction(
@@ -2515,7 +2521,10 @@ async fn abandon_import(
     }
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, import_id = %import_id, "commit abandon clinical import");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to abandon import",
+        );
     }
     match fetch_import(&state, patient_id, import_id).await {
         Ok(Some(row)) => Json(import_json(&row)).into_response(),

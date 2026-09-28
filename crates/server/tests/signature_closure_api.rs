@@ -33,7 +33,10 @@ async fn post_json(app: &axum::Router, path: &str, auth: &str, body: Value) -> (
     let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
         .await
         .unwrap();
-    (status, serde_json::from_slice(&bytes).unwrap_or(json!(null)))
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
 }
 
 async fn seed_user(pool: &PgPool, role: &str) -> Uuid {
@@ -111,7 +114,11 @@ async fn request_state(pool: &PgPool, id: Uuid) -> (String, Option<String>, Opti
     .fetch_one(pool)
     .await
     .unwrap();
-    (row.get("status"), row.get("closed_kind"), row.get("close_reason"))
+    (
+        row.get("status"),
+        row.get("closed_kind"),
+        row.get("close_reason"),
+    )
 }
 
 #[tokio::test]
@@ -125,10 +132,50 @@ async fn untrackable_requests_are_closed_after_the_age_cap_and_staff_is_notified
     let gone_doc = seed_document(&ctx.pool, manager).await;
     let healthy_doc = seed_document(&ctx.pool, manager).await;
 
-    let old_unknown = seed_request(&ctx.pool, old_unknown_doc, manager, "submission_unknown", None, Some("submission_unknown"), 10, None).await;
-    let fresh_unknown = seed_request(&ctx.pool, fresh_unknown_doc, manager, "submission_unknown", None, None, 0, None).await;
-    let gone = seed_request(&ctx.pool, gone_doc, manager, "pending", Some(Uuid::new_v4()), Some("provider_not_found"), 10, None).await;
-    let healthy = seed_request(&ctx.pool, healthy_doc, manager, "pending", Some(Uuid::new_v4()), None, 60, None).await;
+    let old_unknown = seed_request(
+        &ctx.pool,
+        old_unknown_doc,
+        manager,
+        "submission_unknown",
+        None,
+        Some("submission_unknown"),
+        10,
+        None,
+    )
+    .await;
+    let fresh_unknown = seed_request(
+        &ctx.pool,
+        fresh_unknown_doc,
+        manager,
+        "submission_unknown",
+        None,
+        None,
+        0,
+        None,
+    )
+    .await;
+    let gone = seed_request(
+        &ctx.pool,
+        gone_doc,
+        manager,
+        "pending",
+        Some(Uuid::new_v4()),
+        Some("provider_not_found"),
+        10,
+        None,
+    )
+    .await;
+    let healthy = seed_request(
+        &ctx.pool,
+        healthy_doc,
+        manager,
+        "pending",
+        Some(Uuid::new_v4()),
+        None,
+        60,
+        None,
+    )
+    .await;
 
     let closed = gmed_server::document_signatures::closure::close_stuck_requests(&ctx.state)
         .await
@@ -136,12 +183,21 @@ async fn untrackable_requests_are_closed_after_the_age_cap_and_staff_is_notified
     assert!(closed >= 2);
 
     let (status, kind, _) = request_state(&ctx.pool, old_unknown).await;
-    assert_eq!((status.as_str(), kind.as_deref()), ("error", Some("auto_expired")));
+    assert_eq!(
+        (status.as_str(), kind.as_deref()),
+        ("error", Some("auto_expired"))
+    );
     let (status, kind, reason) = request_state(&ctx.pool, gone).await;
-    assert_eq!((status.as_str(), kind.as_deref()), ("error", Some("auto_expired")));
+    assert_eq!(
+        (status.as_str(), kind.as_deref()),
+        ("error", Some("auto_expired"))
+    );
     assert_eq!(reason.as_deref(), Some("provider_not_found"));
     // Young unknown submissions and healthy pending requests stay active.
-    assert_eq!(request_state(&ctx.pool, fresh_unknown).await.0, "submission_unknown");
+    assert_eq!(
+        request_state(&ctx.pool, fresh_unknown).await.0,
+        "submission_unknown"
+    );
     assert_eq!(request_state(&ctx.pool, healthy).await.0, "pending");
 
     let notified: i64 = sqlx::query_scalar(
@@ -179,22 +235,47 @@ async fn staff_can_abandon_an_untracked_request_with_a_reason() {
     };
     let ceo = bearer(ctx.admin_id, "ceo");
     let doc = seed_document(&ctx.pool, ctx.admin_id).await;
-    let request = seed_request(&ctx.pool, doc, ctx.admin_id, "submission_unknown", None, None, 0, None).await;
+    let request = seed_request(
+        &ctx.pool,
+        doc,
+        ctx.admin_id,
+        "submission_unknown",
+        None,
+        None,
+        0,
+        None,
+    )
+    .await;
     let path = format!("/api/v1/document-signature-requests/{request}/abandon");
 
     let (status, _) = post_json(&ctx.app, &path, &ceo, json!({ "reason": "short" })).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     // Billing has no signature rights.
     let billing = bearer(seed_user(&ctx.pool, "billing").await, "billing");
-    let (status, _) = post_json(&ctx.app, &path, &billing, json!({ "reason": "Invitation never arrived at Skribble" })).await;
+    let (status, _) = post_json(
+        &ctx.app,
+        &path,
+        &billing,
+        json!({ "reason": "Invitation never arrived at Skribble" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    let (status, body) = post_json(&ctx.app, &path, &ceo, json!({ "reason": "Invitation never arrived at Skribble" })).await;
+    let (status, body) = post_json(
+        &ctx.app,
+        &path,
+        &ceo,
+        json!({ "reason": "Invitation never arrived at Skribble" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, kind, reason) = request_state(&ctx.pool, request).await;
     assert_eq!(status, "error");
     assert_eq!(kind.as_deref(), Some("abandoned"));
-    assert_eq!(reason.as_deref(), Some("Invitation never arrived at Skribble"));
+    assert_eq!(
+        reason.as_deref(),
+        Some("Invitation never arrived at Skribble")
+    );
     let audited: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action = 'document_signature_abandoned' AND entity_id = $1 AND user_id = $2",
     )
@@ -206,12 +287,28 @@ async fn staff_can_abandon_an_untracked_request_with_a_reason() {
     assert_eq!(audited, 1);
 
     // The document is free for a new request; a second abandon is refused.
-    let (status, _) = post_json(&ctx.app, &path, &ceo, json!({ "reason": "Invitation never arrived at Skribble" })).await;
+    let (status, _) = post_json(
+        &ctx.app,
+        &path,
+        &ceo,
+        json!({ "reason": "Invitation never arrived at Skribble" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT);
 
     // A healthy pending request is withdrawn, not abandoned.
     let doc = seed_document(&ctx.pool, ctx.admin_id).await;
-    let pending = seed_request(&ctx.pool, doc, ctx.admin_id, "pending", Some(Uuid::new_v4()), None, 0, None).await;
+    let pending = seed_request(
+        &ctx.pool,
+        doc,
+        ctx.admin_id,
+        "pending",
+        Some(Uuid::new_v4()),
+        None,
+        0,
+        None,
+    )
+    .await;
     let (status, _) = post_json(
         &ctx.app,
         &format!("/api/v1/document-signature-requests/{pending}/abandon"),
@@ -233,25 +330,65 @@ async fn needs_review_is_resolved_by_accepting_or_rejecting() {
         let doc = seed_document(&ctx.pool, ctx.admin_id).await;
         let result = seed_document(&ctx.pool, ctx.admin_id).await;
         requests.push(
-            seed_request(&ctx.pool, doc, ctx.admin_id, "needs_review", Some(Uuid::new_v4()), Some("document_changed"), 0, Some(result)).await,
+            seed_request(
+                &ctx.pool,
+                doc,
+                ctx.admin_id,
+                "needs_review",
+                Some(Uuid::new_v4()),
+                Some("document_changed"),
+                0,
+                Some(result),
+            )
+            .await,
         );
     }
     let path = |id: Uuid| format!("/api/v1/document-signature-requests/{id}/resolve-review");
 
-    let (status, _) = post_json(&ctx.app, &path(requests[0]), &ceo, json!({ "decision": "maybe", "reason": "Checked against the source" })).await;
+    let (status, _) = post_json(
+        &ctx.app,
+        &path(requests[0]),
+        &ceo,
+        json!({ "decision": "maybe", "reason": "Checked against the source" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
-    let (status, body) = post_json(&ctx.app, &path(requests[0]), &ceo, json!({ "decision": "accept", "reason": "Only the file name changed" })).await;
+    let (status, body) = post_json(
+        &ctx.app,
+        &path(requests[0]),
+        &ceo,
+        json!({ "decision": "accept", "reason": "Only the file name changed" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, kind, _) = request_state(&ctx.pool, requests[0]).await;
-    assert_eq!((status.as_str(), kind.as_deref()), ("completed", Some("review_accepted")));
+    assert_eq!(
+        (status.as_str(), kind.as_deref()),
+        ("completed", Some("review_accepted"))
+    );
 
-    let (status, body) = post_json(&ctx.app, &path(requests[1]), &ceo, json!({ "decision": "reject", "reason": "Fee changed after sending" })).await;
+    let (status, body) = post_json(
+        &ctx.app,
+        &path(requests[1]),
+        &ceo,
+        json!({ "decision": "reject", "reason": "Fee changed after sending" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (status, kind, _) = request_state(&ctx.pool, requests[1]).await;
-    assert_eq!((status.as_str(), kind.as_deref()), ("error", Some("review_rejected")));
+    assert_eq!(
+        (status.as_str(), kind.as_deref()),
+        ("error", Some("review_rejected"))
+    );
 
     // Resolved once only.
-    let (status, _) = post_json(&ctx.app, &path(requests[1]), &ceo, json!({ "decision": "accept", "reason": "Second thoughts on it" })).await;
+    let (status, _) = post_json(
+        &ctx.app,
+        &path(requests[1]),
+        &ceo,
+        json!({ "decision": "accept", "reason": "Second thoughts on it" }),
+    )
+    .await;
     assert_eq!(status, StatusCode::CONFLICT);
 }

@@ -66,18 +66,26 @@ async fn create_announcement(
     variant: &str,
     audience: Option<&str>,
 ) -> String {
-    let mut body = json!({ "title": title, "message": format!("{title} body"), "variant": variant });
+    let mut body =
+        json!({ "title": title, "message": format!("{title} body"), "variant": variant });
     if let Some(audience) = audience {
         body["audience"] = json!(audience);
     }
-    let (status, response) =
-        json_request(app, "POST", "/api/v1/admin/announcements", bearer, Some(body)).await;
+    let (status, response) = json_request(
+        app,
+        "POST",
+        "/api/v1/admin/announcements",
+        bearer,
+        Some(body),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{response}");
     response["id"].as_str().unwrap().to_string()
 }
 
 async fn active_ids(app: &axum::Router, bearer: &str) -> Vec<String> {
-    let (status, body) = json_request(app, "GET", "/api/v1/announcements/active", bearer, None).await;
+    let (status, body) =
+        json_request(app, "GET", "/api/v1/announcements/active", bearer, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     body.as_array()
         .unwrap()
@@ -133,8 +141,14 @@ async fn announcements_reach_only_their_audience() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    let (status, body) =
-        json_request(&ctx.app, "GET", "/api/v1/admin/announcements", &it_admin, None).await;
+    let (status, body) = json_request(
+        &ctx.app,
+        "GET",
+        "/api/v1/admin/announcements",
+        &it_admin,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let listed = body
         .as_array()
@@ -168,13 +182,25 @@ async fn error_announcements_cannot_be_dismissed_while_active() {
     let outage = create_announcement(&ctx.app, &it_admin, "Outage", "error", None).await;
     let notice = create_announcement(&ctx.app, &it_admin, "Notice", "warning", None).await;
 
-    let (status, body) =
-        json_request(&ctx.app, "GET", "/api/v1/announcements/active", &manager, None).await;
+    let (status, body) = json_request(
+        &ctx.app,
+        "GET",
+        "/api/v1/announcements/active",
+        &manager,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let items = body.as_array().unwrap();
-    let outage_item = items.iter().find(|item| item["id"] == outage.as_str()).unwrap();
+    let outage_item = items
+        .iter()
+        .find(|item| item["id"] == outage.as_str())
+        .unwrap();
     assert_eq!(outage_item["dismissible"], false);
-    let notice_item = items.iter().find(|item| item["id"] == notice.as_str()).unwrap();
+    let notice_item = items
+        .iter()
+        .find(|item| item["id"] == notice.as_str())
+        .unwrap();
     assert_eq!(notice_item["dismissible"], true);
 
     let (status, body) = json_request(

@@ -7411,10 +7411,10 @@ async fn toggle_provider_active(
              updated_at = now()
          WHERE id = $1",
     )
-        .bind(provider_id)
-        .bind(is_active)
-        .execute(&state.db)
-        .await
+    .bind(provider_id)
+    .bind(is_active)
+    .execute(&state.db)
+    .await
     {
         Ok(result) if result.rows_affected() > 0 => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "Provider not found"),
