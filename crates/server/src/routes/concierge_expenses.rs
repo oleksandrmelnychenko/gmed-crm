@@ -1795,14 +1795,18 @@ async fn load_expense_item_for_scope(
                   external.service_delivered AS external_service_delivered,
                   external.order_id AS posted_order_id,
                   external.order_leistung_id AS posted_order_leistung_id,
-                  external.patient_receivable_gross,
+                  receivable.patient_receivable_gross,
                   external.provider_liability_gross,
                   settlement.company_paid_gross,
                   settlement.remaining_provider_liability_gross,
                   settlement.settlement_status,
                   order_row.order_number,
                   COALESCE(service.agency_service_name_snapshot, service.description)
-                      AS order_leistung_name
+                      AS order_leistung_name,
+                  CASE WHEN external.id IS NOT NULL
+                       THEN COALESCE(receivable.order_service_billed, false)
+                       ELSE COALESCE(service.status <> 'cancelled', false)
+                  END AS order_service_billed
            FROM concierge_expense_submissions submission
            JOIN users submitter ON submitter.id = submission.submitted_by
            LEFT JOIN documents document ON document.id = submission.receipt_document_id
@@ -1817,6 +1821,8 @@ async fn load_expense_item_for_scope(
            LEFT JOIN external_invoices external ON external.id = initial.external_invoice_id
            LEFT JOIN external_invoice_provider_settlement_balances settlement
              ON settlement.external_invoice_id = external.id
+           LEFT JOIN external_invoice_receivable_balances receivable
+             ON receivable.external_invoice_id = external.id
            LEFT JOIN orders order_row
              ON order_row.id = COALESCE(external.order_id, submission.order_id)
            LEFT JOIN order_leistungen service
@@ -1866,13 +1872,19 @@ async fn load_expense_item_for_scope(
     let posted = status == "posted";
     // The patient's share of an agency-paid or not yet paid receipt is the
     // whole amount; for a not yet paid one it is booked once the service is
-    // delivered, which the flag below tells the reviewer.
-    let intended_receivable = if paid_by == "agency" || paid_by == "unpaid" {
-        amount_gross
-    } else {
-        Decimal::ZERO
-    };
-    let receivable_after_delivery = paid_by == "unpaid" && !service_delivered;
+    // delivered, which the flag below tells the reviewer. A receipt of an
+    // order service billed to the patient is GMED's cost of that service.
+    let order_service_billed = row
+        .try_get::<bool, _>("order_service_billed")
+        .unwrap_or(false);
+    let intended_receivable =
+        if (paid_by == "agency" || paid_by == "unpaid") && !order_service_billed {
+            amount_gross
+        } else {
+            Decimal::ZERO
+        };
+    let receivable_after_delivery =
+        paid_by == "unpaid" && !service_delivered && !order_service_billed;
     let intended_company_paid = if paid_by == "agency" {
         amount_gross
     } else {
@@ -1999,6 +2011,7 @@ async fn load_expense_item_for_scope(
             "provider_liability_gross": provider_liability.round_cents().to_string(),
             "intended_patient_receivable_gross": intended_receivable.round_cents().to_string(),
             "patient_receivable_after_delivery": receivable_after_delivery,
+            "order_service_billed": order_service_billed,
             "intended_company_paid_gross": intended_company_paid.round_cents().to_string(),
             "intended_provider_liability_gross": intended_liability.round_cents().to_string(),
         },

@@ -975,9 +975,16 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
         assert_eq!(status, StatusCode::OK, "{posted}");
         assert_eq!(posted["item"]["status"], "posted");
         assert_eq!(posted["item"]["service_delivered"], delivered);
+        // A receipt mapped to the order service the patient is billed for is
+        // GMED's cost of that service: the payer-based receivable stays on the
+        // external invoice, the patient owes nothing on top of the service.
+        assert_eq!(
+            posted["item"]["balance_consequence"]["order_service_billed"],
+            !without_order
+        );
         assert_eq!(
             posted["item"]["balance_consequence"]["patient_receivable_gross"],
-            if expected_receivable == Decimal::ZERO {
+            if expected_receivable == Decimal::ZERO || !without_order {
                 "0"
             } else {
                 "119.00"
@@ -1186,9 +1193,10 @@ async fn finance_posting_preserves_all_payer_and_delivery_balance_semantics() {
                 .find(|item| item["id"] == expense_id.to_string())
                 .unwrap();
             assert_eq!(updated["external_invoice"]["service_delivered"], true);
+            // Delivered, but the mapped order service is what the patient pays.
             assert_eq!(
                 updated["balance_consequence"]["patient_receivable_gross"],
-                "119.00"
+                "0"
             );
             assert!(
                 sqlx::query("UPDATE external_invoices SET service_delivered = false WHERE id = $1")
