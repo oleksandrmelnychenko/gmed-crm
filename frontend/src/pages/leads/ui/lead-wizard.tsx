@@ -74,6 +74,7 @@ import { paymentStatusLabel } from "@/lib/payment-status";
 import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { appDateKey, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
+import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -185,6 +186,11 @@ import {
   discoveryReferrerMissing,
   intakeAsksDiscoverySource,
   isMinor,
+  isRepeatIntakeLead,
+  prepaymentDueAtPatch,
+  repeatIntakePatientId,
+  repeatIntakePatientNumber,
+  type LeadWizardEntryPoint,
 } from "../model/lead-wizard.model";
 
 import {
@@ -209,7 +215,7 @@ type LeadWizardProps = {
   leadId: string | null;
   open: boolean;
   createMode?: boolean;
-  entryPoint: "lead" | "repeat-patient";
+  entryPoint: LeadWizardEntryPoint;
   creationKey?: string;
   existingPatient?: PatientDetail | null;
   onOpenChange: (open: boolean) => void;
@@ -2372,13 +2378,13 @@ function validateMasterDraft(
     errors.email = contactRequired;
     errors.phone = contactRequired;
   } else {
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email && !isValidEmailAddress(email)) {
       errors.email = tx(
         "Введите корректный адрес электронной почты",
         "Gültige E-Mail-Adresse eingeben",
       );
     }
-    if (phone && phone.replace(/\D/g, "").length < 6) {
+    if (phone && !isValidPhoneNumber(phone)) {
       errors.phone = tx(
         "Введите корректный номер телефона",
         "Gültige Telefonnummer eingeben",
@@ -2663,10 +2669,17 @@ export function LeadWizard({
   // review even when reopened from the leads registry, so the patient's valid
   // documents and contracts are reused instead of recreated. A first intake
   // that has already created its patient only has prospect_patient_id.
-  const isRepeatIntake = entryPoint === "repeat-patient" || Boolean(lead?.repeat_patient_id);
-  const repeatPatientId = open && isRepeatIntake
-    ? existingPatient?.id ?? lead?.repeat_patient_id ?? lead?.prospect_patient_id ?? null
+  const isRepeatIntake = isRepeatIntakeLead(entryPoint, lead);
+  const repeatPatientId = repeatIntakePatientId(open && isRepeatIntake, existingPatient?.id, lead);
+  const repeatPatientNumber = isRepeatIntake
+    ? repeatIntakePatientNumber(existingPatient?.patient_id, lead)
     : null;
+  // Read by callbacks created before the lead is loaded (e.g. the clinical
+  // loader), so they follow the lead's repeat mode without being recreated.
+  const isRepeatIntakeRef = useRef(isRepeatIntake);
+  useEffect(() => {
+    isRepeatIntakeRef.current = isRepeatIntake;
+  }, [isRepeatIntake]);
   const patientReview = useRepeatPatientReview(repeatPatientId);
   const previousRequests = usePreviousRequests(repeatPatientId, lead?.id ?? null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -2765,7 +2778,10 @@ export function LeadWizard({
       setClinicalAccessDenied(false);
       return profile;
     } catch (cause) {
-      if (entryPoint !== "repeat-patient" || !(cause instanceof ApiRequestError) || cause.status !== 403) throw cause;
+      // An existing patient's record may be closed to this role; a repeat
+      // intake then continues without the medical step, from either entry point.
+      const repeatIntake = entryPoint === "repeat-patient" || isRepeatIntakeRef.current;
+      if (!repeatIntake || !(cause instanceof ApiRequestError) || cause.status !== 403) throw cause;
       setClinicalAccessDenied(true);
       clinicalBaselineRef.current = null;
       return { diagnoses: [], medications: [], examinations: [], procedures: [], verlauf: [], narrative: null, allergien: [], cave: [] } satisfies PatientClinicalProfile;
@@ -4959,10 +4975,18 @@ ${serviceCommentLines.join("\n")}`
     const requestedPrepaymentAmount = flags.prepayment_amount
       ?? (prepayment ? prepaymentAmount : undefined);
     const normalizedPrepaymentAmount = requestedPrepaymentAmount?.trim();
+    // The typed deadline travels with every commercial save, like the typed
+    // amount: its field commits only on blur, and an action started without
+    // that blur would otherwise reload the order's empty deadline over it.
+    const prepaymentDueAt = flags.prepayment_due_at ?? prepaymentDueAtPatch(
+      flags.prepayment_required ?? prepayment,
+      prepaymentDeadline,
+      order?.prepayment_due_at,
+    );
     await updateOrderCommercialBasis(orderId, {
       contract_id: contractId,
       prepayment_required: flags.prepayment_required ?? prepayment,
-      ...(flags.prepayment_due_at !== undefined ? { prepayment_due_at: flags.prepayment_due_at } : {}),
+      ...(prepaymentDueAt !== undefined ? { prepayment_due_at: prepaymentDueAt } : {}),
       ...(!syncOrderServiceLines
         && normalizedPrepaymentAmount
         && validMoneyInput(normalizedPrepaymentAmount)
@@ -5722,6 +5746,10 @@ ${serviceCommentLines.join("\n")}`
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
+  // The prepayment deadline is stored on the order when its field loses focus
+  // or with the next commercial action; until then it is not saved.
+  const prepaymentDeadlineUnsaved = Boolean(order)
+    && prepaymentDueAtPatch(prepayment, prepaymentDeadline, order?.prepayment_due_at) !== undefined;
   // The table above checks the patient card; step 4 is closed only by this
   // request's own consents and documents, which are never inherited. These rows
   // show the same things the server checks, so a green table means a done step.
@@ -5834,7 +5862,7 @@ ${serviceCommentLines.join("\n")}`
             {isRepeatIntake ? (
               <p className="mt-1 text-xs text-muted-foreground">
                 {tx("Повторное обращение", "Erneute Anfrage")}
-                {existingPatient?.patient_id ? ` · ${existingPatient.patient_id}` : ""}
+                {repeatPatientNumber ? ` · ${repeatPatientNumber}` : ""}
               </p>
             ) : null}
           </div>
@@ -8184,7 +8212,7 @@ ${serviceCommentLines.join("\n")}`
                 {autosaveStatus === "error" ? null : autosaveStatus === "saving" || commercialFlagsBusyCount + commercialFlagsBackgroundCount > 0 ? (
                     <><LoaderCircle aria-hidden="true" className="size-3 animate-spin" />{tx("Сохранение…", "Wird gespeichert…")}</>
                   ) : !leadId ? tx("Обращение создастся при переходе далее", "Der Lead wird beim Weitergehen angelegt")
-                  : autosaveStatus === "dirty" ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
+                  : autosaveStatus === "dirty" || prepaymentDeadlineUnsaved ? tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")
                     : autosaveStatus === "saved" ? (
                       <><Check aria-hidden="true" className="size-3 text-emerald-700" />{tx("Данные сохранены", "Daten gespeichert")}</>
                     ) : null}

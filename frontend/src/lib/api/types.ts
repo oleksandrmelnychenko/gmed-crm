@@ -188,6 +188,8 @@ export interface LeadDetail extends Lead {
   converted_patient_id: string | null;
   intake_model: "legacy" | "patient_first";
   prospect_patient_id: string | null;
+  /** Patient number (PT-…) of the existing patient of a repeat intake. */
+  repeat_patient_pid?: string | null;
   referrer_patient_id: string | null;
   referrer_patient_pid: string | null;
   referrer_patient_name: string | null;
