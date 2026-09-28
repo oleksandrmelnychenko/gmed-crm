@@ -171,6 +171,7 @@ import {
   formatBusinessDocumentNumber,
   intakeOpenAction,
   intakeReviewNeedsClassification,
+  isMedicalDocumentClassification,
   normalizeTemplateLanguage,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
@@ -1221,6 +1222,16 @@ function StaffDocumentsPage({
   const [translationRequestOpen, setTranslationRequestOpen] = useState(false);
   const [metadataEditOpen, setMetadataEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<EditFormState | null>(null);
+  // A medical category or type makes the document medical on the server
+  // whatever the form sends, so the flag is shown set and cannot be cleared.
+  const uploadMedicalLocked = isMedicalDocumentClassification(
+    uploadForm.category,
+    uploadForm.art,
+    categories,
+  );
+  const editMedicalLocked = editForm
+    ? isMedicalDocumentClassification(editForm.category, editForm.art, categories)
+    : false;
   const [detailOrders, setDetailOrders] = useState<OrderOption[]>([]);
   const [detailAppointments, setDetailAppointments] = useState<
     AppointmentOption[]
@@ -2261,7 +2272,7 @@ function StaffDocumentsPage({
         "visibility",
         constrainedUpload ? "internal" : uploadForm.visibility,
       );
-      if (uploadForm.isMedical) formData.append("is_medical", "true");
+      if (uploadForm.isMedical || uploadMedicalLocked) formData.append("is_medical", "true");
       if (uploadForm.klinik.trim())
         formData.append("klinik", uploadForm.klinik.trim());
       if (!constrainedUpload && uploadForm.ursprung.trim())
@@ -3012,7 +3023,7 @@ function StaffDocumentsPage({
             category: editForm.category || null,
             status: isManualIntakeReview ? "active" : editForm.status,
             visibility: editForm.visibility,
-            is_medical: editForm.isMedical,
+            is_medical: editForm.isMedical || editMedicalLocked,
             klinik: editForm.klinik.trim() || null,
             ursprung: editForm.ursprung.trim() || null,
             document_direction: editForm.documentDirection,
@@ -3033,7 +3044,7 @@ function StaffDocumentsPage({
         : {
             art: editForm.art.trim(),
             category: editForm.category || null,
-            is_medical: editForm.isMedical,
+            is_medical: editForm.isMedical || editMedicalLocked,
             status: "active",
             notes: editForm.notes.trim() || null,
           };
@@ -5210,7 +5221,8 @@ function StaffDocumentsPage({
                   <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                     <input
                       type="checkbox"
-                      checked={uploadForm.isMedical}
+                      checked={uploadForm.isMedical || uploadMedicalLocked}
+                      disabled={uploadMedicalLocked}
                       onChange={(event) =>
                         setUploadForm((current) => ({
                           ...current,
@@ -6041,7 +6053,8 @@ function StaffDocumentsPage({
                     <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                       <input
                         type="checkbox"
-                        checked={editForm.isMedical}
+                        checked={editForm.isMedical || editMedicalLocked}
+                        disabled={editMedicalLocked}
                         onChange={(event) =>
                           setEditForm((current) =>
                             current
@@ -7564,7 +7577,8 @@ function StaffDocumentsPage({
                       <label className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-4 py-3 text-sm text-foreground">
                         <input
                           type="checkbox"
-                          checked={editForm.isMedical}
+                          checked={editForm.isMedical || editMedicalLocked}
+                          disabled={editMedicalLocked}
                           onChange={(event) =>
                             setEditForm((current) =>
                               current

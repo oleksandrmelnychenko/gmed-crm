@@ -1147,18 +1147,40 @@ export function intakeReviewNeedsClassification(
 }
 
 /**
+ * Whether a document category or document type is medical (mirrors the
+ * server): its key is a category marked medical in the category catalogue
+ * (e.g. `medical_arztbrief`, `lab_analysis`, `treatment_plan`). The server
+ * stores such a document as medical data with the medical access category
+ * whatever the form sends, so the form shows the flag set and locked.
+ */
+export function isMedicalDocumentClassification(
+  categoryKey: string | null | undefined,
+  art: string | null | undefined,
+  categories: ReadonlyArray<Pick<CategoryOption, "key" | "is_medical">>,
+): boolean {
+  const keys = [categoryKey, art]
+    .map((value) => (value ?? "").trim().toLowerCase())
+    .filter(Boolean);
+  return categories.some(
+    (category) => category.is_medical && keys.includes(category.key.trim().toLowerCase()),
+  );
+}
+
+/**
  * Picks a document category. A category of medical documents (doctor letter,
  * findings, radiology …) marks the document as medical data, so roles without
- * medical access (concierge, …) do not see it; the flag can still be cleared
- * by hand. Choosing another category never clears it.
+ * medical access (concierge, billing, …) do not see it; the server enforces the
+ * same rule. Choosing another category never clears the flag.
  */
 export function withDocumentCategory<T extends EditFormState | UploadFormState>(
   form: T,
   categoryKey: string,
   categories: ReadonlyArray<Pick<CategoryOption, "key" | "is_medical">>,
 ): T {
-  const medical = Boolean(categories.find((category) => category.key === categoryKey)?.is_medical);
-  if (!medical || form.isMedical) return { ...form, category: categoryKey };
+  const medical = isMedicalDocumentClassification(categoryKey, null, categories);
+  if (!medical || (form.isMedical && form.accessCategory === "medical")) {
+    return { ...form, category: categoryKey };
+  }
   const accessCategory: DocumentAccessCategory = "medical";
   return { ...form, category: categoryKey, isMedical: true, accessCategory };
 }

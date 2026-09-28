@@ -8187,3 +8187,508 @@ fn bindings_without_signature_anchors(bindings: &Value) -> Value {
     }
     bindings
 }
+
+/// The medical flag and access category a document is stored with.
+async fn stored_medical_classification(pool: &PgPool, document_id: Uuid) -> (bool, Option<String>) {
+    let row = sqlx::query("SELECT is_medical, access_category FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    (row.get("is_medical"), row.get("access_category"))
+}
+
+/// Audit rows of the enforced medical classification of a document
+/// (acting user, previous values), oldest first.
+async fn medical_classification_audits(
+    pool: &PgPool,
+    document_id: Uuid,
+) -> Vec<(Option<Uuid>, Value)> {
+    sqlx::query(
+        r#"SELECT user_id, old_value
+           FROM audit_log
+           WHERE action = 'enforce_medical_document_classification'
+             AND entity_type = 'document'
+             AND entity_id = $1
+           ORDER BY id"#,
+    )
+    .bind(document_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|row| (row.get("user_id"), row.get("old_value")))
+    .collect()
+}
+
+async fn wait_for_medical_classification_audits(
+    pool: &PgPool,
+    document_id: Uuid,
+) -> Vec<(Option<Uuid>, Value)> {
+    support::wait_until("medical classification audit row", || async move {
+        !medical_classification_audits(pool, document_id)
+            .await
+            .is_empty()
+    })
+    .await;
+    medical_classification_audits(pool, document_id).await
+}
+
+async fn listed_document_ids(app: &axum::Router, bearer: &str, patient_id: Uuid) -> Vec<String> {
+    let (status, body) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/documents?patient_id={patient_id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body.as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+async fn document_detail_status(app: &axum::Router, bearer: &str, document_id: Uuid) -> StatusCode {
+    json_request(
+        app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        bearer,
+        None,
+    )
+    .await
+    .0
+}
+
+#[tokio::test]
+async fn medical_category_or_type_makes_a_document_medical_on_every_write() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-medical-category");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-conc"), "concierge").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-bill"), "billing").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    // Upload: a doctor letter ("Medical / Doctor letter") sent as non-medical
+    // is stored as medical data with the medical access category.
+    let (status, uploaded) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("auto_name", format!("Arztbrief {tag}")),
+            ("art", "arztbrief".to_string()),
+            ("category", "medical_arztbrief".to_string()),
+            ("is_medical", "false".to_string()),
+            ("access_category", "internal".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "released_internal".to_string()),
+        ],
+        &format!("arztbrief-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-arztbrief%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{uploaded}");
+    assert_eq!(uploaded["is_medical"], true);
+    let letter_id = Uuid::parse_str(uploaded["id"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        stored_medical_classification(&pool, letter_id).await,
+        (true, Some("medical".to_string()))
+    );
+    let audits = wait_for_medical_classification_audits(&pool, letter_id).await;
+    assert_eq!(audits.len(), 1, "{audits:?}");
+    assert_eq!(audits[0].0, Some(admin_id));
+    assert_eq!(
+        audits[0].1,
+        json!({ "is_medical": false, "access_category": "internal" })
+    );
+
+    // A clinic letter is not medical: it stays as sent and assigned roles see it.
+    let upload_administrative = |name: &'static str| {
+        let app = app.clone();
+        let bearer = admin_bearer.clone();
+        let tag = tag.clone();
+        async move {
+            let (status, uploaded) = multipart_upload(
+                &app,
+                "/api/v1/documents/upload",
+                &bearer,
+                &[
+                    ("patient_id", patient_id.to_string()),
+                    ("auto_name", format!("{name} {tag}")),
+                    ("art", "clinic_letter".to_string()),
+                    ("category", "administrative".to_string()),
+                    ("is_medical", "false".to_string()),
+                    ("status", "active".to_string()),
+                    ("visibility", "released_internal".to_string()),
+                ],
+                &format!("{name}-{tag}.pdf"),
+                "application/pdf",
+                b"%PDF-clinic-letter%",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{uploaded}");
+            Uuid::parse_str(uploaded["id"].as_str().unwrap()).unwrap()
+        }
+    };
+    let findings_id = upload_administrative("findings").await;
+    let lab_id = upload_administrative("lab").await;
+    assert!(!stored_medical_classification(&pool, findings_id).await.0);
+    assert_eq!(
+        document_detail_status(&app, &concierge_bearer, findings_id).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        document_detail_status(&app, &billing_bearer, findings_id).await,
+        StatusCode::OK
+    );
+    assert!(
+        medical_classification_audits(&pool, findings_id)
+            .await
+            .is_empty()
+    );
+
+    // Update: refiled under a medical category, or given a medical document
+    // type, the document becomes medical whatever the flag in the request.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{findings_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "category": "medical_befund",
+            "is_medical": false,
+            "access_category": "patient"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{lab_id}/update"),
+        &admin_bearer,
+        Some(json!({ "art": "lab_analysis" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for (document_id, previous_access) in [(findings_id, "patient"), (lab_id, "internal")] {
+        assert_eq!(
+            stored_medical_classification(&pool, document_id).await,
+            (true, Some("medical".to_string()))
+        );
+        let audits = wait_for_medical_classification_audits(&pool, document_id).await;
+        assert_eq!(audits.len(), 1, "{audits:?}");
+        assert_eq!(
+            audits[0].1,
+            json!({ "is_medical": false, "access_category": previous_access })
+        );
+    }
+
+    // Concierge and billing no longer list, open or download them.
+    for bearer in [&concierge_bearer, &billing_bearer] {
+        let listed = listed_document_ids(&app, bearer, patient_id).await;
+        for document_id in [letter_id, findings_id, lab_id] {
+            assert!(!listed.contains(&document_id.to_string()), "{listed:?}");
+            assert_eq!(
+                document_detail_status(&app, bearer, document_id).await,
+                StatusCode::FORBIDDEN
+            );
+        }
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{letter_id}/download"),
+            bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+    // The release to the assigned interpreter keeps working for medical data.
+    let listed = listed_document_ids(&app, &interpreter_bearer, patient_id).await;
+    assert!(listed.contains(&letter_id.to_string()), "{listed:?}");
+    assert_eq!(
+        document_detail_status(&app, &interpreter_bearer, letter_id).await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn intake_review_under_a_medical_category_makes_the_document_medical() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-medical-intake");
+    let (status, uploaded) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[("manual_intake", "true".to_string())],
+        &format!("scan-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-intake-scan%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{uploaded}");
+    let document_id = Uuid::parse_str(uploaded["id"].as_str().unwrap()).unwrap();
+    assert!(!stored_medical_classification(&pool, document_id).await.0);
+
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "art": "arztbrief",
+            "category": "medical_arztbrief",
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        stored_medical_classification(&pool, document_id).await,
+        (true, Some("medical".to_string()))
+    );
+    let audits = wait_for_medical_classification_audits(&pool, document_id).await;
+    assert_eq!(audits.len(), 1, "{audits:?}");
+    assert_eq!(audits[0].0, Some(admin_id));
+}
+
+/// The repair of the migration, re-run on synthetic documents.
+const MEDICAL_CLASSIFICATION_REPAIR: &str =
+    include_str!("../../../migrations/20260928110000_enforce_medical_document_classification.sql");
+
+#[allow(clippy::too_many_arguments)]
+async fn seed_classified_document(
+    pool: &PgPool,
+    uploaded_by: Uuid,
+    patient_id: Uuid,
+    category: &str,
+    art: &str,
+    is_medical: bool,
+    access_category: &str,
+    visibility: &str,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category, status,
+                visibility, is_medical, access_category, mime_type, file_size,
+                version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, $6, 'active',
+                $7, $8, $9, 'application/pdf', 1234,
+                $1, 1, $10
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(format!("Synthetic {art} {document_id}"))
+    .bind(format!("{document_id}.pdf"))
+    .bind(art)
+    .bind(category)
+    .bind(visibility)
+    .bind(is_medical)
+    .bind(access_category)
+    .bind(uploaded_by)
+    .execute(pool)
+    .await
+    .unwrap();
+    document_id
+}
+
+#[tokio::test]
+async fn medical_classification_repair_closes_non_medical_exposure_and_keeps_releases() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-medical-repair");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-conc"), "concierge").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-bill"), "billing").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let patient_user_id = seed_user(&pool, &format!("{tag}-pat"), "patient").await;
+    for user_id in [concierge_id, interpreter_id, patient_user_id] {
+        seed_patient_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    // Filed before the server enforced the classification.
+    let letter_id = seed_classified_document(
+        &pool,
+        admin_id,
+        patient_id,
+        "medical_arztbrief",
+        "arztbrief",
+        false,
+        "internal",
+        "released_internal",
+    )
+    .await;
+    let portal_plan_id = seed_classified_document(
+        &pool,
+        admin_id,
+        patient_id,
+        "general",
+        "treatment_plan",
+        false,
+        "patient",
+        "patient_visible",
+    )
+    .await;
+    // Released to the patient portal.
+    sqlx::query(
+        r#"INSERT INTO document_shares (document_id, shared_with_user_id, shared_by, channel)
+           VALUES ($1, $2, $3, 'patient_portal')"#,
+    )
+    .bind(portal_plan_id)
+    .bind(patient_user_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // Not medical, and already medical: both stay as they are.
+    let clinic_letter_id = seed_classified_document(
+        &pool,
+        admin_id,
+        patient_id,
+        "administrative",
+        "clinic_letter",
+        false,
+        "internal",
+        "released_internal",
+    )
+    .await;
+    let findings_id = seed_classified_document(
+        &pool,
+        admin_id,
+        patient_id,
+        "medical_befund",
+        "befund",
+        true,
+        "medical",
+        "released_internal",
+    )
+    .await;
+
+    // The exposure: concierge and billing open the doctor letter.
+    assert_eq!(
+        document_detail_status(&app, &concierge_bearer, letter_id).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        document_detail_status(&app, &billing_bearer, letter_id).await,
+        StatusCode::OK
+    );
+
+    sqlx::raw_sql(MEDICAL_CLASSIFICATION_REPAIR)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for (document_id, visibility, previous_access) in [
+        (letter_id, "released_internal", "internal"),
+        (portal_plan_id, "patient_visible", "patient"),
+    ] {
+        assert_eq!(
+            stored_medical_classification(&pool, document_id).await,
+            (true, Some("medical".to_string()))
+        );
+        let stored_visibility: String =
+            sqlx::query_scalar("SELECT visibility FROM documents WHERE id = $1")
+                .bind(document_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored_visibility, visibility);
+        let audits = medical_classification_audits(&pool, document_id).await;
+        assert_eq!(audits.len(), 1, "{audits:?}");
+        // The migration, not a person, made the change.
+        assert_eq!(audits[0].0, None);
+        assert_eq!(
+            audits[0].1,
+            json!({ "is_medical": false, "access_category": previous_access })
+        );
+    }
+    assert_eq!(
+        stored_medical_classification(&pool, clinic_letter_id).await,
+        (false, Some("internal".to_string()))
+    );
+    assert!(
+        medical_classification_audits(&pool, clinic_letter_id)
+            .await
+            .is_empty()
+    );
+    assert!(
+        medical_classification_audits(&pool, findings_id)
+            .await
+            .is_empty()
+    );
+
+    // Re-running changes and audits nothing more.
+    sqlx::raw_sql(MEDICAL_CLASSIFICATION_REPAIR)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        medical_classification_audits(&pool, letter_id).await.len(),
+        1
+    );
+
+    // Only the non-medical exposure goes away.
+    for bearer in [&concierge_bearer, &billing_bearer] {
+        let listed = listed_document_ids(&app, bearer, patient_id).await;
+        assert!(!listed.contains(&letter_id.to_string()), "{listed:?}");
+        assert!(!listed.contains(&portal_plan_id.to_string()), "{listed:?}");
+        assert_eq!(
+            document_detail_status(&app, bearer, letter_id).await,
+            StatusCode::FORBIDDEN
+        );
+    }
+    assert_eq!(
+        document_detail_status(&app, &concierge_bearer, clinic_letter_id).await,
+        StatusCode::OK
+    );
+    // The release to the assigned interpreter and the patient keep working.
+    assert_eq!(
+        document_detail_status(
+            &app,
+            &auth_header_for(interpreter_id, "interpreter"),
+            letter_id
+        )
+        .await,
+        StatusCode::OK
+    );
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/documents",
+        &auth_header_for(patient_user_id, "patient"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == portal_plan_id.to_string() && item["is_medical"] == true),
+        "{body}"
+    );
+}

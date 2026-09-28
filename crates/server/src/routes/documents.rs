@@ -2908,6 +2908,183 @@ fn classification_suggestion_is_medical(value: &Value) -> Option<bool> {
     value.get("is_medical").and_then(Value::as_bool)
 }
 
+/// The catalogue keys a document's category and document type are looked up
+/// by: trimmed, lower case, empty ones left out.
+fn document_classification_keys(category: Option<&str>, art: &str) -> Vec<String> {
+    [category.unwrap_or_default(), art]
+        .into_iter()
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+/// Whether a document's category or document type is medical: its key is a
+/// category marked medical in `ref_document_categories` (`medical`,
+/// `medical_arztbrief` — "Medical / Doctor letter", `lab_analysis`,
+/// `treatment_plan`, …). The document forms tick the medical flag for the same
+/// categories; the server is the source of truth and stores every such
+/// document as medical data (see [`enforce_medical_classification`]).
+async fn document_classification_is_medical(
+    state: &AppState,
+    category: Option<&str>,
+    art: &str,
+) -> Result<bool, axum::response::Response> {
+    let keys = document_classification_keys(category, art);
+    if keys.is_empty() {
+        return Ok(false);
+    }
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM ref_document_categories
+               WHERE is_medical
+                 AND lower(id) = ANY($1)
+           )"#,
+    )
+    .bind(&keys)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, "load medical document classification");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate document classification",
+        )
+    })
+}
+
+/// The medical flag and access category a document is stored with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MedicalClassification {
+    is_medical: bool,
+    access_category: Option<String>,
+    /// The write asked for a non-medical flag or access category on a medical
+    /// category or document type, and the server corrected it.
+    enforced: bool,
+}
+
+/// A document with a medical category or document type is medical data with
+/// the medical access category, whatever the client sent: otherwise roles
+/// without medical access (the concierge assigned to the patient, billing)
+/// could list and download e.g. a doctor letter. The write is not refused; the
+/// classification is corrected and audited. Other documents keep what was sent.
+fn enforce_medical_classification(
+    medical_classification: bool,
+    is_medical: bool,
+    access_category: Option<&str>,
+) -> MedicalClassification {
+    if medical_classification && (!is_medical || access_category != Some("medical")) {
+        MedicalClassification {
+            is_medical: true,
+            access_category: Some("medical".to_string()),
+            enforced: true,
+        }
+    } else {
+        MedicalClassification {
+            is_medical,
+            access_category: access_category.map(str::to_string),
+            enforced: false,
+        }
+    }
+}
+
+/// Audit event of a corrected classification: `old_value` is what the write
+/// asked for, `new_value` what was stored.
+fn medical_classification_audit_event(
+    actor: Uuid,
+    document_id: Uuid,
+    category: Option<&str>,
+    art: &str,
+    requested_is_medical: bool,
+    requested_access_category: Option<&str>,
+    source: &str,
+) -> audit::AuditEvent {
+    let mut event = audit::domain_diff_event(
+        "enforce_medical_document_classification",
+        Some(actor),
+        "document",
+        Some(document_id),
+        json!({
+            "is_medical": requested_is_medical,
+            "access_category": requested_access_category,
+        }),
+        json!({ "is_medical": true, "access_category": "medical" }),
+    );
+    event.context = json!({
+        "category": category,
+        "art": art,
+        "source": source,
+        "reason": "medical_document_classification",
+    });
+    event
+}
+
+#[cfg(test)]
+mod medical_classification_tests {
+    use super::*;
+
+    #[test]
+    fn category_and_type_are_looked_up_by_their_trimmed_lower_case_keys() {
+        assert_eq!(
+            document_classification_keys(Some(" Medical_Arztbrief "), "Arztbrief"),
+            vec!["medical_arztbrief".to_string(), "arztbrief".to_string()]
+        );
+        assert_eq!(
+            document_classification_keys(None, "lab_analysis"),
+            vec!["lab_analysis".to_string()]
+        );
+        assert!(document_classification_keys(Some("  "), "").is_empty());
+    }
+
+    #[test]
+    fn a_medical_classification_is_stored_as_medical_data() {
+        for (is_medical, access_category) in [
+            (false, None),
+            (false, Some("internal")),
+            (true, Some("patient")),
+            (false, Some("medical")),
+        ] {
+            assert_eq!(
+                enforce_medical_classification(true, is_medical, access_category),
+                MedicalClassification {
+                    is_medical: true,
+                    access_category: Some("medical".to_string()),
+                    enforced: true,
+                },
+                "{is_medical} {access_category:?}"
+            );
+        }
+        // Already medical: nothing to correct, nothing to audit.
+        assert_eq!(
+            enforce_medical_classification(true, true, Some("medical")),
+            MedicalClassification {
+                is_medical: true,
+                access_category: Some("medical".to_string()),
+                enforced: false,
+            }
+        );
+    }
+
+    #[test]
+    fn other_documents_keep_what_the_write_sent() {
+        for (is_medical, access_category) in [
+            (false, Some("internal")),
+            (true, Some("medical")),
+            (true, None),
+            (false, None),
+        ] {
+            assert_eq!(
+                enforce_medical_classification(false, is_medical, access_category),
+                MedicalClassification {
+                    is_medical,
+                    access_category: access_category.map(str::to_string),
+                    enforced: false,
+                }
+            );
+        }
+    }
+}
+
 fn document_fields_imply_medical(art: &str, category: Option<&str>) -> bool {
     let searchable = format!(
         "{} {}",
@@ -11980,6 +12157,14 @@ pub(crate) async fn persist_document_file(
     input: &NewStoredDocument<'_>,
 ) -> Result<(Uuid, i64, String, String), axum::response::Response> {
     let document_id = input.document_id.unwrap_or_else(Uuid::new_v4);
+    // Every stored document passes here (uploads, generated documents,
+    // versions, translations, lead, interpreter and provider files), so a
+    // medical category or type is stored as medical data on every path.
+    let medical = enforce_medical_classification(
+        document_classification_is_medical(state, input.category, input.art).await?,
+        input.is_medical,
+        input.access_category,
+    );
     let original_filename = if input.original_filename.trim().is_empty() {
         "document.bin".to_string()
     } else {
@@ -12051,7 +12236,7 @@ pub(crate) async fn persist_document_file(
     .bind(input.category)
     .bind(input.status)
     .bind(input.visibility)
-    .bind(input.is_medical)
+    .bind(medical.is_medical)
     .bind(input.mime_type)
     .bind(file_size)
     .bind(storage_key.clone())
@@ -12064,7 +12249,7 @@ pub(crate) async fn persist_document_file(
     .bind(input.document_direction)
     .bind(input.document_variant)
     .bind(input.document_language)
-    .bind(input.access_category)
+    .bind(medical.access_category.as_deref())
     .bind(input.document_date)
     .bind(input.source_person)
     .bind(input.source_institution)
@@ -12093,6 +12278,19 @@ pub(crate) async fn persist_document_file(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to save document",
         ));
+    }
+    if medical.enforced {
+        state
+            .audit_sender
+            .try_send(medical_classification_audit_event(
+                input.uploaded_by,
+                document_id,
+                input.category,
+                input.art.trim(),
+                input.is_medical,
+                input.access_category,
+                "store_document",
+            ));
     }
 
     // A collected lead document advances compliance 'pending' -> 'documents_sent'
@@ -24136,7 +24334,7 @@ async fn upload_document_with_mode(
                 .and_then(classification_suggestion_category)
                 .map(ToOwned::to_owned)
         });
-    let resolved_is_medical = is_medical_override.unwrap_or_else(|| {
+    let requested_is_medical = is_medical_override.unwrap_or_else(|| {
         classification_suggestion
             .as_ref()
             .and_then(classification_suggestion_is_medical)
@@ -24144,6 +24342,32 @@ async fn upload_document_with_mode(
                 document_fields_imply_medical(&resolved_art, resolved_category.as_deref())
             })
     });
+    let requested_access_category = access_category.clone().unwrap_or_else(|| {
+        infer_document_access_category(
+            resolved_category.as_deref(),
+            resolved_art.as_str(),
+            requested_is_medical,
+            visibility.as_str(),
+        )
+        .to_string()
+    });
+    // A medical category or document type is medical data whatever the form
+    // sent; every check below (concierge, upload ACL) sees the stored value.
+    let medical = enforce_medical_classification(
+        match document_classification_is_medical(
+            &state,
+            resolved_category.as_deref(),
+            &resolved_art,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(response) => return response,
+        },
+        requested_is_medical,
+        Some(requested_access_category.as_str()),
+    );
+    let resolved_is_medical = medical.is_medical;
     let concierge_upload_is_medical = resolved_is_medical
         || document_fields_imply_medical(&resolved_art, resolved_category.as_deref())
         || classification_suggestion
@@ -24216,14 +24440,7 @@ async fn upload_document_with_mode(
             .or(Some(infer_document_direction(None, ursprung.as_deref()))),
         document_variant: document_variant.as_deref().or(Some("original")),
         document_language: document_language.as_deref(),
-        access_category: access_category
-            .as_deref()
-            .or(Some(infer_document_access_category(
-                resolved_category.as_deref(),
-                resolved_art.as_str(),
-                resolved_is_medical,
-                visibility.as_str(),
-            ))),
+        access_category: medical.access_category.as_deref(),
         document_date: document_date.or_else(|| Some(crate::app_time::today())),
         source_person: if manual_intake {
             source_person.as_deref()
@@ -24290,6 +24507,19 @@ async fn upload_document_with_mode(
         false
     };
 
+    if medical.enforced {
+        state
+            .audit_sender
+            .try_send(medical_classification_audit_event(
+                auth.user_id,
+                document_id,
+                resolved_category.as_deref(),
+                resolved_art.as_str(),
+                requested_is_medical,
+                Some(requested_access_category.as_str()),
+                "upload_document",
+            ));
+    }
     state.audit_sender.try_send(audit::domain_event(
         "upload_document",
         Some(auth.user_id),
@@ -24699,6 +24929,22 @@ async fn update_document(
         Err(resp) => return resp,
     };
 
+    // Filed under a medical category or document type (edit, intake review,
+    // team lead review), the document is medical data whatever the request
+    // says; the access checks below judge the stored classification.
+    let requested_is_medical = is_medical;
+    let requested_access_category = access_category;
+    let medical = enforce_medical_classification(
+        match document_classification_is_medical(&state, category.as_deref(), art.trim()).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        },
+        requested_is_medical,
+        requested_access_category.as_deref(),
+    );
+    let is_medical = medical.is_medical;
+    let access_category = medical.access_category.clone();
+
     if is_manual_intake && status == "active" {
         if patient_id.is_none() && order_id.is_none() && appointment_id.is_none() {
             return err(
@@ -24878,6 +25124,19 @@ async fn update_document(
                     "is_medical": body.is_medical,
                 }),
             ));
+            if medical.enforced {
+                state
+                    .audit_sender
+                    .try_send(medical_classification_audit_event(
+                        auth.user_id,
+                        id,
+                        category.as_deref(),
+                        art.trim(),
+                        requested_is_medical,
+                        requested_access_category.as_deref(),
+                        "update_document",
+                    ));
+            }
             crate::realtime::publish_document_event(
                 &state,
                 Some(auth.user_id),
