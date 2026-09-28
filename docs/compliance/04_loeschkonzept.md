@@ -6,7 +6,7 @@ Umsetzung. Fristen in eckigen Klammern legt die Organisation mit dem DSB fest.
 | Datenart | Frist | Beginn | Umsetzung im System |
 |---|---|---|---|
 | Nicht zustande gekommene Anfragen (Leads) | 180 Tage | Archivierung | automatisch, täglich (`spawn_lead_purger`, Einstellung `cleanup_archived_leads_days`); Anonymisierung der Identitätsfelder, Löschung der Anhänge |
-| Patientenakte, medizinische Unterlagen | 1095 Tage (`patient_file_retention_days`) | Akte auf „inaktiv“ gesetzt (`inactive_since`) | täglicher Lauf legt einen Löschantrag im Compliance-Register an; Prüfung auf Aufbewahrungspflichten und Ausführung durch CEO/IT |
+| Patientenakte, medizinische Unterlagen | 1095 Tage (`patient_file_retention_days`) | Akte auf „inaktiv“ gesetzt (`inactive_since`) | täglicher Lauf legt einen Löschantrag im Compliance-Register an; Prüfung auf Aufbewahrungspflichten und Ausführung durch CEO/IT. Nicht solange die ärztliche Dokumentation aufzubewahren ist (`clinical_retention_until`) und nicht erneut, wenn der Antrag für dieselbe Inaktivitätsphase begründet abgelehnt wurde |
 | Rechnungen, Buchungsbelege | 8 Jahre (Belege) / 10 Jahre (Bücher) | Ende des Kalenderjahres | von der Löschung ausgenommen (§ 147 AO); nach Ablauf **offen** |
 | Verträge, Aufträge, Geschäftsbriefe | 6 Jahre | Ende des Kalenderjahres | von der Löschung ausgenommen (§ 257 HGB); nach Ablauf **offen** |
 | Direktnachrichten und Anhänge | [Frist] | Versand | automatische Bereinigung abgelaufener Nachrichten und verwaister Anhänge |
@@ -18,7 +18,10 @@ Umsetzung. Fristen in eckigen Klammern legt die Organisation mit dem DSB fest.
 ## Löschung auf Antrag (Art. 17)
 
 Ablauf im Register: Antrag → Prüfung (Genehmigung, Ablehnung mit Begründung oder
-Aufschub wegen Aufbewahrungspflicht mit Datum) → Ausführung. Die Ausführung
+Aufschub wegen Aufbewahrungspflicht mit Datum; die Begründung sieht die betroffene
+Person im Portal) → bei Antrag der betroffenen Person vermerkte Identitätsprüfung →
+Ausführung. Eine genehmigte Löschung können CEO und IT-Admin mit Begründung noch
+ablehnen oder zurückstellen. Die Ausführung
 
 - anonymisiert die Stammdaten einschließlich Passnummer, Warnhinweisen,
   Intake-Profil und Lead-Kopie,
