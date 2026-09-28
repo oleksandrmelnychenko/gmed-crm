@@ -377,6 +377,21 @@ describe("patient surface access helpers", () => {
     ).toBe("relations");
   });
 
+  it("keeps the clinical record and the medical PDFs from the interpreter, whatever its assignment", () => {
+    expect(canViewPatientClinicalProfile("interpreter")).toBe(false);
+    expect(canViewPatientClinicalProfile("teamlead_interpreter")).toBe(true);
+    expect(canViewPatientClinicalProfile("patient_manager")).toBe(true);
+    expect(
+      normalizePatientDetailTab("clinical", {
+        canViewOperationalSurface: true,
+        canViewDocuments: true,
+        canViewContracts: false,
+        canViewInvoices: false,
+        canViewClinical: canViewPatientClinicalProfile("interpreter"),
+      }),
+    ).toBe("profile");
+  });
+
   it("keeps IT admin out of every patient surface", () => {
     expect(canViewPatientOperationalSurface("it_admin")).toBe(false);
     expect(canViewPatientDocumentsSurface("it_admin")).toBe(false);
@@ -392,6 +407,23 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientContractsSurface("billing")).toBe(true);
     expect(canViewPatientInvoicesSurface("billing")).toBe(true);
     expect(canManagePatientProfile("billing")).toBe(false);
+  });
+
+  it("hides the appointments tab from Billing (no appointments.view) but keeps orders and the timeline", () => {
+    expect(canViewPatientAppointmentsSurface("billing")).toBe(false);
+    expect(canViewPatientCareHistorySurface("billing")).toBe(true);
+    const access = {
+      canViewOperationalSurface: true,
+      canViewCareHistory: true,
+      canViewAppointments: false,
+      canViewAssignments: false,
+      canViewDocuments: true,
+      canViewContracts: true,
+      canViewInvoices: true,
+    };
+    expect(normalizePatientDetailTab("appointments", access)).toBe("profile");
+    expect(normalizePatientDetailTab("timeline", access)).toBe("timeline");
+    expect(normalizePatientDetailTab("orders", access)).toBe("orders");
   });
 
   it("keeps sales outside patient-bound commercial and document surfaces", () => {

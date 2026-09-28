@@ -223,6 +223,20 @@ pub(crate) async fn ensure_can_manage_target(
     user_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     auth.require_capability(Capability::UsersManage)?;
+    ensure_can_touch_account(state, auth, user_id).await
+}
+
+/// The CEO guard of [`ensure_can_manage_target`] for account operations that
+/// another capability admits (`admin.security`, `admin.sessions`: MFA,
+/// lockouts, forced password reset, sessions, pending logins). The technical
+/// admin runs them for every account but an existing CEO's, which only the
+/// CEO (`users.manage_ceo`) changes. Answers 404 for an unknown account.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn ensure_can_touch_account(
+    state: &AppState,
+    auth: &AuthUser,
+    user_id: Uuid,
+) -> Result<(), axum::response::Response> {
     let target_role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(&state.db)

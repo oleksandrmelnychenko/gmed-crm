@@ -162,6 +162,10 @@ async fn revoke_user_sessions(
     if let Err(e) = auth.require_capability(Capability::AdminSessions) {
         return e;
     }
+    // Signing an existing CEO out is a change to the CEO account.
+    if let Err(e) = super::users::ensure_can_touch_account(&state, &auth, user_id).await {
+        return e;
+    }
 
     tokens::revoke_all_families(
         &state.db,
@@ -637,6 +641,9 @@ async fn approve_pending(
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
+    if let Err(e) = ensure_can_resolve_pending_login(&state, &auth, pending_id).await {
+        return e;
+    }
 
     match sqlx::query(
         "UPDATE pending_logins pl SET status = 'approved', approved_by = $2, resolved_at = now()
@@ -688,6 +695,9 @@ async fn reject_pending(
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
+    if let Err(e) = ensure_can_resolve_pending_login(&state, &auth, pending_id).await {
+        return e;
+    }
 
     match sqlx::query!(
         "UPDATE pending_logins SET status = 'rejected', approved_by = $2, resolved_at = now() WHERE id = $1 AND status = 'pending'",
@@ -721,6 +731,32 @@ async fn reject_pending(
     }
 }
 
+/// A pending login is decided for its account: an existing CEO's sign-in is
+/// approved or rejected only by a CEO (`users.manage_ceo`), like every other
+/// change to the CEO account.
+async fn ensure_can_resolve_pending_login(
+    state: &AppState,
+    auth: &AuthUser,
+    pending_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let user_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT user_id FROM pending_logins WHERE id = $1")
+            .bind(pending_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, pending = %pending_id, "load pending login account");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            })?;
+    match user_id {
+        Some(user_id) => super::users::ensure_can_touch_account(state, auth, user_id).await,
+        None => Err(err(
+            StatusCode::NOT_FOUND,
+            "Pending login not found or already resolved",
+        )),
+    }
+}
+
 #[derive(Deserialize)]
 struct ToggleMfaReq {
     enabled: bool,
@@ -733,6 +769,10 @@ async fn toggle_mfa(
     Json(body): Json<ToggleMfaReq>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
+        return e;
+    }
+    // The sign-in protection of an existing CEO is the CEO's to change.
+    if let Err(e) = super::users::ensure_can_touch_account(&state, &auth, user_id).await {
         return e;
     }
 

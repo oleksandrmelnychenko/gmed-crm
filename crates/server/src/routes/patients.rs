@@ -3671,7 +3671,7 @@ async fn list_patient_lab_results(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
@@ -4395,7 +4395,7 @@ async fn list_patient_vitals(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -6601,6 +6601,11 @@ async fn list_patient_cases(
         Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    // The main request reason is the case's anamnesis, part of the clinical
+    // record: billing (no `patients.medical.view`) and the interpreter do not
+    // read it. The case number, status and manager stay, orders and invoices
+    // refer to them.
+    let can_view_medical = can_read_clinical_record(&auth);
 
     let rows = sqlx::query(
         r#"SELECT c.id, c.case_id, c.status, c.hauptanfragegrund, c.created_at,
@@ -6628,7 +6633,7 @@ async fn list_patient_cases(
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                 "case_id": row.try_get::<String, _>("case_id").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
-                "hauptanfragegrund": row.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
+                "hauptanfragegrund": if can_view_medical { row.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default() } else { None },
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                 "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).ok(),
                 "zuweiser": row.try_get::<Option<String>, _>("zuweiser").unwrap_or_default(),
@@ -6711,10 +6716,13 @@ async fn list_patient_appointments(
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     // The concierge reads the appointments of a visible patient in the patient
     // card (read-only here; its orders and timeline stay closed to the role).
+    // Billing holds no `appointments.view`: it learns about medical visits
+    // from the billing handoff (task), not from the patient's calendar, the
+    // same as `/appointments` answers it 403.
+    auth.require_capability(Capability::AppointmentsView)?;
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
-        Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
@@ -8531,6 +8539,17 @@ async fn get_patient_timeline(
         Role::TeamleadInterpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    // Billing reads the patient's orders, services and invoices here, but no
+    // medical data and no appointments (docs/backlog/02_rbac-matrix_ua.md).
+    // The events a role may not open are left out of the event set itself, so
+    // the items, totals, facets, filters and search never reveal them.
+    // Without `appointments.view` no appointment (nor its communication or
+    // reminder) is listed; without `patients.medical.view` a medical
+    // appointment is a blocked slot (as for the concierge in `/appointments`),
+    // and cases (anamnesis), medical documents, recommendations and the
+    // clinical records are left out.
+    let can_view_appointments = auth.can(Capability::AppointmentsView);
+    let can_view_medical = auth.can(Capability::PatientsMedicalView);
 
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
@@ -8580,15 +8599,24 @@ async fn get_patient_timeline(
 
             SELECT 'appointment'::text AS entity_type,
                    a.id AS entity_id,
-                   a.title AS title,
+                   CASE
+                       WHEN NOT $11::boolean AND COALESCE(a.appointment_type, 'medical') = 'medical'
+                       THEN 'Blocked medical slot'
+                       ELSE a.title
+                   END AS title,
                    COALESCE(a.appointment_type, 'medical') AS category,
                    a.status AS status,
                    ((a.date::timestamp + COALESCE(a.time_start, time '00:00')) AT TIME ZONE 'Europe/Berlin') AS happened_at,
-                   concat_ws(' · ', p.name, d.name) AS source_label
+                   CASE
+                       WHEN NOT $11::boolean AND COALESCE(a.appointment_type, 'medical') = 'medical'
+                       THEN NULL::text
+                       ELSE concat_ws(' · ', p.name, d.name)
+                   END AS source_label
             FROM appointments a
             LEFT JOIN providers p ON p.id = a.provider_id
             LEFT JOIN provider_doctors d ON d.id = a.doctor_id
             WHERE a.patient_id = $1
+              AND $10::boolean
 
             UNION ALL
 
@@ -8603,6 +8631,7 @@ async fn get_patient_timeline(
             LEFT JOIN leads source_lead
                    ON source_lead.id = COALESCE(c.source_lead_id, c.lead_id)
             WHERE COALESCE(c.patient_id, source_lead.converted_patient_id) = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -8673,6 +8702,11 @@ async fn get_patient_timeline(
             LEFT JOIN providers provider ON provider.id = communication.provider_id
             LEFT JOIN provider_doctors doctor ON doctor.id = communication.doctor_id
             WHERE COALESCE(communication.patient_id, communication_appointment.patient_id) = $1
+              AND $10::boolean
+              AND (
+                    $11::boolean
+                    OR COALESCE(communication_appointment.appointment_type, 'medical') <> 'medical'
+              )
 
             UNION ALL
 
@@ -8687,6 +8721,11 @@ async fn get_patient_timeline(
             JOIN appointments reminder_appointment ON reminder_appointment.id = reminder.appointment_id
             LEFT JOIN users reminder_user ON reminder_user.id = reminder.user_id
             WHERE reminder_appointment.patient_id = $1
+              AND $10::boolean
+              AND (
+                    $11::boolean
+                    OR COALESCE(reminder_appointment.appointment_type, 'medical') <> 'medical'
+              )
 
             UNION ALL
 
@@ -8746,6 +8785,19 @@ async fn get_patient_timeline(
             FROM documents d
             LEFT JOIN leads source_lead ON source_lead.id = d.lead_id
             WHERE COALESCE(d.patient_id, source_lead.converted_patient_id) = $1
+              AND (
+                    $11::boolean
+                    OR NOT (
+                        COALESCE(d.is_medical, false)
+                        OR d.access_category IS NOT DISTINCT FROM 'medical'
+                        OR EXISTS (
+                            SELECT 1
+                            FROM ref_document_categories medical_category
+                            WHERE medical_category.is_medical
+                              AND lower(medical_category.id) IN (lower(d.category), lower(d.art))
+                        )
+                    )
+              )
 
             UNION ALL
 
@@ -8837,6 +8889,7 @@ async fn get_patient_timeline(
             FROM patient_recommendations pr
             LEFT JOIN provider_doctors doctor ON doctor.id = pr.source_doctor_id
             WHERE pr.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -8851,6 +8904,19 @@ async fn get_patient_timeline(
             LEFT JOIN documents d ON d.id = dtr.document_id
             LEFT JOIN users u ON u.id = dtr.requested_by
             WHERE dtr.patient_id = $1
+              AND (
+                    $11::boolean
+                    OR NOT (
+                        COALESCE(d.is_medical, false)
+                        OR d.access_category IS NOT DISTINCT FROM 'medical'
+                        OR EXISTS (
+                            SELECT 1
+                            FROM ref_document_categories medical_category
+                            WHERE medical_category.is_medical
+                              AND lower(medical_category.id) IN (lower(d.category), lower(d.art))
+                        )
+                    )
+              )
 
             UNION ALL
 
@@ -8989,6 +9055,7 @@ async fn get_patient_timeline(
             WHERE al.entity_type = 'case'
               AND al.action = 'drug_match_verified'
               AND c.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9005,6 +9072,7 @@ async fn get_patient_timeline(
             FROM patient_card_entries e
             LEFT JOIN users u ON u.id = e.author_id
             WHERE e.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9032,6 +9100,7 @@ async fn get_patient_timeline(
             FROM patient_medical_orders mo
             LEFT JOIN users u ON u.id = mo.ordered_by
             WHERE mo.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9048,6 +9117,7 @@ async fn get_patient_timeline(
             FROM patient_risk_scores rs
             LEFT JOIN users u ON u.id = rs.recorded_by
             WHERE rs.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9520,6 +9590,8 @@ async fn get_patient_timeline(
         .bind(can_view_financial)
         .bind(limit)
         .bind(offset)
+        .bind(can_view_appointments)
+        .bind(can_view_medical)
         .fetch_one(&state.db)
         .await
         .map_err(|e| {
@@ -9755,6 +9827,28 @@ async fn ensure_related_patient_usable(
     }
 
     if has_patient_use_access(state, auth, related_patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+/// Whether the caller reads the patient's clinical record: diagnoses,
+/// medication, findings, procedures, allergies/CAVE, anamnesis and course,
+/// vital signs, lab results, vaccinations, the case anamnesis and the PDFs
+/// built from them. It needs `patients.medical.view`, and the interpreter
+/// never reads it, whatever its patient assignment (manual or from a
+/// booking): its medical scope is the briefing of its own appointment and the
+/// documents released to it (owner decision 2026-09-28,
+/// docs/backlog/02_rbac-matrix_ua.md).
+fn can_read_clinical_record(auth: &AuthUser) -> bool {
+    auth.can(Capability::PatientsMedicalView) && auth.role != Role::Interpreter
+}
+
+/// 403 unless [`can_read_clinical_record`].
+#[allow(clippy::result_large_err)]
+fn require_clinical_record_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if can_read_clinical_record(auth) {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
@@ -11511,7 +11605,7 @@ async fn get_patient_clinical(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -13557,7 +13651,7 @@ async fn list_patient_narrative_history(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14388,7 +14482,7 @@ async fn get_patient_impfstatus(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14647,7 +14741,7 @@ async fn get_patient_clinical_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14816,7 +14910,7 @@ async fn get_patient_lab_results_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(response) = require_clinical_record_access(&auth) {
         return response;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -15057,7 +15151,7 @@ async fn get_patient_medikationsplan_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {

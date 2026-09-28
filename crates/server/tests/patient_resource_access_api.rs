@@ -792,6 +792,324 @@ async fn concierge_reads_patient_appointments_but_not_orders_or_timeline() {
     }
 }
 
+async fn seed_case(pool: &PgPool, patient_id: Uuid, manager_id: Uuid, tag: &str, reason: &str) {
+    sqlx::query(
+        r#"INSERT INTO cases (case_id, patient_id, manager_id, status, hauptanfragegrund)
+           VALUES ($1, $2, $3, 'open', $4)"#,
+    )
+    .bind(format!("C-{tag}"))
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(reason)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn seed_order_with_invoice(
+    pool: &PgPool,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    supporting_document_ids: &[Uuid],
+) -> (Uuid, Uuid) {
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let line_items = supporting_document_ids
+        .iter()
+        .map(|document_id| {
+            json!({
+                "description": "Clinic fee",
+                "quantity": "1",
+                "unit_price": "100.00",
+                "vat_rate": "0",
+                "line_net": "100.00",
+                "line_vat": "0.00",
+                "line_gross": "100.00",
+                "external_document_id": document_id,
+            })
+        })
+        .collect::<Vec<_>>();
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross,
+                paid_amount, line_items, portal_visible, created_by
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', now(), CURRENT_DATE + 14,
+                200, 0, 200, 0, $4, true, $5
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}"))
+    .bind(Value::Array(line_items))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    (order_id, invoice_id)
+}
+
+fn timeline_entity_types(body: &Value) -> Vec<String> {
+    body["items"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item["entity_type"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn timeline_contains_entity(body: &Value, entity_id: Uuid) -> bool {
+    body["items"].as_array().is_some_and(|items| {
+        items
+            .iter()
+            .any(|item| item["entity_id"] == entity_id.to_string())
+    })
+}
+
+#[tokio::test]
+async fn billing_reads_no_appointments_or_medical_data_in_the_patient_card() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-billing-medical");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let medical_title = format!("Hematology review {tag}");
+    let service_title = format!("Airport transfer {tag}");
+    let medical_appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &medical_title,
+        "2026-04-15",
+    )
+    .await;
+    let service_appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "non_medical",
+        &service_title,
+        "2026-04-16",
+    )
+    .await;
+    let anamnesis = format!("Recurring chest pain {tag}");
+    seed_case(&pool, patient_id, admin_id, &tag, &anamnesis).await;
+    let medical_document_id =
+        seed_document(&pool, patient_id, admin_id, &format!("{tag}-mri"), true).await;
+    let general_document_id = seed_document(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("{tag}-general"),
+        false,
+    )
+    .await;
+    let medical_document_name = format!("Document {tag}-mri");
+    let (order_id, invoice_id) = seed_order_with_invoice(
+        &pool,
+        patient_id,
+        admin_id,
+        &tag,
+        &[medical_document_id, general_document_id],
+    )
+    .await;
+    let billing_id = seed_staff_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+
+    // No `appointments.view`: the patient's calendar is closed, as `/appointments` is.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(!body.to_string().contains(&medical_title), "{body}");
+
+    // The timeline keeps the financial history and drops every appointment,
+    // the anamnesis and the medical document, in the items and the summary.
+    let timeline_path = format!("/api/v1/patients/{patient_id}/timeline");
+    let (status, body) = json_request(&app, "GET", &timeline_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let entity_types = timeline_entity_types(&body);
+    assert!(timeline_contains_entity(&body, order_id), "{body}");
+    assert!(timeline_contains_entity(&body, invoice_id), "{body}");
+    assert!(
+        timeline_contains_entity(&body, general_document_id),
+        "{body}"
+    );
+    assert!(
+        !timeline_contains_entity(&body, medical_document_id),
+        "{body}"
+    );
+    assert!(
+        !timeline_contains_entity(&body, medical_appointment_id),
+        "{body}"
+    );
+    assert!(
+        !timeline_contains_entity(&body, service_appointment_id),
+        "{body}"
+    );
+    assert!(
+        !entity_types
+            .iter()
+            .any(|kind| kind == "appointment" || kind == "case")
+    );
+    let text = body.to_string();
+    let clinic_name = format!("Clinic {tag}");
+    for secret in [
+        medical_title.as_str(),
+        service_title.as_str(),
+        anamnesis.as_str(),
+        medical_document_name.as_str(),
+        clinic_name.as_str(),
+        "anamnesis",
+    ] {
+        assert!(!text.contains(secret), "{secret} leaked: {body}");
+    }
+    // Filters and search do not reach the hidden events either.
+    for query in [
+        "entity_type=appointment",
+        "entity_type=case",
+        "category=medical",
+        "category=anamnesis",
+        "search=Hematology",
+        "search=chest",
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("{timeline_path}?{query}"),
+            &billing,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{query}: {body}");
+        assert_eq!(body["total"], 0, "{query}: {body}");
+    }
+
+    // The case list keeps the case, without its anamnesis.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/cases"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body[0]["case_id"], format!("C-{tag}"), "{body}");
+    assert_eq!(body[0]["hauptanfragegrund"], Value::Null, "{body}");
+
+    // The invoice names only the non-medical supporting document.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let supporting = body["supporting_documents"].to_string();
+    assert!(
+        supporting.contains(&general_document_id.to_string()),
+        "{body}"
+    );
+    assert!(
+        !supporting.contains(&medical_document_id.to_string()),
+        "{body}"
+    );
+    assert!(!supporting.contains(&medical_document_name), "{body}");
+
+    // The CEO and the patient manager keep the full history.
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    for bearer in [
+        auth_header_for(admin_id, "ceo"),
+        auth_header_for(manager_id, "patient_manager"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &timeline_path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            timeline_contains_entity(&body, medical_appointment_id),
+            "{body}"
+        );
+        assert!(
+            timeline_contains_entity(&body, service_appointment_id),
+            "{body}"
+        );
+        assert!(
+            timeline_contains_entity(&body, medical_document_id),
+            "{body}"
+        );
+        let text = body.to_string();
+        assert!(text.contains(&medical_title), "{body}");
+        assert!(text.contains(&anamnesis), "{body}");
+        assert!(text.contains(&medical_document_name), "{body}");
+
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/patients/{patient_id}/appointments"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            find_resource(&body, medical_appointment_id)["title"],
+            medical_title
+        );
+
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/patients/{patient_id}/cases"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body[0]["hauptanfragegrund"], anamnesis, "{body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["supporting_documents"]
+            .to_string()
+            .contains(&medical_document_id.to_string()),
+        "{body}"
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn seed_interpreter_appointment(
     pool: &PgPool,

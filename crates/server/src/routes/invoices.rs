@@ -4120,6 +4120,9 @@ async fn load_invoice_detail(
     let supporting_documents = if direct_document_ids.is_empty() && source_line_ids.is_empty() {
         Vec::new()
     } else {
+        // A medical document linked to a service line stays medical data: a
+        // reader without `patients.medical.view` (billing) does not learn its
+        // name here either (docs/backlog/02_rbac-matrix_ua.md).
         sqlx::query(
             r#"SELECT DISTINCT d.id, d.auto_name, d.original_filename, d.art, d.category
                FROM documents d
@@ -4134,10 +4137,18 @@ async fn load_invoice_detail(
                               AND ol.id = ANY($2)
                         )
                  )
+                 AND (
+                        $3::boolean
+                     OR NOT (
+                            COALESCE(d.is_medical, false)
+                         OR d.access_category IS NOT DISTINCT FROM 'medical'
+                        )
+                 )
                ORDER BY d.auto_name, d.id DESC"#,
         )
         .bind(&direct_document_ids)
         .bind(&source_line_ids)
+        .bind(auth.can(Capability::PatientsMedicalView))
         .fetch_all(&state.db)
         .await
         .map_err(|e| {

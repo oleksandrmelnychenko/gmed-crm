@@ -480,23 +480,30 @@ async fn can_receive_task_event(
     })
 }
 
+/// The part of the appointment-event decision that depends on the role alone:
+/// `Some` decides, `None` leaves it to the appointment row scope. Billing holds
+/// no `appointments.view` and cannot open an appointment, so it hears nothing
+/// about one either: neither its reminders nor its checklist (which reach this
+/// check through the `patients.view` event gate).
+fn appointment_event_role_decision(role: Role) -> Option<bool> {
+    match role {
+        Role::Ceo | Role::CeoAssistant => Some(true),
+        Role::Patient
+        | Role::PatientManager
+        | Role::TeamleadInterpreter
+        | Role::Interpreter
+        | Role::Concierge => None,
+        _ => Some(false),
+    }
+}
+
 async fn can_receive_appointment_event(
     state: &AppState,
     auth: &AuthUser,
     appointment_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
-        return Ok(true);
-    }
-    if !matches!(
-        auth.role,
-        Role::Patient
-            | Role::PatientManager
-            | Role::TeamleadInterpreter
-            | Role::Interpreter
-            | Role::Concierge
-    ) {
-        return Ok(false);
+    if let Some(decision) = appointment_event_role_decision(auth.role) {
+        return Ok(decision);
     }
 
     let row =
@@ -709,9 +716,38 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::requires_current_entity_authorization;
+    use super::{appointment_event_role_decision, requires_current_entity_authorization};
     use crate::realtime::RealtimeEvent;
+    use gmed_domain::access::capabilities::Capability;
+    use gmed_domain::role::Role;
     use uuid::Uuid;
+
+    #[test]
+    fn appointment_events_never_reach_a_role_without_appointments_view() {
+        for role in [
+            Role::Ceo,
+            Role::CeoAssistant,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::Billing,
+            Role::Sales,
+            Role::ItAdmin,
+        ] {
+            if !role.can(Capability::AppointmentsView) {
+                assert_eq!(
+                    appointment_event_role_decision(role),
+                    Some(false),
+                    "{role:?}"
+                );
+            }
+        }
+        assert_eq!(appointment_event_role_decision(Role::Billing), Some(false));
+        assert_eq!(appointment_event_role_decision(Role::Ceo), Some(true));
+        assert_eq!(appointment_event_role_decision(Role::Concierge), None);
+        assert_eq!(appointment_event_role_decision(Role::Patient), None);
+    }
 
     #[test]
     fn patient_scoped_replay_never_trusts_historical_targets() {
