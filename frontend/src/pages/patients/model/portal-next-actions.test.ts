@@ -8,7 +8,7 @@ import {
   nextActionButtonLabel,
   nextActionDescription,
 } from "./portal-next-actions";
-import { portalDocumentValueLabel } from "./portal-shared";
+import { formatPortalDate, formatPortalDateTime, portalDocumentValueLabel } from "./portal-shared";
 
 describe("portal next actions", () => {
   it("labels every kind the server sends", () => {
@@ -56,5 +56,17 @@ describe("portal next actions", () => {
     expect(
       nextActionButtonLabel({ kind: "future_kind", action_label: "Open" }, ru),
     ).toBe("Open");
+  });
+});
+
+describe("portal next action due dates", () => {
+  it("shows an invoice due date as a date, not as 02:00 German time", () => {
+    const label = formatPortalDateTime("2026-10-12");
+    expect(label).toBe(formatPortalDate("2026-10-12"));
+    expect(label).not.toContain("02:00");
+  });
+
+  it("keeps the time of a real instant", () => {
+    expect(formatPortalDateTime("2026-09-28T06:00:00Z")).toContain("08:00");
   });
 });

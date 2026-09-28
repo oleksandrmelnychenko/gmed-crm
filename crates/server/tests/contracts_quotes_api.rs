@@ -1879,6 +1879,15 @@ async fn order_service_keeps_catalog_snapshot_and_used_catalog_item_is_archived(
     assert_eq!(saved_line["unit_price"], "90");
     assert_eq!(saved_line["unit_price_snapshot"], "90");
     assert_eq!(saved_line["vat_rate_snapshot"], "19");
+    // Invoices explain a catalog line's VAT as coming from the catalog, not as
+    // a historical ("legacy") snapshot.
+    let vat_source: String =
+        sqlx::query_scalar("SELECT vat_source FROM order_leistungen WHERE id = $1::uuid")
+            .bind(line["id"].as_str().expect("line id"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(vat_source, "catalog");
 
     let (status, quote) = json_request(
         &app,

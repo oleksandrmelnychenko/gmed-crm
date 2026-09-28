@@ -71,6 +71,16 @@ export function invoiceDisplayNumber(
   return invoice.invoice_number?.trim() || draftLabel;
 }
 
+/**
+ * The invoice date to show. A draft gets its number and date only when it is
+ * released; until then `issued_at` is merely its creation time.
+ */
+export function invoiceIssuedAt(
+  invoice: Pick<InvoiceItem, "issued_at" | "released_at" | "status">,
+) {
+  return isInvoiceReleased(invoice) ? invoice.issued_at : null;
+}
+
 /** Due date the server sets on release when none is given: today (Berlin) + payment term. */
 export function defaultReleaseDueDate(today: Date, termDays = DEFAULT_INVOICE_PAYMENT_TERM_DAYS) {
   return addDaysToDateKey(appDateKey(today), termDays);

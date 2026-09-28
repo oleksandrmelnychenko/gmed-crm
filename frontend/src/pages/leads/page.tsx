@@ -3084,7 +3084,7 @@ function useLeadsPageContent() {
                   {t.lead_convert_dialog_start}{" "}
                   <span className="font-medium text-slate-900">
                     {pendingConvertLead.first_name} {pendingConvertLead.last_name}
-                  </span>
+                  </span>{" "}
                   {t.lead_convert_dialog_end}{" "}
                   <span className="font-mono text-xs">{statusLabel("converted", t)}</span>.
                 </>

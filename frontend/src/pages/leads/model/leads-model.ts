@@ -29,6 +29,13 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
     "Рекомендовавший клиент больше не существует. Выберите другого клиента",
     "Der empfehlende Kunde existiert nicht mehr. Bitte einen anderen Kunden wählen",
   ],
+  // The quick "Convert" action cannot create a patient-first lead's patient; the
+  // intake wizard does that on its last step. A generic 409 ("data changed")
+  // sent staff into a reload loop.
+  "patient-first lead requires a prospect patient before conversion": [
+    "Этого лида нужно оформить через «Обработать»: пациент создаётся на последнем шаге мастера",
+    "Diesen Lead über „Bearbeiten“ abschließen: der Patient wird im letzten Schritt des Assistenten angelegt",
+  ],
   // A converted lead is closed for intake work; reloading the page cannot help.
   "converted lead must use its patient context": [
     "Лид уже конвертирован в пациента. Создавайте и меняйте документы в карточке пациента или заказа",

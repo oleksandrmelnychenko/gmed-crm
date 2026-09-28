@@ -1854,6 +1854,15 @@ fn invoice_pdf_line_height_mm(size_pt: f32, multiplier: f32) -> f32 {
     pt_to_mm(size_pt * multiplier)
 }
 
+/// Height of a heading (text_block with `before_mm`) followed by one-line
+/// label/value table rows, as `InvoicePdfLayout` draws them. Used to keep the
+/// payment details on one page: an IBAN alone on the next page is easy to
+/// miss when paying.
+fn invoice_pdf_heading_with_rows_height_mm(heading_pt: f32, before_mm: f32, rows: usize) -> f32 {
+    let row_mm = invoice_pdf_line_height_mm(9.3, 1.25) + 4.0 + 0.4;
+    before_mm + invoice_pdf_line_height_mm(heading_pt, 1.35) + rows as f32 * row_mm
+}
+
 fn invoice_pdf_mm_to_pt(value: f32) -> Pt {
     Pt(value * 2.834_646)
 }
@@ -5013,6 +5022,11 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
 
     let bank_cells = invoice_pdf_bank_cells(language, &context.agency);
     if !bank_cells.is_empty() {
+        layout.ensure_space(invoice_pdf_heading_with_rows_height_mm(
+            13.0,
+            6.0,
+            bank_cells.len(),
+        ));
         layout.text_block(
             invoice_pdf_label(language, "payment_details"),
             13.0,
@@ -12518,6 +12532,37 @@ mod tests {
     #[test]
     fn invoice_footer_includes_current_and_total_pages() {
         assert_eq!(invoice_pdf_footer_line("Page", 2, 5), "Page: 2/5");
+    }
+
+    #[test]
+    fn payment_details_are_never_split_across_pages() {
+        // A walkthrough invoice printed Kontoinhaber/Bank/SWIFT on page 1 and
+        // the IBAN alone on page 2. Whatever the number of lines, the IBAN
+        // stays on the page of the payment details heading.
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        let line = serde_json::json!({
+            "description": "Kardiologische Untersuchung", "quantity": "1",
+            "unit_price": "100.00", "vat_rate": "0", "is_cost_passthrough": false,
+            "line_gross": "100.00"
+        });
+        for count in 1..=18 {
+            context.line_items =
+                super::parse_invoice_pdf_line_items(&serde_json::Value::Array(vec![
+                    line.clone();
+                    count
+                ]));
+            let bytes = build_invoice_pdf(&context).unwrap();
+            let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).unwrap();
+            let iban_page = pages
+                .iter()
+                .find(|page| page.contains("IBAN"))
+                .unwrap_or_else(|| panic!("no IBAN with {count} lines"));
+            assert!(
+                iban_page.contains("Zahlungsdaten") && iban_page.contains("Kontoinhaber"),
+                "{count} lines split the payment details: {iban_page}"
+            );
+        }
     }
 
     #[test]

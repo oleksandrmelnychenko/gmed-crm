@@ -112,6 +112,8 @@ export function orderPermissions(actor?: Actor): OrdersPermissions {
     // Provider (external) invoices: the order owner or finance.
     canManageExternalInvoices: canEdit || hasCapability(actor, "invoices.finance"),
     canManageEconomics: hasCapability(actor, "orders.economics"),
+    canManagePartnerCosts:
+      hasCapability(actor, "orders.economics") && hasCapability(actor, "invoices.finance"),
     readsOnlyOrderPart: readsOnlyOrderPart(actor),
   };
 }

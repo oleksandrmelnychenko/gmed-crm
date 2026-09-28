@@ -75,6 +75,7 @@ import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
+  agencyServiceStoredName,
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
@@ -2271,7 +2272,7 @@ function useOrdersPageContent() {
       ...blankLeistungForm(),
       agencyServiceId: service.id,
       agencyServicePriceVersionId: selectedPrice.id,
-      description: agencyServiceNameLabel(
+      description: agencyServiceStoredName(
         service.service_key,
         service.service_name,
         t,
@@ -7281,7 +7282,7 @@ function useOrdersPageContent() {
                                     </div>
                                       </>
                                     )}
-                                    {permissions.canManageEconomics && leistung.status !== "cancelled" ? (
+                                    {permissions.canManagePartnerCosts && leistung.status !== "cancelled" ? (
                                       <Button
                                         type="button"
                                         variant="outline"
@@ -7395,7 +7396,7 @@ function useOrdersPageContent() {
                                     label={l("orders_mwst")}
                                     value={`${formatNumber(leistung.vat_rate, locale)}%`}
                                   />
-                                  {permissions.canManageEconomics ? <MiniMetric
+                                  {permissions.canManagePartnerCosts ? <MiniMetric
                                     label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}
                                     value={formatMoney(
                                       leistung.planned_partner_cost_gross,
@@ -7890,7 +7891,8 @@ function useOrdersPageContent() {
                                       {t.orders_external_invoice_paid}
                                     </div>
                                     <div className="mt-1 text-sm font-semibold text-foreground">
-                                      {formatDateTimeLabel(invoice.paid_at)}
+                                      {/* A supplier payment has a payment day only (stored at 12:00 UTC); a time would be invented. */}
+                                      {formatDateOnlyLabel(invoice.paid_at)}
                                     </div>
                                   </div>
                                 </div>
@@ -8793,6 +8795,10 @@ function useOrdersPageContent() {
                                   ? l("orders_stammdaten_vollstandig")
                                   : check.key === "compliance"
                                     ? l("orders_compliance_dokumente_gultig")
+                                    : check.key === "confidentiality_release"
+                                      ? lang === "de"
+                                        ? "Schweigepflichtsentbindung unterschrieben"
+                                        : "Освобождение от врачебной тайны подписано"
                                     : check.key === "identity"
                                       ? l("orders_identitat_verifiziert")
                                       : check.key === "document_pack"
@@ -9079,7 +9085,7 @@ function useOrdersPageContent() {
                         agencyServiceId,
                         agencyServicePriceVersionId: selectedPrice?.id ?? "",
                         description: service
-                          ? agencyServiceNameLabel(
+                          ? agencyServiceStoredName(
                               service.service_key,
                               service.service_name,
                               t,
@@ -9284,7 +9290,7 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                {permissions.canManageEconomics ? <>
+                {permissions.canManagePartnerCosts ? <>
                 <Field htmlFor="order-service-plannedPartnerCostNet" label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
                   <Input
                     id="order-service-plannedPartnerCostNet"

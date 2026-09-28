@@ -433,6 +433,10 @@ async fn load_patient_settlement_ledger(
                   CASE
                       WHEN payment.transaction_type = 'reversal'
                           THEN 'Payment reversal'
+                      -- The receiving leg of a credit transfer is no cash
+                      -- receipt; its reference is the source invoice.
+                      WHEN payment.payment_method = 'credit_transfer'
+                          THEN 'Credit from invoice ' || COALESCE(payment.payment_reference, '')
                       WHEN invoice.invoice_type = 'advance'
                           THEN 'Advance payment received'
                       ELSE 'Payment received'

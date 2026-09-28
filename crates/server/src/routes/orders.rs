@@ -8362,6 +8362,21 @@ async fn list_leistungen(
     }
 }
 
+/// VAT source of a new order line (`tax_profile_id`, `vat_source`): a catalog
+/// service takes its rate from the catalog (or the catalog's tax profile), any
+/// other line was priced by hand. Without this every new line kept the column
+/// default "legacy" and invoices explained its VAT as a historical snapshot.
+fn order_line_vat_source(
+    from_catalog: bool,
+    catalog_tax_profile_id: Option<Uuid>,
+) -> (Option<Uuid>, &'static str) {
+    match (from_catalog, catalog_tax_profile_id) {
+        (true, Some(profile_id)) => (Some(profile_id), "tax_profile"),
+        (true, None) => (None, "catalog"),
+        (false, _) => (None, "manual"),
+    }
+}
+
 async fn add_leistung(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8422,7 +8437,8 @@ async fn add_leistung(
                 r#"SELECT version.id AS price_version_id,
                           version.unit_price,
                           UPPER(version.currency) AS currency,
-                          version.vat_rate
+                          version.vat_rate,
+                          catalog.tax_profile_id
                    FROM agency_service_catalog catalog
                    JOIN agency_service_price_versions version
                      ON version.agency_service_id = catalog.id
@@ -8439,7 +8455,8 @@ async fn add_leistung(
                 r#"SELECT price.id AS price_version_id,
                       COALESCE(price.unit_price, catalog.unit_price) AS unit_price,
                       UPPER(COALESCE(price.currency, catalog.currency)) AS currency,
-                      COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate
+                      COALESCE(price.vat_rate, catalog.vat_rate) AS vat_rate,
+                      catalog.tax_profile_id
                FROM agency_service_catalog catalog
                LEFT JOIN LATERAL (
                    SELECT version.id, version.unit_price, version.currency, version.vat_rate
@@ -8483,6 +8500,8 @@ async fn add_leistung(
                         .unwrap_or(rust_decimal::Decimal::ZERO),
                     row.try_get::<rust_decimal::Decimal, _>("vat_rate")
                         .unwrap_or(rust_decimal::Decimal::ZERO),
+                    row.try_get::<Option<Uuid>, _>("tax_profile_id")
+                        .unwrap_or_default(),
                 ))
             }
             Ok(None) => {
@@ -8556,8 +8575,16 @@ async fn add_leistung(
     };
     let agency_service_price_version_id = resolved_agency_price
         .as_ref()
-        .and_then(|(version_id, _, _)| *version_id);
-    if let Some((_, resolved_price, resolved_vat)) = resolved_agency_price {
+        .and_then(|(version_id, _, _, _)| *version_id);
+    // Where the line's VAT rate comes from; invoices explain it per line. The
+    // column default ("legacy") is for lines that predate VAT sources.
+    let (tax_profile_id, vat_source) = order_line_vat_source(
+        resolved_agency_price.is_some(),
+        resolved_agency_price
+            .as_ref()
+            .and_then(|(_, _, _, tax_profile_id)| *tax_profile_id),
+    );
+    if let Some((_, resolved_price, resolved_vat, _)) = resolved_agency_price {
         price = resolved_price;
         vat = resolved_vat;
     }
@@ -8641,10 +8668,10 @@ async fn add_leistung(
              is_cost_passthrough, provider_id, doctor_id, external_document_id,
              notes, client_reference,
              planned_partner_cost_net, planned_partner_cost_vat,
-             planned_partner_cost_gross
+             planned_partner_cost_gross, tax_profile_id, vat_source
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                 $16, $17, $18)
+                 $16, $17, $18, $19, $20)
          ON CONFLICT (order_id, client_reference) DO UPDATE SET
              patient_id = EXCLUDED.patient_id,
              agency_service_id = EXCLUDED.agency_service_id,
@@ -8654,6 +8681,8 @@ async fn add_leistung(
              unit_price = EXCLUDED.unit_price,
              currency = EXCLUDED.currency,
              vat_rate = EXCLUDED.vat_rate,
+             tax_profile_id = EXCLUDED.tax_profile_id,
+             vat_source = EXCLUDED.vat_source,
              is_cost_passthrough = EXCLUDED.is_cost_passthrough,
              provider_id = EXCLUDED.provider_id,
              doctor_id = EXCLUDED.doctor_id,
@@ -8685,6 +8714,8 @@ async fn add_leistung(
     .bind(planned_cost_net)
     .bind(planned_cost_vat)
     .bind(planned_cost_gross)
+    .bind(tax_profile_id)
+    .bind(vat_source)
     .fetch_optional(&state.db)
     .await
     {
@@ -11857,6 +11888,22 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_order_lines_name_where_their_vat_comes_from() {
+        let profile = Uuid::new_v4();
+        assert_eq!(
+            order_line_vat_source(true, Some(profile)),
+            (Some(profile), "tax_profile")
+        );
+        assert_eq!(order_line_vat_source(true, None), (None, "catalog"));
+        assert_eq!(order_line_vat_source(false, None), (None, "manual"));
+        // A hand-priced line never inherits a catalog profile.
+        assert_eq!(
+            order_line_vat_source(false, Some(profile)),
+            (None, "manual")
+        );
+    }
 
     #[test]
     fn copied_interpreter_report_text_is_replaced_by_a_reference() {

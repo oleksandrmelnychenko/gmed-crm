@@ -709,10 +709,13 @@ async fn sync_services(conn: &mut PgConnection, id: Uuid, d: &Draft) -> Result<(
                 };
                 (!template.is_empty()).then(|| catalog_description(template, &json!(d)))
             });
-        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes)
-            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9) ON CONFLICT(order_id,client_reference)
+        // vat_source: a catalog line's rate comes from the catalog, any other
+        // line was priced in the wizard (not the "legacy" column default).
+        let service_id = sqlx::query_scalar::<_,Uuid>("INSERT INTO order_leistungen(order_id,description,quantity,unit_price,vat_rate,client_reference,agency_service_id,agency_service_price_version_id,patient_id,notes,vat_source)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT patient_id FROM orders WHERE id=$1),$9,CASE WHEN $7::uuid IS NULL THEN 'manual' ELSE 'catalog' END) ON CONFLICT(order_id,client_reference)
             DO UPDATE SET description=EXCLUDED.description,quantity=EXCLUDED.quantity,unit_price=EXCLUDED.unit_price,vat_rate=EXCLUDED.vat_rate,
-                agency_service_id=EXCLUDED.agency_service_id,agency_service_price_version_id=EXCLUDED.agency_service_price_version_id,notes=EXCLUDED.notes
+                agency_service_id=EXCLUDED.agency_service_id,agency_service_price_version_id=EXCLUDED.agency_service_price_version_id,notes=EXCLUDED.notes,
+                vat_source=EXCLUDED.vat_source
             RETURNING id")
             .bind(id).bind(l.description.trim()).bind(qty).bind(price).bind(vat).bind(key)
             .bind(l.agency_service_id).bind(l.agency_service_price_version_id).bind(note)

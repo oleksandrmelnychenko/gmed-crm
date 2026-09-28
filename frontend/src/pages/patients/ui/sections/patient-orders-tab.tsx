@@ -19,6 +19,7 @@ import {
   TabLoader,
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import { discardOrderDraft } from "../../data/repeat-intakes-api";
@@ -33,7 +34,8 @@ function orderAmount(item: OrderItem) {
   if (raw == null || raw === "") return null;
   const value = Number(raw);
   if (!Number.isFinite(value)) return null;
-  return `${value.toFixed(2)} ${item.currency || "EUR"}`;
+  // Same money format as the order page ("3.333,20 €"), not "3333.20 EUR".
+  return formatMoneyAmount(value, item.currency || "EUR");
 }
 
 type PatientOrdersDictionary = {

@@ -191,6 +191,7 @@ describe("orders model", () => {
         canCancelLeistung: has("orders.edit"),
         canManageExternalInvoices: has("orders.edit") || has("invoices.finance"),
         canManageEconomics: has("orders.economics"),
+        canManagePartnerCosts: has("orders.economics") && has("invoices.finance"),
         readsOnlyOrderPart:
           has("orders.view") && !has("orders.edit") && !has("orders.economics") && !has("invoices.view"),
       });
@@ -210,6 +211,16 @@ describe("orders model", () => {
       expect(orderPermissions(role).readsOnlyOrderPart).toBe(false);
     }
     expect(orderPermissions("interpreter").canViewPage).toBe(false);
+  });
+
+  it("keeps planned partner costs to the CEO and billing, as the server does", () => {
+    expect(orderPermissions("ceo").canManagePartnerCosts).toBe(true);
+    expect(orderPermissions("billing").canManagePartnerCosts).toBe(true);
+    // The patient manager works with the order economics but the server
+    // hides partner costs from them and refuses to store them.
+    expect(orderPermissions("patient_manager").canManageEconomics).toBe(true);
+    expect(orderPermissions("patient_manager").canManagePartnerCosts).toBe(false);
+    expect(orderPermissions("ceo_assistant").canManagePartnerCosts).toBe(false);
   });
 });
 

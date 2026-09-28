@@ -234,7 +234,10 @@ async fn list_company_financial_accounts(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<AccountListQuery>,
 ) -> axum::response::Response {
-    if !can_manage_company_accounts(auth.role) {
+    // Reading the accounts belongs to company_finance.view: the company
+    // finance page loads them for every role that may open it (the CEO
+    // assistant reads, billing and the CEO also change them).
+    if !auth.role.can(Capability::CompanyFinanceView) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let requested_currency = match query.currency.as_deref() {

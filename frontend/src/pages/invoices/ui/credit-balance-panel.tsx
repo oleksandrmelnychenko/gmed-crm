@@ -18,6 +18,8 @@ import {
   type InvoiceCreditTransfer,
   type InvoiceCreditTransferTarget,
 } from "../model/overpayment";
+import { formatDate } from "../model/invoice-model";
+import { localizeInvoiceError } from "../model/invoice-errors";
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
@@ -61,7 +63,8 @@ export function CreditBalancePanel({
   released,
   onChanged,
 }: CreditBalancePanelProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const locale = lang === "de" ? "de-DE" : "ru-RU";
   const money = (value: unknown) => formatMoneyAmount(value, currency);
   const credit = Number(creditBalance ?? 0);
   const openTargets = useMemo(() => targets ?? [], [targets]);
@@ -102,7 +105,7 @@ export function CreditBalancePanel({
       setNote("");
       onChanged();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t.common_error);
+      setError(localizeInvoiceError(cause, lang, t.common_error));
     } finally {
       setBusy(false);
     }
@@ -118,7 +121,7 @@ export function CreditBalancePanel({
       setReversalReason("");
       onChanged();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t.common_error);
+      setError(localizeInvoiceError(cause, lang, t.common_error));
     } finally {
       setBusy(false);
     }
@@ -222,7 +225,7 @@ export function CreditBalancePanel({
                     ) : null}
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {transfer.transferred_on} · {transfer.created_by_name}
+                    {formatDate(transfer.transferred_on, locale)} · {transfer.created_by_name}
                     {transfer.note ? ` · ${transfer.note}` : ""}
                   </div>
                 </div>

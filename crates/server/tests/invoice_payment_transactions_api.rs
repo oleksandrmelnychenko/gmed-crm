@@ -897,6 +897,28 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
         category_totals(&pool, open_invoice).await,
         vec![("service_revenue".to_string(), Decimal::new(50, 0))]
     );
+    // The patient statement names the receiving leg a credit from the source
+    // invoice, not "Payment received": no money came in.
+    let (status, statement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/account-statement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{statement:?}");
+    let movements = statement["movements"].as_array().unwrap();
+    let credit_legs = movements
+        .iter()
+        .filter(|movement| {
+            movement["kind"] == "payment"
+                && movement["description"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("Credit from invoice "))
+        })
+        .count();
+    assert_eq!(credit_legs, 1, "{movements:?}");
 
     // A transfer leg cannot be reversed or corrected on its own.
     let target_payment_id: Uuid = sqlx::query_scalar(
