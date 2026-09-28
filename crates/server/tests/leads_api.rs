@@ -2499,6 +2499,412 @@ async fn failed_lead_purges_only_unconverted_prospect_and_preserves_attached_pat
     );
 }
 
+async fn insert_first_intake_lead(app: &TestApp, tag: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, qualification_status, intake_source, created_by
+           ) VALUES (
+                'Failed', 'Lead', $1, '+4915133333333', 'DE', 'de',
+                DATE '1990-01-01', 'female', 'in_progress', 'manual', $2
+           ) RETURNING id"#,
+    )
+    .bind(format!("failed-{tag}@example.com"))
+    .bind(app.patient_manager_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn archiving_a_failed_lead_withdraws_its_order_and_restoring_reopens_it() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id = insert_first_intake_lead(&app, &tag).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    let order_id = artifacts.order_id;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "archive", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The lead's order is cancelled with it, like any order cancellation.
+    let (order_status, reason, cancelled_by): (String, Option<String>, Option<Uuid>) =
+        sqlx::query_as(
+            "SELECT status, cancellation_reason, cancelled_by FROM orders WHERE id = $1",
+        )
+        .bind(order_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(order_status, "cancelled");
+    assert_eq!(reason.as_deref(), Some("lead_archived"));
+    assert_eq!(cancelled_by, Some(app.patient_manager_id));
+    let service_status: String =
+        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+            .bind(artifacts.service_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(service_status, "cancelled");
+    let quote_status: String = sqlx::query_scalar("SELECT status FROM quotes WHERE id = $1")
+        .bind(artifacts.quote_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(quote_status, "rejected");
+    let (order_audits, quote_audits): (i64, i64) = sqlx::query_as(
+        r#"SELECT
+               (SELECT count(*) FROM audit_log
+                WHERE action = 'cancel_order' AND entity_id = $1
+                  AND context->>'source_lead_id' = $3::text
+                  AND context->>'reason' = 'lead_archived'),
+               (SELECT count(*) FROM audit_log
+                WHERE action = 'close_quote_for_cancelled_order' AND entity_id = $2)"#,
+    )
+    .bind(order_id)
+    .bind(artifacts.quote_id)
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!((order_audits, quote_audits), (1, 1));
+    let (status, orders) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders?lead_id={lead_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{orders}");
+    let listed = orders
+        .as_array()
+        .or_else(|| orders["items"].as_array())
+        .expect("orders list")
+        .iter()
+        .find(|item| item["id"] == order_id.to_string())
+        .expect("lead order is listed")
+        .clone();
+    assert_eq!(listed["status"], "cancelled", "{listed}");
+
+    // Returning the lead to work reopens the order with its planned service;
+    // the closed quote stays closed until the intake confirms a quote again.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (order_status, reason, cancelled_at): (
+        String,
+        Option<String>,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as(
+        "SELECT status, cancellation_reason, cancelled_at FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(order_status, "active");
+    assert_eq!(reason, None);
+    assert_eq!(cancelled_at, None);
+    let service_status: String =
+        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+            .bind(artifacts.service_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(service_status, "planned");
+    let quote_status: String = sqlx::query_scalar("SELECT status FROM quotes WHERE id = $1")
+        .bind(artifacts.quote_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(quote_status, "rejected");
+    let reopen_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'reopen_lead_order' AND entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(reopen_audits, 1);
+
+    // The reserved reasons mark only the failed-lead withdrawal.
+    for reserved in ["lead_archived", "lead_deleted"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/orders/{order_id}/status"),
+            &pm,
+            Some(json!({ "status": "cancelled", "reason": reserved })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+}
+
+#[tokio::test]
+async fn deleting_a_failed_lead_cancels_its_order_for_good() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id = insert_first_intake_lead(&app, &tag).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (order_status, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status, cancellation_reason FROM orders WHERE id = $1")
+            .bind(artifacts.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_status, "cancelled");
+    assert_eq!(reason.as_deref(), Some("lead_deleted"));
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let order_status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
+        .bind(artifacts.order_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(order_status, "cancelled");
+}
+
+/// The repair of the migration, re-run on synthetic leads.
+const FAILED_LEAD_ORDERS_REPAIR: &str =
+    include_str!("../../../migrations/20260928172437_withdraw_orders_of_failed_leads.sql");
+
+#[tokio::test]
+async fn failed_lead_orders_repair_withdraws_active_orders_without_invoices() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+
+    // Leads that failed before the fix, their orders still active.
+    let archived_lead = insert_first_intake_lead(&app, &format!("{tag}-a")).await;
+    let archived = seed_complete_lead_onboarding(&app, archived_lead).await;
+    let deleted_lead = insert_first_intake_lead(&app, &format!("{tag}-d")).await;
+    let deleted = seed_complete_lead_onboarding(&app, deleted_lead).await;
+    let invoiced_lead = insert_first_intake_lead(&app, &format!("{tag}-i")).await;
+    let invoiced = seed_complete_lead_onboarding(&app, invoiced_lead).await;
+    for (lead_id, outcome, processed_by) in [
+        (archived_lead, "archived", Some(app.patient_manager_id)),
+        (deleted_lead, "delete_anonymized", None),
+        (invoiced_lead, "archived", Some(app.patient_manager_id)),
+    ] {
+        sqlx::query(
+            r#"UPDATE leads
+               SET qualification_status = CASE WHEN $2 = 'archived' THEN 'archived' ELSE 'deleted' END,
+                   failed_outcome_status = $2,
+                   failed_from_status = 'in_progress',
+                   failed_reason = 'not_our_lead',
+                   failed_processed_at = now() - interval '1 day',
+                   failed_processed_by = $3
+               WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(outcome)
+        .bind(processed_by)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    seed_supplier_invoice(&app, invoiced.order_id, &tag).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::raw_sql(FAILED_LEAD_ORDERS_REPAIR)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+
+    let order_state = |order_id: Uuid| async move {
+        sqlx::query_as::<_, (String, Option<String>, Option<Uuid>)>(
+            "SELECT status, cancellation_reason, cancelled_by FROM orders WHERE id = $1",
+        )
+        .bind(order_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(
+        order_state(archived.order_id).await,
+        (
+            "cancelled".to_string(),
+            Some("lead_archived".to_string()),
+            Some(app.patient_manager_id)
+        )
+    );
+    assert_eq!(
+        order_state(deleted.order_id).await,
+        (
+            "cancelled".to_string(),
+            Some("lead_deleted".to_string()),
+            None
+        )
+    );
+    assert_eq!(order_state(invoiced.order_id).await.0, "active");
+    let statuses: (String, String, String, String) = sqlx::query_as(
+        r#"SELECT (SELECT status FROM order_leistungen WHERE id = $1),
+                  (SELECT status FROM quotes WHERE id = $2),
+                  (SELECT status FROM order_leistungen WHERE id = $3),
+                  (SELECT status FROM quotes WHERE id = $4)"#,
+    )
+    .bind(archived.service_id)
+    .bind(archived.quote_id)
+    .bind(invoiced.service_id)
+    .bind(invoiced.quote_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        statuses,
+        (
+            "cancelled".to_string(),
+            "rejected".to_string(),
+            "planned".to_string(),
+            "accepted".to_string()
+        )
+    );
+    let audits: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE user_id IS NULL
+             AND context->>'repair' = '20260928172437_withdraw_orders_of_failed_leads'
+             AND entity_id = ANY($1)"#,
+    )
+    .bind(vec![
+        archived.order_id,
+        deleted.order_id,
+        invoiced.order_id,
+        archived.quote_id,
+        deleted.quote_id,
+    ])
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 4, "two orders and their two quotes");
+
+    // A repaired archived lead returns to work like a current one.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{archived_lead}/qualify"),
+        &pm,
+        Some(json!({ "status": "in_progress" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(order_state(archived.order_id).await.0, "active");
+    let service_status: String =
+        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+            .bind(archived.service_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(service_status, "planned");
+}
+
+/// An expected supplier invoice booked on a lead's order. A patient invoice
+/// cannot reference an order without a patient (validate_patient_invoice_context),
+/// so a supplier invoice is the invoice a lead's order can already carry.
+async fn seed_supplier_invoice(app: &TestApp, order_id: Uuid, tag: &str) {
+    let patient = seed_repeat_patient(app, true).await;
+    sqlx::query(
+        r#"INSERT INTO external_invoices (
+               order_id, patient_id, external_invoice_number, invoice_date,
+               amount_net, amount_vat, amount_gross, currency, status,
+               paid_by, service_delivered, created_by
+           ) VALUES (
+               $1, $2, $3, CURRENT_DATE, 100, 19, 119, 'EUR', 'expected',
+               'unpaid', false, $4
+           )"#,
+    )
+    .bind(order_id)
+    .bind(patient)
+    .bind(format!("EXT-{tag}"))
+    .bind(app.ceo_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_failed_lead_is_refused_while_its_order_has_an_invoice() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id = insert_first_intake_lead(&app, &tag).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    seed_supplier_invoice(&app, artifacts.order_id, &tag).await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "archive", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("already has invoices"),
+        "{body}"
+    );
+    let (lead_status, outcome): (String, String) = sqlx::query_as(
+        "SELECT qualification_status, failed_outcome_status FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (lead_status.as_str(), outcome.as_str()),
+        ("in_progress", "none")
+    );
+    let order_status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
+        .bind(artifacts.order_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(order_status, "active");
+}
+
 #[tokio::test]
 async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     let Some(app) = test_app().await else {
@@ -3540,12 +3946,14 @@ async fn repeat_intake_creation_is_atomic_replayable_visible_and_archivable() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{b}");
-    let status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id=$1")
-        .bind(order)
-        .fetch_one(&app.suite.pool)
-        .await
-        .unwrap();
+    let (status, reason): (String, Option<String>) =
+        sqlx::query_as("SELECT status, cancellation_reason FROM orders WHERE id=$1")
+            .bind(order)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
     assert_eq!(status, "cancelled");
+    assert_eq!(reason.as_deref(), Some("lead_archived"));
     let (_, list) = json_request(
         &app,
         "GET",

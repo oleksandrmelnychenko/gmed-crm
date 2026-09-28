@@ -3878,18 +3878,63 @@ async fn qualify_lead(
         }
     }
 
-    match sqlx::query(
+    // Returning an archived lead to work reopens the order its archiving
+    // withdrew, in the same transaction as the status change.
+    let restores_archived_lead = failed_outcome_status == "archived"
+        && matches!(body.status.as_str(), "new" | "in_progress" | "qualified");
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin qualify lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let update_result = sqlx::query(
         "UPDATE leads
          SET qualification_status = $2,
              status_changed_at = CASE WHEN qualification_status <> $2 THEN now() ELSE status_changed_at END,
              failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END
          WHERE id = $1",
     )
-        .bind(lead_id)
-        .bind(&body.status)
-        .execute(&state.db)
+    .bind(lead_id)
+    .bind(&body.status)
+    .execute(&mut *tx)
+    .await;
+    let mut reopened_order_ids = Vec::new();
+    if restores_archived_lead && matches!(&update_result, Ok(r) if r.rows_affected() > 0) {
+        reopened_order_ids = match crate::routes::orders::reopen_withdrawn_lead_orders_in_tx(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
         .await
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    }
+    if matches!(&update_result, Ok(r) if r.rows_affected() > 0)
+        && let Err(e) = tx.commit().await
     {
+        tracing::error!(error = %e, lead_id = %lead_id, "commit qualify lead");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    for order_id in &reopened_order_ids {
+        crate::realtime::publish_order_event(
+            &state,
+            Some(auth.user_id),
+            "order.status_changed",
+            *order_id,
+            json!({
+                "from_status": "cancelled",
+                "status": "active",
+                "note": "lead_restored",
+            }),
+        )
+        .await;
+    }
+
+    match update_result {
         Ok(r) if r.rows_affected() > 0 => {
             state.audit_sender.try_send(audit::domain_event(
                 "qualify_lead",
@@ -6167,15 +6212,27 @@ async fn resolve_failed_lead(
         );
     }
 
+    // The lead, its preparation orders and the outcome change together.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin failed-lead resolution");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve failed lead",
+            );
+        }
+    };
     let current = match sqlx::query(
         r#"SELECT qualification_status,
                   converted_patient_id,
                   failed_outcome_status
            FROM leads
-           WHERE id = $1"#,
+           WHERE id = $1
+           FOR UPDATE"#,
     )
     .bind(lead_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(row)) => row,
@@ -6225,6 +6282,26 @@ async fn resolve_failed_lead(
         "deleted"
     };
 
+    // A failed lead no longer needs the order opened while it was prepared:
+    // it is withdrawn in this transaction, so the order list never shows an
+    // active order of an archived or deleted lead.
+    let withdrawn_orders = match crate::routes::orders::withdraw_lead_orders_in_tx(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        if resolution == "archive" {
+            crate::routes::orders::LEAD_ARCHIVED_CANCELLATION_REASON
+        } else {
+            crate::routes::orders::LEAD_DELETED_CANCELLATION_REASON
+        },
+        reason,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
     let update_result = if resolution == "archive" {
         sqlx::query(
             r#"UPDATE leads
@@ -6243,44 +6320,59 @@ async fn resolve_failed_lead(
         .bind(reason)
         .bind(note)
         .bind(auth.user_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
+        .map(|result| (result, None))
     } else {
-        let deleted_result = purge_lead_and_prospect(
-            &state.db,
+        purge_lead_and_prospect_in_tx(
+            &mut tx,
             lead_id,
             Some(current_status.clone()),
             reason,
             note,
             Some(auth.user_id),
         )
-        .await;
-
-        match deleted_result {
-            Ok((result, purged_prospect)) => {
-                if result.rows_affected() > 0 {
-                    let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
-                        .bind(lead_id)
-                        .execute(&state.db)
-                        .await;
-                }
-                if let Some(prospect_id) = purged_prospect {
-                    state.audit_sender.try_send(audit::domain_event(
-                        "purge_prospect_patient",
-                        Some(auth.user_id),
-                        "patient",
-                        Some(prospect_id),
-                        json!({
-                            "reason": "storage_limitation_retention",
-                            "source_lead_id": lead_id,
-                            "gdpr_article": "5(1)(e)",
-                        }),
-                    ));
-                }
-                Ok(result)
+        .await
+    };
+    let update_result = match update_result {
+        Ok((result, purged_prospect)) if result.rows_affected() > 0 => {
+            if let Err(e) = tx.commit().await {
+                tracing::error!(error = %e, lead_id = %lead_id, "commit failed-lead resolution");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to resolve failed lead",
+                );
             }
-            Err(error) => Err(error),
+            if resolution != "archive" {
+                let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+                    .bind(lead_id)
+                    .execute(&state.db)
+                    .await;
+            }
+            if let Some(prospect_id) = purged_prospect {
+                state.audit_sender.try_send(audit::domain_event(
+                    "purge_prospect_patient",
+                    Some(auth.user_id),
+                    "patient",
+                    Some(prospect_id),
+                    json!({
+                        "reason": "storage_limitation_retention",
+                        "source_lead_id": lead_id,
+                        "gdpr_article": "5(1)(e)",
+                    }),
+                ));
+            }
+            crate::routes::orders::publish_withdrawn_lead_orders(
+                &state,
+                auth.user_id,
+                &withdrawn_orders,
+            )
+            .await;
+            Ok(result)
         }
+        // Nothing changed: the transaction rolls back when it is dropped.
+        Ok((result, _)) => Ok(result),
+        Err(error) => Err(error),
     };
 
     match update_result {
@@ -7082,6 +7174,29 @@ async fn purge_lead_and_prospect(
     processed_by: Option<Uuid>,
 ) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
     let mut tx = pool.begin().await?;
+    let purged = purge_lead_and_prospect_in_tx(
+        &mut tx,
+        lead_id,
+        failed_from_status,
+        reason,
+        note,
+        processed_by,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(purged)
+}
+
+/// [`purge_lead_and_prospect`] inside the caller's transaction, so the
+/// failed-lead workflow withdraws the lead's order in the same commit.
+async fn purge_lead_and_prospect_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    failed_from_status: Option<String>,
+    reason: &str,
+    note: Option<&str>,
+    processed_by: Option<Uuid>,
+) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
     let purge_candidate: Option<Uuid> = sqlx::query_scalar(
         r#"SELECT p.id
            FROM leads l
@@ -7092,7 +7207,7 @@ async fn purge_lead_and_prospect(
            FOR UPDATE OF l, p"#,
     )
     .bind(lead_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let purged_prospect = if let Some(patient_id) = purge_candidate {
         // The audit trigger permits this only while the locked patient is still
@@ -7100,19 +7215,19 @@ async fn purge_lead_and_prospect(
         // the subsequent patient cascade never collides with audit immutability.
         sqlx::query("DELETE FROM patient_clinical_versions WHERE patient_id = $1")
             .bind(patient_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
         sqlx::query_scalar(
             "DELETE FROM patients WHERE id = $1 AND lifecycle_status = 'prospective' RETURNING id",
         )
         .bind(patient_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?
     } else {
         None
     };
     let result = anonymize_lead_pii(
-        &mut *tx,
+        &mut **tx,
         lead_id,
         failed_from_status,
         reason,
@@ -7120,7 +7235,6 @@ async fn purge_lead_and_prospect(
         processed_by,
     )
     .await?;
-    tx.commit().await?;
     Ok((result, purged_prospect))
 }
 

@@ -22,6 +22,7 @@ import {
   isValidOrderCancelReason,
   orderCancellationBalance,
   orderCancellationErrorMessage,
+  orderCancellationReasonLabel,
   type OrderCancellationSettlement,
   type OrderCancellationSummary,
 } from "../model/order-cancellation";
@@ -121,7 +122,7 @@ export function OrderCancellationBanner({
         </p>
         {reason ? (
           <p className="whitespace-pre-wrap break-words">
-            {tx("Причина", "Grund")}: {reason}
+            {tx("Причина", "Grund")}: {orderCancellationReasonLabel(reason, lang)}
           </p>
         ) : null}
         <p className="text-xs">

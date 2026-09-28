@@ -7,7 +7,16 @@ import {
   normalizeOrderCancellationSummary,
   orderCancellationBalance,
   orderCancellationErrorMessage,
+  orderCancellationReasonLabel,
 } from "./order-cancellation";
+
+describe("orderCancellationReasonLabel", () => {
+  it("names the reserved reasons of a failed lead's order and keeps staff text", () => {
+    expect(orderCancellationReasonLabel("lead_archived", "ru")).toBe("Лид архивирован (заказ отозван)");
+    expect(orderCancellationReasonLabel("lead_deleted", "de")).toBe("Lead gelöscht und anonymisiert");
+    expect(orderCancellationReasonLabel("Patient postponed", "de")).toBe("Patient postponed");
+  });
+});
 
 const tx = (...texts: [ru: string, de: string]) => texts[0];
 
