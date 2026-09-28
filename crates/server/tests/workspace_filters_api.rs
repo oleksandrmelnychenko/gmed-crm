@@ -5300,6 +5300,127 @@ async fn teamlead_only_sees_assigned_patients_and_appointments() {
 }
 
 #[tokio::test]
+async fn appointment_payload_reports_whether_the_caller_can_change_it() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("appointment-can-edit");
+    let team_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-team")).await;
+    let own_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-own")).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let teamlead_id = seed_user(&pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let concierge_id = seed_user(&pool, &format!("{tag}-conc"), "concierge").await;
+    seed_patient_assignment(&pool, own_patient_id, teamlead_id, admin_id).await;
+    seed_patient_assignment(&pool, team_patient_id, concierge_id, admin_id).await;
+
+    // A visit of the team (a booked interpreter) for a patient the team lead
+    // is not assigned to, and a visit of the team lead's own patient.
+    let team_visit = seed_appointment(
+        &pool,
+        team_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Team visit",
+        "confirmed",
+        "2026-10-05",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE appointments SET interpreter_id = $2, interpreter_response = 'accepted' WHERE id = $1",
+    )
+    .bind(team_visit)
+    .bind(interpreter_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let own_visit = seed_appointment(
+        &pool,
+        own_patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        "Own patient visit",
+        "planned",
+        "2026-10-06",
+    )
+    .await;
+
+    let detail_can_edit = |bearer: String, appointment_id: Uuid| {
+        let app = app.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/appointments/{appointment_id}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["can_edit"].as_bool().expect("can_edit flag")
+        }
+    };
+    let listed_can_edit = |bearer: String| {
+        let app = app.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                "/api/v1/appointments?date_from=2026-10-05&date_to=2026-10-06",
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body.as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| {
+                    item["id"] == team_visit.to_string() || item["id"] == own_visit.to_string()
+                })
+                .map(|item| {
+                    (
+                        item["id"].as_str().unwrap().to_string(),
+                        item["can_edit"].as_bool().expect("can_edit flag"),
+                    )
+                })
+                .collect::<std::collections::HashMap<_, _>>()
+        }
+    };
+
+    // The team lead opens the team visit to review its report but cannot
+    // change it; the server refuses the edit the flag withholds.
+    let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
+    assert!(!detail_can_edit(teamlead_bearer.clone(), team_visit).await);
+    assert!(detail_can_edit(teamlead_bearer.clone(), own_visit).await);
+    let listed = listed_can_edit(teamlead_bearer.clone()).await;
+    assert_eq!(listed.get(&team_visit.to_string()), Some(&false));
+    assert_eq!(listed.get(&own_visit.to_string()), Some(&true));
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{team_visit}/update"),
+        &teamlead_bearer,
+        Some(json!({ "title": "Team visit moved", "date": "2026-10-07" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // The CEO changes every appointment; the booked interpreter has no
+    // appointments.edit; the concierge sees the medical visit as a blocked slot.
+    assert!(detail_can_edit(admin_bearer.clone(), team_visit).await);
+    assert!(!detail_can_edit(auth_header_for(interpreter_id, "interpreter"), team_visit).await);
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    assert!(!detail_can_edit(concierge_bearer.clone(), team_visit).await);
+    let listed = listed_can_edit(concierge_bearer).await;
+    assert_eq!(listed.get(&team_visit.to_string()), Some(&false));
+}
+
+#[tokio::test]
 async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

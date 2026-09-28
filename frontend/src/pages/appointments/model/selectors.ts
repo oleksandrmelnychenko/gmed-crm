@@ -107,6 +107,40 @@ export function blockedSlotPermissions(
 }
 
 /**
+ * The permissions for one appointment. A concierge sees a medical appointment
+ * only as a blocked slot, and the server reports per appointment whether the
+ * caller may change it (`can_edit`): the team lead reviews reports of the
+ * team's appointments but changes only those of its own patients, so every
+ * change action is withheld there while report review stays.
+ */
+export function appointmentRecordPermissions(
+  permissions: AppointmentPermissions,
+  record: { is_blocked?: boolean; can_edit?: boolean } | null | undefined,
+): AppointmentPermissions {
+  if (!record) return permissions;
+  const scoped = record.is_blocked ? blockedSlotPermissions(permissions) : permissions;
+  if (record.can_edit !== false) return scoped;
+  return {
+    ...scoped,
+    canEditSchedule: false,
+    canDelete: false,
+    canManageStatus: false,
+    canAssignInterpreter: false,
+    canManageChecklist: false,
+    canManageReminders: false,
+    canManageCommunications: false,
+  };
+}
+
+/** Whether the calendar may drag or resize this appointment. */
+export function canRescheduleAppointmentItem(
+  canEditSchedule: boolean,
+  item: { is_blocked?: boolean; can_edit?: boolean },
+): boolean {
+  return canEditSchedule && !item.is_blocked && item.can_edit !== false;
+}
+
+/**
  * The server completes a reminder for the coordinating roles (CEO, Patient
  * Manager) or for the user it is addressed to; everyone else gets a 404, so
  * the "mark complete" action is only offered to them.

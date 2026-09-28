@@ -126,6 +126,14 @@ export type AppointmentListItem = {
   recurrence_index: number;
   recurrence_series_size: number;
   is_blocked: boolean;
+  /**
+   * Whether the caller may change this appointment (edit, reschedule, status,
+   * interpreter, checklist, reminders, communication), decided by the server
+   * with the same rule it enforces. An interpreter team lead sees the team's
+   * appointments but changes only those of assigned patients, own ones or
+   * the ones it is booked on. Absent in older payloads: the role decides.
+   */
+  can_edit?: boolean;
 };
 
 export type AppointmentRequestStatus =

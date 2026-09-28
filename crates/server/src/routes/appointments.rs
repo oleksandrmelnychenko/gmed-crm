@@ -1639,7 +1639,14 @@ async fn list_appointments(
                   d.name AS doctor_name,
                   u.name AS interpreter_name,
                   owner.name AS owner_name,
-                  owner.role AS owner_role
+                  owner.role AS owner_role,
+                  ($19::boolean AND EXISTS (
+                      SELECT 1
+                      FROM patient_assignments caller_assignment
+                      WHERE caller_assignment.patient_id = a.patient_id
+                        AND caller_assignment.user_id = $16
+                        AND caller_assignment.revoked_at IS NULL
+                  )) AS caller_has_assignment
            FROM appointments a
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN providers pr ON pr.id = a.provider_id
@@ -1827,7 +1834,14 @@ async fn list_attention_items(
                   reminders.next_due_at AS next_reminder_due_at,
                   COALESCE(comms.open_count, 0) AS open_communication_count,
                   comms.next_due_at AS next_communication_due_at,
-                  latest_report.approval_status AS latest_report_status
+                  latest_report.approval_status AS latest_report_status,
+                  ($21::boolean AND EXISTS (
+                      SELECT 1
+                      FROM patient_assignments caller_assignment
+                      WHERE caller_assignment.patient_id = a.patient_id
+                        AND caller_assignment.user_id = $16
+                        AND caller_assignment.revoked_at IS NULL
+                  )) AS caller_has_assignment
            FROM appointments a
            JOIN patients p ON p.id = a.patient_id
            LEFT JOIN providers pr ON pr.id = a.provider_id
@@ -3949,6 +3963,29 @@ async fn get_appointment(
                 }
                 None => Vec::new(),
             };
+            // The detail tells the client whether the change actions will be
+            // accepted, so it does not offer an edit the server refuses (the
+            // team lead's team context is read-only).
+            let appointment_type: String = a.try_get("appointment_type").unwrap_or_default();
+            let can_edit = if auth.can(Capability::AppointmentsEdit)
+                && !is_blocked_slot(&auth, &appointment_type)
+            {
+                match can_change_appointment(
+                    &state,
+                    &auth,
+                    appointment_id,
+                    Some(patient_id),
+                    interpreter_id,
+                    owner_user_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                }
+            } else {
+                false
+            };
 
             Json(build_appointment_detail_json(
                 &auth,
@@ -3958,6 +3995,7 @@ async fn get_appointment(
                 interpreter_id,
                 recurring_scope_preview,
                 recurring_lineage_history,
+                can_edit,
             ))
             .into_response()
         }
@@ -9533,6 +9571,31 @@ fn build_conflict_item_json(
     })
 }
 
+/// Whether the caller may change the appointment (edit, reschedule, status,
+/// interpreter, checklist, reminders, communication). It is the rule
+/// `can_change_appointment` enforces, decided from the appointment row, on
+/// top of the role's `appointments.edit` and the concierge's blocked medical
+/// slot. The interpreter team lead's team context is a read scope, so a team
+/// appointment of a patient it is not assigned to is not changeable.
+/// `assigned_to_patient` is the caller's active assignment to the patient.
+fn caller_can_edit_appointment(
+    auth: &AuthUser,
+    appointment_type: &str,
+    interpreter_id: Option<Uuid>,
+    owner_user_id: Option<Uuid>,
+    assigned_to_patient: bool,
+) -> bool {
+    if !auth.can(Capability::AppointmentsEdit) || is_blocked_slot(auth, appointment_type) {
+        return false;
+    }
+    let scope = access::AppointmentScope::for_role(auth.role).for_change();
+    scope
+        .admits_directly(auth.user_id, interpreter_id, owner_user_id)
+        .unwrap_or(scope.via_patient_assignment && assigned_to_patient)
+}
+
+/// List item of an appointment. The row carries `caller_has_assignment` (the
+/// caller's active assignment to the patient) for `can_edit`.
 fn build_appointment_list_json(
     auth: &AuthUser,
     row: &sqlx::postgres::PgRow,
@@ -9543,6 +9606,16 @@ fn build_appointment_list_json(
         .try_get::<String, _>("appointment_type")
         .unwrap_or_default();
     let blocked = is_blocked_slot(auth, &appointment_type);
+    let can_edit = caller_can_edit_appointment(
+        auth,
+        &appointment_type,
+        row.try_get::<Option<Uuid>, _>("interpreter_id")
+            .unwrap_or_default(),
+        row.try_get::<Option<Uuid>, _>("owner_user_id")
+            .unwrap_or_default(),
+        row.try_get::<bool, _>("caller_has_assignment")
+            .unwrap_or(false),
+    );
     let patient_name = format!(
         "{} {}",
         row.try_get::<String, _>("first_name").unwrap_or_default(),
@@ -9587,9 +9660,11 @@ fn build_appointment_list_json(
         "recurrence_series_size": if blocked { 1 } else { row.try_get::<i64, _>("recurrence_series_size").map(|value| value as i32).unwrap_or(1) },
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
+        "can_edit": can_edit,
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_appointment_detail_json(
     auth: &AuthUser,
     row: &sqlx::postgres::PgRow,
@@ -9598,6 +9673,7 @@ fn build_appointment_detail_json(
     interpreter_id: Option<Uuid>,
     recurring_scope_preview: Vec<serde_json::Value>,
     recurring_lineage_history: Vec<serde_json::Value>,
+    can_edit: bool,
 ) -> serde_json::Value {
     let appointment_type = row
         .try_get::<String, _>("appointment_type")
@@ -9656,6 +9732,7 @@ fn build_appointment_detail_json(
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "is_blocked": blocked,
         "visibility_mode": if blocked { "blocked" } else { "full" },
+        "can_edit": can_edit,
     })
 }
 

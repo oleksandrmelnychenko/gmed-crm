@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   appointmentPermissions,
+  appointmentRecordPermissions,
   appointmentReportActions,
   appointmentsReadOnlyScope,
   blockedSlotPermissions,
   canCompleteAppointmentReminder,
+  canRescheduleAppointmentItem,
   linkedPatientPermissions,
 } from "./selectors";
 import { getRequiredAppointmentDetailResourceGroups } from "./detail-resource-needs";
@@ -48,6 +50,50 @@ describe("appointment role contracts", () => {
         canManageChecklist: false,
         canManageConciergeServices: false,
       }),
+    );
+  });
+
+  it("withholds change actions on an appointment the server says the team lead cannot change", () => {
+    const teamlead = appointmentPermissions("teamlead_interpreter");
+    const teamContext = appointmentRecordPermissions(teamlead, {
+      is_blocked: false,
+      can_edit: false,
+    });
+    for (const flag of [
+      "canEditSchedule",
+      "canDelete",
+      "canManageStatus",
+      "canAssignInterpreter",
+      "canManageChecklist",
+      "canManageReminders",
+      "canManageCommunications",
+    ] as const) {
+      expect(teamContext[flag], flag).toBe(false);
+    }
+    // Reviewing the team's interpreter reports is the point of the team context.
+    expect(teamContext.canViewReport).toBe(true);
+    expect(teamContext.canApproveReport).toBe(true);
+    expect(teamContext.canRejectReport).toBe(true);
+
+    // Own patients (or an older payload without the flag) keep the role's actions.
+    expect(appointmentRecordPermissions(teamlead, { can_edit: true })).toEqual(teamlead);
+    expect(appointmentRecordPermissions(teamlead, { is_blocked: false })).toEqual(teamlead);
+    expect(appointmentRecordPermissions(teamlead, null)).toEqual(teamlead);
+
+    // A blocked medical slot stays blocked for the concierge.
+    const concierge = appointmentPermissions("concierge");
+    expect(
+      appointmentRecordPermissions(concierge, { is_blocked: true, can_edit: false }),
+    ).toEqual(blockedSlotPermissions(concierge));
+
+    expect(canRescheduleAppointmentItem(true, { is_blocked: false, can_edit: true })).toBe(true);
+    expect(canRescheduleAppointmentItem(true, { is_blocked: false })).toBe(true);
+    expect(canRescheduleAppointmentItem(true, { is_blocked: false, can_edit: false })).toBe(
+      false,
+    );
+    expect(canRescheduleAppointmentItem(true, { is_blocked: true, can_edit: true })).toBe(false);
+    expect(canRescheduleAppointmentItem(false, { is_blocked: false, can_edit: true })).toBe(
+      false,
     );
   });
 

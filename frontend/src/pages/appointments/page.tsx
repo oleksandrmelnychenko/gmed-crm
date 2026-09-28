@@ -33,8 +33,8 @@ import {
 } from "@/pages/appointments/model/selectors";
 import {
   appointmentPermissions,
+  appointmentRecordPermissions,
   appointmentsReadOnlyScope,
-  blockedSlotPermissions,
   linkedPatientPermissions,
 } from "@/pages/appointments/model/selectors";
 import {
@@ -432,9 +432,7 @@ function useStaffAppointmentsPageContent() {
   });
   const requiresExtendedDetailResources =
     detailOpen && isMobile && Boolean(selectedId);
-  const detailPermissions = detail?.is_blocked
-    ? blockedSlotPermissions(permissions)
-    : permissions;
+  const detailPermissions = appointmentRecordPermissions(permissions, detail);
   const {
     linkedPreviewOpen,
     linkedPreviewKind,
