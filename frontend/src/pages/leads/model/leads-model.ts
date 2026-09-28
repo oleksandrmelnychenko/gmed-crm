@@ -250,6 +250,7 @@ export const STATUS_OPTIONS = [
   "qualified",
   "not_qualified",
   "archived",
+  "deleted",
 ] as const;
 
 export const COMPLIANCE_OPTIONS = [
@@ -495,6 +496,9 @@ const LEAD_TRANSITION_LABEL_KEYS = {
   failed_resolved: "lead_transition_failed_resolved",
   converted: "lead_transition_converted",
   gate_updated: "lead_transition_gate_updated",
+  archived: "lead_transition_archived",
+  deleted: "lead_transition_deleted",
+  promoted_to_console: "lead_transition_promoted_to_console",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {

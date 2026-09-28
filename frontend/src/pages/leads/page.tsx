@@ -2756,7 +2756,7 @@ function useLeadsPageContent() {
                 setFilters((current) => ({
                   ...current,
                   status,
-                  includeArchived: status === "archived" ? "true" : current.includeArchived,
+                  includeArchived: status === "archived" || status === "deleted" ? "true" : current.includeArchived,
                 }));
               }}
               className={cn(selectClassName, "h-8 rounded-md w-[190px] bg-field text-xs")}

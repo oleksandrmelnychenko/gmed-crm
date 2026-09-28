@@ -325,6 +325,9 @@ export interface OperationsTranslations {
   lead_transition_failed_resolved: string;
   lead_transition_converted: string;
   lead_transition_gate_updated: string;
+  lead_transition_archived: string;
+  lead_transition_deleted: string;
+  lead_transition_promoted_to_console: string;
   lead_tab_overview: string;
   lead_tab_process: string;
   lead_tab_qualification: string;
@@ -925,6 +928,9 @@ export const operationsRu: OperationsTranslations = {
   lead_transition_failed_resolved: "Неуспешный лид обработан",
   lead_transition_converted: "Конвертирован",
   lead_transition_gate_updated: "Гейт обновлён",
+  lead_transition_archived: "Перенесён в архив",
+  lead_transition_deleted: "Удалён",
+  lead_transition_promoted_to_console: "Переведён в консоль",
   lead_tab_overview: "Обзор",
   lead_tab_process: "Процесс",
   lead_tab_qualification: "Квалификация",
@@ -1556,6 +1562,9 @@ export const operationsDe: OperationsTranslations = {
   lead_transition_failed_resolved: "Nicht erfolgreicher Lead bearbeitet",
   lead_transition_converted: "Konvertiert",
   lead_transition_gate_updated: "Gate aktualisiert",
+  lead_transition_archived: "Archiviert",
+  lead_transition_deleted: "Gelöscht",
+  lead_transition_promoted_to_console: "In Konsole übernommen",
   lead_tab_overview: "Überblick",
   lead_tab_process: "Prozess",
   lead_tab_qualification: "Qualifikation",
