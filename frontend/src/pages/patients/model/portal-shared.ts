@@ -120,6 +120,10 @@ export type PortalInvoiceItem = {
   invoice_number: string;
   invoice_type: string;
   status: string;
+  /** `credited` for an invoice fully covered by credit notes. */
+  display_status?: string;
+  /** A released invoice cancelled later has its cancellation document. */
+  has_storno_document?: boolean;
   issued_at: string;
   due_date: string | null;
   total_net: unknown;
@@ -225,7 +229,13 @@ export type PortalAccountStatementItem = {
   document_number?: string | null;
   description: string;
   status: string;
-  payment_state: "paid" | "partially_paid" | "unpaid" | "amount_hidden" | "invoice_adjustment";
+  payment_state:
+    | "paid"
+    | "partially_paid"
+    | "unpaid"
+    | "amount_hidden"
+    | "invoice_adjustment"
+    | "credited";
   amounts_visible: boolean;
   amount_gross?: string | null;
   cash_paid?: string | null;
@@ -669,6 +679,7 @@ const PORTAL_STATUS_LABEL_KEYS = {
   overdue: "portal_status_overdue",
   paid: "portal_status_paid",
   partially_paid: "portal_status_partially_paid",
+  credited: "portal_status_credited",
   pending: "portal_status_pending",
   planned: "portal_status_planned",
   ready: "portal_status_ready",
@@ -1123,6 +1134,12 @@ export async function downloadPortalUpload(id: string, filename: string) {
 export async function downloadPortalInvoicePdf(id: string, filename: string) {
   const blob = await fetchPortalBlob(`/me/invoices/${id}/pdf`);
   downloadBlob(blob, filename || "invoice.pdf");
+}
+
+/** Cancellation document (Stornorechnung) of a cancelled invoice. */
+export async function downloadPortalStornoPdf(invoiceId: string, invoiceNumber: string) {
+  const blob = await fetchPortalBlob(`/me/invoices/${invoiceId}/storno/pdf`);
+  downloadBlob(blob, `STORNORECHNUNG-${invoiceNumber || invoiceId}.pdf`);
 }
 
 /** Correction document (Rechnungskorrektur) of a credit note shown in the portal. */

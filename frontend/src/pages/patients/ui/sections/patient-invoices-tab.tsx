@@ -561,7 +561,7 @@ function invoiceAccentClass(status: string) {
   if (status === "paid") return "bg-emerald-500";
   if (status === "overdue" || status === "cancelled") return "bg-rose-500";
   if (status === "partially_paid") return "bg-amber-500";
-  if (status === "draft") return "bg-slate-400";
+  if (status === "draft" || status === "credited") return "bg-slate-400";
   return "bg-sky-500";
 }
 
@@ -1275,15 +1275,18 @@ function usePatientInvoicesTabContent({
       {
         id: "status",
         label: t.users_status,
-        accessor: (invoice) => statusLabel(invoice.status),
+        accessor: (invoice) => statusLabel(invoice.display_status ?? invoice.status),
         sortable: true,
         width: 150,
         render: (invoice) => (
           <Badge
             variant="outline"
-            className={cn("rounded-full font-mono text-[10px]", statusColors[invoice.status] ?? "")}
+            className={cn(
+              "rounded-full font-mono text-[10px]",
+              statusColors[invoice.display_status ?? invoice.status] ?? "",
+            )}
           >
-            {statusLabel(invoice.status)}
+            {statusLabel(invoice.display_status ?? invoice.status)}
           </Badge>
         ),
       },
@@ -3431,7 +3434,7 @@ function usePatientInvoicesTabContent({
           dictionary={t as unknown as Record<string, string>}
           emptyState={<EmptyCell>{t.patient_invoices_no_invoices}</EmptyCell>}
           onRowClick={(invoice) => onOpenInvoice(invoice.id)}
-          rowAccent={(invoice) => invoiceAccentClass(invoice.status)}
+          rowAccent={(invoice) => invoiceAccentClass(invoice.display_status ?? invoice.status)}
           toolbarStart={
             <>
               <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">

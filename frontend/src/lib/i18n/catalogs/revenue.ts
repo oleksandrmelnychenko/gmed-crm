@@ -325,6 +325,23 @@ export interface RevenueTranslations {
   revenue_invoice_status_paid: string;
   revenue_invoice_status_overdue: string;
   revenue_invoice_status_cancelled: string;
+  revenue_invoice_status_credited: string;
+  revenue_invoices_storno_title: string;
+  revenue_invoices_storno_description: string;
+  revenue_invoices_storno_download: string;
+  revenue_invoices_status_reason: string;
+  revenue_invoices_storno_reason_hint: string;
+  revenue_invoices_unblock_overdue_hint: string;
+  revenue_invoices_reason_required: string;
+  revenue_invoices_dunning_block: string;
+  revenue_invoices_dunning_block_active: string;
+  revenue_invoices_dunning_block_hint: string;
+  revenue_invoices_dunning_block_set: string;
+  revenue_invoices_dunning_block_clear: string;
+  revenue_invoices_dunning_block_reason: string;
+  revenue_invoices_dunning_block_clear_reason: string;
+  revenue_invoices_dunning_blocked: string;
+  revenue_termination_to_credit: string;
   revenue_invoice_type_advance: string;
   revenue_invoice_type_interim: string;
   revenue_invoice_type_final: string;
@@ -1207,6 +1224,23 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoice_status_paid: "Оплачен",
   revenue_invoice_status_overdue: "Просрочен",
   revenue_invoice_status_cancelled: "Отменён",
+  revenue_invoice_status_credited: "Сторнирован",
+  revenue_invoices_storno_title: "Документ сторно",
+  revenue_invoices_storno_description: "Счёт отменён после выпуска. Документ сторно с собственным номером отменяет его полностью; оба документа хранятся в архиве.",
+  revenue_invoices_storno_download: "Сторно (PDF)",
+  revenue_invoices_status_reason: "Причина",
+  revenue_invoices_storno_reason_hint: "Отмена выпущенного счёта создаёт документ сторно с собственным номером. Причина печатается в документе.",
+  revenue_invoices_unblock_overdue_hint: "Возврат в «Отправлен» ставит блокировку напоминаний с этой причиной: автоматические напоминания и просрочка не применяются, пока блокировка не снята.",
+  revenue_invoices_reason_required: "Укажите причину (от 3 символов).",
+  revenue_invoices_dunning_block: "Блокировка напоминаний",
+  revenue_invoices_dunning_block_active: "Напоминания заблокированы: {reason}",
+  revenue_invoices_dunning_block_hint: "Пока действует блокировка, напоминания не создаются (ни автоматически, ни вручную) и счёт автоматически не становится просроченным.",
+  revenue_invoices_dunning_block_set: "Заблокировать напоминания",
+  revenue_invoices_dunning_block_clear: "Снять блокировку",
+  revenue_invoices_dunning_block_reason: "Причина блокировки",
+  revenue_invoices_dunning_block_clear_reason: "Причина снятия",
+  revenue_invoices_dunning_blocked: "Для счёта действует блокировка напоминаний. Снимите её, чтобы отправить напоминание.",
+  revenue_termination_to_credit: "К сторнированию (выставлено авансом, не оказано)",
   revenue_invoice_type_advance: "Авансовый",
   revenue_invoice_type_interim: "Промежуточный",
   revenue_invoice_type_final: "Финальный",
@@ -1604,6 +1638,23 @@ export const revenueDe: RevenueTranslations = {
   revenue_invoice_status_paid: "Bezahlt",
   revenue_invoice_status_overdue: "Überfällig",
   revenue_invoice_status_cancelled: "Storniert",
+  revenue_invoice_status_credited: "Storniert",
+  revenue_invoices_storno_title: "Stornorechnung",
+  revenue_invoices_storno_description: "Die Rechnung wurde nach der Ausstellung storniert. Die Stornorechnung mit eigener Nummer hebt sie vollständig auf; beide Dokumente bleiben archiviert.",
+  revenue_invoices_storno_download: "Stornorechnung (PDF)",
+  revenue_invoices_status_reason: "Grund",
+  revenue_invoices_storno_reason_hint: "Die Stornierung einer ausgestellten Rechnung erzeugt eine Stornorechnung mit eigener Nummer. Der Grund wird darauf gedruckt.",
+  revenue_invoices_unblock_overdue_hint: "Zurück auf „Versendet“ setzt eine Mahnsperre mit diesem Grund: keine automatischen Mahnungen und keine automatische Überfälligkeit, bis sie aufgehoben wird.",
+  revenue_invoices_reason_required: "Bitte einen Grund angeben (mindestens 3 Zeichen).",
+  revenue_invoices_dunning_block: "Mahnsperre",
+  revenue_invoices_dunning_block_active: "Mahnsperre aktiv: {reason}",
+  revenue_invoices_dunning_block_hint: "Solange die Mahnsperre gilt, werden keine Mahnungen erstellt (weder automatisch noch manuell) und die Rechnung wird nicht automatisch überfällig.",
+  revenue_invoices_dunning_block_set: "Mahnsperre setzen",
+  revenue_invoices_dunning_block_clear: "Mahnsperre aufheben",
+  revenue_invoices_dunning_block_reason: "Grund der Mahnsperre",
+  revenue_invoices_dunning_block_clear_reason: "Grund der Aufhebung",
+  revenue_invoices_dunning_blocked: "Für diese Rechnung gilt eine Mahnsperre. Heben Sie sie auf, um eine Mahnung zu senden.",
+  revenue_termination_to_credit: "Gutzuschreiben (vorab berechnet, nicht erbracht)",
   revenue_invoice_type_advance: "Anzahlung",
   revenue_invoice_type_interim: "Zwischenrechnung",
   revenue_invoice_type_final: "Schlussrechnung",

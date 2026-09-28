@@ -637,6 +637,9 @@ export interface Translations
   settings_interpreter_access: string;
   settings_interpreter_access_hint: string;
   settings_interpreter_booking_access_days: string;
+  settings_dunning: string;
+  settings_dunning_hint: string;
+  settings_auto_dunning_grace_days: string;
   settings_sessions: string;
   settings_active_sessions: string;
   settings_logout_user: string;

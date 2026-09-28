@@ -36,6 +36,8 @@ export type TerminationFigures = {
   draft_gross?: DecimalString;
   billable_gross?: DecimalString;
   unmatched_invoiced_gross?: DecimalString;
+  /** Invoiced in advance, never delivered, not credited yet: owed back. */
+  to_credit_gross?: DecimalString;
 };
 
 export type TerminationPreviewOrder = TerminationFigures & {

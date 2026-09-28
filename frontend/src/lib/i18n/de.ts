@@ -761,6 +761,10 @@ export const de = {
   settings_interpreter_access_hint:
     "Ein gebuchter Dolmetscher sieht die Basisdaten, freigegebenen Dokumente und den Chat des Patienten. Der Zugang endet ohne aktive Buchung oder so viele Tage nach dem letzten gebuchten Termin; manuelle Zuweisungen bleiben bestehen.",
   settings_interpreter_booking_access_days: "Zugang nach dem letzten gebuchten Termin (Tage)",
+  settings_dunning: "Mahnwesen",
+  settings_dunning_hint:
+    "Die erste automatische Zahlungserinnerung folgt erst nach dieser Karenzzeit nach dem Zahlungsziel (Berliner Kalender). Rechnungen mit Mahnsperre, Ratenplan oder eskaliertem Forderungsfall werden nicht automatisch gemahnt.",
+  settings_auto_dunning_grace_days: "Karenzzeit vor der ersten automatischen Erinnerung (Tage)",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
   settings_logout_user: "Sitzungen beenden",

@@ -136,6 +136,10 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_INVOICE_PAGE_SIZE,
   INVOICE_STATUSES,
+  INVOICE_FILTER_STATUSES,
+  invoiceDisplayStatus,
+  activeDunningBlock,
+  statusChangeReasonKind,
   canPickInvoiceStatus,
   INVOICE_TYPES,
   blankCreateForm,
@@ -166,6 +170,7 @@ import {
   dunningLetterFileName,
 } from "./model/invoice-model";
 import { localizeInvoiceError } from "./model/invoice-errors";
+import { DunningBlockPanel, StornoDocumentCard } from "./ui/invoice-corrections-panel";
 import type {
   AccountingEntry,
   AccountingLedgerPayload,
@@ -243,6 +248,7 @@ const INVOICE_STATUS_LABEL_KEYS = {
   paid: "revenue_invoice_status_paid",
   overdue: "revenue_invoice_status_overdue",
   cancelled: "revenue_invoice_status_cancelled",
+  credited: "revenue_invoice_status_credited",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const INVOICE_TYPE_LABEL_KEYS = {
@@ -419,7 +425,7 @@ function createInvoiceUiState(seed: InvoiceCreateSeed): InvoiceUiState {
     createForm: { ...blankCreateForm(seed.quoteId), invoiceType: seed.invoiceType },
     createBusy: false,
     createError: null,
-    statusForm: { status: "draft", dueDate: "", notes: "" },
+    statusForm: { status: "draft", dueDate: "", notes: "", reason: "" },
     statusBusy: false,
     statusError: null,
     statusDialogOpen: false,
@@ -1184,9 +1190,9 @@ function useStaffInvoicesPageContent() {
       {
         id: "status",
         label: t.invoices_status,
-        accessor: (row) => row.status,
+        accessor: (row) => invoiceDisplayStatus(row),
         filterType: "enum",
-        filterOptions: INVOICE_STATUSES.map((status) => ({
+        filterOptions: INVOICE_FILTER_STATUSES.map((status) => ({
           value: status,
           label: invoiceStatusLabel(status),
         })),
@@ -1194,9 +1200,14 @@ function useStaffInvoicesPageContent() {
         sortable: true,
         width: 150,
         render: (row) => (
-          <StatusBadge tone={statusBadgeClass(row.status)}>
-            {invoiceStatusLabel(row.status)}
-          </StatusBadge>
+          <span className="inline-flex flex-wrap items-center gap-1">
+            <StatusBadge tone={statusBadgeClass(invoiceDisplayStatus(row))}>
+              {invoiceStatusLabel(invoiceDisplayStatus(row))}
+            </StatusBadge>
+            {activeDunningBlock(row) ? (
+              <StatusBadge tone="warning">{t.revenue_invoices_dunning_block}</StatusBadge>
+            ) : null}
+          </span>
         ),
       },
       {
@@ -1986,6 +1997,7 @@ function useStaffInvoicesPageContent() {
         status: statusForm.status,
         due_date: statusForm.dueDate || null,
         notes: statusForm.notes.trim() || null,
+        reason: statusForm.reason.trim() || null,
       });
       setStatusError(null);
       setReloadToken((current) => current + 1);
@@ -2299,7 +2311,7 @@ function useStaffInvoicesPageContent() {
               className={cn(selectClassName, "h-8 rounded-md w-[160px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_status}</option>
-              {INVOICE_STATUSES.map((status) => (
+              {INVOICE_FILTER_STATUSES.map((status) => (
                 <option key={status} value={status}>
                   {invoiceStatusLabel(status)}
                 </option>
@@ -2618,9 +2630,12 @@ function useStaffInvoicesPageContent() {
                     <div className="grid gap-4 pl-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <StatusBadge tone={statusBadgeClass(detail.status)}>
-                            {invoiceStatusLabel(detail.status)}
+                          <StatusBadge tone={statusBadgeClass(invoiceDisplayStatus(detail))}>
+                            {invoiceStatusLabel(invoiceDisplayStatus(detail))}
                           </StatusBadge>
+                          {activeDunningBlock(detail) ? (
+                            <StatusBadge tone="warning">{t.revenue_invoices_dunning_block}</StatusBadge>
+                          ) : null}
                           <Badge variant="outline" className="rounded-full font-mono text-xs">{invoiceTypeLabel(detail.invoice_type)}</Badge>
                         </div>
                         <h3 className="mt-2 text-lg font-semibold leading-none text-foreground">
@@ -3744,6 +3759,12 @@ function useStaffInvoicesPageContent() {
                     </section>
                   </div>
 
+                <StornoDocumentCard invoice={detail} />
+                <DunningBlockPanel
+                  invoice={detail}
+                  canManage={access.canManage}
+                  onChanged={() => setReloadToken((current) => current + 1)}
+                />
                 {dunningBlockKey ? (
                   <p id="invoice-dunning-block-reason" className="text-sm text-muted-foreground">
                     {t[dunningBlockKey]}
@@ -4329,8 +4350,29 @@ function useStaffInvoicesPageContent() {
                   <p role="alert" className="text-xs text-destructive lg:col-span-2">
                     {statusFormProblem === "due_date_before_invoice_date"
                       ? t.revenue_invoices_due_date_before_invoice_date
-                      : t.revenue_invoices_due_date_locked}
+                      : statusFormProblem === "reason_required"
+                        ? t.revenue_invoices_reason_required
+                        : t.revenue_invoices_due_date_locked}
                   </p>
+                ) : null}
+                {detail && statusChangeReasonKind(detail, statusForm.status) ? (
+                  <Field label={t.revenue_invoices_status_reason} className="lg:col-span-2">
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {statusChangeReasonKind(detail, statusForm.status) === "storno"
+                        ? t.revenue_invoices_storno_reason_hint
+                        : t.revenue_invoices_unblock_overdue_hint}
+                    </p>
+                    <Input
+                      className={shellInputClassName}
+                      value={statusForm.reason}
+                      maxLength={1000}
+                      onChange={(event) =>
+                        setStatusForm((current) => ({ ...current, reason: event.target.value }))
+                      }
+                      disabled={!access.canManage}
+                      data-testid="invoice-status-reason"
+                    />
+                  </Field>
                 ) : null}
                 <Field label={text.notes} className="lg:col-span-2">
                   <textarea

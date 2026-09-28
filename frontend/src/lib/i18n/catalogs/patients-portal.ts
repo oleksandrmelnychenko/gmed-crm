@@ -4,6 +4,8 @@ export interface PatientsPortalTranslations {
   portal_status_archived: string;
   portal_status_booked: string;
   portal_status_cancelled: string;
+  portal_status_credited: string;
+  portal_invoices_storno_pdf: string;
   portal_status_closed: string;
   portal_status_completed: string;
   portal_status_confirmed: string;
@@ -956,6 +958,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_status_archived: "Архивировано",
   portal_status_booked: "Забронировано",
   portal_status_cancelled: "Отменено",
+  portal_status_credited: "Сторнирован",
+  portal_invoices_storno_pdf: "Документ сторно (PDF)",
   portal_status_closed: "Закрыто",
   portal_status_completed: "Завершено",
   portal_status_confirmed: "Подтверждено",
@@ -1899,6 +1903,8 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_status_archived: "Archiviert",
   portal_status_booked: "Gebucht",
   portal_status_cancelled: "Storniert",
+  portal_status_credited: "Storniert",
+  portal_invoices_storno_pdf: "Stornorechnung (PDF)",
   portal_status_closed: "Geschlossen",
   portal_status_completed: "Abgeschlossen",
   portal_status_confirmed: "Bestätigt",

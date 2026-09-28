@@ -578,6 +578,8 @@ function patientDetailStatusLabel(status: string) {
       return patientDetailText("patients_detail_terminated");
     case "cancelled":
       return patientDetailText("patients_detail_cancelled");
+    case "credited":
+      return patientDetailText("patients_detail_credited");
     case "planned":
       return patientDetailText("patients_detail_planned");
     case "confirmed":
@@ -761,6 +763,7 @@ const STATUS_COLORS: Record<string, string> = {
   expired: "border-slate-200 bg-slate-50 text-slate-600",
   terminated: "border-red-200 bg-red-50 text-red-700",
   cancelled: "border-red-200 bg-red-50 text-red-700",
+  credited: "border-slate-200 bg-slate-50 text-slate-700",
   planned: "border-sky-200 bg-sky-50 text-sky-700",
   confirmed: "border-sky-200 bg-sky-50 text-sky-700",
   granted: "border-emerald-200 bg-emerald-50 text-emerald-700",

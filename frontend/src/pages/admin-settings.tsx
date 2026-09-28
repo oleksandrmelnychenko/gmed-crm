@@ -15,6 +15,7 @@ import {
   ScrollText,
   ShieldCheck,
   UserRoundCheck,
+  Receipt,
 } from "lucide-react";
 
 import { AdminGuideButton } from "@/components/admin-guide";
@@ -114,7 +115,8 @@ type SettingsGroupId =
   | "documents"
   | "clinical"
   | "concierge"
-  | "interpreter_access";
+  | "interpreter_access"
+  | "dunning";
 
 type SettingsGroup = {
   id: SettingsGroupId;
@@ -224,6 +226,16 @@ const INTERPRETER_ACCESS_SETTING_FIELDS: SettingFieldMeta[] = [
   },
 ];
 
+// Days after an invoice's due date before the first automatic reminder.
+const DUNNING_SETTING_FIELDS: SettingFieldMeta[] = [
+  {
+    key: "auto_dunning_grace_days",
+    labelKey: "settings_auto_dunning_grace_days",
+    inputType: "number",
+    min: 0,
+  },
+];
+
 const SETTINGS_GROUPS: SettingsGroup[] = [
   {
     id: "tokens",
@@ -272,6 +284,14 @@ const SETTINGS_GROUPS: SettingsGroup[] = [
     fields: INTERPRETER_ACCESS_SETTING_FIELDS,
     icon: UserRoundCheck,
     tone: "emerald",
+  },
+  {
+    id: "dunning",
+    titleKey: "settings_dunning",
+    descriptionKey: "settings_dunning_hint",
+    fields: DUNNING_SETTING_FIELDS,
+    icon: Receipt,
+    tone: "amber",
   },
 ];
 

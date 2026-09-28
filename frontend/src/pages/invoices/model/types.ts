@@ -9,6 +9,44 @@ export type InvoiceStatus =
   | "overdue"
   | "cancelled";
 
+/**
+ * Status shown to users: the stored status, or `credited` (RU "Сторнирован",
+ * DE "Storniert") for an issued invoice fully covered by credit notes.
+ */
+export type InvoiceDisplayStatus = InvoiceStatus | "credited";
+
+/** Cancellation document (Stornorechnung) of a released, cancelled invoice. */
+export type InvoiceStornoDocument = {
+  id: string;
+  document_number: string;
+  issued_on: string;
+  reason: string;
+  original_invoice_number: string;
+  original_invoice_date: string;
+  currency: string;
+  amount_net: string;
+  amount_vat: string;
+  amount_gross: string;
+  vat_breakdown: { vat_rate: string; net: string; vat: string; gross: string }[];
+  stored_document?: { file_name: string; generated_at: string | null } | null;
+};
+
+export type InvoiceDunningBlockEntry = {
+  id: string;
+  reason: string;
+  blocked_at: string | null;
+  blocked_by_name: string | null;
+  cleared_at: string | null;
+  cleared_by_name: string | null;
+  clear_reason: string | null;
+};
+
+/** Dunning block (Mahnsperre): the active block and its history. */
+export type InvoiceDunningBlockState = {
+  active: InvoiceDunningBlockEntry | null;
+  history: InvoiceDunningBlockEntry[];
+};
+
 export type InvoiceLineItem = {
   description: string;
   quantity: string;
@@ -244,6 +282,10 @@ export type InvoiceItem = {
   invoice_number: string | null;
   invoice_type: InvoiceType | string;
   status: InvoiceStatus | string;
+  display_status?: InvoiceDisplayStatus | string;
+  /** List view: the active dunning block; detail: block state with history. */
+  dunning_block?: InvoiceDunningBlockState | { reason: string; blocked_at: string | null } | null;
+  storno_document?: InvoiceStornoDocument | null;
   issued_at: string;
   /** Set once the invoice was issued; drafts (also cancelled ones) have none. */
   released_at?: string | null;
@@ -415,6 +457,9 @@ export type StatusForm = {
   status: InvoiceStatus;
   dueDate: string;
   notes: string;
+  /** Storno reason (cancelling a released invoice) or dunning block reason
+   * (overdue back to sent). */
+  reason: string;
 };
 
 export type DunningForm = {

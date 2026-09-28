@@ -149,6 +149,8 @@ export type InvoiceItem = {
   invoice_number: string;
   invoice_type: string;
   status: string;
+  /** `credited` for an issued invoice fully covered by credit notes. */
+  display_status?: string;
   issued_at: string;
   due_date?: string | null;
   total_gross?: string | null;
@@ -292,7 +294,11 @@ export type PatientAccountMovement = {
     | "external_allocation"
     | "external_allocation_reversal"
     /** Accrued but not yet invoiced amount of an open termination settlement. */
-    | "termination_uninvoiced";
+    | "termination_uninvoiced"
+    /** Cancellation document (Stornorechnung) of a cancelled released invoice. */
+    | "storno"
+    /** Invoiced in advance, never delivered: owed back by a termination settlement. */
+    | "termination_to_credit";
   direction: "debit" | "credit";
   entry_date: string;
   occurred_at: string;

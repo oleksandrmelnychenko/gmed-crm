@@ -196,6 +196,21 @@ export function createDunningEvent(invoiceId: string, payload: JsonPayload) {
   return postJson<DunningEvent>(`/invoices/${invoiceId}/dunning`, payload);
 }
 
+/** Sets the dunning block (Mahnsperre) with a reason; returns the invoice. */
+export function setInvoiceDunningBlock(invoiceId: string, reason: string) {
+  return postJson<InvoiceItem>(`/invoices/${invoiceId}/dunning-block`, { reason });
+}
+
+/** Clears the dunning block with a reason; returns the invoice. */
+export function clearInvoiceDunningBlock(invoiceId: string, reason: string) {
+  return postJson<InvoiceItem>(`/invoices/${invoiceId}/dunning-block/clear`, { reason });
+}
+
+/** The archived cancellation document (Stornorechnung) of a cancelled invoice. */
+export function fetchStornoPdfBlob(invoiceId: string) {
+  return fetchProtectedBlob(`/invoices/${invoiceId}/storno/pdf`);
+}
+
 export function fetchInvoicePdfBlob(invoiceId: string) {
   return fetchProtectedBlob(`/invoices/${invoiceId}/pdf`);
 }

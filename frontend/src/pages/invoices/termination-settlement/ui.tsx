@@ -80,6 +80,7 @@ export function SettlementFigures({
     | "draft_gross"
     | "billable_gross"
     | "unmatched_invoiced_gross"
+    | "to_credit_gross"
   >;
   currency: string;
   lang: Lang;
@@ -105,6 +106,11 @@ export function SettlementFigures({
         <Figure label={tx("Не выставлено", "Nicht berechnet")} value={money(figures.uninvoiced_gross)} />
       </div>
       {notes.length ? <p className="text-xs text-muted-foreground">{notes.join(" · ")}</p> : null}
+      {isPositiveAmount(figures.to_credit_gross) ? (
+        <p className="text-xs text-amber-700" data-testid="settlement-to-credit">
+          {text.revenue_termination_to_credit}: {money(figures.to_credit_gross)}
+        </p>
+      ) : null}
       {isPositiveAmount(figures.unmatched_invoiced_gross) ? (
         <p className="text-xs text-amber-700">
           {text.finance_settlement_unmatched_lines.replace("{amount}", money(figures.unmatched_invoiced_gross))}

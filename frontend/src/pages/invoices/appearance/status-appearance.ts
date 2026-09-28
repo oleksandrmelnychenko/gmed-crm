@@ -8,6 +8,9 @@ export function statusBadgeClass(status: string): StatusTone {
       return "warning";
     case "sent":
       return "info";
+    // Fully credited: settled by the correction, not by a payment.
+    case "credited":
+      return "neutral";
     case "overdue":
     case "cancelled":
       return "error";

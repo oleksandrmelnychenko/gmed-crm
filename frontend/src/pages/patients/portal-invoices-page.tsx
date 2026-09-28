@@ -43,6 +43,7 @@ import {
   formatPortalDateTime,
   invoiceTypeLabel,
   downloadPortalCreditNotePdf,
+  downloadPortalStornoPdf,
   downloadPortalInvoicePdf,
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
@@ -698,7 +699,7 @@ function usePatientInvoicesPageContent() {
                         <div className="mt-0.5 text-xs text-muted-foreground">{invoice.order_number}</div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{formatPortalDateTime(invoice.issued_at)}</td>
-                      <td className="px-4 py-3"><StatusBadge status={invoice.status}>{portalStatusLabel(invoice.status)}</StatusBadge></td>
+                      <td className="px-4 py-3"><StatusBadge status={invoice.display_status ?? invoice.status}>{portalStatusLabel(invoice.display_status ?? invoice.status)}</StatusBadge></td>
                       <td className="px-4 py-3"><StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>{invoiceTypeLabel(invoice.invoice_type)}</StatusBadge></td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono tabular-nums">{amountsVisible ? formatPortalCurrency(invoice.total_gross, invoice.currency) : t.portal_invoices_hidden}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">{amountsVisible ? formatPortalCurrency(balanceDue, invoice.currency) : t.portal_invoices_hidden}</td>
@@ -732,8 +733,8 @@ function usePatientInvoicesPageContent() {
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <StatusBadge status={invoice.status}>
-                        {portalStatusLabel(invoice.status)}
+                      <StatusBadge status={invoice.display_status ?? invoice.status}>
+                        {portalStatusLabel(invoice.display_status ?? invoice.status)}
                       </StatusBadge>
                       <StatusBadge tone={invoiceTypeBadgeTone(invoice.invoice_type)}>
                         {invoiceTypeLabel(invoice.invoice_type)}
@@ -828,9 +829,27 @@ function usePatientInvoicesPageContent() {
                         <Download className="size-4" />
                         {t.portal_invoices_download_pdf}
                       </Button>
-                      <StatusBadge status={detail.status}>
-                        {portalStatusLabel(detail.status)}
+                      <StatusBadge status={detail.display_status ?? detail.status}>
+                        {portalStatusLabel(detail.display_status ?? detail.status)}
                       </StatusBadge>
+                      {detail.status === "cancelled" && detail.has_storno_document !== false && invoicePdfVisible(detail) ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={tokens.control.primaryButton}
+                          data-testid="portal-storno-download"
+                          onClick={() =>
+                            void downloadPortalStornoPdf(detail.id, detail.invoice_number).catch((err) => {
+                              dispatchInvoicesState({
+                                detailError: err instanceof Error ? err.message : t.portal_invoices_failed_to_download_invoice_pdf,
+                              });
+                            })
+                          }
+                        >
+                          <Download className="size-4" />
+                          {t.portal_invoices_storno_pdf}
+                        </Button>
+                      ) : null}
                       <StatusBadge tone={invoiceTypeBadgeTone(detail.invoice_type)}>
                         {invoiceTypeLabel(detail.invoice_type)}
                       </StatusBadge>

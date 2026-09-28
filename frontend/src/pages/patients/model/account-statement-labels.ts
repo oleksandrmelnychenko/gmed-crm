@@ -36,6 +36,7 @@ const STATEMENT_STATE_LABELS: Record<string, Pair> = {
   not_issued: ["Noch nicht ausgestellt", "Ещё не выставлено"],
   amount_hidden: ["Betrag ausgeblendet", "Сумма скрыта"],
   invoice_adjustment: ["Rechnung korrigiert", "Счёт скорректирован"],
+  credited: ["Storniert (Gutschrift)", "Сторнирован кредит-нотой"],
   patient_paid: ["Vom Patienten bezahlt", "Оплачено пациентом"],
   gmed_paid_patient_due: ["Von GMED bezahlt – Patient schuldet", "Оплачено GMED — долг пациента"],
   order_service_cost: [
@@ -60,6 +61,7 @@ const MOVEMENT_KIND_LABELS: Record<PatientAccountMovement["kind"], Pair> = {
   invoice: ["Patientenrechnung", "Счёт пациента"],
   credit_note: ["Gutschrift", "Кредит-нота"],
   credit_note_reversal: ["Gutschriftstorno", "Сторно кредит-ноты"],
+  storno: ["Stornorechnung", "Документ сторно"],
   payment: ["Zahlung", "Оплата"],
   payment_reversal: ["Zahlungsstorno", "Сторно оплаты"],
   refund: ["Rückzahlung", "Возврат пациенту"],
@@ -72,6 +74,10 @@ const MOVEMENT_KIND_LABELS: Record<PatientAccountMovement["kind"], Pair> = {
   termination_uninvoiced: [
     "Kündigung: angefallen, noch nicht berechnet",
     "Расторжение: набежало, ещё не выставлено",
+  ],
+  termination_to_credit: [
+    "Kündigung: vorab berechnet, nicht erbracht (gutzuschreiben)",
+    "Расторжение: выставлено авансом, не оказано (к сторнированию)",
   ],
 };
 

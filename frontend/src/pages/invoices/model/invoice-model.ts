@@ -18,6 +18,7 @@ import type {
   InvoiceRecipient,
   InvoiceStatus,
   InvoiceType,
+  InvoiceDisplayStatus,
   InvoicesPermissions,
   PayerForm,
   PayerRelationOption,
@@ -36,6 +37,50 @@ export const INVOICE_STATUSES: InvoiceStatus[] = [
   "overdue",
   "cancelled",
 ];
+
+/** Status filter values of the invoice lists: stored statuses and `credited`. */
+export const INVOICE_FILTER_STATUSES: InvoiceDisplayStatus[] = [
+  "draft",
+  "sent",
+  "partially_paid",
+  "paid",
+  "credited",
+  "overdue",
+  "cancelled",
+];
+
+/** Status shown to users (server `display_status`, else the stored status). */
+export function invoiceDisplayStatus(
+  invoice: Pick<InvoiceItem, "status" | "display_status">,
+): string {
+  return invoice.display_status || invoice.status;
+}
+
+/** The active dunning block of an invoice (list or detail payload). */
+export function activeDunningBlock(
+  invoice: Pick<InvoiceItem, "dunning_block"> | null | undefined,
+): { reason: string; blocked_at: string | null } | null {
+  const block = invoice?.dunning_block;
+  if (!block) return null;
+  if ("active" in block) return block.active;
+  return block;
+}
+
+/**
+ * Which reason a status change needs: cancelling a released invoice issues a
+ * cancellation document (the reason is printed on it, optional), moving an
+ * overdue invoice back to sent sets a dunning block (reason required).
+ */
+export function statusChangeReasonKind(
+  invoice: Pick<InvoiceItem, "status" | "released_at">,
+  nextStatus: string,
+): "storno" | "dunning_block" | null {
+  if (nextStatus === "cancelled" && invoice.status !== "cancelled" && isInvoiceReleased(invoice)) {
+    return "storno";
+  }
+  if (invoice.status === "overdue" && nextStatus === "sent") return "dunning_block";
+  return null;
+}
 
 /**
  * Manual status moves accepted by POST /invoices/{id}/status. `paid` and
@@ -97,9 +142,15 @@ export function defaultReleaseDueDate(today: Date, termDays = DEFAULT_INVOICE_PA
  */
 export function invoiceStatusFormProblem(
   invoice: Pick<InvoiceItem, "status" | "released_at" | "due_date">,
-  form: Pick<StatusForm, "status" | "dueDate">,
+  form: Pick<StatusForm, "status" | "dueDate"> & { reason?: string },
   today: Date,
-): "due_date_before_invoice_date" | "due_date_locked" | null {
+): "due_date_before_invoice_date" | "due_date_locked" | "reason_required" | null {
+  if (
+    statusChangeReasonKind(invoice, form.status) === "dunning_block" &&
+    (form.reason ?? "").trim().length < 3
+  ) {
+    return "reason_required";
+  }
   const releasing = invoice.status === "draft" && form.status === "sent";
   if (releasing && form.dueDate && form.dueDate < appDateKey(today)) {
     return "due_date_before_invoice_date";
@@ -399,6 +450,7 @@ export function invoiceToStatusForm(invoice: InvoiceItem): StatusForm {
     status: (invoice.status as InvoiceStatus) ?? "draft",
     dueDate: invoice.due_date ?? "",
     notes: invoice.notes ?? "",
+    reason: "",
   };
 }
 
