@@ -607,6 +607,8 @@ struct InvoicePdfContext {
     total_gross: String,
     /// Advance payments credited against this invoice.
     prepayment_applied_amount: String,
+    /// The credited advance invoices with net and VAT per rate.
+    deducted_advances: Vec<document::DeductedAdvance>,
     notes: Option<String>,
     patient_pid: String,
     patient_name: String,
@@ -2392,10 +2394,12 @@ impl InvoicePdfLayout {
     }
 
     fn summary_row(&mut self, label: &str, value: &str, bold: bool, emphasized: bool) {
+        // Labels are right-aligned against the amount; the label column is
+        // wide enough for "Verbleibender Zahlbetrag" on one line.
         self.table_row(
             &[
-                ("", 96.0, InvoicePdfCellAlign::Left),
-                (label, 42.0, InvoicePdfCellAlign::Right),
+                ("", 84.0, InvoicePdfCellAlign::Left),
+                (label, 54.0, InvoicePdfCellAlign::Right),
                 (value, 36.0, InvoicePdfCellAlign::Right),
             ],
             bold,
@@ -2567,11 +2571,37 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "credited_amount") => "Кредит-ноты",
         ("en", "credited_amount") => "Credit notes",
         (_, "credited_amount") => "Gutschriften",
-        // Short: the summary label column truncates longer text.
+        // Short: a summary label (see `summary_row`).
         ("uk", "prepayment_applied") => "Передоплата",
         ("ru", "prepayment_applied") => "Предоплата",
         ("en", "prepayment_applied") => "Advance payments",
         (_, "prepayment_applied") => "Anzahlungen",
+        // Settlement invoice: advances and the VAT they carried are deducted
+        // (§ 14 Abs. 5 Satz 2 UStG).
+        ("uk", "advances_heading") => "За вирахуванням отриманих передоплат",
+        ("ru", "advances_heading") => "За вычетом полученных предоплат",
+        ("en", "advances_heading") => "Less advance payments received",
+        (_, "advances_heading") => "Abzüglich geleisteter Anzahlungen",
+        ("uk", "advance_invoice") => "Авансовий рахунок",
+        ("ru", "advance_invoice") => "Авансовый счёт",
+        ("en", "advance_invoice") => "Advance invoice",
+        (_, "advance_invoice") => "Anzahlungsrechnung",
+        ("uk", "dated") => "від",
+        ("ru", "dated") => "от",
+        ("en", "dated") => "dated",
+        (_, "dated") => "vom",
+        ("uk", "advances_total") => "Разом передоплати",
+        ("ru", "advances_total") => "Итого предоплаты",
+        ("en", "advances_total") => "Total advance payments",
+        (_, "advances_total") => "Summe Anzahlungen",
+        ("uk", "remaining_amount") => "Залишок",
+        ("ru", "remaining_amount") => "Остаток",
+        ("en", "remaining_amount") => "Remaining amount",
+        (_, "remaining_amount") => "Verbleibender Betrag",
+        ("uk", "remaining_payable") => "Залишок до сплати",
+        ("ru", "remaining_payable") => "Остаток к оплате",
+        ("en", "remaining_payable") => "Remaining amount due",
+        (_, "remaining_payable") => "Verbleibender Zahlbetrag",
         ("uk", "balance_due") => "До сплати",
         ("ru", "balance_due") => "Остаток",
         ("en", "balance_due") => "Balance due",
@@ -4531,6 +4561,7 @@ async fn load_invoice_pdf_context_on(
         &line_items,
     )
     .await?;
+    let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     let setting = |key: &str| {
         row.try_get::<Option<String>, _>(key)
             .unwrap_or_default()
@@ -4578,6 +4609,7 @@ async fn load_invoice_pdf_context_on(
             row.try_get::<Decimal, _>("prepayment_applied_amount")
                 .unwrap_or(Decimal::ZERO),
         ),
+        deducted_advances,
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default()
@@ -4677,6 +4709,125 @@ fn invoice_pdf_vat_group_label(language: &str, row: &document::VatBreakdownRow) 
             invoice_pdf_label(language, "vat_group_passthrough").to_string()
         }
     }
+}
+
+/// "Anzahlungsrechnung INV-… vom 28.09.2026".
+fn invoice_pdf_advance_reference(language: &str, advance: &document::DeductedAdvance) -> String {
+    format!(
+        "{} {} {} {}",
+        invoice_pdf_label(language, "advance_invoice"),
+        advance.invoice_number.trim(),
+        invoice_pdf_label(language, "dated"),
+        format_invoice_pdf_date(Some(advance.issue_date))
+    )
+}
+
+/// Settlement invoice (§ 14 Abs. 5 Satz 2 UStG): below the totals per rate,
+/// every credited advance invoice with its number and date and the net, VAT
+/// and gross it credits per rate, then what remains of the invoice. The rows
+/// share the columns of the VAT breakdown above.
+fn render_invoice_pdf_deducted_advances(
+    layout: &mut InvoicePdfLayout,
+    context: &InvoicePdfContext,
+) {
+    if context.deducted_advances.is_empty() {
+        return;
+    }
+    fn amount_row(
+        layout: &mut InvoicePdfLayout,
+        currency: &str,
+        label: &str,
+        (net, vat, gross): (Decimal, Decimal, Decimal),
+        bold: bool,
+    ) {
+        let money = |value: Decimal| format_invoice_pdf_money(&value.to_string(), currency);
+        let (net, vat, gross) = (money(net), money(vat), money(gross));
+        layout.table_row(
+            &[
+                (label, 72.0, InvoicePdfCellAlign::Left),
+                (&net, 34.0, InvoicePdfCellAlign::Right),
+                (&vat, 34.0, InvoicePdfCellAlign::Right),
+                (&gross, 34.0, InvoicePdfCellAlign::Right),
+            ],
+            bold,
+            false,
+            false,
+        );
+    }
+
+    let language = context.language.as_str();
+    let currency = context.currency.as_str();
+    layout.spacer(3.0);
+    layout.table_row(
+        &[
+            (
+                invoice_pdf_label(language, "advances_heading"),
+                72.0,
+                InvoicePdfCellAlign::Left,
+            ),
+            (
+                invoice_pdf_label(language, "column_net"),
+                34.0,
+                InvoicePdfCellAlign::Right,
+            ),
+            (
+                invoice_pdf_label(language, "column_vat"),
+                34.0,
+                InvoicePdfCellAlign::Right,
+            ),
+            (
+                invoice_pdf_label(language, "column_gross"),
+                34.0,
+                InvoicePdfCellAlign::Right,
+            ),
+        ],
+        true,
+        true,
+        false,
+    );
+    let mut deducted = (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    for advance in &context.deducted_advances {
+        let reference = invoice_pdf_advance_reference(language, advance);
+        layout.table_row(
+            &[(reference.as_str(), 174.0, InvoicePdfCellAlign::Left)],
+            false,
+            false,
+            false,
+        );
+        for row in &advance.rows {
+            amount_row(
+                layout,
+                currency,
+                invoice_pdf_vat_group_label(language, row).as_str(),
+                (-row.net, -row.vat, -row.gross),
+                false,
+            );
+            deducted.0 += row.net;
+            deducted.1 += row.vat;
+            deducted.2 += row.gross;
+        }
+    }
+    if context.deducted_advances.len() > 1 {
+        amount_row(
+            layout,
+            currency,
+            invoice_pdf_label(language, "advances_total"),
+            (-deducted.0, -deducted.1, -deducted.2),
+            true,
+        );
+    }
+    let total = |raw: &str| Decimal::from_str_exact(raw.trim()).unwrap_or(Decimal::ZERO);
+    amount_row(
+        layout,
+        currency,
+        invoice_pdf_label(language, "remaining_amount"),
+        (
+            total(&context.total_net) - deducted.0,
+            total(&context.total_vat) - deducted.1,
+            total(&context.total_gross) - deducted.2,
+        ),
+        true,
+    );
 }
 
 fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static str> {
@@ -4979,6 +5130,7 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
         false,
         false,
     );
+    render_invoice_pdf_deducted_advances(&mut layout, context);
     layout.spacer(3.0);
 
     // Credited advances reduce what is still to pay (§ 14 Abs. 5 UStG), so
@@ -5008,7 +5160,14 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             false,
         );
         layout.summary_row(
-            invoice_pdf_label(language, "amount_payable"),
+            invoice_pdf_label(
+                language,
+                if context.deducted_advances.is_empty() {
+                    "amount_payable"
+                } else {
+                    "remaining_payable"
+                },
+            ),
             &format_invoice_pdf_money(
                 &(gross - prepayment).max(Decimal::ZERO).to_string(),
                 &context.currency,
@@ -10590,6 +10749,69 @@ async fn download_my_invoice_pdf(
     invoice_pdf_response(pdf_bytes, disposition, source)
 }
 
+/// The deducted advances as the e-invoice note states them, in German like
+/// the statutory texts of the XML and with the wording of the printed
+/// settlement invoice: every advance invoice with its net, VAT and gross per
+/// rate, then what remains of the invoice.
+fn einvoice_prepayment_note(
+    advances: &[document::DeductedAdvance],
+    currency: &str,
+    (total_net, total_vat, total_gross): (Decimal, Decimal, Decimal),
+) -> Option<String> {
+    if advances.is_empty() {
+        return None;
+    }
+    let money = |value: Decimal| format_invoice_pdf_money(&value.to_string(), currency);
+    let amounts = |(net, vat, gross): (Decimal, Decimal, Decimal)| {
+        format!(
+            "{} {}, {} {}, {} {}",
+            invoice_pdf_label("de", "column_net"),
+            money(net),
+            invoice_pdf_label("de", "column_vat"),
+            money(vat),
+            invoice_pdf_label("de", "column_gross"),
+            money(gross)
+        )
+    };
+    let mut deducted = (Decimal::ZERO, Decimal::ZERO, Decimal::ZERO);
+    let mut parts = Vec::with_capacity(advances.len() + 1);
+    for advance in advances {
+        let rows = advance
+            .rows
+            .iter()
+            .map(|row| {
+                deducted.0 += row.net;
+                deducted.1 += row.vat;
+                deducted.2 += row.gross;
+                format!(
+                    "{}: {}",
+                    invoice_pdf_vat_group_label("de", row),
+                    amounts((row.net, row.vat, row.gross))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        parts.push(format!(
+            "{}: {rows}",
+            invoice_pdf_advance_reference("de", advance)
+        ));
+    }
+    parts.push(format!(
+        "{}: {}",
+        invoice_pdf_label("de", "remaining_amount"),
+        amounts((
+            total_net - deducted.0,
+            total_vat - deducted.1,
+            total_gross - deducted.2
+        ))
+    ));
+    Some(format!(
+        "{} (§ 14 Abs. 5 Satz 2 UStG): {}.",
+        invoice_pdf_label("de", "advances_heading"),
+        parts.join(". ")
+    ))
+}
+
 /// Invoice data for the ZUGFeRD XML, read from the same rows the PDF uses.
 async fn load_einvoice(
     conn: &mut sqlx::PgConnection,
@@ -10597,7 +10819,8 @@ async fn load_einvoice(
 ) -> Result<Option<zugferd::EInvoice>, sqlx::Error> {
     let sql = format!(
         r#"SELECT i.invoice_number, i.invoice_type, i.issued_at, i.created_at, i.due_date,
-                  i.currency, i.total_gross, i.prepayment_applied_amount, i.line_items, i.notes,
+                  i.currency, i.total_net, i.total_vat, i.total_gross,
+                  i.prepayment_applied_amount, i.line_items, i.notes, i.order_id,
                   o.order_number,
                   {recipient_columns},
                   (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
@@ -10612,7 +10835,7 @@ async fn load_einvoice(
     );
     let Some(row) = sqlx::query(&sql)
         .bind(invoice_id)
-        .fetch_optional(conn)
+        .fetch_optional(&mut *conn)
         .await?
     else {
         return Ok(None);
@@ -10620,6 +10843,35 @@ async fn load_einvoice(
     // The buyer is the recipient printed on the invoice: the payer with the
     // payer's own address, or the patient.
     let recipient = document::resolve_invoice_recipient(&document::recipient_source_from_row(&row));
+    let line_items = row
+        .try_get::<Value, _>("line_items")
+        .unwrap_or_else(|_| json!([]));
+    // Service period and deducted advances as printed on the invoice.
+    let service_period = document::load_invoice_service_period(
+        conn,
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        &line_items,
+    )
+    .await?;
+    let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
+    let currency = row
+        .try_get::<String, _>("currency")
+        .unwrap_or_else(|_| "EUR".to_string());
+    let total_gross = row
+        .try_get::<Decimal, _>("total_gross")
+        .unwrap_or(Decimal::ZERO);
+    let prepayment_note = einvoice_prepayment_note(
+        &deducted_advances,
+        &currency,
+        (
+            row.try_get::<Decimal, _>("total_net")
+                .unwrap_or(Decimal::ZERO),
+            row.try_get::<Decimal, _>("total_vat")
+                .unwrap_or(Decimal::ZERO),
+            total_gross,
+        ),
+    );
 
     let agency = row
         .try_get::<Option<Value>, _>("agency")
@@ -10641,10 +10893,9 @@ async fn load_einvoice(
 
     let (seller_street, seller_postcode, seller_city) =
         zugferd::split_german_address(&setting("agency_address").unwrap_or_default());
-    let lines = row
-        .try_get::<Value, _>("line_items")
-        .ok()
-        .and_then(|value| value.as_array().cloned())
+    let lines = line_items
+        .as_array()
+        .map(Vec::as_slice)
         .unwrap_or_default()
         .iter()
         .map(|line| {
@@ -10678,9 +10929,8 @@ async fn load_einvoice(
         invoice_type: row.try_get("invoice_type").unwrap_or_default(),
         issue_date: invoice_document_date(issued_at),
         due_date: row.try_get("due_date").unwrap_or_default(),
-        currency: row
-            .try_get::<String, _>("currency")
-            .unwrap_or_else(|_| "EUR".to_string()),
+        service_period,
+        currency,
         order_number: optional("order_number"),
         note: optional("notes"),
         seller: zugferd::EInvoiceParty {
@@ -10704,10 +10954,18 @@ async fn load_einvoice(
             tax_number: None,
         },
         lines,
-        total_gross: row.try_get("total_gross").unwrap_or(Decimal::ZERO),
+        total_gross,
         prepaid_amount: row
             .try_get("prepayment_applied_amount")
             .unwrap_or(Decimal::ZERO),
+        prepaid_invoices: deducted_advances
+            .iter()
+            .map(|advance| zugferd::EInvoiceReference {
+                number: advance.invoice_number.clone(),
+                issue_date: advance.issue_date,
+            })
+            .collect(),
+        prepayment_note,
         bank_iban: setting("agency_bank_iban"),
         bank_bic: setting("agency_bank_swift"),
         bank_holder: setting("agency_bank_holder"),
@@ -12513,6 +12771,7 @@ mod tests {
             total_vat: "0.00".to_string(),
             total_gross: "145.00".to_string(),
             prepayment_applied_amount: "0.00".to_string(),
+            deducted_advances: Vec::new(),
             notes: Some("Оплатить после получения счёта.".to_string()),
             patient_pid: "PT-INV-UNIT".to_string(),
             patient_name: "Макс Мюллер".to_string(),
@@ -12779,6 +13038,136 @@ mod tests {
         assert!(text.contains("Leistungsdatum"));
         assert!(text.contains("03.09.2026"));
         assert!(!text.contains("§ 4 Nr. 14"));
+    }
+
+    /// The advance invoice of the QA walkthrough (order A-20260928-0005): a
+    /// 1,000 prepayment split over the quote's VAT groups, 374.83 of it in
+    /// the 19 % group.
+    fn walkthrough_advance() -> document::DeductedAdvance {
+        let advance_lines = serde_json::json!([
+            {
+                "description": "Anzahlung gemäß Angebot KV-1 – Anteil 19 % USt.",
+                "quantity": "1", "unit_price": "314.98", "vat_rate": "19",
+                "is_cost_passthrough": false,
+                "line_net": "314.98", "line_vat": "59.85", "line_gross": "374.83",
+                "source": "advance_prepayment"
+            },
+            {
+                "description": "Anzahlung gemäß Angebot KV-1 – Anteil 0 % USt.",
+                "quantity": "1", "unit_price": "625.17", "vat_rate": "0",
+                "is_cost_passthrough": false,
+                "line_net": "625.17", "line_vat": "0", "line_gross": "625.17",
+                "source": "advance_prepayment"
+            }
+        ]);
+        let amount = rust_decimal::Decimal::new(1000, 0);
+        document::DeductedAdvance {
+            invoice_number: "INV-ADV-1".to_string(),
+            issue_date: NaiveDate::from_ymd_opt(2026, 9, 20).unwrap(),
+            rows: document::deducted_advance_rows(
+                &document::advance_vat_rows(&advance_lines, &[]),
+                amount,
+            ),
+        }
+    }
+
+    fn walkthrough_settlement_context() -> InvoicePdfContext {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.total_net = "3360.00".to_string();
+        context.total_vat = "248.90".to_string();
+        context.total_gross = "3608.90".to_string();
+        context.prepayment_applied_amount = "1000.00".to_string();
+        context.deducted_advances = vec![walkthrough_advance()];
+        context.line_items = super::parse_invoice_pdf_line_items(&serde_json::json!([
+            {
+                "description": "Dolmetscherleistung", "quantity": "13.1", "unit_price": "100",
+                "vat_rate": "19", "line_net": "1310", "line_vat": "248.90",
+                "line_gross": "1558.90", "is_cost_passthrough": false
+            },
+            {
+                "description": "Organisation der Behandlung", "quantity": "1",
+                "unit_price": "2050", "vat_rate": "0", "line_net": "2050", "line_vat": "0",
+                "line_gross": "2050", "is_cost_passthrough": false
+            }
+        ]));
+        context
+    }
+
+    /// § 14 Abs. 5 Satz 2 UStG: the settlement invoice deducts each advance
+    /// invoice by number and date with its net and VAT per rate (D-12).
+    #[test]
+    fn settlement_invoice_deducts_each_advance_with_its_vat_per_rate() {
+        let mut context = walkthrough_settlement_context();
+        let text = pdf_text(&context);
+        // The full delivery per rate stays on the invoice.
+        assert!(text.contains("1.558,90 €"), "{text}");
+        assert!(text.contains("3.608,90 €"), "{text}");
+        assert!(text.contains("ABZÜGLICH GELEISTETER ANZAHLUNGEN"), "{text}");
+        assert!(
+            text.contains("Anzahlungsrechnung INV-ADV-1 vom 20.09.2026"),
+            "{text}"
+        );
+        // The advance per rate: 19 % 314.98 + 59.85 VAT, 0 % 625.17.
+        for amount in ["-314,98 €", "-59,85 €", "-374,83 €", "-625,17 €"] {
+            assert!(text.contains(amount), "{amount} missing: {text}");
+        }
+        // What remains: 2,419.85 net + 189.05 VAT (248.90 - 59.85).
+        assert!(text.contains("Verbleibender Betrag"), "{text}");
+        for amount in ["2.419,85 €", "189,05 €", "2.608,90 €", "-1.000,00 €"] {
+            assert!(text.contains(amount), "{amount} missing: {text}");
+        }
+        assert!(text.contains("Verbleibender Zahlbetrag"), "{text}");
+        // One advance: no separate advance total.
+        assert!(!text.contains("Summe Anzahlungen"), "{text}");
+
+        // Two advances get a total of the deducted advances.
+        let mut second = walkthrough_advance();
+        second.invoice_number = "INV-ADV-2".to_string();
+        second.rows =
+            document::deducted_advance_rows(&second.rows, rust_decimal::Decimal::new(500, 0));
+        context.deducted_advances.push(second);
+        context.prepayment_applied_amount = "1500.00".to_string();
+        let text = pdf_text(&context);
+        assert!(text.contains("Anzahlungsrechnung INV-ADV-2 vom 20.09.2026"));
+        assert!(text.contains("Summe Anzahlungen"), "{text}");
+        assert!(text.contains("-1.500,00 €"), "{text}");
+        assert!(text.contains("2.108,90 €"), "{text}");
+
+        // The patient's language prints the same block.
+        let mut russian = walkthrough_settlement_context();
+        russian.language = "ru".to_string();
+        let text = pdf_text(&russian);
+        assert!(text.contains("ЗА ВЫЧЕТОМ ПОЛУЧЕННЫХ ПРЕДОПЛАТ"), "{text}");
+        assert!(
+            text.contains("Авансовый счёт INV-ADV-1 от 20.09.2026"),
+            "{text}"
+        );
+        assert!(text.contains("Остаток к оплате"), "{text}");
+    }
+
+    #[test]
+    fn einvoice_note_states_the_vat_of_each_deducted_advance() {
+        let dec = |raw: &str| rust_decimal::Decimal::from_str_exact(raw).unwrap();
+        assert_eq!(
+            super::einvoice_prepayment_note(
+                &[walkthrough_advance()],
+                "EUR",
+                (dec("3360.00"), dec("248.90"), dec("3608.90")),
+            )
+            .as_deref(),
+            Some(concat!(
+                "Abzüglich geleisteter Anzahlungen (§ 14 Abs. 5 Satz 2 UStG): ",
+                "Anzahlungsrechnung INV-ADV-1 vom 20.09.2026: ",
+                "19 %: Netto 314,98 €, MwSt. 59,85 €, Brutto 374,83 €; ",
+                "0 % (steuerbefreit): Netto 625,17 €, MwSt. 0,00 €, Brutto 625,17 €. ",
+                "Verbleibender Betrag: Netto 2.419,85 €, MwSt. 189,05 €, Brutto 2.608,90 €."
+            ))
+        );
+        assert_eq!(
+            super::einvoice_prepayment_note(&[], "EUR", (dec("1"), dec("0"), dec("1"))),
+            None
+        );
     }
 }
 
