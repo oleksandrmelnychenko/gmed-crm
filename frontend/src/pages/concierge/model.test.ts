@@ -157,6 +157,26 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canModifyConciergeTask(task({ assigned_by_role: null }), "ceo", "ceo")).toBe(true);
   });
 
+  it("keeps the CEO assistant read-only on tasks it did not create", () => {
+    const createdByConcierge = task({ assigned_by: "creator", assigned_by_role: "concierge" });
+    expect(canModifyConciergeTask(createdByConcierge, "assistant", "ceo_assistant")).toBe(false);
+    expect(canChangeConciergeTaskStatus(createdByConcierge, "assistant", "ceo_assistant")).toBe(false);
+    expect(canModifyConciergeTask(task({ assigned_by: "assistant", assigned_by_role: "ceo_assistant" }), "assistant", "ceo_assistant")).toBe(true);
+    // Assigning work to the concierge stays open to the assistant.
+    expect(canAssignConciergeTaskToRole("ceo_assistant", "concierge")).toBe(true);
+  });
+
+  it("follows the server's reach decision when the payload carries can_manage", () => {
+    // A patient manager outside the task's patient pool (owner decision 2026-09-28).
+    const foreignPatientTask = task({ assigned_by: "creator", assigned_by_role: "concierge", can_manage: false });
+    expect(canModifyConciergeTask(foreignPatientTask, "manager", "patient_manager")).toBe(false);
+    expect(availableConciergeTaskStatuses({ ...foreignPatientTask, status: "review" }, "manager", "patient_manager"))
+      .toEqual(["review"]);
+    expect(canModifyConciergeTask({ ...foreignPatientTask, can_manage: true }, "manager", "patient_manager")).toBe(true);
+    // The assignee still moves its own task to review.
+    expect(canChangeConciergeTaskStatus({ ...foreignPatientTask, assigned_to: "worker" }, "worker", "concierge")).toBe(true);
+  });
+
   it("allows the assignee to change status without granting full edit rights", () => {
     const assignedTask = task({
       assigned_by: "creator",
@@ -221,6 +241,14 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canMarkConciergeTaskNotRequired({ ...checklistTask, status: "completed" }, "creator", "patient_manager")).toBe(false);
     expect(canMarkConciergeTaskNotRequired({ ...checklistTask, workflow_checklist_item_id: null }, "creator", "patient_manager")).toBe(false);
     expect(canMarkConciergeTaskNotRequired(checklistTask, "someone", "interpreter")).toBe(false);
+    // The order checklist (pipeline) is closed to the concierge; the patient checklist is not.
+    const conciergeChecklistTask = { ...checklistTask, assigned_by: "concierge-1", assigned_by_role: "concierge" };
+    expect(canMarkConciergeTaskNotRequired(conciergeChecklistTask, "concierge-1", "concierge")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired(
+      { ...conciergeChecklistTask, workflow_checklist_scope_type: "patient", workflow_checklist_scope_id: "patient-1" },
+      "concierge-1",
+      "concierge",
+    )).toBe(true);
     expect(conciergeTaskNotRequiredPath(checklistTask))
       .toBe("/orders/order-1/workflow-checklist/item-1/not-required");
     expect(conciergeTaskNotRequiredPath({ ...checklistTask, workflow_checklist_scope_type: "patient", workflow_checklist_scope_id: "patient-1" }))

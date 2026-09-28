@@ -11513,6 +11513,13 @@ impl OrderReadScope {
     }
 }
 
+/// Whether the caller reads whole orders: `orders.view` outside the
+/// concierge's and the team lead's projection. The order checklist (the order
+/// pipeline) and its realtime events are open only to such readers.
+pub(crate) fn reads_full_orders(auth: &AuthUser) -> bool {
+    auth.can(Capability::OrdersView) && !OrderReadScope::for_role(auth.role).is_scoped()
+}
+
 /// Endpoints that expose the commercial or clinical side of an order are not
 /// part of the concierge's or the team lead's projection.
 #[allow(clippy::result_large_err)]

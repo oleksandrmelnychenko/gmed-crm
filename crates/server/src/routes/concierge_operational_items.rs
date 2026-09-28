@@ -305,7 +305,9 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
           patient.birth_date AS patient_birth_date,
           task_provider.name AS provider_name, task_provider.phone AS provider_phone,
-          task_provider.email AS provider_email
+          task_provider.email AS provider_email,
+          t.patient_id IS NOT NULL AS has_patient,
+          viewer_scope.project_access, viewer_scope.patient_access
    FROM tasks t
    JOIN users assignee ON assignee.id = t.assigned_to
    JOIN users assigner ON assigner.id = t.assigned_by
@@ -324,6 +326,30 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
        ORDER BY link.created_at
        LIMIT 1
    ) checklist_link ON true
+   CROSS JOIN LATERAL (
+       SELECT
+           EXISTS (
+               SELECT 1
+               FROM crm_projects visible_project
+               WHERE visible_project.id = t.project_id
+                 AND visible_project.archived_at IS NULL
+                 AND (
+                     CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                     OR EXISTS (
+                         SELECT 1 FROM crm_project_members visible_member
+                         WHERE visible_member.project_id = visible_project.id
+                           AND visible_member.user_id = $2
+                     )) END
+                 )
+           ) AS project_access,
+           EXISTS (
+               SELECT 1
+               FROM patient_assignments visible_assignment
+               WHERE visible_assignment.patient_id = t.patient_id
+                 AND visible_assignment.user_id = $2
+                 AND visible_assignment.revoked_at IS NULL
+           ) AS patient_access
+   ) viewer_scope
    WHERE t.id = $1
      AND t.task_scope IN ('general', 'concierge_operational')
      AND t.deleted_at IS NULL"#;
@@ -415,7 +441,9 @@ async fn list_items(
                   NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
                   patient.birth_date AS patient_birth_date,
                   task_provider.name AS provider_name, task_provider.phone AS provider_phone,
-                  task_provider.email AS provider_email
+                  task_provider.email AS provider_email,
+                  t.patient_id IS NOT NULL AS has_patient,
+                  viewer_scope.project_access, viewer_scope.patient_access
            FROM tasks t
            JOIN users assignee ON assignee.id = t.assigned_to
            JOIN users assigner ON assigner.id = t.assigned_by
@@ -434,6 +462,30 @@ async fn list_items(
                ORDER BY link.created_at
                LIMIT 1
            ) checklist_link ON true
+           CROSS JOIN LATERAL (
+               SELECT
+                   EXISTS (
+                       SELECT 1
+                       FROM crm_projects visible_project
+                       WHERE visible_project.id = t.project_id
+                         AND visible_project.archived_at IS NULL
+                         AND (
+                             CASE WHEN (SELECT role FROM users WHERE id = $9) = 'concierge' THEN visible_project.created_by = $9 ELSE (visible_project.owner_id = $9
+                             OR EXISTS (
+                                 SELECT 1 FROM crm_project_members visible_member
+                                 WHERE visible_member.project_id = visible_project.id
+                                   AND visible_member.user_id = $9
+                             )) END
+                         )
+                   ) AS project_access,
+                   EXISTS (
+                       SELECT 1
+                       FROM patient_assignments visible_assignment
+                       WHERE visible_assignment.patient_id = t.patient_id
+                         AND visible_assignment.user_id = $9
+                         AND visible_assignment.revoked_at IS NULL
+                   ) AS patient_access
+           ) viewer_scope
            WHERE t.task_scope IN ('general', 'concierge_operational')
              AND t.deleted_at IS NULL
              AND ($1::uuid IS NULL OR t.assigned_to = $1)
@@ -448,33 +500,14 @@ async fn list_items(
                  OR ($8::text = 'active' AND t.archived_at IS NULL)
                  OR ($8::text = 'archived' AND t.archived_at IS NOT NULL)
              )
+             -- Same rule as `can_view_operational_item`.
              AND (
-                 $10::text = 'ceo'
+                 $10::text IN ('ceo', 'ceo_assistant')
                  OR t.assigned_to = $9
                  OR t.assigned_by = $9
-                 OR (t.project_id IS NOT NULL AND EXISTS (
-                     SELECT 1
-                     FROM crm_projects visible_project
-                     WHERE visible_project.id = t.project_id
-                       AND visible_project.archived_at IS NULL
-                       AND (
-                           CASE WHEN (SELECT role FROM users WHERE id = $9) = 'concierge' THEN visible_project.created_by = $9 ELSE (visible_project.owner_id = $9
-                           OR EXISTS (
-                               SELECT 1 FROM crm_project_members visible_member
-                               WHERE visible_member.project_id = visible_project.id
-                                 AND visible_member.user_id = $9
-                           )) END
-                     )
-                 ))
-                 OR ($10::text NOT IN ('concierge', 'interpreter')
-                     AND t.patient_id IS NOT NULL AND EXISTS (
-                     SELECT 1
-                     FROM patient_assignments visible_assignment
-                     WHERE visible_assignment.patient_id = t.patient_id
-                       AND visible_assignment.user_id = $9
-                       AND visible_assignment.revoked_at IS NULL
-                 ))
-                 OR ($10::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND assigner.role = 'concierge')
+                 OR viewer_scope.project_access
+                 OR ($10::text IN ('patient_manager', 'teamlead_interpreter')
+                     AND viewer_scope.patient_access)
                  OR ($10::text = 'teamlead_interpreter' AND assigner.role = 'interpreter')
              )
            ORDER BY
@@ -509,7 +542,12 @@ async fn list_items(
         }
     };
 
-    Json(rows.iter().filter_map(build_item_json).collect::<Vec<_>>()).into_response()
+    Json(
+        rows.iter()
+            .filter_map(|row| build_item_json(&auth, row))
+            .collect::<Vec<_>>(),
+    )
+    .into_response()
 }
 
 async fn list_assignees(
@@ -614,8 +652,9 @@ async fn list_all_attachments(
                   OR COALESCE(patient.first_name, '') ILIKE $2
                   OR COALESCE(patient.last_name, '') ILIKE $2
                   OR COALESCE(provider.name, '') ILIKE $2)
+             -- Same rule as `can_view_operational_item`.
              AND (
-                 $4::text = 'ceo'
+                 $4::text IN ('ceo', 'ceo_assistant')
                  OR task.assigned_to = $3
                  OR task.assigned_by = $3
                  OR (task.project_id IS NOT NULL AND EXISTS (
@@ -632,7 +671,7 @@ async fn list_all_attachments(
                            )) END
                      )
                  ))
-                 OR ($4::text NOT IN ('concierge', 'interpreter')
+                 OR ($4::text IN ('patient_manager', 'teamlead_interpreter')
                      AND task.patient_id IS NOT NULL AND EXISTS (
                      SELECT 1
                      FROM patient_assignments visible_assignment
@@ -640,7 +679,6 @@ async fn list_all_attachments(
                        AND visible_assignment.user_id = $3
                        AND visible_assignment.revoked_at IS NULL
                  ))
-                 OR ($4::text IN ('ceo_assistant', 'billing', 'patient_manager', 'sales') AND task_creator.role = 'concierge')
                  OR ($4::text = 'teamlead_interpreter' AND task_creator.role = 'interpreter')
              )
            ORDER BY attachment.created_at DESC, attachment.id DESC
@@ -1178,7 +1216,7 @@ async fn create_item(
         let replayed_item_id = replay
             .try_get::<Uuid, _>("task_id")
             .unwrap_or_else(|_| Uuid::nil());
-        let replayed_item = match load_item_in_transaction(&mut tx, replayed_item_id).await {
+        let replayed_item = match load_item_in_transaction(&mut tx, &auth, replayed_item_id).await {
             Ok(Some(value)) => value,
             Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
             Err(response) => return response,
@@ -1262,11 +1300,16 @@ async fn create_item(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
+        let parent_scope = match load_task_scope(&mut *tx, &auth, parent_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
         if !can_collaborate_on_operational_item(
             &auth,
             parent.get("assigned_to"),
             parent.get("assigned_by"),
             parent.get::<String, _>("creator_role").as_str(),
+            parent_scope,
         ) {
             return err(StatusCode::FORBIDDEN, "No access to parent task");
         }
@@ -1408,7 +1451,7 @@ async fn create_item(
     .await;
     publish_pending_notification(&state, assignment_notification, item_id).await;
 
-    match load_item(&state, item_id).await {
+    match load_item(&state, &auth, item_id).await {
         Ok(Some(value)) => (StatusCode::CREATED, Json(value)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => response,
@@ -1488,7 +1531,11 @@ async fn update_item(
     let assigned_by_role = existing
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_mutate_operational_item(&auth, assigned_by, &assigned_by_role) {
+    let scope = match load_task_scope(&mut *tx, &auth, item_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_mutate_operational_item(&auth, assigned_by, &assigned_by_role, scope) {
         return err(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can change this task",
@@ -1805,7 +1852,7 @@ async fn update_item(
         publish_pending_notification(&state, notification, item_id).await;
     }
 
-    match load_item(&state, item_id).await {
+    match load_item(&state, &auth, item_id).await {
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => response,
@@ -1879,7 +1926,11 @@ pub(crate) async fn update_item_status(
     let assigned_by_role = existing
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    let can_review = can_mutate_operational_item(&auth, assigned_by, &assigned_by_role);
+    let scope = match load_task_scope(&mut *tx, &auth, item_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let can_review = can_mutate_operational_item(&auth, assigned_by, &assigned_by_role, scope);
     if auth.user_id != assigned_to && !can_review {
         return err(
             StatusCode::FORBIDDEN,
@@ -1915,7 +1966,7 @@ pub(crate) async fn update_item_status(
             tracing::error!(error = %error, item_id = %item_id, "commit idempotent concierge task status update");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        return match load_item(&state, item_id).await {
+        return match load_item(&state, &auth, item_id).await {
             Ok(Some(value)) => Json(value).into_response(),
             Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
             Err(response) => response,
@@ -2026,7 +2077,7 @@ pub(crate) async fn update_item_status(
         publish_pending_notification(&state, notification, item_id).await;
     }
 
-    match load_item(&state, item_id).await {
+    match load_item(&state, &auth, item_id).await {
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => response,
@@ -2086,7 +2137,16 @@ async fn close_children(
     let parent_creator_role = parent
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if !can_mutate_operational_item(&auth, parent_assigned_by, &parent_creator_role) {
+    let parent_scope = match load_task_scope(&mut *tx, &auth, item_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_mutate_operational_item(
+        &auth,
+        parent_assigned_by,
+        &parent_creator_role,
+        parent_scope,
+    ) {
         return err(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can close its sub-tasks",
@@ -2143,11 +2203,16 @@ async fn close_children(
         let creator_role = row
             .try_get::<String, _>("assigned_by_role")
             .unwrap_or_default();
+        let child_scope = match load_task_scope(&mut *tx, &auth, child.id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
         if !can_collaborate_on_operational_item(
             &auth,
             child.assigned_to,
             child.assigned_by,
             &creator_role,
+            child_scope,
         ) {
             return err(
                 StatusCode::FORBIDDEN,
@@ -2341,7 +2406,11 @@ async fn change_item_archive_state(
     let archived_at = task
         .try_get::<Option<DateTime<Utc>>, _>("archived_at")
         .unwrap_or_default();
-    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role) {
+    let scope = match load_task_scope(&mut *tx, auth, item_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    if !can_mutate_operational_item(auth, assigned_by, &assigned_by_role, scope) {
         return err(
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can archive this task",
@@ -2354,7 +2423,7 @@ async fn change_item_archive_state(
         );
     }
     if archive == archived_at.is_some() {
-        let item = match load_item_in_transaction(&mut tx, item_id).await {
+        let item = match load_item_in_transaction(&mut tx, auth, item_id).await {
             Ok(Some(value)) => value,
             Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
             Err(response) => return response,
@@ -2469,7 +2538,7 @@ async fn change_item_archive_state(
     if let Some(notification) = creator_notification {
         publish_pending_notification(state, notification, item_id).await;
     }
-    match load_item(state, item_id).await {
+    match load_item(state, auth, item_id).await {
         Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => response,
@@ -2529,9 +2598,14 @@ async fn delete_item(
         .unwrap_or_default();
     let title = task.try_get::<String, _>("title").unwrap_or_default();
     let status = task.try_get::<String, _>("status").unwrap_or_default();
+    let scope = match load_task_scope(&mut *tx, &auth, item_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let deletion = OperationalItemDeletion {
         assigned_by,
         assigned_by_role: &assigned_by_role,
+        scope,
         status: &status,
         archived: task
             .try_get::<Option<DateTime<Utc>>, _>("archived_at")
@@ -2659,7 +2733,7 @@ async fn get_item_detail(
     if let Err(response) = lock_item_access(&mut tx, &auth, item_id, false).await {
         return response;
     }
-    let item = match load_item_in_transaction(&mut tx, item_id).await {
+    let item = match load_item_in_transaction(&mut tx, &auth, item_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => return response,
@@ -3732,6 +3806,7 @@ async fn lock_item_access(
 ) -> Result<Uuid, axum::response::Response> {
     let query = if for_update {
         r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
+                  task.patient_id IS NOT NULL AS has_patient,
                   EXISTS (
                       SELECT 1
                       FROM crm_projects visible_project
@@ -3761,6 +3836,7 @@ async fn lock_item_access(
            FOR UPDATE OF task"#
     } else {
         r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
+                  task.patient_id IS NOT NULL AS has_patient,
                   EXISTS (
                       SELECT 1
                       FROM crm_projects visible_project
@@ -3808,12 +3884,19 @@ async fn lock_item_access(
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
-    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
-        && patient_scope_opens_tasks(auth.role);
-    if !can_collaborate_on_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
-        && (for_update || (!project_access && !patient_access))
-    {
+    let scope = TaskScope::from_row(&row);
+    let allowed = if for_update {
+        can_collaborate_on_operational_item(
+            auth,
+            assigned_to,
+            assigned_by,
+            &assigned_by_role,
+            scope,
+        )
+    } else {
+        can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role, scope)
+    };
+    if !allowed {
         return Err(err(
             StatusCode::FORBIDDEN,
             "Only the task assignee, creator, project member, or a higher role can access this task",
@@ -3829,6 +3912,7 @@ async fn ensure_operational_view_access(
 ) -> Result<(), axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, creator.role AS assigned_by_role,
+                  task.patient_id IS NOT NULL AS has_patient,
                   EXISTS (
                       SELECT 1
                       FROM crm_projects visible_project
@@ -3874,13 +3958,13 @@ async fn ensure_operational_view_access(
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    let project_access = row.try_get::<bool, _>("project_access").unwrap_or(false);
-    let patient_access = row.try_get::<bool, _>("patient_access").unwrap_or(false)
-        && patient_scope_opens_tasks(auth.role);
-    if !can_view_operational_item(auth, assigned_to, assigned_by, &assigned_by_role)
-        && !project_access
-        && !patient_access
-    {
+    if !can_view_operational_item(
+        auth,
+        assigned_to,
+        assigned_by,
+        &assigned_by_role,
+        TaskScope::from_row(&row),
+    ) {
         return Err(err(StatusCode::FORBIDDEN, "Forbidden"));
     }
     Ok(())
@@ -3900,8 +3984,9 @@ fn attachment_access(
     assigned_to: Uuid,
     assigned_by: Uuid,
     assigned_by_role: &str,
+    scope: TaskScope,
 ) -> Option<AttachmentAccess> {
-    if can_mutate_operational_item(auth, assigned_by, assigned_by_role) {
+    if can_mutate_operational_item(auth, assigned_by, assigned_by_role, scope) {
         Some(AttachmentAccess::Manage)
     } else if auth.user_id == assigned_to {
         Some(AttachmentAccess::AssigneeUploads)
@@ -3944,7 +4029,8 @@ async fn ensure_operational_attachment_upload_access(
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    if attachment_access(auth, assigned_to, assigned_by, &assigned_by_role).is_none() {
+    let scope = load_task_scope(&state.db, auth, item_id).await?;
+    if attachment_access(auth, assigned_to, assigned_by, &assigned_by_role, scope).is_none() {
         return Err(err(StatusCode::FORBIDDEN, ATTACHMENT_ACCESS_DENIED));
     }
     Ok(())
@@ -3983,7 +4069,9 @@ async fn lock_task_attachment_context(
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
-    let Some(access) = attachment_access(auth, assigned_to, assigned_by, &assigned_by_role) else {
+    let scope = load_task_scope(&mut **tx, auth, item_id).await?;
+    let Some(access) = attachment_access(auth, assigned_to, assigned_by, &assigned_by_role, scope)
+    else {
         return Err(err(StatusCode::FORBIDDEN, ATTACHMENT_ACCESS_DENIED));
     };
     Ok((
@@ -4560,36 +4648,53 @@ fn parse_datetime(
 
 async fn load_item(
     state: &AppState,
+    auth: &AuthUser,
     item_id: Uuid,
 ) -> Result<Option<serde_json::Value>, axum::response::Response> {
     let row = sqlx::query(OPERATIONAL_ITEM_RESPONSE_QUERY)
         .bind(item_id)
+        .bind(auth.user_id)
         .fetch_optional(&state.db)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, item_id = %item_id, "load concierge operational item response");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         })?;
-    Ok(row.as_ref().and_then(build_item_json))
+    Ok(row.as_ref().and_then(|row| build_item_json(auth, row)))
 }
 
 async fn load_item_in_transaction(
     tx: &mut Transaction<'_, Postgres>,
+    auth: &AuthUser,
     item_id: Uuid,
 ) -> Result<Option<serde_json::Value>, axum::response::Response> {
     let row = sqlx::query(OPERATIONAL_ITEM_RESPONSE_QUERY)
         .bind(item_id)
+        .bind(auth.user_id)
         .fetch_optional(&mut **tx)
         .await
         .map_err(|error| {
             tracing::error!(error = %error, item_id = %item_id, "load locked concierge operational item response");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         })?;
-    Ok(row.as_ref().and_then(build_item_json))
+    Ok(row.as_ref().and_then(|row| build_item_json(auth, row)))
 }
 
-fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
+/// Item payload for `auth`: `can_manage` tells the client whether the caller
+/// may edit, close, archive or delete the task (creator or a higher role
+/// whose reach covers it), so the UI offers only what the server accepts.
+fn build_item_json(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
+    let assigned_by_role = row
+        .try_get::<String, _>("assigned_by_role")
+        .unwrap_or_default();
+    let can_manage = can_mutate_operational_item(
+        auth,
+        row.try_get::<Uuid, _>("assigned_by").ok()?,
+        &assigned_by_role,
+        TaskScope::from_row(row),
+    );
     Some(serde_json::json!({
+        "can_manage": can_manage,
         "id": row.try_get::<Uuid, _>("id").ok()?,
         "kind": row.try_get::<String, _>("task_kind").ok()?,
         "parent_task_id": row.try_get::<Option<Uuid>, _>("parent_task_id").unwrap_or_default(),
@@ -4930,16 +5035,102 @@ fn require_operational_role(auth: &AuthUser) -> Result<(), axum::response::Respo
     ])
 }
 
-fn can_mutate_operational_item(auth: &AuthUser, assigned_by: Uuid, assigned_by_role: &str) -> bool {
+/// What opens a task to the caller beyond being its assignee or creator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TaskScope {
+    /// A project the caller works in shares the task.
+    project_access: bool,
+    /// The caller is assigned to the task's patient.
+    patient_access: bool,
+    /// The task names a patient.
+    has_patient: bool,
+}
+
+impl TaskScope {
+    /// Nothing opens the task (also the fallback for unreadable rows).
+    const NONE: Self = Self {
+        project_access: false,
+        patient_access: false,
+        has_patient: true,
+    };
+
+    /// Reads the `project_access`, `patient_access` and `has_patient`
+    /// columns of a task row.
+    fn from_row(row: &sqlx::postgres::PgRow) -> Self {
+        Self {
+            project_access: row.try_get::<bool, _>("project_access").unwrap_or(false),
+            patient_access: row.try_get::<bool, _>("patient_access").unwrap_or(false),
+            has_patient: row.try_get::<bool, _>("has_patient").unwrap_or(true),
+        }
+    }
+}
+
+/// The caller's scope for one task: the project that shares it and the
+/// assignment to its patient.
+const TASK_SCOPE_QUERY: &str = r#"SELECT task.patient_id IS NOT NULL AS has_patient,
+          EXISTS (
+              SELECT 1
+              FROM crm_projects visible_project
+              WHERE visible_project.id = task.project_id
+                AND visible_project.archived_at IS NULL
+                AND (
+                    CASE WHEN (SELECT role FROM users WHERE id = $2) = 'concierge' THEN visible_project.created_by = $2 ELSE (visible_project.owner_id = $2
+                    OR EXISTS (
+                        SELECT 1 FROM crm_project_members visible_member
+                        WHERE visible_member.project_id = visible_project.id
+                          AND visible_member.user_id = $2
+                    )) END
+                )
+          ) AS project_access,
+          EXISTS (
+              SELECT 1
+              FROM patient_assignments visible_assignment
+              WHERE visible_assignment.patient_id = task.patient_id
+                AND visible_assignment.user_id = $2
+                AND visible_assignment.revoked_at IS NULL
+          ) AS patient_access
+   FROM tasks task
+   WHERE task.id = $1"#;
+
+async fn load_task_scope<'e, E>(
+    executor: E,
+    auth: &AuthUser,
+    item_id: Uuid,
+) -> Result<TaskScope, axum::response::Response>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    let row = sqlx::query(TASK_SCOPE_QUERY)
+        .bind(item_id)
+        .bind(auth.user_id)
+        .fetch_optional(executor)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, item_id = %item_id, "load operational task scope");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        })?;
+    Ok(row.as_ref().map_or(TaskScope::NONE, TaskScope::from_row))
+}
+
+/// The creator changes its task; a higher role (see
+/// `can_manage_operational_role`) changes it only within its reach (see
+/// `rank_reaches_task`).
+fn can_mutate_operational_item(
+    auth: &AuthUser,
+    assigned_by: Uuid,
+    assigned_by_role: &str,
+    scope: TaskScope,
+) -> bool {
     if auth.user_id == assigned_by {
         return true;
     }
-    can_manage_operational_role(auth.role, assigned_by_role)
+    can_manage_operational_role(auth.role, assigned_by_role) && rank_reaches_task(auth.role, scope)
 }
 
 struct OperationalItemDeletion<'a> {
     assigned_by: Uuid,
     assigned_by_role: &'a str,
+    scope: TaskScope,
     status: &'a str,
     archived: bool,
     has_work: bool,
@@ -4955,7 +5146,7 @@ fn validate_operational_item_deletion(
     auth: &AuthUser,
     task: &OperationalItemDeletion<'_>,
 ) -> Result<(), (StatusCode, &'static str)> {
-    if !can_mutate_operational_item(auth, task.assigned_by, task.assigned_by_role) {
+    if !can_mutate_operational_item(auth, task.assigned_by, task.assigned_by_role, task.scope) {
         return Err((
             StatusCode::FORBIDDEN,
             "Only the task creator or a higher role can delete this task",
@@ -5002,13 +5193,29 @@ fn operational_role_name(role: Role) -> Option<&'static str> {
     }
 }
 
+/// Rank over the creator's role: the CEO over every task, a manager over
+/// concierge tasks, the interpreter team lead over interpreter tasks. The CEO
+/// assistant reads every task but changes only its own (it is read-only).
 fn can_manage_operational_role(actor_role: Role, creator_role: &str) -> bool {
     match actor_role {
         Role::Ceo => true,
-        Role::CeoAssistant | Role::Billing | Role::PatientManager | Role::Sales => {
-            creator_role == "concierge"
-        }
+        Role::Billing | Role::PatientManager | Role::Sales => creator_role == "concierge",
         Role::TeamleadInterpreter => creator_role == "interpreter",
+        _ => false,
+    }
+}
+
+/// How far a rank over the creator reaches (owner decision 2026-09-28). The
+/// CEO and the interpreter team lead keep their organisation-wide reach. A
+/// patient manager supervises concierge work for the patients of its pool;
+/// billing and sales supervise none of it by patient. Every manager keeps a
+/// patient-less task a project shares with it.
+fn rank_reaches_task(actor_role: Role, scope: TaskScope) -> bool {
+    let shared_without_patient = scope.project_access && !scope.has_patient;
+    match actor_role {
+        Role::Ceo | Role::TeamleadInterpreter => true,
+        Role::PatientManager => scope.patient_access || shared_without_patient,
+        Role::Billing | Role::Sales => shared_without_patient,
         _ => false,
     }
 }
@@ -5039,12 +5246,18 @@ fn can_assign_operational_role(actor_role: Role, target_role: &str) -> bool {
     }
 }
 
-/// Executors (concierge, interpreter) work on their own tasks only: assigned
-/// to them, created by them or shared with them through a project. Their
-/// patient assignment does not open the other tasks of that patient (RBAC
-/// matrix: task manager "W (свої)"). Managers keep the patient-wide view.
+/// Only the patient manager and the interpreter team lead see the tasks of
+/// the patients they are assigned to. Executors (concierge, interpreter) work
+/// on their own tasks only: assigned to them, created by them or shared with
+/// them through a project (RBAC matrix: task manager "W (свої)"); billing and
+/// sales likewise see only their own tasks (owner decision 2026-09-28).
 fn patient_scope_opens_tasks(role: Role) -> bool {
-    !matches!(role, Role::Concierge | Role::Interpreter)
+    matches!(role, Role::PatientManager | Role::TeamleadInterpreter)
+}
+
+/// The CEO sees every task; the CEO assistant reads every task.
+fn sees_every_operational_item(role: Role) -> bool {
+    matches!(role, Role::Ceo | Role::CeoAssistant)
 }
 
 fn can_collaborate_on_operational_item(
@@ -5052,19 +5265,31 @@ fn can_collaborate_on_operational_item(
     assigned_to: Uuid,
     assigned_by: Uuid,
     assigned_by_role: &str,
+    scope: TaskScope,
 ) -> bool {
     auth.user_id == assigned_to
-        || auth.user_id == assigned_by
-        || can_manage_operational_role(auth.role, assigned_by_role)
+        || can_mutate_operational_item(auth, assigned_by, assigned_by_role, scope)
 }
 
+/// Task visibility; `list_items` and `list_all_attachments` apply the same
+/// rule in SQL.
 fn can_view_operational_item(
     auth: &AuthUser,
     assigned_to: Uuid,
     assigned_by: Uuid,
     assigned_by_role: &str,
+    scope: TaskScope,
 ) -> bool {
-    can_collaborate_on_operational_item(auth, assigned_to, assigned_by, assigned_by_role)
+    sees_every_operational_item(auth.role)
+        || can_collaborate_on_operational_item(
+            auth,
+            assigned_to,
+            assigned_by,
+            assigned_by_role,
+            scope,
+        )
+        || scope.project_access
+        || (scope.patient_access && patient_scope_opens_tasks(auth.role))
 }
 
 fn is_allowed_status_transition(from: &str, to: &str, can_review: bool) -> bool {
@@ -5200,7 +5425,8 @@ mod work_center_tests {
                 &actor(assignee, Role::Interpreter),
                 assignee,
                 creator,
-                "patient_manager"
+                "patient_manager",
+                TaskScope::NONE
             ),
             Some(AttachmentAccess::AssigneeUploads)
         );
@@ -5209,7 +5435,8 @@ mod work_center_tests {
                 &actor(creator, Role::PatientManager),
                 assignee,
                 creator,
-                "patient_manager"
+                "patient_manager",
+                TaskScope::NONE
             ),
             Some(AttachmentAccess::Manage)
         );
@@ -5218,7 +5445,8 @@ mod work_center_tests {
                 &actor(Uuid::new_v4(), Role::Concierge),
                 assignee,
                 creator,
-                "patient_manager"
+                "patient_manager",
+                TaskScope::NONE
             ),
             None
         );
@@ -5230,6 +5458,89 @@ mod work_center_tests {
         assert!(!patient_scope_opens_tasks(Role::Interpreter));
         assert!(patient_scope_opens_tasks(Role::PatientManager));
         assert!(patient_scope_opens_tasks(Role::TeamleadInterpreter));
+        // Billing and sales see only their own tasks (owner decision 2026-09-28).
+        assert!(!patient_scope_opens_tasks(Role::Billing));
+        assert!(!patient_scope_opens_tasks(Role::Sales));
+    }
+
+    #[test]
+    fn manager_reach_over_concierge_tasks_stays_within_its_scope() {
+        let concierge = Uuid::new_v4();
+        let assignee = Uuid::new_v4();
+        let foreign_patient = TaskScope::NONE;
+        let own_patient = TaskScope {
+            patient_access: true,
+            ..TaskScope::NONE
+        };
+        let shared_foreign_patient = TaskScope {
+            project_access: true,
+            ..TaskScope::NONE
+        };
+        let shared_without_patient = TaskScope {
+            project_access: true,
+            patient_access: false,
+            has_patient: false,
+        };
+        let unshared_without_patient = TaskScope {
+            has_patient: false,
+            ..TaskScope::NONE
+        };
+        let view = |role: Role, scope: TaskScope| {
+            can_view_operational_item(
+                &actor(Uuid::new_v4(), role),
+                assignee,
+                concierge,
+                "concierge",
+                scope,
+            )
+        };
+        let manage = |role: Role, scope: TaskScope| {
+            can_mutate_operational_item(&actor(Uuid::new_v4(), role), concierge, "concierge", scope)
+        };
+
+        // Patient manager: its own patients and patient-less shared tasks.
+        assert!(!view(Role::PatientManager, foreign_patient));
+        assert!(!manage(Role::PatientManager, foreign_patient));
+        assert!(view(Role::PatientManager, own_patient));
+        assert!(manage(Role::PatientManager, own_patient));
+        assert!(view(Role::PatientManager, shared_foreign_patient));
+        assert!(!manage(Role::PatientManager, shared_foreign_patient));
+        assert!(manage(Role::PatientManager, shared_without_patient));
+        assert!(!view(Role::PatientManager, unshared_without_patient));
+
+        // Billing and sales: own and project-shared tasks only.
+        for role in [Role::Billing, Role::Sales] {
+            assert!(!view(role, foreign_patient), "{role:?}");
+            assert!(!view(role, own_patient), "{role:?}");
+            assert!(!view(role, unshared_without_patient), "{role:?}");
+            assert!(view(role, shared_foreign_patient), "{role:?}");
+            assert!(!manage(role, shared_foreign_patient), "{role:?}");
+            assert!(manage(role, shared_without_patient), "{role:?}");
+        }
+
+        // The CEO sees and changes everything; the CEO assistant only reads.
+        assert!(view(Role::Ceo, foreign_patient));
+        assert!(manage(Role::Ceo, foreign_patient));
+        for scope in [foreign_patient, own_patient, shared_without_patient] {
+            assert!(view(Role::CeoAssistant, scope));
+            assert!(!manage(Role::CeoAssistant, scope));
+        }
+        let assistant = actor(Uuid::new_v4(), Role::CeoAssistant);
+        assert!(can_mutate_operational_item(
+            &assistant,
+            assistant.user_id,
+            "ceo_assistant",
+            TaskScope::NONE
+        ));
+
+        // The interpreter team lead keeps its team-wide reach.
+        assert!(can_view_operational_item(
+            &actor(Uuid::new_v4(), Role::TeamleadInterpreter),
+            assignee,
+            Uuid::new_v4(),
+            "interpreter",
+            TaskScope::NONE
+        ));
     }
 
     #[test]
@@ -5249,6 +5560,7 @@ mod work_center_tests {
                 let task = OperationalItemDeletion {
                     assigned_by: creator,
                     assigned_by_role: "concierge",
+                    scope: TaskScope::NONE,
                     status,
                     archived: false,
                     has_work,
@@ -5274,6 +5586,11 @@ mod work_center_tests {
         let mut task = OperationalItemDeletion {
             assigned_by: creator,
             assigned_by_role: "concierge",
+            // The manager supervises this patient.
+            scope: TaskScope {
+                patient_access: true,
+                ..TaskScope::NONE
+            },
             status: "open",
             archived: false,
             has_work: false,
@@ -5311,6 +5628,7 @@ mod work_center_tests {
         let task = OperationalItemDeletion {
             assigned_by: creator,
             assigned_by_role: "concierge",
+            scope: TaskScope::NONE,
             status: "open",
             archived: false,
             has_work: false,
@@ -5337,14 +5655,21 @@ mod work_center_tests {
             &concierge,
             concierge.user_id,
             manager,
-            "ceo"
+            "ceo",
+            TaskScope::NONE
         ));
-        assert!(!can_mutate_operational_item(&concierge, manager, "ceo"));
+        assert!(!can_mutate_operational_item(
+            &concierge,
+            manager,
+            "ceo",
+            TaskScope::NONE
+        ));
         assert!(!can_collaborate_on_operational_item(
             &concierge,
             Uuid::new_v4(),
             manager,
-            "ceo"
+            "ceo",
+            TaskScope::NONE
         ));
     }
 
