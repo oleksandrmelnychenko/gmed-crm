@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::Cursor;
 
 use axum::{
@@ -15,13 +16,14 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::{
-    audit,
+    access, audit,
     auth::middleware::AuthUser,
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
     routes::documents::{read_document_storage_bytes, remove_document_blob, store_document_blob},
     state::AppState,
 };
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 const MAX_OPERATIONAL_ATTACHMENT_SIZE: usize = 20 * 1024 * 1024;
@@ -408,6 +410,10 @@ async fn list_items(
     let Some(actor_role) = operational_role_name(auth.role) else {
         return err(StatusCode::FORBIDDEN, "Forbidden");
     };
+    let visibility = match TaskPatientVisibility::load(&state, &auth).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
 
     let rows = match sqlx::query(
         r#"SELECT t.id, t.title, t.description AS operational_note, t.assigned_to, t.assigned_by,
@@ -544,7 +550,7 @@ async fn list_items(
 
     Json(
         rows.iter()
-            .filter_map(|row| build_item_json(&auth, row))
+            .filter_map(|row| build_item_json(&auth, &visibility, row))
             .collect::<Vec<_>>(),
     )
     .into_response()
@@ -622,6 +628,10 @@ async fn list_all_attachments(
     let Some(actor_role) = operational_role_name(auth.role) else {
         return err(StatusCode::FORBIDDEN, "Forbidden");
     };
+    let visibility = match TaskPatientVisibility::load(&state, &auth).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let search = query
         .q
         .as_deref()
@@ -635,7 +645,11 @@ async fn list_all_attachments(
                   task.title AS task_title, task.task_kind, task.status AS task_status,
                   task.patient_id, task.provider_id,
                   NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
-                  provider.name AS provider_name
+                  provider.name AS provider_name,
+                  ($2::text IS NOT NULL
+                   AND NOT (attachment.file_name ILIKE $2
+                            OR task.title ILIKE $2
+                            OR COALESCE(provider.name, '') ILIKE $2)) AS matched_by_patient_only
            FROM concierge_operational_task_attachments attachment
            JOIN tasks task ON task.id = attachment.task_id
            JOIN users task_creator ON task_creator.id = task.assigned_by
@@ -700,6 +714,19 @@ async fn list_all_attachments(
     Json(
         rows.iter()
             .filter_map(|row| {
+                // The patient's name is shown, and searched, only for a
+                // patient the caller may open.
+                let patient_id = row
+                    .try_get::<Option<Uuid>, _>("patient_id")
+                    .unwrap_or_default();
+                let patient_visible = patient_id.is_some_and(|id| visibility.allows(id));
+                if !patient_visible
+                    && row
+                        .try_get::<bool, _>("matched_by_patient_only")
+                        .unwrap_or(false)
+                {
+                    return None;
+                }
                 Some(serde_json::json!({
                     "id": row.try_get::<Uuid, _>("id").ok()?,
                     "task_id": row.try_get::<Uuid, _>("task_id").ok()?,
@@ -709,8 +736,8 @@ async fn list_all_attachments(
                     "file_name": row.try_get::<String, _>("file_name").unwrap_or_default(),
                     "mime_type": row.try_get::<String, _>("mime_type").unwrap_or_default(),
                     "file_size": row.try_get::<i64, _>("file_size").unwrap_or_default(),
-                    "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
-                    "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
+                    "patient_id": patient_id,
+                    "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default().filter(|_| patient_visible),
                     "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
                     "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
                     "uploaded_by": row.try_get::<Uuid, _>("uploaded_by").ok()?,
@@ -1162,6 +1189,11 @@ async fn create_item(
         Ok(value) => value,
         Err(response) => return response,
     };
+    if let Some(patient_id) = fields.patient_id
+        && let Err(response) = ensure_task_patient_access(&state, &auth, patient_id).await
+    {
+        return response;
+    }
     let mut payload_fingerprint = create_item_payload_fingerprint(assigned_to, &fields);
     if let Some(parent_id) = body.parent_task_id {
         payload_fingerprint.push_str(&format!(":parent:{parent_id}"));
@@ -1216,16 +1248,15 @@ async fn create_item(
         let replayed_item_id = replay
             .try_get::<Uuid, _>("task_id")
             .unwrap_or_else(|_| Uuid::nil());
-        let replayed_item = match load_item_in_transaction(&mut tx, &auth, replayed_item_id).await {
-            Ok(Some(value)) => value,
-            Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
-            Err(response) => return response,
-        };
         if let Err(error) = tx.commit().await {
             tracing::error!(error = %error, request_id = %body.request_id, "commit concierge operational create replay");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        return Json(replayed_item).into_response();
+        return match load_item(&state, &auth, replayed_item_id).await {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
+            Err(response) => response,
+        };
     }
     if let Err(response) =
         validate_active_operational_assignee_in_transaction(&mut tx, auth.role, assigned_to).await
@@ -1247,20 +1278,6 @@ async fn create_item(
             ensure_service_not_converted_in_transaction(&mut tx, service_id, None).await
         {
             return response;
-        }
-    }
-    if let Some(patient_id) = fields.patient_id {
-        let exists =
-            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
-                .bind(patient_id)
-                .fetch_one(&mut *tx)
-                .await
-                .unwrap_or(false);
-        if !exists {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "patient_id must reference a patient",
-            );
         }
     }
     if let Some(provider_id) = fields.provider_id {
@@ -1483,6 +1500,12 @@ async fn update_item(
         }
         Err(response) => return response,
     };
+    // Checked before the task row is locked; applied below only when the
+    // update links a different patient (a kept link stays editable).
+    let requested_patient_access = match body.patient_id {
+        Some(patient_id) => Some(ensure_task_patient_access(&state, &auth, patient_id).await),
+        None => None,
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
@@ -1493,7 +1516,7 @@ async fn update_item(
     };
     let existing = match sqlx::query(
         r#"SELECT task.assigned_to, task.assigned_by, task.status, task.reminder_at,
-                  task.concierge_service_id,
+                  task.concierge_service_id, task.patient_id,
                   task.archived_at,
                   task.updated_at, creator.role AS assigned_by_role,
                   EXISTS(SELECT 1 FROM tasks child WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL) AS has_children
@@ -1616,19 +1639,13 @@ async fn update_item(
             return response;
         }
     }
-    if let Some(patient_id) = fields.patient_id {
-        let exists =
-            sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
-                .bind(patient_id)
-                .fetch_one(&mut *tx)
-                .await
-                .unwrap_or(false);
-        if !exists {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "patient_id must reference a patient",
-            );
-        }
+    let existing_patient_id = existing
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    if fields.patient_id != existing_patient_id
+        && let Some(Err(response)) = requested_patient_access
+    {
+        return response;
     }
     if let Some(provider_id) = fields.provider_id {
         let exists =
@@ -2423,16 +2440,15 @@ async fn change_item_archive_state(
         );
     }
     if archive == archived_at.is_some() {
-        let item = match load_item_in_transaction(&mut tx, auth, item_id).await {
-            Ok(Some(value)) => value,
-            Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
-            Err(response) => return response,
-        };
         if let Err(error) = tx.commit().await {
             tracing::error!(error = %error, item_id = %item_id, "commit idempotent concierge task archive mutation");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        return Json(item).into_response();
+        return match load_item(state, auth, item_id).await {
+            Ok(Some(value)) => Json(value).into_response(),
+            Ok(None) => err(StatusCode::NOT_FOUND, "Operational item not found"),
+            Err(response) => response,
+        };
     }
 
     let result = sqlx::query(
@@ -2723,6 +2739,11 @@ async fn get_item_detail(
     if let Err(response) = require_operational_role(&auth) {
         return response;
     }
+    // Loaded before the task row is locked, so the read holds one connection.
+    let visibility = match TaskPatientVisibility::load(&state, &auth).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
     let mut tx = match state.db.begin().await {
         Ok(value) => value,
         Err(error) => {
@@ -2733,7 +2754,7 @@ async fn get_item_detail(
     if let Err(response) = lock_item_access(&mut tx, &auth, item_id, false).await {
         return response;
     }
-    let item = match load_item_in_transaction(&mut tx, &auth, item_id).await {
+    let item = match load_item_in_transaction(&mut tx, &auth, &visibility, item_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(response) => return response,
@@ -4660,12 +4681,17 @@ async fn load_item(
             tracing::error!(error = %error, item_id = %item_id, "load concierge operational item response");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         })?;
-    Ok(row.as_ref().and_then(|row| build_item_json(auth, row)))
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let visibility = TaskPatientVisibility::load(state, auth).await?;
+    Ok(build_item_json(auth, &visibility, &row))
 }
 
 async fn load_item_in_transaction(
     tx: &mut Transaction<'_, Postgres>,
     auth: &AuthUser,
+    visibility: &TaskPatientVisibility,
     item_id: Uuid,
 ) -> Result<Option<serde_json::Value>, axum::response::Response> {
     let row = sqlx::query(OPERATIONAL_ITEM_RESPONSE_QUERY)
@@ -4677,13 +4703,25 @@ async fn load_item_in_transaction(
             tracing::error!(error = %error, item_id = %item_id, "load locked concierge operational item response");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         })?;
-    Ok(row.as_ref().and_then(|row| build_item_json(auth, row)))
+    Ok(row
+        .as_ref()
+        .and_then(|row| build_item_json(auth, visibility, row)))
 }
 
 /// Item payload for `auth`: `can_manage` tells the client whether the caller
 /// may edit, close, archive or delete the task (creator or a higher role
 /// whose reach covers it), so the UI offers only what the server accepts.
-fn build_item_json(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
+/// The patient's name and birth date are left out for a caller who may not
+/// open the patient (see `TaskPatientVisibility`).
+fn build_item_json(
+    auth: &AuthUser,
+    visibility: &TaskPatientVisibility,
+    row: &sqlx::postgres::PgRow,
+) -> Option<serde_json::Value> {
+    let patient_id = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default();
+    let patient_visible = patient_id.is_some_and(|id| visibility.allows(id));
     let assigned_by_role = row
         .try_get::<String, _>("assigned_by_role")
         .unwrap_or_default();
@@ -4728,9 +4766,9 @@ fn build_item_json(auth: &AuthUser, row: &sqlx::postgres::PgRow) -> Option<serde
         "created_at": format_datetime(row, "created_at"),
         "updated_at": format_datetime(row, "updated_at"),
         "task_audience": row.try_get::<String, _>("task_audience").unwrap_or_else(|_| "internal".to_string()),
-        "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
-        "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
-        "patient_birth_date": row.try_get::<Option<chrono::NaiveDate>, _>("patient_birth_date").unwrap_or_default().map(|value| value.to_string()),
+        "patient_id": patient_id,
+        "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default().filter(|_| patient_visible),
+        "patient_birth_date": row.try_get::<Option<chrono::NaiveDate>, _>("patient_birth_date").unwrap_or_default().filter(|_| patient_visible).map(|value| value.to_string()),
         "provider_id": row.try_get::<Option<Uuid>, _>("provider_id").unwrap_or_default(),
         "provider_name": row.try_get::<Option<String>, _>("provider_name").unwrap_or_default(),
         "provider_phone": row.try_get::<Option<String>, _>("provider_phone").unwrap_or_default(),
@@ -5062,6 +5100,105 @@ impl TaskScope {
             patient_access: row.try_get::<bool, _>("patient_access").unwrap_or(false),
             has_patient: row.try_get::<bool, _>("has_patient").unwrap_or(true),
         }
+    }
+}
+
+/// Which patients the caller may see on a task. A task can be visible without
+/// its patient (shared through a project, assigned by someone else), so the
+/// patient's name and birth date follow the patient access rule of the rest
+/// of the code: `patients.view`, then `patients::has_patient_access` (the CEO
+/// every patient; explicit access rules; otherwise the role baseline: every
+/// patient for roles outside the assignment model, the patient assignment
+/// and, for the concierge, its own tasks). Loaded once per response so a
+/// task list does not check each row separately.
+struct TaskPatientVisibility {
+    every: bool,
+    none: bool,
+    rules: crate::routes::patients::PatientViewRuleScope,
+    baseline_every: bool,
+    baseline: HashSet<Uuid>,
+}
+
+impl TaskPatientVisibility {
+    async fn load(state: &AppState, auth: &AuthUser) -> Result<Self, axum::response::Response> {
+        let mut visibility = Self {
+            every: auth.role == Role::Ceo,
+            none: !auth.can(Capability::PatientsView),
+            rules: Default::default(),
+            baseline_every: !access::requires_patient_assignment(auth.role),
+            baseline: HashSet::new(),
+        };
+        if visibility.every || visibility.none {
+            return Ok(visibility);
+        }
+        visibility.rules =
+            crate::routes::patients::load_patient_view_rule_scope(state, auth).await?;
+        if !visibility.baseline_every {
+            let failed = |error: sqlx::Error| {
+                tracing::error!(error = %error, user_id = %auth.user_id, "load task patient visibility");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            };
+            visibility.baseline =
+                access::load_active_patient_assignment_set(&state.db, auth.user_id)
+                    .await
+                    .map_err(failed)?;
+            if auth.role == Role::Concierge {
+                visibility.baseline.extend(
+                    access::load_active_concierge_task_patient_access_set(&state.db, auth.user_id)
+                        .await
+                        .map_err(failed)?,
+                );
+            }
+        }
+        Ok(visibility)
+    }
+
+    fn allows(&self, patient_id: Uuid) -> bool {
+        if self.every {
+            return true;
+        }
+        if self.none {
+            return false;
+        }
+        self.rules
+            .decision(patient_id)
+            .unwrap_or_else(|| self.baseline_every || self.baseline.contains(&patient_id))
+    }
+}
+
+/// A task names only a patient its author may open (`patients.view` and the
+/// shared patient access rule); otherwise the task would hand the patient's
+/// name and birth date to its author. The CEO links any patient; sales (no
+/// `patients.view`) and assignment roles outside their pool get 403.
+async fn ensure_task_patient_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(patient_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, patient_id = %patient_id, "validate task patient");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            })?;
+    if !exists {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "patient_id must reference a patient",
+        ));
+    }
+    if auth.can(Capability::PatientsView)
+        && crate::routes::patients::has_patient_access(state, auth, patient_id).await?
+    {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "A task can only name a patient you have access to",
+        ))
     }
 }
 

@@ -690,6 +690,24 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+async fn seed_patient_assignment(
+    pool: &PgPool,
+    patient_id: Uuid,
+    user_id: Uuid,
+    assigned_by: Uuid,
+) {
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+           VALUES ($1, $2, $3)"#,
+    )
+    .bind(patient_id)
+    .bind(user_id)
+    .bind(assigned_by)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn seed_provider(pool: &PgPool, provider_type: &str, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO providers (name, provider_type)
@@ -1481,6 +1499,7 @@ async fn internal_and_external_task_audiences_round_trip_with_their_context() {
     let tag = Uuid::new_v4().simple().to_string();
     let concierge_id = seed_user(&ctx.pool, "concierge", &format!("audience-{tag}")).await;
     let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("audience-{tag}")).await;
+    seed_patient_assignment(&ctx.pool, patient_id, concierge_id, ctx.admin_id).await;
     let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("audience-{tag}")).await;
     let bearer = auth_header_for(concierge_id, "concierge");
     let path = "/api/v1/concierge-operational-items";
@@ -1988,6 +2007,7 @@ async fn operational_task_attachments_follow_visibility_hierarchy_and_storage_ru
     let same_rank_id = seed_user(&ctx.pool, "concierge", &format!("file-same-{tag}")).await;
     let assignee_id = seed_user(&ctx.pool, "interpreter", &format!("file-viewer-{tag}")).await;
     let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("file-{tag}")).await;
+    seed_patient_assignment(&ctx.pool, patient_id, creator_id, ctx.admin_id).await;
     let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("file-{tag}")).await;
     let creator_bearer = auth_header_for(creator_id, "teamlead_interpreter");
     let same_rank_bearer = auth_header_for(same_rank_id, "concierge");
@@ -3713,16 +3733,12 @@ async fn managers_see_concierge_tasks_only_within_their_pool() {
     let own_patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("pool-own-{tag}")).await;
     let foreign_patient_id =
         seed_patient(&ctx.pool, ctx.admin_id, &format!("pool-foreign-{tag}")).await;
-    sqlx::query(
-        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
-           VALUES ($1, $2, $3)"#,
-    )
-    .bind(own_patient_id)
-    .bind(manager_id)
-    .bind(ctx.admin_id)
-    .execute(&ctx.pool)
-    .await
-    .unwrap();
+    seed_patient_assignment(&ctx.pool, own_patient_id, manager_id, ctx.admin_id).await;
+    // The concierge works for both patients (a task names only a patient its
+    // author may open).
+    for patient_id in [own_patient_id, foreign_patient_id] {
+        seed_patient_assignment(&ctx.pool, patient_id, concierge_id, ctx.admin_id).await;
+    }
 
     let concierge = auth_header_for(concierge_id, "concierge");
     let manager = auth_header_for(manager_id, "patient_manager");
@@ -3968,4 +3984,277 @@ async fn managers_see_concierge_tasks_only_within_their_pool() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+async fn post_task(app: &axum::Router, bearer: &str, body: Value) -> (StatusCode, Value) {
+    json_request(
+        app,
+        "POST",
+        "/api/v1/concierge-operational-items",
+        bearer,
+        Some(body),
+    )
+    .await
+}
+
+fn task_body(title: &str, patient_id: Option<Uuid>) -> Value {
+    json!({
+        "request_id": Uuid::new_v4(),
+        "kind": "task",
+        "title": title,
+        "patient_id": patient_id,
+        "priority": "normal"
+    })
+}
+
+fn update_body(task: &Value, patient_id: Option<Uuid>) -> Value {
+    json!({
+        "expected_updated_at": task["updated_at"],
+        "kind": "task",
+        "title": task["title"],
+        "patient_id": patient_id,
+        "priority": "normal",
+        "status": "open"
+    })
+}
+
+/// A task names only a patient its author may open (`patients.view` and the
+/// shared patient access rule), and a task visible without its patient (for
+/// example shared through a project) shows neither the patient's name nor
+/// the birth date: otherwise knowing a patient UUID would reveal the person.
+#[tokio::test]
+async fn tasks_name_only_patients_their_author_may_open() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let hidden_name = format!("Hidden{}", &tag[..12]);
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+               patient_id, first_name, last_name, birth_date, gender, created_by
+           ) VALUES ($1, 'Private', $2, '1984-05-06', 'diverse', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("OPS-LINK-{tag}"))
+    .bind(&hidden_name)
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("link-concierge-{tag}")).await;
+    let assigned_pm_id = seed_user(&ctx.pool, "patient_manager", &format!("link-pm-{tag}")).await;
+    let other_pm_id = seed_user(&ctx.pool, "patient_manager", &format!("link-other-{tag}")).await;
+    let interpreter_id = seed_user(&ctx.pool, "interpreter", &format!("link-interp-{tag}")).await;
+    let billing_id = seed_user(&ctx.pool, "billing", &format!("link-billing-{tag}")).await;
+    let sales_id = seed_user(&ctx.pool, "sales", &format!("link-sales-{tag}")).await;
+    let assistant_id =
+        seed_user(&ctx.pool, "ceo_assistant", &format!("link-assistant-{tag}")).await;
+    for user_id in [concierge_id, assigned_pm_id] {
+        seed_patient_assignment(&ctx.pool, patient_id, user_id, ctx.admin_id).await;
+    }
+    let concierge = auth_header_for(concierge_id, "concierge");
+    let assigned_pm = auth_header_for(assigned_pm_id, "patient_manager");
+    let other_pm = auth_header_for(other_pm_id, "patient_manager");
+    let interpreter = auth_header_for(interpreter_id, "interpreter");
+    let billing = auth_header_for(billing_id, "billing");
+    let sales = auth_header_for(sales_id, "sales");
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+    let ceo = auth_header_for(ctx.admin_id, "ceo");
+    let base_path = "/api/v1/concierge-operational-items";
+
+    // Creating: sales (no patients.view) and a patient manager outside the
+    // pool are refused and no task is stored; an unknown patient is 422.
+    for (bearer, title) in [
+        (&sales, format!("Sales probe {tag}")),
+        (&other_pm, format!("Foreign PM probe {tag}")),
+    ] {
+        let (status, body) = post_task(&ctx.app, bearer, task_body(&title, Some(patient_id))).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{title}: {body}");
+        assert!(!body.to_string().contains(&hidden_name), "{body}");
+        let stored: i64 = sqlx::query_scalar("SELECT count(*) FROM tasks WHERE title = $1")
+            .bind(&title)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, 0, "{title}");
+    }
+    let (status, body) = post_task(
+        &ctx.app,
+        &assigned_pm,
+        task_body("Unknown patient", Some(Uuid::new_v4())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The patient manager of the patient, billing (basic patient data), the
+    // CEO assistant and the CEO may name the patient.
+    let mut pm_task = Value::Null;
+    for bearer in [&assigned_pm, &billing, &assistant, &ceo] {
+        let (status, task) = post_task(
+            &ctx.app,
+            bearer,
+            task_body(&format!("Allowed link {tag}"), Some(patient_id)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{task}");
+        assert_eq!(task["patient_name"], format!("Private {hidden_name}"));
+        assert_eq!(task["patient_birth_date"], "1984-05-06");
+        if pm_task.is_null() {
+            pm_task = task;
+        }
+    }
+
+    // Sub-tasks and edits follow the same rule.
+    let (status, sales_task) = post_task(
+        &ctx.app,
+        &sales,
+        task_body(&format!("Sales own {tag}"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{sales_task}");
+    let mut subtask = task_body(&format!("Sales subtask {tag}"), Some(patient_id));
+    subtask["parent_task_id"] = sales_task["id"].clone();
+    let (status, body) = post_task(&ctx.app, &sales, subtask).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{base_path}/{}/update", sales_task["id"].as_str().unwrap()),
+        &sales,
+        Some(update_body(&sales_task, Some(patient_id))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, other_pm_task) = post_task(
+        &ctx.app,
+        &other_pm,
+        task_body(&format!("Other PM own {tag}"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{other_pm_task}");
+    let (status, body) = json_request(
+        &ctx.app,
+        "POST",
+        &format!(
+            "{base_path}/{}/update",
+            other_pm_task["id"].as_str().unwrap()
+        ),
+        &other_pm,
+        Some(update_body(&other_pm_task, Some(patient_id))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // A kept link stays editable after the assignment ends, but the patient's
+    // data is no longer shown to the former manager.
+    sqlx::query(
+        "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND user_id = $2",
+    )
+    .bind(patient_id)
+    .bind(assigned_pm_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let (status, kept) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("{base_path}/{}/update", pm_task["id"].as_str().unwrap()),
+        &assigned_pm,
+        Some(update_body(&pm_task, Some(patient_id))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept["patient_id"], patient_id.to_string());
+    assert!(kept["patient_name"].is_null(), "{kept}");
+    assert!(kept["patient_birth_date"].is_null(), "{kept}");
+
+    // A project shares a patient task with members who may not open the
+    // patient: they see the task, not the patient's name or birth date.
+    let (status, project) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/projects",
+        &ceo,
+        Some(json!({
+            "name": format!("Shared project {tag}"),
+            "status": "active",
+            "priority": "normal",
+            "owner_id": ctx.admin_id,
+            "member_ids": [other_pm_id, interpreter_id]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{project}");
+    let mut shared = task_body(&format!("Shared transfer {tag}"), Some(patient_id));
+    shared["assigned_to"] = json!(concierge_id);
+    shared["project_id"] = project["id"].clone();
+    let (status, shared_task) = post_task(&ctx.app, &ceo, shared).await;
+    assert_eq!(status, StatusCode::CREATED, "{shared_task}");
+    let shared_id = shared_task["id"].as_str().unwrap().to_owned();
+    let file_name = format!("shared-{tag}.pdf");
+    let (status, attachment) = multipart_file_request(
+        &ctx.app,
+        &format!("{base_path}/{shared_id}/attachments"),
+        &ceo,
+        &file_name,
+        "application/pdf",
+        format!("%PDF-1.4\nGMED shared {tag}\n%%EOF").as_bytes(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{attachment}");
+
+    for bearer in [&other_pm, &interpreter] {
+        let list = list_work_center(&ctx.app, bearer).await;
+        let row = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == shared_id.as_str())
+            .expect("project task is visible");
+        assert_eq!(row["patient_id"], patient_id.to_string());
+        assert!(row["patient_name"].is_null(), "{row}");
+        assert!(row["patient_birth_date"].is_null(), "{row}");
+        let (status, detail) = json_request(
+            &ctx.app,
+            "GET",
+            &format!("{base_path}/{shared_id}"),
+            bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        assert!(!detail.to_string().contains(&hidden_name), "{detail}");
+        assert!(!detail.to_string().contains("1984-05-06"), "{detail}");
+        let (status, files) = json_request(
+            &ctx.app,
+            "GET",
+            &format!("/api/v1/concierge-operational-attachments?q={file_name}"),
+            bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{files}");
+        assert_eq!(files.as_array().map(Vec::len), Some(1), "{files}");
+        assert!(files[0]["patient_name"].is_null(), "{files}");
+        // Searching by the patient's name does not reveal the hidden patient.
+        assert_eq!(count_task_files(&ctx.app, bearer, &hidden_name).await, 0);
+    }
+    // Those who may open the patient keep its data.
+    for bearer in [&concierge, &assistant, &ceo] {
+        let (status, detail) = json_request(
+            &ctx.app,
+            "GET",
+            &format!("{base_path}/{shared_id}"),
+            bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        assert_eq!(
+            detail["item"]["patient_name"],
+            format!("Private {hidden_name}")
+        );
+        assert_eq!(detail["item"]["patient_birth_date"], "1984-05-06");
+    }
+    assert_eq!(count_task_files(&ctx.app, &ceo, &hidden_name).await, 1);
 }
