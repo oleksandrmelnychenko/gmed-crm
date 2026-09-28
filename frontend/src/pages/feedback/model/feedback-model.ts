@@ -1,4 +1,4 @@
-import { hasCapability, type Actor } from "@/lib/permissions";
+import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 
 import type { FeedbackFormState, PatientOption } from "./types";
 
@@ -33,6 +33,11 @@ export function roleCanCaptureFeedback(actor?: Actor) {
 
 export function canViewStaffFeedback(actor?: Actor) {
   return hasCapability(actor, "feedback.view");
+}
+
+/** Mirrors the server: the read-only CEO assistant cannot review or archive feedback. */
+export function canReviewStaffFeedback(actor?: Actor) {
+  return canViewStaffFeedback(actor) && actorRole(actor) !== "ceo_assistant";
 }
 
 export function patientLabel(item: PatientOption) {

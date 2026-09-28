@@ -81,6 +81,7 @@ import {
 } from "./data/feedback-api";
 import {
   blankFeedbackForm,
+  canReviewStaffFeedback,
   canViewStaffFeedback,
   npsOptions,
   patientLabel,
@@ -1310,6 +1311,7 @@ function useStaffFeedbackWorkspaceContent() {
   const feedbackSelectPatientError = t.feedback_select_patient_error;
   const canViewWorkspace = canViewStaffFeedback(user);
   const canCapture = roleCanCaptureFeedback(user);
+  const canReview = canReviewStaffFeedback(user);
 
   const [staffState, dispatchStaffState] = useReducer(
     (
@@ -2133,6 +2135,7 @@ function useStaffFeedbackWorkspaceContent() {
                     submitLabel={t.feedback_review_save}
                     submittingLabel={t.common_loading}
                     submitting={reviewBusy}
+                    submitDisabled={!canReview}
                     onCancel={() => setActiveReview(null)}
                   />
                 }
@@ -2140,6 +2143,7 @@ function useStaffFeedbackWorkspaceContent() {
                 <div className="space-y-4 rounded-xl">
                   {feedbackCard(activeReview, t, true)}
 
+                  {canReview ? (
                   <section className="rounded-lg border border-border/70 bg-card p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div>
@@ -2169,6 +2173,7 @@ function useStaffFeedbackWorkspaceContent() {
                       </Field>
                     </div>
                   </section>
+                  ) : null}
                 </div>
               </AdminSheetScaffold>
             </form>

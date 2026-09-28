@@ -488,6 +488,18 @@ async fn review_writes_timeline_feedback_events() {
     assert_eq!(status, StatusCode::CREATED);
     let feedback_id = created["id"].as_str().unwrap();
 
+    // The CEO assistant reads feedback but cannot review or archive it.
+    let assistant_id = seed_user(pool, &format!("{tag}-assistant"), "ceo_assistant").await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/feedback/{feedback_id}/review"),
+        &auth_header_for(assistant_id, "ceo_assistant"),
+        Some(json!({ "status": "archived" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
     let (status, _) = json_request(
         &app,
         "POST",

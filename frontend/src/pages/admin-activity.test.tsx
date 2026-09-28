@@ -42,6 +42,19 @@ describe("Access and roles activity view", () => {
   });
 });
 
+describe("Status-change activity localization", () => {
+  it("names privacy, document, signature, import and account status changes", () => {
+    expect(actionLabel("privacy_request_executed", ru)).toBe("Запрос по защите данных выполнен");
+    expect(actionLabel("processing_restriction_lifted", de)).toBe(
+      "Einschränkung der Verarbeitung aufgehoben",
+    );
+    expect(actionLabel("document_signature_withdrawn", de)).toBe("Signaturanfrage zurückgezogen");
+    expect(actionLabel("clinical_document_import_retried", ru)).toBe("Импорт документа перезапущен");
+    expect(actionLabel("deactivate_user", ru)).toBe("Пользователь деактивирован");
+    expect(actionLabel("security_incident_reported", de)).toBe("Datenschutzvorfall gemeldet");
+  });
+});
+
 describe("Medication AI activity localization", () => {
   it("uses exact Russian and German labels for every AI lifecycle action", () => {
     expect(actionLabel("create_medication_ai_analysis", ru)).toBe("Запрошен AI-черновик");
