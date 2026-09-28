@@ -254,7 +254,10 @@ pub(crate) fn plan_service_status_change(
 
 /// The service statuses this actor can pick now: the current one and every
 /// move the task rules allow. The UI offers only these.
-pub(crate) fn allowed_service_statuses(auth: &AuthUser, facts: &ServiceTaskFacts<'_>) -> Vec<String> {
+pub(crate) fn allowed_service_statuses(
+    auth: &AuthUser,
+    facts: &ServiceTaskFacts<'_>,
+) -> Vec<String> {
     let mut allowed = vec![facts.service_status.to_string()];
     if !matches!(
         auth.role,
@@ -300,7 +303,11 @@ pub(crate) fn manual_billing_refusal_message(from: &str, to: &str) -> String {
     format!("Billing status cannot move from {from} to {to}")
 }
 
-pub(crate) fn allowed_billing_statuses(role: Role, service_status: &str, billing: &str) -> Vec<String> {
+pub(crate) fn allowed_billing_statuses(
+    role: Role,
+    service_status: &str,
+    billing: &str,
+) -> Vec<String> {
     let mut allowed = vec![billing.to_string()];
     if !matches!(role, Role::Ceo | Role::PatientManager | Role::Billing) {
         return allowed;
@@ -315,7 +322,11 @@ pub(crate) fn allowed_billing_statuses(role: Role, service_status: &str, billing
 
 /// Billing status after the derivation of a service status change (the
 /// database trigger does the same).
-pub(crate) fn billing_after_service_status(current_status: &str, target: &str, billing: &str) -> String {
+pub(crate) fn billing_after_service_status(
+    current_status: &str,
+    target: &str,
+    billing: &str,
+) -> String {
     match (current_status, target, billing) {
         (_, "completed", "draft") => "ready",
         (_, "cancelled", "draft" | "ready") => "waived",
@@ -328,7 +339,10 @@ pub(crate) fn billing_after_service_status(current_status: &str, target: &str, b
 
 /// Names the acting user for the audit rows the service derivation writes in
 /// this transaction.
-pub(crate) async fn set_audit_actor(conn: &mut PgConnection, actor_id: Uuid) -> Result<(), sqlx::Error> {
+pub(crate) async fn set_audit_actor(
+    conn: &mut PgConnection,
+    actor_id: Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query("SELECT set_config('gmed.audit_actor_id', $1, true)")
         .bind(actor_id.to_string())
         .execute(conn)
@@ -432,7 +446,9 @@ pub(crate) async fn prepare_task_status_change(
 }
 
 /// Clear responses for the refusals of the service triggers.
-pub(crate) fn service_state_error_response(error: &sqlx::Error) -> Option<axum::response::Response> {
+pub(crate) fn service_state_error_response(
+    error: &sqlx::Error,
+) -> Option<axum::response::Response> {
     let message = error.as_database_error()?.message().to_string();
     if message.starts_with("concierge_service_billed") {
         Some(conflict(SERVICE_BILLED_CODE, SERVICE_BILLED_MESSAGE))
@@ -468,7 +484,7 @@ pub(crate) async fn close_service_in_tx(
     target: &str,
     step: &SystemStep<'_>,
 ) -> Result<Vec<ChecklistItemSync>, sqlx::Error> {
-    set_audit_actor(&mut **tx, step.actor_id).await?;
+    set_audit_actor(tx, step.actor_id).await?;
     let task = sqlx::query_as::<_, (Uuid, String, Uuid)>(
         r#"SELECT task.id, task.status, task.assigned_to
            FROM tasks task
@@ -704,7 +720,7 @@ pub(crate) async fn reactivate_automatic_services_in_tx(
     appointment_id: Uuid,
     actor_id: Uuid,
 ) -> Result<Vec<ChecklistItemSync>, sqlx::Error> {
-    set_audit_actor(&mut **tx, actor_id).await?;
+    set_audit_actor(tx, actor_id).await?;
     let services = sqlx::query_as::<_, (Uuid, Option<Uuid>, Option<String>, Option<Uuid>, bool)>(
         r#"SELECT service.id, task.id, task.status, task.assigned_to,
                   COALESCE(task.archived_at IS NOT NULL, false)
