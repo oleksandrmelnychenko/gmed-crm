@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
 import { uiText } from "@/lib/i18n";
 
 import type {
@@ -221,7 +222,9 @@ export function usePatientDetailTabData({
             break;
           }
           case "appointments": {
-            const result = await apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal });
+            const result = (
+              await apiFetch<AppointmentItem[]>(`/patients/${id}/appointments`, { signal })
+            ).map((item) => localizeBlockedAppointmentTitle(item));
             if (signal.aborted) return;
             startTransition(() => {
               dispatchTabData({

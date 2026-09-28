@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
 import type {
   AppointmentAttentionItem,
   AppointmentListItem,
@@ -56,7 +57,11 @@ export function settleAppointmentsSchedulerResults(
   };
 
   if (rowsResult.status === "fulfilled") {
-    patch.appointments = rowsResult.value;
+    const rows = rowsResult.value;
+    const localized = rows.map((item) => localizeBlockedAppointmentTitle(item));
+    patch.appointments = localized.every((item, index) => item === rows[index])
+      ? rows
+      : localized;
   }
   if (attentionResult.status === "fulfilled") {
     patch.attentionItems = attentionResult.value;

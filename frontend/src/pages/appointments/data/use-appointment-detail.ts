@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { apiFetch } from "@/lib/api";
+import { localizeBlockedAppointmentTitle } from "@/lib/blocked-appointment";
 import {
   fetchAppointmentDetailResourceGroup,
   type AppointmentDetailResourcePayload,
@@ -419,8 +420,8 @@ export function useAppointmentDetail({
       detailResourceRequestKeysRef.current = createDetailResourceKeyState();
       dispatchDetailState(beginAppointmentDetailLoad());
       try {
-        const appointmentDetail = await apiFetch<AppointmentDetail>(
-          `/appointments/${selectedId}`,
+        const appointmentDetail = localizeBlockedAppointmentTitle(
+          await apiFetch<AppointmentDetail>(`/appointments/${selectedId}`),
         );
         let assignments: PatientAssignment[] = [];
         let assignmentsError = "";
