@@ -22,6 +22,10 @@ import {
   assignableConciergeTaskUsers,
   availableConciergeTaskStatuses,
   availableConciergeServiceStatuses,
+  conciergeBillingStatusOptions,
+  conciergeServiceNeedsBookingDecision,
+  conciergeServiceStatusOptions,
+  isConciergeServiceFinancialLocked,
   canAssignConciergeTaskToRole,
   canChangeConciergeTaskStatus,
   canDeleteConciergeTask,
@@ -527,6 +531,43 @@ describe("concierge workspace model", () => {
       "completed",
       "in_service",
     ]);
+  });
+
+  it("offers only the statuses the service's task rules allow the current user", () => {
+    // The assignee may start the service but only the task author completes it.
+    expect(
+      availableConciergeServiceStatuses(service({ status: "in_service", allowed_statuses: ["in_service"] })),
+    ).toEqual(["in_service"]);
+    expect(
+      availableConciergeServiceStatuses(
+        service({ status: "planned", allowed_statuses: ["planned", "in_service", "cancelled"] }),
+      ),
+    ).toEqual(["planned", "in_service", "cancelled"]);
+    expect(conciergeServiceStatusOptions("completed", false, ["completed", "in_service"])).toEqual([
+      "completed",
+      "in_service",
+    ]);
+    expect(conciergeServiceStatusOptions("planned", false, [])).toEqual(["planned"]);
+  });
+
+  it("moves billing forward only and locks the amounts of a billed service", () => {
+    expect(conciergeBillingStatusOptions("ready", ["ready", "billed", "waived"])).toEqual([
+      "ready",
+      "billed",
+      "waived",
+    ]);
+    expect(conciergeBillingStatusOptions("settled", [])).toEqual(["settled"]);
+    expect(conciergeBillingStatusOptions("draft", undefined)).toHaveLength(5);
+    expect(isConciergeServiceFinancialLocked(service({ billing_status: "billed" }))).toBe(true);
+    expect(isConciergeServiceFinancialLocked(service({ billing_status: "ready" }))).toBe(false);
+    expect(
+      isConciergeServiceFinancialLocked(service({ billing_status: "draft", financial_locked: true })),
+    ).toBe(true);
+  });
+
+  it("flags a partner booking whose appointment was cancelled", () => {
+    expect(conciergeServiceNeedsBookingDecision(service({ booking_decision_required_at: "2026-09-28T10:00:00Z" }))).toBe(true);
+    expect(conciergeServiceNeedsBookingDecision(service({}))).toBe(false);
   });
 
   it("shows key custody only for explicitly key-related services", () => {

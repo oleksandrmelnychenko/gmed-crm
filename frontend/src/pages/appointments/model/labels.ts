@@ -394,6 +394,7 @@ const PLURALIZED_ATTENTION_REASON_KEYS = new Set([
   "appointments_attention_reason_open_tasks_count",
   "appointments_attention_reason_visit_processing_checklist_open_count",
   "appointments_attention_reason_open_communication_threads_count",
+  "appointments_attention_reason_concierge_booking_decision_count",
 ]);
 
 function knownAttentionReasonLabel(key: string, values?: Record<string, string | number | boolean | null | undefined> | null) {

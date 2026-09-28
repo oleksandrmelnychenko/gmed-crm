@@ -28,7 +28,6 @@ import {
   blankConciergeServiceForm,
 } from "@/pages/appointments/model/form-factories";
 import {
-  CONCIERGE_BILLING_STATUS_OPTIONS,
   CONCIERGE_SERVICE_KIND_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
@@ -48,7 +47,11 @@ import {
   buildServiceDraft,
   toRfc3339,
 } from "@/pages/appointments/model/workflow-helpers";
-import { conciergeServiceStatusOptions } from "@/pages/concierge/model";
+import {
+  conciergeBillingStatusOptions,
+  conciergeServiceStatusOptions,
+  isConciergeServiceFinancialLocked,
+} from "@/pages/concierge/model";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type {
   AppointmentDetail,
@@ -515,7 +518,7 @@ function useAppointmentConciergeSectionContent({
                         className={selectClassName}
                       >
                         {/* Only the moves the server accepts; booked and confirmed come from the provider booking. */}
-                        {conciergeServiceStatusOptions(service.status, canManageConciergeBilling).map(
+                        {conciergeServiceStatusOptions(service.status, canManageConciergeBilling, service.allowed_statuses).map(
                           (status) => (
                             <option key={status} value={status}>
                               {serviceStatusLabel(status)}
@@ -541,6 +544,7 @@ function useAppointmentConciergeSectionContent({
                         min="0"
                         step="0.01"
                         value={draft.actualCost}
+                        readOnly={isConciergeServiceFinancialLocked(service)}
                         onChange={(event) =>
                           updateDraft(service.id, { actualCost: event.target.value })
                         }
@@ -599,7 +603,7 @@ function useAppointmentConciergeSectionContent({
                             }
                             className={selectClassName}
                           >
-                            {CONCIERGE_BILLING_STATUS_OPTIONS.map((status) => (
+                            {conciergeBillingStatusOptions(service.billing_status, service.allowed_billing_statuses).map((status) => (
                               <option key={status} value={status}>
                                 {billingStatusLabel(status)}
                               </option>

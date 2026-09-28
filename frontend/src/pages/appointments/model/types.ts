@@ -374,6 +374,11 @@ export type ConciergeServiceEntry = {
   id: string;
   /** The title is a placeholder hiding a medical appointment or provider. */
   title_redacted?: boolean;
+  linked_task_id?: string | null;
+  allowed_statuses?: string[];
+  allowed_billing_statuses?: string[];
+  financial_locked?: boolean;
+  booking_decision_required_at?: string | null;
   patient_id: string;
   patient_name: string;
   patient_pid: string;

@@ -33,6 +33,16 @@ export type ConciergeService = {
   appointment_title: string | null;
   task_eligible?: boolean;
   linked_task_id?: string | null;
+  /** Status of the service's task, the single source of truth of the service. */
+  linked_task_status?: string | null;
+  /** Service statuses the current user may pick now (task rules). */
+  allowed_statuses?: string[];
+  /** Billing statuses the current user may pick now. */
+  allowed_billing_statuses?: string[];
+  /** Amounts are locked once the service is billed. */
+  financial_locked?: boolean;
+  /** Set while a partner booking waits for a decision after its appointment was cancelled. */
+  booking_decision_required_at?: string | null;
   provider_id: string | null;
   provider_name: string | null;
   assigned_concierge_id: string | null;
@@ -652,10 +662,22 @@ export type ConciergeWorkspaceStats = {
 
 const TERMINAL_STATUSES = new Set(["completed", "cancelled"]);
 
+/**
+ * The service statuses the current user may pick. The server derives them
+ * from the rules of the service's task (the task is the single source of
+ * truth: the assignee starts, the author or a higher role completes, cancels
+ * and reopens); without that list the service lifecycle is the fallback.
+ */
 export function availableConciergeServiceStatuses(
-  service: Pick<ConciergeService, "status">,
+  service: Pick<ConciergeService, "status"> & Partial<Pick<ConciergeService, "allowed_statuses">>,
   canReopen = false,
 ): ConciergeServiceStatus[] {
+  if (service.allowed_statuses) {
+    const allowed = service.allowed_statuses.filter((status): status is ConciergeServiceStatus =>
+      (CONCIERGE_SERVICE_STATUSES as readonly string[]).includes(status),
+    );
+    return allowed.includes(service.status) ? allowed : [service.status, ...allowed];
+  }
   const transitions: Record<ConciergeServiceStatus, ConciergeServiceStatus[]> = {
     planned: ["planned", "in_service", "cancelled"],
     booked: ["booked", "cancelled"],
@@ -673,12 +695,45 @@ export function availableConciergeServiceStatuses(
  * booking, reopening only for CEO and patient manager). An unknown status is
  * offered alone.
  */
-export function conciergeServiceStatusOptions(current: string, canReopen: boolean): string[] {
+export function conciergeServiceStatusOptions(
+  current: string,
+  canReopen: boolean,
+  allowed?: readonly string[] | null,
+): string[] {
   if (!(CONCIERGE_SERVICE_STATUSES as readonly string[]).includes(current)) return [current];
   return availableConciergeServiceStatuses(
-    { status: current as ConciergeServiceStatus },
+    { status: current as ConciergeServiceStatus, allowed_statuses: allowed ? [...allowed] : undefined },
     canReopen,
   );
+}
+
+export const CONCIERGE_BILLING_STATUSES = ["draft", "ready", "billed", "settled", "waived"] as const;
+
+/**
+ * The billing options of a service form: the current status plus the moves
+ * the server accepts (draft -> ready -> billed -> settled, waived only from
+ * draft or ready; readiness follows the task).
+ */
+export function conciergeBillingStatusOptions(
+  current: string,
+  allowed?: readonly string[] | null,
+): string[] {
+  if (!allowed) return [...CONCIERGE_BILLING_STATUSES];
+  return allowed.includes(current) ? [...allowed] : [current, ...allowed];
+}
+
+/** The amounts of a billed or settled service are locked. */
+export function isConciergeServiceFinancialLocked(
+  service: Pick<ConciergeService, "billing_status"> & Partial<Pick<ConciergeService, "financial_locked">>,
+): boolean {
+  return service.financial_locked ?? (service.billing_status === "billed" || service.billing_status === "settled");
+}
+
+/** The appointment of a partner booking was cancelled; someone must keep or cancel it. */
+export function conciergeServiceNeedsBookingDecision(
+  service: Partial<Pick<ConciergeService, "booking_decision_required_at">>,
+): boolean {
+  return Boolean(service.booking_decision_required_at);
 }
 
 export function isConciergeKeyService(
@@ -866,7 +921,7 @@ export function filterConciergeServices(
   );
 }
 
-/** A request leaves the service intake workspace after it is converted into an operational task. */
+/** Services without a task yet; the calendar and map show the converted ones as their tasks. */
 export function unconvertedConciergeServices(services: ConciergeService[]): ConciergeService[] {
   return services.filter((service) => !service.linked_task_id);
 }

@@ -12,6 +12,7 @@ import type { Lang } from "@/lib/i18n";
 
 import {
   availableConciergeServiceStatuses,
+  isConciergeServiceFinancialLocked,
   type ConciergeService,
   type ConciergeServiceStatus,
 } from "./model";
@@ -37,7 +38,8 @@ const copy = {
     in_service: "In Durchführung",
     completed: "Abgeschlossen",
     cancelled: "Storniert",
-    bookingHint: "Gebucht und Bestätigt werden über den Partner- und Buchungsablauf gesetzt.",
+    bookingHint: "Gebucht und Bestätigt werden über den Partner- und Buchungsablauf gesetzt. Der Status folgt der Aufgabe des Services: Abschließen, Stornieren und Wiedereröffnen darf deren Ersteller.",
+    amountsLocked: "Der Service ist abgerechnet; die Beträge sind gesperrt.",
     provider: "Partner / Dienstleister",
     contact: "Kontakt",
     startsAt: "Beginn",
@@ -66,7 +68,8 @@ const copy = {
     in_service: "Выполняется",
     completed: "Завершено",
     cancelled: "Отменено",
-    bookingHint: "Статусы «Забронировано» и «Подтверждено» устанавливаются через работу с партнёром и бронированием.",
+    bookingHint: "Статусы «Забронировано» и «Подтверждено» устанавливаются через работу с партнёром и бронированием. Статус следует задаче услуги: завершить, отменить и открыть заново может её автор.",
+    amountsLocked: "Услуга выставлена в счёт; суммы заблокированы.",
     provider: "Партнёр или исполнитель",
     contact: "Контакт",
     startsAt: "Начало",
@@ -110,7 +113,7 @@ function optional(value: string) {
 
 export function requestStatusOptions(
   lang: Lang,
-  service?: Pick<ConciergeService, "status">,
+  service?: Pick<ConciergeService, "status" | "allowed_statuses">,
   canReopen = false,
 ): SelectFieldOption[] {
   const labels = copy[lang];
@@ -154,6 +157,7 @@ export function ConciergeServiceRequestDialog({
   onSave: (input: UpdateConciergeServiceInput) => Promise<void>;
 }) {
   const labels = copy[lang];
+  const amountsLocked = service ? isConciergeServiceFinancialLocked(service) : false;
   const [title, setTitle] = useState("");
   const [status, setStatus] = useState<EditableStatus>("planned");
   const [vendorName, setVendorName] = useState("");
@@ -235,7 +239,7 @@ export function ConciergeServiceRequestDialog({
                   <ConciergeField label={labels.endsAt}><Input type="datetime-local" min={startsAt || undefined} value={endsAt} onChange={(event) => setEndsAt(event.target.value)} /></ConciergeField>
                   <ConciergeField label={labels.address} className="sm:col-span-2"><Input value={address} maxLength={500} onChange={(event) => setAddress(event.target.value)} /></ConciergeField>
                   <ConciergeField label={labels.actualCost}>
-                    <div className="flex gap-2"><Input type="number" min="0" step="0.01" value={actualCost} onChange={(event) => setActualCost(event.target.value)} /><span className="flex h-9 items-center rounded-lg border border-border/70 bg-muted/25 px-3 text-sm text-muted-foreground">{service?.currency || "EUR"}</span></div>
+                    <div className="flex gap-2"><Input type="number" min="0" step="0.01" value={actualCost} disabled={amountsLocked} title={amountsLocked ? labels.amountsLocked : undefined} onChange={(event) => setActualCost(event.target.value)} /><span className="flex h-9 items-center rounded-lg border border-border/70 bg-muted/25 px-3 text-sm text-muted-foreground">{service?.currency || "EUR"}</span></div>
                   </ConciergeField>
                   <ConciergeField label={labels.notes} className="sm:col-span-2">
                     <textarea className="min-h-28 w-full resize-y rounded-lg border border-input bg-field px-3 py-2 text-sm text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground/45 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30" value={notes} maxLength={4000} onChange={(event) => setNotes(event.target.value)} />
