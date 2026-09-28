@@ -15799,3 +15799,96 @@ async fn concierge_marks_only_service_lines_delivered() {
     expected.sort();
     assert_eq!(delivered, expected);
 }
+
+#[tokio::test]
+async fn cancelled_service_lines_do_not_hold_the_order_pipeline_open() {
+    let Some((app, pool, admin_id, admin)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("pipeline-cancelled-line");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let transfer_id =
+        seed_provider_with_type(&pool, &format!("{tag}-transfer"), "non_medical", "Germany").await;
+    let order_id = seed_order(
+        &pool,
+        patient_id,
+        admin_id,
+        &format!("ORD-PIPE-{tag}"),
+        "execution",
+        "active",
+        "Transfer only",
+    )
+    .await;
+    let delivered_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(transfer_id),
+        None,
+        &format!("Airport transfer {tag}"),
+        "",
+    )
+    .await;
+    let cancelled_line = seed_order_line(
+        &pool,
+        order_id,
+        Some(transfer_id),
+        None,
+        &format!("Return transfer {tag}"),
+        "",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE order_leistungen SET status = 'delivered', delivered_at = now() WHERE id = $1",
+    )
+    .bind(delivered_line)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE order_leistungen
+           SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
+               cancellation_reason = 'Patient flies home with family'
+           WHERE id = $1"#,
+    )
+    .bind(cancelled_line)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, pipeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/pipeline"),
+        &admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{pipeline}");
+    assert_eq!(pipeline["services"]["total"], 1, "{pipeline}");
+    assert_eq!(pipeline["services"]["cancelled"], 1, "{pipeline}");
+    let stage = |key: &str| {
+        pipeline["stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|stage| stage["key"] == key)
+            .cloned()
+            .unwrap()
+    };
+    // The cancelled line is neither undelivered nor waiting for an invoice.
+    assert_eq!(stage("execution")["state"], "done", "{pipeline}");
+    assert_eq!(
+        stage("closure")["missing"],
+        json!(["service_not_invoiced", "order_not_completed"]),
+        "{pipeline}"
+    );
+    let provider_services: i64 = pipeline["care_team"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|member| member["provider_id"] == transfer_id.to_string())
+        .map(|member| member["services"].as_i64().unwrap())
+        .sum();
+    assert_eq!(provider_services, 1, "{pipeline}");
+}

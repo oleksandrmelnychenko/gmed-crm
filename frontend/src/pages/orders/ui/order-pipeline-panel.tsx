@@ -361,6 +361,9 @@ export function OrderPipelinePanel({
           <Fact label={tx("Оказано", "Erbracht")} value={pipeline.services.delivered} />
           <Fact label={tx("Подтверждено", "Freigegeben")} value={pipeline.services.approved} />
           <Fact label={tx("В счёте", "Abgerechnet")} value={pipeline.services.invoiced} />
+          {pipeline.services.cancelled ? (
+            <Fact label={tx("Отменено", "Storniert")} value={pipeline.services.cancelled} />
+          ) : null}
         </div>
       </StageBlock>
 
