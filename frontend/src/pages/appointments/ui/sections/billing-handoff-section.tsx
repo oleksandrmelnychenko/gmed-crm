@@ -10,7 +10,7 @@ import { LoaderCircle, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Banner, checkboxClass } from "@/components/ui-shell";
+import { Banner } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
@@ -244,37 +244,21 @@ function useAppointmentBillingHandoffSectionContentContent({
 
     setSubmitBusy(true);
     try {
-      const requests: Array<Promise<unknown>> = [
-        apiFetch<{ id: string }>(`/appointments/${detail.id}/reminders`, {
-          method: "POST",
-          body: JSON.stringify({
-            user_id: form.assigneeId,
-            remind_at: toRfc3339(form.dueAt),
-            title: handoffTitle,
-            description: descriptionParts.join("\n"),
-          }),
+      // The handoff is a task for billing. Billing cannot open appointments,
+      // so the server refuses appointment reminders addressed to it.
+      await apiFetch<{ id: string }>("/tasks", {
+        method: "POST",
+        body: JSON.stringify({
+          title: handoffTitle,
+          description: descriptionParts.join("\n"),
+          assigned_to: form.assigneeId,
+          patient_id: detail.patient_id,
+          order_id: detail.order_id,
+          appointment_id: detail.id,
+          due_date: toRfc3339(form.dueAt),
+          priority: form.taskPriority,
         }),
-      ];
-
-      if (form.createTask && canCreateTasks) {
-        requests.push(
-          apiFetch<{ id: string }>("/tasks", {
-            method: "POST",
-            body: JSON.stringify({
-              title: handoffTitle,
-              description: descriptionParts.join("\n"),
-              assigned_to: form.assigneeId,
-              patient_id: detail.patient_id,
-              order_id: detail.order_id,
-              appointment_id: detail.id,
-              due_date: toRfc3339(form.dueAt),
-              priority: form.taskPriority,
-            }),
-          }),
-        );
-      }
-
-      await Promise.all(requests);
+      });
       setForm(
         buildDefaultForm(
           form.assigneeId,
@@ -293,6 +277,7 @@ function useAppointmentBillingHandoffSectionContentContent({
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const noBillingStaff = billingStaff.length === 0;
+  const canHandOff = canManageConciergeBilling && canCreateTasks && !noBillingStaff;
   const dueAtIsPast = Boolean(form.dueAt && form.dueAt < earliestDueAt);
   const handoffBlockedReason = !form.assigneeId
       ? appointmentText("appointments_billing_handoff_blocked_no_assignee")
@@ -308,7 +293,7 @@ function useAppointmentBillingHandoffSectionContentContent({
         <AppointmentSectionHeading
           title={appointmentText("appointments_billing_and_settlement_handoff")}
         />
-        {canManageConciergeBilling && !noBillingStaff ? (
+        {canHandOff ? (
           <Button
             type="button"
             size="sm"
@@ -332,11 +317,14 @@ function useAppointmentBillingHandoffSectionContentContent({
       ) : null}
 
       <div className="mt-5 space-y-4">
-        <AppointmentRemindersTable
-          reminders={reminders}
-          title={appointmentText("appointments_billing_reminders")}
-          emptyText={tr.common_not_set}
-        />
+        {/* Earlier handoffs also reminded billing; new handoffs are tasks only. */}
+        {reminders.length > 0 ? (
+          <AppointmentRemindersTable
+            reminders={reminders}
+            title={appointmentText("appointments_billing_reminders")}
+            emptyText={tr.common_not_set}
+          />
+        ) : null}
         <AppointmentTasksTable
           tasks={tasks}
           title={appointmentText("appointments_billing_tasks")}
@@ -344,7 +332,7 @@ function useAppointmentBillingHandoffSectionContentContent({
         />
       </div>
 
-      {canManageConciergeBilling && !noBillingStaff ? (
+      {canHandOff ? (
         <AppointmentEditorSheet
           open={sheetOpen}
           onOpenChange={setSheetOpen}
@@ -478,22 +466,7 @@ function useAppointmentBillingHandoffSectionContentContent({
               disabled={noBillingStaff}
             />
           </Field>
-          <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <label className="flex items-center gap-2 text-sm text-foreground">
-              <input
-                type="checkbox"
-                checked={form.createTask}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    createTask: event.target.checked,
-                  }))
-                }
-                className={checkboxClass}
-                disabled={noBillingStaff}
-              />
-              {t.appointments_billing_mirror_task}
-            </label>
+          <div className="md:col-span-2 flex flex-col gap-4 md:flex-row md:items-center md:justify-end">
             <div className="flex flex-wrap justify-end gap-3">
               <Button
                 type="button"

@@ -630,13 +630,16 @@ export type BillingHandoffKind =
   | "payment_confirmation"
   | "other";
 
+/**
+ * A handoff to billing. It is a task for the billing assignee: billing cannot
+ * open appointments, so it is never reminded about one.
+ */
 export type BillingHandoffFormState = {
   kind: BillingHandoffKind;
   title: string;
   assigneeId: string;
   dueAt: string;
   notes: string;
-  createTask: boolean;
   taskPriority: string;
 };
 

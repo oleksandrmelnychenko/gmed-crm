@@ -6068,7 +6068,7 @@ async fn concierge_preparation_is_due_ahead_of_the_service_and_skips_billing() {
     .unwrap();
     assert_eq!(prep_lead, 2.0);
 
-    // Billing has nothing to prepare for a concierge booking.
+    // Billing is never reminded about an appointment it cannot open.
     let (status, body) = json_request(
         &app,
         "POST",
@@ -7911,6 +7911,7 @@ async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
     let other_interpreter = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
     let assigned_concierge = seed_user(&pool, &format!("{tag}-c1"), "concierge").await;
     let unassigned_concierge = seed_user(&pool, &format!("{tag}-c2"), "concierge").await;
+    let billing = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
     for user_id in [
         pm_id,
         booked_interpreter,
@@ -7977,6 +7978,15 @@ async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
     assert_eq!(
         body["message"],
         "The selected user has no access to this appointment or its patient"
+    );
+    // Billing has no appointments.view: it could neither see nor complete a
+    // reminder about this medical visit (it learns about it through the
+    // billing handoff).
+    let (status, body) = remind(billing).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "This role does not take part in this appointment's preparation"
     );
 
     // A declined booking no longer counts.
@@ -8320,7 +8330,8 @@ async fn ceo_can_load_and_manage_appointment_workflow_resources() {
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let provider_id = seed_provider(&pool, &tag).await;
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
-    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let appointment_id = seed_appointment(
         &pool,
         patient_id,
@@ -8360,7 +8371,7 @@ async fn ceo_can_load_and_manage_appointment_workflow_resources() {
         &format!("/api/v1/appointments/{appointment_id}/reminders"),
         &bearer,
         Some(json!({
-            "user_id": billing_id,
+            "user_id": pm_id,
             "remind_at": "2026-08-10T12:00:00Z",
             "title": "CEO workflow reminder"
         })),

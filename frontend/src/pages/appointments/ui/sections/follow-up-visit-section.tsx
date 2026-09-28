@@ -193,7 +193,6 @@ function useAppointmentFollowUpVisitSectionContent({
     canRemindAboutAppointment(
       member,
       {
-        type: form.appointmentType,
         status: "planned",
         interpreter_id: form.interpreterId || null,
         interpreter_response: form.interpreterId ? "pending" : null,

@@ -9,15 +9,15 @@ import {
 } from "./staff-roles";
 
 describe("appointment reminder recipients", () => {
-  it("leaves billing out of concierge bookings and IT out of every reminder", () => {
-    expect(isAppointmentReminderRecipient("billing", "non_medical")).toBe(false);
-    expect(isAppointmentReminderRecipient("billing", "medical")).toBe(true);
-    expect(isAppointmentReminderRecipient("it_admin", "medical")).toBe(false);
-    expect(isAppointmentReminderRecipient("concierge", "non_medical")).toBe(true);
+  it("leaves billing and IT, who cannot open appointments, out of every reminder", () => {
+    expect(isAppointmentReminderRecipient("billing")).toBe(false);
+    expect(isAppointmentReminderRecipient("it_admin")).toBe(false);
+    expect(isAppointmentReminderRecipient("sales")).toBe(false);
+    expect(isAppointmentReminderRecipient("concierge")).toBe(true);
+    expect(isAppointmentReminderRecipient("interpreter")).toBe(true);
   });
 
   const visit = {
-    type: "medical",
     status: "confirmed",
     interpreter_id: "interpreter-1",
     interpreter_response: "accepted",
@@ -56,8 +56,12 @@ describe("appointment reminder recipients", () => {
     expect(remindable("interpreter-1", "teamlead_interpreter")).toBe(true);
     expect(remindable("teamlead-9", "teamlead_interpreter")).toBe(false);
     expect(remindable("ceo-1", "ceo")).toBe(true);
-    expect(remindable("billing-1", "billing")).toBe(true);
-    expect(remindable("billing-1", "billing", { ...visit, type: "non_medical" })).toBe(false);
+    // Billing is not a reminder recipient on any visit, not even as an
+    // assignee or owner: it cannot open appointments.
+    expect(remindable("billing-1", "billing")).toBe(false);
+    expect(
+      remindable("billing-1", "billing", { ...visit, owner_user_id: "billing-1" }),
+    ).toBe(false);
     expect(remindable("it-1", "it_admin")).toBe(false);
     expect(remindable("sales-1", "sales")).toBe(false);
   });

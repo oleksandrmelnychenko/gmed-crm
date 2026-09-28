@@ -6590,8 +6590,7 @@ async fn add_reminder(
         Err(resp) => return resp,
     };
     let row = match sqlx::query(
-        r#"SELECT patient_id, appointment_type, status, interpreter_id,
-                  interpreter_response, owner_user_id
+        r#"SELECT patient_id, status, interpreter_id, interpreter_response, owner_user_id
            FROM appointments
            WHERE id = $1"#,
     )
@@ -6610,7 +6609,6 @@ async fn add_reminder(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     };
     let appointment = ReminderAppointment {
-        appointment_type: row.try_get("appointment_type").unwrap_or_default(),
         status: row.try_get("status").unwrap_or_default(),
         interpreter_id: row.try_get("interpreter_id").unwrap_or_default(),
         interpreter_response: row.try_get("interpreter_response").unwrap_or_default(),
@@ -9670,21 +9668,8 @@ fn build_appointment_detail_json(
     })
 }
 
-/// Who may be reminded about an appointment. IT administration does not work
-/// on appointments, and billing has nothing to prepare for a non-medical
-/// (concierge) booking; billing learns about medical visits through the
-/// billing handoff instead.
-fn reminder_recipient_allowed(role: &str, appointment_type: &str) -> bool {
-    match role {
-        "it_admin" => false,
-        "billing" => appointment_type != "non_medical",
-        _ => true,
-    }
-}
-
 /// The appointment facts that decide who may be reminded about it.
 struct ReminderAppointment {
-    appointment_type: String,
     status: String,
     interpreter_id: Option<Uuid>,
     interpreter_response: Option<String>,
@@ -9699,31 +9684,30 @@ const REMINDER_NO_APPOINTMENT_ACCESS: &str =
     "The selected user has no access to this appointment or its patient";
 
 /// Why a reminder cannot go to this user, if it cannot. The recipient must be
-/// able to open the appointment and complete the reminder: an interpreter only
-/// while booked on it (not declined, the visit not cancelled); every other
-/// role by its own appointment scope (owner, patient assignment, …), billing
-/// by the rule above.
+/// able to open the appointment and complete the reminder, so a role without
+/// `appointments.view` is never a recipient: IT administration does not work
+/// on appointments, and billing learns about visits through the billing
+/// handoff (a task), not through appointment reminders. An interpreter is a
+/// recipient only while booked on the appointment (not declined, the visit not
+/// cancelled); every other role by its own appointment scope (owner, patient
+/// assignment, …).
 fn reminder_recipient_refusal(
     role: &str,
     user_id: Uuid,
     appointment: &ReminderAppointment,
     assigned_to_patient: bool,
 ) -> Option<&'static str> {
-    if !reminder_recipient_allowed(role, &appointment.appointment_type) {
-        return Some(REMINDER_ROLE_REFUSED);
-    }
     let Some(role) = crate::auth::middleware::parse_role(role) else {
         return Some(REMINDER_ROLE_REFUSED);
     };
     match role {
+        role if !role.can(Capability::AppointmentsView) => Some(REMINDER_ROLE_REFUSED),
         Role::Interpreter => {
             let booked = appointment.interpreter_id == Some(user_id)
                 && appointment.status != "cancelled"
                 && appointment.interpreter_response.as_deref() != Some("declined");
             (!booked).then_some(REMINDER_INTERPRETER_NOT_BOOKED)
         }
-        Role::Billing => None,
-        role if !role.can(Capability::AppointmentsView) => Some(REMINDER_ROLE_REFUSED),
         role => {
             let scope = access::AppointmentScope::for_role(role).for_change();
             let admitted = scope
@@ -10869,21 +10853,11 @@ mod tests {
     }
 
     #[test]
-    fn concierge_bookings_do_not_remind_billing_or_it() {
-        assert!(!reminder_recipient_allowed("billing", "non_medical"));
-        assert!(reminder_recipient_allowed("billing", "medical"));
-        assert!(!reminder_recipient_allowed("it_admin", "medical"));
-        assert!(reminder_recipient_allowed("concierge", "non_medical"));
-        assert!(reminder_recipient_allowed("patient_manager", "non_medical"));
-    }
-
-    #[test]
     fn reminders_go_only_to_users_who_can_work_on_the_appointment() {
         let interpreter = Uuid::new_v4();
         let owner = Uuid::new_v4();
         let other = Uuid::new_v4();
         let visit = |status: &str, response: Option<&str>| ReminderAppointment {
-            appointment_type: "medical".to_string(),
             status: status.to_string(),
             interpreter_id: Some(interpreter),
             interpreter_response: response.map(str::to_string),
@@ -10944,20 +10918,9 @@ mod tests {
             None
         );
 
-        // The existing role rules stay.
-        assert_eq!(
-            reminder_recipient_refusal("billing", other, &booked, false),
-            None
-        );
-        let concierge_booking = ReminderAppointment {
-            appointment_type: "non_medical".to_string(),
-            ..visit("confirmed", None)
-        };
-        assert_eq!(
-            reminder_recipient_refusal("billing", other, &concierge_booking, true),
-            Some(REMINDER_ROLE_REFUSED)
-        );
-        for role in ["it_admin", "sales", "patient", "unknown"] {
+        // Roles without appointments.view can neither open the appointment nor
+        // complete its reminder: billing (on any visit), IT and the rest.
+        for role in ["billing", "it_admin", "sales", "patient", "unknown"] {
             assert_eq!(
                 reminder_recipient_refusal(role, other, &booked, true),
                 Some(REMINDER_ROLE_REFUSED),

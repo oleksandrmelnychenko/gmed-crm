@@ -346,7 +346,6 @@ export function blankBillingHandoffForm(
     assigneeId: defaultAssignee,
     dueAt: defaultDueAt,
     notes: "",
-    createTask: true,
     taskPriority: "normal",
   };
 }
