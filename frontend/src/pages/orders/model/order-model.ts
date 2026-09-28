@@ -7,6 +7,7 @@ import {
 } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
+import { blankOrderPrepaymentTerms } from "./order-prepayment";
 import { blankPartnerCostAmounts } from "./partner-cost-amounts";
 import type {
   CreateOrderFormState,
@@ -138,7 +139,11 @@ export function isPartialOrderRead(detail: { read_scope?: OrderReadScope } | nul
 }
 
 export function blankCreateOrderForm(): CreateOrderFormState {
-  return { patientId: "", needsDescription: "" };
+  return {
+    patientId: "",
+    needsDescription: "",
+    prepayment: blankOrderPrepaymentTerms(),
+  };
 }
 
 export function blankLeistungForm(): LeistungFormState {

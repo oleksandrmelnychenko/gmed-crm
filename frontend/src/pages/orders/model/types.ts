@@ -1,5 +1,6 @@
 import type { SpecializationItem } from "@/pages/providers/model/types";
 
+import type { OrderPrepaymentTerms } from "./order-prepayment";
 import type { PartnerCostAmounts } from "./partner-cost-amounts";
 
 export type OrderPhase = "discovery" | "intake" | "execution" | "closure" | "followup";
@@ -789,6 +790,7 @@ export type OrdersFilters = {
 export type CreateOrderFormState = {
   patientId: string;
   needsDescription: string;
+  prepayment: OrderPrepaymentTerms;
 };
 
 export type LeistungFormState = {

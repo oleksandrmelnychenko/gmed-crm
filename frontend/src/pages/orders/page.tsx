@@ -131,6 +131,12 @@ import {
 } from "./model/create-order-gate";
 import { mergeOrderDraft } from "./model/order-draft";
 import {
+  orderPrepaymentError,
+  orderPrepaymentErrorMessage,
+  orderPrepaymentPayload,
+} from "./model/order-prepayment";
+import { OrderPrepaymentFields } from "./ui/order-prepayment-fields";
+import {
   editPartnerCostAmounts,
   partnerCostAmountsError,
   partnerCostAmountsForSubmit,
@@ -2584,6 +2590,11 @@ function useOrdersPageContent() {
       setCreateError(createSubmitBlockMessage);
       return;
     }
+    const prepaymentError = orderPrepaymentError(createForm.prepayment, null);
+    if (prepaymentError) {
+      setCreateError(orderPrepaymentErrorMessage(prepaymentError, lang));
+      return;
+    }
 
     setCreateSaving(true);
     setCreateError(null);
@@ -2593,6 +2604,7 @@ function useOrdersPageContent() {
         patient_id: createForm.patientId,
         contract_id: null,
         needs_description: optString(createForm.needsDescription),
+        ...orderPrepaymentPayload(createForm.prepayment),
       });
 
       updateCreateDialog(false, false);
@@ -9003,6 +9015,26 @@ function useOrdersPageContent() {
                       placeholder={tx.patients_notes}
                     />
                   </Field>
+                </OrderSheetSection>
+
+                <OrderSheetSection title={lang === "de" ? "Zahlungsbedingungen" : "Условия оплаты"}>
+                  <div className="space-y-3">
+                    <OrderPrepaymentFields
+                      value={createForm.prepayment}
+                      lang={lang}
+                      hint={
+                        lang === "de"
+                          ? "Der Kostenvoranschlag des Auftrags muss diesen Betrag decken; ein Kostenvoranschlag mit kleinerer Summe wird abgelehnt."
+                          : "Смета заказа должна покрывать эту сумму: смету с меньшим итогом создать не получится."
+                      }
+                      onChange={(patch) =>
+                        setCreateForm((current) => ({
+                          ...current,
+                          prepayment: { ...current.prepayment, ...patch },
+                        }))
+                      }
+                    />
+                  </div>
                 </OrderSheetSection>
               </div>
 

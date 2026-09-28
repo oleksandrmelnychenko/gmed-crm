@@ -1214,6 +1214,124 @@ async fn quote_commercial_invariants_use_persisted_order_lines() {
 }
 
 #[tokio::test]
+async fn order_created_with_a_required_prepayment_needs_a_quote_covering_it() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("create-prepayment");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let sales_bearer = auth_header_for(sales_id, "sales");
+
+    for (bearer, payload, expected) in [
+        (
+            &pm_bearer,
+            json!({ "patient_id": patient_id, "prepayment_required": true }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            &pm_bearer,
+            json!({ "patient_id": patient_id, "prepayment_required": true, "prepayment_amount": "0" }),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            &sales_bearer,
+            json!({ "patient_id": patient_id, "prepayment_required": true, "prepayment_amount": "150" }),
+            StatusCode::FORBIDDEN,
+        ),
+    ] {
+        let (status, body) =
+            json_request(&app, "POST", "/api/v1/orders", bearer, Some(payload)).await;
+        assert_eq!(status, expected, "response: {body}");
+    }
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Prepayment from the orders page",
+            "prepayment_required": true,
+            "prepayment_amount": "150",
+            "prepayment_due_at": "2026-10-15T12:00:00Z"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().unwrap();
+    let (required, amount_matches, due_at_matches): (bool, bool, bool) = sqlx::query_as(
+        "SELECT prepayment_required, prepayment_amount = 150,
+                prepayment_due_at = '2026-10-15T12:00:00Z'::timestamptz
+         FROM orders WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(order_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(required && amount_matches && due_at_matches);
+
+    let add_service = |description: &'static str| {
+        json!({
+            "description": description,
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "vat_rate": 19.0
+        })
+    };
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(add_service("First service")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    // 119 EUR does not cover the required 150 EUR.
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {quote}"
+    );
+
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(add_service("Second service")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {quote}");
+    assert_eq!(quote["total_gross"], "238");
+}
+
+#[tokio::test]
 async fn quote_versions_capture_initial_and_status_update_snapshots() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

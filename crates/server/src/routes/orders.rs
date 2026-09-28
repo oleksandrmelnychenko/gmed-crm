@@ -138,6 +138,63 @@ struct CreateOrderRequest {
     case_id: Option<Uuid>,
     date_from: Option<String>,
     date_to: Option<String>,
+    prepayment_required: Option<bool>,
+    prepayment_amount: Option<String>,
+    prepayment_due_at: Option<String>,
+}
+
+/// A required prepayment set when the order is created.
+#[derive(Debug, PartialEq)]
+struct CreateOrderPrepayment {
+    amount: rust_decimal::Decimal,
+    due_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Reads the prepayment of a new order like the order wizard: a required
+/// prepayment needs a positive amount (rounded to cents); the due date is
+/// optional. A new order has no services yet, so the quote created later must
+/// cover the amount (`create_quote` refuses a smaller total).
+fn parse_create_order_prepayment(
+    required: Option<bool>,
+    amount: Option<&str>,
+    due_at: Option<&str>,
+) -> Result<Option<CreateOrderPrepayment>, axum::response::Response> {
+    if required != Some(true) {
+        return Ok(None);
+    }
+    let maximum = rust_decimal::Decimal::new(999_999_999_999, 2);
+    let amount = match amount.map(str::trim).filter(|value| !value.is_empty()) {
+        None => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Enter the prepayment amount",
+            ));
+        }
+        Some(raw) => match raw.parse::<rust_decimal::Decimal>() {
+            Ok(value) if value.round_cents() > rust_decimal::Decimal::ZERO && value <= maximum => {
+                value.round_cents()
+            }
+            _ => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "prepayment_amount must be a positive decimal",
+                ));
+            }
+        },
+    };
+    let due_at = match due_at.map(str::trim).filter(|value| !value.is_empty()) {
+        None => None,
+        Some(value) => match chrono::DateTime::parse_from_rfc3339(value) {
+            Ok(date) => Some(date.with_timezone(&chrono::Utc)),
+            Err(_) => {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "prepayment_due_at must be an ISO date and time with timezone",
+                ));
+            }
+        },
+    };
+    Ok(Some(CreateOrderPrepayment { amount, due_at }))
 }
 
 #[derive(sqlx::FromRow)]
@@ -2783,7 +2840,26 @@ async fn create_order(
         case_id,
         date_from,
         date_to,
+        prepayment_required,
+        prepayment_amount,
+        prepayment_due_at,
     } = body;
+    let prepayment = match parse_create_order_prepayment(
+        prepayment_required,
+        prepayment_amount.as_deref(),
+        prepayment_due_at.as_deref(),
+    ) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    // The payment terms are set by the roles that prepare orders in the order
+    // and lead wizards.
+    if prepayment.is_some() && !matches!(auth.role, Role::Ceo | Role::PatientManager) {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Only the CEO or a patient manager can require a prepayment",
+        );
+    }
     let date_from = match parse_optional_order_date(date_from.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -3078,9 +3154,10 @@ async fn create_order(
                case_id,
                date_from,
                date_to,
-               created_by, intake_state
+               created_by, intake_state,
+               prepayment_required, prepayment_amount, prepayment_due_at
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
            ON CONFLICT (source_lead_id) WHERE source_lead_id IS NOT NULL DO NOTHING
            RETURNING id, order_number, created_at"#,
     )
@@ -3098,6 +3175,9 @@ async fn create_order(
     } else {
         "legacy"
     })
+    .bind(prepayment.is_some())
+    .bind(prepayment.as_ref().map(|value| value.amount))
+    .bind(prepayment.as_ref().and_then(|value| value.due_at))
     .fetch_optional(&state.db)
     .await
     {
@@ -11888,6 +11968,56 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_order_requires_a_positive_prepayment_amount() {
+        assert_eq!(
+            parse_create_order_prepayment(None, Some("50"), None).ok(),
+            Some(None)
+        );
+        assert_eq!(
+            parse_create_order_prepayment(Some(false), Some("50"), Some("2026-10-15T12:00:00Z"))
+                .ok(),
+            Some(None)
+        );
+        assert_eq!(
+            parse_create_order_prepayment(
+                Some(true),
+                Some(" 150.005 "),
+                Some("2026-10-15T12:00:00Z")
+            )
+            .ok(),
+            Some(Some(CreateOrderPrepayment {
+                amount: rust_decimal::Decimal::new(15001, 2),
+                due_at: Some("2026-10-15T12:00:00Z".parse().unwrap()),
+            }))
+        );
+        assert_eq!(
+            parse_create_order_prepayment(Some(true), Some("80"), Some("")).ok(),
+            Some(Some(CreateOrderPrepayment {
+                amount: rust_decimal::Decimal::new(80, 0),
+                due_at: None,
+            }))
+        );
+        for (amount, due_at) in [
+            (None, None),
+            (Some(""), None),
+            (Some("0"), None),
+            (Some("0.004"), None),
+            (Some("-5"), None),
+            (Some("abc"), None),
+            (Some("10000000000"), None),
+            (Some("10"), Some("2026-10-15")),
+        ] {
+            let response = parse_create_order_prepayment(Some(true), amount, due_at)
+                .expect_err("invalid prepayment");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{amount:?} {due_at:?}"
+            );
+        }
+    }
 
     #[test]
     fn new_order_lines_name_where_their_vat_comes_from() {
