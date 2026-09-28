@@ -377,6 +377,21 @@ describe("patient surface access helpers", () => {
     ).toBe("relations");
   });
 
+  it("keeps the clinical record and the medical PDFs from the interpreter, whatever its assignment", () => {
+    expect(canViewPatientClinicalProfile("interpreter")).toBe(false);
+    expect(canViewPatientClinicalProfile("teamlead_interpreter")).toBe(true);
+    expect(canViewPatientClinicalProfile("patient_manager")).toBe(true);
+    expect(
+      normalizePatientDetailTab("clinical", {
+        canViewOperationalSurface: true,
+        canViewDocuments: true,
+        canViewContracts: false,
+        canViewInvoices: false,
+        canViewClinical: canViewPatientClinicalProfile("interpreter"),
+      }),
+    ).toBe("profile");
+  });
+
   it("keeps IT admin out of every patient surface", () => {
     expect(canViewPatientOperationalSurface("it_admin")).toBe(false);
     expect(canViewPatientDocumentsSurface("it_admin")).toBe(false);

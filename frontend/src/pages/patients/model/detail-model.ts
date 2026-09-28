@@ -312,9 +312,15 @@ export function canViewPatientContractsSurface(actor?: Actor) {
   return hasCapability(actor, "contracts.view");
 }
 
-/** Diagnoses, medication and Befunde (`/patients/{id}/clinical`). */
+/**
+ * Diagnoses, medication and Befunde (`/patients/{id}/clinical`) and the
+ * medical PDFs. The interpreter holds `patients.medical.view` for the
+ * briefing of its own appointments, but never opens the clinical record,
+ * whatever its patient assignment (owner decision 2026-09-28): the server
+ * answers it 403.
+ */
 export function canViewPatientClinicalProfile(actor?: Actor) {
-  return hasCapability(actor, "patients.medical.view");
+  return hasCapability(actor, "patients.medical.view") && actorRole(actor) !== "interpreter";
 }
 
 export function canEditPatientClinicalProfile(actor?: Actor) {

@@ -3671,7 +3671,7 @@ async fn list_patient_lab_results(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
@@ -4395,7 +4395,7 @@ async fn list_patient_vitals(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -6601,10 +6601,11 @@ async fn list_patient_cases(
         Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
-    // The main request reason is the case's anamnesis: medical data that a
-    // role without `patients.medical.view` (billing) does not read. The case
-    // number, status and manager stay, orders and invoices refer to them.
-    let can_view_medical = auth.can(Capability::PatientsMedicalView);
+    // The main request reason is the case's anamnesis, part of the clinical
+    // record: billing (no `patients.medical.view`) and the interpreter do not
+    // read it. The case number, status and manager stay, orders and invoices
+    // refer to them.
+    let can_view_medical = can_read_clinical_record(&auth);
 
     let rows = sqlx::query(
         r#"SELECT c.id, c.case_id, c.status, c.hauptanfragegrund, c.created_at,
@@ -9832,6 +9833,28 @@ async fn ensure_related_patient_usable(
     }
 }
 
+/// Whether the caller reads the patient's clinical record: diagnoses,
+/// medication, findings, procedures, allergies/CAVE, anamnesis and course,
+/// vital signs, lab results, vaccinations, the case anamnesis and the PDFs
+/// built from them. It needs `patients.medical.view`, and the interpreter
+/// never reads it, whatever its patient assignment (manual or from a
+/// booking): its medical scope is the briefing of its own appointment and the
+/// documents released to it (owner decision 2026-09-28,
+/// docs/backlog/02_rbac-matrix_ua.md).
+fn can_read_clinical_record(auth: &AuthUser) -> bool {
+    auth.can(Capability::PatientsMedicalView) && auth.role != Role::Interpreter
+}
+
+/// 403 unless [`can_read_clinical_record`].
+#[allow(clippy::result_large_err)]
+fn require_clinical_record_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if can_read_clinical_record(auth) {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
 async fn ensure_patient_visible(
     state: &AppState,
     auth: &AuthUser,
@@ -11582,7 +11605,7 @@ async fn get_patient_clinical(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -13628,7 +13651,7 @@ async fn list_patient_narrative_history(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14459,7 +14482,7 @@ async fn get_patient_impfstatus(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14718,7 +14741,7 @@ async fn get_patient_clinical_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14887,7 +14910,7 @@ async fn get_patient_lab_results_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(response) = require_clinical_record_access(&auth) {
         return response;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -15128,7 +15151,7 @@ async fn get_patient_medikationsplan_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {

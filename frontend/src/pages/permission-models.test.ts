@@ -146,7 +146,11 @@ describe("patient detail model", () => {
       expect(canViewPatientContractsSurface(actor)).toBe(has("contracts.view"));
       expect(canViewPatientInvoicesSurface(actor)).toBe(has("invoices.view"));
       expect(canViewPatientFinanceSurface(actor)).toBe(has("invoices.view"));
-      expect(canViewPatientClinicalProfile(actor)).toBe(has("patients.medical.view"));
+      // The interpreter's `patients.medical.view` covers its appointment
+      // briefing, not the clinical record (owner decision 2026-09-28).
+      expect(canViewPatientClinicalProfile(actor)).toBe(
+        has("patients.medical.view") && role !== "interpreter",
+      );
       expect(canEditPatientClinicalProfile(actor)).toBe(has("patients.medical.edit"));
       expect(canManagePatientProfile(actor)).toBe(has("patients.edit"));
       expect(canViewPatientCareHistorySurface(actor)).toBe(
