@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, Field, Section, selectClass, textareaClass } from "@/components/ui-shell";
-import { isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import { berlinLocalInputToIso, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   fetchSecurityIncidents,
@@ -19,8 +19,8 @@ const STATUSES = ["open", "contained", "resolved", "closed"] as const;
 const RISKS = ["pending", "no_risk", "risk", "high_risk"] as const;
 
 function dateTime(value: string | null) {
-  // Stored as UTC instants; the register reads in German time.
-  return value ? isoToBerlinLocalInput(value).replace("T", " ") || value : "—";
+  // Stored as UTC instants; the register reads in German time, DD.MM.YYYY HH:mm.
+  return value ? formatAppDateTime(value) || value : "—";
 }
 
 function hoursLeft(deadline: string) {
@@ -46,6 +46,7 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
     category: "confidentiality",
     severity: "medium",
     affected: "",
+    awareAt: "",
   });
   const [decision, setDecision] = useState({
     status: "",
@@ -84,9 +85,12 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
         category: form.category,
         severity: form.severity,
         affected_subjects_count: form.affected === "" ? undefined : Number(form.affected),
+        // The 72-hour clock runs from when staff became aware (Art. 33 DSGVO),
+        // which can be earlier than the report; empty means "now".
+        became_aware_at: berlinLocalInputToIso(form.awareAt) ?? undefined,
       });
       setNotice(`${l("incidents_reported")}: ${created.reference}`);
-      setForm({ title: "", description: "", category: "confidentiality", severity: "medium", affected: "" });
+      setForm({ title: "", description: "", category: "confidentiality", severity: "medium", affected: "", awareAt: "" });
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -150,6 +154,15 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
             className="h-9 rounded-lg bg-field"
             value={form.affected}
             onChange={(event) => setForm({ ...form, affected: event.target.value })}
+          />
+        </Field>
+        <Field label={l("incidents_field_aware_at")} htmlFor="incident-aware-at">
+          <Input
+            id="incident-aware-at"
+            type="datetime-local"
+            className="h-9 rounded-lg bg-field"
+            value={form.awareAt}
+            onChange={(event) => setForm({ ...form, awareAt: event.target.value })}
           />
         </Field>
         <Field label={l("incidents_field_category")} htmlFor="incident-category">

@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 
 type StatusActionPillProps = {
   isActive: boolean;
-  onToggle: () => Promise<void>;
+  /** Without it the pill only shows the status (the viewer may not change it). */
+  onToggle?: () => Promise<void>;
   activeLabel: string;
   inactiveLabel: string;
   toggleActiveLabel: string;
@@ -55,24 +56,41 @@ export function StatusActionPill({
     };
   }, [open]);
 
+  const pillClassName = cn(
+    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] transition-colors",
+    isActive
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : "border-border bg-muted text-muted-foreground",
+  );
+  const dot = (
+    <span
+      className={cn(
+        "size-1.5 rounded-full",
+        isActive ? "bg-emerald-500" : "bg-muted-foreground/60"
+      )}
+    />
+  );
+
+  if (!onToggle) {
+    return (
+      <span className={cn(pillClassName, className)} data-testid="status-pill-readonly">
+        {dot}
+        {isActive ? activeLabel : inactiveLabel}
+      </span>
+    );
+  }
+
   return (
     <div ref={ref} className={cn("relative inline-block", className)}>
       <button
         type="button"
         onClick={() => setOpen((current) => !current)}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] transition-colors",
-          isActive
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-            : "border-border bg-muted text-muted-foreground hover:bg-muted/80"
+          pillClassName,
+          isActive ? "hover:bg-emerald-100" : "hover:bg-muted/80",
         )}
       >
-        <span
-          className={cn(
-            "size-1.5 rounded-full",
-            isActive ? "bg-emerald-500" : "bg-muted-foreground/60"
-          )}
-        />
+        {dot}
         {isActive ? activeLabel : inactiveLabel}
         <ChevronDown className="size-3" />
       </button>
@@ -88,7 +106,7 @@ export function StatusActionPill({
             onClick={async () => {
               setBusy(true);
               try {
-                await onToggle();
+                await onToggle?.();
               } finally {
                 setBusy(false);
                 setOpen(false);

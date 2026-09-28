@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, Field, Section, selectClass } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { appDateKeyOf } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { fetchPatientConsents, savePatientConsent } from "@/pages/admin/data/admin-api";
 
@@ -35,13 +35,35 @@ const CONSENT_TYPES = [
 ] as const;
 
 function day(value: string | null) {
-  return value ? appDateKeyOf(value) || value : "—";
+  return value ? formatAppDate(value) || value : "—";
 }
 
-function isActive(consent: ConsentRecord) {
-  if (!consent.granted || consent.revoked_at) return false;
-  return !consent.expires_at || new Date(consent.expires_at).getTime() > Date.now();
+export type ConsentRowStatus = "active" | "expired" | "superseded" | "revoked";
+
+/**
+ * State of one history row. A revoke writes its own row (granted = false) and
+ * closes the grant before it; a renewed grant closes the previous grant too,
+ * so `revoked_at` alone cannot tell "withdrawn" from "replaced". The row that
+ * followed decides: the newest grant is active until it expires.
+ */
+export function consentRowStatus(
+  consent: Pick<ConsentRecord, "granted" | "revoked_at" | "expires_at">,
+  newer: Pick<ConsentRecord, "granted"> | null,
+  now: number = Date.now(),
+): ConsentRowStatus {
+  if (!consent.granted) return "revoked";
+  if (newer) return newer.granted ? "superseded" : "revoked";
+  if (consent.revoked_at) return "revoked";
+  if (consent.expires_at && new Date(consent.expires_at).getTime() <= now) return "expired";
+  return "active";
 }
+
+const CONSENT_STATUS_BADGE: Record<ConsentRowStatus, string> = {
+  active: "bg-emerald-500/15 text-emerald-700",
+  expired: "bg-amber-500/15 text-amber-800",
+  superseded: "bg-slate-500/15 text-slate-700",
+  revoked: "bg-red-500/15 text-red-700",
+};
 
 /**
  * Consent history of one patient with grant and revoke. A consent must be as
@@ -92,10 +114,13 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
 
   if (!patientId) return null;
 
-  // Newest record per type decides whether that consent is currently active.
-  const latestByType = new Map<string, ConsentRecord>();
+  // The list comes newest first; remember, per row, the row of the same type
+  // that followed it (null for the newest one).
+  const newerById = new Map<string, ConsentRecord | null>();
+  const lastSeenByType = new Map<string, ConsentRecord>();
   for (const consent of consents) {
-    if (!latestByType.has(consent.consent_type)) latestByType.set(consent.consent_type, consent);
+    newerById.set(consent.id, lastSeenByType.get(consent.consent_type) ?? null);
+    lastSeenByType.set(consent.consent_type, consent);
   }
 
   return (
@@ -143,21 +168,15 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
           <p className="text-sm text-muted-foreground">{l("consents_empty")}</p>
         ) : null}
         {consents.map((consent) => {
-          const current = latestByType.get(consent.consent_type)?.id === consent.id;
-          const active = current && isActive(consent);
+          const status = consentRowStatus(consent, newerById.get(consent.id) ?? null);
+          const active = status === "active";
           return (
             <div
               key={consent.id}
               className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card p-3 text-sm"
             >
               <span className="font-medium">{typeLabel(consent.consent_type)}</span>
-              {active ? (
-                <Badge className="bg-emerald-500/15 text-emerald-700">{l("consents_status_active")}</Badge>
-              ) : consent.granted && !consent.revoked_at ? (
-                <Badge className="bg-slate-500/15 text-slate-700">{l("consents_status_superseded")}</Badge>
-              ) : (
-                <Badge className="bg-red-500/15 text-red-700">{l("consents_status_revoked")}</Badge>
-              )}
+              <Badge className={CONSENT_STATUS_BADGE[status]}>{l(`consents_status_${status}`)}</Badge>
               <span className="text-xs text-muted-foreground">
                 {day(consent.granted_at ?? consent.created_at)}
                 {consent.expires_at ? ` → ${day(consent.expires_at)}` : ""} · {consent.managed_by_name}

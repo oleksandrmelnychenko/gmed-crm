@@ -74,6 +74,39 @@ const CATEGORY_MAP: Record<string, string> = {
   orders: "timeline_category_orders",
   cases: "timeline_category_cases",
   workflow: "timeline_category_workflow",
+  // Compliance rows of the patient timeline (patients.rs timeline query).
+  privacy_request: "timeline_category_privacy_request",
+  consent: "timeline_category_consent",
+  dsgvo_export: "timeline_category_dsgvo_export",
+  dsgvo_anonymize: "timeline_category_dsgvo_anonymize",
+  legal_status: "timeline_category_legal",
+  feedback: "timeline_category_feedback",
+  lifecycle: "timeline_category_lifecycle",
+};
+
+// Titles the server writes for compliance and file-status events.
+const COMPLIANCE_TITLE_KEYS: Record<string, string> = {
+  "DSGVO data export": "timeline_title_dsgvo_export",
+  "Patient anonymized": "timeline_title_patient_anonymized",
+  "Privacy erasure requested": "timeline_title_privacy_erasure_requested",
+  "Processing restriction requested": "timeline_title_restriction_requested",
+  "Third-party sharing revocation requested": "timeline_title_third_party_revoke_requested",
+  "Privacy request created": "timeline_title_privacy_request_created",
+  "Privacy request reviewed": "timeline_title_privacy_request_reviewed",
+  "Privacy request approved": "timeline_title_privacy_request_approved",
+  "Privacy request rejected": "timeline_title_privacy_request_rejected",
+  "Privacy request put on retention hold": "timeline_title_privacy_request_hold",
+  "Processing restriction applied": "timeline_title_restriction_applied",
+  "Third-party sharing revoked": "timeline_title_third_party_revoked",
+  "Privacy request executed": "timeline_title_privacy_request_executed",
+  "Processing restriction lifted": "timeline_title_restriction_lifted",
+  "Consent granted": "timeline_title_consent_granted",
+  "Consent revoked": "timeline_title_consent_revoked",
+  "Patient feedback submitted": "timeline_title_feedback_submitted",
+  "Patient feedback reviewed": "timeline_title_feedback_reviewed",
+  "Legal/compliance status updated": "timeline_title_legal_status_updated",
+  "Patient file activated": "timeline_title_patient_activated",
+  "Patient file deactivated": "timeline_title_patient_deactivated",
 };
 
 // Source labels (who created the event).
@@ -165,6 +198,23 @@ export function localizeTimelineTitle(
   if (/^workflow_item_[a-z0-9_]+$/.test(value)) {
     const localized = l(value);
     return localized === value ? humanizeFallback(value.replace(/^workflow_item_/, "")) : localized;
+  }
+
+  const complianceKey = COMPLIANCE_TITLE_KEYS[value];
+  if (complianceKey) {
+    const localized = l(complianceKey);
+    if (localized !== complianceKey) return localized;
+  }
+
+  // "Consent: <type>" — the consent type is a key such as dsgvo_data_transfer.
+  const consentMatch = /^Consent:\s*([a-z0-9_]+)$/.exec(value);
+  if (consentMatch) {
+    const typeKey = `consents_type_${consentMatch[1]}`;
+    const typeLabel = l(typeKey);
+    const prefix = l("timeline_title_consent");
+    return `${prefix === "timeline_title_consent" ? "Consent" : prefix}: ${
+      typeLabel === typeKey ? humanizeFallback(consentMatch[1]) : typeLabel
+    }`;
   }
 
   const workflowTitle = value

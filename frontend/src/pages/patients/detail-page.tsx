@@ -579,6 +579,13 @@ function patientDetailStatusLabel(status: string) {
       return patientDetailText("patients_detail_submitted");
     case "archived":
       return patientDetailText("patients_detail_archived");
+    // Consent and privacy-request rows of the timeline.
+    case "granted":
+      return patientDetailText("patients_detail_granted");
+    case "revoked":
+      return patientDetailText("patients_detail_revoked");
+    case "rejected":
+      return patientDetailText("patients_detail_rejected");
     default:
       return patientDetailUnknownEnumLabel(status);
   }
@@ -747,6 +754,10 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "border-red-200 bg-red-50 text-red-700",
   planned: "border-sky-200 bg-sky-50 text-sky-700",
   confirmed: "border-sky-200 bg-sky-50 text-sky-700",
+  granted: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  revoked: "border-rose-200 bg-rose-50 text-rose-700",
+  rejected: "border-slate-200 bg-slate-50 text-slate-700",
+  archived: "border-slate-200 bg-slate-50 text-slate-600",
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -1896,6 +1907,21 @@ function usePatientDetailPageContent() {
     }
     reload();
   };
+  // Mirrors the server: only CEO and patient managers switch a file between
+  // active and inactive; prospects follow the lead, and restricted (Art. 18)
+  // or anonymised (Art. 17) files are locked.
+  const legalFlags =
+    detail.legal_status && typeof detail.legal_status === "object"
+      ? (detail.legal_status as Record<string, unknown>)
+      : {};
+  const canTogglePatientActivation =
+    (user?.role === "ceo" || user?.role === "patient_manager") &&
+    hasCapability(user, "patients.edit") &&
+    detail.lifecycle_status !== "prospective" &&
+    legalFlags.processing_restricted !== true &&
+    !legalFlags.anonymized_at;
+  // Revoking needs the patient-manager role on the server (CEO included).
+  const canRevokeAssignments = user?.role === "ceo" || user?.role === "patient_manager";
   const handleRevokeAssignment = (item: PatientAssignment) => {
     const confirmed = window.confirm(
       l("patients_revoke_assignment_confirm").replace(
@@ -1905,7 +1931,12 @@ function usePatientDetailPageContent() {
     );
     if (!confirmed) return;
     void revokePatientAssignment(id ?? "", item.user_id)
-      .catch(() => {})
+      .catch((error: unknown) => {
+        setActionErrorState({
+          patientId: id ?? "",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      })
       .finally(() => {
         reload();
       });
@@ -1941,6 +1972,7 @@ function usePatientDetailPageContent() {
         canEditPatientProfile={canEditPatientProfile}
         canExportPatientCompliance={canExportPatientCompliance}
         canManage={canManage}
+        canRevokeAssignments={canRevokeAssignments}
         canManageContracts={canManageContracts}
         canManageDocuments={canManageDocuments}
         canManageInvoices={canManageInvoices}
@@ -2063,7 +2095,7 @@ function usePatientDetailPageContent() {
           setTimelineSourceFilter(value);
           setTimelineOffset(0);
         }}
-        onTogglePatientActivation={handleTogglePatientActivation}
+        onTogglePatientActivation={canTogglePatientActivation ? handleTogglePatientActivation : undefined}
         onWorkflowCompleteItem={handleCompleteWorkflowItem}
         onWorkflowDueDateChange={(value) => {
           setWorkflowForm((current) => ({ ...current, dueDate: value }));

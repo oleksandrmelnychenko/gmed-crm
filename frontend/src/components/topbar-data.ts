@@ -353,6 +353,12 @@ export function notificationHrefForRole(item: Notification, role: string) {
   if (item.entity_type === "patient" && item.kind.startsWith("medication_ai_")) {
     return `/patients/${item.entity_id}?tab=clinical`;
   }
+  // Privacy requests (also the ones the retention sweep raises) are decided
+  // in the DSGVO register; IT admin cannot open patient files.
+  if (item.kind === "privacy_request" && (role === "ceo" || role === "it_admin")) {
+    return "/admin/compliance";
+  }
+  if (item.entity_type === "security_incident") return "/incidents";
   if (item.entity_type === "patient") return `/patients?patient=${item.entity_id}`;
   if (item.entity_type === "provider") return `/providers/${item.entity_id}`;
   if (item.entity_type === "order") return `/orders?order=${item.entity_id}`;

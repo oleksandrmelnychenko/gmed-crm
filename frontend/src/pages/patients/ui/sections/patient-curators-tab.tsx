@@ -29,6 +29,8 @@ type PatientCuratorsTabProps = {
   assignableStaff: StaffOption[];
   assignBusy: boolean;
   canManage: boolean;
+  /** Revoking needs the patient-manager role on the server (CEO included), assigning does not. */
+  canRevoke: boolean;
   formInputClassName: string;
   l: Localize;
   onAssign: () => void;
@@ -47,6 +49,7 @@ export function PatientCuratorsTab({
   assignableStaff,
   assignBusy,
   canManage,
+  canRevoke,
   formInputClassName,
   l,
   onAssign,
@@ -96,6 +99,16 @@ export function PatientCuratorsTab({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {item.source === "interpreter_booking" ? (
+                    <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-700">
+                      {l("patients_assignment_source_booking")}
+                    </Badge>
+                  ) : null}
+                  {!item.revoked_at && !item.user_active ? (
+                    <Badge variant="outline" className="rounded-full border-amber-200 bg-amber-50 text-amber-800">
+                      {l("patients_assignment_user_inactive")}
+                    </Badge>
+                  ) : null}
                   <Badge
                     variant="outline"
                     className={cn(
@@ -107,7 +120,7 @@ export function PatientCuratorsTab({
                   >
                     {item.revoked_at ? t.patients_revoked : t.common_active}
                   </Badge>
-                  {canManage && !item.revoked_at ? (
+                  {canRevoke && !item.revoked_at ? (
                     <Button
                       variant="ghost"
                       size="icon-xs"
@@ -153,7 +166,7 @@ export function PatientCuratorsTab({
                 onClick={onAssign}
               >
                 {assignBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}
-                {t.patients_assign_owner}
+                {l("patients_assign_action")}
               </Button>
             </div>
           </div>

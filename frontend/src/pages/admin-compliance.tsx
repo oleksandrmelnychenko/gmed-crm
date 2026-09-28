@@ -56,7 +56,7 @@ import {
   reviewCompliancePrivacyRequest,
 } from "@/pages/admin/data/admin-api";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKeyOf } from "@/lib/app-time-zone";
+import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { IncidentRegisterSection } from "@/pages/admin/ui/incident-register-section";
 import { PatientPrivacySections } from "@/pages/admin/ui/patient-privacy-sections";
@@ -136,9 +136,15 @@ const COMPLIANCE_REALTIME_EVENTS = [
   "privacy_request.executed",
 ] as const;
 
+/** Berlin day of an instant as DD.MM.YYYY, the one date format of the UI. */
 function compactDt(dt: string | null | undefined): string {
   if (!dt) return "\u2014";
-  return appDateKeyOf(dt) || dt;
+  return formatAppDate(dt) || dt;
+}
+
+/** Sortable Berlin day ("YYYY-MM-DD") for table sorting; "" when empty. */
+function dateSortKey(dt: string | null | undefined): string {
+  return dt ? appDateKeyOf(dt) : "";
 }
 
 function privacyRequestTypeLabel(
@@ -719,7 +725,7 @@ function useAdminCompliancePageContent() {
     {
       id: "due_at",
       label: t.compliance_col_due,
-      accessor: (record) => compactDt(record.due_at),
+      accessor: (record) => dateSortKey(record.due_at),
       width: 126,
       render: (record) => (
         <span className="font-mono text-xs text-slate-500">
@@ -730,7 +736,7 @@ function useAdminCompliancePageContent() {
     {
       id: "retention_until",
       label: t.compliance_col_retention_until,
-      accessor: (record) => compactDt(record.retention_until),
+      accessor: (record) => dateSortKey(record.retention_until),
       width: 150,
       render: (record) => (
         <span className="font-mono text-xs text-slate-500">
@@ -816,7 +822,7 @@ function useAdminCompliancePageContent() {
     {
       id: "due_at",
       label: t.compliance_col_due,
-      accessor: (record) => compactDt(record.due_at),
+      accessor: (record) => dateSortKey(record.due_at),
       width: 126,
       render: (record) => (
         <span className="font-mono text-xs text-slate-500">
