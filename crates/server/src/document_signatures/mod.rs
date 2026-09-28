@@ -492,6 +492,17 @@ async fn withdraw(
         .withdraw(remote)
         .await
         .map_err(|e| error(StatusCode::BAD_GATEWAY, e))?;
+    // Withdrawing a signing invitation is a legally relevant remote action.
+    state.audit_sender.try_send(audit::domain_event(
+        "document_signature_withdrawn",
+        Some(auth.user_id),
+        "document",
+        Some(row.get::<Uuid, _>("source_document_id")),
+        json!({
+            "request_id": id,
+            "previous_status": row.get::<String, _>("status"),
+        }),
+    ));
     // Poll authoritative status: the last signer may have completed concurrently.
     sqlx::query("UPDATE document_signature_requests SET next_poll_at=now() WHERE id=$1")
         .bind(id)
@@ -630,8 +641,20 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
             "EXPIRED" => "expired",
             _ => "error",
         };
-        sqlx::query("UPDATE document_signature_requests SET status=$3,evidence=$4,last_error=NULL,lease_until=NULL,lease_token=NULL,next_poll_at=now()+interval '1 minute',updated_at=now() WHERE id=$1 AND lease_token=$2")
+        let previous: String = row.get("status");
+        let updated = sqlx::query("UPDATE document_signature_requests SET status=$3,evidence=$4,last_error=NULL,lease_until=NULL,lease_token=NULL,next_poll_at=now()+interval '1 minute',updated_at=now() WHERE id=$1 AND lease_token=$2")
             .bind(id).bind(token).bind(status).bind(verified.evidence).execute(&state.db).await.map_err(|_|"signature_database_error")?;
+        // The provider decided (declined, withdrawn, expired, error): record the
+        // status change like the archive of a signed document.
+        if updated.rows_affected() > 0 && previous != status && status != "pending" {
+            state.audit_sender.try_send(audit::domain_event(
+                "document_signature_status_changed",
+                None,
+                "document",
+                Some(row.get::<Uuid, _>("source_document_id")),
+                json!({"request_id": id, "previous_status": previous, "status": status}),
+            ));
+        }
     }
     Ok(())
 }

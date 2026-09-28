@@ -58,6 +58,42 @@ const APPOINTMENT_CONTEXT_SUPPORTED_TEMPLATE_IDS = new Set([
   "appointment_confirmation",
 ]);
 
+/** Label of a document status (draft / active / archived), shared by every document list. */
+export function formatDocumentStatusLabel(
+  status: string,
+  tr: Translations,
+) {
+  switch (status) {
+    case "draft":
+      return tr.documents_status_draft;
+    case "active":
+      return tr.documents_status_active;
+    case "archived":
+      return tr.documents_status_archived;
+    default:
+      return formatUnknownValue(status, tr);
+  }
+}
+
+/** Label of a document visibility level, shared by every document list. */
+export function formatVisibilityLabel(
+  visibility: string,
+  tr: Translations,
+) {
+  switch (visibility) {
+    case "internal":
+      return tr.documents_visibility_internal;
+    case "released_internal":
+      return tr.documents_visibility_released_internal;
+    case "released_external":
+      return tr.documents_visibility_released_external;
+    case "patient_visible":
+      return tr.documents_visibility_patient_visible;
+    default:
+      return formatUnknownValue(visibility, tr);
+  }
+}
+
 export function documentTemplateRequiresOrder(templateId?: string | null) {
   return ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS.has(templateId?.trim() ?? "");
 }

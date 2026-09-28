@@ -172,6 +172,8 @@ import {
   emptyUploadForm,
   formatConfidenceLabel,
   formatBusinessDocumentNumber,
+  formatDocumentStatusLabel,
+  formatVisibilityLabel,
   intakeOpenAction,
   intakeReviewNeedsClassification,
   isMedicalDocumentClassification,
@@ -664,44 +666,10 @@ function formatFileSize(value?: number | null) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDocumentStatusLabel(
-  status: string,
-  tr: ReturnType<typeof runtimeTranslations>,
-) {
-  switch (status) {
-    case "draft":
-      return tr.documents_status_draft;
-    case "active":
-      return tr.documents_status_active;
-    case "archived":
-      return tr.documents_status_archived;
-    default:
-      return formatUnknownValue(status, tr);
-  }
-}
-
 function documentStatusTone(status: string): StatusTone {
   if (status === "active") return "success";
   if (status === "archived") return "neutral";
   return "warning";
-}
-
-function formatVisibilityLabel(
-  visibility: string,
-  tr: ReturnType<typeof runtimeTranslations>,
-) {
-  switch (visibility) {
-    case "internal":
-      return tr.documents_visibility_internal;
-    case "released_internal":
-      return tr.documents_visibility_released_internal;
-    case "released_external":
-      return tr.documents_visibility_released_external;
-    case "patient_visible":
-      return tr.documents_visibility_patient_visible;
-    default:
-      return formatUnknownValue(visibility, tr);
-  }
 }
 
 function documentVisibilityTone(visibility: string): StatusTone {
@@ -3433,6 +3401,7 @@ function StaffDocumentsPage({
           </div>
           <DocumentTranslationRequestsTable
             canUpdateTranslation={canUpdateTranslation}
+            canTakeOverAssigned={user?.role !== "interpreter"}
             currentUserId={user?.id ?? null}
             emptyText={t.documents_translation_queue_empty}
             l={l}
@@ -6431,7 +6400,11 @@ function StaffDocumentsPage({
                         </Button>
                       ) : null}
                       <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
-                      {canManage && currentDetailTemplate ? (
+                      {/* The server only replaces the newest, non-archived version. */}
+                      {canManage &&
+                      currentDetailTemplate &&
+                      detail.is_latest_version &&
+                      detail.status !== "archived" ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -8263,6 +8236,7 @@ function DocumentIntakeQueueTable({
 
 function DocumentTranslationRequestsTable({
   canUpdateTranslation,
+  canTakeOverAssigned,
   currentUserId,
   emptyText,
   l,
@@ -8274,6 +8248,8 @@ function DocumentTranslationRequestsTable({
   t,
 }: {
   canUpdateTranslation: boolean;
+  /** Interpreters may only take requests that are not assigned to someone else. */
+  canTakeOverAssigned: boolean;
   currentUserId: string | null;
   emptyText: string;
   l: DocumentsLocalizer;
@@ -8451,7 +8427,8 @@ function DocumentTranslationRequestsTable({
             Boolean(currentUserId) &&
             request.status !== "completed" &&
             request.status !== "cancelled" &&
-            request.assigned_to !== currentUserId;
+            request.assigned_to !== currentUserId &&
+            (canTakeOverAssigned || !request.assigned_to);
 
           return canAssign && currentUserId ? (
             <Button
@@ -8478,6 +8455,7 @@ function DocumentTranslationRequestsTable({
       },
     ],
     [
+      canTakeOverAssigned,
       canUpdateTranslation,
       currentUserId,
       l,

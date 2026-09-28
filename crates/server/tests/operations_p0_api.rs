@@ -265,7 +265,7 @@ async fn provider_documents_link_medical_files_to_both_provider_and_patient_with
         &ctx.app,
         "GET",
         &format!("{path}?patient_id={patient_id}"),
-        &concierge,
+        &ceo,
         None,
     )
     .await;
@@ -274,6 +274,20 @@ async fn provider_documents_link_medical_files_to_both_provider_and_patient_with
     assert_eq!(visible[0]["id"], document_id);
     assert_eq!(visible[0]["patient_id"], patient_id.to_string());
     assert_eq!(visible[0]["is_medical"], true);
+
+    // The provider page follows the document rules: a medical file of a
+    // patient is not listed (with the patient's name) to a concierge, who has
+    // no medical access and no assignment to that patient.
+    let (status, hidden) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("{path}?patient_id={patient_id}"),
+        &concierge,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hidden}");
+    assert_eq!(hidden.as_array().map(Vec::len), Some(0), "{hidden}");
 
     let (status, denied_list) = json_request(&ctx.app, "GET", &path, &interpreter, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{denied_list}");
