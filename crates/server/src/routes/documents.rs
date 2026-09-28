@@ -10783,6 +10783,7 @@ async fn fetch_document_row(
                   o.order_number,
                   a.title AS appointment_title,
                   a.interpreter_id AS appointment_interpreter_id,
+                  a.owner_user_id AS appointment_owner_id,
                   u.name AS uploaded_by_name,
                   u.role AS uploaded_by_role,
                   extractor.name AS text_extracted_by_name,
@@ -10816,6 +10817,13 @@ async fn fetch_document_row(
                       AND assigned_request.assigned_to = $2
                       AND assigned_request.status IN ('pending', 'in_progress')
                   ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $2
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document,
                   (d.patient_id IS NULL AND d.lead_id IS NULL AND d.order_id IS NULL
                    AND d.appointment_id IS NULL AND NOT d.is_medical AND d.art = 'provider_document'
                    AND EXISTS (SELECT 1 FROM provider_document_links link WHERE link.document_id = d.id))
@@ -11582,21 +11590,20 @@ pub(crate) fn can_view_document_row(
     let explicit_share = row.try_get::<bool, _>("shared_to_current").unwrap_or(false)
         || row
             .try_get::<bool, _>("translation_assigned_to_current")
-            .unwrap_or(false);
-    // A document filed on an appointment belongs to that visit. The patient
-    // link an interpreter gets from one booking does not open the documents of
-    // another interpreter's visit; only the interpreter of that appointment
-    // (or an explicit share / translation assignment) does.
+            .unwrap_or(false)
+        || (auth.role == Role::Interpreter && is_own_translation_document(row));
+    // An interpreter sees only the documents opened to him (owner decision
+    // 2026-09-28): shared to him, of a translation request assigned to him
+    // (source or result, also once completed), uploaded by him, or filed on
+    // his own appointment. The patient link — from a booking or a manual
+    // assignment — does not open the patient's other documents, whether they
+    // are internal, released or published to the patient portal. His own
+    // uploads and the documents of his own appointment still pass the usual
+    // assignment and release rules below.
     if auth.role == Role::Interpreter
         && !explicit_share
-        && row
-            .try_get::<Option<Uuid>, _>("appointment_id")
-            .unwrap_or_default()
-            .is_some()
-        && row
-            .try_get::<Option<Uuid>, _>("appointment_interpreter_id")
-            .unwrap_or_default()
-            != Some(auth.user_id)
+        && !is_own_upload(auth.user_id, row)
+        && !is_document_of_own_appointment(auth.user_id, row)
     {
         return false;
     }
@@ -11659,6 +11666,61 @@ pub(crate) fn can_view_document_row(
         share_status: Some(share_status),
     })
     .allowed
+}
+
+/// Whether the document is filed on an appointment the caller works on as the
+/// booked interpreter or as its owner — the interpreter's own appointment
+/// scope (`AppointmentScope::for_role(Role::Interpreter)`). A row read without
+/// the appointment columns never counts as the caller's appointment.
+fn is_document_of_own_appointment(user_id: Uuid, row: &sqlx::postgres::PgRow) -> bool {
+    let appointment_id = row
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default();
+    let interpreter_id = row
+        .try_get::<Option<Uuid>, _>("appointment_interpreter_id")
+        .unwrap_or_default();
+    let owner_user_id = row
+        .try_get::<Option<Uuid>, _>("appointment_owner_id")
+        .unwrap_or_default();
+    let scope = access::AppointmentScope::for_role(Role::Interpreter);
+    appointment_id.is_some()
+        && scope.admits_directly(user_id, interpreter_id, owner_user_id) == Some(true)
+}
+
+fn is_own_upload(user_id: Uuid, row: &sqlx::postgres::PgRow) -> bool {
+    row.try_get::<Option<Uuid>, _>("uploaded_by")
+        .unwrap_or_default()
+        == Some(user_id)
+}
+
+/// The source or the translated result of a translation request assigned to
+/// the caller — pending, in progress or completed (`own_translation_document`).
+fn is_own_translation_document(row: &sqlx::postgres::PgRow) -> bool {
+    row.try_get::<bool, _>("own_translation_document")
+        .unwrap_or(false)
+}
+
+/// An interpreter works only on the translation requests assigned to him: he
+/// does not see requests (and their draft texts) assigned to another
+/// interpreter, only his own and still unassigned ones he may pick up.
+fn interpreter_sees_only_own_translation_requests(role: Role) -> bool {
+    role == Role::Interpreter
+}
+
+/// Whether the caller may see this document, by the same rules as the
+/// document routes (`can_view_document_row` and explicit record rules). The
+/// realtime stream applies it to an interpreter's document events.
+pub(crate) async fn current_user_can_view_document(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    let Some(row) = fetch_document_row(state, document_id, auth.user_id).await? else {
+        return Ok(false);
+    };
+    let assignment_set = load_assignment_set(state, auth).await?;
+    let baseline_view = can_view_document_row(auth, &row, &assignment_set);
+    document_row_capability_allowed(state, auth, &row, AccessCapability::View, baseline_view).await
 }
 
 fn can_view_general_provider_document(role: Role, general: bool, hotel: bool) -> bool {
@@ -20213,6 +20275,7 @@ async fn list_documents(
                   o.order_number,
                   a.title AS appointment_title,
                   a.interpreter_id AS appointment_interpreter_id,
+                  a.owner_user_id AS appointment_owner_id,
                   u.name AS uploaded_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
@@ -20243,6 +20306,13 @@ async fn list_documents(
                       AND assigned_request.assigned_to = $13
                       AND assigned_request.status IN ('pending', 'in_progress')
                   ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $13
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -20418,6 +20488,7 @@ async fn list_document_intake_queue(
                   o.order_number,
                   a.title AS appointment_title,
                   a.interpreter_id AS appointment_interpreter_id,
+                  a.owner_user_id AS appointment_owner_id,
                   u.name AS uploaded_by_name,
                   u.role AS uploaded_by_role,
                   deleter.name AS file_deleted_by_name,
@@ -20449,6 +20520,13 @@ async fn list_document_intake_queue(
                       AND assigned_request.assigned_to = $1
                       AND assigned_request.status IN ('pending', 'in_progress')
                   ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $1
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -20795,6 +20873,7 @@ async fn list_document_versions(
                   o.order_number,
                   a.title AS appointment_title,
                   a.interpreter_id AS appointment_interpreter_id,
+                  a.owner_user_id AS appointment_owner_id,
                   u.name AS uploaded_by_name,
                   deleter.name AS file_deleted_by_name,
                   COALESCE((SELECT count(*)::bigint FROM document_shares ds WHERE ds.document_id = d.id AND ds.revoked_at IS NULL), 0) AS share_count,
@@ -20825,6 +20904,13 @@ async fn list_document_versions(
                       AND assigned_request.assigned_to = $2
                       AND assigned_request.status IN ('pending', 'in_progress')
                   ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $2
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document,
                   EXISTS(
                     SELECT 1
                     FROM patient_assignments pa
@@ -20928,6 +21014,7 @@ async fn list_document_translation_request_queue(
         None => None,
     };
     let can_view_all = matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing);
+    let own_requests_only = interpreter_sees_only_own_translation_requests(auth.role);
     // Widen only the SQL candidate set for explicit ACL allows. The batch
     // resolver below still applies precedence, deny overrides and policy
     // boundaries before any queue row is returned.
@@ -20961,7 +21048,9 @@ async fn list_document_translation_request_queue(
                   d.art AS document_art,
                   d.category AS document_category,
                   d.lead_id, d.visibility, d.is_medical, d.art, d.category,
-                  d.ursprung, d.uploaded_by,
+                  d.ursprung, d.uploaded_by, d.appointment_id,
+                  a.interpreter_id AS appointment_interpreter_id,
+                  a.owner_user_id AS appointment_owner_id,
                   EXISTS(
                     SELECT 1 FROM document_shares ds
                     WHERE ds.document_id = d.id
@@ -20974,10 +21063,18 @@ async fn list_document_translation_request_queue(
                       AND assigned_request.assigned_to = $4
                       AND assigned_request.status IN ('pending', 'in_progress')
                   ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $4
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name
            FROM document_translation_requests dtr
            JOIN documents d ON d.id = dtr.document_id
+           LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN patients p ON p.id = dtr.patient_id
            LEFT JOIN users requester ON requester.id = dtr.requested_by
            LEFT JOIN users assignee ON assignee.id = dtr.assigned_to
@@ -20986,6 +21083,7 @@ async fn list_document_translation_request_queue(
            WHERE dtr.status IN ({status_sql})
              AND ($1::text IS NULL OR dtr.request_source = $1)
              AND ($2::uuid IS NULL OR dtr.patient_id = $2)
+             AND ($7::boolean = false OR dtr.assigned_to = $4 OR dtr.assigned_to IS NULL)
              AND (
                 $3::boolean = true
                 OR EXISTS (
@@ -21010,6 +21108,7 @@ async fn list_document_translation_request_queue(
         .bind(auth.user_id)
         .bind(has_view_allow_all)
         .bind(view_allow_document_ids)
+        .bind(own_requests_only)
         .fetch_all(&state.db)
         .await
     {
@@ -21104,9 +21203,12 @@ async fn list_document_translation_requests(
            LEFT JOIN users translator ON translator.id = dtr.translated_by
            LEFT JOIN documents translated_document ON translated_document.id = dtr.translated_document_id
            WHERE dtr.document_id = $1
+             AND ($2::boolean = false OR dtr.assigned_to = $3 OR dtr.assigned_to IS NULL)
            ORDER BY dtr.requested_at DESC, dtr.created_at DESC"#,
     )
     .bind(id)
+    .bind(interpreter_sees_only_own_translation_requests(auth.role))
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     {

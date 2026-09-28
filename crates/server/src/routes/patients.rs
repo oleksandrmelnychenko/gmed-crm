@@ -6954,6 +6954,9 @@ async fn list_patient_documents(
                   (SELECT linked_appointment.interpreter_id
                      FROM appointments linked_appointment
                     WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
+                  (SELECT linked_appointment.owner_user_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_owner_id,
                   d.version_root_document_id,
                   d.replaces_document_id,
                   d.version_number,
@@ -6999,7 +7002,20 @@ async fn list_patient_documents(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $3
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $3
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $3
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
@@ -7199,6 +7215,19 @@ pub(crate) async fn load_patient_document_alerts_summary(
     state: &AppState,
     patient_uuid: Uuid,
 ) -> Result<PatientDocumentAlertsSummary, axum::response::Response> {
+    evaluate_patient_document_alerts(state, patient_uuid, None).await
+}
+
+/// Required-document alerts of a patient. `visible_document_ids` limits the
+/// evaluation to the documents a caller may see: then the summary is that
+/// caller's view — which rules the visible documents fulfil — and the
+/// manager's stored completeness flag is not disclosed, because it would
+/// betray documents the caller cannot see.
+async fn evaluate_patient_document_alerts(
+    state: &AppState,
+    patient_uuid: Uuid,
+    visible_document_ids: Option<&HashSet<Uuid>>,
+) -> Result<PatientDocumentAlertsSummary, axum::response::Response> {
     let rules = load_required_patient_document_rules(state).await?;
 
     let patient_row = sqlx::query(
@@ -7227,7 +7256,7 @@ pub(crate) async fn load_patient_document_alerts_summary(
         .and_then(|value| value.get("document_pack_complete").and_then(Value::as_bool))
         .unwrap_or(false);
 
-    let document_rows = sqlx::query(
+    let mut document_rows = sqlx::query(
         r#"SELECT d.id,
                   COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
                   d.art,
@@ -7248,6 +7277,12 @@ pub(crate) async fn load_patient_document_alerts_summary(
             "Failed to load patient document alerts",
         )
     })?;
+    if let Some(visible_document_ids) = visible_document_ids {
+        document_rows.retain(|row| {
+            row.try_get::<Uuid, _>("id")
+                .is_ok_and(|document_id| visible_document_ids.contains(&document_id))
+        });
+    }
 
     let mut evaluated_rules = Vec::with_capacity(rules.len());
     let mut missing_documents = Vec::new();
@@ -7303,6 +7338,11 @@ pub(crate) async fn load_patient_document_alerts_summary(
 
     let missing_count = missing_documents.len();
     let document_pack_complete = missing_count == 0;
+    let stored_document_pack_complete = if visible_document_ids.is_some() {
+        document_pack_complete
+    } else {
+        stored_document_pack_complete
+    };
 
     Ok(PatientDocumentAlertsSummary {
         configured_rule_count: rules.len(),
@@ -7389,6 +7429,9 @@ async fn load_staff_visible_patient_document_ids(
                   (SELECT linked_appointment.interpreter_id
                      FROM appointments linked_appointment
                     WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
+                  (SELECT linked_appointment.owner_user_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_owner_id,
                   d.is_medical,
                   d.art,
                   d.category,
@@ -7401,7 +7444,20 @@ async fn load_staff_visible_patient_document_ids(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $2
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $2
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document
            FROM documents d
            WHERE d.patient_id = $1
              AND d.status IN ('draft', 'active')"#,
@@ -7905,9 +7961,17 @@ async fn get_patient_document_alerts(
         Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
-    let summary = load_patient_document_alerts_summary(&state, patient_uuid).await?;
     let visible_document_ids =
         load_staff_visible_patient_document_ids(&state, &auth, patient_uuid).await?;
+    // An interpreter sees only the documents opened to him, so his alerts are
+    // counted from those documents: the fulfilled rules and missing counts
+    // must not reveal that the patient has documents closed to him.
+    let summary = evaluate_patient_document_alerts(
+        &state,
+        patient_uuid,
+        (auth.role == Role::Interpreter).then_some(&visible_document_ids),
+    )
+    .await?;
     let mut payload = patient_document_alerts_payload(&summary);
     retain_visible_document_alert_matches(&mut payload, &visible_document_ids);
     Ok(Json(payload))
