@@ -1636,6 +1636,94 @@ async fn second_active_non_advance_invoice_for_same_quote_is_rejected() {
     );
 }
 
+/// Cancelling an invoice returns each billed service to the stage it had
+/// really reached: a service billed ahead of delivery is planned again and is
+/// not counted as owed work.
+#[tokio::test]
+async fn cancelled_invoice_returns_services_to_their_real_stage() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-cancel-lines");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let planned = seed_order_leistung(&pool, order_id, "Billed ahead", 100.0, "planned").await;
+    let approved = seed_order_leistung(&pool, order_id, "Approved work", 80.0, "approved").await;
+    sqlx::query(
+        "UPDATE order_leistungen SET delivered_at = now(), approved_at = now(), approved_by = $2 WHERE id = $1",
+    )
+    .bind(approved)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let dropped = seed_order_leistung(&pool, order_id, "Dropped transfer", 50.0, "planned").await;
+
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+    // A service cancelled after the quote was made is not billed from it.
+    sqlx::query(
+        r#"UPDATE order_leistungen
+           SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
+               cancellation_reason = 'No longer needed'
+           WHERE id = $1"#,
+    )
+    .bind(dropped)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{invoice}");
+    assert_eq!(
+        invoice["line_items"].as_array().unwrap().len(),
+        2,
+        "{invoice}"
+    );
+    assert_eq!(invoice["total_gross"], "214.2", "{invoice}");
+    let line_status = |id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT status FROM order_leistungen WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(line_status(planned).await, "invoiced");
+    assert_eq!(line_status(approved).await, "invoiced");
+    assert_eq!(line_status(dropped).await, "cancelled");
+
+    let invoice_id = invoice["id"].as_str().unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(line_status(planned).await, "planned");
+    assert_eq!(line_status(approved).await, "approved");
+}
+
 #[tokio::test]
 async fn advance_invoice_does_not_consume_order_services() {
     let Some((app, pool, admin_id)) = test_context().await else {

@@ -406,7 +406,8 @@ async fn list_leads(
                   repeat_patient_id,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
-           WHERE ($1::bool = true OR qualification_status != 'archived')
+           WHERE ($1::bool = true OR $2::text IS NOT NULL
+                  OR qualification_status NOT IN ('archived', 'deleted'))
              AND converted_patient_id IS NULL
              AND ($2::text IS NULL OR qualification_status = $2)
              AND (
@@ -562,7 +563,13 @@ async fn list_leads(
 fn is_valid_lead_status(value: &str) -> bool {
     matches!(
         value,
-        "new" | "in_progress" | "qualified" | "not_qualified" | "converted" | "archived"
+        "new"
+            | "in_progress"
+            | "qualified"
+            | "not_qualified"
+            | "converted"
+            | "archived"
+            | "deleted"
     )
 }
 
@@ -2063,7 +2070,9 @@ async fn load_lead_lifecycle(
         "can_convert": failed_outcome_status == "none"
             && converted_patient_id.is_none()
             && qualification_status == "qualified",
-        "can_resolve_failed": failed_outcome_status != "delete_anonymized"
+        // Mirrors `resolve_failed_lead`: only a lead that has not been
+        // archived or deleted yet enters the failed-lead workflow.
+        "can_resolve_failed": failed_outcome_status == "none"
             && converted_patient_id.is_none(),
         "history": history,
     }))
@@ -3399,7 +3408,7 @@ async fn update_lead(
     let current_identity = match sqlx::query(
         r#"SELECT first_name, last_name, date_of_birth, email, phone,
                   trusted_contacts, repeat_patient_id, prospect_patient_id,
-                  converted_patient_id
+                  converted_patient_id, qualification_status
              FROM leads WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -3416,6 +3425,17 @@ async fn update_lead(
             );
         }
     };
+    // A deleted lead was anonymised (GDPR Art. 17 / retention): writing data
+    // back into it would undo the erasure. The UPDATE repeats the guard.
+    if current_identity
+        .try_get::<String, _>("qualification_status")
+        .is_ok_and(|status| status == "deleted")
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "A deleted lead is anonymised and cannot be edited",
+        );
+    }
     let effective_first_name = first_name
         .clone()
         .unwrap_or_else(|| current_identity.get::<String, _>("first_name"));
@@ -3542,7 +3562,7 @@ async fn update_lead(
                    WHEN $42 THEN $43
                    ELSE referrer_patient_id
                END
-           WHERE id = $1"#,
+           WHERE id = $1 AND qualification_status <> 'deleted'"#,
     )
     .bind(lead_id)
     .bind(body.email.as_deref())
@@ -7164,14 +7184,17 @@ pub async fn auto_purge_stale_archived(
     let retention_days = load_archived_lead_retention_days(&state.db).await;
 
     // Coarse filtering happens in SQL. The WHERE clause here mirrors the
-    // guards in `should_auto_purge` — if you edit one, edit both.
-    let candidates: Vec<Uuid> = sqlx::query_scalar(
+    // guards in `should_auto_purge` — if you edit one, edit both. The age
+    // counts from the latest of the failed-lead resolution and the last
+    // status change: a lead archived long ago, reopened and rejected again
+    // today starts a new retention window instead of being erased at once.
+    let candidates: Vec<(Uuid, String)> = sqlx::query_as(
         r#"
-        SELECT id FROM leads
+        SELECT id, qualification_status FROM leads
         WHERE qualification_status IN ('archived', 'not_qualified')
           AND COALESCE(failed_outcome_status, 'none') != 'delete_anonymized'
           AND first_name != $2
-          AND COALESCE(failed_processed_at, updated_at)
+          AND GREATEST(COALESCE(failed_processed_at, updated_at), status_changed_at)
               < now() - make_interval(days => $1::int)
         "#,
     )
@@ -7187,11 +7210,11 @@ pub async fn auto_purge_stale_archived(
         errors: 0,
     };
 
-    for lead_id in candidates {
+    for (lead_id, from_status) in candidates {
         match purge_lead_and_prospect(
             &state.db,
             lead_id,
-            None,
+            Some(from_status.clone()),
             "auto_purge_storage_limitation",
             Some("Auto-purged per cleanup_archived_leads_days retention"),
             None,
@@ -7204,6 +7227,29 @@ pub async fn auto_purge_stale_archived(
                     .bind(lead_id)
                     .execute(&state.db)
                     .await;
+                // The lead history shows the automatic deletion like a manual one.
+                if crate::routes::workflow_lifecycle::record_event(
+                    state,
+                    crate::routes::workflow_lifecycle::RecordEvent {
+                        entity_type: "lead",
+                        entity_id: lead_id,
+                        from_stage: Some(from_status.as_str()),
+                        to_stage: "deleted",
+                        transition_kind: "deleted",
+                        changed_by: None,
+                        note: Some("auto_purge_storage_limitation"),
+                        metadata: json!({
+                            "resolution": "delete_anonymized",
+                            "trigger": "retention_sweeper",
+                            "retention_days": retention_days,
+                        }),
+                    },
+                )
+                .await
+                .is_err()
+                {
+                    tracing::error!(%lead_id, "record lead auto-purge lifecycle event");
+                }
                 state.audit_sender.try_send(audit::domain_event(
                     "auto_purge_lead",
                     None,

@@ -684,9 +684,17 @@ pub(crate) struct TerminatedOrder {
     uninvoiced_gross: Decimal,
     cancelled_services: u64,
     flat_fees_due: u64,
+    /// Upcoming appointments cancelled with the order, like a manual cancel.
+    pub(crate) cancelled_appointment_ids: Vec<Uuid>,
+    /// Pending amount amendments rejected with the order.
+    pub(crate) rejected_amendment_ids: Vec<Uuid>,
 }
 
 impl TerminatedOrder {
+    pub(crate) fn order_id(&self) -> Uuid {
+        self.order_id
+    }
+
     pub fn summary_json(&self) -> Value {
         json!({
             "order_id": self.order_id,
@@ -700,6 +708,8 @@ impl TerminatedOrder {
             "uninvoiced_gross": decimal_to_string(self.uninvoiced_gross),
             "cancelled_services": self.cancelled_services,
             "flat_fees_due": self.flat_fees_due,
+            "cancelled_appointment_ids": self.cancelled_appointment_ids,
+            "rejected_amendment_ids": self.rejected_amendment_ids,
         })
     }
 }
@@ -934,6 +944,8 @@ pub(crate) async fn terminate_open_orders_tx(
             uninvoiced_gross: settlement.uninvoiced_gross(),
             cancelled_services,
             flat_fees_due,
+            cancelled_appointment_ids: Vec::new(),
+            rejected_amendment_ids: Vec::new(),
         });
     }
     Ok(terminated)
@@ -965,6 +977,13 @@ pub(crate) async fn publish_terminated_orders(
             "order.status_changed",
             order.order_id,
             payload,
+        )
+        .await;
+        crate::routes::appointments::publish_cancelled_order_appointments(
+            state,
+            actor_user_id,
+            order.order_id,
+            &order.cancelled_appointment_ids,
         )
         .await;
     }

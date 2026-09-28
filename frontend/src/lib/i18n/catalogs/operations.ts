@@ -327,6 +327,9 @@ export interface OperationsTranslations {
   lead_transition_failed_resolved: string;
   lead_transition_converted: string;
   lead_transition_gate_updated: string;
+  lead_transition_archived: string;
+  lead_transition_deleted: string;
+  lead_transition_promoted_to_console: string;
   lead_tab_overview: string;
   lead_tab_process: string;
   lead_tab_qualification: string;
@@ -830,7 +833,7 @@ export const operationsRu: OperationsTranslations = {
   orders_external_invoice_received: "Получен",
   orders_external_invoice_paid: "Оплачен",
   orders_external_invoice_updated: "Последнее обновление",
-  orders_external_invoice_mark_approved: "Отметить как утверждённый",
+  orders_external_invoice_mark_approved: "Подтвердить счёт",
   orders_external_invoice_mark_paid: "Отметить как оплаченный",
   orders_external_invoice_cancel: "Отменить",
   orders_create_title: "Создать заказ",
@@ -893,7 +896,7 @@ export const operationsRu: OperationsTranslations = {
   lead_compliance_rejected: "Отклонено",
   lead_failed_outcome: "Исход неуспешного лида",
   lead_failed_outcome_none: "Нет",
-  lead_failed_outcome_archived: "Архивирован",
+  lead_failed_outcome_archived: "В архиве",
   lead_failed_outcome_delete_anonymized: "Удалён и анонимизирован",
   lead_legal_sex: "Юридический пол",
   lead_legal_sex_female: "Женский",
@@ -929,6 +932,9 @@ export const operationsRu: OperationsTranslations = {
   lead_transition_failed_resolved: "Неуспешный лид обработан",
   lead_transition_converted: "Конвертирован",
   lead_transition_gate_updated: "Гейт обновлён",
+  lead_transition_archived: "Перенесён в архив",
+  lead_transition_deleted: "Удалён",
+  lead_transition_promoted_to_console: "Переведён в консоль",
   lead_tab_overview: "Обзор",
   lead_tab_process: "Процесс",
   lead_tab_qualification: "Квалификация",
@@ -1463,7 +1469,7 @@ export const operationsDe: OperationsTranslations = {
   orders_external_invoice_received: "Eingegangen",
   orders_external_invoice_paid: "Bezahlt",
   orders_external_invoice_updated: "Letzte Aktualisierung",
-  orders_external_invoice_mark_approved: "Als freigegeben markieren",
+  orders_external_invoice_mark_approved: "Rechnung freigeben",
   orders_external_invoice_mark_paid: "Als bezahlt markieren",
   orders_external_invoice_cancel: "Stornieren",
   orders_create_title: "Auftrag anlegen",
@@ -1562,6 +1568,9 @@ export const operationsDe: OperationsTranslations = {
   lead_transition_failed_resolved: "Nicht erfolgreicher Lead bearbeitet",
   lead_transition_converted: "Konvertiert",
   lead_transition_gate_updated: "Gate aktualisiert",
+  lead_transition_archived: "Archiviert",
+  lead_transition_deleted: "Gelöscht",
+  lead_transition_promoted_to_console: "In Konsole übernommen",
   lead_tab_overview: "Überblick",
   lead_tab_process: "Prozess",
   lead_tab_qualification: "Qualifikation",

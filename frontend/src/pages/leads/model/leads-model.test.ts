@@ -12,7 +12,10 @@ import {
   leadPermissions,
   leadReadinessCheckLabel,
   leadReadinessReasonLabel,
+  leadTransitionKindLabel,
   normalizeLeadServiceSelection,
+  STATUS_OPTIONS,
+  statusLabel,
   normalizeLeadServiceValue,
   updateLeadServiceSelection,
 } from "./leads-model";
@@ -109,6 +112,36 @@ describe("lead readiness labels", () => {
       ),
     ).toBe("Rahmenvertrag wurde gekündigt – neuen Vertrag erstellen");
   });
+});
+
+// Every transition_kind crates/server/src/routes/leads.rs writes to the lead history.
+const SERVER_LEAD_TRANSITION_KINDS = [
+  "created",
+  "status_change",
+  "converted",
+  "archived",
+  "deleted",
+  "promoted_to_console",
+];
+
+describe("lead history labels", () => {
+  for (const lang of ["de", "ru"] as const) {
+    const tr = translateCatalog(lang);
+
+    it(`names every transition the server records (${lang})`, () => {
+      for (const kind of SERVER_LEAD_TRANSITION_KINDS) {
+        const label = leadTransitionKindLabel(kind, tr);
+        expect(label, kind).not.toBe(tr.common_unknown_value);
+        expect(label.trim(), kind).not.toBe("");
+      }
+    });
+
+    it(`names every lead status (${lang})`, () => {
+      for (const status of [...STATUS_OPTIONS, "converted"]) {
+        expect(statusLabel(status, tr), status).not.toBe(tr.common_unknown_value);
+      }
+    });
+  }
 });
 
 describe("lead release permissions", () => {

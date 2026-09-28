@@ -242,6 +242,7 @@ async fn get_order_pipeline(
                SELECT service.provider_id, service.doctor_id, 1 AS services, 0 AS appointments
                FROM order_leistungen service
                WHERE service.order_id = $1 AND service.provider_id IS NOT NULL
+                 AND service.status <> 'cancelled'
                UNION ALL
                SELECT participant.provider_id, participant.doctor_id, 0, 0
                FROM order_service_group_participants participant
@@ -303,19 +304,25 @@ async fn get_order_pipeline(
         Err(e) => return fail(e, order_id, "appointments"),
     };
 
+    // A cancelled service line is closed: it is neither delivered nor
+    // invoiced, and it must not keep execution or closure open.
     let totals = match sqlx::query(
         r#"SELECT
-               (SELECT COUNT(*) FROM order_leistungen WHERE order_id = $1) AS services_total,
+               (SELECT COUNT(*) FROM order_leistungen
+                 WHERE order_id = $1 AND status <> 'cancelled') AS services_total,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'planned') AS services_planned,
                (SELECT COUNT(*) FROM order_leistungen
-                 WHERE order_id = $1 AND delivered_at IS NULL) AS services_undelivered,
+                 WHERE order_id = $1 AND status <> 'cancelled'
+                   AND delivered_at IS NULL) AS services_undelivered,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'delivered') AS services_delivered,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'approved') AS services_approved,
                (SELECT COUNT(*) FROM order_leistungen
                  WHERE order_id = $1 AND status = 'invoiced') AS services_invoiced,
+               (SELECT COUNT(*) FROM order_leistungen
+                 WHERE order_id = $1 AND status = 'cancelled') AS services_cancelled,
                (SELECT COUNT(*) FROM invoices
                  WHERE order_id = $1 AND status <> 'cancelled') AS invoices_total,
                (SELECT COUNT(*) FROM invoices
@@ -452,6 +459,7 @@ async fn get_order_pipeline(
             "delivered": count(&totals, "services_delivered"),
             "approved": count(&totals, "services_approved"),
             "invoiced": services_invoiced,
+            "cancelled": count(&totals, "services_cancelled"),
         },
         "invoices": {
             "total": count(&totals, "invoices_total"),

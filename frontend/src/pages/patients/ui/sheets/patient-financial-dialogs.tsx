@@ -12,9 +12,26 @@ import {
   selectClass,
 } from "@/components/ui-shell";
 
+import { getLang, t as translateCatalog } from "@/lib/i18n";
+
 import type { DunningEvent } from "../../model/detail-tab-types";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
+
+/** Dunning levels read as on the invoices page, never as raw keys. */
+function dunningLevelLabel(level: string) {
+  const tr = translateCatalog(getLang());
+  switch (level) {
+    case "first":
+      return tr.revenue_dunning_level_first;
+    case "second":
+      return tr.revenue_dunning_level_second;
+    case "collections":
+      return tr.revenue_dunning_level_collections;
+    default:
+      return level;
+  }
+}
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -128,7 +145,7 @@ function DunningEventsList({
           <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <Badge variant="outline" className="rounded-full text-[10px]">
-                {event.level}
+                {dunningLevelLabel(event.level)}
               </Badge>
               <span className="text-xs text-slate-400">{formatDateTime(event.sent_at)}</span>
             </div>
@@ -415,12 +432,15 @@ function InvoiceManagerDialog({
             />
           </FormField>
           <FormField label={l("patients_paid_amount")} htmlFor="invoice-paid-amount-edit">
+            {/* Payments are recorded in the invoice payment journal (invoices
+                page); the paid amount here is read-only. */}
             <Input
               id="invoice-paid-amount-edit"
               value={invoiceStatusForm.paidAmount}
               onChange={(event) => onInvoicePaidAmountChange(event.target.value)}
               className={inputClass}
               placeholder="0.00"
+              readOnly
             />
           </FormField>
         </div>
@@ -450,7 +470,7 @@ function InvoiceManagerDialog({
               disabled={dunningBusy}
             >
               {dunningBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {l("patients_send")} {nextDunningLevel(dunningEvents)}
+              {l("patients_send")}: {dunningLevelLabel(nextDunningLevel(dunningEvents) ?? "")}
             </Button>
           ) : null
         }

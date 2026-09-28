@@ -4,10 +4,13 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import {
   formatEnumLabelFromKeys,
+  formatUnknownValue,
   getLang,
   t as translateCatalog,
   type TranslationKey,
+  uiText,
 } from "@/lib/i18n";
+import { orderPhaseTextKey } from "@/lib/workflow-labels";
 
 import {
   ChartSkeleton,
@@ -126,13 +129,6 @@ const MiniDonutChart = lazy(async () => {
   };
 });
 
-const ORDER_PHASE_LABEL_KEYS = {
-  closure: "dash_order_phase_closure",
-  execution: "dash_order_phase_execution",
-  intake: "dash_order_phase_intake",
-  planning: "dash_order_phase_planning",
-} as const satisfies Partial<Record<string, TranslationKey>>;
-
 const SERVICE_TYPE_LABEL_KEYS = {
   medical: "providers_type_medical",
   non_medical: "providers_type_non_medical",
@@ -140,7 +136,8 @@ const SERVICE_TYPE_LABEL_KEYS = {
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
 function orderPhaseLabel(phase: string) {
-  return formatEnumLabelFromKeys(phase, ORDER_PHASE_LABEL_KEYS, translateCatalog(getLang()));
+  const key = orderPhaseTextKey(phase);
+  return key ? uiText(key) : formatUnknownValue(phase, translateCatalog(getLang()));
 }
 
 type TopProviderRow = {

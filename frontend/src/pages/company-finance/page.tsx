@@ -122,6 +122,7 @@ const textByLanguage = {
     dueDate: "Срок оплаты",
     amount: "Сумма",
     payable: "К оплате",
+    overdue: "Просрочен",
     expected: "Ожидается",
     partiallyPaid: "Частично оплачено",
     settledProvider: "Оплачено",
@@ -211,6 +212,7 @@ const textByLanguage = {
     dueDate: "Fällig am",
     amount: "Betrag",
     payable: "Zu zahlen",
+    overdue: "Überfällig",
     expected: "Erwartet",
     partiallyPaid: "Teilweise bezahlt",
     settledProvider: "Bezahlt",
@@ -615,10 +617,18 @@ function CompanyFinancePageContent() {
     {
       id: "status",
       label: text.status,
-      accessor: (row) => row.liability_kind === "payable" && row.settlement_status === "partial" ? "partial" : row.liability_kind,
+      // An overdue payable reads "overdue" here as on the order and incoming
+      // invoice pages; it outranks a partial payment.
+      accessor: (row) =>
+        row.liability_kind === "payable" && row.status === "overdue"
+          ? "overdue"
+          : row.liability_kind === "payable" && row.settlement_status === "partial"
+            ? "partial"
+            : row.liability_kind,
       filterType: "enum",
       filterOptions: [
         { value: "payable", label: text.payable },
+        { value: "overdue", label: text.overdue },
         { value: "partial", label: text.partiallyPaid },
         { value: "settled", label: text.settledProvider },
         { value: "expected", label: text.expected },
@@ -636,9 +646,11 @@ function CompanyFinancePageContent() {
               ? text.settledProvider
               : row.liability_kind === "expected"
                 ? text.expected
-                : row.settlement_status === "partial"
-                  ? text.partiallyPaid
-                  : text.payable}
+                : row.status === "overdue"
+                  ? text.overdue
+                  : row.settlement_status === "partial"
+                    ? text.partiallyPaid
+                    : text.payable}
           </Badge>
       ),
     },

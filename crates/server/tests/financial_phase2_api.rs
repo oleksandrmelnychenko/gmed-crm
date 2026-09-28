@@ -124,8 +124,9 @@ async fn seed_order_line(
 ) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO order_leistungen (
-                order_id, description, quantity, unit_price, vat_rate, status
-           ) VALUES ($1, $2, $3, $4, 19, 'approved')
+                order_id, description, quantity, unit_price, vat_rate, status,
+                delivered_at, approved_at
+           ) VALUES ($1, $2, $3, $4, 19, 'approved', now(), now())
            RETURNING id"#,
     )
     .bind(order_id)
@@ -634,11 +635,13 @@ async fn clinic_expense_payer_controls_receivable_liability_and_cash_ledger() {
     ];
     let mut ids = Vec::new();
     for (number, status_value, paid_by, delivered, amount) in cases {
+        // Approving a supplier invoice or recording it as paid is a finance
+        // decision (billing, CEO).
         let (status, body) = json_request(
             &app,
             "POST",
             &format!("/api/v1/orders/{order_id}/external-invoices"),
-            &manager,
+            &billing,
             Some(json!({
                 "external_invoice_number": format!("{tag}-{number}"),
                 "amount_net": amount,

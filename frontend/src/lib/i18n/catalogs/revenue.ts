@@ -242,6 +242,7 @@ export interface RevenueTranslations {
   revenue_quotes_version_snapshot: string;
   revenue_quotes_version_status_update: string;
   revenue_quotes_version_superseded: string;
+  revenue_quotes_version_order_cancelled: string;
   revenue_quotes_line_items_count: string;
   revenue_contract_status_draft: string;
   revenue_contract_status_sent: string;
@@ -1112,6 +1113,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_quotes_version_snapshot: "Снимок",
   revenue_quotes_version_status_update: "Обновление статуса",
   revenue_quotes_version_superseded: "Заменено новым предложением",
+  revenue_quotes_version_order_cancelled: "Закрыто при отмене заказа",
   revenue_quotes_line_items_count: "позиций",
   revenue_contract_status_draft: "Черновик",
   revenue_contract_status_sent: "Отправлен",
@@ -1204,7 +1206,7 @@ export const revenueRu: RevenueTranslations = {
   revenue_invoice_status_partially_paid: "Частично оплачен",
   revenue_invoice_status_paid: "Оплачен",
   revenue_invoice_status_overdue: "Просрочен",
-  revenue_invoice_status_cancelled: "Отменен",
+  revenue_invoice_status_cancelled: "Отменён",
   revenue_invoice_type_advance: "Авансовый",
   revenue_invoice_type_interim: "Промежуточный",
   revenue_invoice_type_final: "Финальный",
@@ -1508,6 +1510,7 @@ export const revenueDe: RevenueTranslations = {
   revenue_quotes_version_snapshot: "Snapshot",
   revenue_quotes_version_status_update: "Statusaktualisierung",
   revenue_quotes_version_superseded: "Durch neues Angebot ersetzt",
+  revenue_quotes_version_order_cancelled: "Mit dem Auftrag storniert",
   revenue_quotes_line_items_count: "Positionen",
   revenue_contract_status_draft: "Entwurf",
   revenue_contract_status_sent: "Versendet",

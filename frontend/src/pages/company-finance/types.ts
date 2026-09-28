@@ -123,9 +123,10 @@ export type CompanyProviderStatementMovement = {
   amount_charged: string;
   amount_paid: string;
   running_balance: string;
-  order_id: string;
+  /** Null for a company invoice or a patient invoice without an order. */
+  order_id: string | null;
   order_number: string;
-  patient_id: string;
+  patient_id: string | null;
   patient_pid: string;
   patient_name: string;
   financial_account_name: string | null;

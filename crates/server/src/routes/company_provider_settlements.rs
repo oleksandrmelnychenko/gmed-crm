@@ -398,8 +398,10 @@ async fn get_provider_statement(
                       NULL::text AS financial_account_name,
                       NULL::text AS reference
                FROM external_invoices external
-               JOIN orders ON orders.id = external.order_id
-               JOIN patients patient ON patient.id = external.patient_id
+               -- Company invoices and patient invoices without an order belong
+               -- to the statement too, as they do to the provider summary.
+               LEFT JOIN orders ON orders.id = external.order_id
+               LEFT JOIN patients patient ON patient.id = external.patient_id
                WHERE external.provider_id = $1
                  AND UPPER(external.currency) = $2
                  AND external.status NOT IN ('cancelled', 'expected')
@@ -424,8 +426,8 @@ async fn get_provider_statement(
                FROM external_invoice_provider_payment_transactions payment_tx
                JOIN external_invoices external
                  ON external.id = payment_tx.external_invoice_id
-               JOIN orders ON orders.id = external.order_id
-               JOIN patients patient ON patient.id = external.patient_id
+               LEFT JOIN orders ON orders.id = external.order_id
+               LEFT JOIN patients patient ON patient.id = external.patient_id
                JOIN company_financial_accounts account
                  ON account.id = payment_tx.financial_account_id
                WHERE external.provider_id = $1
@@ -530,11 +532,11 @@ async fn get_provider_statement(
             "amount_charged": decimal_to_string(amount_charged),
             "amount_paid": decimal_to_string(amount_paid),
             "running_balance": decimal_to_string(running_balance),
-            "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_default(),
-            "order_number": row.try_get::<String, _>("order_number").unwrap_or_default(),
-            "patient_id": row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
-            "patient_pid": row.try_get::<String, _>("patient_pid").unwrap_or_default(),
-            "patient_name": row.try_get::<String, _>("patient_name").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default().unwrap_or_default(),
+            "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
+            "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default().unwrap_or_default(),
+            "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default().unwrap_or_default(),
             "financial_account_name": row.try_get::<Option<String>, _>("financial_account_name").unwrap_or_default(),
             "reference": row.try_get::<Option<String>, _>("reference").unwrap_or_default(),
         }));

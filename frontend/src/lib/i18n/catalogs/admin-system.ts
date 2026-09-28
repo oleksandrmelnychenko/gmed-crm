@@ -330,10 +330,6 @@ export interface AdminSystemTranslations {
   sops_form_description_teamlead: string;
   sops_date_not_set: string;
 
-  dash_order_phase_closure: string;
-  dash_order_phase_execution: string;
-  dash_order_phase_intake: string;
-  dash_order_phase_planning: string;
   dash_order_count_suffix: string;
 
   feedback_status_submitted: string;
@@ -815,10 +811,6 @@ export const adminSystemRu: AdminSystemTranslations = {
     "Создайте SOP для команды переводчиков. Материалы тимлида переводчиков направляются менеджеру пациента и могут быть назначены только переводчикам.",
   sops_date_not_set: "Не указано",
 
-  dash_order_phase_closure: "Закрытие",
-  dash_order_phase_execution: "Исполнение",
-  dash_order_phase_intake: "Прием",
-  dash_order_phase_planning: "Планирование",
   dash_order_count_suffix: "заказов",
 
   feedback_status_submitted: "Отправлено",
@@ -1301,10 +1293,6 @@ export const adminSystemDe: AdminSystemTranslations = {
     "Erstellen Sie SOP-Inhalte für das Dolmetscherteam. Inhalte des Teamleads gehen zur Freigabe an den Patientenmanager und können nur Dolmetscher adressieren.",
   sops_date_not_set: "Nicht festgelegt",
 
-  dash_order_phase_closure: "Abschluss",
-  dash_order_phase_execution: "Ausführung",
-  dash_order_phase_intake: "Aufnahme",
-  dash_order_phase_planning: "Planung",
   dash_order_count_suffix: "Auftr.",
 
   feedback_status_submitted: "Eingereicht",

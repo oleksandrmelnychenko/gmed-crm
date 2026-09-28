@@ -282,7 +282,7 @@ const copy = {
     pending_review: "На проверке",
     posted: "Подтверждено",
     rejected: "Отклонено",
-    reversed: "Отменено",
+    reversed: "Сторнировано",
     noReceipt: "Документа нет",
     downloadReceipt: "Скачать подтверждение",
     edit: "Изменить",
@@ -319,7 +319,9 @@ function expenseMoney(value: string, currency: string, lang: Lang) {
 
 function expenseStatusClassName(status: ConciergeExpenseItem["status"]) {
   if (status === "posted") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "rejected" || status === "reversed") return "border-rose-200 bg-rose-50 text-rose-700";
+  if (status === "rejected") return "border-rose-200 bg-rose-50 text-rose-700";
+  // A reversal closes a posted expense; it is not an error (slate, as in finance).
+  if (status === "reversed") return "border-slate-200 bg-slate-50 text-slate-700";
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 

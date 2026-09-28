@@ -72,19 +72,34 @@ export function finalInvoiceStatusLabel(status: string, lang: Lang) {
   return lang === "de" ? labels[1] : labels[0];
 }
 
-const LINE_STATUS_LABELS: Record<string, [ru: string, de: string]> = {
+// Same wording as the order page (service lines) and the supplier invoices
+// (third-party costs), so a status reads the same everywhere.
+const SERVICE_LINE_STATUS_LABELS: Record<string, [ru: string, de: string]> = {
   planned: ["Запланировано", "Geplant"],
   delivered: ["Оказано", "Erbracht"],
-  approved: ["Подтверждено", "Freigegeben"],
-  invoiced: ["Выставлено", "Abgerechnet"],
+  approved: ["Утверждено", "Freigegeben"],
+  invoiced: ["Выставлен счёт", "Abgerechnet"],
   cancelled: ["Отменено", "Storniert"],
-  received: ["Получен", "Eingegangen"],
-  paid: ["Оплачен", "Bezahlt"],
 };
 
-export function settlementLineStatusLabel(line: Pick<TerminationSettlementLine, "status" | "due_in_full">, lang: Lang) {
+const SUPPLIER_INVOICE_STATUS_LABELS: Record<string, [ru: string, de: string]> = {
+  expected: ["Ожидается", "Erwartet"],
+  received: ["На проверке", "Zu prüfen"],
+  approved: ["К оплате", "Zu zahlen"],
+  overdue: ["Просрочен", "Überfällig"],
+  paid: ["Оплачен", "Bezahlt"],
+  cancelled: ["Отменён", "Storniert"],
+};
+
+export function settlementLineStatusLabel(
+  line: Pick<TerminationSettlementLine, "status" | "due_in_full"> &
+    Partial<Pick<TerminationSettlementLine, "source">>,
+  lang: Lang,
+) {
   if (line.due_in_full) return lang === "de" ? "Pauschale, voll fällig" : "Паушал, полностью";
-  const labels = LINE_STATUS_LABELS[line.status];
+  const map =
+    line.source === "third_party_cost" ? SUPPLIER_INVOICE_STATUS_LABELS : SERVICE_LINE_STATUS_LABELS;
+  const labels = map[line.status];
   if (!labels) return line.status;
   return lang === "de" ? labels[1] : labels[0];
 }

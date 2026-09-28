@@ -505,6 +505,23 @@ fn validate_money_components(
     Ok((amount_net, amount_vat, amount_gross))
 }
 
+/// Approving a supplier invoice for payment, recording it as paid and
+/// flagging it overdue are finance decisions: the dedicated approve and
+/// patient-payment routes allow the CEO and Billing only, and the order route
+/// must not open them to the patient manager, who records receipt and cancels.
+fn can_decide_external_invoice_payment(role: Role, status: &str) -> bool {
+    !matches!(status, "approved" | "paid" | "overdue")
+        || role.has_full_access()
+        || matches!(role, Role::Billing)
+}
+
+fn external_invoice_payment_decision_forbidden() -> axum::response::Response {
+    err(
+        StatusCode::FORBIDDEN,
+        "Only billing or the CEO can approve a supplier invoice or record its payment",
+    )
+}
+
 fn is_valid_external_invoice_transition(current: &str, next: &str) -> bool {
     current == next
         || matches!(
@@ -7653,6 +7670,9 @@ async fn create_external_invoice(
             "Invalid external invoice status",
         );
     }
+    if !can_decide_external_invoice_payment(auth.role, status) {
+        return external_invoice_payment_decision_forbidden();
+    }
     let paid_by = body
         .paid_by
         .as_deref()
@@ -7997,6 +8017,12 @@ async fn update_external_invoice(
             ),
         );
     }
+    if let Some(next_status) = status
+        && next_status != current_status
+        && !can_decide_external_invoice_payment(auth.role, next_status)
+    {
+        return external_invoice_payment_decision_forbidden();
+    }
     let mut paid_by = body
         .paid_by
         .as_deref()
@@ -8196,7 +8222,14 @@ async fn update_external_invoice(
                amount_vat = COALESCE($7, amount_vat),
                amount_gross = COALESCE($8, amount_gross),
                currency = COALESCE($9, currency),
-               status = COALESCE($10, status),
+               -- An overdue invoice whose due date moves to today or later is
+               -- approved (payable) again; the scheduler marks it overdue anew
+               -- once the new date passes.
+               status = CASE
+                   WHEN COALESCE($10, status) = 'overdue'
+                        AND COALESCE($5, due_date) >= $20 THEN 'approved'
+                   ELSE COALESCE($10, status)
+               END,
                paid_by = COALESCE($11, paid_by),
                service_delivered = COALESCE($12, service_delivered),
                notes = CASE
@@ -8244,6 +8277,7 @@ async fn update_external_invoice(
             .try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")
             .unwrap_or_else(|_| chrono::Utc::now()),
     )
+    .bind(crate::app_time::today())
     .fetch_optional(&state.db)
     .await
     {
@@ -8298,6 +8332,25 @@ async fn update_external_invoice(
                 return err(
                     StatusCode::CONFLICT,
                     "Reverse or reassign active patient-invoice allocations first",
+                );
+            }
+            // Company payments and posted concierge receipts lock the invoice:
+            // the user reverses them first instead of seeing a server error.
+            if database_message.contains("locked by provider payments")
+                || database_message.contains("reverse provider payments before")
+                || database_message.contains("record the full provider payment")
+            {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Reverse the company payments of this invoice first",
+                );
+            }
+            if database_message.contains("posted concierge expense")
+                || database_message.contains("reverse the concierge expense review")
+            {
+                return err(
+                    StatusCode::CONFLICT,
+                    "This invoice comes from a posted concierge receipt; reverse the receipt review first",
                 );
             }
             if database_message.contains("must match order currency")
@@ -8500,9 +8553,9 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
-    let (order_currency, effective_price_date) =
+    let (order_currency, effective_price_date, order_status) =
         match sqlx::query(
-            "SELECT UPPER(currency) AS currency, COALESCE(date_from, CURRENT_DATE) AS effective_price_date FROM orders WHERE id = $1",
+            "SELECT UPPER(currency) AS currency, COALESCE(date_from, CURRENT_DATE) AS effective_price_date, status FROM orders WHERE id = $1",
         )
         .bind(order_id)
         .fetch_optional(&state.db)
@@ -8513,6 +8566,7 @@ async fn add_leistung(
                     .unwrap_or_else(|_| "EUR".to_string()),
                 row.try_get::<chrono::NaiveDate, _>("effective_price_date")
                     .unwrap_or_else(|_| crate::app_time::today()),
+                row.try_get::<String, _>("status").unwrap_or_default(),
             ),
             Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
             Err(error) => {
@@ -8520,6 +8574,14 @@ async fn add_leistung(
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         };
+    // A completed or cancelled order is closed: it takes no new planned work.
+    // Its delivered lines are still approved and billed through their own routes.
+    if matches!(order_status.as_str(), "completed" | "cancelled") {
+        return err(
+            StatusCode::CONFLICT,
+            "A completed or cancelled order cannot receive new services",
+        );
+    }
 
     let resolved_agency_price = if let Some(agency_service_id) = body.agency_service_id {
         let result = if let Some(price_version_id) = body.agency_service_price_version_id {
@@ -8784,6 +8846,9 @@ async fn add_leistung(
          WHERE order_leistungen.planned_partner_cost_net = EXCLUDED.planned_partner_cost_net
            AND order_leistungen.planned_partner_cost_vat = EXCLUDED.planned_partner_cost_vat
            AND order_leistungen.planned_partner_cost_gross = EXCLUDED.planned_partner_cost_gross
+           -- Only a planned line is rewritten: a delivered, approved, invoiced
+           -- or cancelled line keeps the terms it was delivered and billed on.
+           AND order_leistungen.status = 'planned'
          RETURNING id, (xmax = 0) AS inserted",
     )
     .bind(order_id)
@@ -8844,16 +8909,31 @@ async fn add_leistung(
             };
             match sqlx::query(
                 r#"SELECT id, planned_partner_cost_net, planned_partner_cost_vat,
-                          planned_partner_cost_gross
+                          planned_partner_cost_gross, status,
+                          (quantity = $3 AND unit_price = $4 AND vat_rate = $5
+                           AND is_cost_passthrough = $6) AS same_terms
                    FROM order_leistungen
                    WHERE order_id = $1 AND client_reference = $2"#,
             )
             .bind(order_id)
             .bind(&client_reference)
+            .bind(qty)
+            .bind(price)
+            .bind(vat)
+            .bind(passthrough)
             .fetch_optional(&state.db)
             .await
             {
                 Ok(Some(row)) => {
+                    let line_status = row.try_get::<String, _>("status").unwrap_or_default();
+                    if line_status != "planned"
+                        && !row.try_get::<bool, _>("same_terms").unwrap_or(false)
+                    {
+                        return err(
+                            StatusCode::CONFLICT,
+                            "The service is no longer planned and its terms cannot change",
+                        );
+                    }
                     let same_cost = row
                         .try_get::<rust_decimal::Decimal, _>("planned_partner_cost_net")
                         .is_ok_and(|value| value == planned_cost_net)

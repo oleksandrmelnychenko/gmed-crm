@@ -55,6 +55,8 @@ export function localizedNotificationCopy(
           body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
         };
   }
+  const overdueSupplierCopy = externalInvoiceOverdueNotificationCopy(item, lang);
+  if (overdueSupplierCopy) return overdueSupplierCopy;
   const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
   if (interpreterCopy) return interpreterCopy;
   const expenseCopy = conciergeExpenseNotificationCopy(item, lang);
@@ -66,6 +68,33 @@ export function localizedNotificationCopy(
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+// The supplier-invoice overdue scheduler (crates/server/src/routes/orders.rs)
+// writes an English title and body; their facts are shown in RU/DE.
+function externalInvoiceOverdueNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "external_invoice_overdue") return null;
+  const subject = item.title.match(/^External invoice overdue for (.+)$/)?.[1]?.trim() ?? "";
+  const facts = (item.body ?? "").match(
+    /^External invoice (.+) became overdue on (\d{4}-\d{2}-\d{2}) \((-?[\d.]+) ([A-Z]{3})\)\.$/,
+  );
+  const title = lang === "de" ? "Eingangsrechnung überfällig" : "Входящий счёт просрочен";
+  if (!facts) {
+    return { title: subject ? `${title}: ${subject}` : title, body: item.body };
+  }
+  const [, number, dueDate, amount, currency] = facts;
+  const due = formatAppDate(dueDate);
+  const money = formatMoneyAmount(amount, currency);
+  return {
+    title: subject ? `${title}: ${subject}` : title,
+    body:
+      lang === "de"
+        ? `Rechnung ${number}, fällig am ${due}: ${money}`
+        : `Счёт ${number}, срок оплаты ${due}: ${money}`,
+  };
 }
 
 function parseNotificationBody<T extends object>(body: string | null): T | null {

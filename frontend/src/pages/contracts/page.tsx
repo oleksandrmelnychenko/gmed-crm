@@ -196,6 +196,7 @@ const QUOTE_VERSION_REASON_LABEL_KEYS = {
   initial_snapshot: "revenue_quotes_version_snapshot",
   status_update: "revenue_quotes_version_status_update",
   superseded: "revenue_quotes_version_superseded",
+  order_cancelled: "revenue_quotes_version_order_cancelled",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 function useDebouncedValue<T>(value: T, delayMs: number) {

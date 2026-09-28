@@ -1033,6 +1033,99 @@ async fn planned_cost_is_idempotent_and_service_links_enforce_financial_context(
 }
 
 #[tokio::test]
+async fn billed_service_keeps_its_terms_and_closed_orders_take_no_new_services() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let manager = auth_header(manager_id, "patient_manager");
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let path = format!("/api/v1/orders/{order_id}/leistungen");
+    let service = |unit_price: f64| {
+        json!({
+            "description": "Organisation der Behandlung",
+            "quantity": 1.0,
+            "unit_price": unit_price,
+            "client_reference": format!("wizard:{tag}:service:1"),
+        })
+    };
+    let (status, created) = json_request(&app, "POST", &path, &manager, Some(service(250.0))).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let service_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    // A planned line still takes new terms under its client reference.
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(service(260.0))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let price = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, Decimal>("SELECT unit_price FROM order_leistungen WHERE id = $1")
+            .bind(service_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(price(pool.clone()).await, Decimal::from(260));
+
+    // Once billed, the line keeps the terms it was invoiced on.
+    sqlx::query("UPDATE order_leistungen SET status = 'invoiced' WHERE id = $1")
+        .bind(service_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(service(300.0))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(price(pool.clone()).await, Decimal::from(260));
+    // Replaying the same terms stays a harmless replay.
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(service(260.0))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["idempotent_replay"], true, "{body}");
+
+    // A cancelled order takes no new planned work.
+    sqlx::query(
+        r#"UPDATE orders
+           SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
+               cancellation_reason = 'Patient withdrew'
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({ "description": "Late extra", "quantity": 1.0, "unit_price": 50.0 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}
+
+#[tokio::test]
 async fn economics_plan_skips_cancelled_services() {
     let Some(context) = support::suite_context(TEST_SECRET).await else {
         return;

@@ -75,7 +75,15 @@ export type OrderPipeline = {
   medical: OrderPipelineMedical;
   care_team: OrderPipelineCareTeamMember[];
   appointments: OrderPipelineAppointment[];
-  services: { total: number; planned: number; delivered: number; approved: number; invoiced: number };
+  /** `total` counts the live lines only; cancelled lines are reported apart. */
+  services: {
+    total: number;
+    planned: number;
+    delivered: number;
+    approved: number;
+    invoiced: number;
+    cancelled?: number;
+  };
   invoices: { total: number; open: number };
 };
 

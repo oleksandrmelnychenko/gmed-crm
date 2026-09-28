@@ -68,7 +68,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { berlinLocalInputToIso } from "@/lib/app-time-zone";
+import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import {
@@ -166,6 +166,7 @@ import {
   fetchOrders,
   fetchPatientOrderRecheck,
   fetchProviderDoctors,
+  markExternalInvoicePaidByPatient,
   updateExternalInvoice,
   updateOrderDebtManagement,
   updateOrderExecutionFlow,
@@ -187,7 +188,6 @@ import {
 } from "@/pages/contracts/model/contracts-model";
 import {
   DEFAULT_FILTERS,
-  EXTERNAL_INVOICE_STATUSES,
   ORDER_PHASES,
   ORDER_STATUSES,
   blankCreateOrderForm,
@@ -204,6 +204,7 @@ import {
   formatDateOnly,
   formatDateTime,
   formatNumber,
+  externalInvoiceCreateStatuses,
   externalInvoiceStatusTransitions,
   inputDateTimeToApiValue,
   isPartialOrderRead,
@@ -3169,10 +3170,15 @@ function useOrdersPageContent() {
     setExternalInvoiceUpdatingId(externalInvoiceId);
     setDetailError(null);
     try {
-      await updateExternalInvoice(selectedOrderId, externalInvoiceId, {
-        status,
-        paid_by: paidBy,
-      });
+      if (status === "paid" && paidBy === "patient") {
+        // The patient-payment route keeps the payment journal and its date.
+        await markExternalInvoicePaidByPatient(externalInvoiceId, appDateKey());
+      } else {
+        await updateExternalInvoice(selectedOrderId, externalInvoiceId, {
+          status,
+          paid_by: paidBy,
+        });
+      }
       triggerReload();
     } catch (error) {
       setDetailError(
@@ -7739,7 +7745,10 @@ function useOrdersPageContent() {
                                                 : "Отметить услугу оказанной"}
                                             </Button>
                                           ) : null}
-                                          {externalInvoiceStatusTransitions(invoice.status).map(
+                                          {externalInvoiceStatusTransitions(
+                                            invoice.status,
+                                            permissions.canDecideExternalInvoicePayment,
+                                          ).map(
                                             (nextStatus) =>
                                               nextStatus === "paid" ? (
                                                 <div key={nextStatus} className="grid gap-2">
@@ -8374,7 +8383,9 @@ function useOrdersPageContent() {
                       }
                       className={selectClassName}
                     >
-                      {EXTERNAL_INVOICE_STATUSES.map((status) => (
+                      {externalInvoiceCreateStatuses(
+                        permissions.canDecideExternalInvoicePayment,
+                      ).map((status) => (
                         <option key={status} value={status}>
                           {externalInvoiceStatusLabel(status)}
                         </option>

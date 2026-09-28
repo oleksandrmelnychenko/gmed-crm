@@ -1997,7 +1997,7 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                     i.prepayment_applied_amount,
                     i.paid_at
                 FROM invoices i
-                WHERE i.status <> 'cancelled'
+                WHERE i.status NOT IN ('draft', 'cancelled')
            ),
            service_anchor AS (
                 SELECT
@@ -4050,12 +4050,12 @@ async fn load_forecast_collections(
         r#"WITH invoice_scope AS (
                 SELECT
                     COUNT(*) FILTER (
-                        WHERE status NOT IN ('paid', 'cancelled')
+                        WHERE status NOT IN ('draft', 'paid', 'cancelled')
                           AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
                     )::bigint AS due_next_14d_count,
                     COALESCE(
                         SUM(GREATEST(total_gross - COALESCE(credited_amount, 0) - COALESCE(paid_amount, 0) - COALESCE(prepayment_applied_amount, 0), 0)) FILTER (
-                            WHERE status NOT IN ('paid', 'cancelled')
+                            WHERE status NOT IN ('draft', 'paid', 'cancelled')
                               AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + 14
                         ),
                         0
@@ -4072,7 +4072,7 @@ async fn load_forecast_collections(
                     ) AS overdue_open_total,
                     COALESCE(
                         SUM(GREATEST(total_gross - COALESCE(credited_amount, 0) - COALESCE(paid_amount, 0) - COALESCE(prepayment_applied_amount, 0), 0)) FILTER (
-                            WHERE status NOT IN ('paid', 'cancelled')
+                            WHERE status NOT IN ('draft', 'paid', 'cancelled')
                         ),
                         0
                     ) AS outstanding_open_total
@@ -5330,6 +5330,8 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
                         0
                     ) AS outstanding_balance
                 FROM invoices i
+                -- A draft is not issued yet: it is neither billed nor owed.
+                WHERE i.status <> 'draft'
                 GROUP BY i.order_id
             )
             SELECT

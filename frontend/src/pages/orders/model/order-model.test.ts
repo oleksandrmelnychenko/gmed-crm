@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   blankLeistungForm,
+  externalInvoiceCreateStatuses,
   externalInvoiceStatusTransitions,
   formatDate,
   formatDateOnly,
@@ -35,6 +36,17 @@ describe("externalInvoiceStatusTransitions", () => {
   it("treats paid and cancelled invoices as terminal", () => {
     expect(externalInvoiceStatusTransitions("paid")).toEqual([]);
     expect(externalInvoiceStatusTransitions("cancelled")).toEqual([]);
+  });
+
+  it("leaves approval and payment to finance", () => {
+    expect(externalInvoiceStatusTransitions("received", false)).toEqual(["cancelled"]);
+    expect(externalInvoiceStatusTransitions("approved", false)).toEqual(["cancelled"]);
+    expect(externalInvoiceStatusTransitions("expected", false)).toEqual([
+      "received",
+      "cancelled",
+    ]);
+    expect(externalInvoiceCreateStatuses(false)).toEqual(["expected", "received", "cancelled"]);
+    expect(externalInvoiceCreateStatuses(true)).toContain("approved");
   });
 });
 

@@ -2497,6 +2497,135 @@ async fn failed_lead_purges_only_unconverted_prospect_and_preserves_attached_pat
     );
 }
 
+async fn insert_status_lead(app: &TestApp, tag: &str, status: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, qualification_status, created_by
+           ) VALUES ('Status', $1, $2, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(format!("Lead {tag}"))
+    .bind(format!("status-{status}-{tag}@example.com"))
+    .bind(status)
+    .bind(app.patient_manager_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn deleted_lead_is_read_only_and_leaves_the_active_list() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id = insert_status_lead(&app, &tag, "new").await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": "duplicate" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["lifecycle"]["can_resolve_failed"], false, "{detail}");
+
+    // The erasure is not undone by an edit.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "first_name": "Restored", "email": format!("restored-{tag}@example.com") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let first_name: String = sqlx::query_scalar("SELECT first_name FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(first_name, "Deleted");
+
+    let listed = |body: &Value| {
+        body.as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == lead_id.to_string())
+    };
+    let (status, active) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{active}");
+    assert!(!listed(&active), "a deleted lead left the active list");
+    let (status, deleted) =
+        json_request(&app, "GET", "/api/v1/leads?status=deleted", &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert!(listed(&deleted), "the deleted filter finds it: {deleted}");
+}
+
+#[tokio::test]
+async fn retention_sweep_counts_from_the_last_status_change() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    // Archived 200 days ago, reopened and rejected today.
+    let reopened = insert_status_lead(&app, &format!("{tag}-r"), "not_qualified").await;
+    // Archived 200 days ago and never touched again.
+    let stale = insert_status_lead(&app, &format!("{tag}-s"), "archived").await;
+    sqlx::query(
+        r#"UPDATE leads
+           SET failed_outcome_status = CASE WHEN id = $2 THEN 'archived' ELSE 'none' END,
+               failed_from_status = 'in_progress',
+               failed_reason = 'no_budget',
+               failed_processed_at = now() - interval '200 days',
+               status_changed_at = CASE WHEN id = $2 THEN now() - interval '200 days' ELSE now() END
+           WHERE id IN ($1, $2)"#,
+    )
+    .bind(reopened)
+    .bind(stale)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    gmed_server::routes::leads::auto_purge_stale_archived(&app.suite.state)
+        .await
+        .unwrap();
+
+    let state = |lead_id: Uuid| async move {
+        sqlx::query_as::<_, (String, String, Option<String>)>(
+            "SELECT qualification_status, first_name, failed_from_status FROM leads WHERE id = $1",
+        )
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    let (status, first_name, _) = state(reopened).await;
+    assert_eq!(status, "not_qualified");
+    assert_eq!(first_name, "Status");
+    let (status, first_name, from_status) = state(stale).await;
+    assert_eq!(status, "deleted");
+    assert_eq!(first_name, "Deleted");
+    assert_eq!(from_status.as_deref(), Some("archived"));
+    let history: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM workflow_lifecycle_events
+           WHERE entity_type = 'lead' AND entity_id = $1
+             AND transition_kind = 'deleted' AND to_stage = 'deleted'"#,
+    )
+    .bind(stale)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(history, 1, "the automatic deletion is in the lead history");
+}
+
 #[tokio::test]
 async fn ready_lead_conversion_atomically_transfers_onboarding_artifacts() {
     let Some(app) = test_app().await else {
