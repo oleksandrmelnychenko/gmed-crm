@@ -339,6 +339,27 @@ struct RejectReport {
     notes: Option<String>,
 }
 
+/// Optional body of a report approval: the reviewer's note, kept with the
+/// decision like a rejection note.
+#[derive(Deserialize, Default)]
+struct ApproveReport {
+    notes: Option<String>,
+}
+
+/// The reviewer's note of an approval. The body is optional (an empty body,
+/// even with a JSON content type, means no note); a blank note is none.
+fn approve_report_note(body: &[u8]) -> Result<Option<String>, axum::response::Response> {
+    if body.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    let parsed: ApproveReport = serde_json::from_slice(body)
+        .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid approval body"))?;
+    Ok(parsed
+        .notes
+        .map(|note| note.trim().to_string())
+        .filter(|note| !note.is_empty()))
+}
+
 #[derive(Deserialize)]
 struct ListAppointmentsQuery {
     search: Option<String>,
@@ -8278,12 +8299,17 @@ async fn approve_report(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
+    body: axum::body::Bytes,
 ) -> axum::response::Response {
     if let Err(e) =
         auth.require_any_role(&[Role::Ceo, Role::TeamleadInterpreter, Role::PatientManager])
     {
         return e;
     }
+    let review_note = match approve_report_note(&body) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
@@ -8352,12 +8378,16 @@ async fn approve_report(
     };
     let result = sqlx::query(
         r#"UPDATE interpreter_reports
-           SET approval_status = 'approved', approved_by = $2, approved_at = now()
+           SET approval_status = 'approved',
+               approved_by = $2,
+               approved_at = now(),
+               notes = COALESCE($3, notes)
            WHERE id = $1
              AND approval_status = 'pending'"#,
     )
     .bind(report_id)
     .bind(auth.user_id)
+    .bind(review_note)
     .execute(&mut *tx)
     .await;
     match result {
@@ -10768,6 +10798,23 @@ mod tests {
 
     fn time(hour: u32, minute: u32) -> chrono::NaiveTime {
         chrono::NaiveTime::from_hms_opt(hour, minute, 0).expect("valid test time")
+    }
+
+    #[test]
+    fn approval_keeps_the_reviewers_note() {
+        assert_eq!(
+            approve_report_note(br#"{"notes":"  Stunden geprueft  "}"#).unwrap(),
+            Some("Stunden geprueft".to_string())
+        );
+        // No body (older clients send none, even with a JSON content type),
+        // an empty object and a blank note mean no note.
+        assert_eq!(approve_report_note(b"").unwrap(), None);
+        assert_eq!(approve_report_note(b"  \n").unwrap(), None);
+        assert_eq!(approve_report_note(b"{}").unwrap(), None);
+        assert_eq!(approve_report_note(br#"{"notes":"   "}"#).unwrap(), None);
+        assert_eq!(approve_report_note(br#"{"notes":null}"#).unwrap(), None);
+        let rejected = approve_report_note(b"not json").unwrap_err();
+        assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[test]

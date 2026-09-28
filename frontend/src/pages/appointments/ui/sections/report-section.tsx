@@ -45,7 +45,10 @@ import {
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
 } from "@/pages/appointments/model/runtime-formatters";
-import { parseValidInterpreterReportHours } from "@/pages/appointments/model/report-validation";
+import {
+  parseValidInterpreterReportHours,
+  reportReviewBody,
+} from "@/pages/appointments/model/report-validation";
 import type {
   AppointmentDetail,
   ReportFormState,
@@ -202,10 +205,12 @@ function useAppointmentReportSectionContent({
   async function handleApproveReport() {
     dispatchReportState({ busyAction: "report-approve" });
     try {
+      // The review note belongs to the decision either way: an approval keeps it too.
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/approve`, {
         method: "POST",
+        body: JSON.stringify(reportReviewBody(rejectReason)),
       });
-      dispatchReportState({ editorOpen: false });
+      dispatchReportState({ rejectReason: "", editorOpen: false });
       onRefresh();
     } catch (error) {
       onError(
@@ -224,7 +229,7 @@ function useAppointmentReportSectionContent({
     try {
       await apiFetch<{ ok: boolean }>(`/appointments/${detail.id}/report/reject`, {
         method: "POST",
-        body: JSON.stringify({ notes: rejectReason.trim() || null }),
+        body: JSON.stringify(reportReviewBody(rejectReason)),
       });
       dispatchReportState({
         rejectReason: "",

@@ -3151,12 +3151,13 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
     let report_id = body["id"].as_str().unwrap().to_string();
 
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    // The reviewer's note is kept with an approval, not only with a rejection.
     let (status, _) = json_request(
         &app,
         "POST",
         &format!("/api/v1/appointments/{appointment_id}/report/approve"),
         &pm_bearer,
-        None,
+        Some(json!({ "notes": "  Hours checked against the clinic sheet  " })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -3171,6 +3172,7 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["approval_status"], "approved");
+    assert_eq!(body["notes"], "Hours checked against the clinic sheet");
     assert_eq!(body["billing_sync_status"], "synced");
     assert_eq!(body["billing_service_key"], "interpreter_hours");
     let billing_leistung_id = body["billing_leistung_id"]
