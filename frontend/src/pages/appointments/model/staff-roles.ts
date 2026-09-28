@@ -92,7 +92,8 @@ export function activePatientAssigneeIds(
  * and complete the reminder. An interpreter only while booked on it (not
  * declined, the visit not cancelled); patient managers, concierges and team
  * leads as its owner or as assignees of the patient (a team lead also as the
- * booked interpreter); the CEO and the CEO assistant always.
+ * booked interpreter); the CEO always. The read-only CEO assistant never:
+ * it could not complete the reminder.
  */
 export function canRemindAboutAppointment(
   member: StaffLike,
@@ -104,7 +105,6 @@ export function canRemindAboutAppointment(
     member.id === appointment.owner_user_id || patientAssigneeIds.has(member.id);
   switch (member.role) {
     case "ceo":
-    case "ceo_assistant":
       return true;
     case "interpreter":
       return (

@@ -9770,6 +9770,9 @@ fn reminder_recipient_refusal(
     };
     match role {
         role if !role.can(Capability::AppointmentsView) => Some(REMINDER_ROLE_REFUSED),
+        // The CEO assistant reads everything but changes nothing, so it could
+        // never complete the reminder (see `complete_reminder`).
+        Role::CeoAssistant => Some(REMINDER_ROLE_REFUSED),
         Role::Interpreter => {
             let booked = appointment.interpreter_id == Some(user_id)
                 && appointment.status != "cancelled"
@@ -11024,6 +11027,11 @@ mod tests {
                 "{role}"
             );
         }
+        // The read-only CEO assistant sees the visit but could never complete it.
+        assert_eq!(
+            reminder_recipient_refusal("ceo_assistant", other, &booked, true),
+            Some(REMINDER_ROLE_REFUSED)
+        );
     }
 
     #[test]

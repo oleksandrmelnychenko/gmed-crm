@@ -65,6 +65,8 @@ describe("appointment reminder recipients", () => {
     ).toBe(false);
     expect(remindable("it-1", "it_admin")).toBe(false);
     expect(remindable("sales-1", "sales")).toBe(false);
+    // The read-only CEO assistant could never complete the reminder.
+    expect(remindable("assistant-1", "ceo_assistant")).toBe(false);
   });
 });
 
