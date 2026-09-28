@@ -404,6 +404,15 @@ export function updateExternalInvoice(orderId: string, invoiceId: string, payloa
   return postJson<void>(`/orders/${orderId}/external-invoices/${invoiceId}/update`, payload);
 }
 
+/** Records that the patient paid the supplier directly, with its payment journal entry. */
+export function markExternalInvoicePaidByPatient(invoiceId: string, paidOn: string) {
+  return postJson<void>(`/external-invoices/${invoiceId}/patient-payment`, {
+    request_id: crypto.randomUUID(),
+    paid: true,
+    paid_on: paidOn,
+  });
+}
+
 export function fetchExternalInvoiceAllocations(orderId: string, externalInvoiceId: string) {
   return apiFetch<ExternalInvoiceAllocationWorkspace>(
     `/orders/${orderId}/external-invoices/${externalInvoiceId}/allocations`,

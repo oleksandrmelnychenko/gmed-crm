@@ -187,7 +187,10 @@ pub async fn generate_order_service_group_lines(
                 continue;
             }
 
-            sqlx::query(
+            // Only a still planned line takes the regenerated terms; a
+            // delivered, approved, invoiced or cancelled line keeps the terms
+            // it was delivered and billed on and counts as a skipped duplicate.
+            let rewritten = sqlx::query(
                 r#"UPDATE order_leistungen
                    SET description = $2,
                        quantity = $3,
@@ -202,7 +205,7 @@ pub async fn generate_order_service_group_lines(
                        vat_source = $12,
                        source_service_group_id = $13,
                        notes = $14
-                   WHERE id = $1"#,
+                   WHERE id = $1 AND status = 'planned'"#,
             )
             .bind(existing_id)
             .bind(description)
@@ -219,8 +222,13 @@ pub async fn generate_order_service_group_lines(
             .bind(group_id)
             .bind("Generated from multi-doctor service group")
             .execute(&mut *tx)
-            .await?;
-            summary.updated_count += 1;
+            .await?
+            .rows_affected();
+            if rewritten > 0 {
+                summary.updated_count += 1;
+            } else {
+                summary.skipped_duplicate_count += 1;
+            }
             summary.leistung_ids.push(existing_id);
             continue;
         }

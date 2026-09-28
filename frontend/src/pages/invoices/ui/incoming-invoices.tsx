@@ -106,9 +106,10 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     if (row.status === "expected") return tx("Ожидается", "Erwartet");
     if (row.settlement_status === "paid_by_patient") return tx("Оплачен пациентом", "Vom Patienten bezahlt");
     if (row.settlement_status === "paid") return tx("Оплачен", "Bezahlt");
+    // Overdue outranks a partial payment, as in company finance.
+    if (row.status === "overdue") return tx("Просрочен", "Überfällig");
     if (row.settlement_status === "partial") return tx("Частично оплачен", "Teilweise bezahlt");
     if (row.status === "received") return tx("На проверке", "Zu prüfen");
-    if (row.status === "overdue") return tx("Просрочен", "Überfällig");
     return tx("К оплате", "Zu zahlen");
   };
   const payerLabel = (row: IncomingInvoice) => row.paid_by === "patient"
@@ -217,7 +218,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
             <Input className="h-9 rounded-md bg-background text-sm text-foreground" type="date" max={appDateKey()} value={paidOn} disabled={paymentBusy} onChange={(event) => setPaidOn(event.target.value)} />
           </label>
           {paymentError ? <Banner tone="error">{paymentError}</Banner> : null}
-          {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung bestätigen")}</Button></div></Banner> : null}
+          {paymentChoice.status === "received" ? <Banner tone="warning"><div className="flex flex-wrap items-center justify-between gap-3"><span>{tx("Сначала подтвердите реквизиты входящего счёта.", "Prüfen Sie zuerst die Eingangsrechnung.")}</span><Button type="button" size="sm" variant="outline" disabled={paymentBusy} onClick={() => void approvePaymentChoice(paymentChoice)}>{paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Подтвердить счёт", "Rechnung freigeben")}</Button></div></Banner> : null}
           {!canMarkInvoicePaidByPatient(paymentChoice) ? <Banner tone="warning">{tx("Это расход компании без привязки к пациенту. Его можно оплатить только через GMed.", "Dies ist eine Unternehmensausgabe ohne Patientenzuordnung. Sie kann nur über GMed bezahlt werden.")}</Banner> : null}
           <fieldset className="space-y-2">
             <legend className="text-xs font-medium text-muted-foreground">{tx("Кто оплатил счёт?", "Wer hat die Rechnung bezahlt?")}</legend>

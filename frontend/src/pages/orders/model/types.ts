@@ -847,6 +847,11 @@ export type OrdersPermissions = {
   canApproveLeistung: boolean;
   canCancelLeistung: boolean;
   canManageExternalInvoices: boolean;
+  /**
+   * Approving a supplier invoice and recording it as paid are finance
+   * decisions (CEO, billing); the server refuses them to other roles.
+   */
+  canDecideExternalInvoicePayment: boolean;
   canManageEconomics: boolean;
   /**
    * Planned partner costs (and their editor) are finance data: the server

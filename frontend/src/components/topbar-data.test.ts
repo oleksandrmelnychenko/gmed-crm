@@ -27,6 +27,22 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.2026 00:30");
 });
 
+it("shows the overdue supplier invoice notice in German and Russian", () => {
+  const notice = {
+    kind: "external_invoice_overdue",
+    title: "External invoice overdue for A-20260901-0007",
+    body: "External invoice RE-4711 became overdue on 2026-09-20 (480.00 EUR).",
+  } as Notification;
+  const de = localizedNotificationCopy(notice, "de");
+  expect(de.title).toBe("Eingangsrechnung überfällig: A-20260901-0007");
+  expect(de.body).toContain("RE-4711");
+  expect(de.body).toContain("20.09.2026");
+  expect(de.body).not.toContain("External");
+  const ru = localizedNotificationCopy(notice, "ru");
+  expect(ru.title).toBe("Входящий счёт просрочен: A-20260901-0007");
+  expect(ru.body).toContain("20.09.2026");
+});
+
 describe("task notifications", () => {
   const taskNotice = (kind: string, title: string, body: string | null) =>
     ({ id: "n-1", kind, title, body, entity_type: "concierge_task", entity_id: "task-1", is_read: false, created_at: "2026-09-26T10:00:00Z" }) as Notification;

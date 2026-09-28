@@ -1445,14 +1445,15 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
     )
     .await;
 
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    // Approving a supplier invoice is a finance decision.
+    let finance_bearer = auth_header_for(billing_id, "billing");
     let due_date = (gmed_server::app_time::today() - chrono::Duration::days(3)).to_string();
 
     let (status, created_body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/orders/{order_id}/external-invoices"),
-        &pm_bearer,
+        &finance_bearer,
         Some(json!({
             "provider_id": provider_id,
             "external_invoice_number": format!("EXT-DUE-{tag}"),

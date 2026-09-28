@@ -277,12 +277,14 @@ async fn update_patient_payment(
     } else {
         sqlx::query(
             r#"UPDATE external_invoices
-               SET status = CASE WHEN due_date IS NOT NULL AND due_date < CURRENT_DATE
+               SET status = CASE WHEN due_date IS NOT NULL AND due_date < $2
                                  THEN 'overdue' ELSE 'approved' END,
                    paid_by = 'unpaid', paid_at = NULL, updated_at = now()
                WHERE id = $1"#,
         )
         .bind(invoice_id)
+        // Due dates are Europe/Berlin calendar days, like the overdue scheduler's.
+        .bind(crate::app_time::today())
         .execute(&mut *transaction)
         .await
     };

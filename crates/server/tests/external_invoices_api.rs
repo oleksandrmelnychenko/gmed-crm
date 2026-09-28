@@ -1125,6 +1125,33 @@ async fn external_invoices_round_trip_through_order_detail_and_status_update() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
+    // Approval and payment are finance decisions, also on the order route.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &pm_bearer,
+        Some(json!({ "status": "approved" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices"),
+        &pm_bearer,
+        Some(json!({
+            "provider_id": provider_id,
+            "external_invoice_number": format!("EXT-PM-{tag}"),
+            "amount_net": 10.0,
+            "amount_vat": 0.0,
+            "amount_gross": 10.0,
+            "status": "approved"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
     let (status, _) = json_request(
         &app,
         "POST",
@@ -1178,14 +1205,15 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
 
     let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
 
-    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    // Approving a supplier invoice is a finance decision.
+    let finance_bearer = auth_header_for(billing_id, "billing");
     let due_date = (gmed_server::app_time::today() - chrono::Duration::days(3)).to_string();
 
     let (status, created_body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/orders/{order_id}/external-invoices"),
-        &pm_bearer,
+        &finance_bearer,
         Some(json!({
             "provider_id": provider_id,
             "external_invoice_number": format!("EXT-DUE-{tag}"),
@@ -1245,6 +1273,25 @@ async fn external_invoice_deadline_scheduler_marks_overdue_and_notifies_billing(
     .await
     .unwrap();
     assert_eq!(notifications, 1);
+
+    // A new due date in the future makes the invoice payable again.
+    let new_due_date = (gmed_server::app_time::today() + chrono::Duration::days(10)).to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update"),
+        &finance_bearer,
+        Some(json!({ "due_date": new_due_date })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let status_after: String =
+        sqlx::query_scalar("SELECT status FROM external_invoices WHERE id = $1")
+            .bind(external_invoice_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status_after, "approved");
 }
 
 #[tokio::test]

@@ -80,21 +80,41 @@ export const EXTERNAL_INVOICE_STATUSES: ExternalInvoiceStatus[] = [
   "cancelled",
 ];
 
+/**
+ * Next statuses the order page offers. Approving and recording a payment are
+ * finance decisions (CEO, billing): without them only receipt and
+ * cancellation remain, as the server enforces.
+ */
 export function externalInvoiceStatusTransitions(
   current: ExternalInvoiceStatus,
+  canDecidePayment = true,
 ): ExternalInvoiceStatus[] {
-  switch (current) {
-    case "expected":
-      return ["received", "cancelled"];
-    case "received":
-      return ["approved", "cancelled"];
-    case "approved":
-    case "overdue":
-      return ["paid", "cancelled"];
-    case "paid":
-    case "cancelled":
-      return [];
-  }
+  const next = ((): ExternalInvoiceStatus[] => {
+    switch (current) {
+      case "expected":
+        return ["received", "cancelled"];
+      case "received":
+        return ["approved", "cancelled"];
+      case "approved":
+      case "overdue":
+        return ["paid", "cancelled"];
+      case "paid":
+      case "cancelled":
+        return [];
+    }
+  })();
+  return canDecidePayment ? next : next.filter((status) => !isExternalInvoicePaymentDecision(status));
+}
+
+export function isExternalInvoicePaymentDecision(status: ExternalInvoiceStatus) {
+  return status === "approved" || status === "paid" || status === "overdue";
+}
+
+/** Statuses a new supplier invoice may start in for this actor. */
+export function externalInvoiceCreateStatuses(canDecidePayment: boolean): ExternalInvoiceStatus[] {
+  return canDecidePayment
+    ? EXTERNAL_INVOICE_STATUSES
+    : EXTERNAL_INVOICE_STATUSES.filter((status) => !isExternalInvoicePaymentDecision(status));
 }
 
 export const DEFAULT_FILTERS: OrdersFilters = {
@@ -118,6 +138,7 @@ export function orderPermissions(actor?: Actor): OrdersPermissions {
     canCancelLeistung: canEdit,
     // Provider (external) invoices: the order owner or finance.
     canManageExternalInvoices: canEdit || hasCapability(actor, "invoices.finance"),
+    canDecideExternalInvoicePayment: hasCapability(actor, "invoices.finance"),
     canManageEconomics: hasCapability(actor, "orders.economics"),
     canManagePartnerCosts:
       hasCapability(actor, "orders.economics") && hasCapability(actor, "invoices.finance"),

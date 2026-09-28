@@ -407,12 +407,12 @@ test.describe("commercial live workflows", () => {
     await expect(invoiceCard.getByText(externalInvoiceNumber)).toBeVisible();
     await expect(
       invoiceCard.locator('[data-slot="badge"]').filter({
-        hasText: /Eingegangen|Получен/i,
+        hasText: /Zu prüfen|На проверке/i,
       }),
     ).toBeVisible();
     await expect(
       invoiceCard.getByRole("button", {
-        name: /Als freigegeben markieren|Отметить как утверждённый/i,
+        name: /Rechnung freigeben|Подтвердить счёт/i,
       }),
     ).toBeVisible();
   });
