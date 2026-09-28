@@ -4961,6 +4961,87 @@ async fn patient_procedures_round_trip_with_ops_code() {
 }
 
 #[tokio::test]
+async fn procedure_keeps_the_chosen_clinic_for_a_doctor_of_its_department() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("procedure-branch");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
+
+    // The doctor is linked only to the clinic's department, not to the clinic.
+    let clinic_id = seed_provider(&pool, &format!("{tag}-clinic")).await;
+    let department_id = seed_provider(&pool, &format!("{tag}-department")).await;
+    sqlx::query("UPDATE providers SET parent_provider_id = $1 WHERE id = $2")
+        .bind(clinic_id)
+        .bind(department_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let doctor_id = seed_provider_doctor(&pool, department_id, &tag).await;
+    let other_provider_id = seed_provider(&pool, &format!("{tag}-other")).await;
+
+    let save = |provider_id: Uuid| {
+        json!({
+            "items": [
+                {
+                    "label": "Koloskopie",
+                    "ops_code": "1-650.2",
+                    "provider_id": provider_id.to_string(),
+                    "doctor_id": doctor_id.to_string(),
+                },
+            ],
+        })
+    };
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/procedures"),
+        &ceo_bearer,
+        Some(save(clinic_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &ceo_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let procedures = body["procedures"].as_array().expect("procedures array");
+    assert_eq!(procedures.len(), 1);
+    assert_eq!(procedures[0]["provider_id"], clinic_id.to_string());
+    assert_eq!(
+        procedures[0]["provider_name"],
+        format!("Provider {tag}-clinic")
+    );
+    assert_eq!(procedures[0]["doctor_id"], doctor_id.to_string());
+
+    // A provider outside the doctor's branch is still refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/procedures"),
+        &ceo_bearer,
+        Some(save(other_provider_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body["message"],
+        "Doctor does not belong to the selected provider"
+    );
+}
+
+#[tokio::test]
 async fn patient_clinical_pdf_export_returns_pdf() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
