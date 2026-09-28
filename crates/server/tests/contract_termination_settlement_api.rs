@@ -724,6 +724,123 @@ async fn terminating_a_contract_without_activity_closes_the_empty_settlement() {
     assert_eq!(settlement_status, "settled");
 }
 
+/// A stopped order releases what was still scheduled for it, like a manual
+/// order cancellation: upcoming appointments are cancelled, past ones keep
+/// their status, and pending amount amendments are rejected.
+#[tokio::test]
+async fn contract_termination_cancels_upcoming_appointments_and_pending_amendments() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Scheduled', 'Work', '1980-03-03', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let manager = auth_header(manager_id, "patient_manager");
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &manager,
+        Some(json!({ "patient_id": patient_id, "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, status, phase, currency, created_by)
+           VALUES ($1, $2, $3::uuid, 'active', 'execution', 'EUR', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let today = gmed_server::app_time::today();
+    let appointment = |date: chrono::NaiveDate, status: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO appointments (
+                        patient_id, order_id, appointment_type, title, date, status, created_by
+                   ) VALUES ($1, $2, 'non_medical', 'Transfer', $3, $4, $5)
+                   RETURNING id"#,
+            )
+            .bind(patient_id)
+            .bind(order_id)
+            .bind(date)
+            .bind(status)
+            .bind(admin_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let upcoming = appointment(today + chrono::Duration::days(7), "confirmed").await;
+    let past = appointment(today - chrono::Duration::days(7), "confirmed").await;
+    let amendment: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_amendments (order_id, delta_amount, agreed_note, requested_by, vat_treatment, vat_rate)
+           VALUES ($1, 80, 'Extra hour', $2, 'standard_vat', 19)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(manager_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/terminate"),
+        &manager,
+        Some(json!({ "reason": "Patient changed agency" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    let appointment_status = |id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT status FROM appointments WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(appointment_status(upcoming).await, "cancelled");
+    assert_eq!(appointment_status(past).await, "confirmed");
+    let (amendment_status, decided_by): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, decided_by FROM order_amendments WHERE id = $1")
+            .bind(amendment)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(amendment_status, "rejected");
+    assert_eq!(decided_by, Some(manager_id));
+    let order_status: String = sqlx::query_scalar("SELECT status FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(order_status, "cancelled");
+}
+
 /// A completed order (already in the final follow-up phase, or with a terminal
 /// status) is left alone by the termination: it is neither previewed nor
 /// stopped nor settled and keeps its status, phase and services. Running

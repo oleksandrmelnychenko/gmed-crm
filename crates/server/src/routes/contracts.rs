@@ -2638,13 +2638,47 @@ async fn terminate_framework_contract(
     // Termination is possible during a running order: every open order stops
     // and receives its final settlement in the same transaction. Completed
     // orders (final follow-up phase) keep their status and are not settled.
-    let terminated_orders =
+    let mut terminated_orders =
         match termination_settlements::terminate_open_orders_tx(&mut tx, contract_id, auth.user_id)
             .await
         {
             Ok(value) => value,
             Err(e) => return failed(e),
         };
+    // A stopped order releases what was still scheduled for it, as a manual
+    // cancellation does: upcoming appointments (with their interpreter
+    // bookings, reminders and concierge work) are cancelled and pending
+    // amount amendments are rejected. Its quotes stay open: they anchor the
+    // final settlement invoice.
+    for order in &mut terminated_orders {
+        let order_id = order.order_id();
+        order.cancelled_appointment_ids =
+            match crate::routes::appointments::cancel_upcoming_order_appointments_in_tx(
+                &mut tx,
+                order_id,
+                auth.user_id,
+            )
+            .await
+            {
+                Ok(ids) => ids,
+                Err(resp) => return resp,
+            };
+        order.rejected_amendment_ids = match sqlx::query_scalar::<_, Uuid>(
+            r#"UPDATE order_amendments
+               SET status = 'rejected', decided_by = $2, decided_at = now(), decision_note = $3
+               WHERE order_id = $1 AND status = 'pending'
+               RETURNING id"#,
+        )
+        .bind(order_id)
+        .bind(auth.user_id)
+        .bind(format!("Rahmenvertrag gekündigt: {reason}"))
+        .fetch_all(&mut *tx)
+        .await
+        {
+            Ok(ids) => ids,
+            Err(e) => return failed(e),
+        };
+    }
     // Unconfirmed intake drafts (e.g. a repeat intake) are neither stopped nor
     // settled: they lose the contract link and need a new contract later.
     let detached_drafts =
@@ -3923,7 +3957,14 @@ async fn update_quote_status(
     };
 
     let quote_context = match sqlx::query(
-        r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items, o.total_estimated
+        r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items, o.total_estimated,
+                  o.status AS order_status,
+                  EXISTS (
+                      SELECT 1 FROM quotes other
+                      WHERE other.order_id = q.order_id
+                        AND other.id <> q.id
+                        AND other.status IN ('draft', 'sent', 'accepted')
+                  ) AS other_quote_open
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            WHERE q.id = $1
@@ -3940,15 +3981,39 @@ async fn update_quote_status(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
         }
     };
-    if quote_context
+    let previous_status = quote_context
         .try_get::<String, _>("status")
-        .unwrap_or_default()
-        == "superseded"
-    {
+        .unwrap_or_default();
+    if previous_status == "superseded" {
         return err(
             StatusCode::CONFLICT,
             "A superseded quote is closed; use the quote that replaced it",
         );
+    }
+    // Reopening a closed (rejected or expired) quote must not undo what closed
+    // it: a cancelled order bills nothing more from its quotes, and an order
+    // keeps one open quote (a new quote closes the older ones).
+    let reopens = matches!(previous_status.as_str(), "rejected" | "expired")
+        && matches!(body.status.as_str(), "draft" | "sent" | "accepted");
+    if reopens {
+        if quote_context
+            .try_get::<String, _>("order_status")
+            .is_ok_and(|status| status == "cancelled")
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "The order is cancelled; its closed quotes cannot be reopened",
+            );
+        }
+        if quote_context
+            .try_get::<bool, _>("other_quote_open")
+            .unwrap_or(false)
+        {
+            return err(
+                StatusCode::CONFLICT,
+                "Another quote of this order is open; reopen is not possible",
+            );
+        }
     }
     let order_id = quote_context
         .try_get::<Uuid, _>("order_id")
@@ -4067,6 +4132,7 @@ async fn update_quote_status(
     .bind("update_quote_status")
     .bind(quote_id)
     .bind(serde_json::json!({
+        "previous_status": previous_status,
         "status": body.status,
     }))
     .execute(&mut *tx)

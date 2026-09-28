@@ -2716,4 +2716,58 @@ async fn new_quote_supersedes_open_quotes_and_the_replacement_history_is_kept() 
         .execute(&pool)
         .await;
     assert!(reopened.is_err(), "a superseded quote must stay closed");
+
+    // A rejected quote is not reopened next to the open quote that replaced it.
+    let set_status = |quote_id: String, status: &'static str| {
+        let app = app.clone();
+        let pm_bearer = pm_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/quotes/{quote_id}/status"),
+                &pm_bearer,
+                Some(json!({ "status": status })),
+            )
+            .await
+        }
+    };
+    let (status, body) = set_status(rejected_id.clone(), "sent").await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    let (status, body) = set_status(second_id.clone(), "rejected").await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    // With no other open quote, a rejected quote may be reopened ...
+    let (status, body) = set_status(second_id.clone(), "draft").await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    let (status, body) = set_status(second_id.clone(), "rejected").await;
+    assert_eq!(status, StatusCode::OK, "response: {body}");
+    // ... but not once the order is cancelled: nothing more is billed from it.
+    sqlx::query(
+        r#"UPDATE orders
+           SET status = 'cancelled', cancelled_at = now(), cancelled_by = $2,
+               cancellation_reason = 'Patient withdrew'
+           WHERE id = $1::uuid"#,
+    )
+    .bind(&order_id)
+    .bind(pm_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = set_status(second_id.clone(), "accepted").await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {body}");
+    assert_eq!(
+        body["message"],
+        "The order is cancelled; its closed quotes cannot be reopened"
+    );
+    let audit_context: serde_json::Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'update_quote_status' AND entity_id = $1::uuid
+           ORDER BY id DESC LIMIT 1"#,
+    )
+    .bind(&second_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_context["previous_status"], "draft");
+    assert_eq!(audit_context["status"], "rejected");
 }

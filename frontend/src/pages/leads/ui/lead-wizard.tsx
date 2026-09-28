@@ -7732,7 +7732,17 @@ ${serviceCommentLines.join("\n")}`
                       </dt>
                       <dd className="mt-1 text-xs font-medium text-foreground">
                         <StatusBadge tone={quote.status === "accepted" ? "success" : "neutral"}>
-                          {quote.status === "accepted" ? tx("Подтверждена", "Angenommen") : tx("Черновик", "Entwurf")}
+                          {/* Same quote status labels as the contracts page. */}
+                          {(
+                            {
+                              draft: t.revenue_quote_status_draft,
+                              sent: t.revenue_quote_status_sent,
+                              accepted: t.revenue_quote_status_accepted,
+                              rejected: t.revenue_quote_status_rejected,
+                              expired: t.revenue_quote_status_expired,
+                              superseded: t.revenue_quote_status_superseded,
+                            } as Record<string, string>
+                          )[quote.status] ?? quote.status}
                         </StatusBadge>
                       </dd>
                     </div>
