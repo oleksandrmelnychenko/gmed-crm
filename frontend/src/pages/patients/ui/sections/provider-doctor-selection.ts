@@ -41,8 +41,9 @@ export function providerBranchDepths(
 }
 
 /**
- * Filters doctors to the selected provider branch. If a doctor is linked at
- * several levels, the deepest matching provider is used for attribution.
+ * Filters doctors to the selected provider branch. `selected_provider_*` names
+ * the deepest matching provider (the doctor's department) for the option label
+ * only: picking a doctor never replaces the provider the user chose.
  */
 export function doctorsForProviderBranch(
   providers: readonly ProviderHierarchyNode[],

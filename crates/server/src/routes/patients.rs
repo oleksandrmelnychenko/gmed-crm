@@ -11403,9 +11403,12 @@ fn verlauf_row_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
 
 /// Resolve and validate a provider/doctor attribution pair against the DB.
 /// Returns 422 when a non-empty id is malformed, references a missing provider
-/// or doctor, or when the doctor does not belong to the selected provider — so
-/// a record can never be persisted with dangling or mismatched attribution
-/// (which previously surfaced as an opaque 500 from the FK, or a silent NULL).
+/// or doctor, or when the doctor does not belong to the selected provider or
+/// one of its sub-providers (departments) — so a record can never be persisted
+/// with dangling or mismatched attribution (which previously surfaced as an
+/// opaque 500 from the FK, or a silent NULL). The chosen provider is stored as
+/// chosen: a clinic stays the clinic even when the doctor is linked to one of
+/// its departments, matching the branch filter of the attribution picker.
 async fn clinical_resolve_attribution(
     state: &AppState,
     provider_raw: Option<String>,
@@ -11481,10 +11484,17 @@ async fn clinical_resolve_attribution(
         }
         if let Some(pid) = provider_id {
             let linked = sqlx::query_scalar::<_, bool>(
-                r#"SELECT EXISTS(
+                r#"WITH RECURSIVE branch AS (
+                    SELECT id FROM providers WHERE id = $1
+                    UNION
+                    SELECT child.id
+                    FROM providers child
+                    JOIN branch ON child.parent_provider_id = branch.id
+                )
+                SELECT EXISTS(
                     SELECT 1
                     FROM provider_doctor_links
-                    WHERE provider_id = $1
+                    WHERE provider_id IN (SELECT id FROM branch)
                       AND doctor_id = $2
                 )"#,
             )
