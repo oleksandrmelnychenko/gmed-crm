@@ -930,6 +930,9 @@ export function patientInvoiceLedgerCategoryLabel(value?: string | null) {
 
 export function formatPortalDateTime(value?: string | null) {
   if (!value) return portalNotSetLabel();
+  // A calendar date (an invoice due date) has no time: parsed as an instant it
+  // would show UTC midnight as "02:00" German time.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return formatPortalDate(value.trim());
 
   try {
     return PORTAL_DATE_TIME_FORMATTERS[portalLocale()].format(new Date(value));
