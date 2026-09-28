@@ -69,4 +69,11 @@ describe("portal next action due dates", () => {
   it("keeps the time of a real instant", () => {
     expect(formatPortalDateTime("2026-09-28T06:00:00Z")).toContain("08:00");
   });
+
+  it("shows a 09:00 visit at 09:00 whatever time zone the browser runs in", () => {
+    // What the server sends for a 09:00 appointment on 28.09.2026 (CEST).
+    expect(formatPortalDateTime("2026-09-28T07:00:00+00:00")).toBe("28.09.2026 09:00");
+    // An older naive value is Berlin wall-clock time, not browser-local time.
+    expect(formatPortalDateTime("2026-09-28T09:00:00")).toBe("28.09.2026 09:00");
+  });
 });

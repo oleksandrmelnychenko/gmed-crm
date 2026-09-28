@@ -142,14 +142,10 @@ async fn load_appointment_actions(
         .into_iter()
         .map(|row| {
             let id = row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil());
-            let date = row
-                .try_get::<chrono::NaiveDate, _>("date")
-                .map(|value| value.to_string())
-                .unwrap_or_default();
+            let date = row.try_get::<chrono::NaiveDate, _>("date").ok();
             let time_start = row
                 .try_get::<Option<chrono::NaiveTime>, _>("time_start")
-                .unwrap_or_default()
-                .map(|value| value.format("%H:%M").to_string());
+                .unwrap_or_default();
             json!({
                 "id": format!("appointment:{id}"),
                 "kind": "upcoming_appointment",
@@ -159,21 +155,30 @@ async fn load_appointment_actions(
                 "description": row.try_get::<Option<String>, _>("location").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "priority": "normal",
-                "due_at": match &time_start {
-                    Some(time) => format!("{date}T{time}:00"),
-                    None => date.clone(),
-                },
+                "due_at": date.map(|date| appointment_due_at(date, time_start)),
                 "action_label": "Open appointments",
                 "action_url": "/appointments",
                 "metadata": {
-                    "date": date,
-                    "time_start": time_start,
+                    "date": date.map(|value| value.to_string()).unwrap_or_default(),
+                    "time_start": time_start.map(|value| value.format("%H:%M").to_string()),
                     "time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
                     "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                 },
             })
         })
         .collect())
+}
+
+/// When an upcoming appointment is due. Its date and start time are Berlin
+/// wall-clock values, so the due time is sent as that instant in RFC 3339
+/// like every other timed `due_at`; a naive "YYYY-MM-DDTHH:MM" would be read
+/// as the browser's local time and shift the visit outside Germany. An
+/// appointment without a start time is due on its calendar date.
+fn appointment_due_at(date: chrono::NaiveDate, time_start: Option<chrono::NaiveTime>) -> String {
+    match time_start {
+        Some(time) => crate::app_time::from_local(date.and_time(time)).to_rfc3339(),
+        None => date.to_string(),
+    }
 }
 
 async fn load_document_actions(
@@ -410,4 +415,31 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, NaiveTime};
+
+    use super::appointment_due_at;
+
+    #[test]
+    fn appointment_due_at_is_the_berlin_visit_time_as_an_instant() {
+        let nine = NaiveTime::from_hms_opt(9, 0, 0);
+        // 09:00 CEST is 07:00 UTC, so a browser in Kyiv or New York still
+        // shows 09:00 German time.
+        let summer = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        assert_eq!(
+            appointment_due_at(summer, nine),
+            "2026-09-28T07:00:00+00:00"
+        );
+        // 09:00 CET is 08:00 UTC.
+        let winter = NaiveDate::from_ymd_opt(2026, 12, 1).unwrap();
+        assert_eq!(
+            appointment_due_at(winter, nine),
+            "2026-12-01T08:00:00+00:00"
+        );
+        // Without a start time the visit is due on its calendar date.
+        assert_eq!(appointment_due_at(summer, None), "2026-09-28");
+    }
 }
