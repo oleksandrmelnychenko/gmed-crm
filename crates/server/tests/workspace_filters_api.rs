@@ -10637,6 +10637,138 @@ async fn assigned_concierge_can_delete_draft_service_with_optimistic_lock() {
 }
 
 #[tokio::test]
+async fn concierge_service_billing_follows_delivery_and_history_blocks_delete() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-service-billing");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider_with_type(&pool, &tag, "non_medical", "Germany").await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/appointments",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "appointment_type": "non_medical",
+            "title": format!("Transfer {tag}"),
+            "date": berlin_today().to_string(),
+            "time_start": "08:00",
+            "time_end": "09:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let appointment_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let service_id: Uuid = sqlx::query_scalar(
+        "SELECT id FROM concierge_services WHERE appointment_id = $1 AND request_source = 'appointment_bootstrap'",
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let cancelled_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_services (
+               patient_id, appointment_id, service_kind, title, status, billing_status, created_by
+           ) VALUES ($1, $2, 'transfer', $3, 'cancelled', 'draft', $4)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(appointment_id)
+    .bind(format!("Cancelled pickup {tag}"))
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // The form resends the unchanged draft billing status; completing the
+    // service still hands it to billing.
+    let update_path = format!("/api/v1/concierge-services/{service_id}/update");
+    for next in ["in_service", "completed"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &update_path,
+            &pm_bearer,
+            Some(json!({ "status": next, "billing_status": "draft" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next}: {body}");
+    }
+    let billing: String =
+        sqlx::query_scalar("SELECT billing_status FROM concierge_services WHERE id = $1")
+            .bind(service_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(billing, "ready");
+
+    // Completing the appointment does not bill the cancelled service.
+    sqlx::query("UPDATE appointment_checklists SET is_completed = true WHERE appointment_id = $1")
+        .bind(appointment_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "completed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let cancelled: (String, String, bool) = sqlx::query_as(
+        "SELECT status, billing_status, completed_at IS NULL FROM concierge_services WHERE id = $1",
+    )
+    .bind(cancelled_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        cancelled,
+        ("cancelled".to_string(), "draft".to_string(), true)
+    );
+
+    // Key custody history keeps the service from being deleted.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{cancelled_id}/key-events"),
+        &pm_bearer,
+        Some(json!({ "action": "received", "responsible_user_id": pm_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let updated_at: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT updated_at FROM concierge_services WHERE id = $1")
+            .bind(cancelled_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/concierge-services/{cancelled_id}"),
+        &pm_bearer,
+        Some(json!({ "expected_updated_at": updated_at.to_rfc3339() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}
+
+#[tokio::test]
 async fn billing_can_only_update_financial_fields_on_concierge_service() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
@@ -11640,6 +11772,452 @@ async fn interpreter_reports_and_clarifications_notify_whoever_acts_next() {
     .await;
     assert_eq!(detail["interpreter_response"], "accepted");
     assert!(detail["interpreter_response_comment"].is_null(), "{detail}");
+}
+
+/// Audit rows of one action on one appointment, oldest first.
+async fn appointment_audit(pool: &PgPool, appointment_id: Uuid, action: &str) -> Vec<Value> {
+    sqlx::query_scalar::<_, Value>(
+        r#"SELECT context FROM audit_log
+           WHERE entity_type = 'appointment' AND entity_id = $1 AND action = $2
+           ORDER BY id"#,
+    )
+    .bind(appointment_id)
+    .bind(action)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+async fn wait_for_appointment_audit(
+    pool: &PgPool,
+    appointment_id: Uuid,
+    action: &str,
+    count: usize,
+) -> Vec<Value> {
+    support::wait_until(
+        &format!("{count} audit row(s) '{action}' for appointment {appointment_id}"),
+        || async move { appointment_audit(pool, appointment_id, action).await.len() >= count },
+    )
+    .await;
+    appointment_audit(pool, appointment_id, action).await
+}
+
+#[tokio::test]
+async fn declined_bookings_notify_the_coordinators_and_status_changes_are_audited() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("declined-booking");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Declined booking {tag}"),
+        "planned",
+        "2026-12-02",
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": interpreter_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+    let response_path = format!("/api/v1/appointments/{appointment_id}/interpreter-response");
+    for _ in 0..2 {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &response_path,
+            &interpreter_bearer,
+            Some(json!({ "response": "declined", "comment": "Krank" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    // The coordinator learns about the refusal once, with the reason.
+    let declined = notifications_of(&pool, manager_id, "interpreter_booking_declined").await;
+    assert_eq!(declined.len(), 1, "{declined:?}");
+    assert_eq!(declined[0]["comment"], "Krank");
+    assert_eq!(
+        declined[0]["appointment_title"],
+        format!("Declined booking {tag}")
+    );
+    assert!(
+        notifications_of(&pool, interpreter_id, "interpreter_booking_declined")
+            .await
+            .is_empty()
+    );
+    let responses =
+        wait_for_appointment_audit(&pool, appointment_id, "interpreter_response", 2).await;
+    assert_eq!(responses[0]["from"], "pending");
+    assert_eq!(responses[0]["to"], "declined");
+
+    // Every status change leaves an audit row with the old and the new status.
+    let manager_bearer = auth_header_for(manager_id, "patient_manager");
+    for next in ["confirmed", "cancelled"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/appointments/{appointment_id}/status"),
+            &manager_bearer,
+            Some(json!({ "status": next })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{next}: {body}");
+    }
+    let changes =
+        wait_for_appointment_audit(&pool, appointment_id, "update_appointment_status", 2).await;
+    assert_eq!(changes[0]["from"], "planned");
+    assert_eq!(changes[0]["to"], "confirmed");
+    assert_eq!(changes[1]["from"], "confirmed");
+    assert_eq!(changes[1]["to"], "cancelled");
+
+    // A cancelled visit closed its reminders and takes no new one.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/reminders"),
+        &manager_bearer,
+        Some(json!({
+            "user_id": manager_id,
+            "remind_at": "2026-12-01T09:00:00Z",
+            "title": "Too late",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let open_reminders: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM reminders WHERE appointment_id = $1 AND NOT is_completed",
+    )
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open_reminders, 0);
+}
+
+#[tokio::test]
+async fn submitted_interpreter_reports_survive_appointment_changes() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("report-survives");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let first_id = seed_user(&pool, &tag, "interpreter").await;
+    let second_id = seed_user(&pool, &format!("{tag}-second"), "interpreter").await;
+    let visit_date = (berlin_today() - chrono::Duration::days(3)).to_string();
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Reported visit {tag}"),
+        "confirmed",
+        &visit_date,
+    )
+    .await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/assign-interpreter"),
+        &bearer,
+        Some(json!({ "interpreter_id": first_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let first_bearer = auth_header_for(first_id, "interpreter");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/report"),
+        &first_bearer,
+        Some(json!({ "hours": 2.0, "report_text": format!("Report {tag}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // The interpreter who reported the visit cannot decline it any more.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/interpreter-response"),
+        &first_bearer,
+        Some(json!({ "response": "declined", "comment": "Zu spät" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // Deleting would delete the report waiting for approval.
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // Moving the time keeps the booking confirmed by the report.
+    let update_path = format!("/api/v1/appointments/{appointment_id}/update");
+    let update = |interpreter_id: Uuid| {
+        json!({
+            "provider_id": provider_id,
+            "doctor_id": doctor_id,
+            "interpreter_id": interpreter_id,
+            "title": format!("Reported visit {tag}"),
+            "date": visit_date,
+            "time_start": "10:00",
+            "time_end": "11:00",
+        })
+    };
+    let (status, body) =
+        json_request(&app, "POST", &update_path, &bearer, Some(update(first_id))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let response: Option<String> =
+        sqlx::query_scalar("SELECT interpreter_response FROM appointments WHERE id = $1")
+            .bind(appointment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(response.as_deref(), Some("accepted"));
+
+    // Booking another interpreter through the edit form returns the old
+    // interpreter's pending report, as the assignment endpoint does.
+    let (status, body) =
+        json_request(&app, "POST", &update_path, &bearer, Some(update(second_id))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let report_status: String = sqlx::query_scalar(
+        "SELECT approval_status FROM interpreter_reports WHERE appointment_id = $1 AND interpreter_id = $2",
+    )
+    .bind(appointment_id)
+    .bind(first_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(report_status, "rejected");
+    let rejections = appointment_audit(&pool, appointment_id, "reject_interpreter_report").await;
+    assert_eq!(rejections.len(), 1, "{rejections:?}");
+    assert_eq!(rejections[0]["reason"], "interpreter_changed");
+
+    // Without an open report the appointment can be deleted again.
+    let (status, body) = json_request(
+        &app,
+        "DELETE",
+        &format!("/api/v1/appointments/{appointment_id}"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn concierge_reschedules_without_touching_the_interpreter_booking() {
+    let Some((app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("concierge-keeps-interpreter");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    let interpreter_id = seed_user(&pool, &tag, "interpreter").await;
+    let other_interpreter_id = seed_user(&pool, &format!("{tag}-other"), "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+    let appointment_id = seed_appointment_slot(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Transfer {tag}"),
+        "planned",
+        "2026-12-05",
+        "non_medical",
+        Some("09:00"),
+        Some("10:00"),
+        Some(interpreter_id),
+    )
+    .await;
+    sqlx::query(
+        "UPDATE appointments SET provider_id = NULL, doctor_id = NULL, interpreter_response = 'accepted' WHERE id = $1",
+    )
+    .bind(appointment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let concierge_bearer = auth_header_for(concierge_id, "concierge");
+    let update_path = format!("/api/v1/appointments/{appointment_id}/update");
+    let pool_ref = &pool;
+    let booked = move || async move {
+        sqlx::query_scalar::<_, Option<Uuid>>(
+            "SELECT interpreter_id FROM appointments WHERE id = $1",
+        )
+        .bind(appointment_id)
+        .fetch_one(pool_ref)
+        .await
+        .unwrap()
+    };
+    for (time_start, interpreter) in [("11:00", Some(interpreter_id)), ("12:00", None)] {
+        let mut body = json!({
+            "title": format!("Transfer {tag}"),
+            "date": "2026-12-05",
+            "time_start": time_start,
+            "time_end": "13:00",
+        });
+        if let Some(interpreter) = interpreter {
+            body["interpreter_id"] = json!(interpreter);
+        }
+        let (status, response) =
+            json_request(&app, "POST", &update_path, &concierge_bearer, Some(body)).await;
+        assert_eq!(status, StatusCode::OK, "{time_start}: {response}");
+        assert_eq!(booked().await, Some(interpreter_id), "{time_start}");
+    }
+
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &concierge_bearer,
+        Some(json!({
+            "title": format!("Transfer {tag}"),
+            "date": "2026-12-05",
+            "time_start": "14:00",
+            "time_end": "15:00",
+            "interpreter_id": other_interpreter_id,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{response}");
+    assert_eq!(booked().await, Some(interpreter_id));
+}
+
+#[tokio::test]
+async fn cancelling_an_appointment_cancels_its_tasks_and_their_subtasks_with_history() {
+    let Some((app, pool, admin_id, _bearer)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("cancel-task-cascade");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("Cancelled visit {tag}"),
+        "planned",
+        "2026-12-03",
+    )
+    .await;
+    let parent_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (title, assigned_to, assigned_by, patient_id, appointment_id, status)
+           VALUES ($1, $2, $3, $4, $5, 'in_progress') RETURNING id"#,
+    )
+    .bind(format!("Book transfer {tag}"))
+    .bind(concierge_id)
+    .bind(manager_id)
+    .bind(patient_id)
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let child_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (title, assigned_to, assigned_by, patient_id, parent_task_id)
+           VALUES ($1, $2, $3, $4, $5) RETURNING id"#,
+    )
+    .bind(format!("Call the driver {tag}"))
+    .bind(concierge_id)
+    .bind(manager_id)
+    .bind(patient_id)
+    .bind(parent_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let done_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (title, assigned_to, assigned_by, patient_id, appointment_id, status, completed_at)
+           VALUES ($1, $2, $3, $4, $5, 'completed', now()) RETURNING id"#,
+    )
+    .bind(format!("Already done {tag}"))
+    .bind(concierge_id)
+    .bind(manager_id)
+    .bind(patient_id)
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let manager_bearer = auth_header_for(manager_id, "patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/appointments/{appointment_id}/status"),
+        &manager_bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    for (task_id, expected) in [
+        (parent_id, "cancelled"),
+        (child_id, "cancelled"),
+        (done_id, "completed"),
+    ] {
+        let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = $1")
+            .bind(task_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(status, expected, "{task_id}");
+    }
+    let history: Vec<(Uuid, Value)> = sqlx::query_as(
+        r#"SELECT task_id, payload FROM concierge_operational_task_events
+           WHERE task_id = ANY($1) AND event_type = 'status_changed'
+           ORDER BY created_at, id"#,
+    )
+    .bind(vec![parent_id, child_id, done_id])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history.len(), 2, "{history:?}");
+    for (task_id, payload) in &history {
+        assert_eq!(payload["status"], "cancelled");
+        assert_eq!(payload["reason"], "appointment_cancelled");
+        let previous = if *task_id == parent_id {
+            "in_progress"
+        } else {
+            "open"
+        };
+        assert_eq!(payload["previous_status"], previous, "{task_id}");
+    }
 }
 
 #[tokio::test]

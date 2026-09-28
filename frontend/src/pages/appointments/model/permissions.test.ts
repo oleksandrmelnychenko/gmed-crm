@@ -97,6 +97,25 @@ describe("appointment role contracts", () => {
     );
   });
 
+  it("keeps closed appointments out of the calendar drag and cancelled ones free of new reminders", () => {
+    for (const status of ["completed", "cancelled"]) {
+      expect(canRescheduleAppointmentItem(true, { can_edit: true, status })).toBe(false);
+    }
+    for (const status of ["planned", "confirmed", "in_progress"]) {
+      expect(canRescheduleAppointmentItem(true, { can_edit: true, status })).toBe(true);
+    }
+
+    const manager = appointmentPermissions("patient_manager");
+    const cancelled = appointmentRecordPermissions(manager, { can_edit: true, status: "cancelled" });
+    expect(cancelled.canManageReminders).toBe(false);
+    expect(cancelled.canViewReminders).toBe(true);
+    // Completed visits still take follow-up reminders.
+    expect(
+      appointmentRecordPermissions(manager, { can_edit: true, status: "completed" })
+        .canManageReminders,
+    ).toBe(true);
+  });
+
   it("lets Concierge run the service side without clinical notes or reports", () => {
     expect(appointmentPermissions("concierge")).toEqual(
       expect.objectContaining({

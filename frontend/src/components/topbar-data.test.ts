@@ -80,6 +80,11 @@ describe("interpreter work notifications", () => {
       .toBe("Подтвердил(а): Anna");
     expect(localizedNotificationCopy(notice("interpreter_clarification_requested", { interpreter_name: "Iwan", comment: "Adresse?" }), "de").body)
       .toBe("Iwan: Adresse?");
+    const declined = localizedNotificationCopy(notice("interpreter_booking_declined", {
+      appointment_title: "Kardiologie", appointment_date: "2026-09-26", interpreter_name: "Iwan", comment: "Krank",
+    }), "ru");
+    expect(declined.title).toBe("Переводчик отказался от назначения");
+    expect(declined.body).toBe("Kardiologie · 26.09.2026 — Iwan: Krank");
   });
 
   it("survives a body that is not JSON", () => {

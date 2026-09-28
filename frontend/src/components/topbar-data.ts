@@ -177,6 +177,10 @@ const INTERPRETER_WORK_TITLES: Record<string, { de: string; ru: string }> = {
     de: "Dolmetscher benötigt eine Klärung",
     ru: "Переводчику нужно уточнение",
   },
+  interpreter_booking_declined: {
+    de: "Dolmetscher hat den Einsatz abgelehnt",
+    ru: "Переводчик отказался от назначения",
+  },
 };
 
 type InterpreterWorkNotificationBody = {
@@ -226,7 +230,10 @@ function interpreterWorkNotificationCopy(
   if (item.kind === "interpreter_report_rejected" && data.notes) {
     parts.push(`${lang === "de" ? "Hinweis" : "Замечание"}: ${data.notes}`);
   }
-  if (item.kind === "interpreter_clarification_requested") {
+  if (
+    item.kind === "interpreter_clarification_requested" ||
+    item.kind === "interpreter_booking_declined"
+  ) {
     parts.push([data.interpreter_name, data.comment].filter(Boolean).join(": "));
   }
   const body = parts.filter(Boolean).join(" — ");

@@ -1087,13 +1087,16 @@ async fn review_appointment_request(
 
     let next_status = body.status.clone();
     let review_note = normalize_optional_text(body.review_note);
-    if let Err(e) = sqlx::query(
+    // The status guard sits in the UPDATE itself, so a concurrent review or
+    // conversion is never overwritten.
+    match sqlx::query(
         r#"UPDATE patient_appointment_requests
            SET status = $2,
                review_note = $3,
                reviewed_by = $4,
                reviewed_at = now()
-           WHERE id = $1"#,
+           WHERE id = $1
+             AND status = 'requested'"#,
     )
     .bind(id)
     .bind(&next_status)
@@ -1102,11 +1105,20 @@ async fn review_appointment_request(
     .execute(&state.db)
     .await
     {
-        tracing::error!(error = %e, request_id = %id, "review appointment request");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to review appointment request",
-        );
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Only requested appointment requests can be reviewed",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %id, "review appointment request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to review appointment request",
+            );
+        }
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -1857,6 +1869,7 @@ async fn list_attention_items(
              SELECT COUNT(*) FILTER (WHERE t.status NOT IN ('completed', 'cancelled')) AS open_count
              FROM tasks t
              WHERE t.appointment_id = a.id
+               AND t.deleted_at IS NULL
            ) tasks ON true
            LEFT JOIN LATERAL (
              SELECT COUNT(*) FILTER (WHERE NOT r.is_completed AND r.remind_at <= now()) AS overdue_count,
@@ -1909,6 +1922,7 @@ async fn list_attention_items(
                     )
                  OR (
                         a.date < $17
+                        AND a.status <> 'cancelled'
                         AND COALESCE(comms.open_count, 0) > 0
                     )
                  OR (
@@ -2111,7 +2125,10 @@ async fn list_attention_items(
                         serde_json::json!({ "count": open_checklist_count }),
                     );
                 }
-                if appointment_date < today && open_communication_count > 0 {
+                if appointment_date < today
+                    && status != "cancelled"
+                    && open_communication_count > 0
+                {
                     push_reason(
                         "appointments_attention_reason_open_communication_threads_count",
                         format!("{open_communication_count} external communication thread(s) remain open"),
@@ -2834,11 +2851,104 @@ fn ensure_report_not_before_appointment_date(
     ))
 }
 
+/// Cancels the open tasks of appointments that no longer take place, together
+/// with their open sub-tasks at any depth (work-center sub-tasks carry no
+/// appointment of their own). Like the work center's "close sub-tasks" answer,
+/// every cancelled task gets a history entry and its linked workflow checklist
+/// items follow it ("not required"). `title_prefixes` limits the cancelled
+/// appointment tasks to the automatic concierge tasks. Returns the changed
+/// checklist items, which the caller publishes after commit.
+async fn cancel_open_appointment_tasks_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+    title_prefixes: Option<&[&str]>,
+    actor_id: Uuid,
+    reason: &str,
+) -> Result<Vec<crate::routes::workflow_checklists::ChecklistItemSync>, axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, reason, "cancel open tasks of closed appointments");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let prefixes: Option<Vec<String>> =
+        title_prefixes.map(|values| values.iter().map(|value| format!("{value}%")).collect());
+    let open_tasks = sqlx::query_as::<_, (Uuid, String, Uuid, Option<Uuid>)>(
+        r#"WITH RECURSIVE branch AS (
+               SELECT id, ARRAY[id] AS path
+               FROM tasks
+               WHERE appointment_id = ANY($1)
+                 AND deleted_at IS NULL
+                 AND status NOT IN ('completed', 'cancelled')
+                 AND ($2::text[] IS NULL OR title LIKE ANY($2))
+               UNION ALL
+               SELECT child.id, branch.path || child.id
+               FROM tasks child
+               JOIN branch ON child.parent_task_id = branch.id
+               WHERE child.deleted_at IS NULL
+                 AND NOT child.id = ANY(branch.path)
+           )
+           SELECT task.id, task.status, task.assigned_to, task.appointment_id
+           FROM tasks task
+           WHERE task.id IN (SELECT id FROM branch)
+             AND task.status NOT IN ('completed', 'cancelled')
+             AND task.archived_at IS NULL
+           ORDER BY task.created_at, task.id
+           FOR UPDATE"#,
+    )
+    .bind(appointment_ids)
+    .bind(prefixes)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+
+    let mut checklist_changes = Vec::new();
+    for (task_id, previous_status, assigned_to, appointment_id) in open_tasks {
+        sqlx::query(
+            r#"UPDATE tasks
+               SET status = 'cancelled',
+                   completed_at = NULL,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(task_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(failed)?;
+        sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(task_id)
+        .bind(actor_id)
+        .bind(serde_json::json!({
+            "assigned_to": assigned_to,
+            "status": "cancelled",
+            "previous_status": previous_status,
+            "reason": reason,
+            "appointment_id": appointment_id,
+        }))
+        .execute(&mut **tx)
+        .await
+        .map_err(failed)?;
+        checklist_changes.extend(
+            crate::routes::workflow_checklists::sync_checklist_items_for_task_status(
+                tx,
+                task_id,
+                &previous_status,
+                "cancelled",
+                actor_id,
+            )
+            .await
+            .map_err(failed)?,
+        );
+    }
+    Ok(checklist_changes)
+}
+
 async fn close_terminal_appointment_artifacts_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     appointment_ids: &[Uuid],
     completed_by: Uuid,
-) -> Result<(), axum::response::Response> {
+) -> Result<Vec<crate::routes::workflow_checklists::ChecklistItemSync>, axum::response::Response> {
     sqlx::query(
         r#"UPDATE appointment_checklists
            SET is_completed = true,
@@ -2856,20 +2966,14 @@ async fn close_terminal_appointment_artifacts_in_tx(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
 
-    sqlx::query(
-        r#"UPDATE tasks
-           SET status = 'cancelled',
-               updated_at = now()
-           WHERE appointment_id = ANY($1)
-             AND status NOT IN ('completed', 'cancelled')"#,
+    let checklist_changes = cancel_open_appointment_tasks_in_tx(
+        tx,
+        appointment_ids,
+        None,
+        completed_by,
+        "appointment_cancelled",
     )
-    .bind(appointment_ids)
-    .execute(&mut **tx)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "close terminal appointment tasks");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-    })?;
+    .await?;
 
     sqlx::query(
         r#"UPDATE reminders
@@ -2886,7 +2990,7 @@ async fn close_terminal_appointment_artifacts_in_tx(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
 
-    Ok(())
+    Ok(checklist_changes)
 }
 
 async fn reject_pending_reports_for_cancelled_appointments_in_tx(
@@ -2894,32 +2998,124 @@ async fn reject_pending_reports_for_cancelled_appointments_in_tx(
     appointment_ids: &[Uuid],
     rejected_by: Uuid,
 ) -> Result<(), axum::response::Response> {
+    reject_pending_reports_in_tx(
+        tx,
+        appointment_ids,
+        rejected_by,
+        ReportAutoRejection::AppointmentCancelled,
+    )
+    .await
+}
+
+/// An interpreter taken off an appointment can no longer work on it, so the
+/// reminders addressed to them there close (see `reminder_recipient_refusal`).
+/// A team lead keeps reminders it may get through its patient assignment.
+async fn close_unbooked_interpreter_reminders_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_id: Uuid,
+    interpreter_id: Uuid,
+) -> Result<(), axum::response::Response> {
     sqlx::query(
+        r#"UPDATE reminders
+           SET is_completed = true,
+               completed_at = now()
+           WHERE appointment_id = $1
+             AND user_id = $2
+             AND NOT is_completed
+             AND EXISTS (
+                 SELECT 1 FROM users recipient
+                 WHERE recipient.id = $2 AND recipient.role = 'interpreter'
+             )"#,
+    )
+    .bind(appointment_id)
+    .bind(interpreter_id)
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, %appointment_id, "close reminders of an unbooked interpreter");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    Ok(())
+}
+
+/// Why a pending interpreter report was rejected without a reviewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReportAutoRejection {
+    /// The appointment no longer takes place.
+    AppointmentCancelled,
+    /// Another interpreter (or none) is booked now.
+    InterpreterChanged,
+}
+
+impl ReportAutoRejection {
+    fn reason(self) -> &'static str {
+        match self {
+            ReportAutoRejection::AppointmentCancelled => "appointment_cancelled",
+            ReportAutoRejection::InterpreterChanged => "interpreter_changed",
+        }
+    }
+
+    fn note(self) -> &'static str {
+        match self {
+            ReportAutoRejection::AppointmentCancelled => {
+                "Rejected automatically because the appointment was cancelled by user %s"
+            }
+            ReportAutoRejection::InterpreterChanged => {
+                "Rejected automatically because the assigned interpreter changed (user %s)"
+            }
+        }
+    }
+}
+
+/// Rejects the pending interpreter reports of these appointments, recording
+/// who caused it, and writes an audit row per report in the same transaction.
+async fn reject_pending_reports_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+    rejected_by: Uuid,
+    cause: ReportAutoRejection,
+) -> Result<(), axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, reason = cause.reason(), "reject pending interpreter reports");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let rejected = sqlx::query_as::<_, (Uuid, Uuid, Uuid)>(
         r#"UPDATE interpreter_reports
            SET approval_status = 'rejected',
                approved_by = $2,
                approved_at = now(),
-               notes = concat_ws(
-                   E'\n',
-                   NULLIF(notes, ''),
-                   format(
-                       'Rejected automatically because the appointment was cancelled by user %s',
-                       $2::text
-                   )
-               ),
+               notes = concat_ws(E'\n', NULLIF(notes, ''), format($3, $2::text)),
                updated_at = now()
            WHERE appointment_id = ANY($1)
-             AND approval_status = 'pending'"#,
+             AND approval_status = 'pending'
+           RETURNING id, appointment_id, interpreter_id"#,
     )
     .bind(appointment_ids)
     .bind(rejected_by)
-    .execute(&mut **tx)
+    .bind(cause.note())
+    .fetch_all(&mut **tx)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "reject pending interpreter reports for cancelled appointments");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-    })?;
-
+    .map_err(failed)?;
+    for (report_id, appointment_id, interpreter_id) in rejected {
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "reject_interpreter_report",
+                Some(rejected_by),
+                "appointment",
+                Some(appointment_id),
+                serde_json::json!({
+                    "report_id": report_id,
+                    "interpreter_id": interpreter_id,
+                    "from": "pending",
+                    "to": "rejected",
+                    "reason": cause.reason(),
+                }),
+            ),
+        )
+        .await
+        .map_err(failed)?;
+    }
     Ok(())
 }
 
@@ -2970,6 +3166,8 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
     }
     reject_pending_reports_for_cancelled_appointments_in_tx(tx, &appointment_ids, cancelled_by)
         .await?;
+    // The workflow checklist items of the cancelled tasks change in this
+    // transaction; the order cancellation itself carries the audit trail.
     close_terminal_appointment_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
     close_auto_concierge_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
     end_interpreter_links_of_cancelled_in_tx(tx, &appointment_ids, cancelled_by).await?;
@@ -3004,6 +3202,17 @@ pub(crate) async fn publish_cancelled_order_appointments(
     appointment_ids: &[Uuid],
 ) {
     for appointment_id in appointment_ids {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_appointment_status",
+            Some(actor_user_id),
+            "appointment",
+            Some(*appointment_id),
+            serde_json::json!({
+                "to": "cancelled",
+                "reason": "order_cancelled",
+                "order_id": order_id,
+            }),
+        ));
         crate::realtime::publish_appointment_event(
             state,
             Some(actor_user_id),
@@ -4096,6 +4305,35 @@ async fn delete_appointment(
             "In-progress or completed appointments cannot be deleted",
         );
     }
+    // Deleting the appointment deletes its interpreter reports; a report that
+    // waits for approval or was approved (and billed) is delivery evidence,
+    // so such an appointment is cancelled instead.
+    match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM interpreter_reports
+               WHERE appointment_id = $1
+                 AND approval_status IN ('pending', 'approved')
+           )"#,
+    )
+    .bind(apt_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            return err(
+                StatusCode::CONFLICT,
+                "An appointment with a submitted or approved interpreter report cannot be deleted; cancel it instead",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, appointment_id = %apt_id, "check interpreter reports before appointment delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete appointment",
+            );
+        }
+    }
 
     let replacement_series_id = match sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id
@@ -4353,7 +4591,7 @@ async fn update_appointment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(apt_id): Path<Uuid>,
-    Json(body): Json<UpdateAppointment>,
+    Json(mut body): Json<UpdateAppointment>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_any_role(&[
         Role::Ceo,
@@ -4582,13 +4820,21 @@ async fn update_appointment(
         return resp;
     }
 
-    if auth.role == Role::Concierge && body.interpreter_id.is_some() {
-        return err(
-            StatusCode::FORBIDDEN,
-            "Concierge cannot assign interpreters during rescheduling",
-        );
+    if auth.role == Role::Concierge {
+        if body.interpreter_id.is_some() && body.interpreter_id != current_interpreter_id {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Concierge cannot assign interpreters during rescheduling",
+            );
+        }
+        // The concierge reschedules without touching the interpreter booking:
+        // the edit form resends the booked interpreter, and leaving it out
+        // keeps the booking instead of removing it.
+        body.interpreter_id = current_interpreter_id;
     }
-    if let Some(interpreter_id) = body.interpreter_id {
+    if let Some(interpreter_id) = body.interpreter_id
+        && body.interpreter_id != current_interpreter_id
+    {
         match load_active_interpreter_role(&state, interpreter_id).await {
             Ok(Some(_)) => {}
             Ok(None) => {
@@ -5028,7 +5274,11 @@ async fn update_appointment(
             || target.location != location
             || recurrence_rule.is_some();
         let interpreter_changed = target.interpreter_id != body.interpreter_id;
+        let reported = reported_target_ids.contains(&target.id);
         let interpreter_response = match body.interpreter_id {
+            // A submitted or approved report already shows that the booked
+            // interpreter took the visit; moving it does not ask again.
+            Some(_) if !interpreter_changed && reported => target.interpreter_response.as_deref(),
             Some(_) if interpreter_changed || schedule_changed => Some("pending"),
             Some(_) => target.interpreter_response.as_deref(),
             None => None,
@@ -5129,6 +5379,29 @@ async fn update_appointment(
             }
         }
 
+        // The previous interpreter's report waiting for approval cannot be
+        // approved any more, exactly as when the interpreter is reassigned.
+        if interpreter_changed && let Some(previous_interpreter_id) = target.interpreter_id {
+            if let Err(resp) = reject_pending_reports_in_tx(
+                &mut tx,
+                &[target.id],
+                auth.user_id,
+                ReportAutoRejection::InterpreterChanged,
+            )
+            .await
+            {
+                return resp;
+            }
+            if let Err(resp) = close_unbooked_interpreter_reminders_in_tx(
+                &mut tx,
+                target.id,
+                previous_interpreter_id,
+            )
+            .await
+            {
+                return resp;
+            }
+        }
         if let Some(interpreter_id) = body.interpreter_id
             && (interpreter_changed || schedule_changed)
         {
@@ -5261,6 +5534,7 @@ async fn update_appointment(
             }
         }
     }
+    let mut checklist_changes = Vec::new();
     if !cancelled_target_ids.is_empty() {
         if let Err(resp) = reject_pending_reports_for_cancelled_appointments_in_tx(
             &mut tx,
@@ -5271,24 +5545,29 @@ async fn update_appointment(
         {
             return resp;
         }
-        if let Err(resp) =
-            close_terminal_appointment_artifacts_in_tx(&mut tx, &cancelled_target_ids, auth.user_id)
-                .await
+        match close_terminal_appointment_artifacts_in_tx(
+            &mut tx,
+            &cancelled_target_ids,
+            auth.user_id,
+        )
+        .await
         {
-            return resp;
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(resp) => return resp,
         }
-        if let Err(resp) =
-            close_auto_concierge_artifacts_in_tx(&mut tx, &cancelled_target_ids, auth.user_id).await
+        match close_auto_concierge_artifacts_in_tx(&mut tx, &cancelled_target_ids, auth.user_id)
+            .await
         {
-            return resp;
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(resp) => return resp,
         }
     }
     let updated_target_ids: Vec<Uuid> = updated_targets.iter().map(|(id, _, _)| *id).collect();
     if current_type == "non_medical" && appointment_type != "non_medical" {
-        if let Err(resp) =
-            close_auto_concierge_artifacts_in_tx(&mut tx, &updated_target_ids, auth.user_id).await
+        match close_auto_concierge_artifacts_in_tx(&mut tx, &updated_target_ids, auth.user_id).await
         {
-            return resp;
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(resp) => return resp,
         }
     } else if appointment_type == "non_medical" {
         let reactivate_service = current_type != "non_medical";
@@ -5357,6 +5636,12 @@ async fn update_appointment(
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
     if appointment_type == "non_medical" {
         let created_ids: HashSet<Uuid> = created_targets.iter().map(|(id, _, _)| *id).collect();
         for (appointment_id, target_patient_id, target_date) in &updated_targets {
@@ -5793,29 +6078,33 @@ async fn update_status(
     {
         return resp;
     }
-    if body.status == "cancelled"
-        && let Err(resp) =
-            close_terminal_appointment_artifacts_in_tx(&mut tx, &target_ids, auth.user_id).await
-    {
-        return resp;
-    }
-    if body.status == "cancelled"
-        && let Err(resp) =
-            close_auto_concierge_artifacts_in_tx(&mut tx, &target_ids, auth.user_id).await
-    {
-        return resp;
-    }
-    if body.status == "cancelled"
-        && let Err(resp) =
+    let mut checklist_changes = Vec::new();
+    if body.status == "cancelled" {
+        match close_terminal_appointment_artifacts_in_tx(&mut tx, &target_ids, auth.user_id).await {
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(resp) => return resp,
+        }
+        match close_auto_concierge_artifacts_in_tx(&mut tx, &target_ids, auth.user_id).await {
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(resp) => return resp,
+        }
+        if let Err(resp) =
             end_interpreter_links_of_cancelled_in_tx(&mut tx, &target_ids, auth.user_id).await
-    {
-        return resp;
+        {
+            return resp;
+        }
     }
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
 
     if body.status == "completed" {
         for appointment_id in &target_ids {
@@ -5876,6 +6165,29 @@ async fn update_status(
         }
     }
 
+    // One audit row per changed appointment with the old and the new status;
+    // the request row of the middleware only names the route.
+    let recurrence_scope_key = match recurrence_scope {
+        AppointmentRecurrenceScope::Single => "single",
+        AppointmentRecurrenceScope::Following => "following",
+        AppointmentRecurrenceScope::Series => "series",
+    };
+    for (target_id, previous_status, _) in &target_rows {
+        if previous_status == &body.status {
+            continue;
+        }
+        state.audit_sender.try_send(audit::domain_event(
+            "update_appointment_status",
+            Some(auth.user_id),
+            "appointment",
+            Some(*target_id),
+            serde_json::json!({
+                "from": previous_status,
+                "to": body.status,
+                "recurrence_scope": recurrence_scope_key,
+            }),
+        ));
+    }
     if recurrence_scope != AppointmentRecurrenceScope::Single {
         state.audit_sender.try_send(audit::domain_event(
             "update_appointment_series_status",
@@ -6072,26 +6384,25 @@ async fn assign_interpreter(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
-    if previous_interpreter_id.is_some()
-        && previous_interpreter_id != Some(body.interpreter_id)
-        && let Err(e) = sqlx::query(
-            r#"UPDATE interpreter_reports
-               SET approval_status = 'rejected',
-                   notes = concat_ws(
-                       E'\n',
-                       NULLIF(notes, ''),
-                       'Rejected automatically because the assigned interpreter changed'
-                   ),
-                   updated_at = now()
-               WHERE appointment_id = $1
-                 AND approval_status = 'pending'"#,
-        )
-        .bind(apt_id)
-        .execute(&mut *tx)
-        .await
+    if let Some(previous_interpreter_id) = previous_interpreter_id
+        && previous_interpreter_id != body.interpreter_id
     {
-        tracing::error!(error = %e, appointment_id = %apt_id, "reject stale report after interpreter reassignment");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        if let Err(resp) = reject_pending_reports_in_tx(
+            &mut tx,
+            &[apt_id],
+            auth.user_id,
+            ReportAutoRejection::InterpreterChanged,
+        )
+        .await
+        {
+            return resp;
+        }
+        if let Err(resp) =
+            close_unbooked_interpreter_reminders_in_tx(&mut tx, apt_id, previous_interpreter_id)
+                .await
+        {
+            return resp;
+        }
     }
     if let Err(e) = booking_links::grant_in_tx(
         &mut tx,
@@ -6181,7 +6492,7 @@ async fn interpreter_response(
         }
     };
     let appointment = match sqlx::query(
-        "SELECT patient_id, interpreter_id, status FROM appointments WHERE id = $1 FOR UPDATE",
+        "SELECT patient_id, interpreter_id, interpreter_response, status FROM appointments WHERE id = $1 FOR UPDATE",
     )
     .bind(apt_id)
     .fetch_optional(&mut *tx)
@@ -6205,6 +6516,36 @@ async fn interpreter_response(
             StatusCode::CONFLICT,
             "Interpreter response cannot change after appointment completion or cancellation",
         );
+    }
+    // A submitted or approved report shows the visit took place with this
+    // interpreter; declining it afterwards would end the patient link while
+    // the report is still billed.
+    if body.response == "declined" {
+        match sqlx::query_scalar::<_, bool>(
+            r#"SELECT EXISTS (
+                   SELECT 1 FROM interpreter_reports
+                   WHERE appointment_id = $1
+                     AND interpreter_id = $2
+                     AND approval_status IN ('pending', 'approved')
+               )"#,
+        )
+        .bind(apt_id)
+        .bind(auth.user_id)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(false) => {}
+            Ok(true) => {
+                return err(
+                    StatusCode::CONFLICT,
+                    "The booking cannot be declined after a report was submitted",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "check reports before declining a booking");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
     }
     let result = sqlx::query(
         r#"UPDATE appointments
@@ -6250,19 +6591,26 @@ async fn interpreter_response(
         tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response: update patient link");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
-    let notifications = if body.response == "discussion_requested" {
-        match insert_interpreter_work_notifications(
-            &mut tx,
-            InterpreterWorkNotice::ClarificationRequested,
-            apt_id,
-            None,
-            auth.user_id,
-        )
-        .await
+    let previous_response: Option<String> = appointment
+        .try_get("interpreter_response")
+        .unwrap_or_default();
+    // The coordinators act on a clarification request and on a declined
+    // booking (they book another interpreter); repeating the same answer
+    // notifies nobody again.
+    let notice = match body.response.as_str() {
+        "discussion_requested" => Some(InterpreterWorkNotice::ClarificationRequested),
+        "declined" if previous_response.as_deref() != Some("declined") => {
+            Some(InterpreterWorkNotice::BookingDeclined)
+        }
+        _ => None,
+    };
+    let notifications = if let Some(notice) = notice {
+        match insert_interpreter_work_notifications(&mut tx, notice, apt_id, None, auth.user_id)
+            .await
         {
             Ok(value) => value,
             Err(e) => {
-                tracing::error!(error = %e, appointment_id = %apt_id, "notify about interpreter clarification");
+                tracing::error!(error = %e, appointment_id = %apt_id, "notify about interpreter response");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
@@ -6273,6 +6621,16 @@ async fn interpreter_response(
         tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "interpreter_response",
+        Some(auth.user_id),
+        "appointment",
+        Some(apt_id),
+        serde_json::json!({
+            "from": previous_response,
+            "to": body.response,
+        }),
+    ));
     publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
     Json(serde_json::json!({"ok": true})).into_response()
 }
@@ -6482,6 +6840,13 @@ async fn complete_checklist(
         tracing::error!(error = %e, appointment_id = %apt_id, item_id = %item_id, "complete checklist: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "complete_appointment_checklist_item",
+        Some(auth.user_id),
+        "appointment",
+        Some(apt_id),
+        serde_json::json!({ "checklist_item_id": item_id }),
+    ));
 
     crate::realtime::publish_appointment_checklist_event(
         &state,
@@ -6643,6 +7008,15 @@ async fn add_reminder(
         interpreter_response: row.try_get("interpreter_response").unwrap_or_default(),
         owner_user_id: row.try_get("owner_user_id").unwrap_or_default(),
     };
+    // Cancelling an appointment completes its reminders; a new one would stay
+    // open on a visit that no longer happens. Completed visits keep taking
+    // follow-up reminders.
+    if appointment.status == "cancelled" {
+        return err(
+            StatusCode::CONFLICT,
+            "Reminders cannot be added to a cancelled appointment",
+        );
+    }
     let assigned_to_patient = match access::has_active_patient_assignment(
         &state.db,
         patient_id,
@@ -6734,6 +7108,13 @@ async fn complete_reminder(
 
     match result {
         Ok(r) if r.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "complete_reminder",
+                Some(auth.user_id),
+                "appointment",
+                Some(apt_id),
+                serde_json::json!({ "reminder_id": reminder_id }),
+            ));
             crate::realtime::publish_reminder_event(
                 &state,
                 Some(auth.user_id),
@@ -7126,7 +7507,7 @@ async fn submit_report(
         }
     };
     let appointment = match sqlx::query(
-        "SELECT interpreter_id, status, date FROM appointments WHERE id = $1 FOR UPDATE",
+        "SELECT patient_id, interpreter_id, status, date FROM appointments WHERE id = $1 FOR UPDATE",
     )
     .bind(apt_id)
     .fetch_optional(&mut *tx)
@@ -7138,6 +7519,9 @@ async fn submit_report(
             tracing::error!(error = %e, appointment_id = %apt_id, "load assigned interpreter for report");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    };
+    let Ok(patient_id) = appointment.try_get::<Uuid, _>("patient_id") else {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     };
     let assigned_interpreter: Option<Uuid> =
         appointment.try_get("interpreter_id").unwrap_or_default();
@@ -7224,6 +7608,19 @@ async fn submit_report(
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "accept interpreter assignment on report submission");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    // The report accepts the booking, so the interpreter is linked to the
+    // patient again, as when accepting through the response buttons.
+    if let Err(e) = booking_links::grant_in_tx(
+        &mut tx,
+        &[(patient_id, auth.user_id)],
+        auth.user_id,
+        "submit_report",
+    )
+    .await
+    {
+        tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "link interpreter to patient on report submission");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     let notifications = match insert_interpreter_work_notifications(
         &mut tx,
         InterpreterWorkNotice::ReportSubmitted,
@@ -7243,6 +7640,17 @@ async fn submit_report(
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "submit report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "submit_interpreter_report",
+        Some(auth.user_id),
+        "appointment",
+        Some(apt_id),
+        serde_json::json!({
+            "report_id": report_id,
+            "to": "pending",
+            "hours": hours.to_string(),
+        }),
+    ));
     publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
 
     tracing::info!(by = %auth.user_id, apt = %apt_id, hours = %hours, "Interpreter report submitted");
@@ -7265,6 +7673,9 @@ enum InterpreterWorkNotice {
     ReportRejected,
     /// The interpreter needs clarification: notify the approvers.
     ClarificationRequested,
+    /// The interpreter declined the booking: notify the approvers, who book
+    /// another interpreter.
+    BookingDeclined,
 }
 
 impl InterpreterWorkNotice {
@@ -7274,6 +7685,7 @@ impl InterpreterWorkNotice {
             InterpreterWorkNotice::ReportApproved => "interpreter_report_approved",
             InterpreterWorkNotice::ReportRejected => "interpreter_report_rejected",
             InterpreterWorkNotice::ClarificationRequested => "interpreter_clarification_requested",
+            InterpreterWorkNotice::BookingDeclined => "interpreter_booking_declined",
         }
     }
 
@@ -7285,6 +7697,7 @@ impl InterpreterWorkNotice {
             InterpreterWorkNotice::ReportApproved => "Interpreter report approved",
             InterpreterWorkNotice::ReportRejected => "Interpreter report returned for revision",
             InterpreterWorkNotice::ClarificationRequested => "Interpreter needs clarification",
+            InterpreterWorkNotice::BookingDeclined => "Interpreter declined the booking",
         }
     }
 }
@@ -7326,7 +7739,9 @@ async fn insert_interpreter_work_notifications(
     .await?;
     let body = body.to_string();
     let rows = match notice {
-        InterpreterWorkNotice::ReportSubmitted | InterpreterWorkNotice::ClarificationRequested => {
+        InterpreterWorkNotice::ReportSubmitted
+        | InterpreterWorkNotice::ClarificationRequested
+        | InterpreterWorkNotice::BookingDeclined => {
             let rows = sqlx::query(
                 r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
                    SELECT recipient.id, $2, $3, $4, 'appointment', a.id
@@ -8444,6 +8859,17 @@ async fn approve_report(
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "approve report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "approve_interpreter_report",
+        Some(auth.user_id),
+        "appointment",
+        Some(apt_id),
+        serde_json::json!({
+            "report_id": report_id,
+            "from": "pending",
+            "to": "approved",
+        }),
+    ));
     publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
 
     let sync_summary = match sync_interpreter_report_billing_candidates(&state, Some(apt_id)).await
@@ -8563,6 +8989,17 @@ async fn reject_report(
         tracing::error!(error = %e, appointment_id = %apt_id, report_id = %report_id, "reject report: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "reject_interpreter_report",
+        Some(auth.user_id),
+        "appointment",
+        Some(apt_id),
+        serde_json::json!({
+            "report_id": report_id,
+            "from": "pending",
+            "to": "rejected",
+        }),
+    ));
     publish_interpreter_work_notifications(&state, apt_id, &notifications).await;
     Json(serde_json::json!({"ok": true, "report_id": report_id})).into_response()
 }
@@ -9097,7 +9534,7 @@ async fn close_auto_concierge_artifacts_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     appointment_ids: &[Uuid],
     completed_by: Uuid,
-) -> Result<(), axum::response::Response> {
+) -> Result<Vec<crate::routes::workflow_checklists::ChecklistItemSync>, axum::response::Response> {
     let checklist_texts: Vec<String> = CONCIERGE_CHECKLIST_ITEMS
         .iter()
         .map(|(_, text)| (*text).to_string())
@@ -9121,26 +9558,17 @@ async fn close_auto_concierge_artifacts_in_tx(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
 
-    sqlx::query(
-        r#"UPDATE tasks
-           SET status = 'cancelled',
-               updated_at = now()
-           WHERE appointment_id = ANY($1)
-             AND status NOT IN ('completed', 'cancelled')
-             AND (
-                    title LIKE ($2 || '%')
-                 OR title LIKE ($3 || '%')
-             )"#,
+    let checklist_changes = cancel_open_appointment_tasks_in_tx(
+        tx,
+        appointment_ids,
+        Some(&[
+            CONCIERGE_COORDINATE_TASK_PREFIX,
+            CONCIERGE_RECEIPTS_TASK_PREFIX,
+        ]),
+        completed_by,
+        "concierge_workflow_closed",
     )
-    .bind(appointment_ids)
-    .bind(CONCIERGE_COORDINATE_TASK_PREFIX)
-    .bind(CONCIERGE_RECEIPTS_TASK_PREFIX)
-    .execute(&mut **tx)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "close autogenerated concierge tasks");
-        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-    })?;
+    .await?;
 
     sqlx::query(
         r#"UPDATE reminders
@@ -9184,7 +9612,7 @@ async fn close_auto_concierge_artifacts_in_tx(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
 
-    Ok(())
+    Ok(checklist_changes)
 }
 
 #[allow(clippy::too_many_arguments)]

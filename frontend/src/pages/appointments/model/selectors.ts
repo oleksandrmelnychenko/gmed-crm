@@ -11,6 +11,7 @@ import {
   type Translations,
 } from "@/lib/i18n";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
+import { isClosedAppointmentStatus } from "@/pages/appointments/model/completion-rules";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 import {
   communicationChannelLabel,
@@ -116,10 +117,15 @@ export function blockedSlotPermissions(
  */
 export function appointmentRecordPermissions(
   permissions: AppointmentPermissions,
-  record: { is_blocked?: boolean; can_edit?: boolean } | null | undefined,
+  record: { is_blocked?: boolean; can_edit?: boolean; status?: string | null } | null | undefined,
 ): AppointmentPermissions {
   if (!record) return permissions;
-  const scoped = record.is_blocked ? blockedSlotPermissions(permissions) : permissions;
+  const blockedScoped = record.is_blocked ? blockedSlotPermissions(permissions) : permissions;
+  // A cancelled appointment closed its reminders; the server takes no new ones.
+  const scoped =
+    record.status === "cancelled"
+      ? { ...blockedScoped, canManageReminders: false }
+      : blockedScoped;
   if (record.can_edit !== false) return scoped;
   return {
     ...scoped,
@@ -133,12 +139,20 @@ export function appointmentRecordPermissions(
   };
 }
 
-/** Whether the calendar may drag or resize this appointment. */
+/**
+ * Whether the calendar may drag or resize this appointment. The server
+ * refuses to reschedule a completed or cancelled appointment.
+ */
 export function canRescheduleAppointmentItem(
   canEditSchedule: boolean,
-  item: { is_blocked?: boolean; can_edit?: boolean },
+  item: { is_blocked?: boolean; can_edit?: boolean; status?: string | null },
 ): boolean {
-  return canEditSchedule && !item.is_blocked && item.can_edit !== false;
+  return (
+    canEditSchedule &&
+    !item.is_blocked &&
+    item.can_edit !== false &&
+    !isClosedAppointmentStatus(item.status)
+  );
 }
 
 /**

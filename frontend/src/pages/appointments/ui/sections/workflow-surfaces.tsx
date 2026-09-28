@@ -54,10 +54,14 @@ import {
 import {
   futureCompletionTargets,
   isAppointmentCompletionTooEarly,
+  isClosedAppointmentStatus,
 } from "@/pages/appointments/model/completion-rules";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
-import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
+import {
+  appointmentStatusBadgeClassName,
+  interpreterResponseBadgeClassName,
+} from "@/pages/appointments/appearance/status-appearance";
 import {
   blankChecklistForm,
   blankReminderForm,
@@ -792,6 +796,7 @@ function AppointmentInterpreterSection({
         <WritableScope>
           <InterpreterResponseControls
             busyAction={busyAction}
+            closed={isClosedAppointmentStatus(detail.status)}
             interpreterResponse={detail.interpreter_response}
             savedComment={detail.interpreter_response_comment ?? null}
             onResponse={handleInterpreterResponse}
@@ -874,7 +879,12 @@ function InterpreterAssignmentManagement({
         width: 240,
         render: (row) => (
           <span className="flex min-w-0 flex-col items-start gap-0.5">
-            <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 font-mono text-[10px] font-medium text-sky-700">
+            <span
+              className={cn(
+                "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
+                interpreterResponseBadgeClassName(row.interpreter_response),
+              )}
+            >
               {responseLabel(row.interpreter_response ?? "pending")}
             </span>
             {row.interpreter_response_comment ? (
@@ -900,16 +910,21 @@ function InterpreterAssignmentManagement({
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
           {appointmentText("appointments_interpreter_assignment")}
         </span>
-        <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
-        <Button
-          type="button"
-          size="sm"
-          className="h-8 shrink-0 rounded-lg gap-1.5"
-          onClick={() => onOpenChange(true)}
-        >
-          <Plus className="size-3.5" />
-          {appointmentText("appointments_assign_interpreter")}
-        </Button>
+        {/* A completed or cancelled appointment takes no new interpreter. */}
+        {isClosedAppointmentStatus(detail.status) ? null : (
+          <>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg gap-1.5"
+              onClick={() => onOpenChange(true)}
+            >
+              <Plus className="size-3.5" />
+              {appointmentText("appointments_assign_interpreter")}
+            </Button>
+          </>
+        )}
       </div>
       <DataTableSurface
         rows={detail.interpreter_id ? [detail] : []}
@@ -996,11 +1011,14 @@ function InterpreterAssignmentManagement({
 
 function InterpreterResponseControls({
   busyAction,
+  closed,
   interpreterResponse,
   savedComment,
   onResponse,
 }: {
   busyAction: string;
+  /** Completed or cancelled: the server keeps the last answer. */
+  closed: boolean;
   interpreterResponse: InterpreterResponse | null;
   savedComment: string | null;
   onResponse: (response: InterpreterResponse, comment: string) => void | Promise<void>;
@@ -1017,7 +1035,8 @@ function InterpreterResponseControls({
             key={value}
             variant={interpreterResponse === value ? "default" : "outline"}
             disabled={
-              Boolean(busyAction)
+              closed
+              || Boolean(busyAction)
               || (value === "discussion_requested" && commentMissing)
             }
             onClick={() => void onResponse(value, comment.trim())}
@@ -1038,7 +1057,7 @@ function InterpreterResponseControls({
           maxLength={1000}
           rows={3}
           className={textareaClassName}
-          disabled={Boolean(busyAction)}
+          disabled={closed || Boolean(busyAction)}
           onChange={(event) => setComment(event.target.value)}
           placeholder={appointmentText("appointments_interpreter_response_comment_placeholder")}
         />
@@ -1139,6 +1158,9 @@ function AppointmentChecklistSection({
     });
   }, [detail.id]);
   const checklistFormDirty = hasChecklistFormChanges(form);
+  // The server keeps the checklist of a completed or cancelled appointment
+  // as it is: nothing is added or ticked off there.
+  const checklistClosed = isClosedAppointmentStatus(detail.status);
 
   function resetChecklistForm() {
     setForm(blankChecklistForm());
@@ -1255,16 +1277,15 @@ function AppointmentChecklistSection({
       {
         id: "status",
         label: t.users_status,
+        // "Offen" / "Открыто" as a state, not the "open" action verb.
         accessor: (item) =>
-          item.is_completed ? t.common_completed : appointmentText("appointments_open"),
+          item.is_completed ? t.common_completed : t.appointment_task_status_open,
         filterType: "enum",
         filterOptions: (rows) =>
           [
             ...new Set(
               rows.map((item) =>
-                item.is_completed
-                  ? t.common_completed
-                  : appointmentText("appointments_open"),
+                item.is_completed ? t.common_completed : t.appointment_task_status_open,
               ),
             ),
           ].map((label) => ({ value: label, label })),
@@ -1277,7 +1298,7 @@ function AppointmentChecklistSection({
             </span>
           ) : (
             <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-mono text-[10px] font-medium text-amber-700">
-              {appointmentText("appointments_open")}
+              {t.appointment_task_status_open}
             </span>
           ),
       },
@@ -1303,20 +1324,22 @@ function AppointmentChecklistSection({
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
             {appointmentText("appointments_checklist")}
           </span>
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 shrink-0 rounded-lg gap-1.5"
-            onClick={() => setSheetOpen(true)}
-          >
-            <Plus className="size-3.5" />
-            {appointmentText("appointments_add_checklist_item")}
-          </Button>
+          {checklistClosed ? null : (
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 shrink-0 rounded-lg gap-1.5"
+              onClick={() => setSheetOpen(true)}
+            >
+              <Plus className="size-3.5" />
+              {appointmentText("appointments_add_checklist_item")}
+            </Button>
+          )}
           <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
         </>
       }
       rowActions={(item) =>
-        item.is_completed ? null : (
+        item.is_completed || checklistClosed ? null : (
           <Button
             variant="outline"
             size="xs"

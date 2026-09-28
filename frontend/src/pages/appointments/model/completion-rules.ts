@@ -14,6 +14,14 @@ export const APPOINTMENT_REPORTED_FUTURE_DATE_CODE = "appointment_reported_futur
 export const APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE = "appointment_report_status_not_open";
 
 /**
+ * Completed and cancelled appointments are closed: the server refuses to
+ * reschedule them, to assign an interpreter or to change their checklist.
+ */
+export function isClosedAppointmentStatus(status: string | null | undefined): boolean {
+  return status === "completed" || status === "cancelled";
+}
+
+/**
  * Interpreter reports (submit and approve) open once the coordinator has
  * confirmed the appointment; planned or cancelled appointments take none.
  */
