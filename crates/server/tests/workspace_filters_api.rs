@@ -9786,7 +9786,7 @@ async fn appointments_list_supports_owner_filter() {
 }
 
 #[tokio::test]
-async fn teamlead_can_create_appointment_for_assigned_interpreter_owner() {
+async fn teamlead_books_an_interpreter_but_keeps_the_ownership() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -9802,26 +9802,38 @@ async fn teamlead_can_create_appointment_for_assigned_interpreter_owner() {
     seed_patient_assignment(&pool, patient_id, interpreter_id, admin_id).await;
 
     let teamlead_bearer = auth_header_for(teamlead_id, "teamlead_interpreter");
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        "/api/v1/appointments",
-        &teamlead_bearer,
-        Some(json!({
-            "patient_id": patient_id,
-            "provider_id": provider_id,
-            "doctor_id": doctor_id,
-            "owner_user_id": interpreter_id,
-            "interpreter_id": interpreter_id,
-            "appointment_type": "medical",
-            "title": "Interpreter-covered consultation",
-            "date": "2026-05-07",
-            "time_start": "13:00",
-            "time_end": "14:00"
-        })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
+    let create = |owner_user_id: Option<Uuid>| {
+        let app = app.clone();
+        let bearer = teamlead_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                "/api/v1/appointments",
+                &bearer,
+                Some(json!({
+                    "patient_id": patient_id,
+                    "provider_id": provider_id,
+                    "doctor_id": doctor_id,
+                    "owner_user_id": owner_user_id,
+                    "interpreter_id": interpreter_id,
+                    "appointment_type": "medical",
+                    "title": "Interpreter-covered consultation",
+                    "date": "2026-05-07",
+                    "time_start": "13:00",
+                    "time_end": "14:00"
+                })),
+            )
+            .await
+        }
+    };
+
+    // An interpreter cannot work on (edit) an appointment, so it cannot own one.
+    let (status, body) = create(Some(interpreter_id)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, body) = create(None).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
     let appointment_id = body["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(
@@ -9833,7 +9845,7 @@ async fn teamlead_can_create_appointment_for_assigned_interpreter_owner() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["owner_user_id"], interpreter_id.to_string());
+    assert_eq!(body["owner_user_id"], teamlead_id.to_string());
     assert_eq!(body["interpreter_id"], interpreter_id.to_string());
 }
 

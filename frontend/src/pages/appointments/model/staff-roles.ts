@@ -16,32 +16,36 @@ type StaffLike = {
   role: string;
 };
 
+/**
+ * Whether a role can own (curate) an appointment (mirrors the server): the
+ * owner must be able to open the appointment and work on it, i.e. hold
+ * `appointments.view` and `appointments.edit` (CEO, patient manager,
+ * interpreter team lead, concierge; each opens the appointments it owns).
+ * IT administration, billing, interpreters and the CEO assistant cannot.
+ */
+export function isAppointmentOwnerRole(role: string) {
+  return (
+    hasCapability(role, "appointments.view") &&
+    hasCapability(role, "appointments.edit")
+  );
+}
+
 export function canSelectAppointmentOwner(
   currentUserRole: string | undefined,
   currentUserId: string | undefined,
   target: StaffLike,
 ) {
+  if (!isAppointmentOwnerRole(target.role)) return false;
   switch (currentUserRole) {
     case "ceo":
     case "patient_manager":
-      return [
-        "ceo",
-        "patient_manager",
-        "teamlead_interpreter",
-        "interpreter",
-        "concierge",
-        "it_admin",
-      ].includes(target.role);
+      return true;
     case "teamlead_interpreter":
       return (
-        target.id === currentUserId ||
-        target.role === "interpreter" ||
-        target.role === "teamlead_interpreter"
+        target.id === currentUserId || target.role === "teamlead_interpreter"
       );
     case "concierge":
       return target.id === currentUserId && target.role === "concierge";
-    case "it_admin":
-      return target.id === currentUserId && target.role === "it_admin";
     default:
       return false;
   }

@@ -1260,10 +1260,7 @@ async fn convert_appointment_request(
                 }
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
-                );
+                return err(StatusCode::UNPROCESSABLE_ENTITY, APPOINTMENT_OWNER_REFUSED);
             }
             Err(resp) => return resp,
         }
@@ -2349,10 +2346,7 @@ async fn create_appointment(
                 Some(owner_role)
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
-                );
+                return err(StatusCode::UNPROCESSABLE_ENTITY, APPOINTMENT_OWNER_REFUSED);
             }
             Err(resp) => return resp,
         }
@@ -4582,10 +4576,7 @@ async fn update_appointment(
                 }
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "owner_user_id must reference an active CEO/PM/teamlead/interpreter/concierge/IT admin",
-                );
+                return err(StatusCode::UNPROCESSABLE_ENTITY, APPOINTMENT_OWNER_REFUSED);
             }
             Err(resp) => return resp,
         }
@@ -9734,23 +9725,27 @@ async fn load_active_interpreter_role(
     }
 }
 
+/// Whether a role can own (curate) an appointment. The owner must be able to
+/// open the appointment and work on it: `appointments.view` and
+/// `appointments.edit`, with the appointments it owns inside its change scope
+/// (CEO, patient manager, interpreter team lead, concierge). IT
+/// administration, billing, interpreters and the CEO assistant cannot.
+fn is_appointment_owner_role(role: Role) -> bool {
+    let scope = access::AppointmentScope::for_role(role).for_change();
+    role.can(Capability::AppointmentsView)
+        && role.can(Capability::AppointmentsEdit)
+        && (scope.all || scope.as_owner)
+}
+
+const APPOINTMENT_OWNER_REFUSED: &str = "owner_user_id must reference an active user who can open and work on appointments (CEO, patient manager, interpreter team lead or concierge)";
+
+/// The role of an active user who can own an appointment, if the user can.
 async fn load_active_appointment_owner_role(
     state: &AppState,
     user_id: Uuid,
 ) -> Result<Option<String>, axum::response::Response> {
-    sqlx::query_scalar::<_, String>(
-        r#"SELECT role
-           FROM users
-           WHERE id = $1
-             AND is_active = true
-             AND role IN (
-                'ceo',
-                'patient_manager',
-                'teamlead_interpreter',
-                'interpreter',
-                'concierge',
-                'it_admin'
-             )"#,
+    let role = sqlx::query_scalar::<_, String>(
+        "SELECT role FROM users WHERE id = $1 AND is_active = true",
     )
     .bind(user_id)
     .fetch_optional(&state.db)
@@ -9761,7 +9756,10 @@ async fn load_active_appointment_owner_role(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to validate owner",
         )
-    })
+    })?;
+    Ok(role.filter(|role| {
+        crate::auth::middleware::parse_role(role).is_some_and(is_appointment_owner_role)
+    }))
 }
 
 #[allow(clippy::result_large_err)]
@@ -9772,15 +9770,15 @@ fn validate_owner_assignment_rules(
 ) -> Result<(), axum::response::Response> {
     match auth.role {
         Role::Ceo | Role::PatientManager => Ok(()),
+        // Interpreters cannot own appointments (see `is_appointment_owner_role`),
+        // so the team lead hands ownership only to itself or another team lead.
         Role::TeamleadInterpreter => {
-            if owner_user_id == auth.user_id
-                || matches!(owner_role, "interpreter" | "teamlead_interpreter")
-            {
+            if owner_user_id == auth.user_id || owner_role == "teamlead_interpreter" {
                 Ok(())
             } else {
                 Err(err(
                     StatusCode::FORBIDDEN,
-                    "Teamlead can only assign ownership to self or interpreters",
+                    "Teamlead can only assign ownership to self or another interpreter team lead",
                 ))
             }
         }
@@ -10850,6 +10848,28 @@ mod tests {
             after_start,
         );
         assert_eq!(reminder_at.to_rfc3339(), "2026-10-14T17:30:00+00:00");
+    }
+
+    #[test]
+    fn only_roles_that_open_and_work_on_appointments_can_own_them() {
+        for role in [
+            Role::Ceo,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Concierge,
+        ] {
+            assert!(is_appointment_owner_role(role), "{role:?}");
+        }
+        for role in [
+            Role::ItAdmin,
+            Role::Billing,
+            Role::Interpreter,
+            Role::CeoAssistant,
+            Role::Sales,
+            Role::Patient,
+        ] {
+            assert!(!is_appointment_owner_role(role), "{role:?}");
+        }
     }
 
     #[test]
