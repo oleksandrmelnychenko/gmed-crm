@@ -3140,7 +3140,7 @@ function useContractsPageContent() {
                         <Field label={t.users_status}>
                           <NativeComboboxSelect
                             value={quoteStatusForm.status}
-                            disabled={quoteSuperseded}
+                            disabled={quoteSuperseded || !permissions.canManageQuote}
                             onChange={(event) =>
                               setQuoteStatusForm((current) => ({
                                 ...current,
@@ -3179,7 +3179,7 @@ function useContractsPageContent() {
                           <textarea
                             className={textareaClassName}
                             value={quoteStatusForm.notes}
-                            readOnly={quoteSuperseded}
+                            readOnly={quoteSuperseded || !permissions.canManageQuote}
                             onChange={(event) =>
                               setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
                             }

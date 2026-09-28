@@ -243,6 +243,15 @@ describe("lead errors", () => {
     expect(leadErrorMessage(conflict, de)).toContain("bereits in einen Patienten umgewandelt");
   });
 
+  it("sends a patient-first lead to the intake wizard instead of asking for a reload", () => {
+    const conflict = Object.assign(
+      new Error("Patient-first lead requires a prospect patient before conversion"),
+      { status: 409 },
+    );
+    expect(leadErrorMessage(conflict, ru)).toContain("«Обработать»");
+    expect(leadErrorMessage(conflict, ru)).not.toContain("Обновите страницу");
+  });
+
   it("translates known backend messages in both interface languages", () => {
     expect(leadErrorMessage(new Error("Case intake is incomplete"), ru)).toBe(
       "Заполните причину обращения и анамнез",

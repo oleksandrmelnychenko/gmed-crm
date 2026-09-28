@@ -7887,7 +7887,8 @@ function useOrdersPageContent() {
                                       {t.orders_external_invoice_paid}
                                     </div>
                                     <div className="mt-1 text-sm font-semibold text-foreground">
-                                      {formatDateTimeLabel(invoice.paid_at)}
+                                      {/* A supplier payment has a payment day only (stored at 12:00 UTC); a time would be invented. */}
+                                      {formatDateOnlyLabel(invoice.paid_at)}
                                     </div>
                                   </div>
                                 </div>
@@ -8790,6 +8791,10 @@ function useOrdersPageContent() {
                                   ? l("orders_stammdaten_vollstandig")
                                   : check.key === "compliance"
                                     ? l("orders_compliance_dokumente_gultig")
+                                    : check.key === "confidentiality_release"
+                                      ? lang === "de"
+                                        ? "Schweigepflichtsentbindung unterschrieben"
+                                        : "Освобождение от врачебной тайны подписано"
                                     : check.key === "identity"
                                       ? l("orders_identitat_verifiziert")
                                       : check.key === "document_pack"
