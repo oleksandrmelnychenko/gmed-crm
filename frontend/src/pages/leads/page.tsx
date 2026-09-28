@@ -108,6 +108,8 @@ import {
   blankFailedLeadResolutionForm,
   blankLeadForm,
   buildLeadsPath,
+  complianceOptionSelectable,
+  complianceSignedWithoutDocument,
   complianceStatusLabel,
   computeLeadConversionGate,
   dashOrValue,
@@ -1724,6 +1726,11 @@ function useLeadsPageContent() {
                     <StatusBadge tone={complianceTone(detail.compliance_status)}>
                       {`${t.lead_compliance_status}: ${complianceStatusLabel(detail.compliance_status, t)}`}
                     </StatusBadge>
+                    {complianceSignedWithoutDocument(detail) ? (
+                      <StatusBadge tone="warning">
+                        {t.lead_compliance_signed_without_document}
+                      </StatusBadge>
+                    ) : null}
                     {detail.failed_outcome.status !== "none" ? (
                       <StatusBadge tone={failedOutcomeTone(detail.failed_outcome.status)}>
                         {failedOutcomeLabel(detail.failed_outcome.status, t)}
@@ -2282,11 +2289,23 @@ function useLeadsPageContent() {
                             className={selectClassName}
                           >
                             {COMPLIANCE_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
+                              <option
+                                key={option}
+                                value={option}
+                                disabled={!complianceOptionSelectable(option, detail.compliance_status)}
+                              >
                                 {complianceStatusLabel(option, t)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {t.lead_compliance_signed_by_signature_hint}
+                          </p>
+                          {complianceSignedWithoutDocument(detail) ? (
+                            <p className="mt-1 text-xs text-amber-700">
+                              {t.lead_compliance_signed_without_document}
+                            </p>
+                          ) : null}
                         </LeadField>
                         <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
                           <Input

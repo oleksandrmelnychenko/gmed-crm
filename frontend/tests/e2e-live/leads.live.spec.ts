@@ -183,7 +183,7 @@ async function saveLeadGateData(
   await expect(async () => {
     await fillLeadGateDate(sheet, dateOfBirth);
     await selectLeadGateOption(page, sheet, /Rechtliches Geschlecht|Legal sex/i, /Weiblich|female/i);
-    await selectLeadGateOption(page, sheet, /Compliance-Status|Compliance status/i, /Unterzeichnet|signed/i);
+    // Compliance is "signed" from the seeded DSGVO signature; staff cannot choose it.
     for (const consent of [
       /Medizinische Einwilligung liegt vor|Healthcare consent available/i,
       /Datenschutzpraxis akzeptiert|Privacy practices accepted/i,
@@ -216,7 +216,6 @@ async function saveLeadGateData(
     expect(payload).toMatchObject({
       date_of_birth: dateOfBirth,
       legal_sex: "female",
-      compliance_status: "signed",
       consent_healthcare: true,
       consent_privacy_practices: true,
     });

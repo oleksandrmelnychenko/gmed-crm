@@ -450,7 +450,6 @@ async function onboardNewPatient(
     primary_language: "de",
     date_of_birth: "1984-03-14",
     legal_sex: "female",
-    compliance_status: "signed",
     consent_healthcare: true,
     consent_privacy_practices: true,
     street_address: "Teststr. 5",
@@ -459,6 +458,8 @@ async function onboardNewPatient(
     primary_concern_text: "Kardiologische Abklaerung (synthetisch)",
     requested_specialties: ["cardiology"],
   });
+  // Only the signed DSGVO document sets the lead's compliance to signed.
+  await uploadComplianceEvidence(pm, leadId, "privacy_consents", "dsgvo");
   await pm.ok("POST", `/leads/${leadId}/qualify`, { status: "qualified" });
 
   const prospect = await pm.ok("POST", `/leads/${leadId}/prospect`, {
@@ -468,7 +469,6 @@ async function onboardNewPatient(
   expect(prospect.patient_id, JSON.stringify(prospect)).toBeTruthy();
 
   await uploadComplianceEvidence(pm, leadId, "identity", "identity");
-  await uploadComplianceEvidence(pm, leadId, "privacy_consents", "dsgvo");
   await uploadComplianceEvidence(pm, leadId, "confidentiality_release", "confidentiality_release");
 
   const contract = await pm.ok("POST", "/framework-contracts", {
@@ -715,7 +715,6 @@ async function completeRepeatIntake(
   await pm.ok("POST", `/leads/${input.leadId}/update`, {
     primary_concern_text: "Kontrolluntersuchung (synthetisch)",
     requested_specialties: ["cardiology"],
-    compliance_status: "signed",
     consent_healthcare: true,
     consent_privacy_practices: true,
   });

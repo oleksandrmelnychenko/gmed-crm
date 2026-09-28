@@ -289,6 +289,8 @@ export interface OperationsTranslations {
   lead_compliance_documents_sent: string;
   lead_compliance_signed: string;
   lead_compliance_rejected: string;
+  lead_compliance_signed_by_signature_hint: string;
+  lead_compliance_signed_without_document: string;
   lead_failed_outcome: string;
   lead_failed_outcome_none: string;
   lead_failed_outcome_archived: string;
@@ -894,6 +896,8 @@ export const operationsRu: OperationsTranslations = {
   lead_compliance_documents_sent: "Документы отправлены",
   lead_compliance_signed: "Подписано",
   lead_compliance_rejected: "Отклонено",
+  lead_compliance_signed_by_signature_hint: "«Подписано» ставится автоматически, когда документ DSGVO отмечен подписанным.",
+  lead_compliance_signed_without_document: "Подписано вручную: подписанного документа DSGVO нет",
   lead_failed_outcome: "Исход неуспешного лида",
   lead_failed_outcome_none: "Нет",
   lead_failed_outcome_archived: "В архиве",
@@ -1530,6 +1534,8 @@ export const operationsDe: OperationsTranslations = {
   lead_compliance_documents_sent: "Dokumente gesendet",
   lead_compliance_signed: "Unterzeichnet",
   lead_compliance_rejected: "Abgelehnt",
+  lead_compliance_signed_by_signature_hint: "„Unterzeichnet“ wird automatisch gesetzt, sobald das DSGVO-Dokument als unterschrieben markiert ist.",
+  lead_compliance_signed_without_document: "Manuell als unterzeichnet markiert: kein unterschriebenes DSGVO-Dokument",
   lead_failed_outcome: "Ergebnis des nicht erfolgreichen Leads",
   lead_failed_outcome_none: "Keines",
   lead_failed_outcome_archived: "Archiviert",

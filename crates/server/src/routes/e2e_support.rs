@@ -1023,7 +1023,9 @@ async fn seed_complete_lead_onboarding(
                ) || jsonb_build_object(
                    'selected_specialization_work_type_ids', jsonb_build_array($3::text)
                ),
-               compliance_status = CASE WHEN $2 THEN 'signed' ELSE compliance_status END,
+               -- The fixture files a signed DSGVO document below, and only that
+               -- signature sets compliance to signed (staff cannot choose it).
+               compliance_status = 'signed',
                consent_healthcare = CASE WHEN $2 THEN true ELSE consent_healthcare END,
                consent_privacy_practices = CASE WHEN $2 THEN true ELSE consent_privacy_practices END
            WHERE id = $1"#,
