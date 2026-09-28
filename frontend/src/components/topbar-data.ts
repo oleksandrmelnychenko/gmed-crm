@@ -303,6 +303,19 @@ export interface ActiveAnnouncement {
   title: string;
   message: string;
   variant: string;
+  /** False for an error announcement: it stays visible while it is active. */
+  dismissible?: boolean;
+}
+
+/**
+ * Whether the user may hide an announcement. An error announcement cannot be
+ * dismissed while it is active (announcements.rs `is_dismissible`, owner
+ * decision 2026-09-28); older servers do not send the flag.
+ */
+export function isAnnouncementDismissible(
+  announcement: Pick<ActiveAnnouncement, "variant" | "dismissible">,
+): boolean {
+  return announcement.dismissible ?? announcement.variant !== "error";
 }
 
 export interface ChatMessage {

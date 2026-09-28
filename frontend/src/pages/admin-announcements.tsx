@@ -50,6 +50,7 @@ interface Announcement {
   title: string;
   message: string;
   variant: string;
+  audience: AnnouncementAudience;
   is_active: boolean;
   starts_at: string;
   ends_at: string | null;
@@ -58,6 +59,25 @@ interface Announcement {
 }
 
 type AdminAnnouncementsTranslations = ReturnType<typeof useLang>["t"];
+
+/** Who sees an announcement (announcements.rs `audiences_for`). */
+export type AnnouncementAudience = "all" | "staff" | "patients";
+
+export const ANNOUNCEMENT_AUDIENCES: readonly AnnouncementAudience[] = ["all", "staff", "patients"];
+
+export function announcementAudienceLabel(
+  audience: string | null | undefined,
+  uiText: Record<string, string>,
+): string {
+  switch (audience) {
+    case "staff":
+      return uiText.announcements_audience_staff ?? "staff";
+    case "patients":
+      return uiText.announcements_audience_patients ?? "patients";
+    default:
+      return uiText.announcements_audience_all ?? "all";
+  }
+}
 
 const VARIANT_COLORS: Record<string, string> = {
   info: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
@@ -111,6 +131,7 @@ type AdminAnnouncementsState = {
   fTitle: string;
   fMsg: string;
   fVariant: string;
+  fAudience: AnnouncementAudience;
   fEnds: string;
   minAnnouncementEndsAt: string;
 };
@@ -149,9 +170,11 @@ type AdminAnnouncementCreateSheetProps = {
   fMsg: string;
   fTitle: string;
   fVariant: string;
+  fAudience: AnnouncementAudience;
   minAnnouncementEndsAt: string;
   showCreate: boolean;
   t: AdminAnnouncementsTranslations;
+  onAudienceChange: (value: AnnouncementAudience) => void;
   onCreate: (event: FormEvent) => void;
   onEndsChange: (value: string) => void;
   onMessageChange: (value: string) => void;
@@ -167,9 +190,11 @@ function AdminAnnouncementCreateSheet({
   fMsg,
   fTitle,
   fVariant,
+  fAudience,
   minAnnouncementEndsAt,
   showCreate,
   t,
+  onAudienceChange,
   onCreate,
   onEndsChange,
   onMessageChange,
@@ -216,7 +241,32 @@ function AdminAnnouncementCreateSheet({
                       <option value="success">{t.ann_success}</option>
                     </NativeComboboxSelect>
                 </Field>
+                <Field label={t.uiText.announcements_audience ?? "audience"} htmlFor="announcement-audience">
+                  <NativeComboboxSelect
+                    value={fAudience}
+                    onChange={(event) =>
+                      onAudienceChange(
+                        (ANNOUNCEMENT_AUDIENCES as readonly string[]).includes(event.target.value)
+                          ? (event.target.value as AnnouncementAudience)
+                          : "all",
+                      )
+                    }
+                    id="announcement-audience"
+                    className="!h-9 w-full rounded-lg bg-field"
+                  >
+                    {ANNOUNCEMENT_AUDIENCES.map((audience) => (
+                      <option key={audience} value={audience}>
+                        {announcementAudienceLabel(audience, t.uiText)}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </Field>
               </div>
+              {fVariant === "error" ? (
+                <p className="text-xs text-muted-foreground">
+                  {t.uiText.announcements_error_not_dismissible}
+                </p>
+              ) : null}
               <Field label={`${t.ann_message} *`} htmlFor="announcement-message">
                 <Input
                   id="announcement-message"
@@ -336,6 +386,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
       fTitle: "",
       fMsg: "",
       fVariant: "info",
+      fAudience: "all",
       fEnds: "",
       minAnnouncementEndsAt: toDateTimeLocalInput(new Date()),
     }),
@@ -350,6 +401,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
     fTitle,
     fMsg,
     fVariant,
+    fAudience,
     fEnds,
     minAnnouncementEndsAt,
   } = announcementState;
@@ -389,6 +441,8 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
     setAnnouncementField("fVariant", value);
   const setFEnds = (value: SetStateAction<string>) =>
     setAnnouncementField("fEnds", value);
+  const setFAudience = (value: SetStateAction<AnnouncementAudience>) =>
+    setAnnouncementField("fAudience", value);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -429,6 +483,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
         title: fTitle,
         message: fMsg,
         variant: fVariant,
+        audience: fAudience,
         is_active: true,
         starts_at: null,
         ends_at: normalizedEndsAt || null,
@@ -438,6 +493,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
       setFMsg("");
       setFEnds("");
       setFVariant("info");
+      setFAudience("all");
       void load();
     } catch (submitError) {
       setCreateError(
@@ -502,6 +558,18 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
         >
           {variantLabel(announcement.variant)}
         </Badge>
+      ),
+    },
+    {
+      id: "audience",
+      label: t.uiText.announcements_audience ?? "audience",
+      accessor: (announcement) => announcement.audience,
+      sortable: true,
+      width: 150,
+      render: (announcement) => (
+        <span className="text-xs text-foreground">
+          {announcementAudienceLabel(announcement.audience, t.uiText)}
+        </span>
       ),
     },
     {
@@ -592,6 +660,7 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
     t.common_delete,
     t.field_name,
     t.providers_inactive,
+    t.uiText,
     t.users_actions,
     t.users_status,
     variantLabel,
@@ -606,11 +675,13 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
     fMsg,
     fTitle,
     fVariant,
+    fAudience,
     items,
     loading,
     minAnnouncementEndsAt,
     onCreate,
     refresh: load,
+    setFAudience,
     setFEnds,
     setFMsg,
     setFTitle,
@@ -631,11 +702,13 @@ export function AdminAnnouncementsPage() {
     fMsg,
     fTitle,
     fVariant,
+    fAudience,
     items,
     loading,
     minAnnouncementEndsAt,
     onCreate,
     refresh,
+    setFAudience,
     setFEnds,
     setFMsg,
     setFTitle,
@@ -678,9 +751,11 @@ export function AdminAnnouncementsPage() {
         fMsg={fMsg}
         fTitle={fTitle}
         fVariant={fVariant}
+        fAudience={fAudience}
         minAnnouncementEndsAt={minAnnouncementEndsAt}
         showCreate={showCreate}
         t={t}
+        onAudienceChange={setFAudience}
         onCreate={onCreate}
         onEndsChange={setFEnds}
         onMessageChange={setFMsg}
