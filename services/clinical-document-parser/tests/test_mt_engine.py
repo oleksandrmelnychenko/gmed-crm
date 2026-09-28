@@ -436,3 +436,212 @@ def test_german_rewrites_and_phrase_terms():
     assert backend.calls[0][3] == ["Sie fühle sich sehr schwach.", "Appetit XQ1 vermindert.", "Stuhlgang XQ1."]
     result = engine(FakeBackend()).translate("• Ambulant erworbene Pneumonie (J15.9)\nKein Pflegegrad.", "de", "ru", [])
     assert result.text == "• Внебольничная пневмония (J15.9)\nСтепень ухода (Pflegegrad) не установлена."
+
+
+# -- CTranslate2 decode guard ----------------------------------------------
+
+from app.mt_engine import CTranslate2Backend, DecodeGuard  # noqa: E402
+
+
+def test_decode_guard_defaults_and_length_cap():
+    guard = DecodeGuard()
+    assert guard.max_decoding_length(10) == 25
+    assert guard.max_decoding_length(1000) == 512
+    # n-gram blocking is off on the first decode (it corrupts "mmol/l" lists and dosing schemes)
+    assert guard.options([["a"] * 4, ["b"] * 20]) == {
+        "disable_unk": True, "no_repeat_ngram_size": 0, "max_decoding_length": 40,
+    }
+    assert guard.options([["a"] * 4], block_repeats=True)["no_repeat_ngram_size"] == 3
+    assert DecodeGuard(repeat_mode="always").options([["a"]])["no_repeat_ngram_size"] == 3
+    assert DecodeGuard(repeat_mode="off").options([["a"]], block_repeats=True)["no_repeat_ngram_size"] == 0
+
+
+def test_decode_guard_detects_runaway_output():
+    guard = DecodeGuard()
+    sentence = "▁Na ▁140 ▁mmol / l , ▁K ▁4 ▁mmol / l , ▁Cl ▁102 ▁mmol / l .".split()
+    assert not guard.runaway(sentence, 100)
+    assert not guard.runaway("▁1 - 0 - 0".split(), 100)
+    assert guard.runaway("▁a ▁b , ▁x , ▁x , ▁x , ▁x ,".split(), 100)
+    assert guard.runaway(["▁x"] * 4, 100)
+    assert guard.runaway(["▁a", "▁b"], 2)
+
+
+def test_decode_guard_reads_environment(monkeypatch):
+    monkeypatch.setenv("MT_DISABLE_UNK", "0")
+    monkeypatch.setenv("MT_NO_REPEAT_NGRAM", "4")
+    monkeypatch.setenv("MT_NO_REPEAT_MODE", "always")
+    monkeypatch.setenv("MT_MAX_LENGTH_RATIO", "2")
+    monkeypatch.setenv("MT_MAX_LENGTH_EXTRA", "5")
+    monkeypatch.setenv("MT_MAX_DECODING_LENGTH", "30")
+    guard = DecodeGuard.from_env()
+    assert guard == DecodeGuard(False, 4, "always", 2.0, 5, 30)
+    assert guard.max_decoding_length(20) == 30
+    monkeypatch.setenv("MT_NO_REPEAT_NGRAM", "not-a-number")
+    monkeypatch.setenv("MT_NO_REPEAT_MODE", "sometimes")
+    assert DecodeGuard.from_env().no_repeat_ngram_size == 3
+    assert DecodeGuard.from_env().repeat_mode == "loop"
+
+
+class _Tokenizer:
+    """Character-level stand-in for a SentencePiece processor."""
+
+    def __init__(self, unknown=()):
+        self.unknown = set(unknown)
+
+    def unk_id(self):
+        return 0
+
+    def encode(self, text, out_type=int):
+        if out_type is str:
+            return list(text)
+        return [0 if char in self.unknown else ord(char) for char in text]
+
+    def piece_to_id(self, piece):
+        return 0 if piece in self.unknown else 1
+
+    def decode(self, pieces):
+        return "".join(piece if isinstance(piece, str) else chr(piece) for piece in pieces)
+
+
+class _Result:
+    def __init__(self, tokens):
+        self.hypotheses = [tokens]
+
+
+class _Translator:
+    def __init__(self):
+        self.calls = []
+
+    def translate_batch(self, batch, **options):
+        self.calls.append((batch, options))
+        results = []
+        for tokens in batch:
+            tokens = [token for token in tokens if token != "</s>"]
+            if tokens[:4] == list("loop") and not options["no_repeat_ngram_size"]:
+                tokens = tokens + ["x"] * 6  # runaway repetition
+            results.append(_Result(tokens))
+        return results
+
+
+def test_translate_passes_guard_options_and_keeps_order(tmp_path):
+    import threading
+
+    backend = CTranslate2Backend(tmp_path, guard=DecodeGuard())
+    translator = _Translator()
+    backend._get = lambda model: (translator, _Tokenizer(), _Tokenizer(), threading.Lock())
+    texts = ["long sentence here"] + [f"s{i}" for i in range(16)]
+    out = backend.translate("de-zle", texts, None, 4)
+    assert out == texts
+    assert len(translator.calls) == 2
+    short_batch, short_options = translator.calls[0]
+    long_batch, long_options = translator.calls[1]
+    assert short_options["disable_unk"] is True and short_options["no_repeat_ngram_size"] == 0
+    assert short_options["max_decoding_length"] < long_options["max_decoding_length"]
+    assert long_options["max_decoding_length"] == int(1.5 * max(len(tokens) for tokens in long_batch)) + 10
+
+
+def test_only_runaway_outputs_are_redecoded_with_ngram_blocking(tmp_path):
+    import threading
+
+    backend = CTranslate2Backend(tmp_path, guard=DecodeGuard())
+    translator = _Translator()
+    backend._get = lambda model: (translator, _Tokenizer(), _Tokenizer(), threading.Lock())
+    out = backend.translate("zle-de", ["fine", "loop me"], None, 4)
+    assert out == ["fine", "loop me"]
+    assert len(translator.calls) == 2
+    retried_batch, retried_options = translator.calls[1]
+    assert retried_options["no_repeat_ngram_size"] == 3
+    assert ["".join(tokens[:-1]) for tokens in retried_batch] == ["loop me"]
+
+
+def test_symbols_missing_from_model_vocabulary_are_unencodable(tmp_path):
+    import json
+
+    model = tmp_path / "de-zle"
+    model.mkdir()
+    (model / "shared_vocabulary.json").write_text(json.dumps(list("abc,.1") + ["\u2581"]), encoding="utf-8")
+    backend = CTranslate2Backend(tmp_path, guard=DecodeGuard())
+    backend._tokenizers = lambda name: (_Tokenizer(unknown={"®"}), _Tokenizer())
+    # "°" encodes without unk but is not in the model vocabulary; "ґ" is a
+    # letter and must not be masked; "®" is unknown to SentencePiece itself.
+    assert backend.unencodable("de-zle", {"°", "ґ", "®", ",", "a", "1"}) == {"°", "®"}
+
+
+# -- per-language model routing (MT_MODEL_ROUTES / MT_EXTRA_MODEL_DIR) -------
+
+from app.mt_engine import parse_model_routes  # noqa: E402
+
+
+def test_model_routes_parse_valid_entries_and_skip_invalid_ones():
+    routes = parse_model_routes(
+        " de>uk:de-zle-opus_ft_clean_0_3, uk>de:zle-de-opus_ft_clean_0_3 ,ru>de:zle-de-opus_ft_clean_0_3,"
+        "ru>uk:pivot-model,de>de:x,xx>de:y,de>ru:../escape,de>en:,garbage"
+    )
+    assert routes == {
+        ("de", "uk"): "de-zle-opus_ft_clean_0_3",
+        ("uk", "de"): "zle-de-opus_ft_clean_0_3",
+        ("ru", "de"): "zle-de-opus_ft_clean_0_3",
+    }
+    assert parse_model_routes(None) == {} and parse_model_routes("") == {}
+
+
+def test_without_routes_every_pair_uses_the_baseline_model(monkeypatch):
+    monkeypatch.delenv("MT_MODEL_ROUTES", raising=False)
+    eng = engine()
+    assert eng.routes == {}
+    for source, target in (("de", "uk"), ("de", "ru"), ("uk", "de"), ("ru", "de"), ("ru", "uk")):
+        assert eng.hops(source, target) == route(source, target)
+
+
+def test_routes_from_environment_override_only_the_configured_pairs(monkeypatch):
+    monkeypatch.setenv("MT_MODEL_ROUTES", "de>uk:de-zle-ft,uk>de:zle-de-ft,ru>de:zle-de-ft")
+    backend = FakeBackend()
+    eng = engine(backend)
+    assert eng.hops("de", "uk") == [Hop("de-zle-ft", ">>ukr<<")]
+    assert eng.hops("de", "ru") == [Hop("de-zle", ">>rus<<")]
+    assert eng.hops("uk", "de") == [Hop("zle-de-ft")]
+    assert eng.hops("ru", "de") == [Hop("zle-de-ft")]
+    eng.translate("Guten Tag.", "de", "uk")
+    eng.translate("Guten Tag.", "de", "ru")
+    assert [call[:2] for call in backend.calls] == [("de-zle-ft", ">>ukr<<"), ("de-zle", ">>rus<<")]
+
+
+def test_missing_routed_model_falls_back_to_baseline_with_one_warning(caplog):
+    backend = FakeBackend(missing={"de-zle-ft"})
+    eng = MTEngine(backend, Glossary.load(DEFAULT_GLOSSARY_PATH), routes={("de", "uk"): "de-zle-ft"})
+    with caplog.at_level("WARNING", logger="app.mt_engine"):
+        eng.translate("Guten Tag.", "de", "uk")
+        eng.translate("Guten Abend.", "de", "uk")
+    assert {call[0] for call in backend.calls} == {"de-zle"}
+    warnings = [r for r in caplog.records if "unavailable" in r.getMessage()]
+    assert len(warnings) == 1 and "de-zle-ft" in warnings[0].getMessage()
+    assert "Guten" not in caplog.text  # never log medical text
+
+
+def _model_dir(root, name):
+    directory = root / name
+    directory.mkdir(parents=True)
+    for file in ("model.bin", "source.spm", "target.spm"):
+        (directory / file).write_bytes(b"x")
+    return directory
+
+
+def test_extra_model_dir_serves_only_names_missing_from_the_main_dir(tmp_path):
+    main, extra = tmp_path / "main", tmp_path / "extra"
+    _model_dir(main, "de-zle")
+    _model_dir(extra, "de-zle")  # must never shadow the baseline
+    ft = _model_dir(extra, "de-zle-ft")
+    backend = CTranslate2Backend(main, extra_model_dir=extra, guard=DecodeGuard())
+    assert backend.directory("de-zle") == main / "de-zle"
+    assert backend.directory("de-zle-ft") == ft and backend.available("de-zle-ft")
+    assert not backend.available("zle-de-ft")
+    assert not CTranslate2Backend(main, guard=DecodeGuard()).available("de-zle-ft")
+
+
+def test_extra_model_dir_from_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("MT_EXTRA_MODEL_DIR", str(tmp_path / "extra"))
+    ft = _model_dir(tmp_path / "extra", "zle-de-ft")
+    backend = CTranslate2Backend(tmp_path / "main", guard=DecodeGuard())
+    assert backend.directory("zle-de-ft") == ft
+    monkeypatch.delenv("MT_EXTRA_MODEL_DIR")
+    assert CTranslate2Backend(tmp_path / "main", guard=DecodeGuard()).extra_model_dir is None

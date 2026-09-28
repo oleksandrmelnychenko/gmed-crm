@@ -1,0 +1,25 @@
+# DEV-only: fine-tuned OPUS-MT packages next to the baseline models baked into
+# the image (/app/mt-models, untouched). Picked up by scripts/deploy-dev-current.sh
+# when present in the release tree; PROD never uses this file.
+#
+# The host folder holds CTranslate2 int8 packages (one sub-directory per model,
+# each with model.bin, source.spm, target.spm, shared_vocabulary.json) and is
+# mounted read-only. MT_MODEL_ROUTES sends only the listed pairs to them; every
+# other pair (notably de>ru) keeps its baseline model, and a routed package
+# that is missing falls back to the baseline with a warning.
+#
+# Roll back without removing the packages: set GMED_MT_MODEL_ROUTES= (empty) in
+# /home/gmed/gmed-crm/release.env and recreate machine-translation.
+
+services:
+  machine-translation:
+    environment:
+      MT_EXTRA_MODEL_DIR: /app/mt-models-ft
+      MT_MODEL_ROUTES: "${GMED_MT_MODEL_ROUTES-de>uk:de-zle-opus_ft_clean_0_3,uk>de:zle-de-opus_ft_clean_0_3,ru>de:zle-de-opus_ft_clean_0_3}"
+    volumes:
+      - type: bind
+        source: "${GMED_MT_FT_MODEL_DIR:-/home/gmed/mt-models-ft}"
+        target: /app/mt-models-ft
+        read_only: true
+        bind:
+          create_host_path: false
