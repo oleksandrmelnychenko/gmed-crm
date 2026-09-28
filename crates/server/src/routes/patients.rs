@@ -1553,6 +1553,11 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
         for contact in contacts {
             validate_patient_contact_payload(contact)?;
         }
+    } else {
+        // Without a contact list the legacy fields become the contacts.
+        validate_optional_patient_phone(req.phone_primary.as_deref())?;
+        validate_optional_patient_phone(req.phone_secondary.as_deref())?;
+        validate_optional_patient_email(req.email.as_deref())?;
     }
     if let Some(relations) = req.patient_relations.as_ref() {
         for relation in relations {
@@ -1569,7 +1574,8 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
 }
 
 fn validate_patient_contact_payload(contact: &PatientContactRequest) -> Result<(), &'static str> {
-    match contact.contact_kind.trim() {
+    let kind = contact.contact_kind.trim();
+    match kind {
         "phone" | "email" => {}
         _ => return Err("Invalid contact kind"),
     }
@@ -1583,7 +1589,117 @@ fn validate_patient_contact_payload(contact: &PatientContactRequest) -> Result<(
     if contact.notes.as_deref().unwrap_or("").trim().len() > 1000 {
         return Err("Contact notes max 1000");
     }
-    Ok(())
+    // An empty value is dropped by normalize_patient_contacts.
+    if kind == "email" {
+        validate_optional_patient_email(Some(&contact.value))
+    } else {
+        validate_optional_patient_phone(Some(&contact.value))
+    }
+}
+
+/// An e-mail address as the lead wizard accepts it (`^[^\s@]+@[^\s@]+\.[^\s@]+$`
+/// in `frontend/src/lib/contact-validation.ts`): one "@" with text before it,
+/// a domain with a dot that has text on both sides, no spaces.
+pub(crate) fn is_valid_contact_email(value: &str) -> bool {
+    let value = value.trim();
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && !domain.contains('@')
+        && !value.chars().any(char::is_whitespace)
+        && domain
+            .char_indices()
+            .any(|(index, character)| character == '.' && index > 0 && index + 1 < domain.len())
+}
+
+/// A phone number as the lead wizard accepts it: at least six digits, the
+/// same bar the lead identity check uses to compare phone numbers.
+pub(crate) fn is_valid_contact_phone(value: &str) -> bool {
+    value.chars().filter(char::is_ascii_digit).count() >= 6
+}
+
+fn validate_optional_patient_email(value: Option<&str>) -> Result<(), &'static str> {
+    match value.map(str::trim) {
+        Some(email) if !email.is_empty() && !is_valid_contact_email(email) => {
+            Err("Enter a valid email address")
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_optional_patient_phone(value: Option<&str>) -> Result<(), &'static str> {
+    match value.map(str::trim) {
+        Some(phone) if !phone.is_empty() && !is_valid_contact_phone(phone) => {
+            Err("Enter a valid phone number")
+        }
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod patient_contact_validation_tests {
+    use super::{
+        PatientContactRequest, is_valid_contact_email, is_valid_contact_phone,
+        validate_patient_contact_payload,
+    };
+
+    fn contact(kind: &str, value: &str) -> PatientContactRequest {
+        PatientContactRequest {
+            contact_kind: kind.to_string(),
+            contact_type: None,
+            value: value.to_string(),
+            is_primary: None,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn email_follows_the_lead_wizard_rule() {
+        for valid in [
+            "anna@example.com",
+            " anna.muster@klinik.co.uk ",
+            "a@b.c",
+            "a@b.c.",
+        ] {
+            assert!(is_valid_contact_email(valid), "{valid}");
+        }
+        for invalid in [
+            "bad@x",
+            "bad@",
+            "@example.com",
+            "a b@example.com",
+            "a@@b.de",
+            "a@b.",
+            "plain",
+        ] {
+            assert!(!is_valid_contact_email(invalid), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn phone_needs_at_least_six_digits() {
+        assert!(is_valid_contact_phone("+49 (151) 123-456"));
+        assert!(is_valid_contact_phone("0151123456"));
+        assert!(!is_valid_contact_phone("abc"));
+        assert!(!is_valid_contact_phone("+49 12"));
+    }
+
+    #[test]
+    fn contact_values_are_checked_by_kind_and_may_stay_empty() {
+        assert_eq!(
+            validate_patient_contact_payload(&contact("email", "bad@x")),
+            Err("Enter a valid email address")
+        );
+        assert_eq!(
+            validate_patient_contact_payload(&contact("phone", "abc")),
+            Err("Enter a valid phone number")
+        );
+        assert!(validate_patient_contact_payload(&contact("email", "anna@example.com")).is_ok());
+        assert!(validate_patient_contact_payload(&contact("phone", "+49 151 1234567")).is_ok());
+        assert!(validate_patient_contact_payload(&contact("email", "  ")).is_ok());
+        assert!(validate_patient_contact_payload(&contact("phone", "")).is_ok());
+    }
 }
 
 fn normalize_patient_text(value: impl AsRef<str>, max_len: usize) -> Option<String> {
@@ -3237,6 +3353,9 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let phone_primary_supplied = body.phone_primary.is_some();
+    let phone_secondary_supplied = body.phone_secondary.is_some();
+    let email_supplied = body.email.is_some();
     let mut phone_primary = match normalize_patient_text_patch(
         body.phone_primary,
         current.try_get("phone_primary").unwrap_or_default(),
@@ -3261,6 +3380,21 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    // A contact list replaces the legacy fields and was validated above; a
+    // legacy field sent on its own is checked like a contact. Values that are
+    // not sent keep what is stored.
+    if !contacts_patch_supplied {
+        let legacy_checks = [
+            phone_primary_supplied
+                .then(|| validate_optional_patient_phone(phone_primary.as_deref())),
+            phone_secondary_supplied
+                .then(|| validate_optional_patient_phone(phone_secondary.as_deref())),
+            email_supplied.then(|| validate_optional_patient_email(email.as_deref())),
+        ];
+        if let Some(Err(message)) = legacy_checks.into_iter().flatten().find(Result::is_err) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+        }
+    }
     let normalized_contacts = contacts_patch.map(|contacts| {
         let contacts = normalize_patient_contacts(
             Some(contacts),

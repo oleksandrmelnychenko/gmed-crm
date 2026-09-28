@@ -3171,6 +3171,99 @@ async fn patient_passport_round_trips_and_flags_expiry() {
 }
 
 #[tokio::test]
+async fn patient_profile_rejects_invalid_email_and_phone_like_the_lead_wizard() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("contact-validation");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
+    let update_path = format!("/api/v1/patients/{patient_id}/update");
+
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &ceo_bearer,
+        Some(json!({
+            "contacts": [
+                { "contact_kind": "phone", "value": "+49 151 1234567", "is_primary": true },
+                { "contact_kind": "email", "value": "anna@example.com", "is_primary": true },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    // The profile editor sends the contact list; the legacy fields alone are
+    // checked the same way.
+    for (payload, message) in [
+        (
+            json!({ "contacts": [{ "contact_kind": "email", "value": "bad@x" }] }),
+            "Enter a valid email address",
+        ),
+        (
+            json!({ "contacts": [{ "contact_kind": "phone", "value": "abc" }] }),
+            "Enter a valid phone number",
+        ),
+        (json!({ "email": "bad@x" }), "Enter a valid email address"),
+        (
+            json!({ "phone_primary": "abc" }),
+            "Enter a valid phone number",
+        ),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &update_path,
+            &ceo_bearer,
+            Some(payload.clone()),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{payload}: {body}"
+        );
+        assert_eq!(body["message"], message, "{payload}: {body}");
+    }
+
+    let (phone, email): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT phone_primary, email FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(phone.as_deref(), Some("+49 151 1234567"));
+    assert_eq!(email.as_deref(), Some("anna@example.com"));
+
+    // Optional contacts may stay empty.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &ceo_bearer,
+        Some(json!({
+            "contacts": [
+                { "contact_kind": "phone", "value": "+49 151 1234567", "is_primary": true },
+                { "contact_kind": "email", "value": "" },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let email: Option<String> = sqlx::query_scalar("SELECT email FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(email, None);
+}
+
+#[tokio::test]
 async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
