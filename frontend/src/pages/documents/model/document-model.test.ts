@@ -13,7 +13,11 @@ import {
   emptyGenerateForm,
   emptyUploadForm,
   formatBusinessDocumentNumber,
+  intakeOpenAction,
+  intakeReviewNeedsClassification,
   patientDocumentAddresseeLabel,
+  reviewEditForm,
+  withDocumentCategory,
 } from "./document-model";
 import type { DocumentItem, DocumentTemplate, GenerateFormState, PatientOption } from "./types";
 
@@ -712,5 +716,66 @@ describe("document operational metadata forms", () => {
       ursprung: "manual_intake",
       sourcePerson: "",
     });
+  });
+});
+
+describe("document intake review", () => {
+  const categories = [
+    { key: "administrative", is_medical: false },
+    { key: "medical_arztbrief", is_medical: true },
+  ];
+
+  it("marks a document medical when a medical category is chosen", () => {
+    const form = { ...emptyUploadForm(), isMedical: false, accessCategory: "internal" as const };
+    expect(withDocumentCategory(form, "medical_arztbrief", categories)).toMatchObject({
+      category: "medical_arztbrief",
+      isMedical: true,
+      accessCategory: "medical",
+    });
+    expect(withDocumentCategory(form, "administrative", categories)).toMatchObject({
+      category: "administrative",
+      isMedical: false,
+      accessCategory: "internal",
+    });
+  });
+
+  it("never clears the medical flag by picking another category", () => {
+    const medical = { ...emptyUploadForm(), isMedical: true, accessCategory: "medical" as const };
+    expect(withDocumentCategory(medical, "administrative", categories)).toMatchObject({
+      category: "administrative",
+      isMedical: true,
+      accessCategory: "medical",
+    });
+  });
+
+  it("asks for a specific document type and a category like the server", () => {
+    expect(intakeReviewNeedsClassification("uploaded_document", "medical_arztbrief")).toBe(true);
+    expect(intakeReviewNeedsClassification("medical_report", "")).toBe(true);
+    expect(intakeReviewNeedsClassification("medical_report", "portal_upload")).toBe(true);
+    expect(intakeReviewNeedsClassification("medical_report", "medical_arztbrief")).toBe(false);
+  });
+
+  it("reopens the same intake document without dropping its loaded detail", () => {
+    expect(intakeOpenAction("", null, "doc-1")).toBe("select");
+    expect(intakeOpenAction("doc-2", "doc-2", "doc-1")).toBe("select");
+    // Closed and reopened: restart the review from the loaded document.
+    expect(intakeOpenAction("doc-1", "doc-1", "doc-1")).toBe("reset-form");
+    // Reopened before it loaded (or after a failed load): load it again.
+    expect(intakeOpenAction("doc-1", null, "doc-1")).toBe("reload");
+  });
+
+  it("starts the review of a manual intake upload as active", () => {
+    const upload = {
+      id: "d1",
+      auto_name: "scan.pdf",
+      art: "uploaded_document",
+      category: null,
+      status: "draft",
+      visibility: "internal",
+      is_medical: false,
+      ursprung: "manual_intake",
+    } as unknown as DocumentItem;
+    expect(reviewEditForm(upload).status).toBe("active");
+    expect(reviewEditForm({ ...upload, ursprung: "upload" }).status).toBe("draft");
   });
 });

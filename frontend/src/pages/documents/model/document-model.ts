@@ -1,5 +1,6 @@
 import type {
   AppointmentOption,
+  CategoryOption,
   DocumentAccessCategory,
   DocumentItem,
   DocumentStatus,
@@ -1087,6 +1088,79 @@ export function detailToEditForm(detail: DocumentItem): EditFormState {
     paymentMethod: detail.payment_method ?? "",
     notes: detail.notes ?? "",
   };
+}
+
+/**
+ * The edit form of a document under review. A manual intake upload is
+ * activated by saving its review, so the form starts on "active".
+ */
+export function reviewEditForm(detail: DocumentItem): EditFormState {
+  const form = detailToEditForm(detail);
+  if (detail.ursprung === "manual_intake") form.status = "active";
+  return form;
+}
+
+/**
+ * What opening an intake document for review has to do. The detail loader
+ * runs when the selected id changes, so reopening the same document after the
+ * review was closed must not clear the loaded detail: it restarts the review
+ * from it, or loads it again when it never arrived.
+ */
+export function intakeOpenAction(
+  selectedId: string,
+  loadedDetailId: string | null | undefined,
+  id: string,
+): "select" | "reset-form" | "reload" {
+  if (id !== selectedId) return "select";
+  return loadedDetailId === id ? "reset-form" : "reload";
+}
+
+/**
+ * Document types that say nothing about the content ("uploaded document",
+ * portal upload kinds). The server refuses to finish an intake review with
+ * one of them or without a category (`document_needs_categorization`).
+ */
+const UNSPECIFIC_DOCUMENT_ARTS = new Set([
+  "",
+  "document",
+  "uploaded_document",
+  "patient_general_upload",
+  "patient_medical_upload",
+  "patient_admin_upload",
+]);
+
+export function isUnspecificDocumentArt(art: string | null | undefined): boolean {
+  return UNSPECIFIC_DOCUMENT_ARTS.has((art ?? "").trim().toLowerCase());
+}
+
+/** Whether an intake review still lacks a specific document type or a category. */
+export function intakeReviewNeedsClassification(
+  art: string | null | undefined,
+  category: string | null | undefined,
+): boolean {
+  const normalizedCategory = (category ?? "").trim().toLowerCase();
+  return (
+    !normalizedCategory ||
+    normalizedCategory === "portal_upload" ||
+    isUnspecificDocumentArt(art)
+  );
+}
+
+/**
+ * Picks a document category. A category of medical documents (doctor letter,
+ * findings, radiology …) marks the document as medical data, so roles without
+ * medical access (concierge, …) do not see it; the flag can still be cleared
+ * by hand. Choosing another category never clears it.
+ */
+export function withDocumentCategory<T extends EditFormState | UploadFormState>(
+  form: T,
+  categoryKey: string,
+  categories: ReadonlyArray<Pick<CategoryOption, "key" | "is_medical">>,
+): T {
+  const medical = Boolean(categories.find((category) => category.key === categoryKey)?.is_medical);
+  if (!medical || form.isMedical) return { ...form, category: categoryKey };
+  const accessCategory: DocumentAccessCategory = "medical";
+  return { ...form, category: categoryKey, isMedical: true, accessCategory };
 }
 
 /** The translation request queue is readable by every document viewer (read-only for some). */

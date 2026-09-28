@@ -169,12 +169,16 @@ import {
   emptyUploadForm,
   formatConfidenceLabel,
   formatBusinessDocumentNumber,
+  intakeOpenAction,
+  intakeReviewNeedsClassification,
   normalizeTemplateLanguage,
   patientDocumentAddresseeLabel,
   patientOptionLabel,
   resolveGeneratedDocumentAccessCategory,
   resolveTemplateLanguage,
+  reviewEditForm,
   templateForDocument,
+  withDocumentCategory,
 } from "./model/document-model";
 import {
   reconcileTranslationWorkspaceDraftAfterSave,
@@ -957,6 +961,10 @@ function StaffDocumentsPage({
     visibilityHeader: l("documents_visibility_header"),
   };
   const metaText = {
+    intakeSpecificType:
+      lang === "ru"
+        ? "Выберите конкретный тип документа и категорию, чтобы завершить разбор."
+        : "Wählen Sie einen konkreten Dokumenttyp und eine Kategorie, um die Prüfung abzuschließen.",
     operationalMetadata:
       lang === "ru" ? "Операционные данные" : "Operative Daten",
     direction: lang === "ru" ? "Направление" : "Richtung",
@@ -1153,6 +1161,8 @@ function StaffDocumentsPage({
   );
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [detail, setDetail] = useState<DocumentItem | null>(null);
+  // Loads the selected document again when it is reopened before it loaded.
+  const [detailReloadNonce, setDetailReloadNonce] = useState(0);
   const [detailVersions, setDetailVersions] = useState<DocumentItem[]>([]);
   const [translationRequests, setTranslationRequests] = useState<
     TranslationRequest[]
@@ -1796,11 +1806,7 @@ function StaffDocumentsPage({
         setDetailVersions(versionResponse);
         setTranslationRequests(translationResponse);
         setTextExtraction(extractionResponse);
-        const nextEditForm = detailToEditForm(documentResponse);
-        if (documentResponse.ursprung === "manual_intake") {
-          nextEditForm.status = "active";
-        }
-        setEditForm(nextEditForm);
+        setEditForm(reviewEditForm(documentResponse));
         setShares(shareResponse);
       } catch (nextError) {
         if (!active) return;
@@ -1824,7 +1830,13 @@ function StaffDocumentsPage({
     return () => {
       active = false;
     };
-  }, [activeDocumentDetailId, canViewShares, canView, documentsFailedLoadDocumentText]);
+  }, [
+    activeDocumentDetailId,
+    canViewShares,
+    canView,
+    documentsFailedLoadDocumentText,
+    detailReloadNonce,
+  ]);
 
   useEffect(() => {
     if (!uploadOpen || !uploadForm.patientId) {
@@ -2022,9 +2034,16 @@ function StaffDocumentsPage({
       return;
     }
     setSaveError("");
-    setDetail(null);
-    setEditForm(null);
-    setSelectedId(id);
+    const action = intakeOpenAction(selectedId, detail?.id, id);
+    if (action === "reset-form" && detail) {
+      setEditForm(reviewEditForm(detail));
+    } else if (action === "reload") {
+      setDetailReloadNonce((value) => value + 1);
+    } else {
+      setDetail(null);
+      setEditForm(null);
+      setSelectedId(id);
+    }
     setMetadataEditOpen(true);
   }
 
@@ -4907,12 +4926,12 @@ function StaffDocumentsPage({
                     <Field label={t.documents_category}>
                       <NativeComboboxSelect
                         value={uploadForm.category}
-                        onChange={(event) =>
-                          setUploadForm((current) => ({
-                            ...current,
-                            category: event.target.value,
-                          }))
-                        }
+                        onChange={(event) => {
+                          const categoryKey = event.target.value;
+                          setUploadForm((current) =>
+                            withDocumentCategory(current, categoryKey, categories),
+                          );
+                        }}
                         className={selectClassName}
                       >
                         <option value="">{t.documents_no_category}</option>
@@ -5537,7 +5556,8 @@ function StaffDocumentsPage({
                         !editForm.autoName.trim() ||
                         !editForm.art.trim() ||
                         (detail?.ursprung === "manual_intake" &&
-                          (!editForm.patientId || !editForm.category))
+                          (!editForm.patientId ||
+                            intakeReviewNeedsClassification(editForm.art, editForm.category)))
                       }
                       onCancel={() => setMetadataEditOpen(false)}
                     />
@@ -5682,17 +5702,22 @@ function StaffDocumentsPage({
                           </option>
                         ))}
                     </NativeComboboxSelect>
+                    {detail?.ursprung === "manual_intake" &&
+                    intakeReviewNeedsClassification(editForm.art, editForm.category) ? (
+                      <p className="mt-1 text-xs text-amber-700">{metaText.intakeSpecificType}</p>
+                    ) : null}
                   </Field>
                   <Field label={t.documents_category}>
                     <NativeComboboxSelect
                       value={editForm.category}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const categoryKey = event.target.value;
                         setEditForm((current) =>
                           current
-                            ? { ...current, category: event.target.value }
+                            ? withDocumentCategory(current, categoryKey, categories)
                             : current,
-                        )
-                      }
+                        );
+                      }}
                       className={selectClassName}
                     >
                       <option value="">{t.documents_no_category}</option>
@@ -7517,13 +7542,14 @@ function StaffDocumentsPage({
                         <Field label={t.documents_classification_category}>
                           <NativeComboboxSelect
                             value={editForm.category}
-                            onChange={(event) =>
+                            onChange={(event) => {
+                              const categoryKey = event.target.value;
                               setEditForm((current) =>
                                 current
-                                  ? { ...current, category: event.target.value }
+                                  ? withDocumentCategory(current, categoryKey, categories)
                                   : current,
-                              )
-                            }
+                              );
+                            }}
                             className={selectClassName}
                           >
                             <option value="">{t.documents_choose_category}</option>
