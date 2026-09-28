@@ -11,10 +11,10 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { apiFetch, clearApiCache } from "@/lib/api";
 import {
-  appDateTimeFormat,
   appWallClock,
   appWallClockToInstant,
   berlinLocalInputToIso,
+  formatAppDateTime,
   isoToBerlinLocalInput,
   parseBerlinLocalInput,
 } from "@/lib/app-time-zone";
@@ -280,13 +280,8 @@ function toIso(value: string) {
   return berlinLocalInputToIso(value);
 }
 
-function commentDateTime(value: string, lang: Lang) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+function commentDateTime(value: string) {
+  return formatAppDateTime(value) || "—";
 }
 
 /**
@@ -818,7 +813,7 @@ export function ConciergeTaskEventDialog({
                             <article key={entry.id} className="px-3 py-2.5">
                               <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
                                 <strong className="truncate text-foreground">{entry.created_by_name}</strong>
-                                <time className="shrink-0">{commentDateTime(entry.created_at, lang)}</time>
+                                <time className="shrink-0">{commentDateTime(entry.created_at)}</time>
                               </div>
                               <p className="mt-1.5 whitespace-pre-wrap text-sm text-foreground">{entry.body}</p>
                             </article>

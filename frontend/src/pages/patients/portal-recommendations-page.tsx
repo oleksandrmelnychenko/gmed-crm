@@ -23,7 +23,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKeyOf, appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
@@ -1103,13 +1103,7 @@ function formatDateInput(value?: string | null) {
 
 function formatStaffDate(value?: string | null) {
   if (!value) return "";
-  const parsed = dateOrInstant(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return appDateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-  }).format(parsed);
+  return formatAppDate(value) || value;
 }
 
 function ActionButton({

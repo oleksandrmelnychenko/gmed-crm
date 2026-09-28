@@ -16,7 +16,7 @@ import {
   Banner as ShellBanner,
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
-import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -132,8 +132,8 @@ function formatMoney(value: string | null | undefined, currency: string, _locale
   return formatMoneyAmount(value ?? 0, currency);
 }
 
-function formatDate(value: string, locale: string) {
-  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
+function formatDate(value: string) {
+  return formatAppDate(value) || value;
 }
 
 const paymentFieldClassName = "grid min-w-0 gap-1.5 text-xs font-medium text-muted-foreground";
@@ -445,7 +445,7 @@ export function ProviderSettlementDialog({
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge variant={isReversal ? "outline" : "secondary"} className="whitespace-normal text-[10px]">{isReversal ? text.reversalOperation : text.paymentOperation}</Badge>
-                              <span className="text-xs text-muted-foreground">{formatDate(item.paid_on, locale)}</span>
+                              <span className="text-xs text-muted-foreground">{formatDate(item.paid_on)}</span>
                             </div>
                           </div>
                           <p className={cn("shrink-0 whitespace-nowrap font-mono text-sm font-semibold tabular-nums", isReversal ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{isReversal ? "+" : "−"} {formatMoney(item.amount_gross, item.currency, locale)}</p>

@@ -20,7 +20,7 @@ import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { appDateKey, appDateKeyOf, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, appDateKeyOf, appDateTimeFormat, dateOrInstant, formatAppDate, formatAppDateTime, formatAppTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -193,25 +193,18 @@ const copy = {
   },
 } as const;
 
-function dateTime(value: string | null, lang: Lang, fallback = "—") {
+function dateTime(value: string | null, fallback = "—") {
   if (!value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return formatAppDateTime(value) || value;
 }
 
+/** The weekday and "DD.MM.YYYY" of a day ("Montag, 28.09.2026"). */
 function dayHeading(value: string, lang: Lang) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  }).format(date);
+  const day = formatAppDate(value);
+  if (!day) return value;
+  const weekday = appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { weekday: "long" })
+    .format(dateOrInstant(value));
+  return `${weekday}, ${day}`;
 }
 
 function localDateInputValue(value: Date) {
@@ -353,7 +346,7 @@ export function ConciergeTaskQueue({
                 </h3>
                 {task.note ? <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.note}</p> : null}
                 <div className="mt-3 space-y-1.5 border-t border-border/60 pt-3 text-xs text-muted-foreground">
-                  <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{labels.due}: {dateTime(scheduledAt, lang)}</p>
+                  <p className="flex items-center gap-1.5"><Clock3 className="size-3.5" />{labels.due}: {dateTime(scheduledAt)}</p>
                   {task.location ? <p className="flex items-center gap-1.5"><MapPin className="size-3.5" />{task.location}</p> : null}
                   <p className="truncate border-t border-border/60 pt-1.5">{labels.assignedBy}: <span className="font-medium text-foreground">{task.assigned_by_name}</span></p>
                 </div>
@@ -440,7 +433,7 @@ export function ConciergeAgendaView({
                   }}
                 >
                   <div className="font-mono text-xs text-muted-foreground">
-                    {dateTime(item.date, lang).split(", ").at(-1)}
+                    {formatAppTime(item.date) || "—"}
                   </div>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -649,7 +642,7 @@ export function ConciergeMapView({
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <time className="font-mono text-[11px] text-muted-foreground" dateTime={stop.scheduledAt}>
-                          {appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { hour: "2-digit", minute: "2-digit" }).format(new Date(stop.scheduledAt))}
+                          {formatAppTime(stop.scheduledAt)}
                         </time>
                         <Badge variant="outline" className="rounded-full text-[10px]">{labels[stop.kind]}</Badge>
                       </div>

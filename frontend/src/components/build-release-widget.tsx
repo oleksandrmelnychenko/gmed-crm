@@ -2,32 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, X } from "lucide-react";
 
-import { appDateTimeFormat, appWallClock } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import {
   CURRENT_CUSTOMER_RELEASE,
   localizeReleaseText,
 } from "@/lib/release-notes";
 
-function releaseDateLabel(value: string, lang: "ru" | "de") {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function compactBuildTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const pad = (part: number) => String(part).padStart(2, "0");
-  const { year, month, day, hour, minute } = appWallClock(date);
-  return `${pad(day)}.${pad(month)}.${String(year).slice(-2)} ${pad(hour)}:${pad(minute)}`;
+function buildTimeLabel(value: string) {
+  return formatAppDateTime(value) || value;
 }
 
 export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
@@ -113,7 +96,7 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
         <span>{channelLabel}</span>
         <span aria-hidden="true" className="text-[#566b62]">·</span>
         <span className="hidden uppercase md:inline">{text.button}</span>
-        <span className="tracking-normal">{compactBuildTime(release.builtAt)}</span>
+        <span className="tracking-normal">{buildTimeLabel(release.builtAt)}</span>
       </button>
 
       {open ? createPortal(
@@ -148,7 +131,7 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
             <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
               <span className="font-mono text-foreground">Build {release.build}</span>
               <span aria-hidden="true" className="size-1 rounded-full bg-border" />
-              <span>{text.date}: {releaseDateLabel(release.builtAt, lang)}</span>
+              <span>{text.date}: {buildTimeLabel(release.builtAt)}</span>
             </div>
           </div>
 

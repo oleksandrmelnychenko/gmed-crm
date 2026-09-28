@@ -2,6 +2,7 @@ import {
   appDateTimeFormat,
   berlinLocalInputToIso,
   dateOrInstant,
+  formatAppDate,
 } from "@/lib/app-time-zone";
 import {
   formatUiText,
@@ -238,23 +239,11 @@ const EXTERNAL_HANDOFF_PREFIX = "External handoff:";
 const BILLING_HANDOFF_PREFIX = "Billing handoff:";
 const FINDINGS_CHECKLIST_PREFIX = "[Findings]";
 const INCOMING_DATA_CHECKLIST_PREFIX = "[Incoming data]";
-const INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS = {
-  de: appDateTimeFormat("de-DE", {
-    weekday: "long",
-    day: "2-digit",
-    month: "short",
-  }),
-  default: appDateTimeFormat("ru-RU", {
-    weekday: "long",
-    day: "2-digit",
-    month: "short",
-  }),
-} as const;
-
 function buildSlotLabel(detail: TimelineDetail) {
+  const date = formatAppDate(detail.date) || detail.date;
   return detail.time_start
-    ? `${detail.date} ${detail.time_start}${detail.time_end ? `-${detail.time_end}` : ""}`
-    : detail.date;
+    ? `${date} ${detail.time_start}${detail.time_end ? `-${detail.time_end}` : ""}`
+    : date;
 }
 
 function kindFromTitle(title: string): AppointmentTimelineKind {
@@ -362,15 +351,13 @@ function formatInterpreterMobileAgendaDateLabel(
   todayLabel = translateCatalog(getLang()).dash_patients_today,
 ) {
   if (date === todayDate) return todayLabel;
-  try {
-    const formatter =
-      getLang() === "de"
-        ? INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS.de
-        : INTERPRETER_MOBILE_AGENDA_DATE_FORMATTERS.default;
-    return formatter.format(dateOrInstant(date));
-  } catch {
-    return date;
-  }
+  const day = formatAppDate(date);
+  if (!day) return date;
+  // The weekday and "DD.MM.YYYY" ("Montag, 28.09.2026").
+  const weekday = appDateTimeFormat(getLang() === "de" ? "de-DE" : "ru-RU", {
+    weekday: "long",
+  }).format(dateOrInstant(date));
+  return `${weekday}, ${day}`;
 }
 
 export function shouldUseInterpreterMobileAgenda(

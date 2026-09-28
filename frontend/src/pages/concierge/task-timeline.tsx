@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateTimeFormat, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
@@ -28,7 +28,7 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
   const rows = useMemo(() => orderedTaskHierarchy(tasks), [tasks]);
   const labels = copy[lang];
   const locale = lang === "ru" ? "ru-RU" : "de-DE";
-  const format = (date: Date | null) => date ? appDateTimeFormat(locale, { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date) : "—";
+  const format = (date: Date | null) => date ? formatAppDateTime(date) : "—";
   return (
     <section className="min-w-0 rounded-xl border bg-card shadow-sm" aria-label={lang === "ru" ? "Таймлайн задач" : "Aufgabenzeitplan"}>
       <div className="flex flex-wrap items-center justify-between gap-2 border-b p-3">
@@ -37,7 +37,7 @@ export function TaskTimeline({ tasks, lang, now, onOpen, onStatusChange, availab
           <Button size="sm" variant="outline" onClick={() => setFocus(now)}>{labels.today}</Button>
           <Button size="icon-sm" variant="ghost" aria-label={labels.next} onClick={() => setFocus(addTaskCalendarDays(focus, 7))}><ChevronRight /></Button>
         </div>
-        <span className="text-sm font-medium">{appDateTimeFormat(locale, { dateStyle: "medium" }).formatRange(days[0], days[6])}</span>
+        <span className="text-sm font-medium">{`${formatAppDate(days[0])} – ${formatAppDate(days[6])}`}</span>
       </div>
       <div className="overflow-x-auto">
         <div className="min-w-[980px]">

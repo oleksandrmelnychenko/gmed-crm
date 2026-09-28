@@ -16,7 +16,7 @@ import { StaffLink } from "@/components/staff-link";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
-import { formatDateKey } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
@@ -34,7 +34,6 @@ import type { OrderSectionKey } from "../sections";
 type OrderPipelinePanelProps = {
   orderId: string;
   lang: string;
-  locale: string;
   reloadNonce: number;
   appointmentsHref: string;
   providersHref: string;
@@ -127,7 +126,6 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
 export function OrderPipelinePanel({
   orderId,
   lang,
-  locale,
   reloadNonce,
   appointmentsHref,
   providersHref,
@@ -173,7 +171,7 @@ export function OrderPipelinePanel({
     </Button>
   );
   const formatDate = (value: string) =>
-    formatDateKey(value, locale, { day: "2-digit", month: "2-digit", year: "numeric" }) || value;
+    formatAppDate(value) || value;
   const medical = pipeline.medical;
 
   return (

@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
@@ -23,9 +23,8 @@ export function localizedNotificationCopy(
   if (item.kind === "order_payment_status") {
     try {
       const data = JSON.parse(item.body ?? "{}");
-      const due = data.due_at ? new Date(data.due_at) : null;
-      const deadline = due && Number.isFinite(due.getTime())
-        ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" }).format(due)}` : "";
+      const due = data.due_at ? formatAppDateTime(data.due_at) : "";
+      const deadline = due ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${due}` : "";
       return {
         title: `${data.order_number ?? ""} · ${paymentStatusLabel(data.payment_status ?? "awaiting_payment", lang)}`,
         body: `${lang === "de" ? "Erhalten" : "Получено"}: ${formatMoneyAmount(data.received_amount, data.currency)} · ${lang === "de" ? "Offen" : "Остаток"}: ${formatMoneyAmount(data.remaining_amount, data.currency)}${deadline}`,
@@ -155,10 +154,8 @@ function conciergeServiceRequestNotificationCopy(
   const patient = data?.patient_label ?? item.title.replace(/^Patient service request:\s*/, "");
   const title = `${lang === "de" ? "Serviceanfrage des Patienten" : "Запрос услуги от пациента"}: ${patient}`;
   if (!data) return { title, body: item.body };
-  const start = data.starts_at ? new Date(data.starts_at) : null;
-  const slot = start && Number.isFinite(start.getTime())
-    ? appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(start)
-    : lang === "de" ? "ohne Wunschtermin" : "без желаемого времени";
+  const slot = (data.starts_at ? formatAppDateTime(data.starts_at) : "")
+    || (lang === "de" ? "ohne Wunschtermin" : "без желаемого времени");
   const kind = SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
   return { title, body: [kind, data.title, slot].filter(Boolean).join(" · ") };
 }
@@ -208,7 +205,7 @@ function interpreterWorkNotificationCopy(
     data = {};
   }
   const locale = lang === "de" ? "de-DE" : "ru-RU";
-  const date = formatDateKey(data.appointment_date, locale, { year: "numeric", month: "2-digit", day: "2-digit" });
+  const date = data.appointment_date ? formatAppDate(data.appointment_date) : "";
   const when = [
     date || null,
     data.time_start,

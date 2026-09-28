@@ -33,7 +33,7 @@ import {
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
 import { ApiRequestError } from "@/lib/api";
-import { appDateTimeFormat, appWallClock } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,14 +83,8 @@ type ChatConnectionStatus = "connecting" | "connected" | "reconnecting" | "offli
 
 const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as const;
 
-function formatChatDay(iso: string, lang: "de" | "ru") {
-  const value = new Date(iso);
-  if (Number.isNaN(value.getTime())) return iso.slice(0, 10);
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "numeric",
-    month: "long",
-    year: appWallClock(value).year === appWallClock().year ? undefined : "numeric",
-  }).format(value);
+function formatChatDay(iso: string) {
+  return formatAppDate(iso) || iso.slice(0, 10);
 }
 
 function formatMessageExpiry(iso: string, lang: "de" | "ru", now: number) {
@@ -1823,7 +1817,7 @@ function useChatPageContent() {
                         className="my-4 flex items-center gap-3 text-[10px] text-muted-foreground"
                       >
                         <span className="h-px flex-1 bg-border" />
-                        <span>{formatChatDay(m.created_at, lang)}</span>
+                        <span>{formatChatDay(m.created_at)}</span>
                         <span className="h-px flex-1 bg-border" />
                       </div>
                     ) : null}

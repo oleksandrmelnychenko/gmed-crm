@@ -46,13 +46,15 @@ it("formats both date-only values and timestamps as a date", () => {
   expect(formatDate(null, "de-DE", "—")).toBe("—");
 });
 
-it("formats dates and timestamps on their Berlin day", () => {
-  expect(formatDate("2026-09-27", "de-DE")).toBe("27. Sept. 2026");
+it("formats dates and timestamps as DD.MM.YYYY on their Berlin day in every language", () => {
+  expect(formatDate("2026-09-27", "de-DE")).toBe("27.09.2026");
+  expect(formatDate("2026-09-27", "ru-RU")).toBe("27.09.2026");
   // 23:30 in Berlin, already 28 Sep in Kyiv.
-  expect(formatDate("2026-09-27T21:30:00Z", "de-DE")).toBe("27. Sept. 2026");
+  expect(formatDate("2026-09-27T21:30:00Z", "de-DE")).toBe("27.09.2026");
   // 00:30 in Berlin, still 27 Sep in UTC.
-  expect(formatDate("2026-09-27T22:30:00Z", "de-DE")).toBe("28. Sept. 2026");
-  expect(formatDateTime("2026-09-27T21:30:00Z", "de-DE")).toBe("27. Sept. 2026, 23:30");
+  expect(formatDate("2026-09-27T22:30:00Z", "ru-RU")).toBe("28.09.2026");
+  expect(formatDateTime("2026-09-27T21:30:00Z", "de-DE")).toBe("27.09.2026 23:30");
+  expect(formatDateTime("2026-09-27T21:30:00Z", "ru-RU")).toBe("27.09.2026 23:30");
 });
 
 describe("invoice release and numbering", () => {

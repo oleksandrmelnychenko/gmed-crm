@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { appDateTimeFormat, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import { berlinLocalInputToIso, formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -131,12 +131,7 @@ function optional(value: string) {
 export function bookingServiceOptionLabel(service: ConciergeService, lang: Lang, now = new Date()) {
   const startsAt = service.starts_at ? new Date(service.starts_at) : null;
   const validStartsAt = startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null;
-  const date = validStartsAt
-    ? appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-        dateStyle: "short",
-        timeStyle: "short",
-      }).format(validStartsAt)
-    : "—";
+  const date = validStartsAt ? formatAppDateTime(validStartsAt) : "—";
   const overdue = validStartsAt && validStartsAt < now ? ` · ${copy[lang].overdue}` : "";
   return `${date}${overdue} · #${service.id.slice(0, 8)} · ${conciergeServiceDisplayTitle(service, lang)} · ${service.patient_name}`;
 }

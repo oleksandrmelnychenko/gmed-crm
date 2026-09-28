@@ -3,7 +3,7 @@
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect } from "react";
 
-import { formatDateKey } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -164,8 +164,8 @@ function formatCountMessage(template: string, count: number) {
   return template.replace(/\{count\}/g, String(count));
 }
 
-function formatCatalogDate(value: string, locale: string) {
-  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
+function formatCatalogDate(value: string) {
+  return formatAppDate(value) || value;
 }
 
 export function serviceGroupPriceChoiceLabel(
@@ -181,9 +181,9 @@ export function serviceGroupPriceChoiceLabel(
         currency: choice.currency,
       }).format(numericPrice)
     : `${String(choice.unit_price)} ${choice.currency}`;
-  const period = `${formatCatalogDate(choice.valid_from, locale)} — ${
+  const period = `${formatCatalogDate(choice.valid_from)} — ${
     choice.valid_to
-      ? formatCatalogDate(choice.valid_to, locale)
+      ? formatCatalogDate(choice.valid_to)
       : openEndedLabel
   }`;
   return [

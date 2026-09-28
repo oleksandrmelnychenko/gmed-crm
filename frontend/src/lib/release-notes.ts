@@ -1,4 +1,4 @@
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 type LocalizedText = Record<Lang, string>;
@@ -141,18 +141,13 @@ const RELEASE_NOTES: CustomerReleaseNote[] = [
 export function resolveCustomerRelease(environment: ReleaseEnvironment): CustomerRelease {
   const isDevelopment = environment.mode === "development";
   const builtAt = environment.buildTimestamp?.trim() || "2026-09-05T20:00:00+03:00";
-  const buildDate = new Date(builtAt);
+  const buildDate = formatAppDate(builtAt);
   const title: LocalizedText = isDevelopment
     ? { ru: "Обновления", de: "Aktualisierungen" }
     : { ru: "Релиз", de: "Release" };
-  if (!Number.isNaN(buildDate.getTime())) {
-    const dateOptions: Intl.DateTimeFormatOptions = {
-      day: "numeric", month: "long", year: "numeric",
-    };
-    const ruDate = appDateTimeFormat("ru-RU", dateOptions).format(buildDate).replace(/\s*г\.$/, "");
-    const deDate = appDateTimeFormat("de-DE", dateOptions).format(buildDate);
-    title.ru += `${isDevelopment ? " за" : " от"} ${ruDate}`;
-    title.de += ` vom ${deDate}`;
+  if (buildDate) {
+    title.ru += `${isDevelopment ? " за" : " от"} ${buildDate}`;
+    title.de += ` vom ${buildDate}`;
   }
 
   return {

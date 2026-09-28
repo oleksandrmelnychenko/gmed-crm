@@ -1,4 +1,4 @@
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { appDateTimeFormat, dateOrInstant, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { getLang, t as translateCatalog } from "@/lib/i18n";
 
 function appointmentRuntimeTranslations() {
@@ -9,59 +9,22 @@ export function appointmentRuntimeLocale() {
   return getLang() === "ru" ? "ru-RU" : "de-DE";
 }
 
-const APPOINTMENT_DATE_FORMATTERS = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-} as const;
-
-const APPOINTMENT_DATE_TIME_FORMATTERS = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-} as const;
-
+/** The weekday and "DD.MM.YYYY" of an appointment day ("Mo., 13.04.2026"). */
 export function formatAppointmentDateLabel(date: string) {
-  try {
-    return APPOINTMENT_DATE_FORMATTERS[appointmentRuntimeLocale()].format(
-      dateOrInstant(date),
-    );
-  } catch {
-    return date;
-  }
+  const day = formatAppDate(date);
+  if (!day) return date;
+  const weekday = appDateTimeFormat(appointmentRuntimeLocale(), { weekday: "short" }).format(
+    dateOrInstant(date),
+  );
+  return `${weekday}, ${day}`;
 }
 
+/** "DD.MM.YYYY HH:mm" in Berlin time. */
 export function formatAppointmentDateTimeLabel(
   dateTime: string | null | undefined,
 ) {
   if (!dateTime) return appointmentRuntimeTranslations().common_not_set;
-  try {
-    return APPOINTMENT_DATE_TIME_FORMATTERS[appointmentRuntimeLocale()].format(
-      new Date(dateTime),
-    );
-  } catch {
-    return dateTime;
-  }
+  return formatAppDateTime(dateTime) || dateTime;
 }
 
 export function formatAppointmentSlotLabel(item: {

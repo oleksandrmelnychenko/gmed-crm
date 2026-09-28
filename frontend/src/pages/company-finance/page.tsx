@@ -23,7 +23,7 @@ import {
   PageHeader,
   selectClass as shellSelectClassName,
 } from "@/components/ui-shell";
-import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
@@ -256,9 +256,9 @@ function formatMoney(value: string | null | undefined, currency: string, _locale
   return formatMoneyAmount(parseAmount(value), currency);
 }
 
-function formatDate(value: string | null, locale: string) {
+function formatDate(value: string | null) {
   if (!value) return "—";
-  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
+  return formatAppDate(value) || value;
 }
 
 function SummaryCard({
@@ -541,7 +541,7 @@ function CompanyFinancePageContent() {
     { id: "open_count", label: text.openDocuments, accessor: (row) => row.open_invoice_count, filterType: "number", sortable: true, width: 150 },
     { id: "partial_count", label: text.partialDocuments, accessor: (row) => row.partial_invoice_count, filterType: "number", sortable: true, width: 190 },
     { id: "settled_count", label: text.settledDocuments, accessor: (row) => row.settled_invoice_count, filterType: "number", sortable: true, width: 170 },
-    { id: "latest_payment", label: text.latestPayment, accessor: (row) => row.latest_payment_on, filterType: "date", sortable: true, width: 160, render: (row) => formatDate(row.latest_payment_on, locale) },
+    { id: "latest_payment", label: text.latestPayment, accessor: (row) => row.latest_payment_on, filterType: "date", sortable: true, width: 160, render: (row) => formatDate(row.latest_payment_on) },
     { id: "statement", label: text.providerStatement, accessor: (row) => row.provider_id ?? "", width: 150, render: (row) => row.provider_id ? <Button type="button" size="xs" variant="outline" onClick={(event) => { event.stopPropagation(); setStatementProvider(row); }}>{text.providerStatement}</Button> : "—" },
   ], [locale, money, text]);
 
@@ -646,7 +646,7 @@ function CompanyFinancePageContent() {
     { id: "amount", label: text.originalAmount, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 140, render: (row) => money(row.amount_gross) },
     { id: "company_paid", label: text.companyPaid, accessor: (row) => parseAmount(row.company_paid_gross), filterType: "number", sortable: true, width: 180, render: (row) => <span className="text-emerald-700 dark:text-emerald-400">{money(row.company_paid_gross)}</span> },
     { id: "remaining", label: text.remainingAmount, accessor: (row) => parseAmount(row.remaining_gross), filterType: "number", sortable: true, width: 170, render: (row) => <span className={cn("font-semibold", parseAmount(row.remaining_gross) > 0 ? "text-rose-700 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400")}>{money(row.remaining_gross)}</span> },
-    { id: "due_date", label: text.dueDate, accessor: (row) => row.due_date, filterType: "date", sortable: true, width: 140, render: (row) => formatDate(row.due_date, locale) },
+    { id: "due_date", label: text.dueDate, accessor: (row) => row.due_date, filterType: "date", sortable: true, width: 140, render: (row) => formatDate(row.due_date) },
     { id: "patient", label: text.patient, accessor: (row) => `${row.patient_name} ${row.patient_pid ?? ""}`, filterType: "text", searchable: true, sortable: true, width: 210, render: (row) => row.patient_id ? <StaffLink className="hover:text-primary hover:underline" to={`/patients/${row.patient_id}?tab=invoices`}>{row.patient_name || row.patient_pid || "—"}</StaffLink> : "—" },
     { id: "order", label: text.order, accessor: (row) => row.order_number ?? (row.patient_id ? text.noOrder : ""), filterType: "text", searchable: true, sortable: true, width: 150, render: (row) => row.order_id ? <StaffLink className="hover:text-primary hover:underline" to={`/orders/${row.order_id}`}>{row.order_number || "—"}</StaffLink> : row.patient_id ? <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">{text.noOrder}</Badge> : "—" },
   ], [locale, money, openProviderDocument, openingDocumentId, text]);
@@ -662,7 +662,7 @@ function CompanyFinancePageContent() {
   }, [position?.provider_liabilities]);
 
   const cashColumns = useMemo<ColumnDef<CompanyCashMovement>[]>(() => [
-    { id: "date", label: text.date, accessor: (row) => row.entry_date, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.entry_date, locale) },
+    { id: "date", label: text.date, accessor: (row) => row.entry_date, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.entry_date) },
     {
       id: "operation",
       label: text.operation,

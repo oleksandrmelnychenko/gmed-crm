@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -169,13 +169,8 @@ function formatMoney(value: string, currency: string, lang: Lang) {
   }).format(amount);
 }
 
-function formatDate(value: string, lang: Lang) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+function formatDate(value: string) {
+  return formatAppDateTime(value) || value;
 }
 
 function statusTone(status: ConciergeExpenseItem["status"]) {
@@ -499,7 +494,7 @@ export function ConciergeExpenseReceiptDialog({
                               <div className="flex items-center gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(item.status))}>{labels[item.status]}</Badge><span className="text-xs font-medium">{item.vendor}</span></div>
                               <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency, lang)}</span>
                             </div>
-                            <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient?.display_name || service.patient_name || "—"} · {formatDate(item.submitted_at, lang)}</p>
+                            <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient?.display_name || service.patient_name || "—"} · {formatDate(item.submitted_at)}</p>
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                               <p className="text-[10px] text-muted-foreground">{labels.submittedBy.replace("{name}", item.submitted_by.display_name)}</p>
                               {item.receipt ? (

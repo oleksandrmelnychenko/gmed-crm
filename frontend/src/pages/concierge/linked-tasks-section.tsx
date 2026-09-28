@@ -10,7 +10,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
@@ -144,18 +144,10 @@ function taskStatusLabel(status: string, lang: Lang) {
   return status;
 }
 
-function taskDateLabel(task: ConciergeTask, lang: Lang, fallback: string) {
+function taskDateLabel(task: ConciergeTask, fallback: string) {
   const value = scheduledAt(task);
   if (!value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return fallback;
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  return formatAppDateTime(value) || fallback;
 }
 
 export function LinkedTasksSection({
@@ -373,7 +365,7 @@ export function LinkedTasksSection({
                   title={labels.overdue}
                 >
                   <CalendarClock className="size-3.5 shrink-0" />
-                  {taskDateLabel(task, lang, labels.noDate)}
+                  {taskDateLabel(task, labels.noDate)}
                   <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">
                     {labels.overdue}
                   </Badge>
@@ -381,7 +373,7 @@ export function LinkedTasksSection({
               ) : (
                 <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                   <CalendarClock className="size-3.5 shrink-0" />
-                  {taskDateLabel(task, lang, labels.noDate)}
+                  {taskDateLabel(task, labels.noDate)}
                 </span>
               )}
               <Eye className="hidden size-4 text-muted-foreground group-hover:text-orange-700 md:block" />

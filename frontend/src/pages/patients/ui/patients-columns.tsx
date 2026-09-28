@@ -11,9 +11,8 @@ import { countryNameForDisplay } from "@/components/ui/country-select";
 import {
   appDateKey,
   appDateKeyOf,
-  appDateTimeFormat,
-  dateOrInstant,
   daysBetweenDateKeys,
+  formatAppDate,
 } from "@/lib/app-time-zone";
 import { formatUiText, getLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
@@ -22,19 +21,9 @@ import { cn } from "@/lib/utils";
 import { computeAge, patientDisplayName, type PatientSummary } from "../model/list-model";
 import { nationalityNameForDisplay } from "../model/nationalities";
 
-const SHORT_DATE_FORMATTER = appDateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
-
 function formatShortDate(value?: string | null): string {
   if (!value) return "";
-  try {
-    return SHORT_DATE_FORMATTER.format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
 type PatientColumnTranslations = Record<string, string> & {

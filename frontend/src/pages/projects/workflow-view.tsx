@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { conciergeTaskCode, type ConciergeTask, type ConciergeTaskStatus } from "@/pages/concierge/model";
@@ -223,15 +223,9 @@ type ProjectWorkflowViewProps = {
   onRetry: () => void;
 };
 
-function formatDate(value: string | null, lang: Lang) {
+function formatDate(value: string | null) {
   if (!value) return null;
-  const date = dateOrInstant(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: value.length === 10 ? "numeric" : undefined,
-  }).format(date);
+  return formatAppDate(value) || value;
 }
 
 function statusLabel(status: ConciergeTaskStatus, labels: WorkflowLabels) {
@@ -305,7 +299,7 @@ function WorkflowTaskCard({
         <span className="mt-auto grid gap-1.5 border-t pt-2 text-xs text-muted-foreground">
           <span className="flex min-w-0 items-center gap-1.5"><UserRound className="size-3.5 shrink-0" /><span className="truncate">{task.assigned_to_name}</span></span>
           <span className="flex items-center justify-between gap-2">
-            <span className="flex min-w-0 items-center gap-1.5"><CalendarDays className="size-3.5 shrink-0" /><span className="truncate">{formatDate(task.due_at, lang) ?? labels.noDeadline}</span></span>
+            <span className="flex min-w-0 items-center gap-1.5"><CalendarDays className="size-3.5 shrink-0" /><span className="truncate">{formatDate(task.due_at) ?? labels.noDeadline}</span></span>
             {unresolvedCount ? <span className="flex shrink-0 items-center gap-1 font-medium text-orange-700"><span className="size-1.5 rounded-full bg-orange-500" />{unresolvedCount}</span> : null}
           </span>
         </span>
@@ -650,7 +644,7 @@ export function ProjectWorkflowView({
                 </div>
                 <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   <span className="min-w-0 max-w-full break-words" title={selected.owner_name}><span className="text-foreground">{labels.owner}:</span> {selected.owner_name}</span>
-                  <span><span className="text-foreground">{labels.deadline}:</span> {formatDate(selected.due_on, lang) ?? labels.noDeadline}</span>
+                  <span><span className="text-foreground">{labels.deadline}:</span> {formatDate(selected.due_on) ?? labels.noDeadline}</span>
                 </div>
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={labels.progress} aria-valuemin={0} aria-valuemax={100} aria-valuenow={stats.progress}><div className="h-full rounded-full bg-orange-500 transition-[width]" style={{ width: `${stats.progress}%` }} /></div>
@@ -722,7 +716,7 @@ export function ProjectWorkflowView({
                   </div>
                   <div className="mt-3 grid gap-2 rounded-xl bg-muted/35 p-3 text-xs">
                     <span className="flex min-w-0 items-center gap-2"><UserRound className="size-3.5 shrink-0 text-muted-foreground" /><span className="truncate">{selectedTask.assigned_to_name}</span></span>
-                    <span className="flex items-center gap-2"><CalendarDays className="size-3.5 text-muted-foreground" />{formatDate(selectedTask.due_at, lang) ?? labels.noDeadline}</span>
+                    <span className="flex items-center gap-2"><CalendarDays className="size-3.5 text-muted-foreground" />{formatDate(selectedTask.due_at) ?? labels.noDeadline}</span>
                   </div>
                   <div className="mt-2 grid grid-cols-3 gap-1.5 text-center text-[10px] text-muted-foreground">
                     <div className="rounded-lg border px-1.5 py-2"><strong className="block text-xs text-foreground">{selectedTask.checklist_completed}/{selectedTask.checklist_total}</strong>{labels.checklist}</div>

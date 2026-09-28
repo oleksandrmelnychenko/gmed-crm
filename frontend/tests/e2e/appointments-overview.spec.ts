@@ -247,7 +247,7 @@ test.describe("appointments overview detail", () => {
 
     await expect(summarySection).toContainText("Medizinisch");
     await expect(page.getByText(/Mon,\s*13 Apr 2026/)).toHaveCount(0);
-    await expect(page.getByText(/Mo.*13.*Apr.*2026.*13:00 - 14:00/)).toBeVisible();
+    await expect(page.getByText(/Mo.*13.04.2026.*13:00 - 14:00/)).toBeVisible();
 
     const attentionSection = page
       .locator("section")

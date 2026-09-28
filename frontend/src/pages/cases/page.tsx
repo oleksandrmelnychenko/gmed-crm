@@ -45,7 +45,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
-import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useAuth } from "@/lib/auth";
 import {
@@ -211,16 +211,6 @@ function runtimeTranslations(): Translations {
   return translateCatalog(getLang());
 }
 
-function runtimeLocale() {
-  switch (getLang()) {
-    case "ru":
-      return "ru-RU";
-    case "de":
-      return "de-DE";
-    default:
-      return "en-GB";
-  }
-}
 
 function caseText(key: string) {
   return runtimeTranslations().uiText[key] ?? key;
@@ -251,26 +241,9 @@ function doctorOptionSearchText(doctor: DoctorOption, lang: SpecializationLabelL
     .join(" · ");
 }
 
-const CASE_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }),
-  "en-GB": appDateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }),
-};
-
 function formatDateTime(value: string | null | undefined) {
   if (!value) return runtimeTranslations().common_not_set;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return (CASE_DATE_TIME_FORMATTERS[runtimeLocale()] ?? CASE_DATE_TIME_FORMATTERS["en-GB"]).format(date);
+  return formatAppDateTime(value) || value;
 }
 
 function snippetCategoryLabel(category: string) {

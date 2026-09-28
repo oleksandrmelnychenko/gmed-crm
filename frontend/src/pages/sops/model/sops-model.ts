@@ -1,28 +1,8 @@
-import { appDateTimeFormat } from "@/lib/app-time-zone";
-import {
-  type Lang,
-  type Translations,
-} from "@/lib/i18n";
+import { formatAppDateTime } from "@/lib/app-time-zone";
+import { type Translations } from "@/lib/i18n";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
 import type { SopFormState } from "./types";
-
-const SOP_DATE_TIME_FORMATTERS = {
-  de: appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  ru: appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-} satisfies Record<Lang, Intl.DateTimeFormat>;
 
 export function emptyForm(): SopFormState {
   return {
@@ -48,13 +28,10 @@ export function roleCanReview(actor?: Actor) {
   return hasCapability(actor, "sops.review");
 }
 
-export function formatDate(value: string | null | undefined, lang: Lang, translations: Translations) {
+/** "DD.MM.YYYY HH:mm" Berlin time in every language. */
+export function formatDate(value: string | null | undefined, translations: Translations) {
   if (!value) return translations.sops_date_not_set;
-  try {
-    return SOP_DATE_TIME_FORMATTERS[lang].format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
 export function formDescription(role: string | undefined, translations: Translations) {

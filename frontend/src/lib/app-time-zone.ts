@@ -293,6 +293,58 @@ export function appDayEnd(key: string): Date {
   return appDayStart(addDaysToDateKey(key, 1));
 }
 
+type AppDateValue = string | number | Date | null | undefined;
+
+/** Berlin wall clock of an instant, or only the day of a calendar date; null when unparseable. */
+function appDisplayParts(
+  value: AppDateValue,
+): { year: number; month: number; day: number; hour?: number; minute?: number } | null {
+  if (value === null || value === undefined) return null;
+  let input: number | Date | string = value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    // A calendar date has no time and must never shift to another day.
+    if (DATE_KEY.test(trimmed)) return parseDateKey(trimmed);
+    input = trimmed;
+  }
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) return null;
+  const { year, month, day, hour, minute } = appWallClock(date);
+  return { year, month, day, hour, minute };
+}
+
+/**
+ * The single date format of the UI, in every language: "DD.MM.YYYY". A
+ * calendar date ("YYYY-MM-DD") is shown as it is; an instant on its Berlin
+ * day. "" when the value is empty or unparseable.
+ */
+export function formatAppDate(value: AppDateValue): string {
+  const parts = appDisplayParts(value);
+  return parts ? `${pad(parts.day)}.${pad(parts.month)}.${pad(parts.year, 4)}` : "";
+}
+
+/**
+ * "DD.MM.YYYY HH:mm" in Berlin time. A calendar date has no time and is shown
+ * as "DD.MM.YYYY". "" when the value is empty or unparseable.
+ */
+export function formatAppDateTime(value: AppDateValue): string {
+  const parts = appDisplayParts(value);
+  if (!parts) return "";
+  const date = `${pad(parts.day)}.${pad(parts.month)}.${pad(parts.year, 4)}`;
+  return parts.hour === undefined || parts.minute === undefined
+    ? date
+    : `${date} ${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
+/** "HH:mm" in Berlin time of an instant; "" when empty or unparseable. */
+export function formatAppTime(value: AppDateValue): string {
+  const parts = appDisplayParts(value);
+  return parts?.hour === undefined || parts.minute === undefined
+    ? ""
+    : `${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
 /**
  * Formats a calendar date ("YYYY-MM-DD") without any time-zone shift; ""
  * when the value is not a date key.

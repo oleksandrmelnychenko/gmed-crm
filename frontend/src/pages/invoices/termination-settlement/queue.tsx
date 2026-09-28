@@ -8,7 +8,7 @@ import { StaffLink } from "@/components/staff-link";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Banner, StatusBadge } from "@/components/ui-shell";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { useCan } from "@/lib/permissions";
@@ -70,10 +70,7 @@ export function TerminationSettlementQueue({
 
   if (!canView) return null;
 
-  const dateLabel = (value: string) => {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(date);
-  };
+  const dateLabel = (value: string) => formatAppDate(value) || value;
   const money = (row: TerminationSettlement, value: unknown) => formatMoneyAmount(value, row.currency || "EUR");
 
   const columns: ColumnDef<TerminationSettlement>[] = [

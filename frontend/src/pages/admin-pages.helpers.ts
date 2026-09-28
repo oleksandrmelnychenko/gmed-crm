@@ -1,35 +1,14 @@
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 export function adminLocale(lang: Lang) {
   return lang === "ru" ? "ru-RU" : "de-DE";
 }
 
-const ADMIN_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-};
-
-function adminDateTimeFormatter(lang: Lang) {
-  const locale = adminLocale(lang);
-  return ADMIN_DATE_TIME_FORMATTERS[locale] ?? ADMIN_DATE_TIME_FORMATTERS["de-DE"];
-}
-
-export function formatAdminDateTime(value: string | Date, lang: Lang) {
-  const date = value instanceof Date ? value : new Date(value);
-  return adminDateTimeFormatter(lang).format(date);
+/** "DD.MM.YYYY HH:mm" Berlin time in every language. */
+export function formatAdminDateTime(value: string | Date, _lang: Lang) {
+  void _lang;
+  return formatAppDateTime(value) || String(value);
 }
 
 export function compactNotificationConfig(cfg: Record<string, unknown>): string {

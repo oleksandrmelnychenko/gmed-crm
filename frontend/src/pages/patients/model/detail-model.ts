@@ -1,4 +1,4 @@
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -186,12 +186,6 @@ const PATIENT_OPERATIONAL_TAB_KEYS = new Set([
   "curators",
   "timeline",
 ]);
-
-const PATIENT_LABEL_BIRTH_DATE_FORMATTER = appDateTimeFormat("de-DE", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-});
 
 export const DEFAULT_PATIENT_LABEL_FORMAT_ID: PatientLabelFormatId = "compact-90x48";
 
@@ -634,28 +628,13 @@ function formatPrintValue(value?: string | null, fallback?: string) {
   return normalized ? normalized : fallback ?? translateCatalog(getLang()).common_not_set;
 }
 
-const PATIENT_LABEL_GENERATED_AT_FORMATTER = appDateTimeFormat("de-DE", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 /** When the label was generated, in German time. */
 function formatPatientLabelGeneratedAt(value?: string | null) {
-  const generatedAt = value?.trim() ? new Date(value) : new Date();
-  return Number.isNaN(generatedAt.getTime())
-    ? formatPrintValue(value)
-    : PATIENT_LABEL_GENERATED_AT_FORMATTER.format(generatedAt);
+  return formatAppDateTime(value?.trim() ? value : new Date()) || formatPrintValue(value);
 }
 
 function formatPatientLabelBirthDate(value: string) {
-  try {
-    return PATIENT_LABEL_BIRTH_DATE_FORMATTER.format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
 function resolvePatientLabelFormat(formatId: string): PatientLabelFormat {

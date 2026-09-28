@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import { apiFetch } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -344,12 +344,7 @@ export function RoleDashboardPage({ role, preview = false }: { role: string; pre
   const formatTaskDate = (task: ConciergeTask) => {
     const date = conciergeTaskScheduledAt(task);
     if (!date) return copy.noDue;
-    return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
+    return formatAppDateTime(date) || copy.noDue;
   };
 
   return (

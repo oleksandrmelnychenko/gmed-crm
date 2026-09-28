@@ -1,4 +1,4 @@
-import { appDateTimeFormat, appWallClock, dateOrInstant } from "@/lib/app-time-zone";
+import { appDateTimeFormat, appWallClock, dateOrInstant, formatAppDate } from "@/lib/app-time-zone";
 import { getLang } from "@/lib/i18n";
 
 const MONTH_FORMATTERS = {
@@ -9,17 +9,6 @@ const MONTH_FORMATTERS = {
 const DAY_FORMATTERS = {
   "de-DE": appDateTimeFormat("de-DE", { day: "2-digit" }),
   "ru-RU": appDateTimeFormat("ru-RU", { day: "2-digit" }),
-} as const;
-
-const SHORT_DATE_FORMATTERS = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-  }),
 } as const;
 
 function dashboardLocale() {
@@ -61,12 +50,9 @@ export function formatDay(iso: string) {
   }
 }
 
+/** "DD.MM.YYYY", like every date in the UI. */
 export function formatShortDate(iso: string) {
-  try {
-    return SHORT_DATE_FORMATTERS[dashboardLocale()].format(dateOrInstant(iso));
-  } catch {
-    return iso.slice(0, 10);
-  }
+  return formatAppDate(iso) || iso.slice(0, 10);
 }
 
 export function genderToChart(by: Record<string, number> | undefined, tr: Record<string, string>) {

@@ -7,8 +7,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { Field, inputClass, textareaClass } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
-import { berlinNowNaive, parseBerlinLocalInput } from "@/lib/app-time-zone";
-import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { berlinNowNaive, formatAppDateTime, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -450,16 +449,8 @@ function validationErrorLabel(error: PatientLabCorrectionValidationError, tx: Bi
   return labels[error];
 }
 
-function formatCorrectionTimestamp(value: string, tx: Bilingual) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return cachedDateTimeFormat(tx("ru-RU", "de-DE"), {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+function formatCorrectionTimestamp(value: string) {
+  return formatAppDateTime(value) || value;
 }
 
 export function PatientLabCorrectionMetadata({
@@ -481,7 +472,7 @@ export function PatientLabCorrectionMetadata({
           {tx("Исправлено", "Korrigiert")}
         </Badge>
         <span className="min-w-0 truncate" title={item.corrected_by_name ?? undefined}>
-          {formatCorrectionTimestamp(item.corrected_at, tx)}
+          {formatCorrectionTimestamp(item.corrected_at)}
           {item.corrected_by_name ? ` · ${item.corrected_by_name}` : ""}
         </span>
       </div>

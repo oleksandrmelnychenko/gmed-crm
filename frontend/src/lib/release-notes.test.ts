@@ -37,8 +37,8 @@ describe("customer release notes", () => {
     expect(development.channel).toBe("development");
     expect(development.build).toBe("dev-42");
     expect(development.builtAt).toBe("2026-08-10T10:15:00Z");
-    expect(development.title.ru).toBe("Обновления за 10 августа 2026");
-    expect(development.title.de).toBe("Aktualisierungen vom 10. August 2026");
+    expect(development.title.ru).toBe("Обновления за 10.08.2026");
+    expect(development.title.de).toBe("Aktualisierungen vom 10.08.2026");
     expect(development.notes[0]).toMatchObject({
       commit: "26ad6fa",
       title: { ru: "E-Rechnung: счета в формате ZUGFeRD" },
@@ -46,8 +46,8 @@ describe("customer release notes", () => {
     expect(production.channel).toBe("production");
     expect(production.build).toBe("prod-17");
     expect(production.builtAt).toBe("2026-08-11T11:30:00Z");
-    expect(production.title.ru).toBe("Релиз от 11 августа 2026");
-    expect(production.title.de).toBe("Release vom 11. August 2026");
+    expect(production.title.ru).toBe("Релиз от 11.08.2026");
+    expect(production.title.de).toBe("Release vom 11.08.2026");
     expect(production.notes[0]).toMatchObject({
       commit: "26ad6fa",
       title: { ru: "E-Rechnung: счета в формате ZUGFeRD" },
@@ -57,10 +57,10 @@ describe("customer release notes", () => {
   it("dates the build in German time, whatever the browser zone, and avoids invalid-date labels", () => {
     // 22:00Z is already 8 September in Berlin (00:00 CEST) but still the 7th in UTC.
     expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "2026-09-08T01:00:00+03:00" }).title.ru)
-      .toBe("Релиз от 8 сентября 2026");
+      .toBe("Релиз от 08.09.2026");
     // 21:30Z is still 7 September in Berlin but already the 8th in Kyiv.
     expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "2026-09-07T21:30:00Z" }).title.de)
-      .toBe("Release vom 7. September 2026");
+      .toBe("Release vom 07.09.2026");
     expect(resolveCustomerRelease({ mode: "production", buildTimestamp: "invalid" }).title)
       .toEqual({ ru: "Релиз", de: "Release" });
   });

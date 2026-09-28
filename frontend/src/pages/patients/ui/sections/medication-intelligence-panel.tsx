@@ -26,7 +26,7 @@ import {
   type MedicationIntelligenceSource,
 } from "@/lib/api/medication-intelligence";
 import { useLang, type Lang } from "@/lib/i18n";
-import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import { officialSourceLabel } from "../../data/official-medication-source-label";
@@ -67,17 +67,9 @@ const SEVERITY_DOT: Record<MedicationIntelligenceSeverity, string> = {
   info: "bg-sky-500",
 };
 
-function formatGeneratedAt(value: string, lang: Lang): string | null {
+function formatGeneratedAt(value: string): string | null {
   if (!value) return null;
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return value;
-  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
+  return formatAppDateTime(value) || value;
 }
 
 function severityLabel(severity: MedicationIntelligenceSeverity, tx: Bilingual) {
@@ -250,7 +242,7 @@ function OfficialSafetyAlertFinding({
   tx: Bilingual;
 }) {
   const publishedAt = finding.published_at
-    ? formatGeneratedAt(finding.published_at, lang)
+    ? formatGeneratedAt(finding.published_at)
     : null;
   const officialDocumentUrl = source && finding.source_url
     ? safeExternalUrl(finding.source_url)
@@ -622,12 +614,12 @@ function SourcesSection({
             const href = safeExternalUrl(source.url);
             const snapshot = source.last_successful_snapshot;
             const snapshotHref = snapshot ? safeExternalUrl(snapshot.source_url) : null;
-            const fetchedAt = snapshot ? formatGeneratedAt(snapshot.fetched_at, lang) : null;
+            const fetchedAt = snapshot ? formatGeneratedAt(snapshot.fetched_at) : null;
             const publishedAt = snapshot?.published_at
-              ? formatGeneratedAt(snapshot.published_at, lang)
+              ? formatGeneratedAt(snapshot.published_at)
               : null;
             const lastAttemptAt = source.last_attempt_at
-              ? formatGeneratedAt(source.last_attempt_at, lang)
+              ? formatGeneratedAt(source.last_attempt_at)
               : null;
             return (
               <div key={source.id} className="px-3.5 py-3">
@@ -794,7 +786,7 @@ export function MedicationIntelligencePanelContent({
   const { lang: activeLanguage } = useLang();
   const lang = language ?? activeLanguage;
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
-  const generatedAt = data ? formatGeneratedAt(data.generated_at, lang) : null;
+  const generatedAt = data ? formatGeneratedAt(data.generated_at) : null;
   const isEmpty = Boolean(
     data
       && data.medications.length === 0

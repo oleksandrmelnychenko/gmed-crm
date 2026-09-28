@@ -72,8 +72,8 @@ describe("chat synchronization", () => {
     // 21:30Z is 23:30 on 27 Sep in Berlin (already 28 Sep in Kyiv): same day, time only.
     expect(timeAgo("2026-09-27T21:30:00Z", "de", now)).toBe("23:30");
     // 22:30Z is already 28 Sep in Berlin (still 27 Sep in UTC): another day.
-    expect(timeAgo("2026-09-27T22:30:00Z", "de", now)).toBe("28.09., 00:30");
-    expect(timeAgo("2025-12-31T22:30:00Z", "de", now)).toBe("31.12.2025, 23:30");
+    expect(timeAgo("2026-09-27T22:30:00Z", "de", now)).toBe("28.09.2026 00:30");
+    expect(timeAgo("2025-12-31T22:30:00Z", "de", now)).toBe("31.12.2025 23:30");
     expect(timeAgo("invalid")).toBe("—");
   });
 });

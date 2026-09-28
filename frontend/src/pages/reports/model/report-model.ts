@@ -1,15 +1,6 @@
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { formatMoneyAmount } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
-
-const DATE_FORMATTERS = {
-  "de-DE": appDateTimeFormat("de-DE"),
-  "ru-RU": appDateTimeFormat("ru-RU"),
-} as const;
-
-function reportLocale(locale: string) {
-  return locale === "ru-RU" ? "ru-RU" : "de-DE";
-}
 
 export function formatMoney(value?: string | null, _locale = "de-DE") {
   void _locale;
@@ -21,15 +12,15 @@ export function formatMoneyMetric(value?: string | number | null, _locale = "de-
   return formatMoneyAmount(value);
 }
 
+/** "DD.MM.YYYY" in every language. */
 export function formatReportDate(
   value: string | null | undefined,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = "-",
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  const date = dateOrInstant(value);
-  if (Number.isNaN(date.getTime())) return emptyLabel;
-  return DATE_FORMATTERS[reportLocale(locale)].format(date);
+  return formatAppDate(value) || emptyLabel;
 }
 
 export function formatRating(value?: number | null, emptyLabel = "-") {

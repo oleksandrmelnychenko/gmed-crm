@@ -97,7 +97,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
-import { appDateKey, appDateTimeFormat, dateKeyToDate } from "@/lib/app-time-zone";
+import { appDateKey, dateKeyToDate, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -243,10 +243,6 @@ type IntakeUploadItem = {
 
 function runtimeTranslations() {
   return translateCatalog(getLang());
-}
-
-function runtimeLocale() {
-  return getLang() === "ru" ? "ru-RU" : "de-DE";
 }
 
 function formatRoleLabel(role?: string | null) {
@@ -612,17 +608,7 @@ function formatExtractionMethodLabel(method?: string | null) {
 function formatDateTime(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
-  try {
-    return appDateTimeFormat(runtimeLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return formatUnknownValue(value, tr);
-  }
+  return formatAppDateTime(value) || formatUnknownValue(value, tr);
 }
 
 function formatGenerateDocumentError(
@@ -664,17 +650,9 @@ function formatGenerateDocumentError(
 function formatDate(value?: string | null) {
   const tr = runtimeTranslations();
   if (!value) return tr.common_not_set;
-  const date = dateKeyToDate(value);
-  if (!date) return formatUnknownValue(value, tr);
-  try {
-    return appDateTimeFormat(runtimeLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(date);
-  } catch {
-    return formatUnknownValue(value, tr);
-  }
+  // Only calendar dates ("YYYY-MM-DD") are expected here.
+  const label = dateKeyToDate(value) ? formatAppDate(value) : "";
+  return label || formatUnknownValue(value, tr);
 }
 
 function formatFileSize(value?: number | null) {

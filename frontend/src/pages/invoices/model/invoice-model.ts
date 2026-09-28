@@ -1,4 +1,9 @@
-import { addDaysToDateKey, appDateKey, appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import {
+  addDaysToDateKey,
+  appDateKey,
+  formatAppDate,
+  formatAppDateTime,
+} from "@/lib/app-time-zone";
 import { formatMoneyAmount, moneyLineAmounts, roundCents, toCents } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
@@ -139,36 +144,6 @@ export const DEFAULT_FILTERS: Filters = {
 };
 
 export const DEFAULT_INVOICE_PAGE_SIZE = 50;
-
-const INVOICE_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-};
-const INVOICE_DATE_TIME_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  ...INVOICE_DATE_FORMAT_OPTIONS,
-  hour: "2-digit",
-  minute: "2-digit",
-};
-
-const dateFormatters = new Map<string, Intl.DateTimeFormat>([
-  ["de-DE", appDateTimeFormat("de-DE", INVOICE_DATE_FORMAT_OPTIONS)],
-  ["ru-RU", appDateTimeFormat("ru-RU", INVOICE_DATE_FORMAT_OPTIONS)],
-  ["en-GB", appDateTimeFormat("en-GB", INVOICE_DATE_FORMAT_OPTIONS)],
-]);
-const dateTimeFormatters = new Map<string, Intl.DateTimeFormat>([
-  ["de-DE", appDateTimeFormat("de-DE", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-  ["ru-RU", appDateTimeFormat("ru-RU", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-  ["en-GB", appDateTimeFormat("en-GB", INVOICE_DATE_TIME_FORMAT_OPTIONS)],
-]);
-
-function invoiceDateFormatter(locale: string) {
-  return dateFormatters.get(locale) ?? dateFormatters.get("en-GB")!;
-}
-
-function invoiceDateTimeFormatter(locale: string) {
-  return dateTimeFormatters.get(locale) ?? dateTimeFormatters.get("en-GB")!;
-}
 
 export const EMPTY_ACCOUNTING_SUMMARY: AccountingLedgerPayload["summary"] = {
   income_gross: "0.00",
@@ -492,32 +467,29 @@ export function invoiceRecipientAddressLines(recipient: InvoiceRecipient) {
   );
 }
 
+/**
+ * "DD.MM.YYYY" in every language. Date-only values are calendar days;
+ * timestamps such as paid_at are instants shown on their Berlin date.
+ */
 export function formatDate(
   value?: string | null,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = "-",
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  try {
-    // Date-only values are calendar days; timestamps such as paid_at are
-    // instants shown on their Berlin date.
-    return invoiceDateFormatter(locale).format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
+/** "DD.MM.YYYY HH:mm" Berlin time in every language. */
 export function formatDateTime(
   value?: string | null,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = "-",
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  try {
-    return invoiceDateTimeFormatter(locale).format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
 export function formatCurrency(value: unknown, _locale = "de-DE", currency = "EUR") {

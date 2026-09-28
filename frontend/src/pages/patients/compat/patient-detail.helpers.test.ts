@@ -305,7 +305,7 @@ describe("buildPatientLabelPrintHtml", () => {
     expect(html).toContain(`${tr.patient_label_print_insurance} AXA`);
     expect(html).toContain("c/o GMED");
     // Generated 12:00 UTC = 14:00 in Berlin (CEST).
-    expect(html).toContain(`${tr.patient_label_print_generated} 10.04.2026, 14:00`);
+    expect(html).toContain(`${tr.patient_label_print_generated} 10.04.2026 14:00`);
   });
 });
 

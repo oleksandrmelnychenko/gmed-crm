@@ -12,7 +12,7 @@ import type {
   MedicationIntelligenceIdentityStatus,
 } from "@/lib/api/medication-intelligence";
 import { useLang, type Lang } from "@/lib/i18n";
-import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -48,17 +48,9 @@ type MedicationIdentityWorkflowProps = {
   onRetry?: () => void;
 };
 
-function formatTimestamp(value: string | null, lang: Lang) {
+function formatTimestamp(value: string | null) {
   if (!value) return null;
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return value;
-  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
+  return formatAppDateTime(value) || value;
 }
 
 function safeExternalUrl(value: string | null) {
@@ -218,18 +210,16 @@ function CandidateFact({ label, value }: { label: string; value: ReactNode }) {
 
 function CandidateProvenance({
   candidate,
-  lang,
   tx,
 }: {
   candidate: MedicationIdentityCandidate;
-  lang: Lang;
   tx: Bilingual;
 }) {
   const provenance = candidate.provenance;
   const officialUrl = provenance.source_state === "official_snapshot"
     ? safeExternalUrl(provenance.official_url)
     : null;
-  const fetchedAt = formatTimestamp(provenance.snapshot_fetched_at, lang);
+  const fetchedAt = formatTimestamp(provenance.snapshot_fetched_at);
   return (
     <div className="mt-2 rounded-md border border-border/60 bg-muted/15 px-2.5 py-2 text-[10px] text-muted-foreground">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -270,14 +260,12 @@ function CandidateRow({
   candidate,
   selected,
   canSelect,
-  lang,
   tx,
   onSelect,
 }: {
   candidate: MedicationIdentityCandidate;
   selected: boolean;
   canSelect: boolean;
-  lang: Lang;
   tx: Bilingual;
   onSelect?: (candidateId: string) => void;
 }) {
@@ -325,7 +313,7 @@ function CandidateRow({
             {product.atc_code ? <span>ATC {product.atc_code}</span> : null}
             {product.manufacturer ? <span className="font-sans">{product.manufacturer}</span> : null}
           </div>
-          <CandidateProvenance candidate={candidate} lang={lang} tx={tx} />
+          <CandidateProvenance candidate={candidate} tx={tx} />
           {!candidate.confirmable || candidate.blocking_reasons.length > 0 ? (
             <div className="mt-2 border-l-2 border-amber-300 pl-2 text-[10px] leading-relaxed text-amber-800">
               {(candidate.blocking_reasons.length > 0 ? candidate.blocking_reasons : ["candidate_unavailable"])
@@ -356,7 +344,6 @@ function CandidateReview({
   candidate,
   acknowledged,
   status,
-  lang,
   tx,
   onAcknowledgedChange,
   onConfirm,
@@ -365,7 +352,6 @@ function CandidateReview({
   candidate: MedicationIdentityCandidate;
   acknowledged: boolean;
   status: MedicationIdentityWorkflowStatus;
-  lang: Lang;
   tx: Bilingual;
   onAcknowledgedChange?: (acknowledged: boolean) => void;
   onConfirm?: (input: MedicationIdentityConfirmationInput) => void;
@@ -408,7 +394,7 @@ function CandidateReview({
             <CandidateFact label="PZN / ATC" value={[product.pzn, product.atc_code].filter(Boolean).join(" / ")} />
           </ReviewColumn>
         </div>
-        <CandidateProvenance candidate={candidate} lang={lang} tx={tx} />
+        <CandidateProvenance candidate={candidate} tx={tx} />
       </div>
 
       <footer className="sticky bottom-0 z-10 border-t border-border/70 bg-white px-3.5 py-3 sm:static">
@@ -574,7 +560,6 @@ export function MedicationIdentityWorkflow({
                 && status !== "confirming"
                 && status !== "stale"
                 && status !== "success"}
-              lang={lang}
               tx={tx}
               onSelect={onSelectCandidate}
             />
@@ -588,7 +573,6 @@ export function MedicationIdentityWorkflow({
           candidate={selectedCandidate}
           acknowledged={acknowledged}
           status={status}
-          lang={lang}
           tx={tx}
           onAcknowledgedChange={onAcknowledgedChange}
           onConfirm={onConfirm}

@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, appDateTimeFormat, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -30,8 +30,8 @@ function berlinToday() {
   return appDateKey();
 }
 function defaultPeriod() { const year = berlinToday().slice(0, 4); return { from: `${year}-01-01`, to: `${year}-12-31` }; }
-function dateLabel(value: string | null, lang: Lang) {
-  return value ? appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)) : "—";
+function dateLabel(value: string | null) {
+  return value ? formatAppDate(value) || value : "—";
 }
 
 function RoomEditor({ stay, lang, editable, onSaved, onDirty }: { stay: HotelStay; lang: Lang; editable: boolean; onSaved: () => void; onDirty: (id: string, dirty: boolean) => void }) {
@@ -183,7 +183,7 @@ function HotelStatisticsPageContent() {
       </> : null}
       <HotelTable groups={groups} lang={lang} currency={filters.currency} resetKey={JSON.stringify([period, filters])} onOpen={openHotel} />
     </> : null}
-    <Dialog open={Boolean(selectedHotel)} dirty={dirtyRows.size > 0} onOpenChange={open => { if (!open) setSelected(null); }}><DialogContent data-testid="hotel-detail-dialog" className="left-1/2 right-auto top-1/2 bottom-auto flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 pb-0 shadow-2xl sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-[1480px] sm:pb-0"><DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-5 py-4 pr-14"><DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{selectedHotel?.name || labels.noHotel}</DialogTitle><DialogDescription>{labels.details} · {dateLabel(period.from, lang)} — {dateLabel(period.to, lang)}</DialogDescription></DialogHeader>
+    <Dialog open={Boolean(selectedHotel)} dirty={dirtyRows.size > 0} onOpenChange={open => { if (!open) setSelected(null); }}><DialogContent data-testid="hotel-detail-dialog" className="left-1/2 right-auto top-1/2 bottom-auto flex max-h-[calc(100dvh-16px)] w-[calc(100vw-16px)] -translate-x-1/2 -translate-y-1/2 flex-col gap-0 overflow-hidden rounded-xl border-border/70 bg-card p-0 pb-0 shadow-2xl sm:max-h-[92dvh] sm:w-[calc(100vw-2rem)] sm:max-w-[1480px] sm:pb-0"><DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-5 py-4 pr-14"><DialogTitle className="flex items-center gap-2"><span className="size-2 shrink-0 rounded-full bg-orange-500" />{selectedHotel?.name || labels.noHotel}</DialogTitle><DialogDescription>{labels.details} · {dateLabel(period.from)} — {dateLabel(period.to)}</DialogDescription></DialogHeader>
       <div className="min-h-0 space-y-4 overflow-y-auto bg-muted/10 p-4 sm:p-5">
         {selectedHotel ? <>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm"><span className="font-medium">{selectedHotel.city || selectedDirectoryHotel?.country || "—"}</span><span className="text-muted-foreground">{labels.patients}: {selectedHotel.patients}</span><span className="text-muted-foreground">{labels.bookings}: {selectedHotel.bookings}</span><span className="text-muted-foreground">{labels.nights}: {selectedHotel.nights}</span></div>
@@ -196,8 +196,8 @@ function HotelStatisticsPageContent() {
           <thead className="hidden bg-muted/20 md:table-header-group"><tr>{[labels.patient, labels.checkIn, labels.checkOut, labels.rooms, labels.volume, labels.status, breakfastLabels.title, ""].map((label, i) => <th key={i} className={`px-3 py-2.5 text-left text-xs font-medium text-muted-foreground ${i === 4 ? "text-right" : ""}`}>{label}</th>)}</tr></thead>
           <tbody className="block md:table-row-group">{selectedHotel?.stays.map(stay => { const cost = stayCost(stay); return <tr key={stay.source + ":" + stay.id} hidden={!matchesStaySearch(stay, staySearch)} className={`${matchesStaySearch(stay, staySearch) ? "grid md:table-row" : "hidden"} grid-cols-2 gap-x-3 border-t border-border/60 px-3 py-2 align-middle odd:bg-muted/10 hover:bg-muted/25 md:px-0 md:py-0`}>
             <td className="col-span-2 block py-2 md:table-cell md:max-w-52 md:px-3 md:py-2.5"><StaffLink to={`/patients/${stay.patient_id}`} className="font-medium text-orange-700 hover:underline">{stay.patient_name || stay.patient_number || labels.patient}</StaffLink><p className="mt-0.5 font-mono text-xs text-muted-foreground">{stay.patient_number}</p>{stay.booking_reference ? <p className="break-all text-xs text-muted-foreground">{labels.reference}: {stay.booking_reference}</p> : null}</td>
-            <td className="block py-2 md:table-cell md:whitespace-nowrap md:px-3 md:py-2.5"><span className="block text-xs text-muted-foreground md:hidden">{labels.checkIn}</span>{dateLabel(stay.check_in, lang)}</td>
-            <td className="block py-2 md:table-cell md:whitespace-nowrap md:px-3 md:py-2.5"><span className="block text-xs text-muted-foreground md:hidden">{labels.checkOut}</span>{dateLabel(stay.check_out, lang)}<p className="mt-0.5 text-xs text-muted-foreground">{labels.nights}: {stayNights(stay) ?? "—"}</p></td>
+            <td className="block py-2 md:table-cell md:whitespace-nowrap md:px-3 md:py-2.5"><span className="block text-xs text-muted-foreground md:hidden">{labels.checkIn}</span>{dateLabel(stay.check_in)}</td>
+            <td className="block py-2 md:table-cell md:whitespace-nowrap md:px-3 md:py-2.5"><span className="block text-xs text-muted-foreground md:hidden">{labels.checkOut}</span>{dateLabel(stay.check_out)}<p className="mt-0.5 text-xs text-muted-foreground">{labels.nights}: {stayNights(stay) ?? "—"}</p></td>
             <td className="block py-2 md:table-cell md:px-3 md:py-2.5"><span className="mb-1 block text-xs text-muted-foreground md:hidden">{labels.rooms}</span><RoomEditor stay={stay} lang={lang} editable={editable} onDirty={onRoomDirty} onSaved={() => setVersion(value => value + 1)} /></td>
             <td className="block py-2 md:table-cell md:whitespace-nowrap md:px-3 md:py-2.5 md:text-right"><span className="block text-xs text-muted-foreground md:hidden">{labels.volume}</span><span className="font-mono font-medium">{cost ? money(cost.cents) : "—"}</span>{cost?.estimated ? <p className="mt-1"><span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">{labels.estimated}</span></p> : null}</td>
             <td className="block py-2 text-xs md:table-cell md:px-3 md:py-2.5"><span className="mb-1 block text-xs text-muted-foreground md:hidden">{labels.status}</span><Badge variant="outline" className={stay.status === "cancelled" ? "border-rose-200 bg-rose-50 text-rose-700" : ["completed", "confirmed"].includes(stay.status) ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-sky-200 bg-sky-50 text-sky-700"}>{labels[stay.status as keyof typeof labels] || stay.status}</Badge></td>

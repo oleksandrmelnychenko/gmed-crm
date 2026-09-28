@@ -25,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateTimeFormat, berlinLocalInputToIso } from "@/lib/app-time-zone";
+import { berlinLocalInputToIso, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "./use-task-realtime";
@@ -256,14 +256,9 @@ function statusTone(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-function formatDateTime(value: string | null, lang: Lang, fallback: string) {
+function formatDateTime(value: string | null, fallback: string) {
   if (!value) return fallback;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return formatAppDateTime(value) || value;
 }
 
 function formatMoney(value: string | null, currency: string, lang: Lang, fallback: string) {
@@ -385,7 +380,7 @@ function ServiceCard({
           </div>
         </ServiceFact>
         <ServiceFact icon={CalendarClock} label={labels.schedule}>
-          <span className="truncate">{formatDateTime(service.starts_at, lang, labels.notSet)}</span>
+          <span className="truncate">{formatDateTime(service.starts_at, labels.notSet)}</span>
         </ServiceFact>
       </div>
 

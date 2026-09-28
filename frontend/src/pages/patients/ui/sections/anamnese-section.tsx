@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
-import { appDateTimeFormat, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import { berlinLocalInputToIso, formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -102,22 +102,13 @@ function versionSnippet(version: ClinicalNarrative): string {
   return "";
 }
 
-function formatTimestamp(value: string | null | undefined, lang: string): string {
+function formatTimestamp(value: string | null | undefined): string {
   if (!value) return "";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(parsed);
+  return formatAppDateTime(value) || value;
 }
 
-function versionDate(version: ClinicalNarrative, lang: string): string {
-  return formatTimestamp(version.anamnese_at ?? version.updated_at ?? version.created_at, lang) || "—";
+function versionDate(version: ClinicalNarrative): string {
+  return formatTimestamp(version.anamnese_at ?? version.updated_at ?? version.created_at) || "—";
 }
 
 export function AnamneseSection({
@@ -345,7 +336,7 @@ export function AnamneseSection({
                 </p>
                 <p>
                   <span className={datePillClass}>
-                    {versionDate(active, lang)}
+                    {versionDate(active)}
                   </span>
                 </p>
               </div>
@@ -485,7 +476,7 @@ export function AnamneseSection({
                           </p>
                           <p className="mt-1">
                             <span className={datePillClass}>
-                              {versionDate(version, lang)}
+                              {versionDate(version)}
                             </span>
                           </p>
                           <span

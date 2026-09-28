@@ -601,7 +601,7 @@ function useSopsPageContent() {
         accessor: (row) => row.updated_at,
         sortable: true,
         width: 170,
-        render: (row) => formatDate(row.updated_at, lang, t),
+        render: (row) => formatDate(row.updated_at, t),
       },
       {
         id: "author",
@@ -673,7 +673,7 @@ function useSopsPageContent() {
         accessor: (row) => row.updated_at,
         sortable: true,
         width: 170,
-        render: (row) => formatDate(row.updated_at, lang, t),
+        render: (row) => formatDate(row.updated_at, t),
       },
       {
         id: "author",
@@ -1076,7 +1076,7 @@ function useSopsPageContent() {
                       </span>
                       <div className="text-right">
                         <p className="text-xs font-medium leading-5 text-foreground">
-                          {formatDate(selectedItem.updated_at, lang, t)}
+                          {formatDate(selectedItem.updated_at, t)}
                         </p>
                         <p className="mt-1 text-xs leading-5 text-muted-foreground">
                           {selectedItem.created_by_name || roleLabel(selectedItem.created_by_role)}
@@ -1089,7 +1089,7 @@ function useSopsPageContent() {
                 <DetailSection title={text.detailOverview}>
                   <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <SummaryLine label={text.columns.revision} value={selectedItem.revision_no} />
-                    <SummaryLine label={text.columns.updated} value={formatDate(selectedItem.updated_at, lang, t)} />
+                    <SummaryLine label={text.columns.updated} value={formatDate(selectedItem.updated_at, t)} />
                     <SummaryLine label={text.columns.author} value={selectedItem.created_by_name || roleLabel(selectedItem.created_by_role)} />
                     <SummaryLine label={text.columns.ack} value={ackLabel(selectedItem.my_ack_status)} />
                     <SummaryLine label={text.pendingAck} value={selectedItem.pending_ack_count} />
@@ -1392,7 +1392,7 @@ function useSopsPageContent() {
                     <DetailField label={text.columns.author} value={reviewItem.created_by_name || roleLabel(reviewItem.created_by_role)} />
                     <DetailField
                       label={text.columns.updated}
-                      value={formatDate(reviewItem.updated_at, lang, t)}
+                      value={formatDate(reviewItem.updated_at, t)}
                     />
                   </div>
                 </AdminTableCard>

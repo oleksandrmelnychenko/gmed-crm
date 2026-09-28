@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { appDateTimeFormat, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import { berlinLocalInputToIso, formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 import {
@@ -150,13 +150,8 @@ function localDateTimeValue(value: Date) {
   return isoToBerlinLocalInput(value);
 }
 
-function formatDateTime(value: string, lang: Lang) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+function formatDateTime(value: string) {
+  return formatAppDateTime(value) || value;
 }
 
 function interactionLabel(
@@ -370,7 +365,7 @@ export function ConciergePartnerInteractionDialog({
                         </Badge>
                       ) : null}
                     </div>
-                    <time dateTime={event.occurred_at} className="flex items-center gap-1 text-[11px] text-muted-foreground"><Clock3 className="size-3" />{formatDateTime(event.occurred_at, lang)}</time>
+                    <time dateTime={event.occurred_at} className="flex items-center gap-1 text-[11px] text-muted-foreground"><Clock3 className="size-3" />{formatDateTime(event.occurred_at)}</time>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
                     {event.contact_person ? <span className="flex items-center gap-1"><UserRound className="size-3.5 text-muted-foreground" />{event.contact_person}</span> : null}

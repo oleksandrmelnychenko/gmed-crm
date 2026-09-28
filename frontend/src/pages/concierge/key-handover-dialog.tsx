@@ -8,7 +8,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { appDateTimeFormat, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import { formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -71,13 +71,8 @@ function localDateTimeValue(value: Date) {
   return isoToBerlinLocalInput(value);
 }
 
-function formatDateTime(value: string, lang: Lang) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+function formatDateTime(value: string) {
+  return formatAppDateTime(value) || value;
 }
 
 export function conciergeKeyActionLabel(action: ConciergeKeyAction, lang: Lang) {
@@ -156,7 +151,7 @@ export function ConciergeKeyHandoverDialog({
               <ConciergeDialogSection title={labels.current} icon={KeyRound}>
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/35 p-3">
                   {service.key_status ? <Badge variant="outline" className={cn("rounded-full", actionTone(service.key_status))}>{conciergeKeyActionLabel(service.key_status, lang)}</Badge> : <Badge variant="outline" className="rounded-full">{labels.notStarted}</Badge>}
-                  {service.key_status_at ? <time className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="size-3.5" />{formatDateTime(service.key_status_at, lang)}</time> : null}
+                  {service.key_status_at ? <time className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="size-3.5" />{formatDateTime(service.key_status_at)}</time> : null}
                 </div>
                 {service.key_responsible_user_name ? <div className="mt-3 flex items-center gap-2 text-sm"><span className="flex size-8 items-center justify-center rounded-full bg-muted"><UserRound className="size-3.5 text-muted-foreground" /></span><div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">{labels.responsible}</p><p className="font-medium">{service.key_responsible_user_name}</p></div></div> : null}
               </ConciergeDialogSection>
@@ -182,7 +177,7 @@ export function ConciergeKeyHandoverDialog({
                   <ol className="space-y-2">
                     {[...events].reverse().map((event) => (
                       <li key={event.id} className="rounded-lg border border-border/70 bg-muted/15 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", actionTone(event.action))}>{conciergeKeyActionLabel(event.action, lang)}</Badge><time className="text-[11px] text-muted-foreground" dateTime={event.occurred_at}>{formatDateTime(event.occurred_at, lang)}</time></div>
+                        <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", actionTone(event.action))}>{conciergeKeyActionLabel(event.action, lang)}</Badge><time className="text-[11px] text-muted-foreground" dateTime={event.occurred_at}>{formatDateTime(event.occurred_at)}</time></div>
                         <p className="mt-2 text-xs font-medium">{event.responsible_user_name}</p>
                         {event.note ? <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted-foreground">{event.note}</p> : null}
                         <p className={cn("mt-2 text-[10px] text-muted-foreground", event.note ? "" : "mt-1")}>{labels.recordedBy.replace("{name}", event.recorded_by_name)}</p>

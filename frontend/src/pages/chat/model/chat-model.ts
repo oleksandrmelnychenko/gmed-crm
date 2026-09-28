@@ -1,4 +1,4 @@
-import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDateTime, formatAppTime } from "@/lib/app-time-zone";
 import { formatUnknownValue, type Translations } from "@/lib/i18n";
 import type { Message } from "./types";
 
@@ -15,18 +15,14 @@ export function roleDisplay(role: string, translations: Translations) {
   return labels[`role_${role}`] ?? formatUnknownValue(role, translations);
 }
 
-export function timeAgo(iso: string, lang: "de" | "ru" = "de", now = new Date()) {
+/** "HH:mm" for a message sent today, else "DD.MM.YYYY HH:mm" (Berlin time). */
+export function timeAgo(iso: string, _lang: "de" | "ru" = "de", now = new Date()) {
+  void _lang;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "—";
-  const options: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
-  const day = chatMessageDateKey(iso);
-  const today = appDateKey(now);
-  if (day !== today) {
-    options.day = "2-digit";
-    options.month = "2-digit";
-    if (day.slice(0, 4) !== today.slice(0, 4)) options.year = "numeric";
-  }
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", options).format(date);
+  return chatMessageDateKey(iso) === appDateKey(now)
+    ? formatAppTime(date)
+    : formatAppDateTime(date);
 }
 
 // The API uses descending (created_at, id) cursors. Match that order even when

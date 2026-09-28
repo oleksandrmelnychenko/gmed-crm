@@ -4,62 +4,13 @@ import {
   appDateTimeFormat,
   dateOrInstant,
   daysBetweenDateKeys,
+  formatAppDate,
 } from "@/lib/app-time-zone";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   AppointmentTimelineKind,
   AppointmentTimelineTone,
 } from "@/pages/appointments/model/types";
-
-const TIMELINE_DATE_FORMAT_OPTIONS: Intl.DateTimeFormatOptions = {
-  weekday: "short",
-  day: "2-digit",
-  month: "short",
-};
-
-const TIMELINE_DATE_FORMATTERS = new Map<string, Intl.DateTimeFormat>([
-  [
-    "de-DE:current",
-    appDateTimeFormat("de-DE", TIMELINE_DATE_FORMAT_OPTIONS),
-  ],
-  [
-    "de-DE:year",
-    appDateTimeFormat("de-DE", {
-      ...TIMELINE_DATE_FORMAT_OPTIONS,
-      year: "numeric",
-    }),
-  ],
-  [
-    "ru-RU:current",
-    appDateTimeFormat("ru-RU", TIMELINE_DATE_FORMAT_OPTIONS),
-  ],
-  [
-    "ru-RU:year",
-    appDateTimeFormat("ru-RU", {
-      ...TIMELINE_DATE_FORMAT_OPTIONS,
-      year: "numeric",
-    }),
-  ],
-  [
-    "en-GB:current",
-    appDateTimeFormat("en-GB", TIMELINE_DATE_FORMAT_OPTIONS),
-  ],
-  [
-    "en-GB:year",
-    appDateTimeFormat("en-GB", {
-      ...TIMELINE_DATE_FORMAT_OPTIONS,
-      year: "numeric",
-    }),
-  ],
-]);
-
-function getTimelineDateFormatter(locale: string, includeYear: boolean) {
-  const formatterKey = `${locale}:${includeYear ? "year" : "current"}`;
-  return (
-    TIMELINE_DATE_FORMATTERS.get(formatterKey) ??
-    TIMELINE_DATE_FORMATTERS.get(`en-GB:${includeYear ? "year" : "current"}`)!
-  );
-}
 
 export function appointmentTimelineToneBadgeClassName(
   tone: AppointmentTimelineTone,
@@ -195,12 +146,9 @@ export function appointmentTimelineDateGroupLabel(
     return appointmentText("timeline_date_yesterday");
   }
 
-  try {
-    return getTimelineDateFormatter(
-      options.locale,
-      key.slice(0, 4) !== today.slice(0, 4),
-    ).format(dateOrInstant(value!));
-  } catch {
-    return key;
-  }
+  // The weekday and "DD.MM.YYYY" of the day ("Mo., 28.09.2026").
+  const weekday = appDateTimeFormat(options.locale, { weekday: "short" }).format(
+    dateOrInstant(key),
+  );
+  return `${weekday}, ${formatAppDate(key)}`;
 }

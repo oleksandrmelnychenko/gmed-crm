@@ -44,16 +44,16 @@ describe("order workspace dates", () => {
     expect(formatDateOnly("2026-09-27", "ru-RU")).toBe("27.09.2026");
     // 14:05 in Berlin (CEST, UTC+2).
     const timestamp = "2026-09-27T12:05:00Z";
-    expect(formatDateTime(timestamp, "ru-RU")).toBe("27.09.2026, 14:05");
+    expect(formatDateTime(timestamp, "ru-RU")).toBe("27.09.2026 14:05");
     expect(formatDateOnly(timestamp, "de-DE")).toBe("27.09.2026");
   });
 
   it("shows timestamps in Berlin time whatever the browser zone", () => {
     // 23:30 in Berlin, already 28 Sep in Kyiv.
-    expect(formatDateTime("2026-09-27T21:30:00Z", "ru-RU")).toBe("27.09.2026, 23:30");
+    expect(formatDateTime("2026-09-27T21:30:00Z", "ru-RU")).toBe("27.09.2026 23:30");
     expect(formatDate("2026-09-27T21:30:00Z")).toBe("27.09.2026");
     // 00:30 in Berlin, still 27 Sep in UTC.
-    expect(formatDateTime("2026-09-27T22:30:00Z", "de-DE")).toBe("28.09.2026, 00:30");
+    expect(formatDateTime("2026-09-27T22:30:00Z", "de-DE")).toBe("28.09.2026 00:30");
     expect(formatDateOnly("2026-09-27T22:30:00Z", "de-DE")).toBe("28.09.2026");
   });
 

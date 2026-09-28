@@ -3,7 +3,7 @@ import { ArrowUpRight, CalendarDays, Check, CircleAlert, Clock3, FolderKanban, L
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { localizeTaskTitle } from "@/lib/task-labels";
 import { cn } from "@/lib/utils";
@@ -62,7 +62,7 @@ export function TaskWorkflowDialog({ rootId, tasks, lang, busy, availableStatuse
   const children = rows.slice(1);
   const progress = subtaskProgress(children.map(({ task }) => task));
   const incompleteVisibility = rows.some(({ task }) => (task.child_count ?? 0) > rows.filter(row => row.task.parent_task_id === task.id).length);
-  const formatDate = (date: Date) => appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);
+  const formatDate = (date: Date) => formatAppDateTime(date);
 
   async function changeStatus(task: ConciergeTask, status: ConciergeTaskStatus) {
     if (locked || saving.current || !availableStatusesForTask(task).includes(status)) return;

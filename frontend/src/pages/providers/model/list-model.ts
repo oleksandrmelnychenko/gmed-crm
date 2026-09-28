@@ -16,7 +16,7 @@ import type {
   StaffFormState,
 } from "./types";
 import type { ProviderPeopleRow } from "./people-types";
-import { appDateKey, appDateTimeFormat, dateKeyToDate } from "@/lib/app-time-zone";
+import { appDateKey, dateKeyToDate, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { hasCapability, type Actor } from "@/lib/permissions";
 import {
   formatEnumLabelFromKeys,
@@ -808,20 +808,6 @@ export function formatWeeklyAvailabilityDisplayItems(
   }
 }
 
-const COMPACT_DATE_TIME_FORMATTER = appDateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-const COMPACT_DATE_FORMATTER = appDateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-});
-
 const moneyFormatters = new Map<string, Intl.NumberFormat>();
 
 function moneyFormatter(currency: string) {
@@ -1307,11 +1293,7 @@ export function compactDateTime(
   fallback = translateCatalog(getLang()).common_not_set,
 ) {
   if (!value) return fallback;
-  try {
-    return COMPACT_DATE_TIME_FORMATTER.format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
 export function compactDate(
@@ -1319,8 +1301,7 @@ export function compactDate(
   fallback = translateCatalog(getLang()).common_not_set,
 ) {
   if (!value) return fallback;
-  const date = dateKeyToDate(value);
-  return date ? COMPACT_DATE_FORMATTER.format(date) : value;
+  return dateKeyToDate(value) ? formatAppDate(value) : value;
 }
 
 function stringifyContract(value: unknown) {

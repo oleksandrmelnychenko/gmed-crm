@@ -5,9 +5,8 @@ import type { ColumnDef } from "@/components/data-table/types";
 import {
   appDateKey,
   appDateKeyOf,
-  appDateTimeFormat,
   appWallClock,
-  dateOrInstant,
+  formatAppDate,
   parseDateKey,
 } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -348,15 +347,9 @@ function genderText(gender: string | null | undefined, tx: Bilingual): string {
   return "";
 }
 
-function formatBirthDate(value: string | null | undefined, lang: string): string {
+function formatBirthDate(value: string | null | undefined): string {
   if (!value) return "";
-  const d = dateOrInstant(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(d);
+  return formatAppDate(value) || value;
 }
 
 /** One labelled demographic field in the card header. */
@@ -555,7 +548,7 @@ export function PatientOverviewCard({
           </span>
           {row.item.einnahme_bis ? (
             <span className="mt-0.5 block truncate text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
-              {tx("Приём до", "Einnahme bis")} {row.item.einnahme_bis.slice(0, 10)}
+              {tx("Приём до", "Einnahme bis")} {formatAppDate(row.item.einnahme_bis) || row.item.einnahme_bis.slice(0, 10)}
             </span>
           ) : null}
         </div>
@@ -609,8 +602,8 @@ export function PatientOverviewCard({
       cellClassName: "whitespace-normal",
       render: (row) => {
         const holdPeriod = [
-          row.item.hold_from ? `${tx("с", "seit")} ${row.item.hold_from.slice(0, 10)}` : "",
-          row.item.hold_until ? `${tx("до", "bis")} ${row.item.hold_until.slice(0, 10)}` : "",
+          row.item.hold_from ? `${tx("с", "seit")} ${formatAppDate(row.item.hold_from) || row.item.hold_from.slice(0, 10)}` : "",
+          row.item.hold_until ? `${tx("до", "bis")} ${formatAppDate(row.item.hold_until) || row.item.hold_until.slice(0, 10)}` : "",
         ].filter(Boolean).join(" ");
         const details = [row.item.hold_note, row.item.hinweis].filter(Boolean).join(" · ");
         return (
@@ -662,7 +655,7 @@ export function PatientOverviewCard({
     <section className="space-y-2.5 rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
       {showDemographics ? (
         <div className="grid gap-x-5 gap-y-1.5 border-b border-border/60 pb-3 text-xs sm:grid-cols-3 lg:grid-cols-5">
-          <DemoItem label={tx("Дата рождения", "Geburtsdatum")} value={formatBirthDate(birthDate, lang)} />
+          <DemoItem label={tx("Дата рождения", "Geburtsdatum")} value={formatBirthDate(birthDate)} />
           <DemoItem
             label={tx("Возраст", "Alter")}
             value={age != null ? `${age} ${tx("лет", "J.")}` : ""}

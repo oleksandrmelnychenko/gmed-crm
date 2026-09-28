@@ -33,7 +33,8 @@ import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { cachedDateTimeFormat, cachedNumberFormat } from "@/lib/intl-cache";
+import { cachedNumberFormat } from "@/lib/intl-cache";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createSpecialization,
   deleteSpecialization,
@@ -181,13 +182,7 @@ function WorkTypeUpdatedAt({ value, lang }: { value?: string | null; lang: Lang 
       >
         {validDate ? (
           <time dateTime={validDate.toISOString()} className="tabular-nums">
-            {cachedDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-              day: "2-digit",
-              month: "2-digit",
-              year: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            }).format(validDate)}
+            {formatAppDateTime(validDate)}
           </time>
         ) : (
           <span>{lang === "ru" ? "Нет данных" : "Keine Angabe"}</span>

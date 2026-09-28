@@ -4,30 +4,16 @@ import { CountBadge } from "@/components/ui-shell";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { DEFAULT_DATA_TABLE_PAGE_SIZE } from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { formatEnumLabelFromKeys, useLang } from "@/lib/i18n";
 import { CASE_HISTORY_SECTION_LABEL_KEYS } from "@/lib/i18n/catalogs/cases-clinical";
 import { cn } from "@/lib/utils";
 
 import { type CaseHistoryEntry, useCaseWorkspace } from "./context";
 
-function localeCode(lang: string) {
-  if (lang === "de") return "de-DE";
-  if (lang === "ru") return "ru-RU";
-  return "en-GB";
-}
-
-const HISTORY_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }),
-  "ru-RU": appDateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }),
-  "en-GB": appDateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }),
-};
-
-function formatDateTime(lang: string, value: string | null | undefined) {
+function formatDateTime(value: string | null | undefined) {
   if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return (HISTORY_DATE_TIME_FORMATTERS[localeCode(lang)] ?? HISTORY_DATE_TIME_FORMATTERS["en-GB"]).format(date);
+  return formatAppDateTime(value) || value;
 }
 
 const HISTORY_SECTION_CHIP_TONES = [
@@ -98,7 +84,7 @@ export function HistorySection() {
         width: 190,
         render: (entry) => (
           <span className="whitespace-nowrap font-mono text-xs text-foreground">
-            {formatDateTime(lang, entry.created_at)}
+            {formatDateTime(entry.created_at)}
           </span>
         ),
       },

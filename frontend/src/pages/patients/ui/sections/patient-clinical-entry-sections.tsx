@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
-import { appDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import {
   darreichungsformLabel,
@@ -671,7 +671,7 @@ export function PatientMedicationTable({
                 ended ? "text-rose-700" : "text-emerald-700",
               )}>
                 {ended ? tx("Приём завершён", "Einnahme beendet") : tx("Приём до", "Einnahme bis")}{" "}
-                {row.item.einnahme_bis.slice(0, 10)}
+                {formatAppDate(row.item.einnahme_bis) || row.item.einnahme_bis.slice(0, 10)}
               </span>
             ) : null}
           </div>
@@ -730,8 +730,8 @@ export function PatientMedicationTable({
         const attribution = attributionLabel(row.item);
         const instructions = [row.item.hold_note, row.item.hinweis].filter(Boolean).join(" · ");
         const holdPeriod = [
-          row.item.hold_from ? `${tx("с", "seit")} ${row.item.hold_from.slice(0, 10)}` : "",
-          row.item.hold_until ? `${tx("до", "bis")} ${row.item.hold_until.slice(0, 10)}` : "",
+          row.item.hold_from ? `${tx("с", "seit")} ${formatAppDate(row.item.hold_from) || row.item.hold_from.slice(0, 10)}` : "",
+          row.item.hold_until ? `${tx("до", "bis")} ${formatAppDate(row.item.hold_until) || row.item.hold_until.slice(0, 10)}` : "",
         ].filter(Boolean).join(" ");
         return (
           <div className="min-w-0">

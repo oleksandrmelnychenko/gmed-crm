@@ -1,5 +1,5 @@
 import type { Lead, LeadDetail } from "@/lib/api/types";
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import {
   formatEnumLabelFromKeys,
   getLang,
@@ -591,44 +591,6 @@ function runtimeLocale() {
   return getLang() === "de" ? "de-DE" : "ru-RU";
 }
 
-const LEAD_DATE_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-};
-
-const LEAD_DATE_TIME_FORMATTERS: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-};
-
-function leadDateFormatter(locale: string) {
-  return LEAD_DATE_FORMATTERS[locale] ?? LEAD_DATE_FORMATTERS["ru-RU"];
-}
-
-function leadDateTimeFormatter(locale: string) {
-  return LEAD_DATE_TIME_FORMATTERS[locale] ?? LEAD_DATE_TIME_FORMATTERS["ru-RU"];
-}
-
 /**
  * Lead screen permissions from the capability registry. `leads.view` alone
  * (concierge, CEO assistant) gets the read-only service grid: no detail
@@ -1034,30 +996,26 @@ export function leadReadinessReasonLabel(
   return labelKey ? tr[labelKey] : reason;
 }
 
+/** "DD.MM.YYYY" in every language; calendar dates are never shifted. */
 export function formatDate(
   value?: string | null,
-  locale = runtimeLocale(),
+  _locale = runtimeLocale(),
   fallback = runtimeTranslations().common_not_set,
 ) {
+  void _locale;
   if (!value) return fallback;
-  try {
-    return leadDateFormatter(locale).format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
+/** "DD.MM.YYYY HH:mm" Berlin time in every language. */
 export function formatDateTime(
   value?: string | null,
-  locale = runtimeLocale(),
+  _locale = runtimeLocale(),
   fallback = runtimeTranslations().common_not_set,
 ) {
+  void _locale;
   if (!value) return fallback;
-  try {
-    return leadDateTimeFormatter(locale).format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
 export function computeLeadConversionGate(

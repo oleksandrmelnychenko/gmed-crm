@@ -60,7 +60,7 @@ export function DatevInvoiceDialog({ invoice, binding, onClose, onSave }: {
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">{text.fields}</h3>
             <div className="grid gap-3 sm:grid-cols-2">
-              {[[text.number, invoice.number], [text.supplier, invoice.supplier], [text.recipient, invoice.recipient], [text.date, datevDate(invoice.date, lang)], [text.due, datevDate(invoice.dueDate, lang)], [text.currency, invoice.currency], [text.net, datevMoney(invoice.netCents, lang)], [text.vat, datevMoney(invoice.vatCents, lang)]].map(([label, value]) => <Field key={label} label={label}><Input aria-label={label} value={value} readOnly /></Field>)}
+              {[[text.number, invoice.number], [text.supplier, invoice.supplier], [text.recipient, invoice.recipient], [text.date, datevDate(invoice.date)], [text.due, datevDate(invoice.dueDate)], [text.currency, invoice.currency], [text.net, datevMoney(invoice.netCents, lang)], [text.vat, datevMoney(invoice.vatCents, lang)]].map(([label, value]) => <Field key={label} label={label}><Input aria-label={label} value={value} readOnly /></Field>)}
             </div>
             <div className="flex items-center justify-between rounded-lg bg-muted/40 p-3 font-semibold"><span className="text-sm">{text.total}</span><span className="text-lg tabular-nums">{datevMoney(invoice.grossCents, lang)}</span></div>
             <p className="flex justify-between text-xs text-muted-foreground"><span>{text.paymentStatus}</span><span>{text.unavailable}</span></p>

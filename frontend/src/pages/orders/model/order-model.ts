@@ -1,4 +1,9 @@
-import { appWallClock, berlinLocalInputToIso, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import {
+  berlinLocalInputToIso,
+  formatAppDate,
+  formatAppDateTime,
+  isoToBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import {
   formatMoneyAmount,
   moneyLineAmounts,
@@ -370,18 +375,9 @@ export function optString(value: string) {
 const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const UTC_MIDNIGHT = /^(\d{4})-(\d{2})-(\d{2})T00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)$/;
 
-function twoDigits(value: number) {
-  return String(value).padStart(2, "0");
-}
-
 function calendarDateLabel(value: string): string | null {
   const match = CALENDAR_DATE.exec(value.trim()) ?? UTC_MIDNIGHT.exec(value.trim());
   return match ? `${match[3]}.${match[2]}.${match[1]}` : null;
-}
-
-function berlinDateLabel(date: Date) {
-  const { year, month, day } = appWallClock(date);
-  return `${twoDigits(day)}.${twoDigits(month)}.${year}`;
 }
 
 /** DD.MM.YYYY of a calendar date or of a timestamp's Berlin date. */
@@ -392,11 +388,7 @@ export function formatDate(
 ) {
   void _locale;
   if (!value) return emptyLabel;
-  const calendarDate = calendarDateLabel(value);
-  if (calendarDate) return calendarDate;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return berlinDateLabel(date);
+  return calendarDateLabel(value) ?? (formatAppDate(value) || value);
 }
 
 export function numberFromUnknown(value: unknown) {
@@ -438,7 +430,7 @@ export function formatOptionalCurrency(
 }
 
 /**
- * "DD.MM.YYYY, HH:MM" of a timestamp in Berlin time; a date-only value (a
+ * "DD.MM.YYYY HH:mm" of a timestamp in Berlin time; a date-only value (a
  * calendar date or a UTC-midnight timestamp) shows the date alone.
  */
 export function formatDateTime(
@@ -448,12 +440,7 @@ export function formatDateTime(
 ) {
   void _locale;
   if (!value) return emptyLabel;
-  const calendarDate = calendarDateLabel(value);
-  if (calendarDate) return calendarDate;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const { hour, minute } = appWallClock(date);
-  return `${berlinDateLabel(date)}, ${twoDigits(hour)}:${twoDigits(minute)}`;
+  return calendarDateLabel(value) ?? (formatAppDateTime(value) || value);
 }
 
 /** DD.MM.YYYY; the same rules as {@link formatDate}. */

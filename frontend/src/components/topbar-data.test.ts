@@ -24,7 +24,7 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(localizedNotificationCopy(notice,"ru").title).toContain("Срок оплаты истёк");
   // The deadline is German time: 22:30Z is already 28.09 00:30 in Berlin.
   const due = { ...notice, body: JSON.stringify({ order_number: "A-1", payment_status: "overdue", received_amount: "40", remaining_amount: "60", currency: "EUR", due_at: "2026-09-27T22:30:00Z" }) };
-  expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.26, 00:30");
+  expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.2026 00:30");
 });
 
 describe("task notifications", () => {

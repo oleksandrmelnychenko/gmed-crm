@@ -28,7 +28,7 @@ import {
   type MedicationEvidenceSummary,
 } from "@/lib/api/medication-evidence-reviews";
 import { useLang, type Lang } from "@/lib/i18n";
-import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useRealtimeSubscription, type RealtimeEvent } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
@@ -73,29 +73,14 @@ type MedicationEvidenceReviewContentProps = {
   onRetry?: () => void;
 };
 
-function formatTimestamp(value: string, lang: Lang) {
+function formatTimestamp(value: string) {
   if (!value) return null;
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return value;
-  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
+  return formatAppDateTime(value) || value;
 }
 
-function formatEvidenceDate(value: string, lang: Lang) {
+function formatEvidenceDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const timestamp = Date.parse(`${value}T00:00:00Z`);
-  if (Number.isNaN(timestamp)) return value;
-  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(timestamp));
+  return formatAppDate(value) || value;
 }
 
 function safeExternalUrl(value: string | null) {
@@ -238,7 +223,7 @@ export function MedicationEvidenceReviewPanelContent({
   const lang = language ?? activeLanguage;
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const latestCreatedAt = preview?.latest_review
-    ? formatTimestamp(preview.latest_review.created_at, lang)
+    ? formatTimestamp(preview.latest_review.created_at)
     : null;
 
   return (
@@ -257,7 +242,7 @@ export function MedicationEvidenceReviewPanelContent({
         </div>
         {preview ? (
           <span className="shrink-0 text-[10px] text-muted-foreground">
-            {tx("Состояние данных", "Datenstand")}: {formatTimestamp(preview.generated_at, lang) || "—"}
+            {tx("Состояние данных", "Datenstand")}: {formatTimestamp(preview.generated_at) || "—"}
           </span>
         ) : null}
       </header>
@@ -540,7 +525,7 @@ function EvidenceSnapshot({ review, lang, tx }: { review: MedicationEvidenceRevi
                 </p>
               </div>
               <span className="shrink-0 font-mono text-[9px] text-muted-foreground">
-                {assessment.decision_date ? formatEvidenceDate(assessment.decision_date, lang) : "—"}
+                {assessment.decision_date ? formatEvidenceDate(assessment.decision_date) : "—"}
               </span>
             </div>
             <CitationRefs refs={[assessment.citation_ref].filter(Boolean)} citations={citations} tx={tx} />
@@ -613,7 +598,7 @@ function ProvenanceDetails({ review, lang, tx }: { review: MedicationEvidenceRev
         <div className="border-t border-border/60 bg-muted/10 px-3 py-2 text-[10px] text-muted-foreground">
           {tx("Зафиксированные источники", "Gespeicherte Quellen")}: {review.bundle.sources.map((source) => {
             const fetched = source.last_successful_snapshot?.fetched_at
-              ? formatTimestamp(source.last_successful_snapshot.fetched_at, lang)
+              ? formatTimestamp(source.last_successful_snapshot.fetched_at)
               : null;
             return [
               officialSourceLabel(source, lang),
@@ -675,7 +660,7 @@ export function MedicationEvidenceReviewContent({
               {reviewStatusLabel(review.review.status, tx)}
             </span>
             <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700">
-              {formatTimestamp(review.review.created_at, lang) || review.review.id}
+              {formatTimestamp(review.review.created_at) || review.review.id}
             </span>
           </div>
           <SummaryStrip summary={review.bundle.summary} tx={tx} />
@@ -1389,7 +1374,7 @@ export function MedicationEvidenceReviewPanel({
                     {reviewStatusLabel(review.review.status, (ru, de) => (lang === "de" ? de : ru))}
                   </span>
                   <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[9px] font-medium text-sky-700">
-                    {formatTimestamp(review.review.created_at, lang) || review.review.id}
+                    {formatTimestamp(review.review.created_at) || review.review.id}
                   </span>
                 </div>
               ) : null}

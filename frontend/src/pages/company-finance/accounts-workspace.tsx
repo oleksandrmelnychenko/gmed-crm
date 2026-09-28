@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
-import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -194,8 +194,8 @@ function accountIcon(type: CompanyFinancialAccount["account_type"]) {
   return WalletCards;
 }
 
-function formatDate(value: string, locale: string) {
-  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
+function formatDate(value: string) {
+  return formatAppDate(value) || value;
 }
 
 export function CompanyAccountsWorkspace({ payload, currency, locale, money, onChanged }: Props) {
@@ -491,7 +491,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
   }
 
   const transferColumns = useMemo<ColumnDef<CompanyFinancialAccountTransfer>[]>(() => [
-    { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on, locale) },
+    { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on) },
     { id: "source", label: text.sourceAccount, accessor: (row) => row.source_account_name, filterType: "enum", sortable: true, searchable: true, width: 210 },
     { id: "target", label: text.targetAccount, accessor: (row) => row.target_account_name, filterType: "enum", sortable: true, searchable: true, width: 210, render: (row) => <span className="inline-flex items-center gap-2"><ArrowRight className="size-3.5 text-muted-foreground" />{row.target_account_name}</span> },
     {
@@ -525,7 +525,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
   ], [locale, money, text, transferRows]);
 
   const adjustmentColumns = useMemo<ColumnDef<CompanyFinancialAccountAdjustment>[]>(() => [
-    { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on, locale) },
+    { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on) },
     { id: "account", label: text.account, accessor: (row) => row.account_name, filterType: "enum", sortable: true, searchable: true, width: 210 },
     { id: "operation", label: text.operation, accessor: (row) => row.transaction_type === "reversal" ? text.reverse : row.direction === "inflow" ? text.inflow : text.outflow, filterType: "enum", sortable: true, width: 180, render: (row) => <Badge variant="outline" className="rounded-full text-[10px]">{row.transaction_type === "reversal" ? text.reverse : row.direction === "inflow" ? text.inflow : text.outflow}</Badge> },
     { id: "reason", label: text.reason, accessor: (row) => row.reason, filterType: "text", searchable: true, sortable: true, required: true, width: 280, render: (row) => <div className="truncate" title={row.reason}>{row.reason}</div> },
@@ -609,7 +609,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 <div><dt className="text-muted-foreground">{text.corrections}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.adjustment_balance)}</dd></div>
               </dl>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                {formatDate(account.opening_balance_on, locale)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
+                {formatDate(account.opening_balance_on)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
               </p>
               <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-3">
                 <Button type="button" size="xs" variant="outline" disabled={!account.is_active} onClick={() => {

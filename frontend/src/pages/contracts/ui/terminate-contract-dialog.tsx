@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { Field, textareaClass } from "@/components/ui-shell";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
@@ -286,13 +286,9 @@ export function TerminateContractDialog({
 /** Terminated-contract facts for a detail view: date, who, and why. */
 export function contractTerminationSummary(
   contract: Pick<ContractItem, "terminated_at" | "terminated_by_name" | "termination_reason">,
-  lang: Lang,
 ) {
   if (!contract.terminated_at) return null;
-  const date = new Date(contract.terminated_at);
-  const dateLabel = Number.isNaN(date.getTime())
-    ? contract.terminated_at
-    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(date);
+  const dateLabel = formatAppDate(contract.terminated_at) || contract.terminated_at;
   return {
     date: dateLabel,
     by: contract.terminated_by_name?.trim() || null,
@@ -309,7 +305,7 @@ export function ContractTerminationNote({
   lang: Lang;
   className?: string;
 }) {
-  const summary = contractTerminationSummary(contract, lang);
+  const summary = contractTerminationSummary(contract);
   if (!summary) return null;
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   return (

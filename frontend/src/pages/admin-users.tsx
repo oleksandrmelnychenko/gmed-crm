@@ -45,7 +45,7 @@ import {
 } from "@/components/ui-shell";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
@@ -131,20 +131,6 @@ const ADMIN_USER_REALTIME_EVENTS = [
   "session.revoked",
 ] as const;
 
-const ADMIN_USER_DATE_FORMATTER = appDateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-});
-
-const ADMIN_USER_DATE_TIME_FORMATTER = appDateTimeFormat("en-GB", {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 type PasswordMode = "one_time" | "manual";
 
 function initials(name: string) {
@@ -156,19 +142,11 @@ function initials(name: string) {
 }
 
 function formatDate(value: string) {
-  try {
-    return ADMIN_USER_DATE_FORMATTER.format(new Date(value));
-  } catch {
-    return value.split("T")[0];
-  }
+  return formatAppDate(value) || value.split("T")[0];
 }
 
 function formatDateTime(value: string) {
-  try {
-    return ADMIN_USER_DATE_TIME_FORMATTER.format(new Date(value));
-  } catch {
-    return value.replace("T", " ").slice(0, 16);
-  }
+  return formatAppDateTime(value) || value.replace("T", " ").slice(0, 16);
 }
 
 function DotTitle({ children }: { children: ReactNode }) {

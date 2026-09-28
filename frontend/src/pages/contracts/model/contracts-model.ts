@@ -1,4 +1,9 @@
-import { appDateKey, appDateTimeFormat, dateOrInstant, isoToBerlinLocalInput } from "@/lib/app-time-zone";
+import {
+  appDateKey,
+  formatAppDate,
+  formatAppDateTime,
+  isoToBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import { serviceDescriptionItems } from "@/lib/service-description";
 import { hasFormChanges } from "@/lib/form-changes";
 import { hasCapability, type Actor } from "@/lib/permissions";
@@ -416,64 +421,26 @@ function toDateTimeLocal(value: string) {
   return isoToBerlinLocalInput(value);
 }
 
-const CONTRACT_DATE_TIME_FORMAT_OPTIONS = {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-} satisfies Intl.DateTimeFormatOptions;
-
-const CONTRACT_DATE_FORMAT_OPTIONS = {
-  day: "2-digit",
-  month: "short",
-  year: "numeric",
-} satisfies Intl.DateTimeFormatOptions;
-
-const contractDateTimeFormatters: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
-  "ru-RU": appDateTimeFormat("ru-RU", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
-  "en-GB": appDateTimeFormat("en-GB", CONTRACT_DATE_TIME_FORMAT_OPTIONS),
-};
-
-const contractDateFormatters: Record<string, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", CONTRACT_DATE_FORMAT_OPTIONS),
-  "ru-RU": appDateTimeFormat("ru-RU", CONTRACT_DATE_FORMAT_OPTIONS),
-  "en-GB": appDateTimeFormat("en-GB", CONTRACT_DATE_FORMAT_OPTIONS),
-};
-
-function contractDateTimeFormatter(locale: string) {
-  return contractDateTimeFormatters[locale] ?? contractDateTimeFormatters["en-GB"];
-}
-
-function contractDateFormatter(locale: string) {
-  return contractDateFormatters[locale] ?? contractDateFormatters["en-GB"];
-}
-
+/** "DD.MM.YYYY HH:mm" Berlin time in every language. */
 export function formatDateTime(
   value?: string | null,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = "-",
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  try {
-    return contractDateTimeFormatter(locale).format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
+/** "DD.MM.YYYY" in every language; calendar dates are never shifted. */
 export function formatDate(
   value?: string | null,
-  locale = "de-DE",
+  _locale = "de-DE",
   emptyLabel = "-",
 ) {
+  void _locale;
   if (!value) return emptyLabel;
-  try {
-    return contractDateFormatter(locale).format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
 export function enumLabel(

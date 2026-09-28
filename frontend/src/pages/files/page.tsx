@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { apiFetch, downloadApiFile } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
@@ -154,16 +154,8 @@ function statusTone(status: string) {
   return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
-function formatUploadedAt(value: string, lang: Lang) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+function formatUploadedAt(value: string) {
+  return formatAppDateTime(value) || "—";
 }
 
 function FileIcon({ mimeType }: { mimeType: string }) {
@@ -346,7 +338,7 @@ export function FilesPage() {
                   <p className="truncate font-medium text-foreground">{row.uploaded_by_name || "—"}</p>
                   <p className="mt-1 inline-flex items-center gap-1.5">
                     <CalendarClock className="size-3.5" />
-                    {formatUploadedAt(row.created_at, lang)}
+                    {formatUploadedAt(row.created_at)}
                   </p>
                 </div>
 

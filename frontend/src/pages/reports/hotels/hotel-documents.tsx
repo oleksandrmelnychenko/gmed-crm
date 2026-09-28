@@ -3,7 +3,7 @@ import { Check, Download, FileText, Paperclip, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 
 const copy = {
@@ -62,7 +62,7 @@ export function HotelDocuments({ providerId, role, lang, onDirty }: { providerId
       {uploadError ? <p role="alert" className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">{uploadError}</p> : null}
       <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" size="sm" disabled={busy} onClick={reset}>{labels.cancel}</Button><Button type="submit" size="sm" disabled={busy || !file}>{busy ? labels.busy : labels.save}</Button></div>
     </form> : null}
-    {providerId && canRead ? loading ? <p role="status" className="text-xs text-muted-foreground">{labels.busy}</p> : <ul className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70">{documents.map(document => <li key={document.id} className="flex items-start gap-3 px-3 py-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600"><FileText className="size-4" /></span><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{document.auto_name}</p><p className="mt-0.5 break-all text-xs text-muted-foreground">{document.original_filename} · {appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE").format(new Date(document.created_at))}</p>{document.notes ? <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">{document.notes}</p> : null}</div><Button size="icon-sm" variant="outline" className="shrink-0" aria-label={`${labels.download}: ${document.auto_name}`} title={labels.download} onClick={() => void download(document)}><Download className="size-4" /></Button></li>)}{!documents.length && !error ? <li className="px-4 py-6 text-center text-xs text-muted-foreground">{labels.empty}</li> : null}</ul> : null}
+    {providerId && canRead ? loading ? <p role="status" className="text-xs text-muted-foreground">{labels.busy}</p> : <ul className="divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70">{documents.map(document => <li key={document.id} className="flex items-start gap-3 px-3 py-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-orange-600"><FileText className="size-4" /></span><div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{document.auto_name}</p><p className="mt-0.5 break-all text-xs text-muted-foreground">{document.original_filename} · {formatAppDate(document.created_at)}</p>{document.notes ? <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">{document.notes}</p> : null}</div><Button size="icon-sm" variant="outline" className="shrink-0" aria-label={`${labels.download}: ${document.auto_name}`} title={labels.download} onClick={() => void download(document)}><Download className="size-4" /></Button></li>)}{!documents.length && !error ? <li className="px-4 py-6 text-center text-xs text-muted-foreground">{labels.empty}</li> : null}</ul> : null}
     </div>
   </section>;
 }

@@ -13,7 +13,7 @@ import {
   appDateKeyOf,
   appDateTimeFormat,
   dateOrInstant,
-  formatDateKey,
+  formatAppDate,
   startOfMonthKey,
 } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -241,7 +241,7 @@ function isTaskOpen(task: TaskItem) {
   return task.status !== "done" && task.status !== "completed" && task.status !== "cancelled";
 }
 
-function weeklyCashData(finance: ExecutiveFinanceSnapshot | null, locale: string): CashDatum[] {
+function weeklyCashData(finance: ExecutiveFinanceSnapshot | null): CashDatum[] {
   // Seven-day buckets of the current Berlin month, as calendar dates.
   const today = appDateKey();
   const start = startOfMonthKey(today);
@@ -261,7 +261,7 @@ function weeklyCashData(finance: ExecutiveFinanceSnapshot | null, locale: string
     week.net += safeNumber(movement.signed_amount);
   });
 
-  const dayMonth = (key: string) => formatDateKey(key, locale, { day: "2-digit", month: "short" });
+  const dayMonth = (key: string) => formatAppDate(key);
   return weeks.map((week) => ({
     label: `${dayMonth(week.from)}–${dayMonth(week.to)}`,
     inflow: week.inflow,
@@ -378,7 +378,8 @@ export function ExecutiveBusinessMap({
     () => new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     [locale],
   );
-  const date = appDateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date());
+  const today = new Date();
+  const date = `${appDateTimeFormat(locale, { weekday: "long" }).format(today)}, ${formatAppDate(today)}`;
 
   const decisionTasks = useMemo(
     () => tasks
@@ -394,7 +395,7 @@ export function ExecutiveBusinessMap({
     [tasks],
   );
 
-  const cashData = useMemo(() => weeklyCashData(finance, locale), [finance, locale]);
+  const cashData = useMemo(() => weeklyCashData(finance), [finance]);
   const netCashFlow = safeNumber(finance?.net_cash_flow);
   const receivables = safeNumber(finance?.patient_receivables);
   const payables = safeNumber(finance?.provider_payables);
@@ -414,7 +415,7 @@ export function ExecutiveBusinessMap({
   const dueLabel = (task: TaskItem) => {
     if (!task.due_date) return copy.noDue;
     const sameDay = appDateKeyOf(task.due_date) === appDateKey();
-    return sameDay ? copy.today : appDateTimeFormat(locale, { day: "2-digit", month: "short" }).format(dateOrInstant(task.due_date));
+    return sameDay ? copy.today : formatAppDate(task.due_date) || task.due_date;
   };
   const taskTone = (task: TaskItem): "good" | "warning" | "danger" => {
     if (task.due_date && new Date(task.due_date).getTime() < Date.now()) return "danger";

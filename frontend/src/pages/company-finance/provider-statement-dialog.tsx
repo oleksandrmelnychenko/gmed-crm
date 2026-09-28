@@ -11,7 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Banner as ShellBanner } from "@/components/ui-shell";
-import { formatDateKey } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -86,8 +86,8 @@ function formatMoney(value: string | null | undefined, currency: string, _locale
   return formatMoneyAmount(value ?? 0, currency);
 }
 
-function formatDate(value: string, locale: string) {
-  return formatDateKey(value, locale, { year: "numeric", month: "numeric", day: "numeric" }) || value;
+function formatDate(value: string) {
+  return formatAppDate(value) || value;
 }
 
 function operationLabel(
@@ -159,7 +159,7 @@ export function ProviderStatementDialog({
           <DialogTitle>{text.title}</DialogTitle>
           <DialogDescription>
             {provider?.provider_name} · {text.description}
-            {statement ? ` · ${formatDate(statement.period.from, locale)} — ${formatDate(statement.period.to, locale)}` : ""}
+            {statement ? ` · ${formatDate(statement.period.from)} — ${formatDate(statement.period.to)}` : ""}
           </DialogDescription>
         </DialogHeader>
 
@@ -197,7 +197,7 @@ export function ProviderStatementDialog({
                       <Badge variant={movement.movement_type === "payment" ? "secondary" : "outline"}>
                         {operationLabel(movement, text)}
                       </Badge>
-                      <p className="mt-1.5 text-xs text-muted-foreground">{formatDate(movement.movement_date, locale)}</p>
+                      <p className="mt-1.5 text-xs text-muted-foreground">{formatDate(movement.movement_date)}</p>
                     </div>
                     <p className="mt-2 flex items-baseline justify-between gap-3 rounded-md bg-muted/35 px-2.5 py-2 text-sm font-semibold tabular-nums">
                       <span className="text-[10px] font-normal text-muted-foreground">{text.balance}</span>
@@ -256,7 +256,7 @@ export function ProviderStatementDialog({
                 <tbody className="divide-y divide-border/70">
                   {statement.movements.map((movement) => (
                     <tr key={`${movement.movement_type}:${movement.id}`} className="align-top hover:bg-muted/20">
-                      <td className="whitespace-nowrap px-3 py-2.5">{formatDate(movement.movement_date, locale)}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5">{formatDate(movement.movement_date)}</td>
                       <td className="px-3 py-2.5">
                         <Badge variant={movement.movement_type === "payment" ? "secondary" : "outline"}>
                           {operationLabel(movement, text)}

@@ -1,5 +1,5 @@
-import { appDateTimeFormat } from "@/lib/app-time-zone";
-import { getLang, uiText } from "@/lib/i18n";
+import { formatAppDate } from "@/lib/app-time-zone";
+import { uiText } from "@/lib/i18n";
 
 export function formatRelativeTime(from: Date, now: Date = new Date()): string {
   const diffMs = now.getTime() - from.getTime();
@@ -12,9 +12,5 @@ export function formatRelativeTime(from: Date, now: Date = new Date()): string {
   if (hours < 24) return uiText("relative_time_hours_ago", undefined, { count: hours });
   const days = Math.floor(hours / 24);
   if (days < 7) return uiText("relative_time_days_ago", undefined, { count: days });
-  return appDateTimeFormat(getLang() === "de" ? "de-DE" : "ru-RU", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(from);
+  return formatAppDate(from);
 }

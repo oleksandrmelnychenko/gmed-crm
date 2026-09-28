@@ -1,5 +1,5 @@
 import { apiFetchFile } from "@/lib/api";
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { formatMoneyAmount } from "@/lib/money";
 import {
   formatEnumLabelFromKeys,
@@ -636,57 +636,6 @@ function portalText(key: string) {
   return translateCatalog(getLang()).uiText[key] ?? key;
 }
 
-type PortalLocale = "de-DE" | "en-GB" | "ru-RU";
-
-function portalLocale(): PortalLocale {
-  const lang = getLang();
-  if (lang === "de") return "de-DE";
-  if (lang === "ru") return "ru-RU";
-  return "en-GB";
-}
-
-const PORTAL_DATE_TIME_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  "en-GB": appDateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }),
-};
-
-const PORTAL_DATE_FORMATTERS: Record<PortalLocale, Intl.DateTimeFormat> = {
-  "de-DE": appDateTimeFormat("de-DE", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-  "en-GB": appDateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-  "ru-RU": appDateTimeFormat("ru-RU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }),
-};
-
 function portalTranslations() {
   return translateCatalog(getLang());
 }
@@ -936,27 +885,19 @@ export function patientInvoiceLedgerCategoryLabel(value?: string | null) {
   return portalEnumLabel(value, PATIENT_INVOICE_LEDGER_CATEGORY_LABEL_KEYS);
 }
 
+/**
+ * "DD.MM.YYYY HH:mm" in Berlin time. A calendar date (an invoice due date)
+ * has no time and shows as "DD.MM.YYYY", never as UTC midnight.
+ */
 export function formatPortalDateTime(value?: string | null) {
   if (!value) return portalNotSetLabel();
-  // A calendar date (an invoice due date) has no time: parsed as an instant it
-  // would show UTC midnight as "02:00" German time.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return formatPortalDate(value.trim());
-
-  try {
-    return PORTAL_DATE_TIME_FORMATTERS[portalLocale()].format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
+/** "DD.MM.YYYY" in every language. */
 export function formatPortalDate(value?: string | null) {
   if (!value) return portalNotSetLabel();
-
-  try {
-    return PORTAL_DATE_FORMATTERS[portalLocale()].format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
 export function formatPortalFileSize(value?: number | null) {

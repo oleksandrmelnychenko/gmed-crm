@@ -14,7 +14,7 @@ import {
   type AccountSession,
 } from "@/lib/account";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { TwoFactorSection } from "@/pages/two-factor";
@@ -257,7 +257,7 @@ export function ChangePasswordForm({ onChanged }: { onChanged?: () => void | Pro
 }
 
 function SessionsSection() {
-  const { l, lang } = useUiText();
+  const { l } = useUiText();
   const { logout } = useAuth();
   const [sessions, setSessions] = useState<AccountSession[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -305,8 +305,7 @@ function SessionsSection() {
     }
   };
 
-  const formatDate = (value: string) =>
-    appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+  const formatDate = (value: string) => formatAppDateTime(value) || value;
 
   return (
     <Section

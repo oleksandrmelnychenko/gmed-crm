@@ -33,7 +33,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
-import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import type { Lang } from "@/lib/i18n";
@@ -298,19 +298,14 @@ const copy = {
   },
 } as const;
 
-function dateTime(value: string | null, lang: Lang) {
+function dateTime(value: string | null) {
   if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  return formatAppDateTime(value) || "—";
 }
 
-function dateOnly(value: string | null, lang: Lang) {
+function dateOnly(value: string | null) {
   if (!value) return "—";
-  return formatDateKey(value, lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium" }) || value;
+  return formatAppDate(value) || value;
 }
 
 function expenseMoney(value: string, currency: string, lang: Lang) {
@@ -368,7 +363,7 @@ function TaskChildrenTable({ rows, parentId, lang, disabled, onOpen, actions }: 
     if (!value) return <span className="text-muted-foreground">—</span>;
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return <span className="text-muted-foreground">—</span>;
-    return <Badge variant="outline" className={cn("text-[10px] font-normal", overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "bg-muted/15")} title={overdue ? labels.overdue : undefined}><time dateTime={date.toISOString()}>{appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(date)}</time></Badge>;
+    return <Badge variant="outline" className={cn("text-[10px] font-normal", overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "bg-muted/15")} title={overdue ? labels.overdue : undefined}><time dateTime={date.toISOString()}>{formatAppDateTime(date)}</time></Badge>;
   };
   const columns: ColumnDef<ConciergeTask>[] = [
     {
@@ -1073,9 +1068,9 @@ export function ConciergeTaskDetailDialog({
               <TaskDetailSection title={labels.overview}>
                 <div className="divide-y divide-border/60">
                   <TaskDetailRow label={labels.assignee} value={detail.item.assigned_to_name} />
-                  <TaskDetailRow label={labels.start} value={dateTime(detail.item.starts_at, lang)} />
-                  <TaskDetailRow label={labels.end} value={dateTime(detail.item.kind === "event" ? detail.item.ends_at : detail.item.due_at, lang)} />
-                  <TaskDetailRow label={labels.reminder} value={dateTime(detail.item.reminder_at, lang)} />
+                  <TaskDetailRow label={labels.start} value={dateTime(detail.item.starts_at)} />
+                  <TaskDetailRow label={labels.end} value={dateTime(detail.item.kind === "event" ? detail.item.ends_at : detail.item.due_at)} />
+                  <TaskDetailRow label={labels.reminder} value={dateTime(detail.item.reminder_at)} />
                   <TaskDetailRow label={labels.note} value={<p className="whitespace-pre-wrap">{localizeTaskNote(detail.item.note, lang) || "—"}</p>} />
                   <TaskDetailRow label={labels.location} value={detail.item.location || "—"} />
                   <TaskDetailRow
@@ -1122,7 +1117,7 @@ export function ConciergeTaskDetailDialog({
                     ) : null}
                     {detail.item.patient_id && detail.item.patient_name ? (
                       <StaffLink to={`/patients/${detail.item.patient_id}`} className="group flex items-center gap-3 px-3.5 py-2.5 transition-colors hover:bg-muted/20">
-                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date, lang)}</span></span>
+                        <span className="min-w-0 flex-1"><span className="block text-[13px] font-medium text-muted-foreground">{labels.patient}</span><strong className="block truncate text-sm">{detail.item.patient_name}</strong><span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground"><Cake className="size-3" />{labels.birthDate}: {dateOnly(detail.item.patient_birth_date)}</span></span>
                         <ExternalLink className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-[var(--brand)]" />
                       </StaffLink>
                     ) : null}
@@ -1185,7 +1180,7 @@ export function ConciergeTaskDetailDialog({
                               </Badge>
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {dateOnly(item.expense_date, lang)} · {expenseMoney(item.amount_gross, item.currency, lang)}
+                              {dateOnly(item.expense_date)} · {expenseMoney(item.amount_gross, item.currency, lang)}
                             </p>
                           </div>
                           {item.receipt ? (
@@ -1259,7 +1254,7 @@ export function ConciergeTaskDetailDialog({
                         <>
                           <span className="min-w-0 flex-1 pt-0.5">
                             <span className={cn("block break-words", item.is_completed && "text-muted-foreground line-through")}>{item.label}</span>
-                            <time className="mt-0.5 block text-[10px] font-normal text-muted-foreground">{dateTime(item.created_at, lang)}</time>
+                            <time className="mt-0.5 block text-[10px] font-normal text-muted-foreground">{dateTime(item.created_at)}</time>
                           </span>
                           {canCollaborate && !detail.item.archived_at ? (
                             <div className="flex shrink-0 items-center gap-0.5">
@@ -1282,7 +1277,7 @@ export function ConciergeTaskDetailDialog({
                       <div className="flex items-start justify-between gap-2 text-[10px] text-muted-foreground">
                         <div className="min-w-0"><strong className="text-foreground">{item.created_by_name}</strong>{item.edited_at ? <span className="ml-1.5">· {labels.edited}</span> : null}</div>
                         <div className="flex shrink-0 items-center gap-0.5">
-                          <time className="mr-1 pt-1.5">{dateTime(item.created_at, lang)}</time>
+                          <time className="mr-1 pt-1.5">{dateTime(item.created_at)}</time>
                           {item.created_by === user?.id && !detail.item.archived_at ? (
                             <>
                               <Button type="button" size="icon-sm" variant="ghost" className="size-7" aria-label={labels.edit} onClick={() => { setEditingCommentId(item.id); setCommentDraft(item.body); }}><Pencil /></Button>
@@ -1317,7 +1312,7 @@ export function ConciergeTaskDetailDialog({
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
               </summary>
               <div className="divide-y divide-border/60 border-t border-border/70">
-                {detail.history.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at, lang)}</time></div>)}
+                {detail.history.length === 0 ? <p className="p-6 text-center text-xs text-muted-foreground">{labels.emptyHistory}</p> : detail.history.map((event) => <div key={event.id} className="flex items-start justify-between gap-3 px-3 py-2.5 text-xs"><div><p className="font-medium">{labels[event.event_type as keyof typeof labels] ?? event.event_type}</p><p className="mt-0.5 text-muted-foreground">{event.actor_name ?? "System"}</p></div><time className="shrink-0 text-muted-foreground">{dateTime(event.created_at)}</time></div>)}
               </div>
             </details>
             </div>

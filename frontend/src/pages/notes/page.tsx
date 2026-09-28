@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -103,13 +103,8 @@ const copy = {
   },
 } as const;
 
-function formatDate(value: string, lang: "de" | "ru") {
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
+function formatDate(value: string) {
+  return formatAppDateTime(value) || value;
 }
 
 function formatSize(value: number) {
@@ -323,7 +318,7 @@ export function InternalNotesPage() {
                   <div className="flex shrink-0 items-center gap-1">
                     {note.attachment_count > 0 ? <Badge variant="secondary" className="h-5 shrink-0 rounded-full px-1.5 text-[9px]"><Paperclip className="size-2.5" />{note.attachment_count}</Badge> : null}
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[9px] font-medium tabular-nums text-sky-700">
-                      {formatDate(note.updated_at, lang)}
+                      {formatDate(note.updated_at)}
                     </span>
                   </div>
                 </div>
@@ -339,7 +334,7 @@ export function InternalNotesPage() {
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
                 <div className="min-w-0">
                   <h2 className="truncate text-base font-semibold text-foreground">{activeNote?.title ?? labels.untitled}</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">{`${labels.updated} ${activeNote ? formatDate(activeNote.updated_at, lang) : ""}`}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{`${labels.updated} ${activeNote ? formatDate(activeNote.updated_at) : ""}`}</p>
                   {activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.updated_by_name}</p> : null}
                 </div>
                 <div className="flex gap-2">

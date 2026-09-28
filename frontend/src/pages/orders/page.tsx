@@ -4832,7 +4832,6 @@ function useOrdersPageContent() {
                     <OrderPipelinePanel
                       orderId={orderDetail.id}
                       lang={lang}
-                      locale={locale}
                       reloadNonce={reloadNonce}
                       appointmentsHref={detailAppointmentsHref}
                       providersHref={detailProvidersHref}

@@ -50,11 +50,11 @@ function paramsFromPath(path: string) {
 
 describe("compact provider dates", () => {
   it("shows calendar dates unshifted and timestamps in Berlin time", () => {
-    expect(compactDate("2026-09-28")).toMatch(/^28 Sep/);
+    expect(compactDate("2026-09-28")).toBe("28.09.2026");
     expect(compactDate("not a date")).toBe("not a date");
     // 28 Sep 00:30 in Berlin, still 27 Sep in UTC; 27 Sep 23:30 in Berlin, already 28 Sep in Kyiv.
-    expect(compactDateTime("2026-09-27T22:30:00Z")).toMatch(/^28 Sep\S* 2026,? 00:30$/);
-    expect(compactDateTime("2026-09-27T21:30:00Z")).toMatch(/^27 Sep\S* 2026,? 23:30$/);
+    expect(compactDateTime("2026-09-27T22:30:00Z")).toBe("28.09.2026 00:30");
+    expect(compactDateTime("2026-09-27T21:30:00Z")).toBe("27.09.2026 23:30");
   });
 });
 

@@ -319,7 +319,7 @@ describe("patientVitalMetrics", () => {
       "date",
     );
 
-    expect(rendered).toBe("10 авг. 2026 г.");
+    expect(rendered).toBe("10.08.2026");
     expect(rendered).not.toMatch(/00[:.]00/);
   });
 
@@ -342,7 +342,7 @@ describe("groupPatientLabResults", () => {
       lab.measured_at_precision,
     );
 
-    expect(rendered).toBe("10 авг. 2026 г.");
+    expect(rendered).toBe("10.08.2026");
     expect(rendered).not.toMatch(/00[:.]00/);
   });
 

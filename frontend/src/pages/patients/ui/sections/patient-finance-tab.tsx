@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Banner, Field } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
-import { appDateTimeFormat, formatDateKey } from "@/lib/app-time-zone";
+import { appDateTimeFormat, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
@@ -114,7 +114,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
     })),
   ];
   const movementColumns: ColumnDef<PatientAccountMovement>[] = [
-    { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{formatDateKey(row.entry_date, lang === "de" ? "de-DE" : "ru-RU")}</span> },
+    { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{formatAppDate(row.entry_date)}</span> },
     { id: "kind", label: l.kind, accessor: row => row.id.startsWith("payment-balance:") ? l.imported : (l[row.kind as keyof typeof l] ?? l.unknown), width: 235 },
     { id: "document", label: l.document, accessor: row => row.document_number ?? "", width: 190, render: row => <span className="font-mono text-xs">{row.document_number || "—"}</span> },
     { id: "order", label: l.order, accessor: row => row.order_number ?? "", width: 180, render: row => <span className="font-mono text-xs">{row.order_number || "—"}</span> },

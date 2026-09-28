@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LoaderCircle, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import {
   Dialog,
   DialogContent,
@@ -76,7 +76,7 @@ export function RepeatIntakePicker({ patientId, lang, onPick, onClose }: {
         {error ? <div role="alert" className="space-y-3 text-sm text-destructive">{error}<Button variant="outline" onClick={() => setAttempt(value => value + 1)}>{tx("Повторить", "Erneut versuchen")}</Button></div>
           : !drafts ? <p role="status" className="text-sm text-muted-foreground">{tx("Проверяем сохранённые обращения…", "Gespeicherte Anfragen werden geprüft…")}</p>
           : drafts.length === 0 ? <p className="rounded-lg border p-4 text-sm text-muted-foreground">{tx("Сохранённых черновиков нет.", "Keine gespeicherten Entwürfe vorhanden.")}</p>
-          : <div className="overflow-hidden rounded-lg border"><table className="w-full text-sm"><thead className="bg-muted/40 text-muted-foreground"><tr><th className="p-3 text-left font-medium">{tx("Сохранённые обращения", "Gespeicherte Anfragen")}</th><th /></tr></thead><tbody>{drafts.map(item => <tr key={item.id} className="border-t"><td className="p-3"><div>{item.concern || tx("Черновик обращения", "Anfrageentwurf")}</div><div className="text-xs text-muted-foreground">{appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(new Date(item.created_at))}</div></td><td className="p-3"><div className="flex flex-wrap justify-end gap-2"><Button
+          : <div className="overflow-hidden rounded-lg border"><table className="w-full text-sm"><thead className="bg-muted/40 text-muted-foreground"><tr><th className="p-3 text-left font-medium">{tx("Сохранённые обращения", "Gespeicherte Anfragen")}</th><th /></tr></thead><tbody>{drafts.map(item => <tr key={item.id} className="border-t"><td className="p-3"><div>{item.concern || tx("Черновик обращения", "Anfrageentwurf")}</div><div className="text-xs text-muted-foreground">{formatAppDate(item.created_at)}</div></td><td className="p-3"><div className="flex flex-wrap justify-end gap-2"><Button
             type="button"
             variant="destructive"
             size="sm"

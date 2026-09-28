@@ -1,4 +1,4 @@
-import { formatDateKey } from "./app-time-zone";
+import { formatAppDate } from "./app-time-zone";
 import { uiText, type Lang } from "./i18n";
 import { localizeTimelineTitle } from "./timeline-labels";
 
@@ -24,12 +24,7 @@ export function localizeTaskNote(note: string | null | undefined, lang: Lang): s
   const preparation = trimmed.match(/^Prepare non-medical support for appointment on (\d{4}-\d{2}-\d{2})$/);
   if (preparation) {
     return uiText("generated_reminder_note_prepare_concierge_service", lang, {
-      date:
-        formatDateKey(preparation[1], lang === "de" ? "de-DE" : "ru-RU", {
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-        }) || preparation[1],
+      date: formatAppDate(preparation[1]) || preparation[1],
     });
   }
   return note ?? "";

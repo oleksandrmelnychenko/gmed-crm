@@ -3,7 +3,7 @@ import { Check, LoaderCircle, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiFetch } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 
 type ReviewEvent = { id: string; at: string; by: string; test_mode: boolean; automatic: boolean };
@@ -58,7 +58,7 @@ export function DocumentReviewStatus({
   if (error) return <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-destructive">{tx("Не удалось проверить статус ознакомления", "Kenntnisnahmestatus konnte nicht geprüft werden")}<Button size="xs" variant="outline" onClick={() => setRevision(value => value + 1)}>{tx("Повторить", "Erneut versuchen")}</Button></div>;
   if (!state) return <span className="mt-2 block text-xs text-muted-foreground">{tx("Проверка статуса ознакомления…", "Kenntnisnahmestatus wird geprüft…")}</span>;
   const event = state.acknowledged ?? state.sent;
-  const at = event ? appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(event.at)) : "";
+  const at = event ? formatAppDateTime(event.at) : "";
   const confirmationStale = !!confirming && confirming.sent_event_id !== (state.sent?.id ?? null);
   return <div className="mt-2 space-y-2 text-xs">
     {actionError ? <p role="alert" className="text-destructive">{tx("Отметка не сохранена. Проверьте актуальный статус и повторите.", "Vermerk nicht gespeichert. Prüfen Sie den aktuellen Status und versuchen Sie es erneut.")}</p> : null}

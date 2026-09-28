@@ -30,7 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { StaffLink } from "@/components/staff-link";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
-import { appDateKey, appDateTimeFormat, dateKeyToDate } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
@@ -336,13 +336,14 @@ function formatMoney(value: string, currency: string, _locale: string) {
   return formatMoneyAmount(value, currency);
 }
 
-function formatDate(value: string | null, locale: string, withTime = false) {
+function formatDate(value: string | null) {
   if (!value) return "—";
-  const date = withTime ? new Date(value) : dateKeyToDate(value);
-  if (!date || Number.isNaN(date.getTime())) return value;
-  return withTime
-    ? appDateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(date)
-    : appDateTimeFormat(locale, { year: "numeric", month: "numeric", day: "numeric" }).format(date);
+  return formatAppDate(value) || value;
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "—";
+  return formatAppDateTime(value) || value;
 }
 
 function formatFileSize(value: number | null) {
@@ -521,8 +522,8 @@ export function ConciergeExpenseReviewPanel({
       width: 135,
       render: (row) => (
         <div>
-          <div>{formatDate(row.expense_date, locale)}</div>
-          <div className="text-[10px] text-muted-foreground">{text.submittedAt}: {formatDate(row.submitted_at, locale, true)}</div>
+          <div>{formatDate(row.expense_date)}</div>
+          <div className="text-[10px] text-muted-foreground">{text.submittedAt}: {formatDateTime(row.submitted_at)}</div>
         </div>
       ),
     },
@@ -896,7 +897,7 @@ export function ConciergeExpenseReviewPanel({
                 </div>
                 <div className="mt-3 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 text-xs">
                   <div className="min-w-0"><span className="block text-[10px] text-muted-foreground">{text.vendor}</span><span className="block truncate">{row.vendor}</span></div>
-                  <div><span className="block text-[10px] text-muted-foreground">{text.expenseDate}</span>{formatDate(row.expense_date, locale)}</div>
+                  <div><span className="block text-[10px] text-muted-foreground">{text.expenseDate}</span>{formatDate(row.expense_date)}</div>
                   <div><span className="block text-[10px] text-muted-foreground">{text.payer}</span>{payerLabel(row.paid_by)}</div>
                   <div><span className="block text-[10px] text-muted-foreground">{text.amount}</span><span className="font-semibold tabular-nums">{formatMoney(row.amount_gross, row.currency, locale)}</span></div>
                 </div>
@@ -1003,7 +1004,7 @@ export function ConciergeExpenseReviewPanel({
                         <div className="min-w-0"><span className="block text-[11px] text-muted-foreground">{text.patient}</span><StaffLink to={`/patients/${selected.patient_id}?tab=invoices`} className="block truncate font-medium hover:underline">{selected.service.patient_name || selected.service.patient_pid}</StaffLink></div>
                         <div className="min-w-0"><span className="block text-[11px] text-muted-foreground">{text.service}</span><span className="block truncate font-medium">{selected.service.title}</span></div>
                         <div className="min-w-0"><span className="block text-[11px] text-muted-foreground">{text.vendor}</span><span className="block truncate font-medium">{selected.vendor}</span></div>
-                        <div><span className="block text-[11px] text-muted-foreground">{text.expenseDate}</span>{formatDate(selected.expense_date, locale)}</div>
+                        <div><span className="block text-[11px] text-muted-foreground">{text.expenseDate}</span>{formatDate(selected.expense_date)}</div>
                         <div><span className="block text-[11px] text-muted-foreground">{text.payer}</span>{payerLabel(selected.paid_by)}</div>
                         <div><span className="block text-[11px] text-muted-foreground">{text.serviceDelivered}</span>{selected.service_delivered ? text.yes : text.no}</div>
                         <div><span className="block text-[11px] text-muted-foreground">{text.net}</span>{formatMoney(selected.amount_net, selected.currency, locale)}</div>
@@ -1015,7 +1016,7 @@ export function ConciergeExpenseReviewPanel({
                         <p className="whitespace-pre-wrap break-words">{selected.note || "—"}</p>
                       </div>
                       <div className="mt-3 text-xs text-muted-foreground">
-                        {text.submittedBy}: {selected.submitted_by.display_name || "—"} · {formatDate(selected.submitted_at, locale, true)}
+                        {text.submittedBy}: {selected.submitted_by.display_name || "—"} · {formatDateTime(selected.submitted_at)}
                       </div>
                     </section>
 
@@ -1218,7 +1219,7 @@ export function ConciergeExpenseReviewPanel({
                           <li key={`${event.action}:${event.created_at ?? index}`} className="relative border-l border-border pl-3 text-xs">
                             <div className="flex flex-wrap items-center justify-between gap-1">
                               <span className="font-semibold">{event.action === "submitted" ? text.submitted : statusLabel(event.action)}</span>
-                              <span className="text-muted-foreground">{formatDate(event.created_at, locale, true)}</span>
+                              <span className="text-muted-foreground">{formatDateTime(event.created_at)}</span>
                             </div>
                             <div className="mt-0.5 text-muted-foreground">{event.actor.display_name || "—"}</div>
                             {event.reason ? <p className="mt-1 whitespace-pre-wrap break-words"><span className="text-muted-foreground">{text.reason}: </span>{event.reason}</p> : null}

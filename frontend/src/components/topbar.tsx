@@ -18,8 +18,7 @@ import { canAccessStaffRoute, staffHrefIfAllowed } from "@/lib/staff-route-acces
 import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
-import { isoToBerlinLocalInput } from "@/lib/app-time-zone";
-import { cachedDateTimeFormat } from "@/lib/intl-cache";
+import { formatAppDateTime, isoToBerlinLocalInput } from "@/lib/app-time-zone";
 import {
   useDebouncedRealtimeSubscription,
   useRealtimeConnectionStatus,
@@ -74,13 +73,8 @@ function initials(name: string) {
     .join("");
 }
 
-function compactDt(dt: string, lang: "ru" | "de") {
-  const value = new Date(dt);
-  if (Number.isNaN(value.getTime())) return "—";
-  return cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(value);
+function compactDt(dt: string) {
+  return formatAppDateTime(dt) || "—";
 }
 
 function compactTime(dt: string) {
@@ -513,7 +507,7 @@ export function Topbar() {
                                 <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                                   {country ? <span>{country}</span> : null}
                                   {country ? <span aria-hidden="true">·</span> : null}
-                                  <span>{compactDt(lead.created_at, lang)}</span>
+                                  <span>{compactDt(lead.created_at)}</span>
                                 </span>
                               </span>
                               <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
@@ -905,7 +899,7 @@ function NotificationPanel({
                     </p>
                   )}
                   <p className="text-[10px] text-muted-foreground mt-1">
-                    {compactDt(n.created_at, lang)}
+                    {compactDt(n.created_at)}
                   </p>
                 </div>
                 </button>

@@ -14,7 +14,7 @@ import {
 import { toast } from "@/components/ui/toast";
 import { Banner, Field, StatusBadge, textareaClass } from "@/components/ui-shell";
 import { ApiRequestError } from "@/lib/api";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { t as translations, type Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { useCan } from "@/lib/permissions";
@@ -49,12 +49,9 @@ function txFor(lang: Lang) {
   return (ru: string, de: string) => (lang === "de" ? de : ru);
 }
 
-function formatDate(value: string | null | undefined, lang: Lang) {
+function formatDate(value: string | null | undefined) {
   if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { year: "numeric", month: "numeric", day: "numeric" }).format(date);
+  return formatAppDate(value) || value;
 }
 
 function Figure({ label, value, className }: { label: string; value: string; className?: string }) {
@@ -435,7 +432,7 @@ export function TerminationSettlementCard({
             {" · "}
             {tx("договор", "Vertrag")} <span className="font-mono">{settlement.contract_number}</span>
             {" · "}
-            {tx("расторгнут", "gekündigt")} {formatDate(settlement.terminated_at, lang)}
+            {tx("расторгнут", "gekündigt")} {formatDate(settlement.terminated_at)}
           </p>
         </div>
         <StatusBadge tone={settlement.status === "open" ? "warning" : "success"}>
@@ -459,7 +456,7 @@ export function TerminationSettlementCard({
       </div>
       {settlement.status === "settled" ? (
         <p className="text-xs text-muted-foreground">
-          {tx("Закрыт", "Geschlossen")} {formatDate(settlement.settled_at, lang)}
+          {tx("Закрыт", "Geschlossen")} {formatDate(settlement.settled_at)}
           {settlement.settled_by_name ? ` · ${settlement.settled_by_name}` : ""}
           {settlement.settlement_forced && settlement.settled_balance_gross
             && settlementBalanceTone(settlement.settled_balance_gross) !== "even"

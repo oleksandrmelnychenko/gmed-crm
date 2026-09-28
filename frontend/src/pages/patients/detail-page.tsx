@@ -30,9 +30,9 @@ import {
   addDaysToDateKey,
   appDateKey,
   appDateKeyOf,
-  appDateTimeFormat,
   berlinLocalInputToIso,
-  dateOrInstant,
+  formatAppDate,
+  formatAppDateTime,
   isoToBerlinLocalInput,
 } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
@@ -218,9 +218,6 @@ type WorkflowChecklistFormState = {
   dueDate: string;
 };
 
-function patientDateLocale() {
-  return getLang() === "ru" ? "ru-RU" : "de-DE";
-}
 // de-DE keeps the app-wide money pattern: amount first, currency sign after.
 const PATIENT_MONEY_FORMATTERS: Record<string, Intl.NumberFormat> = {
   EUR: new Intl.NumberFormat("de-DE", {
@@ -254,26 +251,12 @@ function patientName(p: PatientDetail) {
 
 function fmtDate(v?: string | null, fb = "") {
   if (!v) return fb;
-  try {
-    return appDateTimeFormat(patientDateLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }).format(dateOrInstant(v));
-  } catch { return v; }
+  return formatAppDate(v) || v;
 }
 
 function fmtDateTime(v?: string | null, fb = "") {
   if (!v) return fb;
-  try {
-    return appDateTimeFormat(patientDateLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(v));
-  } catch { return v; }
+  return formatAppDateTime(v) || v;
 }
 
 function appointmentCarePathKindLabel(value?: string | null) {

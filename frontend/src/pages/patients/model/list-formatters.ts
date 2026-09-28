@@ -1,5 +1,5 @@
 import { getLang, t as translateCatalog } from "@/lib/i18n";
-import { appDateTimeFormat, dateOrInstant } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type {
   PatientDetail,
@@ -9,40 +9,20 @@ import type {
 
 type DictionaryLike = PatientsDictionary | Record<string, string>;
 
-function patientLocale() {
-  return getLang() === "ru" ? "ru-RU" : "de-DE";
-}
-
 function localizedNotSetFallback() {
   return translateCatalog(getLang()).common_not_set;
 }
 
+/** "DD.MM.YYYY"; calendar dates are never shifted. */
 export function formatPatientDate(value?: string | null, fallback?: string) {
   if (!value) return fallback ?? localizedNotSetFallback();
-  try {
-    return appDateTimeFormat(patientLocale(), {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(dateOrInstant(value));
-  } catch {
-    return value;
-  }
+  return formatAppDate(value) || value;
 }
 
+/** "DD.MM.YYYY HH:mm" in Berlin time. */
 export function formatPatientDateTime(value?: string | null, fallback?: string) {
   if (!value) return fallback ?? localizedNotSetFallback();
-  try {
-    return appDateTimeFormat(patientLocale(), {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
+  return formatAppDateTime(value) || value;
 }
 
 export function getPatientGenderLabel(

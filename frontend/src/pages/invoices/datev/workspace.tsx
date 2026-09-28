@@ -25,7 +25,7 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
     { id: "number", label: text.number, accessor: (row) => row.number, required: true, width: 190, sortable: true, render: (row) => <button type="button" className="inline-flex items-center gap-2 text-left font-medium text-foreground hover:underline" onClick={(event) => { event.stopPropagation(); setSelected(row); }}><FileText className="size-3.5 text-muted-foreground" />{row.number}</button> },
     { id: "supplier", label: text.supplier, accessor: (row) => row.supplier, width: 210, sortable: true },
     { id: "recipient", label: text.recipient, accessor: (row) => row.recipient, width: 170, sortable: true },
-    { id: "date", label: text.date, accessor: (row) => row.date, width: 150, sortable: true, render: (row) => <span className="text-muted-foreground">{datevDate(row.date, lang)}</span> },
+    { id: "date", label: text.date, accessor: (row) => row.date, width: 150, sortable: true, render: (row) => <span className="text-muted-foreground">{datevDate(row.date)}</span> },
     { id: "total", label: text.total, accessor: (row) => row.grossCents, width: 145, sortable: true, render: (row) => <span className="font-medium tabular-nums">{datevMoney(row.grossCents, lang)}</span> },
     { id: "binding", label: text.binding, width: 200, accessor: (row) => bindings[row.id] ? text.linked : suggestDemoPatient(row) ? text.suggested : text.needsClient, render: (row) => {
       const binding = bindings[row.id];

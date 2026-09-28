@@ -1,4 +1,4 @@
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { OrderOption, PatientOption } from "../model/types";
 import { matchInvoicePatient } from "../model/patient-match";
 
@@ -87,8 +87,8 @@ export function datevMoney(cents: number, lang: string): string {
   return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", { style: "currency", currency: "EUR" }).format(cents / 100);
 }
 
-export function datevDate(date: string, lang: string): string {
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+export function datevDate(date: string): string {
+  return formatAppDate(date) || date;
 }
 
 export function demoDocumentUrl(invoice: DatevDemoInvoice, format: "pdf" | "png"): string {

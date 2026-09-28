@@ -31,7 +31,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { SelectField } from "@/components/ui/select-field";
 import { Section } from "@/components/ui-shell";
-import { appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateTimeFormat, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
@@ -224,14 +224,9 @@ function dateKey(date: Date) {
   return taskCalendarDayKey(date);
 }
 
-function formatDateTime(value: Date | null, lang: Lang) {
+function formatDateTime(value: Date | null) {
   if (!value) return "—";
-  return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(value);
+  return formatAppDateTime(value) || "—";
 }
 
 function priorityTone(priority: string) {
@@ -244,10 +239,10 @@ function priorityTone(priority: string) {
 function CalendarTaskButton({ task, lang, onOpen }: { task: ConciergeTask; lang: Lang; onOpen: (task: ConciergeTask) => void }) {
   const labels = copy[lang];
   const { start, end } = conciergeTaskInterval(task);
-  const period = `${labels.begins}: ${formatDateTime(start, lang)} · ${labels.ends}: ${formatDateTime(end, lang)}`;
+  const period = `${labels.begins}: ${formatDateTime(start)} · ${labels.ends}: ${formatDateTime(end)}`;
   return <button type="button" className={cn("block w-full rounded border px-1.5 py-1 text-left text-[10px]", task.status === "on_hold" ? "border-dashed border-amber-400 bg-amber-50 text-amber-800" : task.kind === "event" ? "border-transparent bg-violet-100 text-violet-800" : "border-transparent bg-muted text-foreground")} title={`${localizeTaskTitle(task.title, lang)} · ${period} · ${labels[task.status]}`} onClick={() => onOpen(task)}>
     <span className="block truncate font-medium">{task.status === "on_hold" ? <Pause className="mr-1 inline size-3" /> : null}{localizeTaskTitle(task.title, lang)}</span>
-    <span className="block truncate">{formatDateTime(start, lang)} — {formatDateTime(end, lang)}</span>
+    <span className="block truncate">{formatDateTime(start)} — {formatDateTime(end)}</span>
   </button>;
 }
 
@@ -401,7 +396,7 @@ function TaskCard({
               {([[labels.begins, interval.start], [labels.ends, interval.end]] as const).map(([label, date], index) => (
                 <div key={label} className="grid grid-cols-1 items-center gap-x-2 gap-y-1 @[12rem]/task-times:grid-cols-[minmax(0,1fr)_auto]">
                   <span className="min-w-0">{label}:{date ? null : " —"}</span>
-                  {date ? <Badge variant="outline" className={cn("shrink-0 justify-self-start rounded-full font-mono text-[10px] tabular-nums @[12rem]/task-times:justify-self-end", index === 1 && overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "border-border/70 bg-background text-foreground")}><time dateTime={date.toISOString()}>{formatDateTime(date, lang).replace(/[.,]/g, "")}</time></Badge> : null}
+                  {date ? <Badge variant="outline" className={cn("shrink-0 justify-self-start rounded-full font-mono text-[10px] tabular-nums @[12rem]/task-times:justify-self-end", index === 1 && overdue ? "border-rose-200 bg-rose-50 text-rose-700" : "border-border/70 bg-background text-foreground")}><time dateTime={date.toISOString()}>{formatDateTime(date)}</time></Badge> : null}
                 </div>
               ))}
             </div>
@@ -733,7 +728,7 @@ export function ConciergeTaskManager({
                   return (
                     <div key={day.toISOString()} className="min-h-28 border-b p-1.5">
                       <button type="button" className={cn("mb-1 rounded px-1 text-xs font-medium hover:bg-primary/10", dateKey(day) === dateKey(effectiveNow) && "text-primary")} onClick={() => onCreateAt?.(day)}>
-                        {appDateTimeFormat(calendarLocale, { weekday: "short", day: "2-digit", month: "long" }).format(day)}
+                        {`${appDateTimeFormat(calendarLocale, { weekday: "short" }).format(day)}, ${formatAppDate(day)}`}
                       </button>
                       <div className="space-y-1">
                         {visibleRows.map((task) => (

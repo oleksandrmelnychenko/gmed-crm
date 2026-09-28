@@ -257,6 +257,8 @@ describe("contract dates in Berlin time", () => {
     // 00:30 in Berlin, still 27 Sep in UTC.
     expect(formatDate("2026-09-27T22:30:00Z", "de-DE")).toBe(formatDate("2026-09-28", "de-DE"));
     expect(formatDateTime("2026-09-27T21:30:00Z", "de-DE")).toContain("23:30");
+    expect(formatDate("2026-09-27", "ru-RU")).toBe("27.09.2026");
+    expect(formatDateTime("2026-09-27T21:30:00Z", "ru-RU")).toBe("27.09.2026 23:30");
   });
 
   it("prefills the signing time as Berlin wall-clock time", () => {

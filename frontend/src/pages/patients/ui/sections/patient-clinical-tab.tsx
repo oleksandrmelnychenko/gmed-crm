@@ -20,11 +20,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
-import { getLang, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
-import { cachedDateTimeFormat } from "@/lib/intl-cache";
-import { appDateKey, appDateKeyOf, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, appDateKeyOf, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import {
@@ -180,27 +179,12 @@ export function patientVitalDateTime(
   precision?: PatientVitalMeasurement["measured_at_precision"],
 ): string {
   if (!value) return fallback;
-  try {
-    if (precision === "date") {
-      const datePart = value.slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return fallback;
-      return cachedDateTimeFormat(getLang() === "ru" ? "ru-RU" : "de-DE", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      }).format(new Date(`${datePart}T00:00:00Z`));
-    }
-    return cachedDateTimeFormat(getLang() === "ru" ? "ru-RU" : "de-DE", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(value));
-  } catch {
-    return value;
+  if (precision === "date") {
+    // A date-precision measurement is stored at UTC midnight: show its day only.
+    const datePart = value.slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? formatAppDate(datePart) || fallback : fallback;
   }
+  return formatAppDateTime(value) || value;
 }
 
 export function patientVitalIsImported(
@@ -2439,7 +2423,9 @@ function MedicationHistoryTree({
                                 {action.label}
                               </Badge>
                               <span className="text-xs font-semibold text-foreground">
-                              {event.source_date || appDateTimeFormat(tx("ru-RU", "de-DE")).format(new Date(event.created_at))}
+                              {event.source_date
+                                ? formatAppDate(event.source_date) || event.source_date
+                                : formatAppDate(event.created_at)}
                               </span>
                               {status ? <span className="text-xs text-muted-foreground">{localizedMedicationStatus(status, tx)}</span> : null}
                             </div>
@@ -3828,9 +3814,7 @@ export function PatientClinicalTab({
             </h3>
             {impfstatus?.updated_at ? (
               <span className="text-[11px] text-muted-foreground">
-                {cachedDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-                  dateStyle: "medium",
-                }).format(new Date(impfstatus.updated_at))}
+                {formatAppDate(impfstatus.updated_at)}
               </span>
             ) : null}
           </div>

@@ -17,6 +17,9 @@ import {
   dateOrInstant,
   daysBetweenDateKeys,
   endOfMonthKey,
+  formatAppDate,
+  formatAppDateTime,
+  formatAppTime,
   formatDateKey,
   isoToBerlinLocalInput,
   parseBerlinLocalInput,
@@ -180,5 +183,29 @@ describe("app time zone", () => {
     expect(startOfIsoWeekKey("2026-09-27")).toBe("2026-09-21");
     expect(startOfIsoWeekKey("2026-09-21")).toBe("2026-09-21");
     expect(endOfMonthKey("2028-02-10")).toBe("2028-02-29");
+  });
+});
+
+describe("app date display", () => {
+  it("shows dates as DD.MM.YYYY in the Berlin day, never shifting calendar dates", () => {
+    expect(formatAppDate("2026-09-28")).toBe("28.09.2026");
+    expect(formatAppDate("2026-01-05")).toBe("05.01.2026");
+    expect(formatAppDate(BERLIN_27_KYIV_28)).toBe("27.09.2026");
+    expect(formatAppDate(BERLIN_28_UTC_27.toISOString())).toBe("28.09.2026");
+    expect(formatAppDate(BERLIN_28_UTC_27.getTime())).toBe("28.09.2026");
+    for (const value of [null, undefined, "", "  ", "nope", "2026-02-31"]) {
+      expect(formatAppDate(value)).toBe("");
+    }
+  });
+
+  it("shows date-times as DD.MM.YYYY HH:mm in Berlin time", () => {
+    expect(formatAppDateTime(BERLIN_27_KYIV_28)).toBe("27.09.2026 23:30");
+    expect(formatAppDateTime("2026-09-27T22:30:00Z")).toBe("28.09.2026 00:30");
+    expect(formatAppDateTime("2026-01-15T07:05:00Z")).toBe("15.01.2026 08:05");
+    // A calendar date has no time.
+    expect(formatAppDateTime("2026-09-28")).toBe("28.09.2026");
+    expect(formatAppDateTime("nope")).toBe("");
+    expect(formatAppTime("2026-09-27T22:30:00Z")).toBe("00:30");
+    expect(formatAppTime("2026-09-28")).toBe("");
   });
 });

@@ -34,7 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import { clearApiCache } from "@/lib/api";
-import { appDateKey, appDateTimeFormat } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createDocumentPreviewObjectUrl,
   revokeDocumentPreviewObjectUrl,
@@ -1377,10 +1377,7 @@ export function ClinicalDocumentImportSheet({
     candidates.filter((item) => item.target === target).length;
 
   function formatImportDate(value: string) {
-    return appDateTimeFormat(lang === "de" ? "de-DE" : "ru-RU", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value));
+    return formatAppDateTime(value) || value;
   }
 
   function appliedObjectCount(item: ClinicalDocumentImportSummary | ClinicalDocumentImport) {

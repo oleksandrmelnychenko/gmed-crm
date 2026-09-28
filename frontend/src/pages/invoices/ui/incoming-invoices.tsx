@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { StaffLink } from "@/components/staff-link";
 import { apiFetch } from "@/lib/api";
-import { appDateKey, formatDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { fetchCompanyFinancialAccounts } from "@/pages/company-finance/data";
@@ -182,7 +182,7 @@ export function IncomingInvoices({ canManage, patientId, orderId, reloadToken, o
     { id: "amount", label: tx("Сумма счёта", "Rechnungsbetrag"), accessor: row => Number(row.amount_gross), width: 150, render: row => <span className="font-mono tabular-nums">{money(row.amount_gross, row.currency)}</span> },
     { id: "paid", label: tx("Выплачено компанией", "Vom Unternehmen bezahlt"), accessor: row => Number(row.company_paid_gross), width: 180, render: row => <span className="font-mono tabular-nums">{money(row.company_paid_gross, row.currency)}</span> },
     { id: "remaining", label: tx("Осталось выплатить", "Noch zu zahlen"), accessor: row => Number(row.remaining_gross), width: 180, render: row => <span className={`font-mono font-semibold tabular-nums ${Number(row.remaining_gross) > 0 ? "text-rose-700 dark:text-rose-400" : ""}`}>{money(row.remaining_gross, row.currency)}</span> },
-    { id: "due", label: tx("Срок оплаты", "Fällig am"), accessor: row => row.due_date, width: 140, render: row => row.due_date ? formatDateKey(row.due_date, locale, { year: "numeric", month: "numeric", day: "numeric" }) || row.due_date : "—" },
+    { id: "due", label: tx("Срок оплаты", "Fällig am"), accessor: row => row.due_date, width: 140, render: row => row.due_date ? formatAppDate(row.due_date) || row.due_date : "—" },
     { id: "patient", label: tx("Пациент", "Patient"), accessor: row => row.patient_name, width: 210, render: row => row.patient_id ? <StaffLink to={`/patients/${row.patient_id}`}>{row.patient_name || row.patient_pid}</StaffLink> : tx("Расход компании", "Unternehmensausgabe") },
     { id: "order", label: tx("Заказ", "Auftrag"), accessor: row => row.order_number ?? "", width: 155, render: row => row.order_id ? <StaffLink to={`/orders/${row.order_id}`}>{row.order_number}</StaffLink> : row.patient_id ? <StatusBadge tone="warning">{tx("Без заказа", "Ohne Auftrag")}</StatusBadge> : "—" },
   ];
