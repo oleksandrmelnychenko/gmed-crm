@@ -410,3 +410,128 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     let (forbidden_status, _) = request_json(&ctx.app, "GET", &base, &sales, None).await;
     assert_eq!(forbidden_status, StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn supplier_invoice_with_active_allocations_cannot_be_cancelled() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &tag).await;
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+               patient_id, first_name, last_name, birth_date, gender, created_by
+           ) VALUES ($1, 'Cancel', 'Allocation', '1990-01-01', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("CANCEL-PT-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let order_id = seed_order(&ctx.pool, patient_id, ctx.admin_id, &format!("c-{tag}")).await;
+    let invoice_id = seed_patient_invoice(
+        &ctx.pool,
+        order_id,
+        patient_id,
+        ctx.admin_id,
+        &format!("PAT-C-{tag}"),
+        150,
+    )
+    .await;
+    let external_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO external_invoices (
+               order_id, patient_id, external_invoice_number,
+               amount_net, amount_vat, amount_gross, currency,
+               status, paid_by, service_delivered, created_by
+           ) VALUES ($1, $2, $3, 100, 0, 100, 'EUR', 'received', 'unpaid', true, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("EXT-C-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let bearer = auth_header_for(manager_id, "patient_manager");
+    let base =
+        format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/allocations");
+    let (status, allocation) = request_json(
+        &ctx.app,
+        "POST",
+        &base,
+        &bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "patient_invoice_id": invoice_id,
+            "amount_gross": "100"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{allocation}");
+    let allocation_id = allocation["id"].as_str().unwrap().to_string();
+
+    let update_path =
+        format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/update");
+    let (status, refused) = request_json(
+        &ctx.app,
+        "POST",
+        &update_path,
+        &bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused["message"],
+        "Reverse the patient-invoice allocations of this supplier invoice before cancelling it"
+    );
+
+    // The database refuses it as well, whatever the caller.
+    let direct = sqlx::query("UPDATE external_invoices SET status = 'cancelled' WHERE id = $1")
+        .bind(external_invoice_id)
+        .execute(&ctx.pool)
+        .await;
+    assert!(direct.is_err());
+
+    let (status, reversed) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("{base}/{allocation_id}/reverse"),
+        &bearer,
+        Some(json!({ "note": "Supplier invoice was issued in error" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed}");
+    let (status, cancelled) = request_json(
+        &ctx.app,
+        "POST",
+        &update_path,
+        &bearer,
+        Some(json!({ "status": "cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'update_external_invoice'
+             AND context->>'external_invoice_id' = $1
+             AND context->>'new_status' = 'cancelled'"#,
+    )
+    .bind(external_invoice_id.to_string())
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}

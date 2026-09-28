@@ -21,6 +21,8 @@ import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
+import { UnassignedInvoiceCorrection } from "./unassigned-invoice-correction";
+import { canCorrectUnassignedInvoice } from "./unassigned-invoice-model";
 
 import {
   approveProviderInvoice,
@@ -81,6 +83,7 @@ const copy = {
     loadFailed: "Не удалось загрузить историю выплат партнёру / исполнителю.",
     saveFailed: "Не удалось записать выплату.",
     reversalFailed: "Не удалось отменить выплату.",
+    correction: "Исправить или отменить счёт без заказа",
   },
   de: {
     title: "Zahlungen an Partner / Leistungserbringer",
@@ -119,6 +122,7 @@ const copy = {
     loadFailed: "Der Zahlungsverlauf für den Partner / Leistungserbringer konnte nicht geladen werden.",
     saveFailed: "Die Zahlung konnte nicht erfasst werden.",
     reversalFailed: "Die Zahlung konnte nicht storniert werden.",
+    correction: "Rechnung ohne Auftrag korrigieren oder stornieren",
   },
 } as const;
 
@@ -166,6 +170,7 @@ export function ProviderSettlementDialog({
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentDirty, setPaymentDirty] = useState(false);
   const [reversalDirty, setReversalDirty] = useState(false);
+  const [correctionDirty, setCorrectionDirty] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -347,7 +352,7 @@ export function ProviderSettlementDialog({
     && settlement.paid_by !== "patient";
 
   return (
-    <Dialog open={Boolean(liability)} dirty={paymentDirty || reversalDirty} onOpenChange={(open) => { if (!open) onClose(); }}>
+    <Dialog open={Boolean(liability)} dirty={paymentDirty || reversalDirty || correctionDirty} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="flex max-h-[calc(100dvh-1rem)] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-h-[92dvh] sm:max-w-2xl sm:pb-0">
         <DialogHeader className="shrink-0 gap-1.5 border-b border-border/70 bg-muted/20 px-4 py-3.5 pr-12 sm:px-5 sm:pr-14">
           <DialogTitle className="flex min-w-0 items-start gap-2 text-base"><span aria-hidden className="mt-2 size-2 shrink-0 rounded-full bg-primary" /><span className="min-w-0 break-words">{text.title}</span></DialogTitle>
@@ -429,6 +434,21 @@ export function ProviderSettlementDialog({
               <ShellBanner tone="warning">{text.expected}</ShellBanner>
             ) : remaining <= 0 ? (
               <div role="status" className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 aria-hidden className="mt-0.5 size-4 shrink-0" /><p>{text.paidInFull}</p></div>
+            ) : null}
+
+            {liability && canCorrectUnassignedInvoice({ ...liability, company_paid_gross: settlement.company_paid_gross, status: settlement.status, paid_by: settlement.paid_by }) ? (
+              <SettlementSection title={text.correction}>
+                <UnassignedInvoiceCorrection
+                  key={liability.id}
+                  liability={liability}
+                  onDirtyChange={setCorrectionDirty}
+                  onChanged={() => {
+                    setCorrectionDirty(false);
+                    onChanged();
+                    onClose();
+                  }}
+                />
+              </SettlementSection>
             ) : null}
 
             <SettlementSection title={text.history} action={<Badge variant="secondary">{(settlement.transactions ?? []).length}</Badge>}>

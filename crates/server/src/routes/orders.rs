@@ -20,10 +20,12 @@ use sqlx::Row;
 
 mod incoming_invoices;
 mod pipeline;
+mod unassigned_invoices;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(incoming_invoices::router())
+        .merge(unassigned_invoices::router())
         .merge(pipeline::router())
         .route("/me/followup-milestones", get(list_my_followup_milestones))
         .route("/orders", get(list_orders).post(create_order))
@@ -519,6 +521,37 @@ fn external_invoice_payment_decision_forbidden() -> axum::response::Response {
     err(
         StatusCode::FORBIDDEN,
         "Only billing or the CEO can approve a supplier invoice or record its payment",
+    )
+}
+
+/// Active allocations of a supplier invoice to patient invoices (not reversed,
+/// patient invoice not cancelled). While any exist the supplier invoice cannot
+/// be cancelled: the patient invoice still bills that cost (the database
+/// trigger `protect_external_invoice_allocated_receivable` repeats the rule).
+pub(crate) async fn external_invoice_active_allocation_count(
+    executor: impl sqlx::PgExecutor<'_>,
+    external_invoice_id: Uuid,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT COUNT(*)
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
+           WHERE allocation.external_invoice_id = $1
+             AND allocation.reversed_at IS NULL
+             AND patient_invoice.status <> 'cancelled'"#,
+    )
+    .bind(external_invoice_id)
+    .fetch_one(executor)
+    .await
+}
+
+pub(crate) const EXTERNAL_INVOICE_ALLOCATIONS_BLOCK_CANCELLATION: &str =
+    "Reverse the patient-invoice allocations of this supplier invoice before cancelling it";
+
+fn external_invoice_allocations_block_cancellation() -> axum::response::Response {
+    err(
+        StatusCode::CONFLICT,
+        EXTERNAL_INVOICE_ALLOCATIONS_BLOCK_CANCELLATION,
     )
 }
 
@@ -1236,8 +1269,80 @@ async fn load_order_completion_blockers(
             "{unsettled_service_count} service item(s) are not approved or invoiced"
         ));
     }
+    reasons.extend(load_order_billing_closure_blockers(state, order_id).await?);
 
     Ok(reasons)
+}
+
+/// What still has to be invoiced or paid before an order leaves the closure
+/// stage (→ follow-up) or is completed; the same condition as the pipeline's
+/// closure stage: every approved service is invoiced and no patient invoice
+/// of the order is open (draft, sent, partially paid or overdue). One reason
+/// per open item so staff see what is left. Cancelling stays possible.
+async fn load_order_billing_closure_blockers(
+    state: &AppState,
+    order_id: Uuid,
+) -> Result<Vec<String>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT
+               (SELECT COUNT(*) FROM order_leistungen
+                 WHERE order_id = $1 AND status = 'approved') AS approved_uninvoiced,
+               (SELECT COUNT(*) FROM invoices
+                 WHERE order_id = $1 AND status = 'draft') AS draft_invoices,
+               COALESCE((
+                   SELECT array_agg(
+                              COALESCE(NULLIF(BTRIM(invoice_number), ''), id::text)
+                              || '|' || status
+                              ORDER BY created_at, id)
+                   FROM invoices
+                   WHERE order_id = $1
+                     AND status IN ('sent', 'partially_paid', 'overdue')
+               ), ARRAY[]::text[]) AS unpaid_invoices"#,
+    )
+    .bind(order_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, order_id = %order_id, "load order billing closure state");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate order billing",
+        )
+    })?;
+    let approved_uninvoiced: i64 = row.try_get("approved_uninvoiced").unwrap_or(0);
+    let draft_invoices: i64 = row.try_get("draft_invoices").unwrap_or(0);
+    let unpaid_invoices: Vec<String> = row.try_get("unpaid_invoices").unwrap_or_default();
+    Ok(order_billing_closure_reasons(
+        approved_uninvoiced,
+        draft_invoices,
+        &unpaid_invoices,
+    ))
+}
+
+/// `unpaid_invoices` holds `number|status` of issued invoices still open.
+fn order_billing_closure_reasons(
+    approved_uninvoiced: i64,
+    draft_invoices: i64,
+    unpaid_invoices: &[String],
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if approved_uninvoiced > 0 {
+        reasons.push(format!(
+            "{approved_uninvoiced} approved service item(s) are not invoiced yet"
+        ));
+    }
+    if draft_invoices > 0 {
+        reasons.push(format!(
+            "{draft_invoices} draft patient invoice(s) are not issued yet"
+        ));
+    }
+    for invoice in unpaid_invoices {
+        let (number, status) = invoice.rsplit_once('|').unwrap_or((invoice.as_str(), ""));
+        reasons.push(format!(
+            "Patient invoice {number} is not paid yet ({status})"
+        ));
+    }
+    reasons
 }
 
 struct OrderLifecycleGate {
@@ -2539,6 +2644,10 @@ async fn load_order_followup_readiness(
         blocking_reasons
             .push("No follow-up reminder, task or appointment has been launched yet".to_string());
     }
+    // Closing the order's billing is part of leaving the closure stage.
+    let billing_reasons = load_order_billing_closure_blockers(state, order_id).await?;
+    let billing_closed = billing_reasons.is_empty();
+    blocking_reasons.extend(billing_reasons);
 
     let followup_ready = blocking_reasons.is_empty();
 
@@ -2568,6 +2677,7 @@ async fn load_order_followup_readiness(
             "package_end_ready": package_end_ready,
             "results_handoff_ready": results_handoff_ready,
             "followup_activity_ready": followup_activity_ready,
+            "billing_closed": billing_closed,
             "closure_anchor_at": closure_anchor_at.map(|value| value.to_rfc3339()),
             "recommended_followup_1w_at": recommended_followup_1w_at.map(|value| value.to_rfc3339()),
             "recommended_followup_1m_at": recommended_followup_1m_at.map(|value| value.to_rfc3339()),
@@ -5135,50 +5245,73 @@ async fn update_status(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    match sqlx::query(
+    let payload = serde_json::json!({
+        "from_status": current_status,
+        "status": requested_status,
+        "phase": current_phase,
+        "note": note,
+    });
+    let failed = |error: sqlx::Error, step: &str| {
+        tracing::error!(error = %error, order_id = %order_id, step, "update order status");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return failed(error, "begin"),
+    };
+    // The status only changes from the state the checks above saw, and the
+    // audit row commits with it.
+    let updated = match sqlx::query(
         r#"UPDATE orders
-           SET status = $2,
-               cancelled_at = CASE WHEN $2 = 'cancelled' THEN now() ELSE cancelled_at END
-           WHERE id = $1"#,
+           SET status = $2
+           WHERE id = $1 AND status = $3"#,
     )
     .bind(order_id)
     .bind(&requested_status)
-    .execute(&state.db)
+    .bind(&current_status)
+    .execute(&mut *tx)
     .await
     {
-        Ok(result) if result.rows_affected() > 0 => {
-            let payload = serde_json::json!({
-                "from_status": current_status,
-                "status": requested_status,
-                "phase": current_phase,
-                "note": note,
-            });
-            state.audit_sender.try_send(audit::domain_event(
+        Ok(result) => result.rows_affected() > 0,
+        Err(error) => return failed(error, "update"),
+    };
+    if updated {
+        if let Err(error) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
                 "update_order_status",
                 Some(auth.user_id),
                 "order",
                 Some(order_id),
                 payload.clone(),
-            ));
-            crate::realtime::publish_order_event(
-                &state,
-                Some(auth.user_id),
-                "order.status_changed",
-                order_id,
-                payload,
-            )
-            .await;
-            Json(serde_json::json!({"ok": true})).into_response()
+            ),
+        )
+        .await
+        {
+            return failed(error, "audit");
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(error) => {
-            tracing::error!(error = %error, order_id = %order_id, "update order status");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update order status",
-            )
+        if let Err(error) = tx.commit().await {
+            return failed(error, "commit");
         }
     }
+    if !updated {
+        return err(
+            StatusCode::CONFLICT,
+            "The order status changed meanwhile; reload the order and try again",
+        );
+    }
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.status_changed",
+        order_id,
+        payload,
+    )
+    .await;
+    Json(serde_json::json!({"ok": true})).into_response()
 }
 
 /// What cancelling an order changed inside its transaction; used for the
@@ -5406,15 +5539,9 @@ async fn cancel_order(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    if let Err(error) = tx.commit().await {
-        tracing::error!(error = %error, %order_id, "commit order cancellation");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to update order status",
-        );
-    }
-
-    state.audit_sender.try_send(audit::domain_event(
+    // The order, its closed quotes, cancelled services and rejected amount
+    // changes are audited in the cancellation transaction.
+    let mut audit_events = vec![audit::domain_event(
         "cancel_order",
         Some(auth.user_id),
         "order",
@@ -5437,9 +5564,9 @@ async fn cancel_order(
             "paid_gross": cancellation.settlement.as_ref().map(|value| value["paid_gross"].clone()),
             "balance_gross": cancellation.settlement.as_ref().map(|value| value["balance_gross"].clone()),
         }),
-    ));
-    for quote in &cancellation.closed_quotes {
-        state.audit_sender.try_send(audit::domain_event(
+    )];
+    audit_events.extend(cancellation.closed_quotes.iter().map(|quote| {
+        audit::domain_event(
             "close_quote_for_cancelled_order",
             Some(auth.user_id),
             "quote",
@@ -5450,7 +5577,59 @@ async fn cancel_order(
                 "status": "rejected",
                 "order_id": order_id,
             }),
-        ));
+        )
+    }));
+    audit_events.extend(cancellation.cancelled_service_ids.iter().map(|service_id| {
+        audit::domain_event(
+            "cancel_order_service",
+            Some(auth.user_id),
+            "order_leistung",
+            Some(*service_id),
+            serde_json::json!({
+                "order_id": order_id,
+                "previous_status": "planned",
+                "reason": reason,
+                "cause": "order_cancelled",
+            }),
+        )
+    }));
+    audit_events.extend(
+        cancellation
+            .rejected_amendment_ids
+            .iter()
+            .map(|amendment_id| {
+                audit::domain_event(
+                    "reject_order_amendment",
+                    Some(auth.user_id),
+                    "order_amendment",
+                    Some(*amendment_id),
+                    serde_json::json!({
+                        "order_id": order_id,
+                        "previous_status": "pending",
+                        "status": "rejected",
+                        "cause": "order_cancelled",
+                    }),
+                )
+            }),
+    );
+    for event in &audit_events {
+        if let Err(error) = audit::write_in_transaction(&mut tx, event).await {
+            tracing::error!(error = %error, %order_id, action = %event.action, "audit order cancellation");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order status",
+            );
+        }
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, %order_id, "commit order cancellation");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order status",
+        );
+    }
+
+    for quote in &cancellation.closed_quotes {
         crate::realtime::publish_quote_event(
             state,
             Some(auth.user_id),
@@ -5635,14 +5814,72 @@ async fn update_phase(
         return lifecycle_gate_err(&body.phase, &lifecycle_gate.reasons);
     }
 
-    match sqlx::query!(
-        "UPDATE orders SET phase = $2 WHERE id = $1",
-        order_id,
-        body.phase
+    // The phase, its history entry and audit row commit together; the phase
+    // only moves on from the one the gate above checked.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, order_id = %order_id, "begin order phase change");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let phase_update = sqlx::query(
+        "UPDATE orders SET phase = $2 WHERE id = $1 AND phase = $3 AND status = 'active'",
     )
-    .execute(&state.db)
-    .await
+    .bind(order_id)
+    .bind(&body.phase)
+    .bind(&current_phase)
+    .execute(&mut *tx)
+    .await;
+    if let Ok(result) = &phase_update
+        && result.rows_affected() > 0
     {
+        if let Err(e) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "update_phase",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "phase": body.phase.clone(),
+                    "from_phase": current_phase.clone(),
+                    "note": phase_note.clone(),
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %e, order_id = %order_id, "audit order phase change");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(resp) = crate::routes::workflow_lifecycle::record_event_tx(
+            &mut tx,
+            crate::routes::workflow_lifecycle::RecordEvent {
+                entity_type: "order",
+                entity_id: order_id,
+                from_stage: Some(current_phase.as_str()),
+                to_stage: &body.phase,
+                transition_kind: "phase_change",
+                changed_by: Some(auth.user_id),
+                note: phase_note.as_deref(),
+                metadata: serde_json::json!({
+                    "from_phase": current_phase.clone(),
+                    "to_phase": body.phase.clone(),
+                    "created_at": created_at.to_rfc3339(),
+                }),
+            },
+        )
+        .await
+        {
+            return resp;
+        }
+        if let Err(e) = tx.commit().await {
+            tracing::error!(error = %e, order_id = %order_id, "commit order phase change");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    match phase_update {
         Ok(r) if r.rows_affected() > 0 => {
             if let Err(resp) = crate::routes::workflow_checklists::ensure_default_order_workflow(
                 &state,
@@ -5664,38 +5901,6 @@ async fn update_phase(
             {
                 return resp;
             }
-            state.audit_sender.try_send(audit::domain_event(
-                "update_phase",
-                Some(auth.user_id),
-                "order",
-                Some(order_id),
-                serde_json::json!({
-                    "phase": body.phase.clone(),
-                    "from_phase": current_phase.clone(),
-                    "note": phase_note.clone(),
-                }),
-            ));
-            if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
-                &state,
-                crate::routes::workflow_lifecycle::RecordEvent {
-                    entity_type: "order",
-                    entity_id: order_id,
-                    from_stage: Some(current_phase.as_str()),
-                    to_stage: &body.phase,
-                    transition_kind: "phase_change",
-                    changed_by: Some(auth.user_id),
-                    note: phase_note.as_deref(),
-                    metadata: serde_json::json!({
-                        "from_phase": current_phase.clone(),
-                        "to_phase": body.phase.clone(),
-                        "created_at": created_at.to_rfc3339(),
-                    }),
-                },
-            )
-            .await
-            {
-                return resp;
-            }
             crate::realtime::publish_order_event(
                 &state,
                 Some(auth.user_id),
@@ -5710,7 +5915,10 @@ async fn update_phase(
             .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
+        Ok(_) => err(
+            StatusCode::CONFLICT,
+            "The order changed meanwhile; reload the order and try again",
+        ),
         Err(e) => {
             tracing::error!(error = %e, "update phase");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
@@ -8023,6 +8231,19 @@ async fn update_external_invoice(
     {
         return external_invoice_payment_decision_forbidden();
     }
+    if status == Some("cancelled") && current_status != "cancelled" {
+        match external_invoice_active_allocation_count(&state.db, external_invoice_id).await {
+            Ok(0) => {}
+            Ok(_) => return external_invoice_allocations_block_cancellation(),
+            Err(error) => {
+                tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "count external invoice allocations before cancellation");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update external invoice",
+                );
+            }
+        }
+    }
     let mut paid_by = body
         .paid_by
         .as_deref()
@@ -8212,7 +8433,17 @@ async fn update_external_invoice(
         }
     }
 
-    match sqlx::query(
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "begin external invoice update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update external invoice",
+            );
+        }
+    };
+    let update_result = sqlx::query(
         r#"UPDATE external_invoices
            SET provider_id = COALESCE($3, provider_id),
                order_leistung_id = CASE WHEN $16 THEN NULL ELSE COALESCE($17, order_leistung_id) END,
@@ -8252,7 +8483,7 @@ async fn update_external_invoice(
              AND paid_by = $15
              AND order_leistung_id IS NOT DISTINCT FROM $18
              AND updated_at = $19
-           RETURNING id"#,
+           RETURNING id, status"#,
     )
     .bind(external_invoice_id)
     .bind(order_id)
@@ -8278,9 +8509,43 @@ async fn update_external_invoice(
             .unwrap_or_else(|_| chrono::Utc::now()),
     )
     .bind(crate::app_time::today())
-    .fetch_optional(&state.db)
-    .await
-    {
+    .fetch_optional(&mut *transaction)
+    .await;
+    // The change and its audit row commit together.
+    if let Ok(Some(row)) = &update_result {
+        let new_status = row.try_get::<String, _>("status").unwrap_or_default();
+        if let Err(error) = audit::write_in_transaction(
+            &mut transaction,
+            &audit::domain_event(
+                "update_external_invoice".to_string(),
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "external_invoice_id": external_invoice_id,
+                    "status": status,
+                    "previous_status": current_status,
+                    "new_status": new_status,
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "audit external invoice update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update external invoice",
+            );
+        }
+        if let Err(error) = transaction.commit().await {
+            tracing::error!(error = %error, external_invoice_id = %external_invoice_id, "commit external invoice update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update external invoice",
+            );
+        }
+    }
+    match update_result {
         Ok(Some(_)) => {
             if let Err(error) =
                 crate::routes::invoices::sync_external_invoice_accounting_entries_from_current_state(
@@ -8296,16 +8561,6 @@ async fn update_external_invoice(
                     "Failed to update external invoice accounting ledger",
                 );
             }
-            state.audit_sender.try_send(audit::domain_event(
-                "update_external_invoice".to_string(),
-                Some(auth.user_id),
-                "order",
-                Some(order_id),
-                serde_json::json!({
-                    "external_invoice_id": external_invoice_id,
-                    "status": status,
-                }),
-            ));
             crate::realtime::publish_order_event(
                 &state,
                 Some(auth.user_id),
@@ -8324,44 +8579,8 @@ async fn update_external_invoice(
             "External invoice changed concurrently; reload and try again",
         ),
         Err(error) => {
-            let database_message = error.to_string();
-            if database_message.contains("locked by active allocations")
-                || database_message.contains("cannot be lower than active allocations")
-                || database_message.contains("cancelled external invoices cannot be reactivated")
-            {
-                return err(
-                    StatusCode::CONFLICT,
-                    "Reverse or reassign active patient-invoice allocations first",
-                );
-            }
-            // Company payments and posted concierge receipts lock the invoice:
-            // the user reverses them first instead of seeing a server error.
-            if database_message.contains("locked by provider payments")
-                || database_message.contains("reverse provider payments before")
-                || database_message.contains("record the full provider payment")
-            {
-                return err(
-                    StatusCode::CONFLICT,
-                    "Reverse the company payments of this invoice first",
-                );
-            }
-            if database_message.contains("posted concierge expense")
-                || database_message.contains("reverse the concierge expense review")
-            {
-                return err(
-                    StatusCode::CONFLICT,
-                    "This invoice comes from a posted concierge receipt; reverse the receipt review first",
-                );
-            }
-            if database_message.contains("must match order currency")
-                || database_message.contains("must belong to the same order")
-                || database_message.contains("must match order service provider")
-                || database_message.contains("external_invoices_amount")
-            {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "External invoice economics data is inconsistent with the selected order service",
-                );
+            if let Some(response) = external_invoice_guard_response(&error) {
+                return response;
             }
             tracing::error!(error = %error, order_id = %order_id, external_invoice_id = %external_invoice_id, "update external invoice");
             err(
@@ -8370,6 +8589,56 @@ async fn update_external_invoice(
             )
         }
     }
+}
+
+/// A supplier-invoice change the database guards refused, as the reason the
+/// user can act on (409/422) instead of a server error.
+pub(crate) fn external_invoice_guard_response(
+    error: &sqlx::Error,
+) -> Option<axum::response::Response> {
+    let database_message = error.to_string();
+    if database_message.contains("reverse active patient-invoice allocations before cancelling") {
+        return Some(external_invoice_allocations_block_cancellation());
+    }
+    if database_message.contains("locked by active allocations")
+        || database_message.contains("cannot be lower than active allocations")
+        || database_message.contains("cancelled external invoices cannot be reactivated")
+    {
+        return Some(err(
+            StatusCode::CONFLICT,
+            "Reverse or reassign active patient-invoice allocations first",
+        ));
+    }
+    // Company payments and posted concierge receipts lock the invoice: the
+    // user reverses them first instead of seeing a server error.
+    if database_message.contains("locked by provider payments")
+        || database_message.contains("reverse provider payments before")
+        || database_message.contains("record the full provider payment")
+    {
+        return Some(err(
+            StatusCode::CONFLICT,
+            "Reverse the company payments of this invoice first",
+        ));
+    }
+    if database_message.contains("posted concierge expense")
+        || database_message.contains("reverse the concierge expense review")
+    {
+        return Some(err(
+            StatusCode::CONFLICT,
+            "This invoice comes from a posted concierge receipt; reverse the receipt review first",
+        ));
+    }
+    if database_message.contains("must match order currency")
+        || database_message.contains("must belong to the same order")
+        || database_message.contains("must match order service provider")
+        || database_message.contains("external_invoices_amount")
+    {
+        return Some(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "External invoice economics data is inconsistent with the selected order service",
+        ));
+    }
+    None
 }
 
 async fn list_leistungen(
@@ -9421,18 +9690,55 @@ async fn deliver_leistung(
         }
     }
 
-    match sqlx::query(
-        "UPDATE order_leistungen
-         SET status = CASE WHEN status = 'planned' THEN 'delivered' ELSE status END,
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, "begin deliver leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let delivered = sqlx::query(
+        "UPDATE order_leistungen line
+         SET status = CASE WHEN line.status = 'planned' THEN 'delivered' ELSE line.status END,
              delivered_at = now()
-         WHERE id = $2 AND order_id = $1 AND delivered_at IS NULL AND status <> 'cancelled'",
+         FROM order_leistungen previous
+         WHERE previous.id = line.id
+           AND line.id = $2 AND line.order_id = $1
+           AND line.delivered_at IS NULL AND line.status <> 'cancelled'
+         RETURNING previous.status AS previous_status, line.status",
     )
     .bind(order_id)
     .bind(leistung_id)
-    .execute(&state.db)
-    .await
-    {
-        Ok(r) if r.rows_affected() > 0 => {
+    .fetch_optional(&mut *transaction)
+    .await;
+    // The status change and its audit row commit together.
+    if let Ok(Some(row)) = &delivered {
+        if let Err(e) = audit::write_in_transaction(
+            &mut transaction,
+            &audit::domain_event(
+                "deliver_order_service",
+                Some(auth.user_id),
+                "order_leistung",
+                Some(leistung_id),
+                serde_json::json!({
+                    "order_id": order_id,
+                    "previous_status": row.try_get::<String, _>("previous_status").unwrap_or_default(),
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %e, %order_id, %leistung_id, "audit deliver leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(e) = transaction.commit().await {
+            tracing::error!(error = %e, %order_id, %leistung_id, "commit deliver leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    match delivered {
+        Ok(Some(_)) => {
             crate::realtime::publish_order_event(
                 &state,
                 Some(auth.user_id),
@@ -9470,16 +9776,51 @@ async fn approve_leistung(
         Err(resp) => return resp,
     }
 
-    match sqlx::query!(
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(e) => {
+            tracing::error!(error = %e, "begin approve leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let approved = sqlx::query(
         "UPDATE order_leistungen SET status = 'approved', approved_by = $3, approved_at = now()
          WHERE id = $2 AND order_id = $1 AND status = 'delivered'",
-        order_id,
-        leistung_id,
-        auth.user_id
     )
-    .execute(&state.db)
-    .await
+    .bind(order_id)
+    .bind(leistung_id)
+    .bind(auth.user_id)
+    .execute(&mut *transaction)
+    .await;
+    // The status change and its audit row commit together.
+    if let Ok(result) = &approved
+        && result.rows_affected() > 0
     {
+        if let Err(e) = audit::write_in_transaction(
+            &mut transaction,
+            &audit::domain_event(
+                "approve_order_service",
+                Some(auth.user_id),
+                "order_leistung",
+                Some(leistung_id),
+                serde_json::json!({
+                    "order_id": order_id,
+                    "previous_status": "delivered",
+                    "status": "approved",
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %e, %order_id, %leistung_id, "audit approve leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if let Err(e) = transaction.commit().await {
+            tracing::error!(error = %e, %order_id, %leistung_id, "commit approve leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    match approved {
         Ok(r) if r.rows_affected() > 0 => {
             crate::realtime::publish_order_event(
                 &state,
@@ -9589,23 +9930,30 @@ async fn cancel_leistung(
         Ok(value) => value,
         Err(error) => return failed(error, "update"),
     };
+    if let Err(error) = audit::write_in_transaction(
+        &mut transaction,
+        &audit::domain_event(
+            "cancel_order_service",
+            Some(auth.user_id),
+            "order_leistung",
+            Some(leistung_id),
+            serde_json::json!({
+                "order_id": order_id,
+                "previous_status": status,
+                "description": description,
+                "quantity": quantity.normalize().to_string(),
+                "reason": reason,
+            }),
+        ),
+    )
+    .await
+    {
+        return failed(error, "audit");
+    }
     if let Err(error) = transaction.commit().await {
         return failed(error, "commit");
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "cancel_order_service",
-        Some(auth.user_id),
-        "order_leistung",
-        Some(leistung_id),
-        serde_json::json!({
-            "order_id": order_id,
-            "previous_status": status,
-            "description": description,
-            "quantity": quantity.normalize().to_string(),
-            "reason": reason,
-        }),
-    ));
     crate::realtime::publish_order_event(
         &state,
         Some(auth.user_id),
@@ -9847,6 +10195,8 @@ pub async fn run_external_invoice_deadline_scheduler_once(
             .or(row.try_get("supplier_name").unwrap_or_default())
             .unwrap_or_else(|| external_invoice_number.clone());
 
+        // The status change and its audit row commit together.
+        let mut transaction = state.db.begin().await?;
         let result = sqlx::query(
             r#"UPDATE external_invoices
                SET status = 'overdue'
@@ -9854,12 +10204,31 @@ pub async fn run_external_invoice_deadline_scheduler_once(
                  AND status = 'approved'"#,
         )
         .bind(external_invoice_id)
-        .execute(&state.db)
+        .execute(&mut *transaction)
         .await?;
 
         if result.rows_affected() == 0 {
             continue;
         }
+        audit::write_in_transaction(
+            &mut transaction,
+            &audit::domain_event(
+                "auto_mark_external_invoice_overdue".to_string(),
+                None,
+                entity_type,
+                Some(entity_id),
+                serde_json::json!({
+                    "external_invoice_id": external_invoice_id,
+                    "external_invoice_number": external_invoice_number,
+                    "patient_id": patient_id,
+                    "due_date": due_date.to_string(),
+                    "previous_status": "approved",
+                    "status": "overdue",
+                }),
+            ),
+        )
+        .await?;
+        transaction.commit().await?;
 
         summary.overdue_marked += result.rows_affected();
 
@@ -9901,18 +10270,6 @@ pub async fn run_external_invoice_deadline_scheduler_once(
             summary.notifications_created += 1;
         }
 
-        state.audit_sender.try_send(audit::domain_event(
-            "auto_mark_external_invoice_overdue".to_string(),
-            None,
-            entity_type,
-            Some(entity_id),
-            serde_json::json!({
-                "external_invoice_id": external_invoice_id,
-                "external_invoice_number": external_invoice_number,
-                "patient_id": patient_id,
-                "due_date": due_date.to_string(),
-            }),
-        ));
         let Some(order_id) = order_id else {
             continue;
         };
@@ -10426,23 +10783,31 @@ async fn create_order_amendment(
         Ok(id) => id,
         Err(e) => return failed(e),
     };
+    if let Err(e) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "create_order_amendment",
+            Some(auth.user_id),
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "amendment_id": amendment_id,
+                "status": "pending",
+                "delta_amount": delta.to_string(),
+                "currency": currency,
+                "vat_treatment": vat.treatment,
+                "vat_rate": vat.vat_rate.normalize().to_string(),
+            }),
+        ),
+    )
+    .await
+    {
+        return failed(e);
+    }
     if let Err(e) = tx.commit().await {
         return failed(e);
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "create_order_amendment",
-        Some(auth.user_id),
-        "order",
-        Some(order_id),
-        serde_json::json!({
-            "amendment_id": amendment_id,
-            "delta_amount": delta.to_string(),
-            "currency": currency,
-            "vat_treatment": vat.treatment,
-            "vat_rate": vat.vat_rate.normalize().to_string(),
-        }),
-    ));
     (
         StatusCode::CREATED,
         Json(load_order_amendment_json(&state, amendment_id).await),
@@ -10643,26 +11008,34 @@ async fn decide_order_amendment(
         return failed(e);
     }
 
+    if let Err(e) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "decide_order_amendment",
+            Some(auth.user_id),
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "amendment_id": amendment_id,
+                "decision": decision,
+                "previous_status": status,
+                "delta_amount": delta.to_string(),
+                "order_leistung_id": billing_line.as_ref().map(|(id, _)| *id),
+                "vat_treatment": billing_line.as_ref().map(|(_, vat)| vat.treatment),
+                "vat_rate": billing_line
+                    .as_ref()
+                    .map(|(_, vat)| vat.vat_rate.normalize().to_string()),
+            }),
+        ),
+    )
+    .await
+    {
+        return failed(e);
+    }
     if let Err(e) = tx.commit().await {
         return failed(e);
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "decide_order_amendment",
-        Some(auth.user_id),
-        "order",
-        Some(order_id),
-        serde_json::json!({
-            "amendment_id": amendment_id,
-            "decision": decision,
-            "delta_amount": delta.to_string(),
-            "order_leistung_id": billing_line.as_ref().map(|(id, _)| *id),
-            "vat_treatment": billing_line.as_ref().map(|(_, vat)| vat.treatment),
-            "vat_rate": billing_line
-                .as_ref()
-                .map(|(_, vat)| vat.vat_rate.normalize().to_string()),
-        }),
-    ));
     if let Some((line_id, _)) = billing_line.as_ref() {
         crate::realtime::publish_order_event(
             &state,
@@ -10814,23 +11187,30 @@ async fn bill_order_amendment(
     if let Err(e) = sync_order_total_estimated(&mut tx, order_id).await {
         return failed(e);
     }
+    if let Err(e) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "bill_order_amendment",
+            Some(auth.user_id),
+            "order",
+            Some(order_id),
+            serde_json::json!({
+                "amendment_id": amendment_id,
+                "delta_amount": delta.to_string(),
+                "order_leistung_id": line_id,
+                "vat_treatment": vat.treatment,
+                "vat_rate": vat.vat_rate.normalize().to_string(),
+            }),
+        ),
+    )
+    .await
+    {
+        return failed(e);
+    }
     if let Err(e) = tx.commit().await {
         return failed(e);
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "bill_order_amendment",
-        Some(auth.user_id),
-        "order",
-        Some(order_id),
-        serde_json::json!({
-            "amendment_id": amendment_id,
-            "delta_amount": delta.to_string(),
-            "order_leistung_id": line_id,
-            "vat_treatment": vat.treatment,
-            "vat_rate": vat.vat_rate.normalize().to_string(),
-        }),
-    ));
     crate::realtime::publish_order_event(
         &state,
         Some(auth.user_id),
@@ -12058,6 +12438,27 @@ async fn ensure_order_service_patient_allowed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn billing_closure_lists_every_open_item() {
+        assert!(order_billing_closure_reasons(0, 0, &[]).is_empty());
+        assert_eq!(
+            order_billing_closure_reasons(
+                2,
+                1,
+                &[
+                    "RE-2026-0007|sent".to_string(),
+                    "RE-2026-0009|overdue".to_string(),
+                ],
+            ),
+            vec![
+                "2 approved service item(s) are not invoiced yet".to_string(),
+                "1 draft patient invoice(s) are not issued yet".to_string(),
+                "Patient invoice RE-2026-0007 is not paid yet (sent)".to_string(),
+                "Patient invoice RE-2026-0009 is not paid yet (overdue)".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn a_new_order_requires_a_positive_prepayment_amount() {

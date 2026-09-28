@@ -315,6 +315,25 @@ async fn update_patient_payment(
             "Failed to update payment state",
         );
     }
+    // The status change and its audit row commit together.
+    if let Err(error) = audit::write_in_transaction(
+        &mut transaction,
+        &audit::domain_event(
+            event_type,
+            Some(auth.user_id),
+            "external_invoice",
+            Some(invoice_id),
+            json!({"paid_on": paid_on, "patient_id": patient_id, "previous_status": status}),
+        ),
+    )
+    .await
+    {
+        tracing::error!(%error, %invoice_id, "audit patient payment update");
+        return super::err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update payment state",
+        );
+    }
     if let Err(error) = transaction.commit().await {
         tracing::error!(%error, %invoice_id, "commit patient payment update");
         return super::err(
@@ -323,13 +342,6 @@ async fn update_patient_payment(
         );
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        event_type,
-        Some(auth.user_id),
-        "external_invoice",
-        Some(invoice_id),
-        json!({"paid_on": paid_on, "patient_id": patient_id}),
-    ));
     crate::realtime::publish_company_finance_event(
         &state,
         Some(auth.user_id),
@@ -352,7 +364,18 @@ async fn approve(
         return response.into_response();
     }
     // Confirmation changes no money. Payments still go through the settlement journal.
-    match sqlx::query_scalar::<_, Uuid>(
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %invoice_id, "approve incoming invoice");
+        super::err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to approve invoice",
+        )
+    };
+    let mut transaction = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => return failed(error),
+    };
+    let approved = sqlx::query_scalar::<_, Uuid>(
         r#"
         UPDATE external_invoices SET status = 'approved', updated_at = now()
         WHERE id = $1 AND status = 'received' AND paid_by = 'unpaid'
@@ -360,17 +383,30 @@ async fn approve(
     "#,
     )
     .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(id)) => {
-            state.audit_sender.try_send(audit::domain_event(
+    .fetch_optional(&mut *transaction)
+    .await;
+    // The status change and its audit row commit together.
+    if let Ok(Some(id)) = &approved {
+        if let Err(error) = audit::write_in_transaction(
+            &mut transaction,
+            &audit::domain_event(
                 "approve_external_invoice",
                 Some(auth.user_id),
                 "external_invoice",
-                Some(id),
-                json!({"status": "approved"}),
-            ));
+                Some(*id),
+                json!({"status": "approved", "previous_status": "received"}),
+            ),
+        )
+        .await
+        {
+            return failed(error);
+        }
+        if let Err(error) = transaction.commit().await {
+            return failed(error);
+        }
+    }
+    match approved {
+        Ok(Some(id)) => {
             crate::realtime::publish_company_finance_event(
                 &state,
                 Some(auth.user_id),

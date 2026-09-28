@@ -378,6 +378,12 @@ async fn updating_lead_gates_allows_qualification_but_conversion_requires_onboar
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
     let lead_id = create_lead(&app, &pm_bearer, &tag).await;
+    // Stands for the DSGVO signature flow: staff cannot set `signed` by hand.
+    sqlx::query("UPDATE leads SET compliance_status = 'signed' WHERE id::text = $1")
+        .bind(lead_id.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let (status, updated) = json_request(
         &app,
@@ -389,7 +395,6 @@ async fn updating_lead_gates_allows_qualification_but_conversion_requires_onboar
             "primary_language": "de",
             "date_of_birth": "1987-05-12",
             "legal_sex": "female",
-            "compliance_status": "signed",
             "consent_healthcare": true,
             "consent_privacy_practices": true
         })),
@@ -1565,7 +1570,32 @@ async fn order_lifecycle_blocks_closure_and_followup_until_evidence_exists() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    let (status, _) = json_request(
+    // Billing must be closed before the order leaves closure: approved
+    // services invoiced and no open patient invoice (owner decision Q5).
+    let approved_line: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (order_id, patient_id, description, quantity, unit_price, currency, vat_rate, status, delivered_at)
+           VALUES ($1, $2, 'Organisation der Behandlung', 1, 200, 'EUR', 0, 'approved', now())
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let draft_invoice: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_type, status,
+               total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, 'interim', 'draft', 200, 0, 200, 0, '[]', $3)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
         &app,
         "POST",
         &format!("/api/v1/orders/{order_id}/phase"),
@@ -1573,7 +1603,51 @@ async fn order_lifecycle_blocks_closure_and_followup_until_evidence_exists() {
         Some(json!({ "phase": "followup" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let reasons: Vec<String> = body["blocking_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|reason| reason.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(
+        reasons.contains(&"1 approved service item(s) are not invoiced yet".to_string()),
+        "{reasons:?}"
+    );
+    assert!(
+        reasons.contains(&"1 draft patient invoice(s) are not issued yet".to_string()),
+        "{reasons:?}"
+    );
+    sqlx::query("UPDATE order_leistungen SET status = 'invoiced' WHERE id = $1")
+        .bind(approved_line)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE invoices SET status = 'cancelled' WHERE id = $1")
+        .bind(draft_invoice)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/phase"),
+        &pm_bearer,
+        Some(json!({ "phase": "followup" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'update_phase' AND entity_id = $1
+             AND context->>'phase' = 'followup'"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
 }
 
 #[tokio::test]

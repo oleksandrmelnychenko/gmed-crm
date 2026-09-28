@@ -101,6 +101,30 @@ describe("orderBlockingReasonSection", () => {
     expect(orderBlockingReasonSection("2 service item(s) are not approved or invoiced")).toBe("services");
   });
 
+  it("lists open billing as blockers on the invoices section", () => {
+    for (const reason of [
+      "2 approved service item(s) are not invoiced yet",
+      "1 draft patient invoice(s) are not issued yet",
+      "Patient invoice RE-2026-0007 is not paid yet (overdue)",
+    ]) {
+      expect(orderBlockingReasonSection(reason), reason).toBe("invoices");
+    }
+    expect(resolveOrderBlockingReason("2 approved service item(s) are not invoiced yet")).toEqual({
+      key: "orders_blocking_approved_services_uninvoiced_count",
+      values: { count: 2 },
+    });
+    expect(resolveOrderBlockingReason("1 draft patient invoice(s) are not issued yet")).toEqual({
+      key: "orders_blocking_draft_invoices_count",
+      values: { count: 1 },
+    });
+    expect(
+      resolveOrderBlockingReason("Patient invoice RE-2026-0007 is not paid yet (partially_paid)"),
+    ).toEqual({
+      key: "orders_blocking_patient_invoice_unpaid",
+      values: { number: "RE-2026-0007" },
+    });
+  });
+
   it("sends planning blockers to planning and everything else to the gates", () => {
     expect(orderBlockingReasonSection("Assigned interpreter has not confirmed yet")).toBe("planning");
     expect(orderBlockingReasonSection("Treatment plan must be finalized before execution")).toBe("planning");

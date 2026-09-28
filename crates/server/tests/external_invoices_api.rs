@@ -1382,3 +1382,159 @@ async fn deadline_scheduler_marks_approved_company_invoice_overdue_and_skips_una
     .unwrap();
     assert_eq!(notifications, 1);
 }
+
+#[tokio::test]
+async fn company_invoice_can_be_corrected_and_cancelled_by_finance_until_paid() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("company-invoice-edit");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let manager = auth_header_for(manager_id, "patient_manager");
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               auto_name, art, category, uploaded_by, id, version_root_document_id
+           ) VALUES ($1, 'invoice_document', 'finance', $2, $3, $3)"#,
+    )
+    .bind(format!("FIN-Rechnung {tag}.pdf"))
+    .bind(admin_id)
+    .bind(document_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let today = gmed_server::app_time::today();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/external-invoices/company",
+        &billing,
+        Some(json!({
+            "source_document_id": document_id,
+            "supplier_name": format!("Supplier {tag}"),
+            "external_invoice_number": format!("RE-{tag}"),
+            "invoice_date": today.to_string(),
+            "due_date": (today + chrono::Duration::days(14)).to_string(),
+            "amount_net": 100.0,
+            "amount_vat": 19.0,
+            "amount_gross": 119.0,
+            "currency": "EUR"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let invoice_id = created["id"].as_str().unwrap().to_string();
+
+    // Finance roles only.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/update"),
+        &manager,
+        Some(json!({ "notes": "x" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A wrong amount is corrected; a past due date makes it overdue at once.
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/update"),
+        &billing,
+        Some(json!({
+            "amount_net": 200.0,
+            "amount_vat": 38.0,
+            "amount_gross": 238.0,
+            "due_date": (today - chrono::Duration::days(1)).to_string(),
+            "external_invoice_number": format!("RE-{tag}-corrected")
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(
+        updated["invoice"]["amount_gross"]
+            .as_str()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap(),
+        238.0
+    );
+    assert_eq!(updated["invoice"]["status"], "overdue");
+    let (status, inconsistent) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/update"),
+        &billing,
+        Some(json!({ "amount_gross": 1.0 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{inconsistent}");
+
+    let (status, missing_reason) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/cancel"),
+        &billing,
+        Some(json!({ "reason": "x" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_reason}");
+    let (status, cancelled) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/cancel"),
+        &billing,
+        Some(json!({ "reason": "Duplicate of an invoice already booked" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    let row = sqlx::query(
+        "SELECT status, cancelled_by, cancellation_reason FROM external_invoices WHERE id::text = $1",
+    )
+    .bind(&invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("status"), "cancelled");
+    assert_eq!(row.get::<Option<Uuid>, _>("cancelled_by"), Some(billing_id));
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/update"),
+        &billing,
+        Some(json!({ "notes": "late" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/external-invoices/{invoice_id}/cancel"),
+        &billing,
+        Some(json!({ "reason": "Again cancelled" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let audited: Vec<String> = sqlx::query_scalar(
+        r#"SELECT action FROM audit_log
+           WHERE entity_type = 'external_invoice' AND entity_id::text = $1
+             AND action IN ('update_unassigned_external_invoice', 'cancel_unassigned_external_invoice')
+           ORDER BY created_at, action"#,
+    )
+    .bind(&invoice_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        audited,
+        vec![
+            "update_unassigned_external_invoice".to_string(),
+            "cancel_unassigned_external_invoice".to_string()
+        ]
+    );
+}
