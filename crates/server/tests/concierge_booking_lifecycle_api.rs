@@ -207,6 +207,35 @@ async fn general_task_booking_is_task_native_and_manager_accessible() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{forbidden}");
 
+    // The CEO assistant reads services but never books them.
+    let assistant_id =
+        seed_user(&ctx.pool, "ceo_assistant", &format!("task-assistant-{tag}")).await;
+    let (status, assistant_forbidden) = json_request(
+        &ctx.app,
+        "POST",
+        &path,
+        &auth_header_for(assistant_id, "ceo_assistant"),
+        Some(booking_body(Uuid::new_v4(), provider_id, "confirmed")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{assistant_forbidden}");
+
+    // Booking started the open task once, with a history entry.
+    let (task_status, starts): (String, i64) = sqlx::query_as(
+        r#"SELECT task.status,
+                  (SELECT count(*) FROM concierge_operational_task_events event
+                   WHERE event.task_id = task.id
+                     AND event.event_type = 'status_changed'
+                     AND event.payload ->> 'reason' = 'provider_booked')
+           FROM tasks task WHERE task.id = $1"#,
+    )
+    .bind(task_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(task_status, "in_progress");
+    assert_eq!(starts, 1);
+
     let persisted: (String, String, Option<Uuid>, i64) = sqlx::query_as(
         r#"SELECT task_scope, service_status, concierge_service_id,
                   (SELECT count(*) FROM concierge_service_partner_interactions interaction

@@ -407,6 +407,8 @@ pub(crate) async fn mark_services_ready_for_billing(
         return Ok(());
     }
 
+    // A cancelled service was not delivered: it stays cancelled and is not
+    // handed to billing when the appointment completes.
     let rows = sqlx::query(
         r#"UPDATE concierge_services
            SET status = CASE
@@ -420,7 +422,8 @@ pub(crate) async fn mark_services_ready_for_billing(
                    ELSE billing_status
                END
            WHERE appointment_id = $1
-           RETURNING id"#,
+             AND status <> 'cancelled'
+           RETURNING id, status, billing_status"#,
     )
     .bind(appointment_id)
     .fetch_all(&state.db)
@@ -435,6 +438,18 @@ pub(crate) async fn mark_services_ready_for_billing(
 
     for row in rows {
         if let Ok(service_id) = row.try_get::<Uuid, _>("id") {
+            state.audit_sender.try_send(audit::domain_event(
+                "mark_concierge_service_ready_for_billing",
+                Some(created_by),
+                "concierge_service",
+                Some(service_id),
+                serde_json::json!({
+                    "appointment_id": appointment_id,
+                    "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "billing_status": row.try_get::<String, _>("billing_status").unwrap_or_default(),
+                    "reason": "appointment_completed",
+                }),
+            ));
             crate::realtime::publish_concierge_service_event(
                 state,
                 Some(created_by),
@@ -1066,6 +1081,31 @@ async fn delete_concierge_service(
             "Concierge service with expense history cannot be deleted",
         );
     }
+    // Key custody and partner contacts are append-only history (who held the
+    // key, what the partner confirmed); deleting the service would delete it.
+    let has_history = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (SELECT 1 FROM concierge_service_key_events WHERE concierge_service_id = $1)
+               OR EXISTS (
+                   SELECT 1 FROM concierge_service_partner_interactions
+                   WHERE concierge_service_id = $1
+               )"#,
+    )
+    .bind(service_id)
+    .fetch_one(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "check concierge service history before delete");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if has_history {
+        return err(
+            StatusCode::CONFLICT,
+            "Concierge service with key custody or partner history cannot be deleted; cancel it instead",
+        );
+    }
 
     let result = match sqlx::query(
         r#"DELETE FROM concierge_services
@@ -1342,6 +1382,46 @@ async fn book_concierge_service_provider(
             "Service is already linked to a different provider",
         );
     }
+    // The booking turns the service task into a calendar event and starts
+    // it; a closed or archived task is not reopened behind the work center's
+    // back, and a task with sub-tasks cannot become an event.
+    let (task_status, task_archived, task_has_children) = match sqlx::query_as::<
+        _,
+        (String, bool, bool),
+    >(
+        r#"SELECT task.status,
+                      task.archived_at IS NOT NULL,
+                      EXISTS (
+                          SELECT 1 FROM tasks child
+                          WHERE child.parent_task_id = task.id AND child.deleted_at IS NULL
+                      )
+               FROM tasks task
+               WHERE task.id = $1
+               FOR UPDATE OF task"#,
+    )
+    .bind(task_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Service task not found"),
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "lock service task for booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    if task_archived || matches!(task_status.as_str(), "completed" | "cancelled") {
+        return err(
+            StatusCode::CONFLICT,
+            "The service task is closed; reopen it before booking",
+        );
+    }
+    if task_has_children {
+        return err(
+            StatusCode::CONFLICT,
+            "A service task with sub-tasks cannot become a booked event",
+        );
+    }
 
     let provider = match sqlx::query(
         r#"SELECT name, phone, email, address_street, address_city, address_country
@@ -1465,7 +1545,7 @@ async fn book_concierge_service_provider(
                location = $8,
                service_address = $8,
                service_status = $9,
-               status = 'in_progress',
+               status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END,
                updated_at = now()
            WHERE id = $1"#,
     )
@@ -1482,6 +1562,25 @@ async fn book_concierge_service_provider(
     .await
     {
         tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "sync task provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if task_status == "open"
+        && let Err(error) = sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(task_id)
+        .bind(auth.user_id)
+        .bind(serde_json::json!({
+            "status": "in_progress",
+            "previous_status": "open",
+            "reason": "provider_booked",
+            "concierge_service_id": service_id,
+        }))
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "record task start on provider booking");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
@@ -2408,6 +2507,9 @@ async fn book_task_provider(
     Path(task_id): Path<Uuid>,
     Json(body): Json<BookConciergeServiceProviderRequest>,
 ) -> axum::response::Response {
+    if let Err(response) = require_service_task_write(&auth) {
+        return response;
+    }
     if !matches!(body.booking_state.as_str(), "requested" | "confirmed") {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2523,6 +2625,25 @@ async fn book_task_provider(
         "billed" | "settled" | "waived"
     ) {
         return err(StatusCode::CONFLICT, "Closed billing task cannot be booked");
+    }
+    match sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL)",
+    )
+    .bind(task_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            return err(
+                StatusCode::CONFLICT,
+                "A task with sub-tasks cannot become a booked event",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, task_id = %task_id, "check sub-tasks before provider booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
 
     let expected_outcome = if body.booking_state == "confirmed" {
@@ -2685,7 +2806,7 @@ async fn book_task_provider(
                location = $8,
                service_address = $8,
                service_status = $9,
-               status = 'in_progress',
+               status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END,
                updated_at = now()
            WHERE id = $1"#,
     )
@@ -2702,6 +2823,26 @@ async fn book_task_provider(
     .await
     {
         tracing::error!(error = %error, task_id = %task_id, "update task provider booking");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    // Booking starts an open task; a task waiting for review or on hold keeps
+    // its work-center status. The start is part of the task history.
+    if task.status == "open"
+        && let Err(error) = sqlx::query(
+            r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+               VALUES ($1, 'status_changed', $2, $3)"#,
+        )
+        .bind(task_id)
+        .bind(auth.user_id)
+        .bind(serde_json::json!({
+            "status": "in_progress",
+            "previous_status": "open",
+            "reason": "provider_booked",
+        }))
+        .execute(&mut *transaction)
+        .await
+    {
+        tracing::error!(error = %error, task_id = %task_id, "record task start on provider booking");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
     if let Some(service_id) = task.concierge_service_id
@@ -2853,6 +2994,9 @@ async fn record_task_key_event(
     Path(task_id): Path<Uuid>,
     Json(body): Json<RecordConciergeServiceKeyEventRequest>,
 ) -> axum::response::Response {
+    if let Err(response) = require_service_task_write(&auth) {
+        return response;
+    }
     if !is_valid_key_action(&body.action) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid key action");
     }
@@ -3161,6 +3305,9 @@ async fn record_task_partner_interaction(
     Path(task_id): Path<Uuid>,
     Json(body): Json<RecordConciergeServicePartnerInteractionRequest>,
 ) -> axum::response::Response {
+    if let Err(response) = require_service_task_write(&auth) {
+        return response;
+    }
     if !is_valid_partner_channel(&body.channel) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -3373,6 +3520,9 @@ async fn apply_task_partner_quote_as_cost_estimate(
     Extension(auth): Extension<AuthUser>,
     Path((task_id, interaction_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
+    if let Err(response) = require_service_task_write(&auth) {
+        return response;
+    }
     let task_row = match load_task_service_row(&state, task_id).await {
         Ok(Some(row)) => row,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Task not found"),
@@ -3908,15 +4058,19 @@ async fn update_concierge_service(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
-    if matches!(body.status.as_deref(), Some("booked" | "confirmed")) {
+    let current_status = existing
+        .try_get::<String, _>("status")
+        .unwrap_or_else(|_| "planned".to_string());
+    // The forms resend the unchanged status with every save; only moving a
+    // service into booked or confirmed goes through the booking endpoint.
+    if matches!(body.status.as_deref(), Some("booked" | "confirmed"))
+        && body.status.as_deref() != Some(current_status.as_str())
+    {
         return err(
             StatusCode::CONFLICT,
             "Use the provider booking endpoint for booked or confirmed status",
         );
     }
-    let current_status = existing
-        .try_get::<String, _>("status")
-        .unwrap_or_else(|_| "planned".to_string());
     if let Some(next_status) = body.status.as_deref()
         && !is_allowed_service_status_transition(
             &current_status,
@@ -4203,12 +4357,20 @@ async fn update_concierge_service(
         Some("completed") => Some(chrono::Utc::now()),
         _ => None,
     };
-    let billed_at = match body.billing_status.as_deref() {
+    // The service forms resend the unchanged billing status with every save.
+    // An unchanged value is no billing decision, so completing a draft
+    // service still hands it to billing ("ready").
+    let billing_status_update = body.billing_status.clone().filter(|value| {
+        !existing
+            .try_get::<String, _>("billing_status")
+            .is_ok_and(|current| *value == current)
+    });
+    let billed_at = match billing_status_update.as_deref() {
         Some("billed") | Some("settled") => Some(chrono::Utc::now()),
         _ => None,
     };
     let automatically_ready_for_billing = body.status.as_deref() == Some("completed")
-        && body.billing_status.is_none()
+        && billing_status_update.is_none()
         && existing
             .try_get::<String, _>("billing_status")
             .is_ok_and(|value| value == "draft");
@@ -4216,7 +4378,7 @@ async fn update_concierge_service(
     let audit_billing_status = if automatically_ready_for_billing {
         Some("ready".to_string())
     } else {
-        body.billing_status.clone()
+        billing_status_update.clone()
     };
     let audit_assigned_concierge_id = body.assigned_concierge_id;
 
@@ -4266,7 +4428,7 @@ async fn update_concierge_service(
     .bind(body.service_kind)
     .bind(body.title.map(|value| value.trim().to_string()))
     .bind(body.status)
-    .bind(body.billing_status)
+    .bind(billing_status_update)
     .bind(booking_reference)
     .bind(vendor_name)
     .bind(vendor_contact)
@@ -4573,6 +4735,22 @@ fn task_service_context(
             .try_get("currency")
             .unwrap_or_else(|_| "EUR".to_string()),
     })
+}
+
+/// Booking, key custody, partner calls and quotes on a service task change the
+/// service: only the roles that run services (`services.edit`: CEO, patient
+/// manager, concierge) may do it, never the read-only CEO assistant or a
+/// task collaborator from another department.
+#[allow(clippy::result_large_err)]
+fn require_service_task_write(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if auth.can(Capability::ServicesEdit) {
+        Ok(())
+    } else {
+        Err(err(
+            StatusCode::FORBIDDEN,
+            "Only the roles that run services can change a service task",
+        ))
+    }
 }
 
 fn can_access_task_service(auth: &AuthUser, task: &TaskServiceContext) -> bool {

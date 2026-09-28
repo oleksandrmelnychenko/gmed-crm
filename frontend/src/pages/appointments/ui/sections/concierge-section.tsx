@@ -30,7 +30,6 @@ import {
 import {
   CONCIERGE_BILLING_STATUS_OPTIONS,
   CONCIERGE_SERVICE_KIND_OPTIONS,
-  CONCIERGE_SERVICE_STATUS_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
   billingStatusLabel,
@@ -49,6 +48,7 @@ import {
   buildServiceDraft,
   toRfc3339,
 } from "@/pages/appointments/model/workflow-helpers";
+import { conciergeServiceStatusOptions } from "@/pages/concierge/model";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type {
   AppointmentDetail,
@@ -319,8 +319,9 @@ function useAppointmentConciergeSectionContent({
             billing_notes: draft.billingNotes.trim() || null,
           }
         : {
+            // The concierge runs the service operationally; the server
+            // refuses taxonomy, provider, title and billing changes from it.
             status: draft.status,
-            taxonomy_node_id: draft.taxonomyNodeId || null,
             booking_reference: draft.bookingReference.trim() || null,
             vendor_name: draft.vendorName.trim() || null,
             vendor_contact: draft.vendorContact.trim() || null,
@@ -478,6 +479,7 @@ function useAppointmentConciergeSectionContent({
                     ) : null}
                     {!canManageConciergeBilling ? (
                       <Field label={t.services_category}>
+                        {/* Shown for orientation; the category is set by the coordinators. */}
                         <ProviderTaxonomyCascadeSelect
                           value={draft.taxonomyNodeId}
                           nodes={taxonomyNodes}
@@ -486,6 +488,7 @@ function useAppointmentConciergeSectionContent({
                           placeholder={tr.common_not_set}
                           containerClassName="grid gap-2 sm:grid-cols-2"
                           selectClassName={selectClassName}
+                          disabled
                           onChange={(taxonomyNodeId) =>
                             updateDraft(service.id, {
                               taxonomyNodeId,
@@ -511,11 +514,14 @@ function useAppointmentConciergeSectionContent({
                         }
                         className={selectClassName}
                       >
-                        {CONCIERGE_SERVICE_STATUS_OPTIONS.map((status) => (
-                          <option key={status} value={status}>
-                            {serviceStatusLabel(status)}
-                          </option>
-                        ))}
+                        {/* Only the moves the server accepts; booked and confirmed come from the provider booking. */}
+                        {conciergeServiceStatusOptions(service.status, canManageConciergeBilling).map(
+                          (status) => (
+                            <option key={status} value={status}>
+                              {serviceStatusLabel(status)}
+                            </option>
+                          ),
+                        )}
                       </NativeComboboxSelect>
                     </Field>
                     <Field label={tr.appointments_title_col}>

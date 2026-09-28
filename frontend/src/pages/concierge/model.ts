@@ -667,6 +667,20 @@ export function availableConciergeServiceStatuses(
   return transitions[service.status];
 }
 
+/**
+ * The status options of a service edit form: the current status plus the
+ * moves the server accepts (booked and confirmed only through the provider
+ * booking, reopening only for CEO and patient manager). An unknown status is
+ * offered alone.
+ */
+export function conciergeServiceStatusOptions(current: string, canReopen: boolean): string[] {
+  if (!(CONCIERGE_SERVICE_STATUSES as readonly string[]).includes(current)) return [current];
+  return availableConciergeServiceStatuses(
+    { status: current as ConciergeServiceStatus },
+    canReopen,
+  );
+}
+
 export function isConciergeKeyService(
   service: Pick<
     ConciergeService,

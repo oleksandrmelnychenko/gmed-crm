@@ -56,6 +56,7 @@ import { roundCents } from "@/lib/money";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { servicesPermissions } from "@/pages/services.model";
+import { conciergeServiceStatusOptions } from "@/pages/concierge/model";
 import {
   formatEnumLabelFromKeys,
   useLang,
@@ -637,7 +638,7 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       label: t.staff_services_column_billing,
       accessor: (row) => row.billing_status,
       filterType: "enum",
-      filterOptions: ["draft", "ready", "billed", "settled"].map((value) => ({
+      filterOptions: ["draft", "ready", "billed", "settled", "waived"].map((value) => ({
         value,
         label: billingStatusLabel(value, t),
       })),
@@ -1893,7 +1894,11 @@ function useStaffServicesPageContent() {
                           }
                           className={formSelectClassName}
                         >
-                          {["planned", "booked", "confirmed", "in_service", "completed", "cancelled"].map((status) => (
+                          {/* Only the moves the server accepts; booked and confirmed come from the provider booking. */}
+                          {conciergeServiceStatusOptions(
+                            selectedService?.status ?? editForm.status,
+                            user?.role === "ceo" || user?.role === "patient_manager",
+                          ).map((status) => (
                             <option key={status} value={status}>
                               {serviceStatusLabel(status, t)}
                             </option>
