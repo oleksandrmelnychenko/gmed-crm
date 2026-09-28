@@ -23,6 +23,8 @@ export interface PatientsPortalTranslations {
   portal_status_planned: string;
   portal_status_ready: string;
   portal_status_rejected: string;
+  portal_status_requested: string;
+  portal_status_not_required: string;
   portal_status_released: string;
   portal_status_retention_hold: string;
   portal_status_reviewed: string;
@@ -957,13 +959,13 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_status_closed: "Закрыто",
   portal_status_completed: "Завершено",
   portal_status_confirmed: "Подтверждено",
-  portal_status_converted: "Преобразовано",
+  portal_status_converted: "Запланировано",
   portal_status_declined: "Отклонено",
   portal_status_draft: "Черновик",
   portal_status_executed: "Исполнено",
   portal_status_expired: "Истекло",
   portal_status_in_progress: "В работе",
-  portal_status_in_service: "В исполнении",
+  portal_status_in_service: "Выполняется",
   portal_status_not_started: "Не начато",
   portal_status_open: "Открыто",
   portal_status_overdue: "Просрочено",
@@ -973,6 +975,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_status_planned: "Запланировано",
   portal_status_ready: "Готово",
   portal_status_rejected: "Отклонено",
+  portal_status_requested: "Запрошено",
+  portal_status_not_required: "Не требуется",
   portal_status_released: "Опубликовано",
   portal_status_retention_hold: "Удержание по хранению",
   portal_status_reviewed: "Проверено",
@@ -1898,13 +1902,13 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_status_closed: "Geschlossen",
   portal_status_completed: "Abgeschlossen",
   portal_status_confirmed: "Bestätigt",
-  portal_status_converted: "Umgewandelt",
+  portal_status_converted: "Geplant",
   portal_status_declined: "Abgelehnt",
   portal_status_draft: "Entwurf",
   portal_status_executed: "Ausgeführt",
   portal_status_expired: "Abgelaufen",
   portal_status_in_progress: "In Bearbeitung",
-  portal_status_in_service: "In Betreuung",
+  portal_status_in_service: "In Durchführung",
   portal_status_not_started: "Nicht gestartet",
   portal_status_open: "Offen",
   portal_status_overdue: "Überfällig",
@@ -1914,6 +1918,8 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_status_planned: "Geplant",
   portal_status_ready: "Bereit",
   portal_status_rejected: "Abgelehnt",
+  portal_status_requested: "Angefragt",
+  portal_status_not_required: "Nicht erforderlich",
   portal_status_released: "Freigegeben",
   portal_status_retention_hold: "Aufbewahrungssperre",
   portal_status_reviewed: "Geprüft",

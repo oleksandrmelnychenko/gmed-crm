@@ -547,6 +547,10 @@ function patientDetailStatusLabel(status: string) {
       return patientDetailText("patients_detail_open");
     case "in_progress":
       return patientDetailText("patients_detail_in_progress");
+    case "on_hold":
+      return patientDetailText("patients_detail_on_hold");
+    case "review":
+      return patientDetailText("patients_detail_review");
     case "closed":
       return patientDetailText("patients_detail_closed");
     case "active":
@@ -733,6 +737,8 @@ function nextDunningLevel(events: DunningEvent[]): DunningLevel | null {
 const STATUS_COLORS: Record<string, string> = {
   open: "border-sky-200 bg-sky-50 text-sky-700",
   in_progress: "border-amber-200 bg-amber-50 text-amber-700",
+  on_hold: "border-amber-200 bg-amber-50 text-amber-700",
+  review: "border-violet-200 bg-violet-50 text-violet-700",
   closed: "border-emerald-200 bg-emerald-50 text-emerald-700",
   active: "border-emerald-200 bg-emerald-50 text-emerald-700",
   completed: "border-emerald-200 bg-emerald-50 text-emerald-700",

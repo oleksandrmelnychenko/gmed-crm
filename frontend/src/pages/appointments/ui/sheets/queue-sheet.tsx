@@ -19,8 +19,10 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { appointmentTimeOfDayLabel } from "@/pages/patients/model/portal-shared";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
 import { isAppointmentCompletionTooEarly } from "@/pages/appointments/model/completion-rules";
 import {
@@ -198,30 +200,33 @@ function requestStatusLabel(status: AppointmentRequestStatus) {
 
 function requestStatusClassName(status: AppointmentRequestStatus) {
   switch (status) {
+    // Same tones as the patient portal: approved waits for scheduling,
+    // converted is done.
     case "requested":
       return "border-amber-200 bg-amber-50 text-amber-700";
     case "approved":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      return "border-sky-200 bg-sky-50 text-sky-700";
     case "rejected":
     case "cancelled":
       return "border-rose-200 bg-rose-50 text-rose-700";
     case "converted":
-      return "border-sky-200 bg-sky-50 text-sky-700";
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
   }
 }
 
 function preferredWindowLabel(item: AppointmentRequestItem) {
-  const from = item.preferred_date_from;
-  const to = item.preferred_date_to;
+  // DD.MM.YYYY and the patient portal's time-of-day wording.
+  const from = item.preferred_date_from ? formatAppDate(item.preferred_date_from) : "";
+  const to = item.preferred_date_to ? formatAppDate(item.preferred_date_to) : "";
   const time = item.preferred_time_of_day
-    ? item.preferred_time_of_day.replace("_", " ")
+    ? appointmentTimeOfDayLabel(item.preferred_time_of_day)
     : "";
 
   let dateLabel = appointmentText("appointments_flexible_date");
   if (from && to && from !== to) {
     dateLabel = `${from} - ${to}`;
   } else if (from || to) {
-    dateLabel = from ?? to ?? dateLabel;
+    dateLabel = from || to || dateLabel;
   }
 
   return time ? `${dateLabel} · ${time}` : dateLabel;

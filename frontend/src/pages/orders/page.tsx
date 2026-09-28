@@ -326,6 +326,8 @@ const ORDER_PAGE_SIZE = 50;
 const ORDER_TASK_STATUS_LABEL_KEYS = {
   open: "orders_task_status_open",
   in_progress: "orders_task_status_in_progress",
+  on_hold: "orders_task_status_on_hold",
+  review: "orders_task_status_review",
   completed: "orders_task_status_completed",
   done: "orders_task_status_completed",
   cancelled: "orders_task_status_cancelled",

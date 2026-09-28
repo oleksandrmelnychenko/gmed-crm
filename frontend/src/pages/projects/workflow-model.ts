@@ -5,10 +5,14 @@ import type { ProjectWorkflowDependency } from "./model";
 export const WORKFLOW_STAGE_ORDER: ConciergeTaskStatus[] = [
   "open",
   "in_progress",
+  "on_hold",
   "review",
   "completed",
   "cancelled",
 ];
+
+/** Stages shown only while a task is in them (a paused task stays on the canvas). */
+const OPTIONAL_WORKFLOW_STAGES = new Set<ConciergeTaskStatus>(["on_hold", "cancelled"]);
 
 export const WORKFLOW_NODE_WIDTH = 252;
 export const WORKFLOW_NODE_HEIGHT = 158;
@@ -99,7 +103,8 @@ export function buildProjectWorkflowGraph(
 ): ProjectWorkflowGraph {
   const visibleTasks = visibleTaskIds ? tasks.filter((task) => visibleTaskIds.has(task.id)) : tasks;
   const stages = WORKFLOW_STAGE_ORDER.filter(
-    (stage) => stage !== "cancelled" || visibleTasks.some((task) => task.status === "cancelled"),
+    (stage) =>
+      !OPTIONAL_WORKFLOW_STAGES.has(stage) || visibleTasks.some((task) => task.status === stage),
   );
   const tasksById = taskById(tasks);
   const validDependencies = dependencies.filter(

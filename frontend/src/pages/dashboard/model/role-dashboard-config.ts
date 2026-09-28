@@ -149,7 +149,7 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
         metrics: [
           metric(lang, "active_services", { ru: "Активные сервисы", de: "Aktive Services" }, { ru: "в вашей очереди", de: "in Ihrer Queue" }),
           metric(lang, "completed_services_30d", { ru: "Выполнено", de: "Abgeschlossen" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
-          metric(lang, "ready_for_billing", { ru: "Готово к оплате", de: "Bereit zur Abrechnung" }, { ru: "нужно передать", de: "zu übergeben" }),
+          metric(lang, "ready_for_billing", { ru: "Готово к биллингу", de: "Bereit zur Abrechnung" }, { ru: "нужно передать", de: "zu übergeben" }),
           metric(lang, "portal_requests_30d", { ru: "Запросы из портала", de: "Portal-Anfragen" }, { ru: "за 30 дней", de: "in 30 Tagen" }),
           metric(lang, "avg_feedback_score", { ru: "Оценка сервиса", de: "Servicebewertung" }, { ru: "средний балл", de: "Durchschnitt" }, "score"),
           metric(lang, "taxonomy_mix", { ru: "Направления сервиса", de: "Servicebereiche" }, { ru: "виды активных запросов", de: "Arten aktiver Anfragen" }),

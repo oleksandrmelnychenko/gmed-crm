@@ -126,6 +126,22 @@ describe("project workflow model", () => {
     expect(graph.edges).toEqual([]);
   });
 
+  it("keeps paused tasks on the canvas in their own stage", () => {
+    const withoutPause = buildProjectWorkflowGraph([task("a", "open")], []);
+    expect(withoutPause.stages).not.toContain("on_hold");
+
+    const graph = buildProjectWorkflowGraph(
+      [task("a", "open"), task("b", "on_hold")],
+      [dependency("a-before-b", "b", "a")],
+    );
+    expect(graph.stages).toEqual(["open", "in_progress", "on_hold", "review", "completed"]);
+    expect(graph.nodes.map((node) => node.task.id)).toEqual(["a", "b"]);
+    expect(graph.edges.find((edge) => edge.id === "a-before-b")).toMatchObject({
+      sourceTaskId: "a",
+      targetTaskId: "b",
+    });
+  });
+
   it("does not count completed, cancelled or missing tasks as blocked", () => {
     const tasks = [task("a", "open"), task("b", "completed"), task("c", "cancelled"), task("d", "open")];
     const dependencies = [dependency("ab", "b", "a"), dependency("ac", "c", "a"), dependency("ad", "d", "a"), dependency("ax", "missing", "a")];

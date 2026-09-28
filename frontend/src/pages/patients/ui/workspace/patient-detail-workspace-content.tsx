@@ -930,8 +930,6 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onOpenAppointment={onOpenAppointment}
               patientId={id}
               reload={reload}
-              statusColors={statusColors}
-              statusLabel={patientDetailStatusLabel}
               t={t}
               tabLoading={tabLoading}
             />

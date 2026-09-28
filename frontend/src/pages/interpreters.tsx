@@ -45,6 +45,7 @@ import {
 import { apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { reportApprovalLabel } from "@/pages/appointments/model/labels";
 import {
   buildInterpreterLanguagesPath,
   buildInterpreterListPath,
@@ -2495,7 +2496,7 @@ export function InterpretersPage() {
                         <div>
                           <span className="font-medium">
                             {displayNumber(item.hours, " h")} ·{" "}
-                            {displayValue(item.approval_status)}
+                            {reportApprovalLabel(String(item.approval_status ?? ""))}
                           </span>
                           <span className="mt-1 block text-muted-foreground">
                             {compactDate(item.appointment_date)} ·{" "}

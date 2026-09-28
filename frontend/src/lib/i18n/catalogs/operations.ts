@@ -51,6 +51,8 @@ export interface OperationsTranslations {
   lead_access_restricted: string;
   orders_task_status_open: string;
   orders_task_status_in_progress: string;
+  orders_task_status_on_hold: string;
+  orders_task_status_review: string;
   orders_task_status_completed: string;
   orders_task_status_cancelled: string;
   orders_service_groups_loading: string;
@@ -581,7 +583,7 @@ export const operationsRu: OperationsTranslations = {
   operations_status_booked: "Забронировано",
   operations_status_confirmed: "Подтверждено",
   operations_status_in_progress: "В работе",
-  operations_status_in_service: "В процессе оказания",
+  operations_status_in_service: "Выполняется",
   operations_status_delivered: "Оказано",
   operations_status_approved: "Утверждено",
   operations_document_type: "Тип документа",
@@ -623,7 +625,9 @@ export const operationsRu: OperationsTranslations = {
     "Этот раздел доступен только менеджерам пациентов и отделу продаж.",
   orders_task_status_open: "Открыто",
   orders_task_status_in_progress: "В работе",
-  orders_task_status_completed: "Завершено",
+  orders_task_status_on_hold: "На паузе",
+  orders_task_status_review: "На проверке",
+  orders_task_status_completed: "Выполнено",
   orders_task_status_cancelled: "Отменено",
   orders_service_groups_loading: "Загрузка групп услуг...",
   orders_service_groups_failed_load: "Не удалось загрузить группы услуг.",
@@ -1210,7 +1214,7 @@ export const operationsDe: OperationsTranslations = {
   operations_status_booked: "Gebucht",
   operations_status_confirmed: "Bestätigt",
   operations_status_in_progress: "In Bearbeitung",
-  operations_status_in_service: "In Leistung",
+  operations_status_in_service: "In Durchführung",
   operations_status_delivered: "Erbracht",
   operations_status_approved: "Freigegeben",
   operations_document_type: "Dokumenttyp",
@@ -1251,8 +1255,10 @@ export const operationsDe: OperationsTranslations = {
   lead_access_restricted:
     "Dieser Bereich ist auf Patientenmanager und Sales beschränkt.",
   orders_task_status_open: "Offen",
-  orders_task_status_in_progress: "In Bearbeitung",
-  orders_task_status_completed: "Abgeschlossen",
+  orders_task_status_in_progress: "In Arbeit",
+  orders_task_status_on_hold: "Pausiert",
+  orders_task_status_review: "Zur Prüfung",
+  orders_task_status_completed: "Erledigt",
   orders_task_status_cancelled: "Storniert",
   orders_service_groups_loading: "Leistungsgruppen werden geladen...",
   orders_service_groups_failed_load:
@@ -1329,7 +1335,7 @@ export const operationsDe: OperationsTranslations = {
   staff_services_status_cancelled: "Storniert",
   staff_services_billing_status_draft: "Entwurf",
   staff_services_billing_status_ready: "Bereit",
-  staff_services_billing_status_billed: "Abgerechnet",
+  staff_services_billing_status_billed: "In Rechnung gestellt",
   staff_services_billing_status_settled: "Beglichen",
   staff_services_kind_hotel: "Hotel",
   staff_services_kind_transfer: "Transfer",

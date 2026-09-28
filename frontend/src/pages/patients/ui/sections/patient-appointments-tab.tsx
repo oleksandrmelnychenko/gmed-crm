@@ -17,6 +17,9 @@ import {
 } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
+import { statusLabel as appointmentStatusLabel } from "@/pages/appointments/model/labels";
+import type { AppointmentStatus } from "@/pages/appointments/model/types";
 
 import type { AppointmentItem } from "../../model/detail-tab-types";
 
@@ -44,8 +47,6 @@ type PatientAppointmentsTabProps = {
   onOpenAppointment: (appointmentId: string) => void;
   patientId?: string;
   reload: () => void;
-  statusColors: Record<string, string>;
-  statusLabel: (status: string) => string;
   t: PatientAppointmentsDictionary;
   tabLoading: boolean;
 };
@@ -62,8 +63,6 @@ export function PatientAppointmentsTab({
   onOpenAppointment,
   patientId,
   reload,
-  statusColors,
-  statusLabel,
   t,
   tabLoading,
 }: PatientAppointmentsTabProps) {
@@ -152,15 +151,19 @@ export function PatientAppointmentsTab({
       {
         id: "status",
         label: dict.users_status,
-        accessor: (item) => statusLabel(item.status),
+        // Same wording and colours as the appointments module.
+        accessor: (item) => appointmentStatusLabel(item.status),
         sortable: true,
         width: 160,
         render: (item) => (
           <Badge
             variant="outline"
-            className={cn("rounded-full font-mono text-[10px]", statusColors[item.status] ?? "")}
+            className={cn(
+              "rounded-full font-mono text-[10px]",
+              appointmentStatusBadgeClassName(item.status as AppointmentStatus),
+            )}
           >
-            {statusLabel(item.status)}
+            {appointmentStatusLabel(item.status)}
           </Badge>
         ),
       },
@@ -178,7 +181,7 @@ export function PatientAppointmentsTab({
         ),
       },
     ];
-  }, [appointmentCarePathKindLabel, appointmentTypeLabel, dict, formatDate, statusColors, statusLabel]);
+  }, [appointmentCarePathKindLabel, appointmentTypeLabel, dict, formatDate]);
 
   return (
     <TabsContent value="appointments" className="space-y-4 mt-4 min-h-[400px]">
