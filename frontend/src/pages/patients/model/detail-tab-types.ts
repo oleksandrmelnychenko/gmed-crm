@@ -243,7 +243,13 @@ export type PatientFinancialLedger = {
 
 export type PatientAccountStatementItem = {
   id: string;
-  kind: "invoice" | "prepayment" | "external_expense" | "service";
+  kind:
+    | "invoice"
+    | "prepayment"
+    | "credit_note"
+    | "credit_note_reversal"
+    | "external_expense"
+    | "service";
   entry_date: string;
   order_id?: string | null;
   order_number?: string | null;

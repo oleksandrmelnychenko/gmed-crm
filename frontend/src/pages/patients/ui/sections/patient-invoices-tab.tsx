@@ -64,6 +64,12 @@ import type {
   OrderItem,
 } from "../../model/detail-tab-types";
 import type { PatientAssignment } from "../../model/list-model";
+import {
+  accountMovementKindLabel,
+  accountStatementKindLabel,
+  accountStatementStateLabel,
+  localizeFinancialDescription,
+} from "../../model/account-statement-labels";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { FormSection } from "../shared/patient-form-primitives";
 import {
@@ -558,63 +564,11 @@ function invoiceAccentClass(status: string) {
   return "bg-sky-500";
 }
 
-function accountStatementKindLabel(kind: PatientAccountStatementItem["kind"], lang: string) {
-  const labels: Record<PatientAccountStatementItem["kind"], [string, string]> = {
-    invoice: ["Rechnung", "Счёт"],
-    prepayment: ["Vorauszahlung", "Предоплата"],
-    external_expense: ["Externe Kosten", "Внешние расходы"],
-    service: ["Leistung", "Услуга"],
-  };
-  return lang === "de" ? labels[kind][0] : labels[kind][1];
-}
-
-function accountStatementStateLabel(state: string, lang: string) {
-  const labels: Record<string, [string, string]> = {
-    reconciled_to_patient_invoice: [
-      "Patientenrechnung zugeordnet",
-      "Распределено по счёту пациента",
-    ],
-    paid: ["Bezahlt", "Оплачено"],
-    partially_paid: ["Teilbezahlt – Rest offen", "Оплачено частично — требуется доплата"],
-    unpaid: ["Nicht bezahlt", "Не оплачено"],
-    not_issued: ["Noch nicht ausgestellt", "Ещё не выставлено"],
-    amount_hidden: ["Betrag ausgeblendet", "Сумма скрыта"],
-    patient_paid: ["Vom Patienten bezahlt", "Оплачено пациентом"],
-    gmed_paid_patient_due: ["Von GMED bezahlt – Patient schuldet", "Оплачено GMED — долг пациента"],
-    provider_unpaid_patient_due: ["Anbieter offen – Patient schuldet nach Leistung", "Поставщику не оплачено — долг пациента за оказанную услугу"],
-    provider_unpaid: ["Anbieter noch nicht bezahlt", "Поставщику ещё не оплачено"],
-    not_invoiced: ["Noch nicht fakturiert", "Ещё не выставлено в счёт"],
-    partially_invoiced: ["Teilweise fakturiert", "Частично выставлено в счёт"],
-    invoiced: ["Fakturiert", "Выставлено в счёт"],
-  };
-  const label = labels[state];
-  return label ? (lang === "de" ? label[0] : label[1]) : state;
-}
-
 function accountStatementPayerLabel(paidBy: PatientAccountStatementItem["paid_by"], lang: string) {
   if (paidBy === "patient") return lang === "de" ? "Patient" : "Пациент";
   if (paidBy === "agency") return "GMED";
   if (paidBy === "unpaid") return lang === "de" ? "Noch niemand" : "Ещё никто";
   return "—";
-}
-
-function accountMovementKindLabel(kind: PatientAccountMovement["kind"], lang: string) {
-  const labels: Record<PatientAccountMovement["kind"], [string, string]> = {
-    invoice: ["Patientenrechnung", "Счёт пациента"],
-    credit_note: ["Gutschrift", "Кредит-нота"],
-    credit_note_reversal: ["Gutschriftstorno", "Сторно кредит-ноты"],
-    payment: ["Zahlung", "Оплата"],
-    payment_reversal: ["Zahlungsstorno", "Сторно оплаты"],
-    refund: ["Rückzahlung", "Возврат пациенту"],
-    refund_reversal: ["Rückzahlungsstorno", "Сторно возврата"],
-    balance_adjustment: ["Kontokorrektur", "Корректировка баланса"],
-    balance_adjustment_reversal: ["Korrekturstorno", "Сторно корректировки"],
-    external_receivable: ["Externe Forderung", "Внешний долг"],
-    external_allocation: ["Forderung zugeordnet", "Долг распределён"],
-    external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
-    termination_uninvoiced: ["Kündigung: angefallen, noch nicht berechnet", "Расторжение: набежало, ещё не выставлено"],
-  };
-  return lang === "de" ? labels[kind][0] : labels[kind][1];
 }
 
 function accountMovementDirectionLabel(
@@ -623,39 +577,6 @@ function accountMovementDirectionLabel(
 ) {
   if (direction === "debit") return lang === "de" ? "Belastung" : "Начисление";
   return lang === "de" ? "Zahlung oder Gutschrift" : "Оплата или уменьшение долга";
-}
-
-function localizeFinancialDescription(value: string, lang: string) {
-  const exact: Record<string, [string, string]> = {
-    "Patient invoice": ["Patientenrechnung", "Счёт пациента"],
-    "Advance payment": ["Vorauszahlung", "Предоплата"],
-    "Payment received": ["Zahlung erhalten", "Оплата получена"],
-    "Advance payment received": ["Vorauszahlung erhalten", "Предоплата получена"],
-    "Payment reversal": ["Zahlungsstorno", "Сторно оплаты"],
-    "Invoice adjustment": ["Rechnungskorrektur", "Корректировка счёта"],
-    "Account adjustment": ["Kontokorrektur", "Корректировка баланса"],
-    "Payment opening balance": ["Zahlungsanfangsbestand", "Начальный остаток оплаты"],
-    "Advance payment opening balance": ["Anfangsbestand Vorauszahlung", "Начальный остаток предоплаты"],
-    "Patient invoice cancelled; external receivable reopened": [
-      "Patientenrechnung storniert; externe Forderung wieder geöffnet",
-      "Счёт пациента отменён; внешний долг снова открыт",
-    ],
-    "External provider": ["Externer Anbieter", "Внешний поставщик"],
-  };
-  const direct = exact[value];
-  if (direct) return lang === "de" ? direct[0] : direct[1];
-
-  const prefixes: Array<[string, [string, string]]> = [
-    ["Concierge partner payment reversal", ["Storno der Zahlung an Concierge-Partner", "Сторно оплаты партнёру консьержа"]],
-    ["Concierge partner payment", ["Zahlung an Concierge-Partner", "Оплата партнёру консьержа"]],
-  ];
-  for (const [prefix, labels] of prefixes) {
-    if (value.startsWith(prefix)) {
-      return `${lang === "de" ? labels[0] : labels[1]}${value.slice(prefix.length)}`;
-    }
-  }
-
-  return value;
 }
 
 function accountBalanceLabel(
@@ -1609,17 +1530,23 @@ function usePatientInvoicesTabContent({
         sortable: true,
         filterType: "number",
         width: 150,
-        render: (entry) => (
-          <span
-            className={cn(
-              "block text-right font-mono text-xs font-medium tabular-nums",
-              ledgerLabels.isIncome(entry.direction) ? "text-emerald-700" : "text-rose-700",
-            )}
-          >
-            {ledgerLabels.isIncome(entry.direction) ? "+" : "-"}
-            {formatMoney(entry.amount_gross, entry.currency)}
-          </span>
-        ),
+        render: (entry) => {
+          // A refund booked on the income side carries a negative amount; the
+          // sign comes from the signed value, never "+-".
+          const signed =
+            (ledgerLabels.isIncome(entry.direction) ? 1 : -1) * moneyNumeric(entry.amount_gross);
+          return (
+            <span
+              className={cn(
+                "block text-right font-mono text-xs font-medium tabular-nums",
+                signed >= 0 ? "text-emerald-700" : "text-rose-700",
+              )}
+            >
+              {signed >= 0 ? "+" : "−"}
+              {formatMoney(String(Math.abs(signed)), entry.currency)}
+            </span>
+          );
+        },
       },
     ],
     [commonNotSet, formatDate, formatMoney, lang, ledgerEntries, ledgerLabels, t],
@@ -1664,13 +1591,13 @@ function usePatientInvoicesTabContent({
       {
         id: "kind",
         label: lang === "de" ? "Buchung" : "Операция",
-        accessor: (movement) => accountMovementKindLabel(movement.kind, lang),
+        accessor: (movement) => accountMovementKindLabel(movement, lang),
         sortable: true,
         filterType: "enum",
         width: 185,
         render: (movement) => (
           <span className="text-xs font-medium text-foreground">
-            {accountMovementKindLabel(movement.kind, lang)}
+            {accountMovementKindLabel(movement, lang)}
           </span>
         ),
       },
@@ -2526,16 +2453,16 @@ function usePatientInvoicesTabContent({
                   className={cn(selectClass, "h-8 !w-52 max-w-full shrink-0")}
                 >
                   <option value="all">{lang === "de" ? "Alle Buchungen" : "Все операции"}</option>
-                  <option value="invoice">{accountMovementKindLabel("invoice", lang)}</option>
-                  <option value="payment">{accountMovementKindLabel("payment", lang)}</option>
-                  <option value="payment_reversal">{accountMovementKindLabel("payment_reversal", lang)}</option>
-                  <option value="refund">{accountMovementKindLabel("refund", lang)}</option>
-                  <option value="refund_reversal">{accountMovementKindLabel("refund_reversal", lang)}</option>
-                  <option value="balance_adjustment">{accountMovementKindLabel("balance_adjustment", lang)}</option>
-                  <option value="balance_adjustment_reversal">{accountMovementKindLabel("balance_adjustment_reversal", lang)}</option>
-                  <option value="external_receivable">{accountMovementKindLabel("external_receivable", lang)}</option>
-                  <option value="external_allocation">{accountMovementKindLabel("external_allocation", lang)}</option>
-                  <option value="external_allocation_reversal">{accountMovementKindLabel("external_allocation_reversal", lang)}</option>
+                  <option value="invoice">{accountMovementKindLabel({ kind: "invoice", description: "" }, lang)}</option>
+                  <option value="payment">{accountMovementKindLabel({ kind: "payment", description: "" }, lang)}</option>
+                  <option value="payment_reversal">{accountMovementKindLabel({ kind: "payment_reversal", description: "" }, lang)}</option>
+                  <option value="refund">{accountMovementKindLabel({ kind: "refund", description: "" }, lang)}</option>
+                  <option value="refund_reversal">{accountMovementKindLabel({ kind: "refund_reversal", description: "" }, lang)}</option>
+                  <option value="balance_adjustment">{accountMovementKindLabel({ kind: "balance_adjustment", description: "" }, lang)}</option>
+                  <option value="balance_adjustment_reversal">{accountMovementKindLabel({ kind: "balance_adjustment_reversal", description: "" }, lang)}</option>
+                  <option value="external_receivable">{accountMovementKindLabel({ kind: "external_receivable", description: "" }, lang)}</option>
+                  <option value="external_allocation">{accountMovementKindLabel({ kind: "external_allocation", description: "" }, lang)}</option>
+                  <option value="external_allocation_reversal">{accountMovementKindLabel({ kind: "external_allocation_reversal", description: "" }, lang)}</option>
                 </NativeComboboxSelect>
               </>
             }
