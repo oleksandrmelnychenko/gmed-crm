@@ -62,8 +62,85 @@ struct UpdateIncidentRequest {
     authority_reference: Option<String>,
     no_notification_reason: Option<String>,
     subjects_notified_at: Option<DateTime<Utc>>,
+    /// Art. 34 Abs. 3: why the data subjects of a high-risk breach are not told.
+    subjects_no_notification_reason: Option<String>,
+    /// Required to move a closed case back to an open status.
+    reopen_reason: Option<String>,
     root_cause: Option<String>,
     measures_taken: Option<String>,
+}
+
+/// Length of the reason for reopening a closed case.
+const MIN_REOPEN_REASON_CHARS: usize = 10;
+
+/// The decision facts of an incident that the closing and reopening rules read.
+struct IncidentDecisionState {
+    status: String,
+    risk_assessment: String,
+    authority_documented: bool,
+    subjects_notified: bool,
+    subjects_reason: bool,
+}
+
+/// Why an incident cannot take the requested update, or `None` when it can.
+/// `current` is the stored state; the request supplies what changes.
+fn incident_update_conflict(
+    current: &IncidentDecisionState,
+    body: &UpdateIncidentRequest,
+) -> Option<(StatusCode, &'static str)> {
+    let supplied =
+        |value: &Option<String>| value.as_deref().is_some_and(|text| !text.trim().is_empty());
+    let next_status = body.status.as_deref().unwrap_or(current.status.as_str());
+    let next_risk = body
+        .risk_assessment
+        .as_deref()
+        .unwrap_or(current.risk_assessment.as_str());
+
+    // A closed case reopens only with a reason (kept and audited).
+    if current.status == "closed" && next_status != "closed" {
+        let reason_ok = body
+            .reopen_reason
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|text| text.chars().count() >= MIN_REOPEN_REASON_CHARS);
+        if !reason_ok {
+            return Some((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Reopening a closed incident needs a reason of at least 10 characters",
+            ));
+        }
+    }
+
+    let closes = body.status.as_deref() == Some("closed")
+        || (current.status == "closed" && body.risk_assessment.is_some());
+    if !closes {
+        return None;
+    }
+    // A closed case must show either the report or why none was needed.
+    let authority_documented = current.authority_documented
+        || body.authority_notified_at.is_some()
+        || supplied(&body.no_notification_reason);
+    if !authority_documented {
+        return Some((
+            StatusCode::CONFLICT,
+            "Record the authority notification or the reason for not notifying before closing",
+        ));
+    }
+    // Art. 34: a high-risk breach is communicated to the data subjects, or the
+    // reason for not doing so is on record.
+    if next_risk == "high_risk" {
+        let subjects_documented = current.subjects_notified
+            || current.subjects_reason
+            || body.subjects_notified_at.is_some()
+            || supplied(&body.subjects_no_notification_reason);
+        if !subjects_documented {
+            return Some((
+                StatusCode::CONFLICT,
+                "A high-risk breach needs the notification of the data subjects or the reason for not notifying them before closing",
+            ));
+        }
+    }
+    None
 }
 
 async fn report_incident(
@@ -265,6 +342,8 @@ async fn update_incident(
     let texts = [
         &body.authority_reference,
         &body.no_notification_reason,
+        &body.subjects_no_notification_reason,
+        &body.reopen_reason,
         &body.root_cause,
         &body.measures_taken,
     ];
@@ -275,39 +354,59 @@ async fn update_incident(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "text too long");
     }
 
-    // A closed case must show either the report or why none was needed.
-    if body.status.as_deref() == Some("closed") {
-        let supplied = body.authority_notified_at.is_some()
-            || body
-                .no_notification_reason
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty());
-        let documented = match sqlx::query_scalar::<_, bool>(
-            r#"SELECT authority_notified_at IS NOT NULL OR no_notification_reason IS NOT NULL
-               FROM security_incidents
-               WHERE id = $1"#,
+    let failed = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update incident",
         )
-        .bind(incident_id)
-        .fetch_optional(&state.db)
-        .await
-        {
-            Ok(Some(value)) => value,
-            Ok(None) => return err(StatusCode::NOT_FOUND, "Incident not found"),
-            Err(e) => {
-                tracing::error!(error = %e, incident_id = %incident_id, "load security incident");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to update incident",
-                );
-            }
-        };
-        if !supplied && !documented {
-            return err(
-                StatusCode::CONFLICT,
-                "Record the authority notification or the reason for not notifying before closing",
-            );
+    };
+    // The rules read the stored decision, so it is locked until the update
+    // commits: a parallel close or reopen waits instead of slipping past them.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, incident_id = %incident_id, "begin security incident update");
+            return failed();
         }
+    };
+    let current = match sqlx::query(
+        r#"SELECT status, risk_assessment,
+                  authority_notified_at IS NOT NULL OR no_notification_reason IS NOT NULL
+                      AS authority_documented,
+                  subjects_notified_at IS NOT NULL AS subjects_notified,
+                  subjects_no_notification_reason IS NOT NULL AS subjects_reason
+           FROM security_incidents
+           WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(incident_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => IncidentDecisionState {
+            status: row.try_get("status").unwrap_or_default(),
+            risk_assessment: row.try_get("risk_assessment").unwrap_or_default(),
+            authority_documented: row.try_get("authority_documented").unwrap_or(false),
+            subjects_notified: row.try_get("subjects_notified").unwrap_or(false),
+            subjects_reason: row.try_get("subjects_reason").unwrap_or(false),
+        },
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Incident not found"),
+        Err(e) => {
+            tracing::error!(error = %e, incident_id = %incident_id, "load security incident");
+            return failed();
+        }
+    };
+    if let Some((status, message)) = incident_update_conflict(&current, &body) {
+        return err(status, message);
     }
+    let reopens = current.status == "closed"
+        && body
+            .status
+            .as_deref()
+            .is_some_and(|status| status != "closed");
+    let reopen_reason = reopens
+        .then(|| body.reopen_reason.as_deref().map(str::trim))
+        .flatten();
 
     let row = sqlx::query(
         r#"UPDATE security_incidents SET
@@ -322,6 +421,11 @@ async fn update_incident(
                 root_cause = COALESCE(NULLIF(btrim($10), ''), root_cause),
                 measures_taken = COALESCE(NULLIF(btrim($11), ''), measures_taken),
                 updated_by = $12,
+                subjects_no_notification_reason =
+                    COALESCE(NULLIF(btrim($13), ''), subjects_no_notification_reason),
+                reopened_at = CASE WHEN $14::text IS NOT NULL THEN now() ELSE reopened_at END,
+                reopened_by = CASE WHEN $14::text IS NOT NULL THEN $12 ELSE reopened_by END,
+                reopen_reason = COALESCE($14, reopen_reason),
                 updated_at = now()
            WHERE id = $1
            RETURNING *, (SELECT name FROM users WHERE id = reported_by) AS reported_by_name"#,
@@ -338,7 +442,9 @@ async fn update_incident(
     .bind(&body.root_cause)
     .bind(&body.measures_taken)
     .bind(auth.user_id)
-    .fetch_optional(&state.db)
+    .bind(&body.subjects_no_notification_reason)
+    .bind(reopen_reason)
+    .fetch_optional(&mut *tx)
     .await;
 
     let row = match row {
@@ -346,13 +452,36 @@ async fn update_incident(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Incident not found"),
         Err(e) => {
             tracing::error!(error = %e, incident_id = %incident_id, "update security incident");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update incident",
-            );
+            return failed();
         }
     };
     let payload = map_incident_row(&row);
+    if reopens {
+        // The reopening is part of the evidence: it commits with the change.
+        if let Err(e) = audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "security_incident_reopened",
+                Some(auth.user_id),
+                "security_incident",
+                Some(incident_id),
+                json!({
+                    "previous_status": current.status,
+                    "status": payload["status"],
+                    "reason": reopen_reason,
+                }),
+            ),
+        )
+        .await
+        {
+            tracing::error!(error = %e, incident_id = %incident_id, "audit security incident reopening");
+            return failed();
+        }
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, incident_id = %incident_id, "commit security incident update");
+        return failed();
+    }
 
     state.audit_sender.try_send(audit::domain_event(
         "security_incident_updated",
@@ -363,7 +492,9 @@ async fn update_incident(
             "status": payload["status"],
             "risk_assessment": payload["risk_assessment"],
             "authority_notified_at": payload["authority_notified_at"],
+            "authority_notified_late": payload["authority_notified_late"],
             "subjects_notified_at": payload["subjects_notified_at"],
+            "subjects_no_notification_reason": payload["subjects_no_notification_reason"],
         }),
     ));
 
@@ -394,6 +525,14 @@ fn map_incident_row(row: &PgRow) -> Value {
     let authority_notified_at = timestamp("authority_notified_at");
     let no_notification_reason = text("no_notification_reason");
     let documented = authority_notified_at.is_some() || no_notification_reason.is_some();
+    // Art. 33 Abs. 1: a report after 72 hours is late and must say why.
+    let authority_notified_late =
+        authority_notified_at.is_some_and(|notified_at| notified_at > authority_deadline);
+    let risk_assessment = row
+        .try_get::<String, _>("risk_assessment")
+        .unwrap_or_default();
+    let subjects_notified_at = timestamp("subjects_notified_at");
+    let subjects_no_notification_reason = text("subjects_no_notification_reason");
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -403,16 +542,21 @@ fn map_incident_row(row: &PgRow) -> Value {
         "category": row.try_get::<String, _>("category").unwrap_or_default(),
         "severity": row.try_get::<String, _>("severity").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
-        "risk_assessment": row.try_get::<String, _>("risk_assessment").unwrap_or_default(),
         "occurred_at": timestamp("occurred_at").map(|value| value.to_rfc3339()),
         "became_aware_at": became_aware_at.to_rfc3339(),
         "authority_deadline": authority_deadline.to_rfc3339(),
         "authority_notified_at": authority_notified_at.map(|value| value.to_rfc3339()),
+        "authority_notified_late": authority_notified_late,
         "authority_reference": text("authority_reference"),
         "no_notification_reason": no_notification_reason,
         "notification_decision_documented": documented,
         "authority_deadline_missed": !documented && authority_deadline < Utc::now(),
-        "subjects_notified_at": timestamp("subjects_notified_at").map(|value| value.to_rfc3339()),
+        "subjects_notification_required": risk_assessment == "high_risk",
+        "subjects_notified_at": subjects_notified_at.map(|value| value.to_rfc3339()),
+        "subjects_no_notification_reason": subjects_no_notification_reason,
+        "reopened_at": timestamp("reopened_at").map(|value| value.to_rfc3339()),
+        "reopen_reason": text("reopen_reason"),
+        "risk_assessment": risk_assessment,
         "affected_subjects_count": row.try_get::<Option<i32>, _>("affected_subjects_count").unwrap_or_default(),
         "data_categories": row.try_get::<Vec<String>, _>("data_categories").unwrap_or_default(),
         "root_cause": text("root_cause"),
@@ -445,5 +589,83 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
         assert_eq!(authority_deadline_label(winter), "04.12.2026 09:00");
+    }
+
+    fn update(value: serde_json::Value) -> UpdateIncidentRequest {
+        serde_json::from_value(value).expect("update request")
+    }
+
+    fn stored(status: &str, risk: &str) -> IncidentDecisionState {
+        IncidentDecisionState {
+            status: status.to_string(),
+            risk_assessment: risk.to_string(),
+            authority_documented: true,
+            subjects_notified: false,
+            subjects_reason: false,
+        }
+    }
+
+    #[test]
+    fn a_closed_incident_reopens_only_with_a_reason() {
+        let closed = stored("closed", "no_risk");
+        assert!(incident_update_conflict(&closed, &update(json!({ "status": "open" }))).is_some());
+        assert!(
+            incident_update_conflict(
+                &closed,
+                &update(json!({ "status": "open", "reopen_reason": "too short" }))
+            )
+            .is_some()
+        );
+        assert!(
+            incident_update_conflict(
+                &closed,
+                &update(
+                    json!({ "status": "open", "reopen_reason": "New evidence from the clinic" })
+                )
+            )
+            .is_none()
+        );
+        // Editing the notes of a closed case is not a reopening.
+        assert!(
+            incident_update_conflict(&closed, &update(json!({ "measures_taken": "Training" })))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_high_risk_incident_closes_only_with_the_subjects_told_or_a_reason() {
+        let open = stored("open", "high_risk");
+        let close = update(json!({ "status": "closed" }));
+        assert_eq!(
+            incident_update_conflict(&open, &close).map(|(status, _)| status),
+            Some(StatusCode::CONFLICT)
+        );
+        assert!(
+            incident_update_conflict(
+                &open,
+                &update(
+                    json!({ "status": "closed", "subjects_notified_at": "2026-09-28T10:00:00Z" })
+                )
+            )
+            .is_none()
+        );
+        assert!(
+            incident_update_conflict(
+                &open,
+                &update(json!({
+                    "status": "closed",
+                    "subjects_no_notification_reason": "Data was encrypted (Art. 34 Abs. 3 lit. a)"
+                }))
+            )
+            .is_none()
+        );
+        // Raising the risk of a closed case applies the same rule.
+        let closed = stored("closed", "risk");
+        assert!(
+            incident_update_conflict(&closed, &update(json!({ "risk_assessment": "high_risk" })))
+                .is_some()
+        );
+        // Any other risk closes with the authority decision alone.
+        assert!(incident_update_conflict(&stored("open", "risk"), &close).is_none());
     }
 }
