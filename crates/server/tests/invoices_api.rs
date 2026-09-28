@@ -2137,6 +2137,324 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
     assert_eq!(status_of(third_quote["id"].as_str().unwrap()), "draft");
 }
 
+fn line_index_by_description(line_items: &Value, description: &str) -> usize {
+    line_items
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|line| line["description"] == description)
+        .unwrap_or_else(|| panic!("no line {description}: {line_items}"))
+}
+
+async fn pay_invoice_in_full(
+    app: &axum::Router,
+    bearer: &str,
+    invoice_id: &str,
+    reference: &str,
+) -> Value {
+    let (status, invoice) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{invoice}");
+    let (status, payment) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": invoice["balance_due"],
+            "payment_method": "bank_transfer",
+            "payment_reference": reference,
+            "received_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{reference}: {payment}");
+    invoice
+}
+
+/// A settlement invoice deducts the paid advance with its VAT per rate and
+/// names the advance invoice (§ 14 Abs. 5 Satz 2 UStG, D-12), and the cash
+/// ledger books the settlement's payment on what remains of each category
+/// after the advance (D-16): over the order, advance + interim + final
+/// invoice with a credit note, pass-through revenue and VAT match what was
+/// invoiced.
+#[tokio::test]
+async fn settlement_invoice_deducts_the_advance_and_the_ledger_matches_the_invoices() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("settlement-advance");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET address_street = 'Hauptstraße 1', address_zip = '80331',
+               address_city = 'München', address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    seed_agency_invoice_settings(&pool, admin_id).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    // Medical care at 0 %, two interpreter services at 19 % and a clinic
+    // invoice passed through: 550 + 119 + 238 + 300 = 1,207 gross.
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    for (description, price, vat_rate, passthrough) in [
+        ("Organisation der Behandlung", 550.0, 0.0, false),
+        ("Dolmetscher", 100.0, 19.0, false),
+        ("Dolmetscher Nachtermin", 200.0, 19.0, false),
+        ("Klinikrechnung", 300.0, 0.0, true),
+    ] {
+        seed_order_leistung_finance(
+            &pool,
+            order_id,
+            description,
+            price,
+            vat_rate,
+            passthrough,
+            "approved",
+        )
+        .await;
+    }
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    let quote_lines: Value =
+        sqlx::query_scalar("SELECT line_items FROM quotes WHERE id = $1::uuid")
+            .bind(&quote_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // Advance for the required prepayment of 500, split over the quote's VAT
+    // groups, paid in full.
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 500 WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, advance) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "advance", "advance_basis": "prepayment" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{advance}");
+    let advance_id = advance["id"].as_str().unwrap().to_string();
+    let advance = release_invoice(&app, &billing_bearer, &advance_id).await;
+    let advance_number = advance["invoice_number"].as_str().unwrap().to_string();
+    pay_invoice_in_full(&app, &billing_bearer, &advance_id, "ADVANCE").await;
+    let advance_lines: Value =
+        sqlx::query_scalar("SELECT line_items FROM invoices WHERE id = $1::uuid")
+            .bind(&advance_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    // Printed with two decimals ("23,61"); stored trimmed ("23.61", "14.2").
+    let advance_vat = advance_lines
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|line| line["vat_rate"] == "19")
+        .map(|line| {
+            format!(
+                "{:.2}",
+                rust_decimal::Decimal::from_str_exact(line["line_vat"].as_str().unwrap()).unwrap()
+            )
+        })
+        .unwrap();
+
+    // Interim invoice for the second interpreter service, paid.
+    let (status, interim) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({
+            "invoice_type": "interim",
+            "line_items": [{
+                "line_index": line_index_by_description(&quote_lines, "Dolmetscher Nachtermin"),
+                "quantity": 1
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{interim}");
+    let interim_id = interim["id"].as_str().unwrap().to_string();
+    release_invoice(&app, &billing_bearer, &interim_id).await;
+    pay_invoice_in_full(&app, &billing_bearer, &interim_id, "INTERIM").await;
+
+    // Final invoice for the rest (550 + 119 + 300): releasing it credits the
+    // advance.
+    let (status, final_invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice}");
+    let final_id = final_invoice["id"].as_str().unwrap().to_string();
+    let released = release_invoice(&app, &billing_bearer, &final_id).await;
+    assert_eq!(released["total_gross"], "969", "{released}");
+    assert_eq!(released["prepayment_applied_amount"], "500", "{released}");
+
+    // The issued document names the advance invoice and deducts its VAT.
+    let (status, _, bytes) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{final_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+    let advance_date = gmed_server::app_time::today()
+        .format("%d.%m.%Y")
+        .to_string();
+    assert!(
+        text.contains(&format!(
+            "Anzahlungsrechnung {advance_number} vom {advance_date}"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("-{} €", advance_vat.replace('.', ","))),
+        "advance VAT {advance_vat}: {text}"
+    );
+    assert!(text.contains("Verbleibender Zahlbetrag"), "{text}");
+    assert!(text.contains("469,00 €"), "{text}");
+    let (status, _, xml) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{final_id}/zugferd.xml"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&xml));
+    let xml = String::from_utf8(xml).unwrap();
+    assert!(
+        xml.contains(&format!(
+            "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>{advance_number}</ram:IssuerAssignedID>"
+        )),
+        "{xml}"
+    );
+    assert!(xml.contains("<ram:GrandTotalAmount>969.00</ram:GrandTotalAmount><ram:TotalPrepaidAmount>500.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>469.00</ram:DuePayableAmount>"), "{xml}");
+    assert!(
+        xml.contains("Abzüglich geleisteter Anzahlungen (§ 14 Abs. 5 Satz 2 UStG)"),
+        "{xml}"
+    );
+
+    // Credit note for half of the first interpreter service (59.50, 9.50
+    // VAT), then the rest of the final invoice is paid.
+    let final_lines: Value =
+        sqlx::query_scalar("SELECT line_items FROM invoices WHERE id = $1::uuid")
+            .bind(&final_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let (status, credit) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_id}/credit-notes"),
+        &billing_bearer,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{
+                "line_index": line_index_by_description(&final_lines, "Dolmetscher"),
+                "amount_gross": "59.50"
+            }],
+            "reason": "Termin verkürzt",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit}");
+    assert_eq!(credit["amount_vat"], "9.5", "{credit}");
+    let paid = pay_invoice_in_full(&app, &billing_bearer, &final_id, "FINAL").await;
+    assert_eq!(paid["balance_due"], "409.5", "{paid}");
+
+    // Over the order, the ledger books what was invoiced: 238 + 909.50 gross,
+    // the 300 pass-through cost once, and 38 + 9.50 VAT, though the advance
+    // (booked with its own split) paid part of each.
+    let booked: Vec<(String, rust_decimal::Decimal, rust_decimal::Decimal)> = sqlx::query_as(
+        r#"SELECT category, SUM(amount_gross), SUM(amount_vat)
+           FROM accounting_entries
+           WHERE order_id = $1 AND direction = 'income'
+           GROUP BY category
+           ORDER BY category"#,
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let category = |name: &str| {
+        booked
+            .iter()
+            .find(|(category, ..)| category == name)
+            .map(|(_, gross, vat)| (*gross, *vat))
+            .unwrap_or_default()
+    };
+    let dec = |raw: &str| rust_decimal::Decimal::from_str_exact(raw).unwrap();
+    assert_eq!(
+        category("cost_passthrough_revenue"),
+        (dec("300.00"), dec("0.00")),
+        "{booked:?}"
+    );
+    assert_eq!(category("patient_credit").0, dec("0"), "{booked:?}");
+    assert_eq!(
+        booked
+            .iter()
+            .map(|(_, gross, _)| *gross)
+            .sum::<rust_decimal::Decimal>(),
+        dec("1147.50"),
+        "{booked:?}"
+    );
+    assert_eq!(
+        booked
+            .iter()
+            .map(|(_, _, vat)| *vat)
+            .sum::<rust_decimal::Decimal>(),
+        dec("47.50"),
+        "{booked:?}"
+    );
+    // The invoices' own VAT after credit notes, for the same comparison.
+    let invoiced_vat: rust_decimal::Decimal = sqlx::query_scalar(
+        r#"SELECT SUM(invoice.total_vat) - COALESCE(SUM((
+                      SELECT SUM(CASE WHEN credit.transaction_type = 'credit_note'
+                                      THEN credit.amount_vat ELSE -credit.amount_vat END)
+                      FROM invoice_credit_note_transactions credit
+                      WHERE credit.invoice_id = invoice.id
+                  )), 0)
+           FROM invoices invoice
+           WHERE invoice.order_id = $1 AND invoice.invoice_type <> 'advance'"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(invoiced_vat, dec("47.50"));
+}
+
 /// Advances are credited only against released invoices. A draft offers no
 /// advance and refuses one with a message saying why, instead of a balance
 /// conflict. Releasing the draft dates the invoice.

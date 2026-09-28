@@ -1111,6 +1111,35 @@ async fn provider_payment_journal_target_gross(
     }))
 }
 
+/// What the advances credited against an invoice paid for, by accounting
+/// category: the gross and VAT of their pass-through share and the VAT of
+/// the rest. The advance invoices' own payments were booked with this split,
+/// and it is the split the settlement invoice prints for them
+/// (`document::DeductedAdvance`), so both come from one source.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CreditedAdvanceSplit {
+    passthrough_gross: Decimal,
+    passthrough_vat: Decimal,
+    service_vat: Decimal,
+}
+
+impl CreditedAdvanceSplit {
+    fn of(advances: &[document::DeductedAdvance]) -> Self {
+        let mut split = Self::default();
+        for row in advances.iter().flat_map(|advance| &advance.rows) {
+            // Pass-through costs carry no VAT (durchlaufende Posten); their
+            // rows are the 0 % pass-through group.
+            if row.kind == document::VatGroupKind::Passthrough {
+                split.passthrough_gross += row.gross;
+                split.passthrough_vat += row.vat;
+            } else {
+                split.service_vat += row.vat;
+            }
+        }
+        split
+    }
+}
+
 /// Where the cash retained on an invoice (payments minus refunds) belongs, as
 /// `(category, gross, VAT)` booking targets.
 ///
@@ -1120,9 +1149,17 @@ async fn provider_payment_journal_target_gross(
 /// cash (adjusted total minus credited advances) is revenue; anything beyond
 /// it — an overpayment, or a credit note not yet refunded — is patient credit
 /// without VAT until it is refunded or moved to another invoice.
+///
+/// Credited advances were booked on their advance invoices with their own
+/// split, so the cash of this invoice pays for what remains of each category:
+/// the invoice's pass-through gross and VAT less the advances' (`credited`).
+/// Summed over an order, every category then matches what was invoiced; a
+/// remainder may be negative when an advance paid for services another
+/// invoice billed.
 fn invoice_cash_targets(
     context: &InvoicePaymentContext,
     credits: &[credit_notes::ExistingCredit],
+    credited: CreditedAdvanceSplit,
     retained_gross: Decimal,
 ) -> [(&'static str, Decimal, Decimal); 3] {
     let (_, passthrough_vat, passthrough_gross) = invoice_passthrough_totals(&context.line_items);
@@ -1151,22 +1188,21 @@ fn invoice_cash_targets(
         .min(adjusted_vat);
     let cash_capacity = (adjusted_gross - context.prepayment_applied_amount).max(Decimal::ZERO);
     let revenue_gross = retained_gross.min(cash_capacity);
+    let open_passthrough_gross = adjusted_passthrough_gross - credited.passthrough_gross;
+    let open_passthrough_vat = adjusted_passthrough_vat - credited.passthrough_vat;
+    let open_service_vat = adjusted_vat - adjusted_passthrough_vat - credited.service_vat;
     let passthrough_target =
-        proportional_share(revenue_gross, adjusted_passthrough_gross, adjusted_gross);
+        proportional_share(revenue_gross, open_passthrough_gross, cash_capacity);
     [
         (
             "service_revenue",
             revenue_gross - passthrough_target,
-            proportional_share(
-                revenue_gross,
-                adjusted_vat - adjusted_passthrough_vat,
-                adjusted_gross,
-            ),
+            proportional_share(revenue_gross, open_service_vat, cash_capacity),
         ),
         (
             "cost_passthrough_revenue",
             passthrough_target,
-            proportional_share(revenue_gross, adjusted_passthrough_vat, adjusted_gross),
+            proportional_share(revenue_gross, open_passthrough_vat, cash_capacity),
         ),
         (
             "patient_credit",
@@ -1272,9 +1308,17 @@ async fn invoice_cash_lines(
         );
     }
     let retained_gross = previous_gross + signed_gross;
+    let credited = if context.prepayment_applied_amount > Decimal::ZERO {
+        CreditedAdvanceSplit::of(
+            &document::load_deducted_advances(transaction, context.invoice_id).await?,
+        )
+    } else {
+        CreditedAdvanceSplit::default()
+    };
     let targets = invoice_cash_targets(
         context,
         &credit_notes::load_active_credits(transaction, context.invoice_id).await?,
+        credited,
         retained_gross,
     );
     Ok(targets
@@ -13352,6 +13396,158 @@ mod invoice_line_rounding_tests {
         assert_eq!(
             proportional_share(-amount, Decimal::ONE, Decimal::TWO),
             Decimal::new(-4513, 2)
+        );
+    }
+}
+
+#[cfg(test)]
+mod invoice_cash_target_tests {
+    use super::{
+        CreditedAdvanceSplit, InvoicePaymentContext, credit_notes, document, invoice_cash_targets,
+    };
+    use rust_decimal::Decimal;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    fn dec(raw: &str) -> Decimal {
+        Decimal::from_str_exact(raw).unwrap()
+    }
+
+    /// INV-20260928-0014 of the QA walkthrough (D-16): 1,558.90 at 19 %
+    /// (248.90 VAT), 850 medical care and 1,200 pass-through costs, less a
+    /// 226.10 credit note on the 19 % line; the 1,000 advance was credited.
+    fn walkthrough_final() -> (InvoicePaymentContext, Vec<credit_notes::ExistingCredit>) {
+        let context = InvoicePaymentContext {
+            invoice_id: Uuid::nil(),
+            order_id: Some(Uuid::nil()),
+            patient_id: Uuid::nil(),
+            invoice_number: "INV-20260928-0014".to_string(),
+            invoice_status: "sent".to_string(),
+            total_vat: dec("248.90"),
+            total_gross: dec("3608.90"),
+            credited_amount: dec("226.10"),
+            prepayment_applied_amount: dec("1000"),
+            currency: "EUR".to_string(),
+            line_items: json!([
+                {
+                    "description": "Interpreter support", "vat_rate": "19",
+                    "is_cost_passthrough": false,
+                    "line_net": "1310", "line_vat": "248.90", "line_gross": "1558.90"
+                },
+                {
+                    "description": "Organisation der Behandlung", "vat_rate": "0",
+                    "is_cost_passthrough": false,
+                    "line_net": "850", "line_vat": "0", "line_gross": "850"
+                },
+                {
+                    "description": "Klinikrechnung", "vat_rate": "0",
+                    "is_cost_passthrough": true,
+                    "line_net": "1200", "line_vat": "0", "line_gross": "1200"
+                }
+            ]),
+        };
+        let credit = credit_notes::ExistingCredit {
+            vat: dec("36.10"),
+            gross: dec("226.10"),
+            lines: Some(vec![credit_notes::CreditNoteLine {
+                invoice_line_index: 0,
+                description: "Interpreter support".to_string(),
+                quantity: None,
+                unit_price: None,
+                vat_rate: dec("19"),
+                is_cost_passthrough: false,
+                net: dec("190"),
+                vat: dec("36.10"),
+                gross: dec("226.10"),
+            }]),
+        };
+        (context, vec![credit])
+    }
+
+    /// The advance INV-20260928-0012 (1,000 over the composition of the
+    /// earlier quote), as the settlement invoice deducts it.
+    fn walkthrough_advance() -> document::DeductedAdvance {
+        let lines = json!([
+            {
+                "description": "Anzahlung – Anteil 0 % USt.", "vat_rate": "0",
+                "is_cost_passthrough": false,
+                "line_net": "336.63", "line_vat": "0", "line_gross": "336.63"
+            },
+            {
+                "description": "Anzahlung – Anteil 19 % USt.", "vat_rate": "19",
+                "is_cost_passthrough": false,
+                "line_net": "314.98", "line_vat": "59.85", "line_gross": "374.83"
+            },
+            {
+                "description": "Anzahlung – Anteil Auslagen", "vat_rate": "0",
+                "is_cost_passthrough": true,
+                "line_net": "288.54", "line_vat": "0", "line_gross": "288.54"
+            }
+        ]);
+        document::DeductedAdvance {
+            invoice_number: "INV-20260928-0012".to_string(),
+            issue_date: chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
+            rows: document::deducted_advance_rows(
+                &document::advance_vat_rows(&lines, &[]),
+                dec("1000"),
+            ),
+        }
+    }
+
+    #[test]
+    fn settlement_cash_pays_what_the_advance_left_of_each_category() {
+        let (context, credits) = walkthrough_final();
+        let credited = CreditedAdvanceSplit::of(&[walkthrough_advance()]);
+        assert_eq!(credited.passthrough_gross, dec("288.54"));
+        assert_eq!(credited.service_vat, dec("59.85"));
+
+        // The final payment of 2,382.80: 1,200 - 288.54 pass-through and
+        // 212.80 - 59.85 VAT, not 845.26 and 149.89 pro rata over the whole
+        // invoice.
+        let targets = invoice_cash_targets(&context, &credits, credited, dec("2382.80"));
+        assert_eq!(
+            targets,
+            [
+                ("service_revenue", dec("1471.34"), dec("152.95")),
+                ("cost_passthrough_revenue", dec("911.46"), dec("0")),
+                ("patient_credit", dec("0"), dec("0")),
+            ]
+        );
+        // With the advance's 288.54 + 59.85 the order books 1,200 pass-through
+        // and 212.80 VAT, as invoiced.
+        assert_eq!(targets[1].1 + credited.passthrough_gross, dec("1200"));
+        assert_eq!(targets[0].2 + credited.service_vat, dec("212.80"));
+
+        // A part payment takes its share of what remains.
+        let targets = invoice_cash_targets(&context, &credits, credited, dec("1000"));
+        assert_eq!(
+            targets[1],
+            ("cost_passthrough_revenue", dec("382.52"), dec("0"))
+        );
+        assert_eq!(targets[0].2, dec("64.19"));
+        // Cash beyond the open amount is patient credit.
+        let targets = invoice_cash_targets(&context, &credits, credited, dec("2400"));
+        assert_eq!(targets[1].1, dec("911.46"));
+        assert_eq!(targets[2], ("patient_credit", dec("17.20"), dec("0")));
+    }
+
+    #[test]
+    fn invoices_without_credited_advances_keep_the_whole_invoice_split() {
+        let (mut context, credits) = walkthrough_final();
+        context.prepayment_applied_amount = Decimal::ZERO;
+        let targets = invoice_cash_targets(
+            &context,
+            &credits,
+            CreditedAdvanceSplit::default(),
+            dec("3382.80"),
+        );
+        assert_eq!(
+            targets,
+            [
+                ("service_revenue", dec("2182.80"), dec("212.80")),
+                ("cost_passthrough_revenue", dec("1200"), dec("0")),
+                ("patient_credit", dec("0"), dec("0")),
+            ]
         );
     }
 }
