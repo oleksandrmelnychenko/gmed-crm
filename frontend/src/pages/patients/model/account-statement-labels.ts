@@ -118,6 +118,11 @@ const FINANCIAL_DESCRIPTION_PREFIXES: Array<[string, Pair]> = [
   ["Concierge partner payment", ["Zahlung an Concierge-Partner", "Оплата партнёру консьержа"]],
   [CREDIT_TRANSFER_OUT, ["Guthaben verrechnet mit Rechnung ", "Переплата зачтена в счёт "]],
   [CREDIT_TRANSFER_IN, ["Guthaben aus Rechnung ", "Переплата из счёта "]],
+  // Accounting ledger entries are described as "<kind> <transaction> <invoice>".
+  ["invoice_payment payment ", ["Zahlung zu Rechnung ", "Оплата по счёту "]],
+  ["invoice_payment reversal ", ["Zahlungsstorno zu Rechnung ", "Сторно оплаты по счёту "]],
+  ["invoice_refund refund ", ["Erstattung zu Rechnung ", "Возврат по счёту "]],
+  ["invoice_refund reversal ", ["Erstattungsstorno zu Rechnung ", "Сторно возврата по счёту "]],
 ];
 
 /** Server descriptions of statement rows are English; show them in the UI language. */

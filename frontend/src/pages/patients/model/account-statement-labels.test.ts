@@ -52,4 +52,13 @@ describe("credit transfers in the statement", () => {
     );
     expect(localizeFinancialDescription("Payment received", "ru")).toBe("Оплата получена");
   });
+
+  it("does not show technical ledger descriptions", () => {
+    expect(localizeFinancialDescription("invoice_payment payment INV-20260928-0009", "ru")).toBe(
+      "Оплата по счёту INV-20260928-0009",
+    );
+    expect(localizeFinancialDescription("invoice_refund refund INV-20260928-0009", "de")).toBe(
+      "Erstattung zu Rechnung INV-20260928-0009",
+    );
+  });
 });
