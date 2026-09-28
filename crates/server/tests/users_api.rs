@@ -906,3 +906,81 @@ async fn it_admin_manages_users_but_never_the_ceo() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
+
+/// Owner decision 2026-09-28 (Q14): patient portal accounts come only from
+/// the CEO/PM portal activation, never from the generic user administration.
+#[tokio::test]
+async fn generic_user_administration_cannot_create_patient_accounts() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let it_admin_id = seed_user(&pool, "users-api-no-patient", "it_admin").await;
+    let suffix = Uuid::new_v4().simple().to_string();
+    for bearer in [
+        auth_header_for(it_admin_id, "it_admin"),
+        auth_header_for(admin_id, "ceo"),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/users",
+            &bearer,
+            json!({
+                "email": format!("portal-{suffix}@example.com"),
+                "name": "Portal by admin",
+                "role": "patient"
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    }
+    let created: i64 = sqlx::query_scalar("SELECT count(*) FROM users WHERE email = $1")
+        .bind(format!("portal-{suffix}@example.com"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(created, 0);
+
+    // A staff account cannot be turned into a patient account either.
+    let staff_id = seed_user(&pool, "users-api-no-patient", "billing").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{staff_id}/update"),
+        &auth_header_for(it_admin_id, "it_admin"),
+        json!({ "role": "patient" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let role: String = sqlx::query_scalar("SELECT role FROM users WHERE id = $1")
+        .bind(staff_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(role, "billing");
+}
+
+/// Owner decision 2026-09-28 (Q12): e-mail addresses are unique regardless of
+/// case, so an edit cannot create a login collision.
+#[tokio::test]
+async fn user_email_edits_cannot_collide_by_case() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let first = seed_user(&pool, "users-api-case", "billing").await;
+    let second = seed_user(&pool, "users-api-case", "concierge").await;
+    let first_email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(first)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{second}/update"),
+        &auth_header_for(admin_id, "ceo"),
+        json!({ "email": first_email.to_uppercase() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}

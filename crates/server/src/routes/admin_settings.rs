@@ -641,11 +641,16 @@ async fn approve_pending(
         return e;
     }
 
+    // A pending forced password change does not block the approval: the
+    // session created on redemption is confined to the password-change
+    // endpoints (`TokenPair::password_change_required`). Refusing it here left
+    // an account with admin approval and a forced change unable to sign in at
+    // all (owner decision 2026-09-28, Q12).
     match sqlx::query(
         "UPDATE pending_logins pl SET status = 'approved', approved_by = $2, resolved_at = now()
          FROM users u
          WHERE pl.id = $1 AND pl.user_id = u.id AND pl.status = 'pending'
-           AND pl.expires_at > now() AND u.is_active AND NOT u.password_reset_required",
+           AND pl.expires_at > now() AND u.is_active",
     )
     .bind(pending_id)
     .bind(auth.user_id)

@@ -32,6 +32,133 @@ pub struct TokenPair {
 struct CreatedSession {
     pair: TokenPair,
     family_id: Uuid,
+    /// Older sessions ended to stay within `max_sessions_per_user`.
+    evicted_families: Vec<Uuid>,
+}
+
+/// A session can still be refreshed: not revoked, active within
+/// `session_idle_days` and holding an unused, unexpired refresh token.
+/// `$idle` is the bind position of the idle limit in days.
+fn live_family_condition(idle: &str) -> String {
+    format!(
+        "NOT tf.is_revoked
+         AND tf.last_activity_at >= now() - ({idle}::bigint * interval '1 day')
+         AND EXISTS (
+             SELECT 1 FROM refresh_tokens rt
+             WHERE rt.family_id = tf.id AND NOT rt.is_used AND rt.expires_at > now()
+         )"
+    )
+}
+
+/// Ends the least recently used sessions of `user_id` so that one more fits
+/// under `max_sessions_per_user` (owner decision 2026-09-28, Q12). Runs under
+/// the user row lock of the session being created; the ended sessions'
+/// access tokens are blacklisted in the same transaction.
+async fn evict_sessions_over_limit(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    settings: &TokenSettings,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let keep = settings.max_sessions_per_user.max(1) - 1;
+    let evicted: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"WITH ranked AS (
+               SELECT tf.id,
+                      row_number() OVER (ORDER BY tf.last_activity_at DESC, tf.created_at DESC) AS position
+               FROM token_families tf
+               WHERE tf.user_id = $1 AND {}
+           )
+           UPDATE token_families tf
+           SET is_revoked = true, revoked_reason = 'session_limit'
+           FROM ranked
+           WHERE tf.id = ranked.id AND ranked.position > $3
+           RETURNING tf.id"#,
+        live_family_condition("$2")
+    ))
+    .bind(user_id)
+    .bind(settings.session_idle_days.max(1))
+    .bind(keep)
+    .fetch_all(&mut **tx)
+    .await?;
+    if !evicted.is_empty() {
+        sqlx::query(
+            "INSERT INTO revoked_access_tokens (jti, user_id, family_id, expires_at, reason)
+             SELECT family_id, $2, family_id, now() + interval '30 days', 'session_limit'
+             FROM unnest($1::uuid[]) AS family_id
+             ON CONFLICT (jti) DO NOTHING",
+        )
+        .bind(&evicted)
+        .bind(Uuid::nil())
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(evicted)
+}
+
+/// Marks sessions that can no longer be used as revoked, so that active
+/// session counts and lists stay right: idle longer than `session_idle_days`
+/// (`idle_timeout`) or without a usable refresh token (`expired`). Their
+/// access tokens are older than the access-token lifetime already.
+/// Returns (idle, expired) counts.
+pub async fn revoke_stale_families(
+    pool: &PgPool,
+    settings: &TokenSettings,
+) -> Result<(u64, u64), sqlx::Error> {
+    let reasons: Vec<Option<String>> = sqlx::query_scalar(
+        r#"UPDATE token_families tf
+           SET is_revoked = true,
+               revoked_reason = CASE
+                   WHEN tf.last_activity_at < now() - ($1::bigint * interval '1 day')
+                       THEN 'idle_timeout'
+                   ELSE 'expired'
+               END
+           WHERE NOT tf.is_revoked
+             AND (
+                 tf.last_activity_at < now() - ($1::bigint * interval '1 day')
+                 OR NOT EXISTS (
+                     SELECT 1 FROM refresh_tokens rt
+                     WHERE rt.family_id = tf.id AND NOT rt.is_used AND rt.expires_at > now()
+                 )
+             )
+           RETURNING tf.revoked_reason"#,
+    )
+    .bind(settings.session_idle_days.max(1))
+    .fetch_all(pool)
+    .await?;
+    let idle = reasons
+        .iter()
+        .filter(|reason| reason.as_deref() == Some("idle_timeout"))
+        .count() as u64;
+    Ok((idle, reasons.len() as u64 - idle))
+}
+
+/// Every 15 minutes: revoke idle and expired sessions (`revoke_stale_families`).
+pub fn spawn_session_sweeper(state: crate::state::AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(15 * 60));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let settings = state.settings.get().await;
+            match revoke_stale_families(&state.db, &settings).await {
+                Ok((0, 0)) => {}
+                Ok((idle, expired)) => {
+                    tracing::info!(idle, expired, "Revoked idle and expired sessions");
+                    state.audit_sender.try_send(crate::audit::domain_event(
+                        "sessions_expired",
+                        None,
+                        "token_family",
+                        None,
+                        serde_json::json!({
+                            "idle_timeout": idle,
+                            "expired": expired,
+                            "session_idle_days": settings.session_idle_days,
+                        }),
+                    ));
+                }
+                Err(error) => tracing::warn!(%error, "Session sweep failed"),
+            }
+        }
+    });
 }
 
 #[derive(sqlx::FromRow)]
@@ -50,6 +177,7 @@ struct RefreshTokenRow {
     expires_at: chrono::DateTime<Utc>,
     user_id: Uuid,
     is_revoked: bool,
+    last_activity_at: chrono::DateTime<Utc>,
     role: String,
     is_active: bool,
     password_reset_required: bool,
@@ -93,6 +221,13 @@ async fn create_session_record(
         account.password_changed_at,
         settings.password_expire_days,
     );
+
+    let evicted_families = evict_sessions_over_limit(tx, user_id, settings)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %user_id, "Failed to enforce the session limit");
+            TokenError::Internal
+        })?;
 
     let family = sqlx::query!(
         "INSERT INTO token_families (user_id, device_fingerprint, ip_address, user_agent)
@@ -138,6 +273,7 @@ async fn create_session_record(
 
     Ok(CreatedSession {
         family_id: family.id,
+        evicted_families,
         pair: TokenPair {
             access_token,
             refresh_token: raw_refresh,
@@ -211,7 +347,11 @@ pub async fn create_session(
          VALUES ($1, 'login', 'token_family', $2, $3)",
         user_id,
         created.family_id,
-        serde_json::json!({ "ip": ip_address, "device": device_fingerprint })
+        serde_json::json!({
+            "ip": ip_address,
+            "device": device_fingerprint,
+            "sessions_ended_by_limit": created.evicted_families,
+        })
     )
     .execute(pool)
     .await
@@ -236,7 +376,7 @@ pub async fn rotate_refresh_token(
 
     let row = sqlx::query_as::<_, RefreshTokenRow>(
         r#"SELECT rt.id AS rt_id, rt.family_id, rt.is_used, rt.expires_at,
-                  tf.user_id, tf.is_revoked,
+                  tf.user_id, tf.is_revoked, tf.last_activity_at,
                   u.role, u.is_active, u.password_reset_required, u.password_changed_at
            FROM refresh_tokens rt
            JOIN token_families tf ON tf.id = rt.family_id
@@ -327,6 +467,31 @@ pub async fn rotate_refresh_token(
         .map_err(|_| TokenError::Internal)?;
         tx.commit().await.map_err(|_| TokenError::Internal)?;
         return Err(TokenError::FamilyRevoked);
+    }
+
+    // A session unused for `session_idle_days` ends (owner decision
+    // 2026-09-28, Q12); the periodic sweeper revokes the ones never refreshed.
+    if row.last_activity_at < Utc::now() - Duration::days(settings.session_idle_days.max(1)) {
+        sqlx::query(
+            "UPDATE token_families SET is_revoked = true, revoked_reason = 'idle_timeout'
+             WHERE id = $1",
+        )
+        .bind(row.family_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| TokenError::Internal)?;
+        sqlx::query(
+            "INSERT INTO revoked_access_tokens (jti, user_id, family_id, expires_at, reason)
+             VALUES ($1, $2, $1, now() + interval '30 days', 'idle_timeout')
+             ON CONFLICT (jti) DO NOTHING",
+        )
+        .bind(row.family_id)
+        .bind(Uuid::nil())
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| TokenError::Internal)?;
+        tx.commit().await.map_err(|_| TokenError::Internal)?;
+        return Err(TokenError::Expired);
     }
 
     let claimed = sqlx::query(

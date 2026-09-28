@@ -372,7 +372,7 @@ async fn complete_totp_login(
         r#"UPDATE totp_login_challenges
            SET attempts = attempts + 1
            WHERE id = $1 AND consumed_at IS NULL AND expires_at > now()
-           RETURNING user_id, attempts, user_agent"#,
+           RETURNING user_id, attempts, user_agent, device_info"#,
     )
     .bind(body.challenge_id)
     .fetch_optional(&state.db)
@@ -391,6 +391,7 @@ async fn complete_totp_login(
     let user_id: Uuid = challenge.try_get("user_id").unwrap_or_else(|_| Uuid::nil());
     let attempts: i32 = challenge.try_get("attempts").unwrap_or(0);
     let user_agent: Option<String> = challenge.try_get("user_agent").unwrap_or_default();
+    let device_info: Option<Value> = challenge.try_get("device_info").unwrap_or_default();
     if attempts > MAX_CHALLENGE_ATTEMPTS {
         state.audit_sender.try_send(audit::auth_event(
             "login_failure",
@@ -440,10 +441,12 @@ async fn complete_totp_login(
         );
     }
 
-    let user = sqlx::query("SELECT role, is_active, password_changed_at FROM users WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await;
+    let user = sqlx::query(
+        "SELECT role, is_active, mfa_required, password_changed_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await;
     let user = match user {
         Ok(Some(row)) if row.try_get::<bool, _>("is_active").unwrap_or(false) => row,
         Ok(_) => return err(StatusCode::FORBIDDEN, "Account is disabled"),
@@ -459,6 +462,47 @@ async fn complete_totp_login(
     let password_changed_at = user
         .try_get::<Option<chrono::DateTime<Utc>>, _>("password_changed_at")
         .unwrap_or_default();
+
+    // The authenticator code does not replace the per-user admin approval:
+    // an account flagged `mfa_required` still waits for an administrator after
+    // the code (TOM "Zusätzlich weiterhin Anmeldefreigabe durch Administrator
+    // je Benutzer"; owner decision 2026-09-28, Q12).
+    if user.try_get::<bool, _>("mfa_required").unwrap_or(false) {
+        return match sqlx::query_scalar::<_, Uuid>(
+            r#"INSERT INTO pending_logins (user_id, ip_address, user_agent, device_info)
+               VALUES ($1, $2, $3, $4)
+               RETURNING id"#,
+        )
+        .bind(user_id)
+        .bind(ip.as_deref())
+        .bind(user_agent.as_deref())
+        .bind(device_info)
+        .fetch_one(&state.db)
+        .await
+        {
+            Ok(pending_id) => {
+                state.audit_sender.try_send(audit::auth_event(
+                    "login_mfa_requested",
+                    Some(user_id),
+                    ip_hash,
+                    json!({ "pending_id": pending_id, "second_factor": "totp" }),
+                ));
+                Json(json!({
+                    "status": "mfa_pending",
+                    "pending_id": pending_id,
+                    "message": "Login requires admin approval"
+                }))
+                .into_response()
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "create pending login after totp");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "An internal error occurred",
+                )
+            }
+        };
+    }
 
     let settings = state.settings.get().await;
     let pair = match tokens::create_session(

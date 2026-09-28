@@ -124,12 +124,20 @@ function user(overrides: Partial<AdminUserActionTarget> = {}): AdminUserActionTa
 
 describe("admin users page model", () => {
   it("offers the ceo role only to holders of users.manage_ceo", () => {
-    expect(getAssignableAdminUserRoles(true)).toEqual([...ADMIN_USER_ROLE_KEYS]);
+    expect(getAssignableAdminUserRoles(true)).toEqual(
+      ADMIN_USER_ROLE_KEYS.filter((role) => role !== "patient"),
+    );
     const itAdminRoles = getAssignableAdminUserRoles(false);
     expect(itAdminRoles).not.toContain("ceo");
     expect(itAdminRoles).toEqual(
-      ADMIN_USER_ROLE_KEYS.filter((role) => role !== "ceo"),
+      ADMIN_USER_ROLE_KEYS.filter((role) => role !== "ceo" && role !== "patient"),
     );
+  });
+
+  it("never offers the patient role except to keep an existing portal account", () => {
+    expect(getAssignableAdminUserRoles(true)).not.toContain("patient");
+    expect(getAssignableAdminUserRoles(false, "billing")).not.toContain("patient");
+    expect(getAssignableAdminUserRoles(false, "patient")).toContain("patient");
   });
 
   it("keeps CEO rows read-only for the technical admin", () => {

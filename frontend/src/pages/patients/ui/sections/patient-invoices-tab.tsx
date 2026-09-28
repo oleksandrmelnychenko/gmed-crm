@@ -653,8 +653,10 @@ function usePatientInvoicesTabContent({
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
   const canManageBalance = user?.role === "ceo" || user?.role === "billing";
+  // Portal accounts are activated only by the CEO or a patient manager
+  // (server: activate_patient_portal_account; owner decision 2026-09-28).
   const canManagePortalAccount =
-    user?.role === "ceo" || user?.role === "patient_manager" || user?.role === "it_admin";
+    user?.role === "ceo" || user?.role === "patient_manager";
   const [movementDirectionFilter, setMovementDirectionFilter] = useState<
     "all" | PatientAccountMovement["direction"]
   >("all");

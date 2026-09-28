@@ -415,11 +415,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // Second step of a sign-in: the authenticator code answers the challenge.
+  // An account with admin approval then still waits for an administrator.
   const completeTotp = async (challengeId: string, code: string) => {
-    const result = await fetchJson<AuthTokens>("/auth/totp", {
+    const result = await fetchJson<AuthTokens | PendingLoginResponse>("/auth/totp", {
       method: "POST",
       body: JSON.stringify({ challenge_id: challengeId, code }),
     });
+    if (isPendingLoginResponse(result)) {
+      throw new PendingLoginError(result.pending_id, result.message);
+    }
     await saveTokens(result);
     const me = await fetchMe(result.access_token);
     applyPreferredLanguage(me);

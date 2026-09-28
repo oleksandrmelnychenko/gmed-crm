@@ -1430,3 +1430,423 @@ fn base32_decode(value: &str) -> Vec<u8> {
     }
     out
 }
+
+async fn seeded_admin_bearer(pool: &PgPool) -> String {
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
+        .bind("admin@gmed.de")
+        .fetch_one(pool)
+        .await
+        .expect("seeded admin");
+    ceo_admin_bearer(admin_id)
+}
+
+/// Owner decision 2026-09-28 (Q12): an account with admin approval and a
+/// forced password change used to be refused on approval forever. Approval
+/// now starts a session confined to the password change.
+#[tokio::test]
+async fn admin_approval_with_a_forced_password_change_starts_a_confined_session() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let email = format!("mfa-reset-{}@example.com", Uuid::new_v4().simple());
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "billing",
+        "Str0ng!Passw0rd",
+        true,
+        true,
+        None,
+    )
+    .await;
+    sqlx::query("UPDATE users SET password_reset_required = true WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, login_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "Str0ng!Passw0rd" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login_body}");
+    assert_eq!(login_body["status"], "mfa_pending");
+    let pending_id = login_body["pending_id"].as_str().unwrap().to_string();
+
+    let admin = seeded_admin_bearer(&pool).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/mfa/pending/{pending_id}/approve"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, redeemed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/auth/pending/{pending_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{redeemed}");
+    assert_eq!(redeemed["status"], "approved");
+    assert_eq!(redeemed["password_change_required"], true);
+    let session = bearer(redeemed["access_token"].as_str().unwrap());
+
+    // Confined to the password change until it is replaced.
+    let (status, me) = json_request(&app, "GET", "/api/v1/me", Some(&session), None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let (status, blocked) =
+        json_request(&app, "GET", "/api/v1/patients", Some(&session), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(blocked["error"], "password_change_required");
+}
+
+/// Owner decision 2026-09-28 (Q12): the login e-mail matches regardless of
+/// case and surrounding blanks.
+#[tokio::test]
+async fn login_matches_the_email_case_insensitively() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let stored = format!("Mixed.Case-{tag}@Example.com");
+    seed_user_with_password_and_flags(
+        &pool,
+        &stored,
+        "billing",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+
+    for typed in [
+        stored.to_lowercase(),
+        stored.to_uppercase(),
+        format!("  {stored} "),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/auth/login",
+            None,
+            Some(json!({ "email": typed, "password": "Str0ng!Passw0rd" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{typed}: {body}");
+        assert!(body["access_token"].is_string(), "{typed}: {body}");
+    }
+
+    // A second account differing only in case cannot be created.
+    let admin = seeded_admin_bearer(&pool).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/users",
+        Some(&admin),
+        Some(json!({
+            "email": stored.to_uppercase(),
+            "name": "Duplicate",
+            "role": "billing"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+}
+
+async fn login_tokens(app: &axum::Router, email: &str, password: &str) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": password })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+async fn family_state(pool: &PgPool, access_token: &str) -> (Uuid, bool, Option<String>) {
+    let family_id = jwt::verify_access_token(TEST_SECRET, access_token)
+        .expect("claims")
+        .claims
+        .fam;
+    let row: (bool, Option<String>) =
+        sqlx::query_as("SELECT is_revoked, revoked_reason FROM token_families WHERE id = $1")
+            .bind(family_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    (family_id, row.0, row.1)
+}
+
+/// Owner decision 2026-09-28 (Q12): `session_idle_days` ends a session that
+/// was not refreshed for that long.
+#[tokio::test]
+async fn an_idle_session_cannot_be_refreshed() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let email = format!("idle-{}@example.com", Uuid::new_v4().simple());
+    seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "billing",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+    let tokens_body = login_tokens(&app, &email, "Str0ng!Passw0rd").await;
+    let access = tokens_body["access_token"].as_str().unwrap();
+    let (family_id, _, _) = family_state(&pool, access).await;
+    let idle_days = TokenSettings::default().session_idle_days;
+    sqlx::query(
+        "UPDATE token_families SET last_activity_at = now() - ($2::bigint * interval '1 day') - interval '1 hour'
+         WHERE id = $1",
+    )
+    .bind(family_id)
+    .bind(idle_days)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/refresh",
+        None,
+        Some(json!({ "refresh_token": tokens_body["refresh_token"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, revoked, reason) = family_state(&pool, access).await;
+    assert!(revoked);
+    assert_eq!(reason.as_deref(), Some("idle_timeout"));
+    // Its access token is refused as well.
+    let (status, _) = json_request(&app, "GET", "/api/v1/me", Some(&bearer(access)), None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// Owner decision 2026-09-28 (Q12): `max_sessions_per_user` is enforced by
+/// ending the least recently used session.
+#[tokio::test]
+async fn a_new_session_over_the_limit_ends_the_least_recent_one() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let user_id = seed_user(&pool, &format!("limit-{tag}"), "billing").await;
+    let settings = TokenSettings {
+        max_sessions_per_user: 2,
+        ..TokenSettings::default()
+    };
+    let mut families = Vec::new();
+    for _ in 0..3 {
+        let pair = tokens::create_session(
+            &pool,
+            TEST_SECRET,
+            user_id,
+            "billing",
+            None,
+            None,
+            Some("127.0.0.1"),
+            Some("test-agent"),
+            &settings,
+        )
+        .await
+        .expect("session");
+        let (family_id, _, _) = family_state(&pool, &pair.access_token).await;
+        // Make the order of activity explicit.
+        sqlx::query(
+            "UPDATE token_families SET last_activity_at = now() - ($2::int * interval '1 minute') WHERE id = $1",
+        )
+        .bind(family_id)
+        .bind(10 - families.len() as i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+        families.push((family_id, pair.access_token));
+    }
+
+    let (_, oldest_revoked, reason) = family_state(&pool, &families[0].1).await;
+    assert!(oldest_revoked);
+    assert_eq!(reason.as_deref(), Some("session_limit"));
+    for (_, access) in &families[1..] {
+        let (_, revoked, _) = family_state(&pool, access).await;
+        assert!(!revoked);
+    }
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me",
+        Some(&bearer(&families[0].1)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me",
+        Some(&bearer(&families[2].1)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// Owner decision 2026-09-28 (Q12): the session sweeper revokes idle and
+/// expired sessions, so active-session counts stay right.
+#[tokio::test]
+async fn the_session_sweeper_revokes_idle_and_expired_sessions() {
+    let Some((_app, pool)) = test_context().await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple();
+    let user_id = seed_user(&pool, &format!("sweep-{tag}"), "billing").await;
+    let settings = TokenSettings::default();
+    let mut families = Vec::new();
+    for _ in 0..3 {
+        let pair = tokens::create_session(
+            &pool, TEST_SECRET, user_id, "billing", None, None, None, None, &settings,
+        )
+        .await
+        .expect("session");
+        families.push(family_state(&pool, &pair.access_token).await.0);
+    }
+    let (idle, expired, live) = (families[0], families[1], families[2]);
+    sqlx::query(
+        "UPDATE token_families SET last_activity_at = now() - ($2::bigint * interval '1 day') - interval '1 hour'
+         WHERE id = $1",
+    )
+    .bind(idle)
+    .bind(settings.session_idle_days)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE refresh_tokens SET expires_at = now() - interval '1 minute' WHERE family_id = $1")
+        .bind(expired)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (idle_count, expired_count) = tokens::revoke_stale_families(&pool, &settings)
+        .await
+        .expect("sweep");
+    assert!(idle_count >= 1 && expired_count >= 1);
+
+    let reasons: Vec<(Uuid, bool, Option<String>)> = sqlx::query_as(
+        "SELECT id, is_revoked, revoked_reason FROM token_families WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let find = |id: Uuid| reasons.iter().find(|row| row.0 == id).unwrap().clone();
+    assert_eq!(find(idle).2.as_deref(), Some("idle_timeout"));
+    assert_eq!(find(expired).2.as_deref(), Some("expired"));
+    assert!(!find(live).1);
+}
+
+/// Owner decision 2026-09-28 (Q12): an enrolled authenticator app does not
+/// replace the per-user admin approval (TOM, section "Zweiter Faktor").
+#[tokio::test]
+async fn admin_approval_still_applies_after_the_authenticator_code() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let email = format!("totp-mfa-{}@example.com", Uuid::new_v4().simple());
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+    let staff = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, user_id, "patient_manager", Uuid::new_v4())
+            .expect("issue jwt")
+    );
+    let (status, setup) =
+        json_request(&app, "POST", "/api/v1/me/totp/setup", Some(&staff), None).await;
+    assert_eq!(status, StatusCode::OK, "{setup}");
+    let secret = base32_decode(setup["secret"].as_str().unwrap());
+    let now = u64::try_from(Utc::now().timestamp()).unwrap();
+    let code = |offset_steps: u64| {
+        format!(
+            "{:06}",
+            gmed_server::auth::totp::code_at_step(
+                &secret,
+                gmed_server::auth::totp::step_for(now) + offset_steps
+            )
+        )
+    };
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/totp/confirm",
+        Some(&staff),
+        Some(json!({ "code": code(0) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query("UPDATE users SET mfa_required = true WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let body = login_tokens(&app, &email, "Str0ng!Passw0rd").await;
+    assert_eq!(body["status"], "totp_required");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/totp",
+        None,
+        Some(json!({ "challenge_id": body["challenge_id"], "code": code(1) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "mfa_pending", "{body}");
+    assert!(body.get("access_token").is_none());
+    let pending_id = body["pending_id"].as_str().unwrap().to_string();
+
+    let admin = seeded_admin_bearer(&pool).await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/mfa/pending/{pending_id}/approve"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, redeemed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/auth/pending/{pending_id}"),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(redeemed["status"], "approved");
+    assert!(redeemed["access_token"].is_string());
+}
