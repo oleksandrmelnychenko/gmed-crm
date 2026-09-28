@@ -46,6 +46,20 @@ export function localizeWorkflowItemText(
   return fallbackText;
 }
 
+// Maps orders.phase → the label every staff page shows for it (orders list and
+// card, patient card, dashboard), so a phase reads the same everywhere.
+const ORDER_PHASE_TEXT_MAP: Record<string, string> = {
+  discovery: "orders_bedarfsklarung",
+  intake: "orders_aufnahme",
+  execution: "orders_durchfuhrung",
+  closure: "orders_abschluss",
+  followup: "orders_nachsorge",
+};
+
+export function orderPhaseTextKey(phase: string | null | undefined): string | null {
+  return phase ? (ORDER_PHASE_TEXT_MAP[phase] ?? null) : null;
+}
+
 export function localizeWorkflowGroupLabel(
   checklistKey: string | null | undefined,
   fallbackLabel: string,

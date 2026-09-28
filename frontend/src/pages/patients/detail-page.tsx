@@ -551,6 +551,8 @@ function patientDetailStatusLabel(status: string) {
       return patientDetailText("patients_detail_closed");
     case "active":
       return patientDetailText("patients_detail_active");
+    case "paused":
+      return patientDetailText("patients_detail_paused");
     case "completed":
       return patientDetailText("patients_detail_completed");
     case "draft":
