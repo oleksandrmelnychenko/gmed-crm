@@ -2454,7 +2454,9 @@ function useOrdersPageContent() {
 
     async function loadDetail() {
       try {
-        const workspace = await fetchOrderWorkspace(currentOrderId);
+        const workspace = await fetchOrderWorkspace(currentOrderId, {
+          readsOnlyOrderPart: permissions.readsOnlyOrderPart,
+        });
         if (cancelled) return;
         applyOrderWorkspace(workspace);
       } catch (error) {
@@ -2475,6 +2477,7 @@ function useOrdersPageContent() {
     applyOrderWorkspace,
     failOrderWorkspaceLoad,
     finishOrderDetailLoad,
+    permissions.readsOnlyOrderPart,
     reloadNonce,
     resetSelectedOrderWorkspaceData,
     selectedOrderId,

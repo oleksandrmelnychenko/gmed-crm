@@ -352,6 +352,19 @@ async fn can_receive_event(
             let appointment_id = payload_appointment_id(event).unwrap_or_default();
             can_receive_appointment_event(state, auth, appointment_id).await
         }
+        // An order checklist item is part of the order pipeline: closed to
+        // the concierge's and the team lead's order projection and to roles
+        // without `orders.view`, as `GET /orders/{id}/workflow-checklist`.
+        "workflow_checklist_item" if is_order_checklist_event(event) => {
+            if !crate::routes::orders::reads_full_orders(auth) {
+                return Ok(false);
+            }
+            if let Some(patient_id) = event.patient_id {
+                can_receive_patient_event(state, auth, patient_id).await
+            } else {
+                Ok(false)
+            }
+        }
         "document"
         | "invoice"
         | "privacy_request"
@@ -389,6 +402,14 @@ async fn can_receive_event(
         "notification" => Ok(false),
         _ => Ok(false),
     }
+}
+
+fn is_order_checklist_event(event: &RealtimeEvent) -> bool {
+    event
+        .payload
+        .get("scope_type")
+        .and_then(|value| value.as_str())
+        == Some("order")
 }
 
 fn payload_appointment_id(event: &RealtimeEvent) -> Option<Uuid> {
@@ -711,7 +732,7 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::requires_current_entity_authorization;
+    use super::{is_order_checklist_event, requires_current_entity_authorization};
     use crate::realtime::RealtimeEvent;
     use uuid::Uuid;
 
@@ -722,6 +743,20 @@ mod tests {
         event.target_user_ids.push(user_id);
 
         assert!(requires_current_entity_authorization(&event));
+    }
+
+    #[test]
+    fn order_checklist_events_are_told_apart_from_patient_checklist_events() {
+        let item_id = Uuid::new_v4();
+        let mut event = RealtimeEvent::new(
+            "workflow_checklist_item.completed",
+            "workflow_checklist_item",
+            item_id,
+        );
+        event.payload = serde_json::json!({ "scope_type": "order" });
+        assert!(is_order_checklist_event(&event));
+        event.payload = serde_json::json!({ "scope_type": "patient" });
+        assert!(!is_order_checklist_event(&event));
     }
 
     #[test]

@@ -1,11 +1,49 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { apiFetch } from "@/lib/api";
 
 import {
+  fetchOrderWorkspace,
   normalizeOrderAmendment,
   orderGroupCandidates,
   normalizeOrderGroup,
   normalizePatientOrderRecheck,
 } from "./order-api";
+
+vi.mock("@/lib/api", () => ({
+  apiFetch: vi.fn(),
+}));
+
+const apiFetchMock = vi.mocked(apiFetch);
+
+describe("fetchOrderWorkspace", () => {
+  beforeEach(() => {
+    apiFetchMock.mockReset();
+    apiFetchMock.mockImplementation(async (path: string) => {
+      if (path === "/orders/order-1") return { id: "order-1", patient_id: "patient-1" };
+      if (path.endsWith("/workflow-checklist")) return { items: [] };
+      return [];
+    });
+  });
+
+  it("loads the order checklist and its owner choice for full order readers", async () => {
+    const workspace = await fetchOrderWorkspace("order-1");
+    const paths = apiFetchMock.mock.calls.map(([path]) => path);
+    expect(paths).toContain("/orders/order-1/workflow-checklist");
+    expect(paths).toContain("/patients/patient-1/assignments");
+    expect(workspace.workflow).toEqual({ items: [] });
+  });
+
+  it("does not request the order pipeline for order-part readers (concierge, team lead)", async () => {
+    const workspace = await fetchOrderWorkspace("order-1", { readsOnlyOrderPart: true });
+    const paths = apiFetchMock.mock.calls.map(([path]) => path);
+    expect(paths).not.toContain("/orders/order-1/workflow-checklist");
+    expect(paths).not.toContain("/patients/patient-1/assignments");
+    expect(workspace.workflow).toBeNull();
+    expect(workspace.assignments).toEqual([]);
+    expect(workspace.detail.id).toBe("order-1");
+  });
+});
 
 describe("normalizePatientOrderRecheck", () => {
   it("defaults partial re-check payloads to render-safe arrays and objects", () => {

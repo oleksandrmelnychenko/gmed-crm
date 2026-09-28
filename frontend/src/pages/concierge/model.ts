@@ -411,19 +411,24 @@ const TASK_SERVICE_CONVERTED_ERROR = "Concierge service request already converte
  * A checklist task that is still open can be closed as "not required": the
  * checklist item and the task are closed together and can be reopened on the
  * order page. Deleting it would leave the item open behind a dead task.
+ * The order checklist is the order pipeline, which the concierge does not
+ * open (403): it closes order work through the task itself.
  */
 export function canMarkConciergeTaskNotRequired(
-  task: Pick<ConciergeTask, "status" | "archived_at" | "assigned_by" | "assigned_by_role" | "workflow_checklist_item_id" | "workflow_checklist_scope_id">,
+  task: Pick<ConciergeTask, "status" | "archived_at" | "assigned_by" | "assigned_by_role" | "can_manage" | "workflow_checklist_item_id" | "workflow_checklist_scope_type" | "workflow_checklist_scope_id">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
+  const checklistRoles = task.workflow_checklist_scope_type === "patient"
+    ? ["ceo", "patient_manager", "concierge"]
+    : ["ceo", "patient_manager"];
   return Boolean(
     task.workflow_checklist_item_id
     && task.workflow_checklist_scope_id
     && !task.archived_at
     && task.status !== "completed"
     && task.status !== "cancelled"
-    && ["ceo", "patient_manager", "concierge"].includes(actorRole ?? "")
+    && checklistRoles.includes(actorRole ?? "")
     && canModifyConciergeTask(task, actorId, actorRole),
   );
 }

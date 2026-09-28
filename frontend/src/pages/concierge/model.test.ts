@@ -241,6 +241,14 @@ describe("filterConciergeTaskAssignees", () => {
     expect(canMarkConciergeTaskNotRequired({ ...checklistTask, status: "completed" }, "creator", "patient_manager")).toBe(false);
     expect(canMarkConciergeTaskNotRequired({ ...checklistTask, workflow_checklist_item_id: null }, "creator", "patient_manager")).toBe(false);
     expect(canMarkConciergeTaskNotRequired(checklistTask, "someone", "interpreter")).toBe(false);
+    // The order checklist (pipeline) is closed to the concierge; the patient checklist is not.
+    const conciergeChecklistTask = { ...checklistTask, assigned_by: "concierge-1", assigned_by_role: "concierge" };
+    expect(canMarkConciergeTaskNotRequired(conciergeChecklistTask, "concierge-1", "concierge")).toBe(false);
+    expect(canMarkConciergeTaskNotRequired(
+      { ...conciergeChecklistTask, workflow_checklist_scope_type: "patient", workflow_checklist_scope_id: "patient-1" },
+      "concierge-1",
+      "concierge",
+    )).toBe(true);
     expect(conciergeTaskNotRequiredPath(checklistTask))
       .toBe("/orders/order-1/workflow-checklist/item-1/not-required");
     expect(conciergeTaskNotRequiredPath({ ...checklistTask, workflow_checklist_scope_type: "patient", workflow_checklist_scope_id: "patient-1" }))
