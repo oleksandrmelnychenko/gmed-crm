@@ -553,8 +553,9 @@ async fn contract_termination_stops_open_orders_and_settles_what_accrued() {
         direct_lines[0]["source_order_leistung_id"],
         late_hours.to_string()
     );
+    // The draft reserves the services; they are invoiced when it is released.
     for service in [delivered, flat_fee, late_hours] {
-        assert_eq!(service_status(&pool, service).await, "invoiced");
+        assert_ne!(service_status(&pool, service).await, "invoiced");
     }
     assert_eq!(service_status(&pool, planned).await, "cancelled");
 
@@ -580,6 +581,9 @@ async fn contract_termination_stops_open_orders_and_settles_what_accrued() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "send final invoice: {sent:?}");
+    for service in [delivered, flat_fee, late_hours] {
+        assert_eq!(service_status(&pool, service).await, "invoiced");
+    }
     // Releasing the final invoice credits the paid advance automatically.
     assert_eq!(money(&sent["prepayment_applied_amount"]), paid);
     assert_eq!(
@@ -1481,4 +1485,195 @@ async fn termination_settlement_matches_legacy_invoice_lines_and_the_patient_bal
     )
     .await;
     assert_eq!(statement_balance(&statement), cents(22930));
+}
+
+/// A service invoiced in advance but never delivered did not accrue: the
+/// settlement owes it back to the patient until a credit note corrects the
+/// invoice (status audit Q7).
+#[tokio::test]
+async fn termination_credits_services_invoiced_in_advance_but_not_delivered() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Advance', 'Hotel', '1979-02-03', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    for user_id in [manager_id, billing_id] {
+        seed_assignment(&pool, patient_id, user_id, admin_id).await;
+    }
+    let manager = auth_header(manager_id, "patient_manager");
+    let billing = auth_header(billing_id, "billing");
+
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &manager,
+        Some(json!({
+            "patient_id": patient_id,
+            "status": "signed",
+            "valid_from": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, currency, created_by)
+           VALUES ($1, $2, $3::uuid, 'execution', 'active', 'EUR', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Delivered and invoiced: 840.34 net + 19 % = 1,000.00.
+    let delivered: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency,
+               vat_rate, status, delivered_at
+           ) VALUES ($1, $2, 'Organisation der Behandlung', 1, 840.34, 'EUR', 19, 'invoiced', now())
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Invoiced in advance, never delivered: hotel at cost, 481.50.
+    let hotel: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO order_leistungen (
+               order_id, patient_id, description, quantity, unit_price, currency,
+               vat_rate, is_cost_passthrough, status
+           ) VALUES ($1, $2, 'Hotel', 3, 160.50, 'EUR', 0, true, 'invoiced')
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status, due_date,
+               issued_at, total_net, total_vat, total_gross, paid_amount, line_items, created_by
+           ) VALUES ($1, $2, $3, 'interim', 'sent', CURRENT_DATE + 14, now() - interval '3 days',
+                     1321.84, 159.66, 1481.50, 0,
+                     jsonb_build_array(
+                         jsonb_build_object('description', 'Organisation der Behandlung', 'quantity', '1',
+                             'unit_price', '840.34', 'vat_rate', '19', 'is_cost_passthrough', false,
+                             'line_net', '840.34', 'line_vat', '159.66', 'line_gross', '1000',
+                             'source_order_leistung_id', $5::uuid),
+                         jsonb_build_object('description', 'Hotel', 'quantity', '3',
+                             'unit_price', '160.5', 'vat_rate', '0', 'is_cost_passthrough', true,
+                             'line_net', '481.50', 'line_vat', '0', 'line_gross', '481.50',
+                             'source_order_leistung_id', $6::uuid)),
+                     $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-ADV-{tag}"))
+    .bind(billing_id)
+    .bind(delivered)
+    .bind(hotel)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    record_payment(&app, &billing, &invoice_id.to_string(), "1481.50").await;
+
+    let (status, terminated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/terminate"),
+        &manager,
+        Some(json!({ "reason": "Patient terminated the contract" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "terminate: {terminated:?}");
+    let snapshot = &terminated["settlements"][0];
+    assert_eq!(money(&snapshot["accrued_gross"]), cents(100000));
+    assert_eq!(money(&snapshot["invoiced_gross"]), cents(148150));
+    assert_eq!(money(&snapshot["balance_gross"]), cents(-48150));
+
+    let (status, settlement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "settlement: {settlement:?}");
+    assert_eq!(
+        money(&settlement["current"]["to_credit_gross"]),
+        cents(48150)
+    );
+    assert_eq!(
+        settlement["current"]["undelivered_lines"][0]["order_leistung_id"],
+        hotel.to_string()
+    );
+    assert_eq!(settlement["can_settle"], false);
+    // The stopped order is audited with the termination.
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'terminate_order_for_contract' AND entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // Crediting the hotel line moves the amount from "to credit" into the
+    // invoice correction; the balance still asks for the refund.
+    let (status, credit) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 1 }],
+            "reason": "Hotel nicht in Anspruch genommen",
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "credit: {credit:?}");
+    let (_, settlement) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/termination-settlement"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        money(&settlement["current"]["to_credit_gross"]),
+        Decimal::ZERO
+    );
+    assert_eq!(
+        money(&settlement["current"]["invoiced_gross"]),
+        cents(100000)
+    );
+    assert_eq!(
+        money(&settlement["current"]["balance_gross"]),
+        cents(-48150)
+    );
 }

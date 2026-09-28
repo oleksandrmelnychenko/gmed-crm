@@ -192,6 +192,25 @@ async fn partial_interims_allocate_quantities_and_final_consumes_only_remaining(
         .await;
         assert_eq!(status, StatusCode::CREATED, "interim response: {body:?}");
     }
+    // Drafts only reserve the services; they are billed once released.
+    let drafts: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM invoices WHERE quote_id = $1 AND status = 'draft' ORDER BY created_at, id",
+    )
+    .bind(Uuid::parse_str(quote_id).unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    for invoice_id in drafts {
+        let (status, released) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/invoices/{invoice_id}/status"),
+            &billing,
+            Some(json!({ "status": "sent" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "release response: {released:?}");
+    }
 
     let (status, partial_order) = json_request(
         &app,
@@ -270,6 +289,25 @@ async fn partial_interims_allocate_quantities_and_final_consumes_only_remaining(
     .collect();
     assert_eq!(allocated[0].1, rust_decimal::Decimal::new(3, 0));
     assert_eq!(allocated[1].1, rust_decimal::Decimal::new(2, 0));
+    // Drafts only reserve the services; they are billed once released.
+    let drafts: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM invoices WHERE quote_id = $1 AND status = 'draft' ORDER BY created_at, id",
+    )
+    .bind(Uuid::parse_str(quote_id).unwrap())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    for invoice_id in drafts {
+        let (status, released) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/invoices/{invoice_id}/status"),
+            &billing,
+            Some(json!({ "status": "sent" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "release response: {released:?}");
+    }
     let service_ids = vec![first_line, second_line];
     let statuses: Vec<String> =
         sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = ANY($1) ORDER BY id")
@@ -296,26 +334,15 @@ async fn partial_interims_allocate_quantities_and_final_consumes_only_remaining(
             .all(|item| item["billing_status"] == "awaiting_payment")
     );
 
-    // The drafts are released (and numbered) before they can be paid.
-    let drafts: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM invoices WHERE quote_id = $1 AND status = 'draft' ORDER BY created_at, id",
+    // All three invoices were released (and numbered) before payment.
+    let released_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invoices WHERE quote_id = $1 AND released_at IS NOT NULL",
     )
     .bind(Uuid::parse_str(quote_id).unwrap())
-    .fetch_all(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(drafts.len(), 3);
-    for invoice_id in drafts {
-        let (status, released) = json_request(
-            &app,
-            "POST",
-            &format!("/api/v1/invoices/{invoice_id}/status"),
-            &billing,
-            Some(json!({ "status": "sent" })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "release response: {released:?}");
-    }
+    assert_eq!(released_count, 3);
 
     sqlx::query(
         r#"UPDATE invoices

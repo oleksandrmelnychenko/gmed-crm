@@ -509,13 +509,16 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     assert_eq!(body["quote_id"], quote_id);
     assert_eq!(body["line_items"].as_array().unwrap().len(), 1);
 
-    let current_status: String =
-        sqlx::query_scalar("SELECT status FROM order_leistungen WHERE id = $1")
+    // The draft only reserves the service; it is invoiced once released.
+    let service_status = || async {
+        sqlx::query_scalar::<_, String>("SELECT status FROM order_leistungen WHERE id = $1")
             .bind(leistung_id)
             .fetch_one(&pool)
             .await
-            .unwrap();
-    assert_eq!(current_status, "invoiced");
+            .unwrap()
+    };
+    assert_eq!(service_status().await, "approved");
+    let draft_id = body["id"].as_str().unwrap().to_string();
 
     let (status, body) = json_request(
         &app,
@@ -527,6 +530,20 @@ async fn invoice_creation_from_quote_marks_order_services_invoiced() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 1);
+
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{draft_id}/status"),
+        &billing_bearer,
+        Some(json!({
+            "status": "sent",
+            "due_date": (gmed_server::app_time::today() + chrono::Duration::days(14)).to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    assert_eq!(service_status().await, "invoiced");
 }
 
 #[tokio::test]
@@ -1706,11 +1723,23 @@ async fn cancelled_invoice_returns_services_to_their_real_stage() {
                 .unwrap()
         }
     };
+    // The draft reserves the services; releasing it invoices them.
+    assert_eq!(line_status(planned).await, "planned");
+    assert_eq!(line_status(approved).await, "approved");
+    let invoice_id = invoice["id"].as_str().unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(line_status(planned).await, "invoiced");
     assert_eq!(line_status(approved).await, "invoiced");
     assert_eq!(line_status(dropped).await, "cancelled");
 
-    let invoice_id = invoice["id"].as_str().unwrap();
     let (status, body) = json_request(
         &app,
         "POST",
