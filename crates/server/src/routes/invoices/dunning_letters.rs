@@ -24,7 +24,8 @@ use super::stored_documents::{
 use super::{
     InvoicePdfAgency, InvoicePdfCellAlign, InvoicePdfColor, InvoicePdfLayout, document, err,
     format_invoice_pdf_date, format_invoice_pdf_money, invoice_document_date,
-    invoice_pdf_bank_cells, invoice_pdf_brand, invoice_pdf_label, invoice_pdf_sender_line,
+    invoice_pdf_bank_cells, invoice_pdf_brand, invoice_pdf_heading_with_rows_height_mm,
+    invoice_pdf_label, invoice_pdf_line_height_mm, invoice_pdf_sender_line,
     resolve_invoice_pdf_language,
 };
 use crate::pdf_text::{add_unicode_pdf_fonts, pdf_text_save_options};
@@ -456,6 +457,12 @@ pub(super) fn build_dunning_letter_pdf(
 
     let bank_cells = invoice_pdf_bank_cells(language, &context.agency);
     if !bank_cells.is_empty() {
+        // The payment details (plus the reference row) stay on one page.
+        layout.ensure_space(invoice_pdf_heading_with_rows_height_mm(
+            12.0,
+            6.0,
+            bank_cells.len() + 1,
+        ));
         layout.text_block(
             invoice_pdf_label(language, "payment_details"),
             12.0,
@@ -485,6 +492,9 @@ pub(super) fn build_dunning_letter_pdf(
         }
     }
 
+    // Closing and signature belong together; the signature alone on a
+    // second page looked like a stray page.
+    layout.ensure_space(8.0 + 1.0 + 2.0 * invoice_pdf_line_height_mm(10.5, 1.35));
     layout.text_block(
         dunning_letter_label(language, "closing"),
         10.5,
@@ -702,6 +712,35 @@ mod tests {
         let russian = text(&context("second", "ru"));
         assert!(russian.contains("Первое требование об оплате"));
         assert!(russian.contains("Новый срок оплаты"));
+    }
+
+    #[test]
+    fn closing_and_signature_stay_together() {
+        // With full bank details the walkthrough letter put "Mit freundlichen
+        // Grüßen" on page 1 and the signature alone on page 2.
+        let mut letter = context("first", "de");
+        letter.agency.care_of = Some("Heorhii Hudiiev".to_string());
+        letter.agency.bank_name = Some("Commerzbank München".to_string());
+        letter.agency.bank_swift = Some("COBADEFFXXX".to_string());
+        letter.recipient.name = "Ready Lead".to_string();
+        let pages = pdf_extract::extract_text_from_mem_by_pages(
+            &build_dunning_letter_pdf(&letter).unwrap(),
+        )
+        .unwrap();
+        let closing_page = pages
+            .iter()
+            .find(|page| page.contains("Mit freundlichen Grüßen"))
+            .expect("closing");
+        // Body text precedes the page header ("Dokument-Nr.") in the extract.
+        let after_closing = closing_page
+            .split("Mit freundlichen Grüßen")
+            .nth(1)
+            .and_then(|rest| rest.split("Dokument-Nr.").next())
+            .unwrap_or_default();
+        assert!(
+            after_closing.contains("GMED - Agentur für Patientenbetreuung"),
+            "signature is not under the closing: {pages:?}"
+        );
     }
 
     #[test]
