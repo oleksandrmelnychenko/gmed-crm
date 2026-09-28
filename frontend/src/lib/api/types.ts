@@ -203,6 +203,12 @@ export interface LeadDetail extends Lead {
   lifecycle: LeadLifecycle;
 
   attachments: LeadAttachment[];
+  /**
+   * Set for a role without medical access (Sales): the server left out the
+   * request text, specialties, notes, questionnaire answers and uploads,
+   * insurance and the wizard state, so the screens hide those blocks.
+   */
+  medical_fields_hidden?: boolean;
 }
 
 export interface LeadTrustedContact {

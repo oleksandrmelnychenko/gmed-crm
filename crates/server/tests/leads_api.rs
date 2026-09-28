@@ -764,6 +764,168 @@ async fn create_and_get_lead() {
 }
 
 #[tokio::test]
+async fn sales_sees_leads_without_their_medical_content() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let sales = app.auth_header("sales");
+    let tag = Uuid::new_v4().simple().to_string();
+    let concern = format!("Pathology slides {tag}");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, source, country, primary_language,
+                primary_concern_text, additional_concerns, message, notes, selected_program,
+                currently_in_treatment, has_health_risk_for_travel, has_medical_records,
+                has_insurance, insurance_provider, insurance_number, insurance_type,
+                requested_specialties, raw_payload, wizard_state, created_by
+           ) VALUES (
+                'Medical', 'Privacy', $1, '+4915144444444', 'Website', 'UA', 'uk',
+                $2, 'Second opinion', 'Please review my scans',
+                'Needs fertility documentation checklist', 'Oncology check-up',
+                true, true, 'yes',
+                true, 'Allianz', 'A123456', 'private',
+                '["oncology"]'::jsonb, '{"answers":{"diagnosis":"C50"}}'::jsonb,
+                '{"clinical_draft":{"narrative":"Pain"}}'::jsonb, $3
+           ) RETURNING id"#,
+    )
+    .bind(format!("medical-{tag}@example.com"))
+    .bind(&concern)
+    .bind(app.sales_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let attachment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO lead_attachments (lead_id, file_name, content_type, size_bytes, data)
+           VALUES ($1, 'mri-report.pdf', 'application/pdf', 4, '\x25504446'::bytea)
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let detail_path = format!("/api/v1/leads/{lead_id}");
+
+    let (status, detail) = json_request(&app, "GET", &detail_path, &sales, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    for field in [
+        "primary_concern_text",
+        "additional_concerns",
+        "message",
+        "notes",
+        "selected_program",
+        "currently_in_treatment",
+        "has_health_risk_for_travel",
+        "has_medical_records",
+        "has_insurance",
+        "insurance_provider",
+        "insurance_number",
+        "insurance_type",
+        "raw_payload",
+    ] {
+        assert!(
+            detail[field].is_null(),
+            "{field} must be hidden from sales: {detail}"
+        );
+    }
+    assert_eq!(detail["requested_specialties"], json!([]));
+    assert_eq!(detail["wizard_state"], json!({}));
+    assert_eq!(detail["attachments"], json!([]));
+    assert_eq!(detail["attachment_count"], 1);
+    assert_eq!(detail["medical_fields_hidden"], true);
+    // Contact, source, status, country and language stay visible.
+    assert_eq!(detail["email"], format!("medical-{tag}@example.com"));
+    assert_eq!(detail["phone"], "+4915144444444");
+    assert_eq!(detail["source"], "Website");
+    assert_eq!(detail["country"], "UA");
+    assert_eq!(detail["primary_language"], "uk");
+    assert_eq!(detail["qualification_status"], "new");
+
+    // The list neither shows nor searches the medical content.
+    let search_path = format!("/api/v1/leads?search={}", tag);
+    let (status, list) = json_request(&app, "GET", &search_path, &sales, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let found = |list: &Value| {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == lead_id.to_string())
+    };
+    assert!(found(&list), "the e-mail matches for sales too: {list}");
+    let concern_search = "/api/v1/leads?search=Pathology%20slides";
+    let (status, list) = json_request(&app, "GET", concern_search, &sales, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(
+        !found(&list),
+        "sales must not find a lead by its medical text"
+    );
+
+    // Sales cannot download questionnaire uploads or overwrite medical fields.
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/attachments/{attachment_id}"),
+        &sales,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let update_path = format!("/api/v1/leads/{lead_id}/update");
+    for payload in [
+        json!({ "notes": "Overwritten" }),
+        json!({ "primary_concern_text": "Overwritten" }),
+        json!({ "wizard_state": {} }),
+    ] {
+        let (status, body) =
+            json_request(&app, "POST", &update_path, &sales, Some(payload.clone())).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{payload}: {body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &sales,
+        Some(json!({ "country": "DE" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let stored_notes: Option<String> = sqlx::query_scalar("SELECT notes FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored_notes.as_deref(),
+        Some("Needs fertility documentation checklist")
+    );
+
+    // Roles with medical access keep the full lead.
+    for role in ["patient_manager", "ceo"] {
+        let bearer = app.auth_header(role);
+        let (status, detail) = json_request(&app, "GET", &detail_path, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{role}: {detail}");
+        assert_eq!(detail["primary_concern_text"], concern, "{role}");
+        assert_eq!(
+            detail["notes"], "Needs fertility documentation checklist",
+            "{role}"
+        );
+        assert_eq!(detail["insurance_number"], "A123456", "{role}");
+        assert_eq!(
+            detail["requested_specialties"],
+            json!(["oncology"]),
+            "{role}"
+        );
+        assert_eq!(
+            detail["attachments"].as_array().map(Vec::len),
+            Some(1),
+            "{role}"
+        );
+        assert!(detail.get("medical_fields_hidden").is_none(), "{role}");
+        let (status, list) = json_request(&app, "GET", concern_search, &bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{role}: {list}");
+        assert!(found(&list), "{role} finds the lead by its request text");
+    }
+}
+
+#[tokio::test]
 async fn lead_contacts_are_unique_except_for_a_minor_and_linked_guardian() {
     let Some(app) = test_app().await else { return };
     let sales = app.auth_header("sales");

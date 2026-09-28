@@ -397,6 +397,9 @@ async fn list_leads(
     let source_pattern = format!("%{}%", query.source.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
     let concierge_grid_only = lead_service_grid_only(&auth);
+    // Search only in what the caller may read: without medical access the
+    // request text, notes and program do not match (no inference by search).
+    let contact_search_only = concierge_grid_only || !lead_medical_visible(&auth);
 
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
@@ -464,7 +467,7 @@ async fn list_leads(
     .bind(query.intake_source)
     .bind(query.lead_type)
     .bind(query.flow)
-    .bind(concierge_grid_only)
+    .bind(contact_search_only)
     .fetch_all(&state.db)
     .await
     {
@@ -2965,6 +2968,9 @@ async fn get_lead(
     if lead_service_grid_only(&auth) {
         return Json(lead_service_grid_projection(&lead)).into_response();
     }
+    if !lead_medical_visible(&auth) {
+        return Json(lead_without_medical_fields(lead)).into_response();
+    }
     Json(lead).into_response()
 }
 
@@ -2973,6 +2979,89 @@ async fn get_lead(
 /// get the full lead.
 fn lead_service_grid_only(auth: &AuthUser) -> bool {
     auth.can(Capability::LeadsView) && !auth.can(Capability::LeadsEdit)
+}
+
+/// Whether the caller may read what a lead says about health: the medical
+/// access of patients (`patients.medical.view`). Sales works leads without it
+/// and sees contact, source, status, country and language, dates and the
+/// responsible person, but none of the fields in [`LEAD_MEDICAL_FIELDS`]
+/// (owner decision 2026-09-28).
+fn lead_medical_visible(auth: &AuthUser) -> bool {
+    auth.can(Capability::PatientsMedicalView)
+}
+
+/// Lead fields with medical content: the request text, the requested
+/// specialties and program, notes (mixed content, so hidden as a whole), the
+/// questionnaire answers on treatment, travel risk and records, insurance, and
+/// the raw questionnaire and wizard payloads (clinical intake draft).
+const LEAD_MEDICAL_FIELDS: &[&str] = &[
+    "primary_concern_text",
+    "additional_concerns",
+    "message",
+    "notes",
+    "selected_program",
+    "currently_in_treatment",
+    "has_health_risk_for_travel",
+    "has_medical_records",
+    "records_in_accepted_language",
+    "has_insurance",
+    "insurance_covers_germany",
+    "insurance_provider",
+    "insurance_number",
+    "insurance_type",
+    "raw_payload",
+];
+
+/// A lead payload without its medical content, for callers without
+/// [`lead_medical_visible`]. The fields stay present as null (lists and
+/// records empty) so the lead screens render; `medical_fields_hidden` tells
+/// them to leave out the medical blocks.
+fn lead_without_medical_fields(lead: Value) -> Value {
+    let Value::Object(mut fields) = lead else {
+        return lead;
+    };
+    for key in LEAD_MEDICAL_FIELDS {
+        if fields.contains_key(*key) {
+            fields.insert((*key).to_string(), Value::Null);
+        }
+    }
+    fields.insert("requested_specialties".into(), json!([]));
+    fields.insert("wizard_state".into(), json!({}));
+    // Questionnaire uploads are medical records; only their number stays.
+    if let Some(attachments) = fields.get("attachments").and_then(Value::as_array) {
+        let count = attachments.len();
+        fields.insert("attachment_count".into(), json!(count));
+        fields.insert("attachments".into(), json!([]));
+    }
+    fields.insert("medical_fields_hidden".into(), Value::Bool(true));
+    Value::Object(fields)
+}
+
+/// The medical fields a lead update carries; a caller without medical access
+/// may not overwrite what it cannot read.
+fn lead_update_medical_fields(body: &UpdateLeadRequest) -> Vec<&'static str> {
+    [
+        ("notes", body.notes.is_some()),
+        ("primary_concern_text", body.primary_concern_text.is_some()),
+        ("additional_concerns", body.additional_concerns.is_some()),
+        ("selected_program", body.selected_program.is_some()),
+        ("has_insurance", body.has_insurance.is_some()),
+        (
+            "insurance_covers_germany",
+            body.insurance_covers_germany.is_some(),
+        ),
+        ("insurance_provider", body.insurance_provider.is_some()),
+        ("insurance_number", body.insurance_number.is_some()),
+        ("insurance_type", body.insurance_type.is_some()),
+        (
+            "requested_specialties",
+            body.requested_specialties.is_some(),
+        ),
+        ("wizard_state", body.wizard_state.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(field, sent)| sent.then_some(field))
+    .collect()
 }
 
 /// Fields of a lead the service grid may show: who the lead is, where it
@@ -3204,6 +3293,12 @@ async fn update_lead(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
+    }
+    if !lead_medical_visible(&auth) && !lead_update_medical_fields(&body).is_empty() {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Medical lead fields require medical access",
+        );
     }
 
     let compliance_status = body.compliance_status.as_deref().map(str::to_lowercase);
@@ -6505,6 +6600,10 @@ async fn download_attachment(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::LeadsView) {
         return e;
+    }
+    // Questionnaire uploads are medical records (see lead_without_medical_fields).
+    if !lead_medical_visible(&auth) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match sqlx::query(
