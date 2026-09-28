@@ -844,6 +844,12 @@ export type OrdersPermissions = {
   canManageExternalInvoices: boolean;
   canManageEconomics: boolean;
   /**
+   * Planned partner costs (and their editor) are finance data: the server
+   * returns and accepts them for the CEO and billing only, not for patient
+   * managers who otherwise work with the order economics.
+   */
+  canManagePartnerCosts: boolean;
+  /**
    * The role reads only its part of an order (concierge: service lines,
    * interpreter team lead: interpreter lines). The server answers with a
    * projection (`read_scope`) and refuses economics, amendments, group,

@@ -7277,7 +7277,7 @@ function useOrdersPageContent() {
                                     </div>
                                       </>
                                     )}
-                                    {permissions.canManageEconomics && leistung.status !== "cancelled" ? (
+                                    {permissions.canManagePartnerCosts && leistung.status !== "cancelled" ? (
                                       <Button
                                         type="button"
                                         variant="outline"
@@ -7391,7 +7391,7 @@ function useOrdersPageContent() {
                                     label={l("orders_mwst")}
                                     value={`${formatNumber(leistung.vat_rate, locale)}%`}
                                   />
-                                  {permissions.canManageEconomics ? <MiniMetric
+                                  {permissions.canManagePartnerCosts ? <MiniMetric
                                     label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}
                                     value={formatMoney(
                                       leistung.planned_partner_cost_gross,
@@ -9280,7 +9280,7 @@ function useOrdersPageContent() {
                     className={inputClassName}
                   />
                 </Field>
-                {permissions.canManageEconomics ? <>
+                {permissions.canManagePartnerCosts ? <>
                 <Field htmlFor="order-service-plannedPartnerCostNet" label={lang === "de" ? "Geplante Partnerkosten ohne Mehrwertsteuer" : "Плановые затраты на партнёра без налога"}>
                   <Input
                     id="order-service-plannedPartnerCostNet"
