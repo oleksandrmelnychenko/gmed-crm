@@ -42,6 +42,8 @@ mod stored_documents;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
+pub(crate) use zugferd::line_exemption_reason;
+
 const INVOICE_PDF_PAGE_WIDTH_MM: f32 = 210.0;
 const INVOICE_PDF_PAGE_HEIGHT_MM: f32 = 297.0;
 const INVOICE_PDF_LEFT_MARGIN_MM: f32 = 18.0;

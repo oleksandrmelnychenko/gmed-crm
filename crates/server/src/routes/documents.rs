@@ -405,6 +405,9 @@ struct GeneratedContractLineItem {
     unit_price: String,
     line_gross: String,
     vat_rate: Option<String>,
+    /// Pass-through cost (durchlaufender Posten). Sources that do not carry
+    /// the flag still mark "Voraussichtliche Auslagen" by its description.
+    is_cost_passthrough: bool,
     notes: Option<String>,
 }
 
@@ -2504,6 +2507,8 @@ struct ServiceLineInput {
     #[serde(default)]
     vat_rate: Option<String>,
     #[serde(default)]
+    is_cost_passthrough: Option<bool>,
+    #[serde(default)]
     note: Option<String>,
 }
 
@@ -4554,6 +4559,10 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
                     .get("vat_rate")
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned),
+                is_cost_passthrough: object
+                    .get("is_cost_passthrough")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
                 notes: object
                     .get("notes")
                     .and_then(Value::as_str)
@@ -16475,9 +16484,13 @@ fn build_single_order_pdf(
                     false,
                 );
             }
+            let priced_items = context.line_items.iter().collect::<Vec<_>>();
             admin_block(
                 &mut layout,
-                "*Alle angegebenen Preise zzgl. MwSt. 19 %. Der konkrete Aufwand wird im Kostenvoranschlag zu diesem Einzelauftrag ausgewiesen.",
+                &format!(
+                    "*{} Der konkrete Aufwand wird im Kostenvoranschlag zu diesem Einzelauftrag ausgewiesen.",
+                    contract_vat_note(&priced_items)
+                ),
                 7.0,
                 1.5,
             );
@@ -16689,11 +16702,13 @@ fn build_order_cost_estimate_pdf(
         ("Summe", TOTAL_WIDTH_MM, PdfCellAlign::Right),
     ]);
     let estimated_outlays = estimated_outlays_total(&context.line_items);
-    for item in context
+    // The estimated outlays have their own row below the VAT total.
+    let listed_items = context
         .line_items
         .iter()
         .filter(|item| estimated_outlays.is_none() || !is_estimated_outlays_item(item))
-    {
+        .collect::<Vec<_>>();
+    for item in &listed_items {
         let unit_price = cost_coverage_money_cell(&item.unit_price)
             .unwrap_or_else(|| "____________".to_string());
         let quantity = if item.quantity.trim().is_empty() {
@@ -16722,9 +16737,18 @@ fn build_order_cost_estimate_pdf(
     let displayed_net =
         net_without_estimated_outlays(context.total_net.as_deref(), estimated_outlays);
     let displayed_outlays = estimated_outlays.map(format_eur);
+    let vat_label = format!(
+        "{}:",
+        contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>())
+    );
     let totals = [
         ("Nettowert:", displayed_net.as_deref(), false, false),
-        ("MWSt. 19%:", context.total_vat.as_deref(), false, false),
+        (
+            vat_label.as_str(),
+            context.total_vat.as_deref(),
+            false,
+            false,
+        ),
         (
             "Voraussichtliche Auslagen:",
             displayed_outlays.as_deref(),
@@ -16763,6 +16787,9 @@ fn build_order_cost_estimate_pdf(
         } else {
             layout.table_row_aligned_middle_compact(&cells, bold, shaded);
         }
+    }
+    if let Some(note) = mixed_contract_vat_note(&listed_items) {
+        admin_block(&mut layout, &note, 3.0, 0.0);
     }
     let bank_lines = [
         ("Kontoinhaber", context.agency.bank_holder.as_deref()),
@@ -16962,6 +16989,153 @@ fn net_without_estimated_outlays(
     }
 }
 
+/// Rate a contract line is taxed at. A line without a rate has always been
+/// totalled and described at 19 %.
+fn contract_line_vat_rate(item: &GeneratedContractLineItem) -> Decimal {
+    item.vat_rate
+        .as_deref()
+        .and_then(parse_eur_decimal)
+        .unwrap_or(Decimal::new(19, 0))
+        .clamp(Decimal::ZERO, Decimal::ONE_HUNDRED)
+}
+
+/// VAT treatment of a contract line, classified like the invoice's VAT
+/// breakdown: a 0 % line is either exempt medical care or a pass-through cost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContractLineVat {
+    Taxed(Decimal),
+    /// Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG, e.g. the organisation
+    /// of the treatment.
+    Exempt,
+    /// Durchlaufender Posten, e.g. the estimated outlays.
+    Passthrough,
+}
+
+impl ContractLineVat {
+    fn of(item: &GeneratedContractLineItem) -> Self {
+        let rate = contract_line_vat_rate(item);
+        if rate > Decimal::ZERO {
+            Self::Taxed(rate.normalize())
+        } else if item.is_cost_passthrough || is_estimated_outlays_item(item) {
+            Self::Passthrough
+        } else {
+            Self::Exempt
+        }
+    }
+
+    /// Taxed rates first, highest first, then exempt and pass-through lines:
+    /// the order of the invoice's VAT breakdown.
+    fn sort_key(self) -> (u8, std::cmp::Reverse<Decimal>) {
+        match self {
+            Self::Taxed(rate) => (0, std::cmp::Reverse(rate)),
+            Self::Exempt => (1, std::cmp::Reverse(Decimal::ZERO)),
+            Self::Passthrough => (2, std::cmp::Reverse(Decimal::ZERO)),
+        }
+    }
+}
+
+/// A VAT rate as the German documents print it: "19", "7", "5,5".
+fn fmt_vat_rate(rate: Decimal) -> String {
+    rate.normalize().to_string().replace('.', ",")
+}
+
+/// The listed services grouped by VAT treatment, in breakdown order.
+fn contract_vat_groups<'a>(
+    items: &[&'a GeneratedContractLineItem],
+) -> Vec<(ContractLineVat, Vec<&'a str>)> {
+    let mut groups: Vec<(ContractLineVat, Vec<&'a str>)> = Vec::new();
+    for &item in items {
+        let treatment = ContractLineVat::of(item);
+        let index = match groups.iter().position(|(group, _)| *group == treatment) {
+            Some(index) => index,
+            None => {
+                groups.push((treatment, Vec::new()));
+                groups.len() - 1
+            }
+        };
+        let name = item.description.trim();
+        let names = &mut groups[index].1;
+        if !name.is_empty() && !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    groups.sort_by_key(|(treatment, _)| treatment.sort_key());
+    groups
+}
+
+/// Label of the VAT total: the rate when every taxed service uses the same
+/// one ("MWSt. 19%"), plain "MWSt." otherwise.
+fn contract_vat_total_label(items: &[&GeneratedContractLineItem]) -> String {
+    let taxed_rates = contract_vat_groups(items)
+        .into_iter()
+        .filter_map(|(treatment, _)| match treatment {
+            ContractLineVat::Taxed(rate) => Some(rate),
+            ContractLineVat::Exempt | ContractLineVat::Passthrough => None,
+        })
+        .collect::<Vec<_>>();
+    match taxed_rates.as_slice() {
+        [rate] => format!("MWSt. {}%", fmt_vat_rate(*rate)),
+        _ => "MWSt.".to_string(),
+    }
+}
+
+/// VAT note for services that are not all taxed at one rate: names the rate
+/// of each service and the statutory reason of each 0 % line in the words of
+/// the invoice and the e-invoice (§ 4 Nr. 14 UStG for medical care such as
+/// the organisation of the treatment, § 10 UStG for pass-through costs).
+/// `None` when every listed price carries the same VAT rate.
+fn mixed_contract_vat_note(items: &[&GeneratedContractLineItem]) -> Option<String> {
+    let groups = contract_vat_groups(items);
+    if matches!(groups.as_slice(), [] | [(ContractLineVat::Taxed(_), _)]) {
+        return None;
+    }
+    let parts = groups
+        .iter()
+        .map(|(treatment, names)| {
+            let (rate, reason) = match treatment {
+                ContractLineVat::Taxed(rate) => (*rate, None),
+                ContractLineVat::Exempt => (
+                    Decimal::ZERO,
+                    crate::routes::invoices::line_exemption_reason(Decimal::ZERO, false),
+                ),
+                ContractLineVat::Passthrough => (
+                    Decimal::ZERO,
+                    crate::routes::invoices::line_exemption_reason(Decimal::ZERO, true),
+                ),
+            };
+            let mut part = format!("{} %", fmt_vat_rate(rate));
+            if !names.is_empty() {
+                part.push_str(" – ");
+                part.push_str(&names.join(", "));
+            }
+            if let Some(reason) = reason {
+                part.push_str(&format!(" ({reason})"));
+            }
+            part
+        })
+        .collect::<Vec<_>>();
+    Some(format!(
+        "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: {}.",
+        parts.join("; ")
+    ))
+}
+
+/// VAT note under a contract price table (prices are net): "Alle angegebenen
+/// Preise zzgl. MwSt. 19 %." when every service carries that rate, the
+/// per-service rates of `mixed_contract_vat_note` otherwise.
+fn contract_vat_note(items: &[&GeneratedContractLineItem]) -> String {
+    mixed_contract_vat_note(items).unwrap_or_else(|| {
+        let rate = items
+            .first()
+            .map(|&item| contract_line_vat_rate(item))
+            .unwrap_or(Decimal::new(19, 0));
+        format!(
+            "Alle angegebenen Preise zzgl. MwSt. {} %.",
+            fmt_vat_rate(rate)
+        )
+    })
+}
+
 fn build_cost_coverage_pdf(
     context: &GeneratedCostCoverageContext,
     document_reference: &str,
@@ -17072,7 +17246,7 @@ fn build_cost_coverage_pdf(
             0.0,
             1.0,
         );
-        for item in service_items {
+        for item in &service_items {
             // Description (Leistungen).
             layout.text_block(
                 &format!("•  {}", item.description.trim()),
@@ -17131,7 +17305,7 @@ fn build_cost_coverage_pdf(
         }
         admin_block(
             &mut layout,
-            "*Alle angegebenen Preise zzgl. MwSt. 19 %.",
+            &format!("*{}", contract_vat_note(&service_items)),
             4.5,
             2.0,
         );
@@ -17251,9 +17425,10 @@ fn build_cost_coverage_pdf(
     let displayed_net =
         net_without_estimated_outlays(context.total_net.as_deref(), estimated_outlays);
     let displayed_outlays = estimated_outlays.map(format_eur);
+    let vat_label = contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>());
     for (label, value) in [
         ("Nettowert", displayed_net.as_deref()),
-        ("MWSt. 19%", context.total_vat.as_deref()),
+        (vat_label.as_str(), context.total_vat.as_deref()),
         (ESTIMATED_OUTLAYS_DESCRIPTION, displayed_outlays.as_deref()),
         ("Gesamtsumme", context.total_gross.as_deref()),
     ] {
@@ -19246,12 +19421,7 @@ fn compute_line_item_totals(
         } else {
             continue;
         };
-        let vat_rate = item
-            .vat_rate
-            .as_deref()
-            .and_then(parse_eur_decimal)
-            .unwrap_or(Decimal::new(19, 0))
-            .clamp(Decimal::ZERO, Decimal::ONE_HUNDRED);
+        let vat_rate = contract_line_vat_rate(item);
         net += line_net;
         vat += money::vat_amount(line_net, vat_rate);
     }
@@ -19277,6 +19447,7 @@ fn service_lines_to_items(lines: &[ServiceLineInput]) -> Vec<GeneratedContractLi
             unit_price: line.fee.clone().unwrap_or_default(),
             line_gross: line.line_total.clone().unwrap_or_default(),
             vat_rate: line.vat_rate.clone(),
+            is_cost_passthrough: line.is_cost_passthrough.unwrap_or(false),
             notes: line
                 .note
                 .as_deref()
@@ -19487,6 +19658,7 @@ async fn load_lead_cost_estimate_catalog_selection(
             unit_price: price_range,
             line_gross: line_total_range,
             vat_rate: None,
+            is_cost_passthrough: false,
             notes: None,
         });
     }
@@ -27774,6 +27946,7 @@ mod tests {
             unit_price: "150,00 EUR".to_string(),
             line_gross: "150,00 EUR".to_string(),
             vat_rate: Some("19".to_string()),
+            is_cost_passthrough: false,
             notes: Some(
                 "1) Dining: Up to 2 restaurant reservations per day\n2) Transport Coordination: up to 2 transfers/day\n\nNOT INCLUDED\n- Private chauffeur services\n- Security services"
                     .to_string(),
@@ -27865,6 +28038,7 @@ mod tests {
                     unit_price: "100,00 EUR".to_string(),
                     line_gross: "500,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
+                    is_cost_passthrough: false,
                     notes: Some(
                         "Herstellung von Kontakten und Terminvereinbarungen.\n\nKoordination der interdisziplinären Zusammenarbeit."
                             .to_string(),
@@ -27879,6 +28053,7 @@ mod tests {
                     unit_price: "999,00 EUR".to_string(),
                     line_gross: "999,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
+                    is_cost_passthrough: false,
                     notes: None,
                 },
                 GeneratedContractLineItem {
@@ -27889,6 +28064,7 @@ mod tests {
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
                     line_gross: "800,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
+                    is_cost_passthrough: false,
                     notes: None,
                 },
             ],
@@ -27943,6 +28119,11 @@ mod tests {
         );
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
         assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
+        // Every service is taxed at 19 %: the short VAT note stays.
+        assert!(text.contains(
+            "*Alle angegebenen Preise zzgl. MwSt. 19 %. Der konkrete Aufwand wird im Kostenvoranschlag"
+        ));
+        assert!(!text.contains("§ 4 Nr. 14 UStG"));
 
         context.line_items.push(GeneratedContractLineItem {
             description_items: None,
@@ -27952,6 +28133,7 @@ mod tests {
             unit_price: "50,00 EUR".to_string(),
             line_gross: "50,00 EUR".to_string(),
             vat_rate: Some("0".to_string()),
+            is_cost_passthrough: false,
             notes: None,
         });
         context.total_net = Some("2.349,00 EUR".to_string());
@@ -27978,6 +28160,11 @@ mod tests {
         assert!(estimate_text.contains("VORAUSSICHTLICHER AUFWAND (IN EINHEITEN)"));
         assert!(estimate_text.contains("Nettowert:"));
         assert!(estimate_text.contains("MWSt. 19%:"));
+        // The listed services are all taxed at 19 % and the outlays have
+        // their own row, so no per-service VAT note is printed.
+        assert!(
+            !estimate_text.contains("nach dem für die jeweilige Leistung geltenden Steuersatz")
+        );
         assert!(estimate_text.contains("Voraussichtliche Auslagen:"));
         assert!(estimate_text.contains("Gesamtsumme:"));
         assert!(estimate_text.contains("Organisation der Behandlung"));
@@ -28060,6 +28247,241 @@ mod tests {
         assert!(estimate_text.contains("Berlin, den 16.07.2026"));
     }
 
+    fn priced_line(
+        description: &str,
+        quantity: &str,
+        unit_price: &str,
+        line_total: &str,
+        vat_rate: &str,
+    ) -> GeneratedContractLineItem {
+        GeneratedContractLineItem {
+            description_items: None,
+            localized_sections: Vec::new(),
+            description: description.to_string(),
+            quantity: quantity.to_string(),
+            unit_price: unit_price.to_string(),
+            line_gross: line_total.to_string(),
+            vat_rate: Some(vat_rate.to_string()),
+            is_cost_passthrough: false,
+            notes: None,
+        }
+    }
+
+    /// The order from QA case A-05: the organisation of the treatment at 0 %,
+    /// transfer and interpreter at 19 %, estimated outlays as a 0 % line.
+    fn mixed_vat_order_lines() -> Vec<GeneratedContractLineItem> {
+        vec![
+            priced_line(
+                "Organisation der Behandlung",
+                "1",
+                "550,00 EUR",
+                "550,00 EUR",
+                "0",
+            ),
+            priced_line("Airport transfer", "2", "180,00 EUR", "360,00 EUR", "19"),
+            priced_line("Interpreter", "8", "95,00 EUR", "760,00 EUR", "19"),
+            priced_line(
+                super::ESTIMATED_OUTLAYS_DESCRIPTION,
+                "1",
+                "1.200,00 EUR",
+                "1.200,00 EUR",
+                "0",
+            ),
+        ]
+    }
+
+    const MIXED_VAT_NOTE: &str = "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer, Interpreter; 0 % – Organisation der Behandlung (Steuerfreie Heilbehandlung nach § 4 Nr. 14 UStG)";
+
+    #[test]
+    fn contract_vat_note_follows_the_rates_of_the_lines() {
+        // Only 19 %: the short note is unchanged. Quotes store "19.00" and a
+        // manual line without a rate has always been taxed at 19 %.
+        let taxed = [
+            priced_line("Airport transfer", "2", "180,00 EUR", "360,00 EUR", "19"),
+            priced_line("Interpreter", "8", "95,00 EUR", "760,00 EUR", "19.00"),
+            GeneratedContractLineItem {
+                vat_rate: None,
+                ..priced_line("Beratung", "1", "100,00 EUR", "100,00 EUR", "19")
+            },
+        ];
+        let taxed = taxed.iter().collect::<Vec<_>>();
+        assert_eq!(
+            super::contract_vat_note(&taxed),
+            "Alle angegebenen Preise zzgl. MwSt. 19 %."
+        );
+        assert_eq!(super::mixed_contract_vat_note(&taxed), None);
+        assert_eq!(super::contract_vat_total_label(&taxed), "MWSt. 19%");
+
+        // The QA order: every rate is named, 0 % lines carry the reason the
+        // invoice prints (§ 4 Nr. 14 UStG) or the e-invoice uses (§ 10 UStG).
+        let lines = mixed_vat_order_lines();
+        let all = lines.iter().collect::<Vec<_>>();
+        assert_eq!(
+            super::contract_vat_note(&all),
+            format!(
+                "{MIXED_VAT_NOTE}; 0 % – Voraussichtliche Auslagen (Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG)."
+            )
+        );
+        assert_eq!(super::contract_vat_total_label(&all), "MWSt. 19%");
+        // The lead wizard's Einzelauftrag lists the services without outlays.
+        assert_eq!(
+            super::contract_vat_note(&all[..3]),
+            format!("{MIXED_VAT_NOTE}.")
+        );
+
+        // A flagged pass-through cost is never described as medical care.
+        let clinic_invoice = GeneratedContractLineItem {
+            is_cost_passthrough: true,
+            ..priced_line("Klinikrechnung", "1", "800,00 EUR", "800,00 EUR", "0")
+        };
+        let note = super::contract_vat_note(&[&lines[1], &clinic_invoice]);
+        assert_eq!(
+            note,
+            "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer; 0 % – Klinikrechnung (Durchlaufender Posten gemäß § 10 Abs. 1 Satz 5 UStG)."
+        );
+
+        // Two taxed rates: highest first; the VAT total names no single rate.
+        let reduced = priced_line("Fachliteratur", "1", "20,00 EUR", "20,00 EUR", "7");
+        let two_rates = [&reduced, &lines[1]];
+        assert_eq!(
+            super::contract_vat_note(&two_rates),
+            "Alle angegebenen Preise zzgl. MwSt. nach dem für die jeweilige Leistung geltenden Steuersatz: 19 % – Airport transfer; 7 % – Fachliteratur."
+        );
+        assert_eq!(super::contract_vat_total_label(&two_rates), "MWSt.");
+    }
+
+    #[test]
+    fn quote_and_binding_lines_keep_the_pass_through_flag() {
+        let quote = super::parse_quote_line_items(&json!([
+            {"description": "Organisation der Behandlung", "quantity": "1", "unit_price": "550.00",
+             "vat_rate": "0.00", "is_cost_passthrough": false, "line_gross": "550.00"},
+            {"description": "Klinikrechnung", "quantity": "1", "unit_price": "800.00",
+             "vat_rate": "0.00", "is_cost_passthrough": true, "line_gross": "800.00"},
+            {"description": "Interpreter", "quantity": "8", "unit_price": "95.00",
+             "vat_rate": "19.00", "is_cost_passthrough": false, "line_gross": "904.40"}
+        ]));
+        assert_eq!(
+            quote
+                .iter()
+                .map(super::ContractLineVat::of)
+                .collect::<Vec<_>>(),
+            vec![
+                super::ContractLineVat::Exempt,
+                super::ContractLineVat::Passthrough,
+                super::ContractLineVat::Taxed(rust_decimal::Decimal::new(19, 0)),
+            ]
+        );
+
+        let lines: Vec<ServiceLineInput> = serde_json::from_value(json!([
+            {"description": "Klinikrechnung", "vat_rate": "0", "is_cost_passthrough": true},
+            {"description": "Organisation der Behandlung", "vat_rate": "0"}
+        ]))
+        .unwrap();
+        let items = super::service_lines_to_items(&lines);
+        assert!(items[0].is_cost_passthrough);
+        assert!(!items[1].is_cost_passthrough);
+    }
+
+    #[test]
+    fn order_documents_state_the_vat_of_mixed_rate_services() {
+        let lines = mixed_vat_order_lines();
+        let mut context = GeneratedSingleOrderContext {
+            language: "de".to_string(),
+            auto_name: "Einzelauftrag".to_string(),
+            title_override: None,
+            patient_pid: "PT-VAT-1".to_string(),
+            party: legal_test_party("Germany"),
+            agency: legal_test_agency(),
+            order_number: "EA-2026-0005".to_string(),
+            contract_number: Some("RV-2026-0002".to_string()),
+            order_sequence: 1,
+            order_date: NaiveDate::from_ymd_opt(2026, 9, 28),
+            contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
+            specialties: None,
+            examination_purpose: None,
+            treatment_purpose: None,
+            order_components: None,
+            period_from: None,
+            period_to: None,
+            payer: None,
+            quote_number: Some("KV-2026-0010".to_string()),
+            // The lead wizard leaves the estimated outlays out of the order.
+            line_items: lines[..3].to_vec(),
+            total_net: Some("1.670,00 EUR".to_string()),
+            total_vat: Some("212,80 EUR".to_string()),
+            total_gross: Some("1.882,80 EUR".to_string()),
+            party_sign_place: None,
+            party_sign_date: None,
+            agency_sign_place: None,
+            agency_sign_date: None,
+            generated_at: Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap(),
+        };
+
+        let order_text = assert_legal_pdf_chrome(
+            &build_single_order_pdf(&context, "DOC-VAT-ORDER").unwrap(),
+            "EA-2026-0005",
+        );
+        assert!(order_text.contains(&format!(
+            "*{MIXED_VAT_NOTE}. Der konkrete Aufwand wird im Kostenvoranschlag"
+        )));
+        assert!(!order_text.contains("zzgl. MwSt. 19 %"));
+
+        context.line_items = lines.clone();
+        context.total_net = Some("2.870,00 EUR".to_string());
+        context.total_gross = Some("3.082,80 EUR".to_string());
+        let estimate_text = assert_legal_pdf_chrome(
+            &build_order_cost_estimate_pdf(&context, "DOC-VAT-QUOTE").unwrap(),
+            "KV-2026-0010",
+        );
+        assert!(estimate_text.contains("Nettowert: 1.670,00 EUR"));
+        assert!(estimate_text.contains("MWSt. 19%: 212,80 EUR"));
+        assert!(estimate_text.contains("Voraussichtliche Auslagen: 1.200,00 EUR"));
+        assert!(estimate_text.contains("Gesamtsumme: 3.082,80 EUR"));
+        // The outlays have their own row; the note covers the listed services.
+        assert!(estimate_text.contains(&format!("{MIXED_VAT_NOTE}.")));
+        assert_eq!(
+            estimate_text
+                .matches(super::ESTIMATED_OUTLAYS_DESCRIPTION)
+                .count(),
+            1
+        );
+        let gross_position = estimate_text.find("Gesamtsumme:").unwrap();
+        let note_position = estimate_text.find(MIXED_VAT_NOTE).unwrap();
+        assert!(gross_position < note_position);
+
+        let coverage = super::GeneratedCostCoverageContext {
+            language: "de".to_string(),
+            auto_name: "Kostenübernahmeerklärung".to_string(),
+            title_override: None,
+            patient: legal_test_party("Germany"),
+            payer: DocPartyBlock {
+                name: "Justus Geldgeber".to_string(),
+                ..Default::default()
+            },
+            agency: legal_test_agency(),
+            order_number: "EA-2026-0005".to_string(),
+            order_sequence: 1,
+            order_date: NaiveDate::from_ymd_opt(2026, 9, 28),
+            contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
+            quote_number: Some("KV-2026-0010".to_string()),
+            line_items: lines,
+            total_net: Some("2.870,00 EUR".to_string()),
+            total_vat: Some("212,80 EUR".to_string()),
+            total_gross: Some("3.082,80 EUR".to_string()),
+            payer_sign_place: None,
+            payer_sign_date: None,
+            agency_sign_place: None,
+            agency_sign_date: None,
+            generated_at: Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap(),
+        };
+        let coverage_text = normalized_pdf_text(
+            &super::build_cost_coverage_pdf(&coverage, "DOC-VAT-COVERAGE").unwrap(),
+        );
+        assert!(coverage_text.contains(&format!("*{MIXED_VAT_NOTE}.")));
+        assert!(!coverage_text.contains("zzgl. MwSt. 19 %"));
+        assert!(coverage_text.contains("MWSt. 19%: 212,80 EUR"));
+    }
+
     #[test]
     fn cost_estimate_pdf_uses_its_own_document_number_and_shared_legal_chrome() {
         let context = GeneratedCostEstimateContext {
@@ -28081,6 +28503,7 @@ mod tests {
                 unit_price: "100,00 - 1000,00 EUR".to_string(),
                 line_gross: "100,00 - 1000,00 EUR".to_string(),
                 vat_rate: None,
+                is_cost_passthrough: false,
                 notes: None,
             }],
             total_range: Some("100,00 - 1000,00 EUR".to_string()),
@@ -28129,6 +28552,7 @@ mod tests {
                 unit_price: "100,00 - 1000,00 EUR".to_string(),
                 line_gross: "100,00 - 1000,00 EUR".to_string(),
                 vat_rate: None,
+                is_cost_passthrough: false,
                 notes: None,
             }],
             total_range: Some("100,00 - 1000,00 EUR".to_string()),
@@ -28183,6 +28607,7 @@ mod tests {
             unit_price: "100,00 - 1000,00 EUR".to_string(),
             line_gross: "100,00 - 1000,00 EUR".to_string(),
             vat_rate: None,
+            is_cost_passthrough: false,
             notes: None,
         };
         let context = GeneratedCostEstimateContext {
@@ -28236,6 +28661,7 @@ mod tests {
                 quantity: Some("1".to_string()),
                 line_total: Some("285,00 EUR".to_string()),
                 vat_rate: Some("19".to_string()),
+                is_cost_passthrough: None,
                 note: None,
             }],
             ..Default::default()
@@ -28280,6 +28706,7 @@ mod tests {
                 unit_price: "800,00 - 1.200,00 EUR".to_string(),
                 line_gross: "800,00 - 1.200,00 EUR".to_string(),
                 vat_rate: None,
+                is_cost_passthrough: false,
                 notes: None,
             }],
             total_range: "800,00 - 1.200,00 EUR".to_string(),
@@ -28313,6 +28740,7 @@ mod tests {
                 quantity: None,
                 line_total: Some("1.000,00 - 1.500,00 EUR".to_string()),
                 vat_rate: None,
+                is_cost_passthrough: None,
                 note: None,
             }],
             ..Default::default()
@@ -28429,6 +28857,7 @@ mod tests {
             unit_price: "100,00 EUR/1 Stunde".to_string(),
             line_gross: String::new(),
             vat_rate: None,
+            is_cost_passthrough: false,
             notes: None,
         }])
         .unwrap();
@@ -28448,6 +28877,7 @@ mod tests {
             unit_price: "95,00 EUR/1 Stunde".to_string(),
             line_gross: String::new(),
             vat_rate: Some("19".to_string()),
+            is_cost_passthrough: false,
             notes: None,
         }])
         .unwrap();
@@ -28527,6 +28957,7 @@ mod tests {
                     unit_price: "100,00 EUR".to_string(),
                     line_gross: "500,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
+                    is_cost_passthrough: false,
                     notes: Some("Leistungsumfang 10, 11".to_string()),
                 },
                 GeneratedContractLineItem {
@@ -28538,6 +28969,7 @@ mod tests {
                     unit_price: "999,00 EUR".to_string(),
                     line_gross: "999,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
+                    is_cost_passthrough: false,
                     notes: None,
                 },
                 GeneratedContractLineItem {
@@ -28548,6 +28980,7 @@ mod tests {
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
                     line_gross: "800,00 EUR".to_string(),
                     vat_rate: Some("19".to_string()),
+                    is_cost_passthrough: false,
                     notes: None,
                 },
             ],

@@ -112,6 +112,9 @@ pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, templ
                 )),
                 line_total: Some(format_eur_decimal(line_net(line))),
                 vat_rate: Some(text(line, "vat_rate").to_string()),
+                // Intake lines carry no pass-through flag; the estimated
+                // outlays line is recognised by its description.
+                is_cost_passthrough: None,
                 note,
             }
         })
@@ -165,6 +168,7 @@ pub(super) fn estimate_selection(context: &Value) -> Option<GeneratedCostEstimat
                 unit_price: format_eur_range(min, max),
                 line_gross: format_eur_range(min, max),
                 vat_rate: None,
+                is_cost_passthrough: false,
                 notes: None,
             }
         })
@@ -261,6 +265,9 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                 )),
                 line_total: Some(format_eur_decimal(line_net(line))),
                 vat_rate: Some(text(line, "vat_rate").to_owned()),
+                // The repeat-order context carries no pass-through flag; the
+                // estimated outlays line is recognised by its description.
+                is_cost_passthrough: None,
             }
         })
         .collect();

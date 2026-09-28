@@ -5387,6 +5387,8 @@ ${serviceCommentLines.join("\n")}`
                 fee: serviceDocumentFee(line),
                 line_total: `${roundCents(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
                 vat_rate: line.vat,
+                // A 0 % pass-through cost is a durchlaufender Posten, not tax-exempt medical care.
+                is_cost_passthrough: line.isCostPassthrough === true,
                 note: serviceDocumentNote(line),
                 description_items: resolvedServiceCatalogItems(line),
               })),

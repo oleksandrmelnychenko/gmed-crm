@@ -493,6 +493,12 @@ describe("document template binding payloads", () => {
     expect(buildBindingsPayload("single_order", hydrated)?.service_lines).toEqual(lines);
   });
 
+  it("keeps the pass-through flag of a service line when editing a new version", () => {
+    const lines = [{ description: "Klinikrechnung", fee: "800 EUR", is_cost_passthrough: true }];
+    const hydrated = hydrateDocumentBindings("order_cost_estimate", { service_lines: lines }, null);
+    expect(buildBindingsPayload("order_cost_estimate", hydrated)?.service_lines).toEqual(lines);
+  });
+
   it("hydrates every persisted scalar and structured binding for a new version", () => {
     expect(
       hydrateDocumentBindings(
