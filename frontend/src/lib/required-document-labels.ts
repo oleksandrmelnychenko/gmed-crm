@@ -1,6 +1,142 @@
 type L = (key: string) => string;
 
+/**
+ * Document categories and types from the server dictionary
+ * (`ref_document_categories`) and the generated-document templates that are
+ * labelled as `document_category_<key>` in the UI catalogs. The server only
+ * sends English and German names, so the UI localises by the stable key and
+ * falls back to the server label for keys added later.
+ */
+const DOCUMENT_CATEGORY_LABEL_KEYS = [
+  "official",
+  "personal",
+  "other",
+  "payment",
+  "administrative_single_order",
+  "administrative_appointment_confirmation",
+  "official_authority",
+  "official_departmental",
+  "visa_invitation_letter",
+  "finance_general",
+  "finance_cost_coverage",
+  "finance_cost_estimate",
+  "finance_order_cost_estimate",
+  "finance_payment_proof",
+  "compliance_aml",
+  "provider_template",
+  "medical_gastro",
+  "medical_onko",
+  "medical_kardio",
+  "medical_kardch",
+  "medical_derma",
+  "medical_dermch",
+  "medical_radiology",
+  "medical_lab",
+  "medical_patho_histo",
+  "medical_neuro",
+  "medical_neurch",
+  "medical_chir",
+  "medical_gyn",
+  "medical_gynch",
+  "medical_auge",
+  "medical_augch",
+  "medical_hamat",
+  "medical_uro",
+  "medical_uroch",
+  "medical_schlaf",
+  "medical_endo",
+  "medical_endoch",
+  "medical_vask",
+  "medical_orthol",
+  "medical_unfal",
+  "medical_mkg",
+  "medical_dent",
+  "medical_kfo",
+  "medical_plastchir",
+  "medical_pad",
+  "medical_physio_reha",
+  "medical_hno",
+  "medical_infekt",
+  "medical_ana",
+  "medical_nephro",
+  "medical_psych",
+  "medical_pneumo_resp",
+  "medical_prokto",
+  "medical_rheum",
+  "medical_ger",
+  "medical_allmed",
+  "medical_arztbrief",
+  "medical_befund",
+  "medical_bericht",
+  "medical_schreiben",
+  "medical_ueberweisung",
+  "medical_radiology_report",
+  "medical_sonography",
+  "medical_ct",
+  "medical_mrt",
+  "medical_roentgen",
+  "medical_pet_ct",
+  "medical_entlassungsbrief",
+  "medical_operationsbericht",
+  "treatment_plan",
+  "medical_therapy_protocol",
+  "medical_prescription",
+  "medical_vaccination_record",
+  "medical_lab_results",
+  "medication_summary",
+  "personal_passport",
+  "personal_residence_permit",
+  "personal_birth_certificate",
+] as const;
+
+/** Document type (`art`) codes the server writes, labelled as `document_art_<code>`. */
+const DOCUMENT_ART_LABEL_CODES = [
+  "document",
+  "arztbrief",
+  "imaging_report",
+  "invoice_document",
+  "insurance_document",
+  "payment_proof",
+  "receipt",
+  "contract_document",
+  "translated_document",
+  "signature_evidence",
+  "provider_document",
+  "provider_template_instruction",
+  "interpreter_profile_document",
+  "questionnaire_attachment",
+  "patient_upload",
+  "patient_general_upload",
+  "patient_medical_upload",
+  "patient_admin_upload",
+  "patient_correspondence_upload",
+  "patient_analysis_upload",
+  "patient_conclusion_upload",
+  "patient_invoice_upload",
+  "patient_translation_upload",
+  "free_text_document",
+  "framework_contract",
+  "visa_invitation",
+  "patient_sticker",
+  "single_order",
+  "order_cost_estimate",
+  "cost_coverage_declaration",
+  "cost_estimate",
+  "appointment_confirmation",
+  "confidentiality_release",
+  "privacy_consents",
+  "privacy_information",
+  "enhanced_due_diligence",
+  "consent_data_release",
+] as const;
+
 const DOC_LABEL_MAP: Record<string, string> = {
+  ...Object.fromEntries(
+    DOCUMENT_CATEGORY_LABEL_KEYS.map((key) => [key, `document_category_${key}`]),
+  ),
+  ...Object.fromEntries(
+    DOCUMENT_ART_LABEL_CODES.map((code) => [code, `document_art_${code}`]),
+  ),
   passport: "required_doc_passport",
   consent_form: "required_doc_consent_form",
   insurance_card: "required_doc_insurance_card",
@@ -86,4 +222,52 @@ export function localizeDocumentCode(
     return humanizeFallback(trimmed);
   }
   return trimmed;
+}
+
+/** The UI label of a known document code, or undefined when the UI has none. */
+export function knownDocumentCodeLabel(
+  value: string | null | undefined,
+  l: L,
+): string | undefined {
+  const normalized = value?.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const entry = normalized ? DOC_LABEL_MAP[normalized] : undefined;
+  return entry ? l(entry) : undefined;
+}
+
+/** A category entry as `/documents/meta/categories` returns it. */
+export type DocumentCategoryLabelSource = {
+  key: string;
+  label?: string;
+  label_de?: string;
+  label_en?: string;
+  parent_key?: string | null;
+  breadcrumb_label?: string;
+  breadcrumb_label_de?: string;
+};
+
+/**
+ * Label of a category from the server's document dictionary: the UI label for
+ * its key, else the server name (German for DE; the server has no Russian
+ * names). `withPath` prefixes the parent category ("Medizinisch / Arztbrief").
+ */
+export function localizeDocumentCategory(
+  category: DocumentCategoryLabelSource,
+  lang: "de" | "ru",
+  l: L,
+  withPath = false,
+): string {
+  const serverLabel =
+    lang === "de"
+      ? category.label_de || category.label || category.label_en || category.key
+      : category.label || category.label_en || category.key;
+  const known = knownDocumentCodeLabel(category.key, l);
+  const label = known ?? serverLabel;
+  if (!withPath || !category.parent_key) return label;
+  const parentLabel = knownDocumentCodeLabel(category.parent_key, l);
+  if (parentLabel) return `${parentLabel} / ${label}`;
+  const serverPath =
+    lang === "de"
+      ? category.breadcrumb_label_de || category.breadcrumb_label
+      : category.breadcrumb_label;
+  return !known && serverPath ? serverPath : label;
 }

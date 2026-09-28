@@ -13,7 +13,11 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
-import { useLang } from "@/lib/i18n";
+import { uiText, useLang } from "@/lib/i18n";
+import {
+  localizeDocumentCategory,
+  localizeDocumentCode,
+} from "@/lib/required-document-labels";
 import {
   fetchDocument,
   fetchDocumentCategories,
@@ -317,8 +321,9 @@ function mergeCategories(
 }
 
 function categoryLabel(category: CategoryOption, lang: "de" | "ru") {
-  const label =
-    lang === "de" ? category.label_de || category.label : category.label;
+  const label = localizeDocumentCategory(category, lang, (key) =>
+    uiText(key, lang),
+  );
   const prefix = category.short_code ? `${category.short_code} · ` : "";
   const indent =
     category.level === "category"
@@ -580,7 +585,11 @@ export function PatientDocumentEditSheet({
                 />
                 <datalist id="patient-document-art-options">
                   {artOptions.map((art) => (
-                    <option key={art} value={art} />
+                    <option
+                      key={art}
+                      value={art}
+                      label={localizeDocumentCode(art, (key) => uiText(key, lang))}
+                    />
                   ))}
                 </datalist>
               </Field>

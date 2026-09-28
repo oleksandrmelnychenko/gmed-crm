@@ -45,7 +45,10 @@ import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { createDocumentPreviewColumn } from "@/components/data-table/document-preview-column";
 import type { ColumnDef } from "@/components/data-table/types";
 import { DocumentsGrid } from "@/components/documents-grid";
-import { localizeDocumentCode } from "@/lib/required-document-labels";
+import {
+  localizeDocumentCategory,
+  localizeDocumentCode,
+} from "@/lib/required-document-labels";
 import {
   DOCUMENT_BINDING_FIELDS,
   documentTemplateUsesOrderServices,
@@ -289,15 +292,13 @@ function documentCategoryOptionLabel(
   lang: string,
   showPath = false,
 ) {
-  const label =
-    lang === "ru"
-      ? category.label || category.label_en || category.key
-      : category.label_de || category.label || category.label_en || category.key;
-  const path =
-    lang === "ru"
-      ? category.breadcrumb_label || label
-      : category.breadcrumb_label_de || category.breadcrumb_label || label;
-  const visible = showPath ? path : label;
+  const language = lang === "de" ? "de" : "ru";
+  const visible = localizeDocumentCategory(
+    category,
+    language,
+    (key) => uiText(key, language),
+    showPath,
+  );
   return category.short_code ? `${category.short_code} · ${visible}` : visible;
 }
 

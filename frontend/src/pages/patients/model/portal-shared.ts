@@ -6,7 +6,9 @@ import {
   getLang,
   t as translateCatalog,
   type TranslationKey,
+  uiText,
 } from "@/lib/i18n";
+import { knownDocumentCodeLabel } from "@/lib/required-document-labels";
 
 export type PortalDocumentItem = {
   id: string;
@@ -887,14 +889,20 @@ export function portalStatusLabel(value?: string | null) {
 }
 
 export function documentCategoryLabel(value?: string | null) {
-  return portalEnumLabel(value, PORTAL_DOCUMENT_VALUE_LABEL_KEYS);
+  return portalDocumentValueLabel(value);
 }
 
 export function invoiceTypeLabel(value: string) {
   return portalEnumLabel(value, PORTAL_INVOICE_TYPE_LABEL_KEYS);
 }
 
+/** A document type or category: the portal wording, else the staff document label. */
 export function portalDocumentValueLabel(value?: string | null) {
+  if (value && !(value in PORTAL_DOCUMENT_VALUE_LABEL_KEYS)) {
+    const lang = getLang();
+    const known = knownDocumentCodeLabel(value, (key) => uiText(key, lang));
+    if (known) return known;
+  }
   return portalEnumLabel(value, PORTAL_DOCUMENT_VALUE_LABEL_KEYS);
 }
 
