@@ -131,7 +131,7 @@ export async function completableParentAfterChild(
 
 /** Status steps that complete a task for this actor, or null if they cannot. */
 export function parentCompletionPath(
-  parent: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role">,
+  parent: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ): Array<"in_progress" | "completed"> | null {

@@ -151,6 +151,13 @@ export type ConciergeTask = {
   assigned_by: string;
   assigned_by_name: string;
   assigned_by_role?: string | null;
+  /**
+   * Whether the caller may edit, close, archive or delete the task (its
+   * creator, or a higher role whose reach covers the task: a patient manager
+   * only for the patients of its pool). Sent by the work center; the role
+   * hierarchy below is the fallback for payloads without it.
+   */
+  can_manage?: boolean;
   concierge_service_id: string | null;
   due_at: string | null;
   starts_at: string | null;
@@ -217,7 +224,14 @@ function participatesInTaskManager(role: string | null | undefined) {
   return hasCapability(role, "tasks.use");
 }
 
+/** Roles that assign tasks to the concierge. */
 const MANAGEMENT_ROLES = new Set(["ceo_assistant", "billing", "patient_manager", "sales"]);
+/**
+ * Roles that change concierge tasks by rank (within their reach, which only
+ * the server knows: see `can_manage`). The CEO assistant reads every task but
+ * changes only its own.
+ */
+const CONCIERGE_SUPERVISOR_ROLES = new Set(["billing", "patient_manager", "sales"]);
 
 function canManageConciergeTaskCreatorRole(
   actorRole: string | null | undefined,
@@ -225,7 +239,7 @@ function canManageConciergeTaskCreatorRole(
 ) {
   if (!actorRole || !creatorRole) return false;
   if (actorRole === "ceo") return creatorRole !== "ceo";
-  if (MANAGEMENT_ROLES.has(actorRole)) return creatorRole === "concierge";
+  if (CONCIERGE_SUPERVISOR_ROLES.has(actorRole)) return creatorRole === "concierge";
   if (actorRole === "teamlead_interpreter") return creatorRole === "interpreter";
   return false;
 }
@@ -300,11 +314,12 @@ export function conciergeTasksAssignedToActor(
 }
 
 export function canModifyConciergeTask(
-  task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
   if (!actorId || !actorRole) return false;
+  if (typeof task.can_manage === "boolean") return task.can_manage;
   if (task.assigned_by === actorId) return true;
   if (actorRole === "ceo") return true;
   return canManageConciergeTaskCreatorRole(actorRole, task.assigned_by_role);
@@ -315,7 +330,7 @@ export function canModifyConciergeTask(
  * (who documents its own work). The assignee removes only its own uploads.
  */
 export function canAttachToConciergeTask(
-  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
@@ -326,7 +341,7 @@ export function canAttachToConciergeTask(
 }
 
 export function canChangeConciergeTaskStatus(
-  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
@@ -337,7 +352,7 @@ export function canChangeConciergeTaskStatus(
 }
 
 export function availableConciergeTaskStatuses(
-  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ): ConciergeTaskStatus[] {
@@ -364,7 +379,7 @@ export function availableConciergeTaskStatuses(
 }
 
 export function canDeleteConciergeTask(
-  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number; child_count?: number; workflow_checklist_item_id?: string | null },
+  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role" | "can_manage"> & { attachment_count?: number; child_count?: number; workflow_checklist_item_id?: string | null },
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {

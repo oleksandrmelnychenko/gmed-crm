@@ -448,15 +448,17 @@ async fn can_receive_task_event(
     auth: &AuthUser,
     event: &RealtimeEvent,
 ) -> Result<bool, axum::response::Response> {
-    // Executors (concierge, interpreter) hear only about their own tasks, as
-    // in the task lists: a patient link does not open other staff's tasks.
+    // As in the task lists: the CEO and the CEO assistant see every task; only
+    // the patient manager and the interpreter team lead see the tasks of their
+    // patients. Executors (concierge, interpreter), billing and sales hear only
+    // about their own tasks (owner decision 2026-09-28).
+    if matches!(auth.role, Role::Ceo | Role::CeoAssistant) {
+        return Ok(true);
+    }
     if let Some(patient_id) = event.patient_id
-        && !matches!(auth.role, Role::Concierge | Role::Interpreter)
+        && matches!(auth.role, Role::PatientManager | Role::TeamleadInterpreter)
     {
         return can_receive_patient_event(state, auth, patient_id).await;
-    }
-    if auth.role == Role::Ceo {
-        return Ok(true);
     }
 
     sqlx::query_scalar::<_, bool>(
