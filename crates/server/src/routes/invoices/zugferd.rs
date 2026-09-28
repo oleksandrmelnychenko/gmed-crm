@@ -173,8 +173,9 @@ impl TaxGroup {
 }
 
 /// Why a line carries no VAT, as the e-invoice states it. The printed invoice
-/// uses the same wording so the visible document and the embedded XML agree.
-pub(super) fn line_exemption_reason(
+/// and the order documents (Einzelauftrag, Kostenvoranschlag) use the same
+/// wording so the visible documents and the embedded XML agree.
+pub(crate) fn line_exemption_reason(
     vat_rate: Decimal,
     is_cost_passthrough: bool,
 ) -> Option<&'static str> {
