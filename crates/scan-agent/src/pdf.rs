@@ -1,8 +1,21 @@
-//! Assemble scanned JPEG pages into one PDF without re-encoding them: each
+//! Assemble scanned JPEG pages into PDFs without re-encoding them: each
 //! page embeds the scanner's JPEG bytes as a `DCTDecode` image.
 
 use anyhow::{Result, bail};
 use lopdf::{Document, Object, Stream, dictionary};
+
+/// Generous estimate of the PDF structure around the page images (per page
+/// and per file), used to pick how many pages fit into one part.
+const PAGE_OVERHEAD: usize = 1024;
+const FILE_OVERHEAD: usize = 4096;
+
+/// One PDF of a scan that had to be split, with its 1-based page range.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PdfPart {
+    pub pdf: Vec<u8>,
+    pub first_page: usize,
+    pub last_page: usize,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JpegInfo {
@@ -129,6 +142,51 @@ pub fn jpeg_pages_to_pdf(pages: &[Vec<u8>], dpi: u32) -> Result<Vec<u8>> {
     Ok(output)
 }
 
+/// Build as few PDFs as possible, in page order, each at most `max_bytes`
+/// (GMED's per-document limit), so a thick stack is never lost to it.
+pub fn jpeg_pages_to_pdf_parts(
+    pages: &[Vec<u8>],
+    dpi: u32,
+    max_bytes: usize,
+) -> Result<Vec<PdfPart>> {
+    if pages.is_empty() {
+        bail!("no pages to put into the PDF");
+    }
+    let mut parts = Vec::new();
+    let mut start = 0;
+    while start < pages.len() {
+        let mut end = start + 1;
+        let mut estimate = FILE_OVERHEAD + pages[start].len() + PAGE_OVERHEAD;
+        while end < pages.len() && estimate + pages[end].len() + PAGE_OVERHEAD <= max_bytes {
+            estimate += pages[end].len() + PAGE_OVERHEAD;
+            end += 1;
+        }
+        // The estimate is generous; shrink only if the real file is larger.
+        loop {
+            let pdf = jpeg_pages_to_pdf(&pages[start..end], dpi)?;
+            if pdf.len() <= max_bytes {
+                parts.push(PdfPart {
+                    pdf,
+                    first_page: start + 1,
+                    last_page: end,
+                });
+                break;
+            }
+            if end - start == 1 {
+                bail!(
+                    "page {} alone is {:.1} MB, above GMED's limit of {:.0} MB per document; scan in gray or at a lower dpi",
+                    start + 1,
+                    pdf.len() as f64 / 1_048_576.0,
+                    max_bytes as f64 / 1_048_576.0
+                );
+            }
+            end -= 1;
+        }
+        start = end;
+    }
+    Ok(parts)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -189,5 +247,49 @@ pub(crate) mod tests {
             pdf.windows(pages[0].len())
                 .any(|window| window == pages[0].as_slice())
         );
+    }
+
+    /// A fake JPEG padded (after EOI) to roughly `size` bytes.
+    fn jpeg_of_size(size: usize) -> Vec<u8> {
+        let mut jpeg = fake_jpeg(2480, 3508, 3);
+        jpeg.resize(size, 0);
+        jpeg
+    }
+
+    #[test]
+    fn splits_a_thick_stack_below_the_upload_limit() {
+        let pages: Vec<Vec<u8>> = (0..7).map(|_| jpeg_of_size(30_000)).collect();
+        let limit = 100_000;
+        let parts = jpeg_pages_to_pdf_parts(&pages, 300, limit).unwrap();
+        let ranges: Vec<(usize, usize)> = parts
+            .iter()
+            .map(|part| (part.first_page, part.last_page))
+            .collect();
+        assert_eq!(ranges, vec![(1, 3), (4, 6), (7, 7)]);
+        for part in &parts {
+            assert!(part.pdf.len() <= limit, "{}", part.pdf.len());
+            let document = Document::load_mem(&part.pdf).unwrap();
+            assert_eq!(
+                document.get_pages().len(),
+                part.last_page - part.first_page + 1
+            );
+        }
+    }
+
+    #[test]
+    fn a_small_scan_stays_one_pdf() {
+        let pages = vec![fake_jpeg(2480, 3508, 3), fake_jpeg(2480, 3508, 1)];
+        let parts = jpeg_pages_to_pdf_parts(&pages, 300, 25 * 1024 * 1024).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!((parts[0].first_page, parts[0].last_page), (1, 2));
+        let document = Document::load_mem(&parts[0].pdf).unwrap();
+        assert_eq!(document.get_pages().len(), 2);
+    }
+
+    #[test]
+    fn a_single_page_above_the_limit_is_refused() {
+        let pages = vec![jpeg_of_size(1_000), jpeg_of_size(50_000)];
+        let error = jpeg_pages_to_pdf_parts(&pages, 300, 20_000).unwrap_err();
+        assert!(error.to_string().contains("page 2 alone"), "{error}");
     }
 }

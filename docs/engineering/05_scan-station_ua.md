@@ -17,36 +17,41 @@
 
 - **Роль у GMED: CEO або Patient manager.** Серверне правило `manual_intake` інших ролей не пускає. `gmed-scan whoami` попереджає про це, а `scan` перевіряє роль до того, як папір піде через сканер.
 - Сканер і комп'ютер в одній мережі. У Web Config сканера має бути ввімкнено **Network → AirPrint Setup → Enable AirPrint** (вмикає Bonjour і сервіс сканування) та **Network Security → Protocol → Bonjour**.
-- macOS: при першому пошуку сканера система спитає дозвіл «Local Network» для Terminal, його треба дозволити.
+- macOS 15+: при першому зверненні до сканера система може спитати дозвіл «Local Network» для Terminal, його треба дозволити. Якщо дозвіл відхилили, сканер не знаходиться й не відповідає; увімкнути: System Settings → Privacy & Security → Local Network → Terminal. Станція показує цю підказку, коли сканер недоступний.
+- Windows: MSI сам додає правило брандмауера «GMED Scan - scanner discovery (Bonjour)» (UDP 5353, лише локальна підмережа), без нього Windows відкидає відповіді сканерів на пошук.
+- Сканеру варто закріпити IP на роутері (DHCP reservation). Якщо адреса все ж зміниться, станція сама знайде той самий сканер через Bonjour за його ідентифікатором (UUID) і збереже нову адресу.
 - Якщо в GMED увімкнено IP whitelist, IP станції має бути в списку, інакше логін буде відхилено.
 
 ## Встановлення
 
-Інсталятори беруться з артефактів останнього успішного запуску workflow **Scan Agent**:
+Інсталятори беруться з GitHub release `scan-agent-v<версія>` (стабільне посилання, разом із `SHA256SUMS.txt`) або з артефактів останнього успішного запуску workflow **Scan Agent** (зберігаються 90 днів):
 
-| Платформа | Артефакт | Що ставить |
+| Платформа | Файл | Що ставить |
 |---|---|---|
-| Windows 10/11 x64 | `gmed-scan-windows-x64` → `gmed-scan-<версія>-windows-x64.msi` | `C:\Program Files\GMED Scan\gmed-scan.exe`, запис у системний PATH, ярлики «GMED Scan» у меню Пуск і на робочому столі |
-| macOS 11+ (Apple silicon та Intel) | `gmed-scan-macos-universal` → `gmed-scan-<версія>-macos-universal.pkg` | `/usr/local/bin/gmed-scan` (універсальний бінарник), `/Applications/GMED Scan.app` |
-| Linux x86_64 | `gmed-scan-linux-x86_64` | лише бінарник |
+| Windows 10/11 x64 | `gmed-scan-<версія>-windows-x64.msi` | `C:\Program Files\GMED Scan\gmed-scan.exe`, запис у системний PATH, правило брандмауера для пошуку сканера, ярлики «GMED Scan» у меню Пуск і на робочому столі |
+| macOS 11+ (Apple silicon та Intel) | `gmed-scan-<версія>-macos-universal.pkg` | `/Applications/GMED Scan.app` (усередині універсальний `gmed-scan`), посилання `/usr/local/bin/gmed-scan` на нього |
+| Linux x86_64 | `gmed-scan-<версія>-linux-x86_64.tar.gz` | лише бінарник |
+
+Кожен інсталятор CI перед публікацією справді встановлює на своєму раннері: MSI — встановлення, заміна перезбіркою тієї самої версії, видалення (файли, PATH, правило брандмауера); PKG — встановлення, запуск станції з `station.command`, повторне встановлення.
 
 Інсталятори поки **не підписані**, тому система попередить при першому запуску:
 
-- Windows: SmartScreen «Windows protected your PC» → «More info» → «Run anyway». MSI ставиться для всіх користувачів і просить права адміністратора. Нова версія MSI замінює стару; видалення через «Apps & features».
-- macOS 15+: «Apple could not verify…» → System Settings → Privacy & Security → «Open Anyway» (на старіших версіях: правий клік по `.pkg` → Open). Видалення: `sudo rm -rf /usr/local/bin/gmed-scan "/Applications/GMED Scan.app" && sudo pkgutil --forget com.gmedhealth.scan`.
+- Windows: SmartScreen «Windows protected your PC» → «More info» → «Run anyway». MSI ставиться для всіх користувачів і просить права адміністратора. Visual C++ Redistributable не потрібен (runtime зашитий у `gmed-scan.exe`). Новий MSI, зокрема перезбірка тієї самої версії, замінює встановлений; видалення через «Apps & features».
+- macOS 15+: «Apple could not verify…» → System Settings → Privacy & Security → «Open Anyway» (на старіших версіях: правий клік по `.pkg` → Open). Новий `.pkg` просто встановлюється поверх. Видалення: `sudo rm -rf "/Applications/GMED Scan.app" /usr/local/bin/gmed-scan && sudo pkgutil --forget com.gmedhealth.scan`.
 
 Підпис (Apple Developer ID з нотаризацією, Windows Authenticode) прибере ці попередження. Для нього потрібні сертифікати організації.
 
-Необов'язкова змінна репозиторію `GMED_SCAN_DEFAULT_SERVER` (Settings → Secrets and variables → Actions → Variables) вшивається в збірку. Станція тоді пропонує цю адресу при першому вході, і персоналу не треба її вводити.
+Змінна репозиторію `GMED_SCAN_DEFAULT_SERVER` (Settings → Secrets and variables → Actions → Variables, зараз `https://console.gmed-health.com`) вшивається в збірку. Станція пропонує цю адресу при першому вході, і персоналу не треба її вводити; інша адреса вводиться замість неї.
 
 ## Станція (ярлик «GMED Scan»)
 
-Ярлик (Windows) або застосунок у Launchpad (macOS) відкриває вікно терміналу з інтерактивною станцією. Те саме робить `gmed-scan` без аргументів.
+Ярлик (Windows) або застосунок у Launchpad (macOS) відкриває вікно терміналу з інтерактивною станцією. Те саме робить `gmed-scan` без аргументів. На macOS `GMED Scan.app` — нативний універсальний застосунок (без запиту на Rosetta), який відкриває Terminal зі станцією.
 
 1. Якщо ще немає входу: адреса GMED (за замовчуванням вшита), e-mail, пароль, код з автентифікатора.
-2. Якщо сканер ще не вибрано: пошук через Bonjour. Єдиний знайдений сканер зберігається сам, з кількох треба вибрати номер. Якщо нічого не знайдено, можна ввести IP сканера.
+2. Якщо сканер ще не вибрано: пошук через Bonjour. Єдиний знайдений сканер зберігається сам, з кількох треба вибрати номер. Якщо нічого не знайдено, можна ввести IP сканера або натиснути Enter для нового пошуку.
 3. Далі кожна клавіша запускає скан: `Enter` — з ADF, одна сторона; `d` — дуплекс; `f` — зі скла; `g` — колір/сірий; `s` — інший сканер; `l` — інший обліковий запис; `q` — вихід.
-4. Перед кожним сканом станція перевіряє сесію, щоб папір не пройшов через сканер даремно. Якщо upload не вдався, скан лишається в `outbox`, і станція пропонує `u`, щоб відправити його пізніше.
+4. Перед кожним сканом станція перевіряє сесію і сканер, щоб папір не пройшов через сканер даремно. Якщо сканер не відповідає за збереженою адресою, станція шукає його в мережі за ідентифікатором. Якщо upload не вдався, скан лишається в `outbox`, і станція пропонує `u`, щоб відправити його пізніше. Файл, який GMED відхилив (формат, вміст), `u` переносить в `outbox/refused/` разом із причиною: такий документ треба відсканувати заново, а файл видалити.
+5. Скан понад 25 МБ (ліміт GMED на документ) станція ділить на кілька PDF по сторінках і відправляє кожен окремим документом: `Scan_<дата>_part-1-of-3.pdf` тощо, у нотатках «part 1/3 (pages 1-20)». Під час розбору ці частини прив'язуються до того самого пацієнта.
 
 ## Командний рядок
 
@@ -57,10 +62,10 @@ gmed-scan scan --duplex
 ```
 
 - `login`: e-mail і пароль, далі код з автентифікатора (TOTP) або очікування підтвердження адміністратором, якщо акаунт цього вимагає. Сесія зберігається й оновлюється сама. Refresh-токен діє 30 днів і згорає після 7 днів бездіяльності (налаштування `refresh_token_days` / `session_idle_days`).
-- `scanners`: пошук через Bonjour (`_uscans._tcp`, `_uscan._tcp`); `--save N` запам'ятовує сканер. Без Bonjour адресу можна задати вручну: `--scanner 192.168.1.20`.
+- `scanners`: пошук через Bonjour (`_uscans._tcp`, `_uscan._tcp`); `--save N` запам'ятовує сканер разом з його ідентифікатором, тож `scan` знаходить його і після зміни IP. Без Bonjour адресу можна задати вручну: `--scanner 192.168.1.20` (тоді пошуку за ідентифікатором немає).
 - `scan`: за замовчуванням ADF, одна сторона, колір, 300 dpi, A4, як в Epson Scan 2 на скріншоті клієнта. Опції: `--duplex`, `--source flatbed`, `--color gray`, `--dpi 200`, `--paper a5|letter|legal|max`, `--title "..."`, `--note "..."`, `--no-upload`, `--keep`.
 - Після підтвердженого завантаження локальний PDF видаляється (`--keep` залишає). Якщо завантаження не вдалося, PDF лишається в `outbox` і програма друкує готову команду `gmed-scan upload "<шлях>"`.
-- Ліміт GMED: 25 МБ на документ. Кольоровий A4 на 300 dpi займає приблизно 0,5–1,5 МБ на сторінку. Для товстих пачок краще `--color gray` або `--dpi 200`.
+- Ліміт GMED: 25 МБ на документ. Кольоровий A4 на 300 dpi займає приблизно 0,5–1,5 МБ на сторінку, тому товста пачка автоматично ділиться на кілька PDF до 25 МБ (див. станцію, п. 5); `--title` отримує суфікс ` (1/3)`. Щоб документів було менше, підійде `--color gray` або `--dpi 200`. `watch` і `upload` файли не ділять: файл понад 25 МБ відхиляється.
 
 ## Режим теки (`watch`)
 
@@ -100,4 +105,8 @@ cargo test -p gmed-scan --locked
 cargo clippy -p gmed-scan --all-targets --locked -- -D warnings
 ```
 
-Crate входить у Cargo workspace, тому Linux clippy/тести йдуть і в CI-job `rust`. Windows/macOS-збірку та тести перевіряє workflow Scan Agent. Серверну частину crate не змінює.
+Crate входить у Cargo workspace, тому Linux clippy/тести йдуть і в CI-job `rust`. Windows/macOS-збірку, тести та встановлення інсталяторів перевіряє workflow Scan Agent. Серверну частину crate не змінює.
+
+Пакування: [`packaging/windows/gmed-scan.wxs`](../../crates/scan-agent/packaging/windows/gmed-scan.wxs) (WiX 5 з `WixToolset.Firewall.wixext`), [`packaging/macos/build-pkg.sh`](../../crates/scan-agent/packaging/macos/build-pkg.sh) з нативним лаунчером [`launcher.c`](../../crates/scan-agent/packaging/macos/launcher.c) і [`postinstall`](../../crates/scan-agent/packaging/macos/postinstall). Windows-бінарник збирається зі статичним CRT (`+crt-static`), CI перевіряє, що він не імпортує `VCRUNTIME140.dll`.
+
+Випуск для клінік: підняти `version` у `crates/scan-agent/Cargo.toml`, злити в `main`, поставити тег `scan-agent-v<версія>` на цей коміт і запушити його. Workflow збере й перевірить інсталятори та опублікує GitHub release (не позначається як «Latest», тег продукту `v*` не зачіпається).

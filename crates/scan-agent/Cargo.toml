@@ -1,6 +1,6 @@
 [package]
 name = "gmed-scan"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 description = "Scan station agent: drives an eSCL (AirScan) network scanner and files the scans into the GMED document intake queue"

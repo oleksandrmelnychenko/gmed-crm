@@ -364,6 +364,18 @@ pub fn parse_status(xml: &str) -> Result<Status> {
     Ok(status)
 }
 
+/// Context for a failed connection. On macOS a missing Local Network
+/// permission for Terminal looks exactly like an unreachable scanner.
+fn cannot_reach(url: &Url) -> String {
+    if cfg!(target_os = "macos") {
+        format!(
+            "cannot reach the scanner at {url} (is Terminal allowed under System Settings > Privacy & Security > Local Network?)"
+        )
+    } else {
+        format!("cannot reach the scanner at {url}")
+    }
+}
+
 pub struct Scanner {
     http: Client,
     base: Url,
@@ -376,6 +388,9 @@ impl Scanner {
         // certificate that cannot be verified; TLS here only adds encryption.
         let http = Client::builder()
             .user_agent(concat!("gmed-scan/", env!("CARGO_PKG_VERSION")))
+            // The scanner is on the local network: never route it through
+            // an HTTP(S)_PROXY meant for the internet.
+            .no_proxy()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(300))
             .danger_accept_invalid_certs(true)
@@ -394,7 +409,7 @@ impl Scanner {
             .http
             .get(url.clone())
             .send()
-            .with_context(|| format!("cannot reach the scanner at {url}"))?;
+            .with_context(|| cannot_reach(&url))?;
         if !response.status().is_success() {
             bail!("the scanner answered {} for {url}", response.status());
         }
@@ -450,7 +465,7 @@ impl Scanner {
                 .header(CONTENT_TYPE, "text/xml")
                 .body(settings_xml.clone())
                 .send()
-                .with_context(|| format!("cannot reach the scanner at {url}"))?;
+                .with_context(|| cannot_reach(&url))?;
             match response.status() {
                 StatusCode::CREATED | StatusCode::OK => {
                     let location = response
@@ -497,7 +512,7 @@ impl Scanner {
                 .http
                 .get(url.clone())
                 .send()
-                .with_context(|| format!("cannot reach the scanner at {url}"))?;
+                .with_context(|| cannot_reach(&url))?;
             match response.status() {
                 StatusCode::OK => return Ok(Some(response.bytes()?.to_vec())),
                 StatusCode::NOT_FOUND | StatusCode::GONE => return Ok(None),

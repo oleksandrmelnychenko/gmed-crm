@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 
-use gmed_scan::api::{Gmed, LoginPrompt};
+use gmed_scan::api::{ApiError, Gmed, LoginPrompt};
 use gmed_scan::config::{Paths, Session};
 use gmed_scan::discovery::{self, FoundScanner};
 use gmed_scan::escl::{ColorMode, Paper, ScanRequest, Scanner, Source};
@@ -330,7 +330,8 @@ fn scanners(paths: &Paths, timeout: u64, save: Option<usize>) -> Result<()> {
     let found = discovery::discover(Duration::from_secs(timeout))?;
     if found.is_empty() {
         println!(
-            "No scanner answered. Check that AirPrint/Bonjour is enabled in the scanner's Web Config and that this computer is on the same network, or pass the address directly: gmed-scan scan --scanner <IP>"
+            "No scanner answered. Check that AirPrint/Bonjour is enabled in the scanner's Web Config and that this computer is on the same network, or pass the address directly: gmed-scan scan --scanner <IP>.{}",
+            discovery::local_network_hint()
         );
         return Ok(());
     }
@@ -348,14 +349,14 @@ fn scanners(paths: &Paths, timeout: u64, save: Option<usize>) -> Result<()> {
     let Some(scanner) = number.checked_sub(1).and_then(|index| found.get(index)) else {
         bail!("there is no scanner number {number} in the list");
     };
-    save_first_answering(paths, &scanner.urls)?;
+    save_first_answering(paths, &scanner.urls, Some(&scanner.id))?;
     Ok(())
 }
 
 /// Save the first address that really answers as the default scanner:
 /// HTTPS when the scanner's TLS works with this client, otherwise its plain
-/// HTTP service.
-fn save_first_answering(paths: &Paths, candidates: &[String]) -> Result<String> {
+/// HTTP service. `id` is the Bonjour identity (`None` for a typed address).
+fn save_first_answering(paths: &Paths, candidates: &[String], id: Option<&str>) -> Result<String> {
     let mut failures = Vec::new();
     for candidate in candidates {
         let probe = Scanner::new(candidate)
@@ -371,6 +372,7 @@ fn save_first_answering(paths: &Paths, candidates: &[String]) -> Result<String> 
                 let url = scanner.base().to_string();
                 let mut config = paths.load_config()?;
                 config.scanner = Some(url.clone());
+                config.scanner_id = id.map(str::to_string);
                 paths.save_config(&config)?;
                 println!(
                     "Default scanner: {} ({})",
@@ -410,9 +412,11 @@ fn run_scan(
     request: ScanRequest,
     options: FileOptions,
 ) -> Result<()> {
-    let target = match scanner.or(paths.load_config()?.scanner) {
-        Some(target) => target,
-        None => {
+    let saved = paths.load_config()?.scanner;
+    let target = match (scanner, saved) {
+        (Some(target), _) => target,
+        (None, Some(saved)) => reachable_scanner(&paths, &saved)?,
+        (None, None) => {
             bail!("no scanner chosen; run `gmed-scan scanners --save 1` or pass --scanner <IP>")
         }
     };
@@ -422,6 +426,24 @@ fn run_scan(
         ensure_intake_role(&gmed)?;
     }
     scan_and_file(&gmed, &paths, &target, &request, &options)
+}
+
+/// The saved scanner's address, or its new one when it moved (a new DHCP
+/// lease) and Bonjour still finds it under the same identity.
+fn reachable_scanner(paths: &Paths, target: &str) -> Result<String> {
+    let error = match Scanner::new(target).and_then(|scanner| scanner.capabilities()) {
+        Ok(_) => return Ok(target.to_string()),
+        Err(error) => error,
+    };
+    let Some(id) = paths.load_config()?.scanner_id else {
+        return Err(error);
+    };
+    eprintln!("The scanner does not answer at {target}; searching for it on the network...");
+    let found = discovery::discover(Duration::from_secs(5)).unwrap_or_default();
+    let Some(scanner) = found.iter().find(|scanner| scanner.id == id) else {
+        return Err(error.context("the scanner was not found on the network either"));
+    };
+    save_first_answering(paths, &scanner.urls, Some(&scanner.id))
 }
 
 fn scan_and_file(
@@ -438,36 +460,60 @@ fn scan_and_file(
     })?;
     let file_name = scan::scan_file_name(Local::now());
     let dir = options.output.clone().unwrap_or_else(|| paths.outbox());
-    let path = scan::save_unique(&dir, &file_name, &document.pdf)?;
-    let size_mb = document.pdf.len() as f64 / 1_048_576.0;
-    eprintln!(
-        "{} page(s), {size_mb:.1} MB -> {}",
-        document.pages,
-        path.display()
-    );
+    let saved = scan::save_parts(&dir, &file_name, &document)?;
+    let count = saved.len();
+    let size_mb = document.size() as f64 / 1_048_576.0;
+    eprintln!("{} page(s), {size_mb:.1} MB", document.pages);
+    if count > 1 {
+        eprintln!(
+            "GMED accepts at most 25 MB per document, so this scan becomes {count} documents."
+        );
+    }
+    for path in &saved {
+        eprintln!("  -> {}", path.display());
+    }
     if options.no_upload {
-        println!("{}", path.display());
+        for path in &saved {
+            println!("{}", path.display());
+        }
         return Ok(());
     }
-    let notes = scan::scan_note(&document, request, options.note.as_deref());
-    match watch::upload_file(gmed, &path, options.title.clone(), Some(notes)) {
-        Ok(uploaded) => {
-            println!(
-                "Filed into the GMED intake queue as draft document {}.",
-                uploaded.id
-            );
-            if !options.keep {
-                std::fs::remove_file(&path)
-                    .with_context(|| format!("delete {}", path.display()))?;
+    let mut not_uploaded = Vec::new();
+    for (index, path) in saved.iter().enumerate() {
+        let notes = scan::scan_note(&document, index, request, options.note.as_deref());
+        let title = options.title.as_ref().map(|title| match count {
+            1 => title.clone(),
+            _ => format!("{title} ({}/{count})", index + 1),
+        });
+        match watch::upload_file(gmed, path, title, Some(notes)) {
+            Ok(uploaded) => {
+                println!(
+                    "Filed into the GMED intake queue as draft document {}.",
+                    uploaded.id
+                );
+                if !options.keep
+                    && let Err(error) = std::fs::remove_file(path)
+                {
+                    eprintln!(
+                        "warning: {} was filed but could not be deleted ({error}); delete it by hand so it is not sent twice",
+                        path.display()
+                    );
+                }
             }
-            Ok(())
+            Err(error) => {
+                eprintln!("error: {}: {error:#}", path.display());
+                not_uploaded.push(format!("\"{}\"", path.display()));
+            }
         }
-        Err(error) => Err(error.context(format!(
-            "the scan is kept at {}; retry with: gmed-scan upload \"{}\"",
-            path.display(),
-            path.display()
-        ))),
     }
+    if !not_uploaded.is_empty() {
+        bail!(
+            "{} of {count} file(s) were not uploaded and are kept; retry with: gmed-scan upload {}",
+            not_uploaded.len(),
+            not_uploaded.join(" ")
+        );
+    }
+    Ok(())
 }
 
 fn upload(
@@ -555,10 +601,11 @@ fn pick_scanner(paths: &Paths) -> Result<String> {
             eprintln!("warning: {error:#}");
             Vec::new()
         });
-        let candidates = match found.as_slice() {
+        let (candidates, id) = match found.as_slice() {
             [] => {
+                println!("No scanner found.{}", discovery::local_network_hint());
                 let address = read_line(
-                    "No scanner found. Enter the scanner's IP address (shown in the network status on its display), or q to quit: ",
+                    "Scanner IP address (shown in the network status on its display), Enter = search again, q = quit: ",
                 )?;
                 if address.eq_ignore_ascii_case("q") {
                     bail!("stopped");
@@ -566,11 +613,11 @@ fn pick_scanner(paths: &Paths) -> Result<String> {
                 if address.is_empty() {
                     continue;
                 }
-                vec![address]
+                (vec![address], None)
             }
             [only] => {
                 println!("Found {}.", describe_scanner(only));
-                only.urls.clone()
+                (only.urls.clone(), Some(only.id.clone()))
             }
             several => {
                 for (index, scanner) in several.iter().enumerate() {
@@ -583,12 +630,12 @@ fn pick_scanner(paths: &Paths) -> Result<String> {
                     .and_then(|number| number.checked_sub(1))
                     .and_then(|index| several.get(index))
                 {
-                    Some(scanner) => scanner.urls.clone(),
+                    Some(scanner) => (scanner.urls.clone(), Some(scanner.id.clone())),
                     None => continue,
                 }
             }
         };
-        match save_first_answering(paths, &candidates) {
+        match save_first_answering(paths, &candidates, id.as_deref()) {
             Ok(url) => return Ok(url),
             Err(error) => {
                 eprintln!("error: {error:#}");
@@ -621,7 +668,11 @@ fn waiting_scans(paths: &Paths) -> Vec<PathBuf> {
     files
 }
 
-fn upload_waiting(gmed: &Gmed, files: &[PathBuf]) {
+/// Where the station puts outbox scans that GMED refused, so `u` does not
+/// offer them forever.
+const REFUSED_DIR: &str = "refused";
+
+fn upload_waiting(gmed: &Gmed, paths: &Paths, files: &[PathBuf]) {
     for file in files {
         let notes = Some("gmed-scan: upload retried from the outbox".to_string());
         match watch::upload_file(gmed, file, None, notes) {
@@ -633,6 +684,24 @@ fn upload_waiting(gmed: &Gmed, files: &[PathBuf]) {
                     uploaded.id
                 ),
             },
+            Err(error)
+                if error
+                    .downcast_ref::<ApiError>()
+                    .is_some_and(ApiError::rejects_file) =>
+            {
+                let reason = format!("{error:#}");
+                match watch::set_aside(&paths.outbox(), REFUSED_DIR, file, &reason) {
+                    Ok(target) => eprintln!(
+                        "GMED refused {}: {reason}. It was moved to {}; scan the document again and delete that file.",
+                        file.display(),
+                        target.display()
+                    ),
+                    Err(move_error) => eprintln!(
+                        "GMED refused {}: {reason}; it could not be moved aside ({move_error:#}), delete it by hand",
+                        file.display()
+                    ),
+                }
+            }
             Err(error) => eprintln!("{}: {error:#}", file.display()),
         }
     }
@@ -669,7 +738,7 @@ fn station(paths: Paths) -> Result<()> {
         let request = match read_line("> ")?.to_ascii_lowercase().as_str() {
             "u" => {
                 ensure_station_session(&paths, &gmed, false)?;
-                upload_waiting(&gmed, &waiting);
+                upload_waiting(&gmed, &paths, &waiting);
                 continue;
             }
             "" => station_request(Source::Adf, false, color),
@@ -694,8 +763,16 @@ fn station(paths: Paths) -> Result<()> {
             "q" => return Ok(()),
             _ => continue,
         };
-        // Check the session before paper moves through the scanner.
+        // Check the session and the scanner before paper moves through it.
         ensure_station_session(&paths, &gmed, false)?;
+        target = match reachable_scanner(&paths, &target) {
+            Ok(target) => target,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                eprintln!("Check that the scanner is on, or press s to choose it again.");
+                continue;
+            }
+        };
         let options = FileOptions {
             title: None,
             note: None,

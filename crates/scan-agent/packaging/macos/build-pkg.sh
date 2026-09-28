@@ -3,10 +3,12 @@
 #
 #   build-pkg.sh <version> <arm64 binary> <x86_64 binary> <output.pkg>
 #
-# The package installs a universal gmed-scan binary into /usr/local/bin (on
-# the default PATH) and "GMED Scan.app" into /Applications. The app opens
-# Terminal with the interactive station (`gmed-scan station`). Runs on a
-# macOS host (lipo, pkgbuild, PlistBuddy); used by
+# The package installs "GMED Scan.app" into /Applications. The app carries
+# everything: a native launcher (launcher.c) that opens Terminal with the
+# interactive station, station.command, and the universal gmed-scan binary.
+# The postinstall script links /usr/local/bin/gmed-scan (on the default
+# PATH) to that binary, so the installer never rewrites /usr/local/bin.
+# Runs on a macOS host (clang, lipo, pkgbuild, PlistBuddy); used by
 # .github/workflows/scan-agent.yml.
 set -euo pipefail
 
@@ -19,27 +21,29 @@ arm64_binary="$2"
 x86_64_binary="$3"
 output="$4"
 identifier="com.gmedhealth.scan"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 root="$work/root"
-app="$root/Applications/GMED Scan.app"
-mkdir -p "$root/usr/local/bin" "$app/Contents/MacOS" "$app/Contents/Resources"
+app="$root/GMED Scan.app"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$work/scripts"
 
-lipo -create -output "$root/usr/local/bin/gmed-scan" "$arm64_binary" "$x86_64_binary"
-chmod 755 "$root/usr/local/bin/gmed-scan"
-lipo -info "$root/usr/local/bin/gmed-scan"
+lipo -create -output "$app/Contents/MacOS/gmed-scan" "$arm64_binary" "$x86_64_binary"
+chmod 755 "$app/Contents/MacOS/gmed-scan"
+lipo -info "$app/Contents/MacOS/gmed-scan"
 
-# Terminal runs .command files; the app only hands this one to Terminal.
+clang -arch arm64 -arch x86_64 -mmacosx-version-min=11.0 -O2 -Wall -Wextra -Werror \
+  -o "$app/Contents/MacOS/GMED Scan" "$here/launcher.c"
+lipo -info "$app/Contents/MacOS/GMED Scan"
+
+# Terminal runs .command files. The binary sits next to the launcher, so the
+# station works even if /usr/local/bin is missing from PATH.
 cat > "$app/Contents/Resources/station.command" <<'EOF'
 #!/bin/sh
-exec /usr/local/bin/gmed-scan station
+exec "$(dirname "$0")/../MacOS/gmed-scan" station
 EOF
-cat > "$app/Contents/MacOS/GMED Scan" <<'EOF'
-#!/bin/sh
-exec /usr/bin/open -a Terminal "$(dirname "$0")/../Resources/station.command"
-EOF
-chmod 755 "$app/Contents/Resources/station.command" "$app/Contents/MacOS/GMED Scan"
+chmod 755 "$app/Contents/Resources/station.command"
 
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -67,6 +71,9 @@ cat > "$app/Contents/Info.plist" <<EOF
 EOF
 plutil -lint "$app/Contents/Info.plist"
 
+cp "$here/postinstall" "$work/scripts/postinstall"
+chmod 755 "$work/scripts/postinstall"
+
 # App bundles are relocatable by default: the installer would update a copy
 # found anywhere on disk instead of /Applications. Pin it.
 pkgbuild --analyze --root "$root" "$work/components.plist"
@@ -75,9 +82,10 @@ pkgbuild --analyze --root "$root" "$work/components.plist"
 pkgbuild \
   --root "$root" \
   --component-plist "$work/components.plist" \
+  --scripts "$work/scripts" \
   --identifier "$identifier" \
   --version "$version" \
-  --install-location / \
+  --install-location /Applications \
   "$output"
 
 pkgutil --payload-files "$output"
