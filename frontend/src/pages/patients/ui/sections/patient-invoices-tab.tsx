@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useReducer,
@@ -1685,6 +1686,15 @@ function usePatientInvoicesTabContent({
     ],
     [formatDate, formatMoney, lang],
   );
+  // Service rows carry the catalog name ("Airport transfer coordination");
+  // known catalog services are shown in the UI language like everywhere else.
+  const statementItemDescription = useCallback(
+    (item: PatientAccountStatementItem) =>
+      item.kind === "service"
+        ? agencyServiceNameLabel(undefined, item.description, t)
+        : localizeFinancialDescription(item.description, lang),
+    [lang, t],
+  );
   const accountStatementColumns = useMemo<ColumnDef<PatientAccountStatementItem>[]>(
     () => [
       {
@@ -1716,16 +1726,16 @@ function usePatientInvoicesTabContent({
         id: "description",
         label: lang === "de" ? "Beschreibung / Beleg" : "Описание / документ",
         accessor: (item) =>
-          `${localizeFinancialDescription(item.description, lang)} ${item.document_number ?? ""}`,
+          `${statementItemDescription(item)} ${item.document_number ?? ""}`,
         searchable: true,
         width: 260,
         render: (item) => (
           <div className="min-w-0">
             <div
               className="truncate text-xs text-foreground"
-              title={localizeFinancialDescription(item.description, lang)}
+              title={statementItemDescription(item)}
             >
-              {localizeFinancialDescription(item.description, lang)}
+              {statementItemDescription(item)}
             </div>
             <div className="truncate font-mono text-[10px] text-muted-foreground">
               {[item.order_number, item.document_number].filter(Boolean).join(" · ") || "—"}
@@ -1848,7 +1858,7 @@ function usePatientInvoicesTabContent({
         },
       },
     ],
-    [accountStatement?.currency, formatDate, formatMoney, lang],
+    [accountStatement?.currency, formatDate, formatMoney, lang, statementItemDescription],
   );
   const servicePackageColumns = useMemo<ColumnDef<PatientServicePackageItem>[]>(
     () => [
