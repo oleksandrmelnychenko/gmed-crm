@@ -10686,7 +10686,7 @@ async fn concierge_service_billing_follows_delivery_and_history_blocks_delete() 
     )
     .bind(patient_id)
     .bind(appointment_id)
-    .bind(format!("Cancelled pickup {tag}"))
+    .bind(format!("Cancelled key handover {tag}"))
     .bind(pm_id)
     .fetch_one(&pool)
     .await
