@@ -17,6 +17,27 @@ describe("appointmentActionErrorMessage", () => {
     );
   });
 
+  it("names the billed report and order line when a cancellation is refused", () => {
+    const error = new ApiRequestError("reverse that billing", {
+      status: 409,
+      code: "Conflict",
+      body: {
+        code: "appointment_cancel_billed_report",
+        interpreter_name: "Iwan",
+        hours: "2.5",
+        order_leistung_id: "line-1",
+        order_leistung_description: "Dolmetscherstunden · Kardiologie",
+        order_number: "A-2026-7",
+      },
+    });
+    const message = appointmentActionErrorMessage(error, "fallback");
+    expect(message).toContain("Iwan");
+    expect(message).toContain("2,5");
+    expect(message).toContain("Dolmetscherstunden · Kardiologie");
+    expect(message).toContain("A-2026-7");
+    expect(message).not.toContain("{");
+  });
+
   it("localizes the server rejection of a completion before the appointment date", () => {
     const error = new ApiRequestError(
       "Appointment cannot be completed before its date",

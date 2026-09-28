@@ -48,7 +48,8 @@ const LEGACY_CONCIERGE_TRANSFER_COMPLETED_SOURCES = [
  * Appointment screen permissions from the capability registry. Only the two
  * assignment-side flags stay role-bound: responding to an interpreter
  * assignment and submitting the visit report are the assignee's own actions
- * (the server accepts `submit_report` from `interpreter` only).
+ * (the server accepts both from the booked `interpreter` or
+ * `teamlead_interpreter`).
  */
 export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
   const role = actorRole(actor);
@@ -71,7 +72,8 @@ export function appointmentPermissions(actor?: Actor): AppointmentPermissions {
     canManageReminders: coordinates,
     canRespondToAssignment:
       submitsReports && (role === "interpreter" || role === "teamlead_interpreter"),
-    canSubmitReport: submitsReports && role === "interpreter",
+    canSubmitReport:
+      submitsReports && (role === "interpreter" || role === "teamlead_interpreter"),
     canViewReport: approvesReports || submitsReports,
     canApproveReport: approvesReports,
     canRejectReport: approvesReports,
@@ -469,7 +471,9 @@ export function canResubmitInterpreterReport(params: {
  * Report controls for one appointment. Submitting a report (or resubmitting
  * a returned one) belongs to the interpreter assigned to the visit: the
  * server accepts `POST /appointments/{id}/report` from that user only.
- * Reviewers see approve/reject while the latest report is pending.
+ * Reviewers see approve/reject while the latest report is pending, except on
+ * their own report: a team lead booked as the interpreter leaves the review
+ * to someone else (the server answers 403).
  */
 export function appointmentReportActions(params: {
   permissions: Pick<
@@ -478,7 +482,7 @@ export function appointmentReportActions(params: {
   >;
   currentUserId?: string | null;
   interpreterId?: string | null;
-  report?: { approval_status: string } | null;
+  report?: { approval_status: string; interpreter_id?: string | null } | null;
 }) {
   const { permissions, currentUserId, interpreterId, report } = params;
   const isAssignedInterpreter =
@@ -498,7 +502,8 @@ export function appointmentReportActions(params: {
     canResubmitRejectedReport,
     showReportReviewActions:
       (permissions.canApproveReport || permissions.canRejectReport) &&
-      report?.approval_status === "pending",
+      report?.approval_status === "pending" &&
+      !(Boolean(currentUserId) && report?.interpreter_id === currentUserId),
   };
 }
 
