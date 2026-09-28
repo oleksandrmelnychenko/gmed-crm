@@ -629,7 +629,7 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
         "POST",
         &format!("/api/v1/orders/{order_id}/quotes"),
         &pm_bearer,
-        Some(json!({ "valid_until": "2026-12-31" })),
+        Some(json!({ "valid_until": "2099-12-31" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "response: {quote}");
@@ -914,7 +914,7 @@ async fn quote_creation_from_order_services_computes_totals_and_updates_order() 
         &format!("/api/v1/orders/{order_id}/quotes"),
         &billing_bearer,
         Some(json!({
-            "valid_until": "2026-05-15",
+            "valid_until": "2099-05-15",
             "notes": "Source-derived quote"
         })),
     )
@@ -1385,7 +1385,7 @@ async fn quote_versions_capture_initial_and_status_update_snapshots() {
         &format!("/api/v1/orders/{order_id}/quotes"),
         &billing_bearer,
         Some(json!({
-            "valid_until": "2026-05-15",
+            "valid_until": "2099-05-15",
             "notes": "Initial commercial snapshot"
         })),
     )
@@ -1533,7 +1533,7 @@ async fn ceo_can_manage_contracts_and_quotes_without_patient_assignment() {
         &format!("/api/v1/orders/{order_id}/quotes"),
         &ceo_bearer,
         Some(json!({
-            "valid_until": "2026-05-31",
+            "valid_until": "2099-05-31",
             "notes": "CEO-created quote"
         })),
     )
@@ -1623,7 +1623,7 @@ async fn ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes() {
         &format!("/api/v1/orders/{order_id}/quotes"),
         &billing_bearer,
         Some(json!({
-            "valid_until": "2026-06-15",
+            "valid_until": "2099-06-15",
             "notes": "Read-only quote"
         })),
     )

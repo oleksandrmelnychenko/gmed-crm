@@ -2584,14 +2584,11 @@ async fn update_framework_contract_status(
     }
     // The contract runs for an unlimited term: it never expires, and ending it
     // goes through the terminate action (reason, open-order check, audit).
-    match body.status.as_str() {
-        "terminated" => {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Use the terminate action to end a framework contract",
-            );
-        }
-        _ => {}
+    if body.status == "terminated" {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Use the terminate action to end a framework contract",
+        );
     }
 
     let subject = match load_contract_subject(&state, contract_id).await {
