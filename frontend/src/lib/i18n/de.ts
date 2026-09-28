@@ -411,7 +411,7 @@ export const de = {
   providers_amount: "Betrag",
   providers_select_first: "Zuerst Provider auswählen",
   providers_price_numeric: "Preis muss numerisch sein",
-  providers_delete_provider_confirm: "Provider \"{name}\" löschen?",
+  providers_delete_provider_confirm: "Provider \"{name}\" archivieren? Er wird inaktiv; Termine, Leistungen und Dokumente behalten ihn. Wiederherstellen über „Aktivieren“.",
   providers_delete_doctor_confirm: "Arzt \"{name}\" löschen?",
   providers_delete_contact_confirm: "Kontakt \"{name}\" löschen?",
   providers_delete_staff_confirm: "Mitarbeitenden \"{name}\" löschen?",
@@ -761,6 +761,7 @@ export const de = {
   settings_interpreter_access_hint:
     "Ein gebuchter Dolmetscher sieht die Basisdaten, freigegebenen Dokumente und den Chat des Patienten. Der Zugang endet ohne aktive Buchung oder so viele Tage nach dem letzten gebuchten Termin; manuelle Zuweisungen bleiben bestehen.",
   settings_interpreter_booking_access_days: "Zugang nach dem letzten gebuchten Termin (Tage)",
+  settings_signature_stuck_request_days: "Nicht nachverfolgbare Signaturanfragen schließen nach (Tagen)",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
   settings_logout_user: "Sitzungen beenden",

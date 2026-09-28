@@ -409,7 +409,7 @@ export const ru = {
   providers_amount: "Сумма",
   providers_select_first: "Сначала выберите провайдера",
   providers_price_numeric: "Цена должна быть числом",
-  providers_delete_provider_confirm: "Удалить провайдера \"{name}\"?",
+  providers_delete_provider_confirm: "Переместить провайдера \"{name}\" в архив? Он станет неактивным; приёмы, услуги и документы сохранят его. Восстановить: «Активировать».",
   providers_delete_doctor_confirm: "Удалить врача \"{name}\"?",
   providers_delete_contact_confirm: "Удалить контакт \"{name}\"?",
   providers_delete_staff_confirm: "Удалить сотрудника \"{name}\"?",
@@ -758,6 +758,7 @@ export const ru = {
   settings_interpreter_access_hint:
     "Забронированный переводчик видит базовую карточку, открытые документы и чат пациента. Доступ заканчивается без активного бронирования или через столько дней после последнего забронированного приёма; ручные назначения сохраняются.",
   settings_interpreter_booking_access_days: "Доступ после последнего забронированного приёма (дней)",
+  settings_signature_stuck_request_days: "Закрывать неотслеживаемые запросы подписи через (дней)",
   settings_sessions: "Управление сессиями",
   settings_active_sessions: "Активные сессии",
   settings_logout_user: "Завершить сессии",

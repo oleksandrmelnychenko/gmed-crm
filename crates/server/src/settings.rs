@@ -228,6 +228,13 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
                 "Concierge lead time cannot exceed 336 hours (14 days)".into(),
             ));
         }
+        crate::document_signatures::closure::STUCK_DAYS_SETTING
+            if parsed > crate::document_signatures::closure::MAX_STUCK_DAYS =>
+        {
+            return Err(UpdateError::InvalidValue(
+                "Signature requests can stay untrackable for at most 90 days".into(),
+            ));
+        }
         crate::services::interpreter_booking_links::ACCESS_DAYS_SETTING
             if parsed > crate::services::interpreter_booking_links::MAX_ACCESS_DAYS =>
         {

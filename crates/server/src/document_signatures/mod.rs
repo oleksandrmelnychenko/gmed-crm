@@ -1,4 +1,5 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
+pub mod closure;
 pub mod connection;
 mod defaults;
 pub(crate) mod package;
@@ -41,6 +42,14 @@ pub fn router() -> Router<AppState> {
         .route("/documents/{id}/signature-requests", get(list).post(create))
         .route("/document-signature-requests/{id}/refresh", post(refresh))
         .route("/document-signature-requests/{id}/withdraw", post(withdraw))
+        .route(
+            "/document-signature-requests/{id}/abandon",
+            post(closure::abandon),
+        )
+        .route(
+            "/document-signature-requests/{id}/resolve-review",
+            post(closure::resolve_review),
+        )
         .route("/document-signature-requests/{id}/report", get(report))
 }
 
@@ -177,6 +186,11 @@ fn public_request(row: &PgRow) -> Value {
         "has_report":row.get::<Option<String>,_>("report_storage_key").is_some(),
         "can_withdraw":row.get::<String,_>("status") == "pending" || (row.get::<String,_>("status") == "submission_unknown" && row.get::<bool,_>("has_review_attachment") && row.get::<Option<Uuid>,_>("provider_request_id").is_some()),
         "last_error":row.get::<Option<String>,_>("last_error"),
+        "can_abandon":closure::can_abandon(&row.get::<String,_>("status"), row.get("provider_request_id"), row.get::<Option<String>,_>("last_error").as_deref()),
+        "can_resolve_review":row.get::<String,_>("status") == "needs_review",
+        "closed_kind":row.get::<Option<String>,_>("closed_kind"),
+        "close_reason":row.get::<Option<String>,_>("close_reason"),
+        "closed_at":row.get::<Option<DateTime<Utc>>,_>("closed_at").map(|value| value.to_rfc3339()),
         "created_at":row.get::<DateTime<Utc>,_>("created_at").to_rfc3339(),
         "updated_at":row.get::<DateTime<Utc>,_>("updated_at").to_rfc3339()})
 }
@@ -547,6 +561,12 @@ pub fn spawn_worker(state: AppState) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             interval.tick().await;
+            // Requests the provider cannot resolve do not stay active forever.
+            match closure::close_stuck_requests(&state).await {
+                Ok(0) => {}
+                Ok(closed) => tracing::info!(closed, "Closed untrackable signature requests"),
+                Err(error) => tracing::warn!(%error, "Closing untrackable signature requests failed"),
+            }
             for _ in 0..20 {
                 match poll_one(&state, None).await {
                     Ok(true) => {}
@@ -829,5 +849,16 @@ async fn archive_transaction(
         .bind(if current {None}else{Some("document_changed")}).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
     tx.commit().await.map_err(|_| "signature_database_error")?;
     state.audit_sender.try_send(audit::domain_event("document_signature_archived",None,"document",Some(result_id),json!({"request_id":id,"source_document_id":source_id,"test_mode":test_mode,"status":status,"sha256":sha256(pdf)})));
+    if !current {
+        closure::notify_staff(
+            state,
+            row.get::<Uuid, _>("requested_by"),
+            source_id,
+            "signature_review_required",
+            "Signed document needs review",
+            "The document was signed, but its source changed during signing. Accept or reject the signature in the document's signature panel.",
+        )
+        .await;
+    }
     Ok(true)
 }

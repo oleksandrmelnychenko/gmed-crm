@@ -240,6 +240,12 @@ impl Provider {
         if response.status().as_u16() == 429 {
             return Err("provider_rate_limited");
         }
+        // The provider does not know the request (any more). The poller keeps
+        // retrying; after `signature_stuck_request_days` the request is closed
+        // as an error (owner decision 2026-09-28, Q9).
+        if response.status().as_u16() == 404 {
+            return Err("provider_not_found");
+        }
         if matches!(
             response.status().as_u16(),
             400 | 401 | 403 | 406 | 413 | 415 | 422

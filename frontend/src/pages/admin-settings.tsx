@@ -187,6 +187,13 @@ const DOCUMENT_REQUIREMENT_SETTING_FIELDS: SettingFieldMeta[] = [
     inputType: "textarea",
     rows: 12,
   },
+  // Signature requests Skribble cannot confirm are closed as failed after this.
+  {
+    key: "signature_stuck_request_days",
+    labelKey: "settings_signature_stuck_request_days",
+    inputType: "number",
+    min: 1,
+  },
 ];
 
 const CLINICAL_SETTING_FIELDS: SettingFieldMeta[] = [
