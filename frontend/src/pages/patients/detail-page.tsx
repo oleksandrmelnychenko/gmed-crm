@@ -52,6 +52,7 @@ import {
   validateContractStatusForm,
   type ContractFormValidationMessages,
 } from "@/pages/contracts/model/contracts-model";
+import { canPickInvoiceStatus } from "@/pages/invoices/model/invoice-model";
 
 import {
   buildPatientLabelPrintHtml,
@@ -1777,12 +1778,11 @@ function usePatientDetailPageContent() {
     setInvoiceBusy(true);
     setTabActionError("");
     try {
+      // Payments go through the invoice payment journal, never through the
+      // status change: `paid`/`partially_paid` are derived from it.
       await updateInvoiceStatus(invoiceManageId, {
         status: invoiceStatusForm.status,
         due_date: toOptional(invoiceStatusForm.dueDate),
-        paid_amount: toOptional(invoiceStatusForm.paidAmount)
-          ? Number(invoiceStatusForm.paidAmount)
-          : null,
         notes: toOptional(invoiceStatusForm.notes),
       });
       toast.success(t.common_active);
@@ -2149,7 +2149,12 @@ function usePatientDetailPageContent() {
             invoiceBusy={invoiceBusy}
             invoiceManageId={invoiceManageId}
             invoiceStatusForm={invoiceStatusForm}
-            invoiceStatusOptions={INVOICE_STATUS_OPTIONS}
+            invoiceStatusOptions={INVOICE_STATUS_OPTIONS.filter((status) =>
+              canPickInvoiceStatus(
+                invoices.find((invoice) => invoice.id === invoiceManageId)?.status ?? "",
+                status,
+              ),
+            )}
             lang={lang}
             l={l}
             nextDunningLevel={nextDunningLevel}

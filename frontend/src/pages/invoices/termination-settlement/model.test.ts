@@ -108,6 +108,10 @@ describe("termination settlement model", () => {
     expect(settlementLineStatusLabel(line({ status: "cancelled" }), "ru")).toBe("Отменено");
     expect(settlementLineStatusLabel(line({ status: "cancelled" }), "de")).toBe("Storniert");
     expect(settlementLineStatusLabel(line({ due_in_full: true }), "de")).toBe("Pauschale, voll fällig");
+    // A third-party cost carries its supplier invoice status, worded as on the invoices pages.
+    expect(settlementLineStatusLabel(line({ source: "third_party_cost", status: "approved" }), "ru")).toBe("К оплате");
+    expect(settlementLineStatusLabel(line({ source: "third_party_cost", status: "overdue" }), "de")).toBe("Überfällig");
+    expect(settlementLineStatusLabel(line({ status: "approved" }), "ru")).toBe("Утверждено");
     expect(countDueInFull([line({ due_in_full: true }), line({}), line({ due_in_full: true })])).toBe(2);
   });
 
