@@ -772,6 +772,10 @@ describe("document intake review", () => {
     expect(intakeReviewNeedsClassification("medical_report", "")).toBe(true);
     expect(intakeReviewNeedsClassification("medical_report", "portal_upload")).toBe(true);
     expect(intakeReviewNeedsClassification("medical_report", "medical_arztbrief")).toBe(false);
+    // Every portal upload kind is a placeholder until staff pick a real type.
+    expect(intakeReviewNeedsClassification("patient_analysis_upload", "lab_analysis")).toBe(true);
+    expect(intakeReviewNeedsClassification("patient_upload", "portal_upload")).toBe(true);
+    expect(intakeReviewNeedsClassification("lab_report", "lab_analysis")).toBe(false);
   });
 
   it("reopens the same intake document without dropping its loaded detail", () => {

@@ -1047,6 +1047,85 @@ async fn uncategorized_uploads_land_in_document_intake_queue() {
     assert_eq!(queued_item["needs_categorization"], true);
 }
 
+async fn intake_queue_contains(app: &axum::Router, bearer: &str, document_id: &str) -> bool {
+    let (status, body) =
+        json_request(app, "GET", "/api/v1/documents/intake-queue", bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body.as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["id"] == document_id)
+}
+
+/// Owner decision 2026-09-28: the intake queue is based on a missing category
+/// or document type (and draft scans), not on the origin — a classified portal
+/// upload leaves the queue.
+#[tokio::test]
+async fn classified_portal_upload_leaves_the_intake_queue() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("portal-intake");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, body) = multipart_upload(
+        &app,
+        "/api/v1/me/documents/upload",
+        &patient_bearer,
+        &[
+            ("upload_kind", "analyses".to_string()),
+            ("auto_name", format!("Blood test {tag}")),
+        ],
+        &format!("blood-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-portal-analysis%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document_id = body["id"].as_str().unwrap().to_string();
+
+    // The patient's pick (analysis, lab category) is not a staff classification.
+    assert!(intake_queue_contains(&app, &admin_bearer, &document_id).await);
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["ursprung"], "patient_portal");
+    assert_eq!(detail["needs_categorization"], true);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &admin_bearer,
+        Some(json!({
+            "art": "lab_report",
+            "category": "lab_analysis",
+            "is_medical": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Still a portal upload, but classified: out of the queue.
+    let ursprung: Option<String> =
+        sqlx::query_scalar("SELECT ursprung FROM documents WHERE id = $1")
+            .bind(Uuid::parse_str(&document_id).unwrap())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(ursprung.as_deref(), Some("patient_portal"));
+    assert!(!intake_queue_contains(&app, &admin_bearer, &document_id).await);
+}
+
 #[tokio::test]
 async fn manual_intake_upload_stays_unlinked_and_skips_text_extraction_until_review() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {

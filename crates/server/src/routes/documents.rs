@@ -2839,26 +2839,36 @@ fn suggest_document_classification(
     None
 }
 
-fn document_needs_categorization(
-    art: Option<&str>,
-    category: Option<&str>,
-    ursprung: Option<&str>,
-) -> bool {
+/// Document types that say nothing about the content: the generic upload
+/// types and every kind a patient picks in the portal. Staff classification
+/// replaces them with a real document type. Keep in sync with
+/// `UNSPECIFIC_DOCUMENT_ARTS` in the frontend document model; the SQL of
+/// `list_document_intake_queue` binds this list.
+const UNSPECIFIC_DOCUMENT_ARTS: &[&str] = &[
+    "",
+    "document",
+    "uploaded_document",
+    "patient_upload",
+    "patient_general_upload",
+    "patient_medical_upload",
+    "patient_admin_upload",
+    "patient_correspondence_upload",
+    "patient_analysis_upload",
+    "patient_conclusion_upload",
+    "patient_invoice_upload",
+    "patient_translation_upload",
+];
+
+/// Whether a document still lacks a specific type or a category. The origin
+/// (`ursprung`) plays no part: a classified portal upload leaves the intake
+/// queue like any other document (owner decision 2026-09-28).
+fn document_needs_categorization(art: Option<&str>, category: Option<&str>) -> bool {
     let art = art.unwrap_or_default().trim().to_lowercase();
     let category = category.unwrap_or_default().trim().to_lowercase();
-    let ursprung = ursprung.unwrap_or_default().trim().to_lowercase();
 
     category.is_empty()
         || category == "portal_upload"
-        || matches!(
-            art.as_str(),
-            "" | "document"
-                | "uploaded_document"
-                | "patient_general_upload"
-                | "patient_medical_upload"
-                | "patient_admin_upload"
-        )
-        || ursprung == "patient_portal"
+        || UNSPECIFIC_DOCUMENT_ARTS.contains(&art.as_str())
 }
 
 fn is_interpreter_review_document(
@@ -2888,7 +2898,7 @@ fn is_document_intake_queue_candidate(row: &sqlx::postgres::PgRow) -> bool {
 
     (matches!(ursprung.as_deref(), Some("manual_intake"))
         && matches!(status.as_deref(), Some("draft")))
-        || document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref())
+        || document_needs_categorization(art.as_deref(), category.as_deref())
         || is_interpreter_review_document(
             uploaded_by_role.as_deref(),
             ursprung.as_deref(),
@@ -10494,8 +10504,7 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
                 .as_deref(),
         )
     };
-    let needs_categorization =
-        document_needs_categorization(art.as_deref(), category.as_deref(), ursprung.as_deref());
+    let needs_categorization = document_needs_categorization(art.as_deref(), category.as_deref());
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -20310,25 +20319,22 @@ async fn list_document_intake_queue(
            LEFT JOIN users deleter ON deleter.id = d.file_deleted_by
            WHERE d.status <> 'archived'
              AND (
-                COALESCE(d.category, '') = ''
-                OR d.category = 'portal_upload'
+                -- no category or no specific document type
+                -- (document_needs_categorization); the origin does not count,
+                -- so a classified portal upload leaves the queue
+                btrim(COALESCE(d.category, '')) = ''
+                OR lower(btrim(d.category)) = 'portal_upload'
+                OR lower(btrim(COALESCE(d.art, ''))) = ANY($2)
                 -- a classified scan stays "for review" until it is linked and
                 -- released (is_document_intake_queue_candidate)
                 OR (d.ursprung = 'manual_intake' AND d.status = 'draft')
                 OR (d.ursprung = 'interpreter_upload' AND d.status = 'draft')
-                OR d.art IN (
-                    'document',
-                    'uploaded_document',
-                    'patient_general_upload',
-                    'patient_medical_upload',
-                    'patient_admin_upload'
-                )
-                OR d.ursprung = 'patient_portal'
              )
            ORDER BY d.created_at DESC
            LIMIT 200"#,
     )
     .bind(auth.user_id)
+    .bind(UNSPECIFIC_DOCUMENT_ARTS)
     .fetch_all(&state.db)
     .await
     {
@@ -24466,11 +24472,8 @@ async fn upload_document_with_mode(
     {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
-    let needs_categorization = document_needs_categorization(
-        Some(resolved_art.as_str()),
-        resolved_category.as_deref(),
-        ursprung.as_deref(),
-    );
+    let needs_categorization =
+        document_needs_categorization(Some(resolved_art.as_str()), resolved_category.as_deref());
     let persist_input = NewStoredDocument {
         document_id: None,
         document_number: None,
@@ -25016,7 +25019,7 @@ async fn update_document(
                 "Manual intake review requires a patient, order or appointment link",
             );
         }
-        if document_needs_categorization(Some(art.trim()), category.as_deref(), None) {
+        if document_needs_categorization(Some(art.trim()), category.as_deref()) {
             return err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Manual intake review requires document type and category",
@@ -25033,7 +25036,7 @@ async fn update_document(
 
     if auth.role == Role::TeamleadInterpreter
         && status == "active"
-        && document_needs_categorization(Some(art.trim()), category.as_deref(), ursprung.as_deref())
+        && document_needs_categorization(Some(art.trim()), category.as_deref())
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
