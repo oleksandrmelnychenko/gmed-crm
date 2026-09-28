@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
 };
 use gmed_domain::role::Role;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
@@ -149,14 +150,18 @@ async fn online_users(
     if auth.role == Role::Patient {
         return err(StatusCode::FORBIDDEN, "Staff access required");
     }
-    match sqlx::query!(
+    // Staff presence only: patients' portal sessions (and their e-mail
+    // addresses) are not shown to every member of staff.
+    match sqlx::query(
         r#"SELECT DISTINCT ON (tf.user_id)
-                  tf.user_id, u.name AS "user_name!", u.email AS "user_email!", u.role AS "role!"
+                  tf.user_id, u.name AS user_name, u.email AS user_email, u.role
            FROM token_families tf
            JOIN users u ON u.id = tf.user_id
            WHERE NOT tf.is_revoked
              AND tf.last_activity_at > now() - interval '15 minutes'
-           ORDER BY tf.user_id, tf.last_activity_at DESC"#
+             AND u.role <> 'patient'
+             AND u.is_active
+           ORDER BY tf.user_id, tf.last_activity_at DESC"#,
     )
     .fetch_all(&state.db)
     .await
@@ -166,10 +171,10 @@ async fn online_users(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "user_id": r.user_id,
-                        "user_name": r.user_name,
-                        "user_email": r.user_email,
-                        "role": r.role,
+                        "user_id": r.try_get::<Uuid, _>("user_id").ok(),
+                        "user_name": r.try_get::<String, _>("user_name").unwrap_or_default(),
+                        "user_email": r.try_get::<String, _>("user_email").unwrap_or_default(),
+                        "role": r.try_get::<String, _>("role").unwrap_or_default(),
                     })
                 })
                 .collect();

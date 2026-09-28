@@ -129,7 +129,26 @@ async fn patient_notifications_are_self_scoped_and_presence_is_staff_only() {
     let (status, _) = request_json(&ctx.app, "GET", "/api/v1/users/online", &patient_auth).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
+    // Presence lists staff only: a patient's portal session (and e-mail) is
+    // not shown to every member of staff.
+    let staff_id = seed_user(&ctx.pool, "billing").await;
+    for user_id in [patient_id, staff_id] {
+        sqlx::query("INSERT INTO token_families (user_id, last_activity_at) VALUES ($1, now())")
+            .bind(user_id)
+            .execute(&ctx.pool)
+            .await
+            .unwrap();
+    }
     let admin_auth = auth_header_for(ctx.admin_id, "ceo");
-    let (status, _) = request_json(&ctx.app, "GET", "/api/v1/users/online", &admin_auth).await;
+    let (status, payload) =
+        request_json(&ctx.app, "GET", "/api/v1/users/online", &admin_auth).await;
     assert_eq!(status, StatusCode::OK);
+    let online: Vec<String> = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|row| row["user_id"].as_str().map(str::to_string))
+        .collect();
+    assert!(online.contains(&staff_id.to_string()));
+    assert!(!online.contains(&patient_id.to_string()));
 }

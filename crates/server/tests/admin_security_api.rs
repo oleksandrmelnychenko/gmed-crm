@@ -519,3 +519,81 @@ async fn access_policy_matrix_exposes_it_admin_as_locked_hidden() {
     .unwrap();
     assert_eq!(locked_rows, 14);
 }
+
+/// The technical admin manages every account except the CEO; the security
+/// and session screens must not open a side door to the CEO account.
+#[tokio::test]
+async fn it_admin_security_actions_cannot_target_the_ceo() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let ceo_id = seed_user(&app.suite.pool, "admin_security_ceo_guard", "ceo").await;
+    let pm_id = seed_user(
+        &app.suite.pool,
+        "admin_security_ceo_guard",
+        "patient_manager",
+    )
+    .await;
+    sqlx::query("UPDATE users SET failed_login_attempts = 5, locked_until = now() + interval '30 minutes' WHERE id = ANY($1)")
+        .bind(vec![ceo_id, pm_id])
+        .execute(&app.suite.pool)
+        .await
+        .unwrap();
+    let it_admin = auth_header_for("it_admin", app.it_admin_id);
+
+    let actions = |user_id: Uuid| {
+        [
+            (format!("/api/v1/admin/users/{user_id}/unlock"), None),
+            (
+                format!("/api/v1/admin/users/{user_id}/force-password-reset"),
+                None,
+            ),
+            (
+                format!("/api/v1/admin/mfa/user/{user_id}/toggle"),
+                Some(json!({ "enabled": true })),
+            ),
+            (
+                format!("/api/v1/admin/sessions/user/{user_id}/revoke"),
+                None,
+            ),
+        ]
+    };
+
+    for (path, body) in actions(ceo_id) {
+        let (status, response) = json_request(&app, "POST", &path, &it_admin, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
+    }
+    let (locked, reset_required, mfa_required): (bool, bool, bool) = sqlx::query_as(
+        "SELECT locked_until IS NOT NULL, password_reset_required, mfa_required FROM users WHERE id = $1",
+    )
+    .bind(ceo_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert!(locked, "the CEO lock must stay untouched");
+    assert!(!reset_required && !mfa_required);
+
+    for (path, body) in actions(pm_id) {
+        let (status, response) = json_request(&app, "POST", &path, &it_admin, body).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {response}");
+    }
+    let (locked, reset_required, mfa_required): (bool, bool, bool) = sqlx::query_as(
+        "SELECT locked_until IS NOT NULL, password_reset_required, mfa_required FROM users WHERE id = $1",
+    )
+    .bind(pm_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert!(!locked && reset_required && mfa_required);
+
+    let unknown = Uuid::new_v4();
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/users/{unknown}/unlock"),
+        &it_admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

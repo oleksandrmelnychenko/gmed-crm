@@ -207,7 +207,12 @@ export function LoginPage() {
       navigate(me.password_change_required ? "/account/password-required" : redirectTo, { replace: true });
     } catch (err) {
       // An expired or exhausted challenge sends the person back to the password.
-      if (err instanceof AuthLoginError && err.code === "unauthorized" && err.message !== "The code does not match") {
+      // /auth/totp answers with the HTTP reason ("Unauthorized"), /auth/login with "unauthorized".
+      if (
+        err instanceof AuthLoginError &&
+        err.code?.toLowerCase() === "unauthorized" &&
+        err.message !== "The code does not match"
+      ) {
         dispatchLoginState({ totpChallenge: null, totpCode: "", error: tr.login_totp_error });
       } else {
         dispatchLoginState({ error: tr.login_totp_error });

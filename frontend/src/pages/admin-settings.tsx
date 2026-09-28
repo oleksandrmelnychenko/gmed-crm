@@ -56,6 +56,8 @@ import {
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { clearApiCache } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
@@ -349,6 +351,9 @@ function createAdminSettingsFieldPatch<K extends keyof AdminSettingsState>(
 
 function useAdminSettingsPageContent() {
   const { t, lang } = useLang();
+  const { user: currentUser } = useAuth();
+  // Mirrors the server: forced logout of a CEO needs `users.manage_ceo`.
+  const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
   const tr = t as unknown as Record<string, string>;
   const [settingsState, dispatchSettingsState] = useReducer(
     adminSettingsReducer,
@@ -890,6 +895,9 @@ function useAdminSettingsPageContent() {
       width: 170,
       render: (session) => {
         const busy = actionBusyKey === `session:${session.user_id}`;
+        if (session.role === "ceo" && !canManageCeo) {
+          return <span className="text-xs text-muted-foreground">—</span>;
+        }
         return (
           <Button
             type="button"
@@ -910,6 +918,7 @@ function useAdminSettingsPageContent() {
     },
   ], [
     actionBusyKey,
+    canManageCeo,
     lang,
     logoutUser,
     t.common_device,

@@ -162,6 +162,9 @@ async fn revoke_user_sessions(
     if let Err(e) = auth.require_capability(Capability::AdminSessions) {
         return e;
     }
+    if let Err(e) = super::users::ensure_can_act_on_account(&state, &auth, user_id).await {
+        return e;
+    }
 
     tokens::revoke_all_families(
         &state.db,
@@ -733,6 +736,9 @@ async fn toggle_mfa(
     Json(body): Json<ToggleMfaReq>,
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
+        return e;
+    }
+    if let Err(e) = super::users::ensure_can_act_on_account(&state, &auth, user_id).await {
         return e;
     }
 

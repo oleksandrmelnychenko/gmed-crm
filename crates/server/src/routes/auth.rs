@@ -282,7 +282,17 @@ async fn login(
     };
 
     if !password_valid {
-        let new_attempts = user.failed_login_attempts + 1;
+        // Once a lock has run out the account starts over with the full
+        // number of attempts; otherwise the next typo would lock it again.
+        let lock_expired = user
+            .locked_until
+            .is_some_and(|locked_until| locked_until <= chrono::Utc::now());
+        let previous_attempts = if lock_expired {
+            0
+        } else {
+            user.failed_login_attempts
+        };
+        let new_attempts = previous_attempts + 1;
         let max_attempts: i32 = sqlx::query_scalar!(
             r#"SELECT value::TEXT AS "v!" FROM system_settings WHERE key = 'max_failed_login_attempts'"#
         ).fetch_optional(&state.db).await.ok().flatten()
@@ -325,11 +335,13 @@ async fn login(
                 "Account locked due to too many failed attempts",
             );
         } else {
-            let _ = sqlx::query!(
-                "UPDATE users SET failed_login_attempts = $2 WHERE id = $1",
-                user.id,
-                new_attempts
+            let _ = sqlx::query(
+                "UPDATE users SET failed_login_attempts = $2,
+                        locked_until = CASE WHEN locked_until <= now() THEN NULL ELSE locked_until END
+                 WHERE id = $1",
             )
+            .bind(user.id)
+            .bind(new_attempts)
             .execute(&state.db)
             .await;
         }
