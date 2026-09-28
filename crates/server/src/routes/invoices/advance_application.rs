@@ -316,7 +316,45 @@ pub(crate) async fn follow_up_applied_advances(
     }
 }
 
-/// Audit and realtime events of automatically applied advances, after commit.
+fn applied_advance_payload(advance: &AppliedAdvance, trigger: &str) -> serde_json::Value {
+    json!({
+        "allocation_id": advance.allocation_id,
+        "request_id": advance.request_id,
+        "advance_invoice_id": advance.advance_invoice_id,
+        "advance_invoice_number": advance.advance_invoice_number,
+        "amount_gross": decimal_to_string(advance.amount_gross),
+        "patient_id": advance.patient_id,
+        "automatic": true,
+        "trigger": trigger,
+    })
+}
+
+/// Audit rows of automatically applied advances, written in the transaction
+/// that applied them.
+pub(crate) async fn audit_applied_advances_tx(
+    conn: &mut sqlx::PgConnection,
+    actor_id: Uuid,
+    trigger: &str,
+    applied: &[AppliedAdvance],
+) -> Result<(), sqlx::Error> {
+    for advance in applied {
+        audit::write_in_transaction(
+            &mut *conn,
+            &audit::domain_event(
+                "apply_invoice_prepayment",
+                Some(actor_id),
+                "invoice",
+                Some(advance.target_invoice_id),
+                applied_advance_payload(advance, trigger),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Realtime events of automatically applied advances, after commit (their
+/// audit rows are written by [`audit_applied_advances_tx`]).
 pub(crate) async fn publish_applied_advances(
     state: &AppState,
     actor_id: Uuid,
@@ -324,23 +362,7 @@ pub(crate) async fn publish_applied_advances(
     applied: &[AppliedAdvance],
 ) {
     for advance in applied {
-        let payload = json!({
-            "allocation_id": advance.allocation_id,
-            "request_id": advance.request_id,
-            "advance_invoice_id": advance.advance_invoice_id,
-            "advance_invoice_number": advance.advance_invoice_number,
-            "amount_gross": decimal_to_string(advance.amount_gross),
-            "patient_id": advance.patient_id,
-            "automatic": true,
-            "trigger": trigger,
-        });
-        state.audit_sender.try_send(audit::domain_event(
-            "apply_invoice_prepayment",
-            Some(actor_id),
-            "invoice",
-            Some(advance.target_invoice_id),
-            payload.clone(),
-        ));
+        let payload = applied_advance_payload(advance, trigger);
         crate::realtime::publish_invoice_event(
             state,
             Some(actor_id),

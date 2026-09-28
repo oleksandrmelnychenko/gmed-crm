@@ -2686,6 +2686,19 @@ async fn terminate_framework_contract(
             Ok(value) => value,
             Err(e) => return failed(e),
         };
+    // Stopped orders, their settlements and detached drafts are audited in
+    // the termination transaction.
+    if let Err(e) = termination_settlements::audit_termination_tx(
+        &mut tx,
+        auth.user_id,
+        contract_id,
+        &terminated_orders,
+        &detached_drafts,
+    )
+    .await
+    {
+        return failed(e);
+    }
 
     if let Err(e) = sqlx::query(
         r#"UPDATE framework_contracts

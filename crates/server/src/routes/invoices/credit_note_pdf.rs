@@ -1,11 +1,17 @@
-//! Credit-note document (Rechnungskorrektur) as PDF.
+//! Credit-note document (Rechnungskorrektur) and cancellation document
+//! (Stornorechnung) as PDF.
 //!
 //! The document references the corrected invoice by number and date, lists the
 //! credited lines with their VAT rates and sums net, VAT and gross per rate
 //! (§ 14 Abs. 4 UStG items that change with the correction). A reversal of a
 //! credit note (Storno der Rechnungskorrektur) prints the same lines and
 //! references the reversed credit note. Legacy pro-rata credit notes, created
-//! before line-level credits, print as one line with their stored totals.
+//! before line-level credits, print as one line with their stored totals. A
+//! cancellation document reverses every line of a released invoice.
+//!
+//! Every document is rendered once when it is issued and stored with the
+//! invoice documents (GoBD); downloads serve the stored copy. Credit notes
+//! issued before documents were stored get their copy on the first download.
 //!
 //! The layout is self-contained on purpose: invoice PDF layout helpers evolve
 //! with the invoice document and must not change credit notes by accident.
@@ -23,11 +29,15 @@ use printpdf::{
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde_json::Value;
-use sqlx::Row;
+use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use super::credit_notes::{CreditNoteLine, parse_credit_note_lines, vat_breakdown};
-use super::{can_read_invoices, ensure_patient_access, err, invoice_is_patient_visible};
+use super::stored_documents::{self, NewInvoiceDocument, PendingBlob};
+use super::{
+    INVOICE_DOCUMENT_SOURCE_HEADER, can_read_invoices, ensure_patient_access, err,
+    invoice_is_patient_visible,
+};
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
@@ -49,7 +59,11 @@ const FOOTER_RULE_Y_MM: f32 = 21.5;
 const FOOTER_CONTENT_TOP_MM: f32 = 18.5;
 const CONTENT_WIDTH_MM: f32 = PAGE_WIDTH_MM - LEFT_MM - RIGHT_MM;
 
+/// `transaction_type` of a cancellation document (Stornorechnung).
+pub(crate) const STORNO_DOCUMENT: &str = "storno";
+
 pub(crate) struct CreditNotePdfContext {
+    /// Credit-note transaction, or cancellation document for a `storno`.
     pub credit_note_id: Uuid,
     pub invoice_id: Uuid,
     pub patient_id: Uuid,
@@ -105,7 +119,7 @@ fn pdf_language(languages: &[String]) -> String {
 }
 
 pub(crate) async fn load_credit_note_pdf_context(
-    state: &AppState,
+    conn: &mut PgConnection,
     invoice_id: Uuid,
     credit_note_id: Uuid,
 ) -> Result<Option<CreditNotePdfContext>, sqlx::Error> {
@@ -140,28 +154,17 @@ pub(crate) async fn load_credit_note_pdf_context(
     )
     .bind(credit_note_id)
     .bind(invoice_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *conn)
     .await?
     else {
         return Ok(None);
     };
 
-    let name = [
-        setting(&row, "title"),
-        setting(&row, "first_name"),
-        setting(&row, "last_name"),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" ");
+    let name = patient_name(&row);
     let issued_at = row
         .try_get::<DateTime<Utc>, _>("issued_at")
         .unwrap_or_else(|_| Utc::now());
-    let recipient = {
-        let mut conn = state.db.acquire().await?;
-        super::document::load_invoice_recipient(&mut conn, invoice_id).await?
-    };
+    let recipient = super::document::load_invoice_recipient(conn, invoice_id).await?;
     Ok(Some(CreditNotePdfContext {
         recipient,
         credit_note_id,
@@ -208,6 +211,113 @@ pub(crate) async fn load_credit_note_pdf_context(
     }))
 }
 
+fn patient_name(row: &sqlx::postgres::PgRow) -> String {
+    [
+        setting(row, "title"),
+        setting(row, "first_name"),
+        setting(row, "last_name"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+/// Printing context of an invoice's cancellation document. Its stored amounts
+/// and lines are negative; the document prints them with the credit sign.
+pub(crate) async fn load_storno_pdf_context(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Option<CreditNotePdfContext>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT storno.id, storno.document_number, storno.reason, storno.issued_on,
+                  storno.currency, storno.amount_net, storno.amount_vat, storno.amount_gross,
+                  storno.line_items, storno.original_invoice_number,
+                  storno.original_invoice_date,
+                  invoice.patient_id, invoice.status,
+                  invoice.portal_visible, invoice.hide_amounts_from_patient,
+                  invoice.pdf_visible_to_patient,
+                  orders.order_number,
+                  patient.patient_id AS patient_pid, patient.title, patient.first_name,
+                  patient.last_name, patient.languages,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
+                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
+           FROM invoice_storno_documents storno
+           JOIN invoices invoice ON invoice.id = storno.invoice_id
+           JOIN patients patient ON patient.id = invoice.patient_id
+           LEFT JOIN orders ON orders.id = invoice.order_id
+           WHERE storno.invoice_id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let recipient = super::document::load_invoice_recipient(conn, invoice_id).await?;
+    let lines = parse_credit_note_lines(row.try_get::<Option<Value>, _>("line_items")?.as_ref())
+        .map(|lines| {
+            lines
+                .into_iter()
+                .map(|line| CreditNoteLine {
+                    net: -line.net,
+                    vat: -line.vat,
+                    gross: -line.gross,
+                    ..line
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|lines| !lines.is_empty());
+    Ok(Some(CreditNotePdfContext {
+        recipient,
+        credit_note_id: row.try_get("id")?,
+        invoice_id,
+        patient_id: row.try_get("patient_id")?,
+        transaction_type: STORNO_DOCUMENT.to_string(),
+        document_number: row.try_get("document_number")?,
+        reversed_document_number: None,
+        reversed_issued_on: None,
+        reason: row.try_get("reason")?,
+        issued_on: row.try_get("issued_on")?,
+        currency: row.try_get("currency")?,
+        amount_net: -row.try_get::<Decimal, _>("amount_net")?,
+        amount_vat: -row.try_get::<Decimal, _>("amount_vat")?,
+        amount_gross: -row.try_get::<Decimal, _>("amount_gross")?,
+        lines,
+        credit_portal_visible: true,
+        invoice_number: row.try_get("original_invoice_number")?,
+        invoice_date: row.try_get("original_invoice_date")?,
+        invoice_status: row.try_get("status")?,
+        invoice_portal_visible: row.try_get("portal_visible")?,
+        hide_amounts_from_patient: row.try_get("hide_amounts_from_patient")?,
+        pdf_visible_to_patient: row.try_get("pdf_visible_to_patient")?,
+        order_number: row.try_get("order_number")?,
+        patient_pid: row.try_get("patient_pid")?,
+        patient_name: patient_name(&row),
+        language: pdf_language(
+            &row.try_get::<Vec<String>, _>("languages")
+                .unwrap_or_default(),
+        ),
+        agency: PatientPdfBrand {
+            name: setting(&row, "agency_name")
+                .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
+            responsible_person: setting(&row, "agency_care_of").unwrap_or_default(),
+            address: setting(&row, "agency_address"),
+            phone: setting(&row, "agency_phone"),
+            email: setting(&row, "agency_email"),
+            website: setting(&row, "agency_website"),
+        },
+        vat_id: setting(&row, "agency_vat_id"),
+        tax_number: setting(&row, "agency_tax_number"),
+    }))
+}
+
 fn label(language: &str, key: &'static str) -> &'static str {
     match (language, key) {
         ("uk", "title") => "Коригування рахунку",
@@ -218,6 +328,18 @@ fn label(language: &str, key: &'static str) -> &'static str {
         ("ru", "reversal_title") => "Сторно корректировки счёта",
         ("en", "reversal_title") => "Cancellation of invoice correction",
         (_, "reversal_title") => "Storno der Rechnungskorrektur",
+        ("uk", "storno_title") => "Сторно рахунку",
+        ("ru", "storno_title") => "Сторнирование счёта",
+        ("en", "storno_title") => "Cancellation invoice",
+        (_, "storno_title") => "Stornorechnung",
+        ("uk", "storno_lines") => "Сторновані позиції",
+        ("ru", "storno_lines") => "Сторнированные позиции",
+        ("en", "storno_lines") => "Cancelled items",
+        (_, "storno_lines") => "Stornierte Positionen",
+        ("uk", "storno_total") => "Сума сторно",
+        ("ru", "storno_total") => "Сумма сторно",
+        ("en", "storno_total") => "Cancellation total",
+        (_, "storno_total") => "Stornobetrag",
         ("uk", "refers_to") => "до рахунку",
         ("ru", "refers_to") => "к счёту",
         ("en", "refers_to") => "for invoice",
@@ -361,6 +483,18 @@ fn label(language: &str, key: &'static str) -> &'static str {
         }
         (_, "reversal_statement") => {
             "Dieses Dokument hebt die oben genannte Rechnungskorrektur auf; der Rechnungsbetrag ist in dieser Höhe wieder geschuldet."
+        }
+        ("uk", "storno_statement") => {
+            "Цей документ повністю сторнує зазначений рахунок; сума рахунку більше не підлягає сплаті."
+        }
+        ("ru", "storno_statement") => {
+            "Этот документ полностью сторнирует указанный счёт; сумма счёта больше не подлежит оплате."
+        }
+        ("en", "storno_statement") => {
+            "This document cancels the invoice above in full; the invoice amount is no longer payable."
+        }
+        (_, "storno_statement") => {
+            "Diese Stornorechnung hebt die oben genannte Rechnung vollständig auf; der Rechnungsbetrag ist nicht mehr geschuldet."
         }
         ("uk", "page") => "Сторінка",
         ("ru", "page") => "Страница",
@@ -697,6 +831,7 @@ pub(crate) fn build_credit_note_pdf(
 ) -> Result<Vec<u8>, &'static str> {
     let language = context.language.as_str();
     let is_reversal = context.transaction_type == "reversal";
+    let is_storno = context.transaction_type == STORNO_DOCUMENT;
     // A credit note reduces the invoice (negative), its reversal restores it.
     let sign = if is_reversal {
         Decimal::ONE
@@ -748,7 +883,9 @@ pub(crate) fn build_credit_note_pdf(
     layout.paragraph(
         &label(
             language,
-            if is_reversal {
+            if is_storno {
+                "storno_title"
+            } else if is_reversal {
                 "reversal_title"
             } else {
                 "title"
@@ -819,7 +956,12 @@ pub(crate) fn build_credit_note_pdf(
     );
     layout.space(4.0);
 
-    layout.paragraph(label(language, "lines"), 12.0, true, Tone::Body);
+    layout.paragraph(
+        label(language, if is_storno { "storno_lines" } else { "lines" }),
+        12.0,
+        true,
+        Tone::Body,
+    );
     layout.space(1.5);
     layout.row(
         &[
@@ -839,7 +981,7 @@ pub(crate) fn build_credit_note_pdf(
             description.push_str(" · ");
             description.push_str(label(language, "passthrough"));
         }
-        if line.quantity.is_none() && context.lines.is_some() {
+        if line.quantity.is_none() && context.lines.is_some() && !is_storno {
             description.push_str(" · ");
             description.push_str(label(language, "partial"));
         }
@@ -906,7 +1048,15 @@ pub(crate) fn build_credit_note_pdf(
     for (key, amount, emphasized) in [
         ("total_net", context.amount_net, false),
         ("total_vat", context.amount_vat, false),
-        ("total_gross", context.amount_gross, true),
+        (
+            if is_storno {
+                "storno_total"
+            } else {
+                "total_gross"
+            },
+            context.amount_gross,
+            true,
+        ),
     ] {
         let value = format_money(sign * amount, &context.currency);
         layout.row(
@@ -923,7 +1073,9 @@ pub(crate) fn build_credit_note_pdf(
     layout.paragraph(
         label(
             language,
-            if is_reversal {
+            if is_storno {
+                "storno_statement"
+            } else if is_reversal {
                 "reversal_statement"
             } else {
                 "credit_statement"
@@ -940,38 +1092,250 @@ pub(crate) fn build_credit_note_pdf(
         .save(&pdf_text_save_options(), &mut warnings))
 }
 
-pub(crate) fn credit_note_pdf_filename(document_number: &str) -> String {
-    let base = document_number
+fn safe_file_part(document_number: &str) -> String {
+    document_number
         .chars()
         .map(|character| match character {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
             _ => character,
         })
-        .collect::<String>();
-    format!("RECHNUNGSKORREKTUR-{}.pdf", base.trim())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
-fn pdf_response(bytes: Vec<u8>, document_number: &str) -> axum::response::Response {
+pub(crate) fn credit_note_pdf_filename(document_number: &str) -> String {
+    format!("RECHNUNGSKORREKTUR-{}.pdf", safe_file_part(document_number))
+}
+
+pub(crate) fn storno_pdf_filename(document_number: &str) -> String {
+    format!("STORNORECHNUNG-{}.pdf", safe_file_part(document_number))
+}
+
+fn context_file_name(context: &CreditNotePdfContext) -> String {
+    if context.transaction_type == STORNO_DOCUMENT {
+        storno_pdf_filename(&context.document_number)
+    } else {
+        credit_note_pdf_filename(&context.document_number)
+    }
+}
+
+fn pdf_response(bytes: Vec<u8>, file_name: &str, source: &'static str) -> axum::response::Response {
     match axum::response::Response::builder()
         .header("content-type", "application/pdf")
         .header(
             "content-disposition",
-            format!(
-                "inline; filename=\"{}\"",
-                credit_note_pdf_filename(document_number).replace('"', "")
-            ),
+            format!("inline; filename=\"{}\"", file_name.replace('"', "")),
         )
+        .header(INVOICE_DOCUMENT_SOURCE_HEADER, source)
         .body(Body::from(bytes))
     {
         Ok(response) => response,
         Err(error) => {
-            tracing::error!(%error, "build credit-note pdf response");
+            tracing::error!(%error, "build correction document pdf response");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to build credit-note PDF",
+                "Failed to build the document PDF",
             )
         }
     }
+}
+
+/// The document row a correction context is stored under.
+fn new_document<'a>(
+    context: &'a CreditNotePdfContext,
+    file_name: &'a str,
+    trigger: &'static str,
+    generated_by: Option<Uuid>,
+) -> NewInvoiceDocument<'a> {
+    let storno = context.transaction_type == STORNO_DOCUMENT;
+    NewInvoiceDocument {
+        invoice_id: context.invoice_id,
+        kind: if storno {
+            stored_documents::KIND_STORNO
+        } else {
+            stored_documents::KIND_CREDIT_NOTE
+        },
+        dunning_event_id: None,
+        credit_note_transaction_id: (!storno).then_some(context.credit_note_id),
+        storno_document_id: storno.then_some(context.credit_note_id),
+        file_name,
+        language: &context.language,
+        trigger,
+        generated_by,
+    }
+}
+
+/// A correction document rendered and stored at issue.
+pub(super) struct IssuedCorrectionDocument {
+    pub file_name: String,
+    pub sha256: String,
+    /// Blob written by this call; discard it when the transaction fails.
+    pub blob: Option<PendingBlob>,
+}
+
+async fn store_issued(
+    conn: &mut PgConnection,
+    context: &CreditNotePdfContext,
+    generated_by: Uuid,
+) -> Result<IssuedCorrectionDocument, axum::response::Response> {
+    let bytes = build_credit_note_pdf(context)
+        .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let file_name = context_file_name(context);
+    let blob = stored_documents::store_rendered(
+        conn,
+        &new_document(
+            context,
+            &file_name,
+            stored_documents::TRIGGER_ISSUE,
+            Some(generated_by),
+        ),
+        &bytes,
+    )
+    .await?;
+    Ok(IssuedCorrectionDocument {
+        sha256: stored_documents::sha256_hex(&bytes),
+        file_name,
+        blob,
+    })
+}
+
+/// Renders and stores a credit note (or reversal) inside its issuing
+/// transaction.
+pub(super) async fn store_issued_credit_note(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+    credit_note_id: Uuid,
+    generated_by: Uuid,
+) -> Result<IssuedCorrectionDocument, axum::response::Response> {
+    let context = load_credit_note_pdf_context(conn, invoice_id, credit_note_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %invoice_id, %credit_note_id, "load issued credit note document");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store the credit-note document",
+            )
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Credit note not found"))?;
+    store_issued(conn, &context, generated_by).await
+}
+
+/// Renders and stores an invoice's cancellation document inside the
+/// cancelling transaction.
+pub(super) async fn store_issued_storno(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+    generated_by: Uuid,
+) -> Result<IssuedCorrectionDocument, axum::response::Response> {
+    let context = load_storno_pdf_context(conn, invoice_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %invoice_id, "load issued cancellation document");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store the cancellation document",
+            )
+        })?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Cancellation document not found"))?;
+    store_issued(conn, &context, generated_by).await
+}
+
+/// The stored PDF of a correction document. A credit note issued before
+/// documents were stored gets its copy now, from the current data; a
+/// concurrent first download that stored first wins.
+async fn stored_or_first_download(
+    conn: &mut PgConnection,
+    context: &CreditNotePdfContext,
+    actor: Uuid,
+) -> Result<(Vec<u8>, String, &'static str), axum::response::Response> {
+    let storno = context.transaction_type == STORNO_DOCUMENT;
+    let (credit_id, storno_id) = if storno {
+        (None, Some(context.credit_note_id))
+    } else {
+        (Some(context.credit_note_id), None)
+    };
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, invoice_id = %context.invoice_id, document_id = %context.credit_note_id, "load stored correction document");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the document",
+        )
+    };
+    if let Some(document) = stored_documents::load_correction(conn, credit_id, storno_id)
+        .await
+        .map_err(failed)?
+    {
+        let bytes = stored_documents::read_bytes(&document).await?;
+        return Ok((bytes, document.file_name, "stored"));
+    }
+    let bytes = build_credit_note_pdf(context)
+        .map_err(|message| err(StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let file_name = context_file_name(context);
+    let stored = stored_documents::store_rendered(
+        conn,
+        &new_document(
+            context,
+            &file_name,
+            stored_documents::TRIGGER_FIRST_DOWNLOAD,
+            Some(actor),
+        ),
+        &bytes,
+    )
+    .await?;
+    if stored.is_some() {
+        return Ok((bytes, file_name, "stored-on-first-download"));
+    }
+    let document = stored_documents::load_correction(conn, credit_id, storno_id)
+        .await
+        .map_err(failed)?
+        .ok_or_else(|| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the document",
+            )
+        })?;
+    let bytes = stored_documents::read_bytes(&document).await?;
+    Ok((bytes, document.file_name, "stored"))
+}
+
+async fn acquire(
+    state: &AppState,
+) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, axum::response::Response> {
+    state.db.acquire().await.map_err(|error| {
+        tracing::error!(%error, "acquire correction document connection");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the document",
+        )
+    })
+}
+
+fn audit_download(
+    state: &AppState,
+    actor: Uuid,
+    action: &str,
+    context: &CreditNotePdfContext,
+    document: &'static str,
+    source: &str,
+) {
+    let key = if context.transaction_type == STORNO_DOCUMENT {
+        "storno_document_id"
+    } else {
+        "credit_note_transaction_id"
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        action,
+        Some(actor),
+        "invoice",
+        Some(context.invoice_id),
+        serde_json::json!({
+            key: context.credit_note_id,
+            "document_number": context.document_number,
+            "document": document,
+            "source": source,
+        }),
+    ));
 }
 
 pub(crate) async fn download_credit_note_pdf(
@@ -982,7 +1346,11 @@ pub(crate) async fn download_credit_note_pdf(
     if !can_read_invoices(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
-    let context = match load_credit_note_pdf_context(&state, invoice_id, credit_note_id).await {
+    let mut conn = match acquire(&state).await {
+        Ok(conn) => conn,
+        Err(response) => return response,
+    };
+    let context = match load_credit_note_pdf_context(&mut conn, invoice_id, credit_note_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Credit note not found"),
         Err(error) => {
@@ -996,22 +1364,20 @@ pub(crate) async fn download_credit_note_pdf(
     if let Err(response) = ensure_patient_access(&state, &auth, context.patient_id).await {
         return response;
     }
-    let bytes = match build_credit_note_pdf(&context) {
-        Ok(value) => value,
-        Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
-    };
-    state.audit_sender.try_send(audit::domain_event(
+    let (bytes, file_name, source) =
+        match stored_or_first_download(&mut conn, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    audit_download(
+        &state,
+        auth.user_id,
         "download_credit_note_pdf",
-        Some(auth.user_id),
-        "invoice",
-        Some(context.invoice_id),
-        serde_json::json!({
-            "credit_note_transaction_id": context.credit_note_id,
-            "document_number": context.document_number,
-            "source": "staff_workspace",
-        }),
-    ));
-    pdf_response(bytes, &context.document_number)
+        &context,
+        source,
+        "staff_workspace",
+    );
+    pdf_response(bytes, &file_name, source)
 }
 
 pub(crate) async fn download_my_credit_note_pdf(
@@ -1026,7 +1392,11 @@ pub(crate) async fn download_my_credit_note_pdf(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let context = match load_credit_note_pdf_context(&state, invoice_id, credit_note_id).await {
+    let mut conn = match acquire(&state).await {
+        Ok(conn) => conn,
+        Err(response) => return response,
+    };
+    let context = match load_credit_note_pdf_context(&mut conn, invoice_id, credit_note_id).await {
         Ok(Some(value)) => value,
         Ok(None) => return err(StatusCode::NOT_FOUND, "Credit note not found"),
         Err(error) => {
@@ -1050,22 +1420,114 @@ pub(crate) async fn download_my_credit_note_pdf(
             "Credit-note PDF is hidden from patient",
         );
     }
-    let bytes = match build_credit_note_pdf(&context) {
-        Ok(value) => value,
-        Err(message) => return err(StatusCode::INTERNAL_SERVER_ERROR, message),
-    };
-    state.audit_sender.try_send(audit::domain_event(
+    let (bytes, file_name, source) =
+        match stored_or_first_download(&mut conn, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    audit_download(
+        &state,
+        auth.user_id,
         "download_portal_credit_note_pdf",
-        Some(auth.user_id),
-        "invoice",
-        Some(context.invoice_id),
-        serde_json::json!({
-            "credit_note_transaction_id": context.credit_note_id,
-            "document_number": context.document_number,
-            "source": "patient_portal",
-        }),
-    ));
-    pdf_response(bytes, &context.document_number)
+        &context,
+        source,
+        "patient_portal",
+    );
+    pdf_response(bytes, &file_name, source)
+}
+
+pub(crate) async fn download_storno_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if !can_read_invoices(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut conn = match acquire(&state).await {
+        Ok(conn) => conn,
+        Err(response) => return response,
+    };
+    let context = match load_storno_pdf_context(&mut conn, invoice_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Cancellation document not found"),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load cancellation document context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the cancellation document",
+            );
+        }
+    };
+    if let Err(response) = ensure_patient_access(&state, &auth, context.patient_id).await {
+        return response;
+    }
+    let (bytes, file_name, source) =
+        match stored_or_first_download(&mut conn, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    audit_download(
+        &state,
+        auth.user_id,
+        "download_storno_document_pdf",
+        &context,
+        source,
+        "staff_workspace",
+    );
+    pdf_response(bytes, &file_name, source)
+}
+
+pub(crate) async fn download_my_storno_pdf(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::Patient]) {
+        return response;
+    }
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let mut conn = match acquire(&state).await {
+        Ok(conn) => conn,
+        Err(response) => return response,
+    };
+    let context = match load_storno_pdf_context(&mut conn, invoice_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Cancellation document not found"),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load portal cancellation document context");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the cancellation document",
+            );
+        }
+    };
+    if context.patient_id != patient_id || !context.invoice_portal_visible {
+        return err(StatusCode::NOT_FOUND, "Cancellation document not found");
+    }
+    if context.hide_amounts_from_patient || !context.pdf_visible_to_patient {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Cancellation document PDF is hidden from patient",
+        );
+    }
+    let (bytes, file_name, source) =
+        match stored_or_first_download(&mut conn, &context, auth.user_id).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    audit_download(
+        &state,
+        auth.user_id,
+        "download_portal_storno_document_pdf",
+        &context,
+        source,
+        "patient_portal",
+    );
+    pdf_response(bytes, &file_name, source)
 }
 
 #[cfg(test)]
@@ -1150,6 +1612,34 @@ mod tests {
         assert!(bytes.starts_with(b"%PDF"));
         let bytes = build_credit_note_pdf(&context(None, "reversal")).unwrap();
         assert!(bytes.starts_with(b"%PDF"));
+    }
+
+    #[test]
+    fn storno_document_prints_its_title_and_negative_totals() {
+        let consultation = CreditNoteLine {
+            invoice_line_index: 0,
+            description: "Organisation der Behandlung".to_string(),
+            quantity: Some(dec("1")),
+            unit_price: Some(dec("481.50")),
+            vat_rate: Decimal::ZERO,
+            is_cost_passthrough: false,
+            net: dec("481.50"),
+            vat: Decimal::ZERO,
+            gross: dec("481.50"),
+        };
+        let mut storno = context(Some(vec![consultation]), STORNO_DOCUMENT);
+        storno.document_number = "STORNO-20260928-0001".to_string();
+        let bytes = build_credit_note_pdf(&storno).unwrap();
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(text.contains("STORNORECHNUNG"), "{text}");
+        assert!(text.contains("INV-20260901-0001"), "{text}");
+        assert!(text.contains("-481,50"), "{text}");
+        assert!(text.contains("Stornobetrag"), "{text}");
+        assert!(!text.contains("Teilkorrektur"), "{text}");
+        assert_eq!(
+            storno_pdf_filename("STORNO-20260928-0001"),
+            "STORNORECHNUNG-STORNO-20260928-0001.pdf"
+        );
     }
 
     #[test]

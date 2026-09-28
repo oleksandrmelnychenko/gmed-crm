@@ -5,8 +5,9 @@
 //! planned services are cancelled and the order is billed for what actually
 //! accrued up to the termination:
 //!
-//! * order services that were delivered, approved or already invoiced, at their
-//!   own line prices;
+//! * order services that were delivered or approved, at their own line prices;
+//!   a service invoiced in advance counts only once it was actually delivered
+//!   (`delivered_at`, or approved);
 //! * flat fees marked `due_in_full_on_termination` in the catalog (the
 //!   treatment-organisation Pauschale), even if they were still planned;
 //! * third-party costs (external/provider invoices of the order that are a
@@ -22,7 +23,10 @@
 //!   costs still to re-invoice and amounts on draft invoices;
 //! * `paid` — patient cash on the order's invoices, advances included, minus
 //!   refunds (applied advances are part of that cash, not counted twice);
-//! * `balance = invoiced + uninvoiced - paid`.
+//! * `to_credit` — services invoiced in advance but never delivered: what
+//!   released invoices bill for them and credit notes have not credited yet.
+//!   They did not accrue, so the patient gets them credited (and refunded);
+//! * `balance = invoiced - to_credit + uninvoiced - paid`.
 //!
 //! Credit notes lower `invoiced` and never reopen a service for billing.
 //! Which service an invoice line bills is decided line by line, legacy quote
@@ -58,7 +62,7 @@ use super::{
     can_manage_invoice_finance, can_read_invoices, compute_invoice_line_parts, decimal_to_string,
     ensure_patient_access, err, inherited_invoice_payer, invoice_json_decimal,
     load_allocated_quote_quantities, load_invoice_detail, load_quote_invoice_context,
-    write_invoice_audit,
+    write_invoice_audit_tx,
 };
 use crate::audit;
 use crate::auth::middleware::AuthUser;
@@ -173,12 +177,26 @@ pub(crate) struct OrderSettlement {
     pub unmatched_invoiced_gross: Decimal,
     lines: Vec<SettlementLine>,
     cancelled_lines: Vec<SettlementLine>,
+    /// Services invoiced in advance but never delivered; `gross` is what
+    /// released invoices still bill for them (after credit notes).
+    undelivered_lines: Vec<SettlementLine>,
     warnings: Vec<&'static str>,
 }
 
 impl OrderSettlement {
     pub fn balance_gross(&self) -> Decimal {
-        (self.invoiced_gross + self.uninvoiced_gross() - self.paid_gross).round_cents()
+        (self.invoiced_gross - self.to_credit_gross() + self.uninvoiced_gross() - self.paid_gross)
+            .round_cents()
+    }
+
+    /// Billed in advance, never delivered, not credited yet: the patient is
+    /// owed a credit note (and a refund of what was paid for it).
+    pub fn to_credit_gross(&self) -> Decimal {
+        self.undelivered_lines
+            .iter()
+            .map(|line| line.gross)
+            .sum::<Decimal>()
+            .round_cents()
     }
 
     /// Service amounts no invoice line bills yet: what "create final invoice"
@@ -252,6 +270,8 @@ impl OrderSettlement {
             "draft_gross": decimal_to_string(self.draft_gross),
             "billable_gross": decimal_to_string(self.billable_gross()),
             "unmatched_invoiced_gross": decimal_to_string(self.unmatched_invoiced_gross),
+            "to_credit_gross": decimal_to_string(self.to_credit_gross()),
+            "undelivered_lines": self.undelivered_lines.iter().map(SettlementLine::to_json).collect::<Vec<_>>(),
         })
     }
 
@@ -271,6 +291,8 @@ impl OrderSettlement {
             "draft_gross": decimal_to_string(self.draft_gross),
             "billable_gross": decimal_to_string(self.billable_gross()),
             "unmatched_invoiced_gross": decimal_to_string(self.unmatched_invoiced_gross),
+            "to_credit_gross": decimal_to_string(self.to_credit_gross()),
+            "undelivered_lines": self.undelivered_lines.iter().map(SettlementLine::to_json).collect::<Vec<_>>(),
             "lines": self.lines_json(),
             "cancelled_lines": self.cancelled_lines.iter().map(SettlementLine::to_json).collect::<Vec<_>>(),
             "warnings": self.warnings,
@@ -310,6 +332,9 @@ pub(crate) async fn compute_order_settlement(
                   service.description AS raw_description,
                   service.agency_service_unit_label_snapshot AS unit_label,
                   service.status, service.quantity,
+                  service.delivered_at IS NOT NULL AS delivered,
+                  (service.approved_at IS NOT NULL OR service.approved_by IS NOT NULL)
+                      AS approved_stage,
                   service.unit_price_snapshot AS unit_price,
                   service.vat_rate_snapshot AS vat_rate,
                   service.is_cost_passthrough,
@@ -375,8 +400,69 @@ pub(crate) async fn compute_order_settlement(
         .collect::<Vec<_>>();
     let invoiced_quantities = attribute_invoiced_lines(&service_keys, &invoiced_lines);
 
+    // What released invoices still bill per service after line credit notes
+    // (reversals restore the credited lines).
+    let open_billed_by_service = sqlx::query(
+        r#"WITH billed AS (
+               SELECT invoice.id AS invoice_id,
+                      (item.position - 1)::INTEGER AS line_index,
+                      item.value ->> 'source_order_leistung_id' AS service_id,
+                      COALESCE(NULLIF(item.value ->> 'line_gross', '')::NUMERIC, 0) AS gross
+               FROM invoices invoice
+               CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                        THEN invoice.line_items ELSE '[]'::jsonb END
+               ) WITH ORDINALITY AS item(value, position)
+               WHERE invoice.order_id = $1
+                 AND invoice.released_at IS NOT NULL
+                 AND invoice.status <> 'cancelled'
+                 AND invoice.invoice_type <> 'advance'
+                 AND COALESCE(item.value ->> 'source_order_leistung_id', '') <> ''
+           ), credited AS (
+               SELECT credit.invoice_id,
+                      NULLIF(line.value ->> 'invoice_line_index', '')::INTEGER AS line_index,
+                      SUM(
+                          CASE WHEN credit.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                          * COALESCE(NULLIF(line.value ->> 'line_gross', '')::NUMERIC, 0)
+                      ) AS gross
+               FROM invoice_credit_note_transactions credit
+               JOIN invoices invoice ON invoice.id = credit.invoice_id
+               CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(credit.line_items) = 'array'
+                        THEN credit.line_items ELSE '[]'::jsonb END
+               ) AS line(value)
+               WHERE invoice.order_id = $1
+               GROUP BY credit.invoice_id, 2
+           )
+           SELECT billed.service_id,
+                  SUM(GREATEST(billed.gross - COALESCE(credited.gross, 0), 0)) AS open_gross
+           FROM billed
+           LEFT JOIN credited
+             ON credited.invoice_id = billed.invoice_id
+            AND credited.line_index = billed.line_index
+           GROUP BY billed.service_id"#,
+    )
+    .bind(order_id)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .filter_map(|row| {
+        let service_id = row
+            .try_get::<Option<String>, _>("service_id")
+            .ok()
+            .flatten()
+            .and_then(|value| Uuid::parse_str(&value).ok())?;
+        Some((
+            service_id,
+            row.try_get::<Decimal, _>("open_gross")
+                .unwrap_or(Decimal::ZERO),
+        ))
+    })
+    .collect::<BTreeMap<_, _>>();
+
     let mut lines = Vec::new();
     let mut cancelled_lines = Vec::new();
+    let mut undelivered_lines = Vec::new();
     let mut warnings = Vec::new();
     let mut accrued_net = Decimal::ZERO;
     let mut accrued_gross = Decimal::ZERO;
@@ -384,10 +470,17 @@ pub(crate) async fn compute_order_settlement(
     for row in service_rows {
         let status = row.try_get::<String, _>("status").unwrap_or_default();
         let due_in_full = row.try_get::<bool, _>("due_in_full").unwrap_or(false);
-        let accrued = matches!(status.as_str(), "delivered" | "approved" | "invoiced")
+        // Accrual follows actual delivery: a service invoiced ahead of its
+        // delivery (e.g. billed in advance) accrued only if it was delivered
+        // or approved; otherwise it is credited to the patient.
+        let reached_delivery = row.try_get::<bool, _>("delivered").unwrap_or(false)
+            || row.try_get::<bool, _>("approved_stage").unwrap_or(false);
+        let accrued = matches!(status.as_str(), "delivered" | "approved")
+            || (status == "invoiced" && (reached_delivery || due_in_full))
             || (status == "planned" && due_in_full);
+        let undelivered = status == "invoiced" && !accrued;
         let cancelled = status == "cancelled" || (status == "planned" && !due_in_full);
-        if !accrued && !cancelled {
+        if !accrued && !cancelled && !undelivered {
             continue;
         }
         let quantity = row
@@ -454,6 +547,18 @@ pub(crate) async fn compute_order_settlement(
             accrued_net += net;
             accrued_gross += gross;
             lines.push(line);
+        } else if undelivered {
+            let open_billed = line
+                .order_leistung_id
+                .and_then(|id| open_billed_by_service.get(&id).copied())
+                .unwrap_or(Decimal::ZERO)
+                .round_cents();
+            if open_billed > Decimal::ZERO {
+                undelivered_lines.push(SettlementLine {
+                    gross: open_billed,
+                    ..line
+                });
+            }
         } else {
             cancelled_lines.push(line);
         }
@@ -632,6 +737,7 @@ pub(crate) async fn compute_order_settlement(
         unmatched_invoiced_gross: invoiced_quantities.unmatched_gross.round_cents(),
         lines,
         cancelled_lines,
+        undelivered_lines,
         warnings,
     }))
 }
@@ -783,7 +889,62 @@ pub(crate) async fn detach_draft_orders_tx(
     Ok(detached)
 }
 
-/// Audit and realtime events for drafts detached by a committed termination.
+fn detached_draft_payload(order: &DetachedDraftOrder, contract_id: Uuid) -> Value {
+    let mut payload = order.summary_json();
+    payload["contract_id"] = json!(contract_id);
+    payload["reason"] = json!(CONTRACT_TERMINATED_REASON);
+    payload
+}
+
+fn terminated_order_payload(order: &TerminatedOrder, contract_id: Uuid) -> Value {
+    let mut payload = order.summary_json();
+    payload["contract_id"] = json!(contract_id);
+    payload["from_status"] = json!(order.previous_status);
+    payload["status"] = json!("cancelled");
+    payload["cancellation_reason"] = json!(CONTRACT_TERMINATED_REASON);
+    payload
+}
+
+/// Audit rows of the stopped orders (with their settlements) and detached
+/// drafts, written in the termination transaction before it commits.
+pub(crate) async fn audit_termination_tx(
+    transaction: &mut Transaction<'_, Postgres>,
+    actor_user_id: Uuid,
+    contract_id: Uuid,
+    orders: &[TerminatedOrder],
+    drafts: &[DetachedDraftOrder],
+) -> Result<(), sqlx::Error> {
+    for order in orders {
+        audit::write_in_transaction(
+            transaction,
+            &audit::domain_event(
+                "terminate_order_for_contract",
+                Some(actor_user_id),
+                "order",
+                Some(order.order_id),
+                terminated_order_payload(order, contract_id),
+            ),
+        )
+        .await?;
+    }
+    for order in drafts {
+        audit::write_in_transaction(
+            transaction,
+            &audit::domain_event(
+                "detach_draft_order_from_terminated_contract",
+                Some(actor_user_id),
+                "order",
+                Some(order.order_id),
+                detached_draft_payload(order, contract_id),
+            ),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// Realtime events for drafts detached by a committed termination (audited
+/// by [`audit_termination_tx`]).
 pub(crate) async fn publish_detached_draft_orders(
     state: &AppState,
     actor_user_id: Uuid,
@@ -791,16 +952,7 @@ pub(crate) async fn publish_detached_draft_orders(
     orders: &[DetachedDraftOrder],
 ) {
     for order in orders {
-        let mut payload = order.summary_json();
-        payload["contract_id"] = json!(contract_id);
-        payload["reason"] = json!(CONTRACT_TERMINATED_REASON);
-        state.audit_sender.try_send(audit::domain_event(
-            "detach_draft_order_from_terminated_contract",
-            Some(actor_user_id),
-            "order",
-            Some(order.order_id),
-            payload.clone(),
-        ));
+        let payload = detached_draft_payload(order, contract_id);
         crate::realtime::publish_order_event(
             state,
             Some(actor_user_id),
@@ -897,7 +1049,7 @@ pub(crate) async fn terminate_open_orders_tx(
                            accrued_net, accrued_gross, invoiced_gross, paid_gross,
                            balance_gross, uninvoiced_gross, lines, status,
                            settled_at, settled_by, settlement_note, settled_balance_gross,
-                           created_by
+                           created_by, to_credit_gross
                        ) VALUES (
                            $1, $2, $3, now(), $4,
                            $5, $6, $7, $8,
@@ -906,7 +1058,7 @@ pub(crate) async fn terminate_open_orders_tx(
                            CASE WHEN $12 = 'settled' THEN $13::uuid END,
                            CASE WHEN $12 = 'settled' THEN 'Nothing accrued, invoiced or paid' END,
                            CASE WHEN $12 = 'settled' THEN 0::numeric END,
-                           $13
+                           $13, $14
                        )
                        RETURNING id"#,
                 )
@@ -923,6 +1075,7 @@ pub(crate) async fn terminate_open_orders_tx(
                 .bind(settlement.lines_json())
                 .bind(status)
                 .bind(actor_user_id)
+                .bind(settlement.to_credit_gross())
                 .fetch_one(&mut **transaction)
                 .await?;
                 (Some(settlement_id), Some(status))
@@ -951,7 +1104,8 @@ pub(crate) async fn terminate_open_orders_tx(
     Ok(terminated)
 }
 
-/// Audit and realtime events for orders stopped by a committed termination.
+/// Realtime events for orders stopped by a committed termination (audited by
+/// [`audit_termination_tx`]).
 pub(crate) async fn publish_terminated_orders(
     state: &AppState,
     actor_user_id: Uuid,
@@ -959,18 +1113,7 @@ pub(crate) async fn publish_terminated_orders(
     orders: &[TerminatedOrder],
 ) {
     for order in orders {
-        let mut payload = order.summary_json();
-        payload["contract_id"] = json!(contract_id);
-        payload["from_status"] = json!(order.previous_status);
-        payload["status"] = json!("cancelled");
-        payload["cancellation_reason"] = json!(CONTRACT_TERMINATED_REASON);
-        state.audit_sender.try_send(audit::domain_event(
-            "terminate_order_for_contract",
-            Some(actor_user_id),
-            "order",
-            Some(order.order_id),
-            payload.clone(),
-        ));
+        let payload = terminated_order_payload(order, contract_id);
         crate::realtime::publish_order_event(
             state,
             Some(actor_user_id),
@@ -1005,6 +1148,7 @@ async fn load_settlement_payloads(
                   settlement.terminated_at, settlement.currency, settlement.status,
                   settlement.accrued_net, settlement.accrued_gross, settlement.invoiced_gross,
                   settlement.paid_gross, settlement.balance_gross, settlement.uninvoiced_gross,
+                  settlement.to_credit_gross,
                   settlement.lines, settlement.final_invoice_id, settlement.settled_at,
                   settlement.settlement_note, settlement.settlement_forced,
                   settlement.settled_balance_gross, settlement.created_at,
@@ -1079,6 +1223,7 @@ async fn load_settlement_payloads(
                     "paid_gross": decimal("paid_gross"),
                     "balance_gross": decimal("balance_gross"),
                     "uninvoiced_gross": decimal("uninvoiced_gross"),
+                    "to_credit_gross": decimal("to_credit_gross"),
                 },
                 "current": current_json,
                 "can_settle": can_settle,
@@ -1648,18 +1793,8 @@ async fn create_termination_final_invoice(
             );
         }
     }
-    if !invoiced_service_ids.is_empty()
-        && let Err(error) = sqlx::query(
-            "UPDATE order_leistungen SET status = 'invoiced'
-             WHERE order_id = $1 AND id = ANY($2) AND status <> 'invoiced'",
-        )
-        .bind(order_id)
-        .bind(&invoiced_service_ids)
-        .execute(&mut *transaction)
-        .await
-    {
-        return failed(error);
-    }
+    // The draft reserves its services (its lines and allocations count as
+    // billed); they become `invoiced` when the final invoice is released.
     if let Err(error) =
         sqlx::query("UPDATE order_termination_settlements SET final_invoice_id = $2 WHERE id = $1")
             .bind(settlement_id)
@@ -1670,12 +1805,8 @@ async fn create_termination_final_invoice(
         return failed(error);
     }
 
-    if let Err(error) = transaction.commit().await {
-        return failed(error);
-    }
-
-    write_invoice_audit(
-        &state,
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "create_termination_final_invoice",
         invoice_id,
@@ -1689,7 +1820,13 @@ async fn create_termination_final_invoice(
             "total_gross": decimal_to_string(snapshot.total_gross),
         }),
     )
-    .await;
+    .await
+    {
+        return failed(error);
+    }
+    if let Err(error) = transaction.commit().await {
+        return failed(error);
+    }
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -1833,24 +1970,31 @@ async fn settle_termination_settlement(
     {
         return failed(error);
     }
-    if let Err(error) = transaction.commit().await {
-        return failed(error);
-    }
-
     let payload = json!({
         "termination_settlement_id": settlement_id,
         "forced": forced,
         "balance_gross": decimal_to_string(current.balance_gross()),
         "uninvoiced_gross": decimal_to_string(current.uninvoiced_gross()),
+        "to_credit_gross": decimal_to_string(current.to_credit_gross()),
         "has_note": note.is_some(),
     });
-    state.audit_sender.try_send(audit::domain_event(
-        "settle_order_termination_settlement",
-        Some(auth.user_id),
-        "order",
-        Some(order_id),
-        payload.clone(),
-    ));
+    if let Err(error) = audit::write_in_transaction(
+        &mut transaction,
+        &audit::domain_event(
+            "settle_order_termination_settlement",
+            Some(auth.user_id),
+            "order",
+            Some(order_id),
+            payload.clone(),
+        ),
+    )
+    .await
+    {
+        return failed(error);
+    }
+    if let Err(error) = transaction.commit().await {
+        return failed(error);
+    }
     crate::realtime::publish_order_event(
         &state,
         Some(auth.user_id),

@@ -562,6 +562,8 @@ pub(super) async fn store_dunning_letter(
             invoice_id,
             kind: KIND_DUNNING_LETTER,
             dunning_event_id: Some(dunning_event_id),
+            credit_note_transaction_id: None,
+            storno_document_id: None,
             file_name: &file_name,
             language: &context.language,
             trigger: TRIGGER_DUNNING,

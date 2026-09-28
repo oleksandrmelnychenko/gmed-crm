@@ -7,6 +7,9 @@
 //!   first download (`generation_trigger = 'first_download'`); it shows the
 //!   invoice as recorded at that moment and is kept unchanged from then on.
 //! * Dunning letters are stored with their dunning event the same way.
+//! * Credit notes, their reversals and cancellation documents
+//!   (Stornorechnungen) are stored when they are issued (`issue`); credit
+//!   notes issued before that get their copy on the first download.
 //! * Drafts are never stored: they render live and are marked as drafts.
 //!
 //! Blobs are sealed with the document key registry and live next to the other
@@ -27,10 +30,13 @@ use crate::routes::documents::{
 
 pub(super) const KIND_INVOICE: &str = "invoice";
 pub(super) const KIND_DUNNING_LETTER: &str = "dunning_letter";
+pub(super) const KIND_CREDIT_NOTE: &str = "credit_note";
+pub(super) const KIND_STORNO: &str = "storno";
 
 pub(super) const TRIGGER_RELEASE: &str = "release";
 pub(super) const TRIGGER_FIRST_DOWNLOAD: &str = "first_download";
 pub(super) const TRIGGER_DUNNING: &str = "dunning";
+pub(super) const TRIGGER_ISSUE: &str = "issue";
 
 /// A stored document row.
 #[derive(Clone, Debug)]
@@ -48,6 +54,8 @@ pub(super) struct NewInvoiceDocument<'a> {
     pub invoice_id: Uuid,
     pub kind: &'static str,
     pub dunning_event_id: Option<Uuid>,
+    pub credit_note_transaction_id: Option<Uuid>,
+    pub storno_document_id: Option<Uuid>,
     pub file_name: &'a str,
     pub language: &'a str,
     pub trigger: &'static str,
@@ -96,8 +104,9 @@ pub(super) async fn insert_row(
     sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_documents (
                 invoice_id, document_kind, dunning_event_id, storage_key, file_name,
-                file_size, sha256, document_language, generation_trigger, generated_by
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                file_size, sha256, document_language, generation_trigger, generated_by,
+                credit_note_transaction_id, storno_document_id
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            ON CONFLICT DO NOTHING
            RETURNING id"#,
     )
@@ -111,6 +120,8 @@ pub(super) async fn insert_row(
     .bind(document.language)
     .bind(document.trigger)
     .bind(document.generated_by)
+    .bind(document.credit_note_transaction_id)
+    .bind(document.storno_document_id)
     .fetch_optional(conn)
     .await
 }
@@ -142,6 +153,60 @@ pub(super) async fn load(
         generation_trigger: row.try_get("generation_trigger").unwrap_or_default(),
         generated_at: row.try_get("generated_at").unwrap_or_else(|_| Utc::now()),
     }))
+}
+
+/// The stored PDF of a credit note (or its reversal), or of a cancellation
+/// document.
+pub(super) async fn load_correction(
+    conn: &mut PgConnection,
+    credit_note_transaction_id: Option<Uuid>,
+    storno_document_id: Option<Uuid>,
+) -> Result<Option<StoredInvoiceDocument>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT id, storage_key, file_name, sha256, generation_trigger, generated_at
+           FROM invoice_documents
+           WHERE ($1::uuid IS NOT NULL AND credit_note_transaction_id = $1)
+              OR ($2::uuid IS NOT NULL AND storno_document_id = $2)"#,
+    )
+    .bind(credit_note_transaction_id)
+    .bind(storno_document_id)
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|row| StoredInvoiceDocument {
+        id: row.try_get("id").unwrap_or_default(),
+        storage_key: row.try_get("storage_key").unwrap_or_default(),
+        file_name: row.try_get("file_name").unwrap_or_default(),
+        sha256: row.try_get("sha256").unwrap_or_default(),
+        generation_trigger: row.try_get("generation_trigger").unwrap_or_default(),
+        generated_at: row.try_get("generated_at").unwrap_or_else(|_| Utc::now()),
+    }))
+}
+
+/// Writes a rendered document's blob and row through the caller's
+/// connection. `Some(blob)` when this call stored it (the caller discards the
+/// blob if its transaction does not commit), `None` when another request
+/// stored the same document first.
+pub(super) async fn store_rendered(
+    conn: &mut PgConnection,
+    document: &NewInvoiceDocument<'_>,
+    bytes: &[u8],
+) -> Result<Option<PendingBlob>, axum::response::Response> {
+    let blob = write_blob(bytes, document.file_name).await?;
+    match insert_row(conn, document, &blob).await {
+        Ok(Some(_)) => Ok(Some(blob)),
+        Ok(None) => {
+            blob.discard().await;
+            Ok(None)
+        }
+        Err(error) => {
+            blob.discard().await;
+            tracing::error!(%error, invoice_id = %document.invoice_id, kind = document.kind, "store invoice document");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store the document",
+            ))
+        }
+    }
 }
 
 /// Reads and verifies a stored document.
@@ -213,6 +278,8 @@ pub(super) async fn store_invoice_pdf(
             invoice_id,
             kind: KIND_INVOICE,
             dunning_event_id: None,
+            credit_note_transaction_id: None,
+            storno_document_id: None,
             file_name: &file_name,
             language: &context.language,
             trigger,

@@ -8029,6 +8029,11 @@ async fn list_patient_invoices(
                 "invoice_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
                 "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                "display_status": crate::routes::invoices::invoice_display_status(
+                    &row.try_get::<String, _>("status").unwrap_or_default(),
+                    total_gross,
+                    credited_amount,
+                ),
                 "issued_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("issued_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                 "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
                 "total_gross": total_gross.round_cents().normalize().to_string(),

@@ -28,7 +28,7 @@ use super::{
     ensure_patient_access, err, insert_invoice_payment_accounting_entries,
     insert_invoice_refund_accounting_entries, invoice_balance_due, load_invoice_detail,
     normalize_optional, parse_optional_date, recompute_invoice_settlement_status,
-    run_paid_invoice_follow_up, write_invoice_audit,
+    run_paid_invoice_follow_up, write_invoice_audit_tx,
 };
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
@@ -537,12 +537,6 @@ pub(crate) async fn create_credit_transfer(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     }
-    if let Err(error) = transaction.commit().await {
-        tracing::error!(%error, %invoice_id, "commit credit transfer");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-
-    run_paid_invoice_follow_up(&state, &auth, body.target_invoice_id, payment_id).await;
     let payload = json!({
         "credit_transfer_id": transfer_id,
         "request_id": body.request_id,
@@ -557,19 +551,29 @@ pub(crate) async fn create_credit_transfer(
         "transferred_on": transferred_on.to_string(),
         "patient_id": patient_id,
     });
-    for (id, action, event) in [
-        (
-            invoice_id,
-            "credit_transferred_out",
-            "invoice.credit_transferred_out",
-        ),
-        (
-            body.target_invoice_id,
-            "credit_transferred_in",
-            "invoice.credit_transferred_in",
-        ),
+    // Both legs are audited in the transfer's transaction.
+    for (id, action) in [
+        (invoice_id, "credit_transferred_out"),
+        (body.target_invoice_id, "credit_transferred_in"),
     ] {
-        write_invoice_audit(&state, auth.user_id, action, id, payload.clone()).await;
+        if let Err(error) =
+            write_invoice_audit_tx(&mut transaction, auth.user_id, action, id, payload.clone())
+                .await
+        {
+            tracing::error!(%error, %invoice_id, "audit credit transfer");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %invoice_id, "commit credit transfer");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+
+    run_paid_invoice_follow_up(&state, &auth, body.target_invoice_id, payment_id).await;
+    for (id, event) in [
+        (invoice_id, "invoice.credit_transferred_out"),
+        (body.target_invoice_id, "invoice.credit_transferred_in"),
+    ] {
         crate::realtime::publish_invoice_event(
             &state,
             Some(auth.user_id),
@@ -849,11 +853,6 @@ pub(crate) async fn reverse_credit_transfer(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     }
-    if let Err(error) = transaction.commit().await {
-        tracing::error!(%error, %transfer_id, "commit credit transfer reversal");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-
     let payload = json!({
         "credit_transfer_id": transfer_id,
         "source_invoice_id": source_id,
@@ -866,14 +865,24 @@ pub(crate) async fn reverse_credit_transfer(
         "patient_id": patient_id,
     });
     for id in [source_id, target_id] {
-        write_invoice_audit(
-            &state,
+        if let Err(error) = write_invoice_audit_tx(
+            &mut transaction,
             auth.user_id,
             "credit_transfer_reversed",
             id,
             payload.clone(),
         )
-        .await;
+        .await
+        {
+            tracing::error!(%error, %transfer_id, "audit credit transfer reversal");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %transfer_id, "commit credit transfer reversal");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    for id in [source_id, target_id] {
         crate::realtime::publish_invoice_event(
             &state,
             Some(auth.user_id),

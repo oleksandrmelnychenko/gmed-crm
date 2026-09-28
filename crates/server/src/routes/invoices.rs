@@ -36,9 +36,11 @@ mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
 mod document;
+mod dunning_blocks;
 mod dunning_letters;
 mod release;
 mod stored_documents;
+mod storno;
 pub(crate) mod termination_settlements;
 mod zugferd;
 
@@ -57,6 +59,9 @@ const INVOICE_PDF_CONTENT_WIDTH_MM: f32 =
 const AUTO_DUNNING_CHECK_INTERVAL_SECS: u64 = 60 * 60;
 const DEFAULT_AUTO_DUNNING_SECOND_DELAY_DAYS: i64 = 14;
 const DEFAULT_AUTO_DUNNING_COLLECTIONS_DELAY_DAYS: i64 = 28;
+/// Days after the due date before the first automatic reminder
+/// (`auto_dunning_grace_days`).
+const DEFAULT_AUTO_DUNNING_GRACE_DAYS: i64 = 7;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -80,6 +85,10 @@ pub fn router() -> Router<AppState> {
             get(list_my_invoice_refunds),
         )
         .route(
+            "/me/invoices/{invoice_id}/storno/pdf",
+            get(credit_note_pdf::download_my_storno_pdf),
+        )
+        .route(
             "/me/invoices/{invoice_id}/pdf",
             get(download_my_invoice_pdf),
         )
@@ -99,6 +108,10 @@ pub fn router() -> Router<AppState> {
         .route("/invoices", get(list_invoices))
         .route("/invoices/{invoice_id}", get(get_invoice))
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
+        .route(
+            "/invoices/{invoice_id}/storno/pdf",
+            get(credit_note_pdf::download_storno_pdf),
+        )
         .route(
             "/invoices/{invoice_id}/zugferd.xml",
             get(download_invoice_zugferd_xml),
@@ -164,6 +177,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/invoices/{invoice_id}/dunning/{dunning_event_id}/pdf",
             get(download_dunning_letter),
+        )
+        .route(
+            "/invoices/{invoice_id}/dunning-block",
+            post(dunning_blocks::set_dunning_block),
+        )
+        .route(
+            "/invoices/{invoice_id}/dunning-block/clear",
+            post(dunning_blocks::clear_dunning_block),
         )
         .route(
             "/quotes/{quote_id}/invoices",
@@ -263,6 +284,10 @@ struct UpdateInvoiceStatusRequest {
     due_date: Option<String>,
     paid_amount: Option<MoneyInput>,
     notes: Option<String>,
+    /// Why a released invoice is cancelled (printed on its cancellation
+    /// document), or why an overdue invoice goes back to `sent` (the reason of
+    /// the dunning block that keeps it there).
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -476,7 +501,6 @@ struct InvoiceLineAllocationSnapshot {
     amount_net: Decimal,
     amount_vat: Decimal,
     amount_gross: Decimal,
-    completes_quote_line: bool,
 }
 
 struct InvoiceDunningContext {
@@ -547,6 +571,22 @@ struct AutoDunningCandidate {
     first_sent_at: Option<DateTime<Utc>>,
     second_sent_at: Option<DateTime<Utc>>,
     collections_sent_at: Option<DateTime<Utc>>,
+    /// New payment deadlines set by the first and second letters.
+    first_payment_due_date: Option<NaiveDate>,
+    second_payment_due_date: Option<NaiveDate>,
+    /// Debt state of the invoice's order (`order_debt_management`).
+    debt_status: String,
+}
+
+/// Timing rules of the automatic dunning run.
+#[derive(Clone, Copy, Debug)]
+struct AutoDunningRules {
+    /// Days after the due date before the first reminder.
+    grace_days: i64,
+    second_delay_days: i64,
+    collections_delay_days: i64,
+    /// Payment term of a letter, for letters stored without their deadline.
+    letter_term_days: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -706,6 +746,34 @@ fn is_valid_invoice_status(value: &str) -> bool {
 /// the payment journal, so asking for `sent` on a settled invoice only
 /// re-normalises it through `recompute_invoice_settlement_status`. A released
 /// invoice never returns to draft: it is corrected by cancelling it.
+/// Status filters of the invoice lists: the stored statuses and `credited`,
+/// the display status of a fully credited invoice.
+fn is_valid_invoice_status_filter(value: &str) -> bool {
+    is_valid_invoice_status(value) || value == INVOICE_DISPLAY_CREDITED
+}
+
+/// Display status of a released invoice whose credit notes cover its whole
+/// total (RU "Сторнирован", DE "Storniert"); SQL `invoice_display_status`.
+pub(crate) const INVOICE_DISPLAY_CREDITED: &str = "credited";
+
+/// The status shown to users: `credited` for a released invoice fully
+/// covered by credit notes (it is settled by the correction, not paid), else
+/// the stored status. A partly credited invoice keeps its paid/open status.
+pub(crate) fn invoice_display_status(
+    status: &str,
+    total_gross: Decimal,
+    credited_amount: Decimal,
+) -> &str {
+    if !matches!(status, "draft" | "cancelled")
+        && total_gross > Decimal::ZERO
+        && credited_amount >= total_gross
+    {
+        INVOICE_DISPLAY_CREDITED
+    } else {
+        status
+    }
+}
+
 fn is_valid_invoice_status_transition(from: &str, to: &str) -> bool {
     if from == to {
         return true;
@@ -783,7 +851,8 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 /// the supporting documents list, the contract link, the credit-note form
 /// data, credit transfers (internal notes, other invoices) and the patient's
 /// relatives offered as payers.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 8] = [
+const STAFF_ONLY_INVOICE_KEYS: [&str; 9] = [
+    "dunning_block",
     "visibility_note",
     "available_prepayments",
     "supporting_documents",
@@ -983,6 +1052,28 @@ async fn write_invoice_audit(
         Some(invoice_id),
         context,
     ));
+}
+
+/// Audit row of an invoice change written in the changing transaction: it
+/// commits or rolls back with the change and cannot be lost to a full queue.
+async fn write_invoice_audit_tx(
+    conn: &mut sqlx::PgConnection,
+    user_id: Uuid,
+    action: &str,
+    invoice_id: Uuid,
+    context: Value,
+) -> Result<(), sqlx::Error> {
+    audit::write_in_transaction(
+        conn,
+        &audit::domain_event(
+            action.to_string(),
+            Some(user_id),
+            "invoice",
+            Some(invoice_id),
+            context,
+        ),
+    )
+    .await
 }
 
 async fn insert_accounting_entry(
@@ -1532,21 +1623,32 @@ async fn resolve_auto_dunning_actor_user_id(state: &AppState) -> Result<Option<U
     .await
 }
 
+/// Released, unpaid invoices with a due date. Invoices with an active
+/// dunning block (Mahnsperre) are left out entirely: neither reminders nor the
+/// overdue escalation apply to them.
 async fn load_auto_dunning_candidates(
     state: &AppState,
 ) -> Result<Vec<AutoDunningCandidate>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT i.id, i.created_by, i.status, i.due_date, i.total_gross, i.credited_amount, i.paid_amount,
                   i.prepayment_applied_amount,
+                  COALESCE(debt.status, 'not_required') AS debt_status,
                   max(ide.sent_at) FILTER (WHERE ide.level = 'first') AS first_sent_at,
                   max(ide.sent_at) FILTER (WHERE ide.level = 'second') AS second_sent_at,
-                  max(ide.sent_at) FILTER (WHERE ide.level = 'collections') AS collections_sent_at
+                  max(ide.sent_at) FILTER (WHERE ide.level = 'collections') AS collections_sent_at,
+                  max(ide.payment_due_date) FILTER (WHERE ide.level = 'first') AS first_payment_due_date,
+                  max(ide.payment_due_date) FILTER (WHERE ide.level = 'second') AS second_payment_due_date
            FROM invoices i
            LEFT JOIN invoice_dunning_events ide ON ide.invoice_id = i.id
+           LEFT JOIN order_debt_management debt ON debt.order_id = i.order_id
            WHERE i.due_date IS NOT NULL
              AND i.status NOT IN ('draft', 'paid', 'cancelled')
+             AND NOT EXISTS (
+                 SELECT 1 FROM invoice_dunning_blocks block
+                 WHERE block.invoice_id = i.id AND block.cleared_at IS NULL
+             )
            GROUP BY i.id, i.created_by, i.status, i.due_date, i.total_gross,
-                    i.credited_amount, i.paid_amount, i.prepayment_applied_amount"#,
+                    i.credited_amount, i.paid_amount, i.prepayment_applied_amount, debt.status"#,
     )
     .fetch_all(&state.db)
     .await?;
@@ -1581,6 +1683,15 @@ async fn load_auto_dunning_candidates(
             collections_sent_at: row
                 .try_get::<Option<DateTime<Utc>>, _>("collections_sent_at")
                 .unwrap_or_default(),
+            first_payment_due_date: row
+                .try_get::<Option<NaiveDate>, _>("first_payment_due_date")
+                .unwrap_or_default(),
+            second_payment_due_date: row
+                .try_get::<Option<NaiveDate>, _>("second_payment_due_date")
+                .unwrap_or_default(),
+            debt_status: row
+                .try_get::<String, _>("debt_status")
+                .unwrap_or_else(|_| "not_required".to_string()),
         })
         .collect())
 }
@@ -1597,36 +1708,60 @@ fn auto_dunning_note(level: &str) -> String {
     }
 }
 
+/// Order debt states in which billing handles the debt by hand: a payment
+/// plan runs or the case was escalated, so no automatic reminder is sent.
+fn debt_state_stops_auto_dunning(debt_status: &str) -> bool {
+    matches!(debt_status, "payment_plan" | "escalated")
+}
+
+/// The next automatic reminder level, if one is due today (Berlin calendar):
+/// the first one once the grace period after the due date has passed, each
+/// later one after its delay and once the previous letter's own payment
+/// deadline has passed.
 fn next_auto_dunning_level(
     candidate: &AutoDunningCandidate,
     today: NaiveDate,
-    second_delay_days: i64,
-    collections_delay_days: i64,
+    rules: AutoDunningRules,
 ) -> Option<&'static str> {
     if candidate.collections_sent_at.is_some() {
         return None;
     }
-    if candidate.first_sent_at.is_none() {
-        return Some("first");
-    }
+    let letter_deadline = |sent_at: DateTime<Utc>, stored: Option<NaiveDate>| {
+        stored.unwrap_or_else(|| {
+            dunning_letters::dunning_payment_due_date(
+                crate::app_time::date_of(sent_at),
+                rules.letter_term_days,
+            )
+        })
+    };
+    let Some(first_sent_at) = candidate.first_sent_at else {
+        return (candidate.due_date + chrono::Duration::days(rules.grace_days.max(0)) < today)
+            .then_some("first");
+    };
 
-    let first_sent_at = candidate.first_sent_at?;
-    if candidate.second_sent_at.is_none()
-        && crate::app_time::date_of(first_sent_at)
-            <= today - chrono::Duration::days(second_delay_days)
-    {
-        return Some("second");
-    }
+    let Some(second_sent_at) = candidate.second_sent_at else {
+        return (crate::app_time::date_of(first_sent_at)
+            <= today - chrono::Duration::days(rules.second_delay_days)
+            && letter_deadline(first_sent_at, candidate.first_payment_due_date) < today)
+            .then_some("second");
+    };
 
-    let second_sent_at = candidate.second_sent_at?;
-    if candidate.collections_sent_at.is_none()
-        && crate::app_time::date_of(second_sent_at)
-            <= today - chrono::Duration::days(collections_delay_days)
-    {
-        return Some("collections");
-    }
+    (crate::app_time::date_of(second_sent_at)
+        <= today - chrono::Duration::days(rules.collections_delay_days)
+        && letter_deadline(second_sent_at, candidate.second_payment_due_date) < today)
+        .then_some("collections")
+}
 
-    None
+/// `auto_dunning_grace_days` (0 to 90), else the default.
+async fn load_auto_dunning_grace_days(state: &AppState) -> Result<i64, sqlx::Error> {
+    Ok(sqlx::query_scalar::<_, String>(
+        "SELECT value #>> '{}' FROM system_settings WHERE key = 'auto_dunning_grace_days'",
+    )
+    .fetch_optional(&state.db)
+    .await?
+    .and_then(|value| value.trim().parse::<i64>().ok())
+    .filter(|value| (0..=90).contains(value))
+    .unwrap_or(DEFAULT_AUTO_DUNNING_GRACE_DAYS))
 }
 
 async fn load_auto_dunning_delay_days(state: &AppState) -> Result<(i64, i64), sqlx::Error> {
@@ -1661,6 +1796,15 @@ pub async fn run_auto_dunning_scheduler_once(
     let today = crate::app_time::today();
     let automation_actor_user_id = resolve_auto_dunning_actor_user_id(state).await?;
     let (second_delay_days, collections_delay_days) = load_auto_dunning_delay_days(state).await?;
+    let rules = AutoDunningRules {
+        grace_days: load_auto_dunning_grace_days(state).await?,
+        second_delay_days,
+        collections_delay_days,
+        letter_term_days: {
+            let mut conn = state.db.acquire().await?;
+            dunning_letters::load_dunning_payment_term_days(&mut conn).await?
+        },
+    };
     let mut summary = AutoDunningRunSummary::default();
 
     for candidate in load_auto_dunning_candidates(state).await? {
@@ -1675,20 +1819,26 @@ pub async fn run_auto_dunning_scheduler_once(
 
         let actor_user_id = automation_actor_user_id.unwrap_or(candidate.created_by);
         if candidate.status != "overdue" {
+            // The status change and its audit row are one transaction; a block
+            // set meanwhile keeps the invoice as it is.
+            let mut transaction = state.db.begin().await?;
             let result = sqlx::query(
                 "UPDATE invoices
                  SET status = 'overdue'
                  WHERE id = $1
-                   AND status NOT IN ('draft', 'paid', 'cancelled', 'overdue')",
+                   AND status NOT IN ('draft', 'paid', 'cancelled', 'overdue')
+                   AND NOT EXISTS (
+                       SELECT 1 FROM invoice_dunning_blocks block
+                       WHERE block.invoice_id = invoices.id AND block.cleared_at IS NULL
+                   )",
             )
             .bind(candidate.invoice_id)
-            .execute(&state.db)
+            .execute(&mut *transaction)
             .await?;
-
-            if result.rows_affected() > 0 {
-                summary.overdue_marked += result.rows_affected();
-                write_invoice_audit(
-                    state,
+            let marked = result.rows_affected() > 0;
+            if marked {
+                write_invoice_audit_tx(
+                    &mut transaction,
                     actor_user_id,
                     "auto_mark_invoice_overdue",
                     candidate.invoice_id,
@@ -1698,7 +1848,12 @@ pub async fn run_auto_dunning_scheduler_once(
                         "balance_due": decimal_to_string(balance_due),
                     }),
                 )
-                .await;
+                .await?;
+            }
+            transaction.commit().await?;
+
+            if marked {
+                summary.overdue_marked += result.rows_affected();
                 crate::realtime::publish_invoice_event(
                     state,
                     Some(actor_user_id),
@@ -1715,9 +1870,11 @@ pub async fn run_auto_dunning_scheduler_once(
             }
         }
 
-        let Some(level) =
-            next_auto_dunning_level(&candidate, today, second_delay_days, collections_delay_days)
-        else {
+        // A payment plan or an escalated case is handled by billing itself.
+        if debt_state_stops_auto_dunning(&candidate.debt_status) {
+            continue;
+        }
+        let Some(level) = next_auto_dunning_level(&candidate, today, rules) else {
             continue;
         };
 
@@ -1727,9 +1884,12 @@ pub async fn run_auto_dunning_scheduler_once(
         }
 
         let note = auto_dunning_note(level);
-        // The event and its letter are written together: a dunning step
-        // without the letter it sends is not recorded.
+        // The event, its letter and its audit row are written together: a
+        // dunning step without the letter it sends is not recorded.
         let mut transaction = state.db.begin().await?;
+        if dunning_blocks::is_blocked(&mut transaction, candidate.invoice_id).await? {
+            continue;
+        }
         let payment_due_date = dunning_letters::dunning_payment_due_date(
             invoice_document_date(Utc::now()),
             dunning_letters::load_dunning_payment_term_days(&mut transaction).await?,
@@ -1767,18 +1927,8 @@ pub async fn run_auto_dunning_scheduler_once(
                     continue;
                 }
             }
-        }
-        if let Err(error) = transaction.commit().await {
-            if let Some(blob) = letter_blob {
-                blob.discard().await;
-            }
-            return Err(error);
-        }
-
-        if inserted.is_some() {
-            summary.dunning_events_created += 1;
-            write_invoice_audit(
-                state,
+            let audited = write_invoice_audit_tx(
+                &mut transaction,
                 actor_user_id,
                 "auto_create_invoice_dunning_event",
                 candidate.invoice_id,
@@ -1789,9 +1939,26 @@ pub async fn run_auto_dunning_scheduler_once(
                     "due_date_snapshot": candidate.due_date.to_string(),
                     "payment_due_date": payment_due_date.to_string(),
                     "dunning_event_id": inserted,
+                    "grace_days": rules.grace_days,
                 }),
             )
             .await;
+            if let Err(error) = audited {
+                if let Some(blob) = letter_blob {
+                    blob.discard().await;
+                }
+                return Err(error);
+            }
+        }
+        if let Err(error) = transaction.commit().await {
+            if let Some(blob) = letter_blob {
+                blob.discard().await;
+            }
+            return Err(error);
+        }
+
+        if inserted.is_some() {
+            summary.dunning_events_created += 1;
             crate::realtime::publish_invoice_event(
                 state,
                 Some(actor_user_id),
@@ -3544,7 +3711,6 @@ async fn build_selected_invoice_snapshot(
                 amount_net: line_net,
                 amount_vat: line_vat,
                 amount_gross: line_gross,
-                completes_quote_line: selected_quantity >= remaining,
             });
         }
     }
@@ -4352,6 +4518,25 @@ async fn load_invoice_detail(
             "generated_at": document.generated_at.to_rfc3339(),
         })
     });
+    let (storno_document, dunning_block) = {
+        let mut conn = state.db.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "acquire connection for invoice corrections");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?;
+        let storno = storno::load_storno_summary(&mut conn, invoice_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load cancellation document");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?;
+        let block = dunning_blocks::load_dunning_block_state(&mut conn, invoice_id)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "load dunning block");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+            })?;
+        (storno, block)
+    };
     // Relatives of the patient the payer can be picked from (staff only).
     let payer_relation_options = sqlx::query(
         r#"SELECT relation.id, relation.related_name, relation.relation_type,
@@ -4390,6 +4575,8 @@ async fn load_invoice_detail(
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
         "recipient": recipient,
         "stored_document": stored_document,
+        "storno_document": storno_document,
+        "dunning_block": dunning_block,
         "payer_relation_options": payer_relation_options,
         "order_id": invoice_order_id,
         "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
@@ -4406,6 +4593,7 @@ async fn load_invoice_detail(
         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        "display_status": invoice_display_status(&invoice_status, total_gross, credited_amount),
         "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|v| v.to_string()),
         "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
@@ -5098,7 +5286,7 @@ async fn list_my_invoices(
     }
 
     if let Some(ref status) = query.status
-        && !is_valid_invoice_status(status)
+        && !is_valid_invoice_status_filter(status)
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");
     }
@@ -5116,6 +5304,9 @@ async fn list_my_invoices(
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient,
                   o.order_number, i.currency, q.quote_number,
+                  EXISTS (
+                    SELECT 1 FROM invoice_storno_documents storno WHERE storno.invoice_id = i.id
+                  ) AS has_storno_document,
                   COALESCE((
                     SELECT count(*)::bigint
                     FROM documents d
@@ -5152,7 +5343,8 @@ async fn list_my_invoices(
              -- release, never reached the patient.
              AND i.released_at IS NOT NULL
              AND i.portal_visible = true
-             AND ($3::text IS NULL OR i.status = $3)
+             AND ($3::text IS NULL
+                  OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $3)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
     )
     .bind(auth.user_id)
@@ -5190,6 +5382,8 @@ async fn list_my_invoices(
                         "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                         "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                        "display_status": invoice_display_status(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount),
+                        "has_storno_document": row.try_get::<bool, _>("has_storno_document").unwrap_or(false),
                         "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
                         "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
@@ -5657,7 +5851,7 @@ async fn list_invoices(
     }
 
     if let Some(ref status) = query.status
-        && !is_valid_invoice_status(status)
+        && !is_valid_invoice_status_filter(status)
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");
     }
@@ -5682,8 +5876,11 @@ async fn list_invoices(
                   i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
-                  o.order_number, i.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid
+                  o.order_number, i.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid,
+                  block.reason AS dunning_block_reason, block.blocked_at AS dunning_blocked_at
            FROM invoices i
+           LEFT JOIN invoice_dunning_blocks block
+             ON block.invoice_id = i.id AND block.cleared_at IS NULL
            LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
@@ -5699,7 +5896,8 @@ async fn list_invoices(
              AND ($2::uuid IS NULL OR i.patient_id = $2)
              AND ($3::uuid IS NULL OR i.order_id = $3)
              AND ($4::uuid IS NULL OR i.quote_id = $4)
-             AND ($5::text IS NULL OR i.status = $5)
+             AND ($5::text IS NULL
+                  OR invoice_display_status(i.status, i.total_gross, i.credited_amount) = $5)
              AND ($6::text IS NULL OR i.invoice_type = $6)
            ORDER BY i.issued_at DESC, i.created_at DESC"#,
     )
@@ -5753,6 +5951,11 @@ async fn list_invoices(
                     "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                     "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
                     "status": row.try_get::<String, _>("status").unwrap_or_default(),
+                    "display_status": invoice_display_status(&row.try_get::<String, _>("status").unwrap_or_default(), total_gross, credited_amount),
+                    "dunning_block": row.try_get::<Option<String>, _>("dunning_block_reason").unwrap_or_default().map(|reason| json!({
+                        "reason": reason,
+                        "blocked_at": row.try_get::<Option<DateTime<Utc>>, _>("dunning_blocked_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                    })),
                     "issued_at": row.try_get::<DateTime<Utc>, _>("issued_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "due_date": row.try_get::<Option<NaiveDate>, _>("due_date").unwrap_or_default().map(|v| v.to_string()),
                     "total_net": decimal_to_string(row.try_get::<Decimal, _>("total_net").unwrap_or(Decimal::ZERO)),
@@ -6483,45 +6686,8 @@ async fn create_patient_billing_invoice(
         }
     }
 
-    let completed_source_ids = snapshot
-        .allocations
-        .iter()
-        .filter(|allocation| allocation.completes_quote_line)
-        .filter_map(|allocation| allocation.order_leistung_id)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    if invoice_type != "advance"
-        && !completed_source_ids.is_empty()
-        && let Some(order_id) = body.order_id
-    {
-        match sqlx::query(
-            "UPDATE order_leistungen SET status = 'invoiced'
-             WHERE order_id = $1 AND id = ANY($2) AND status <> 'invoiced'",
-        )
-        .bind(order_id)
-        .bind(&completed_source_ids)
-        .execute(&mut *transaction)
-        .await
-        {
-            Ok(result)
-                if result.rows_affected()
-                    == u64::try_from(completed_source_ids.len()).unwrap_or(u64::MAX) => {}
-            Ok(_) => {
-                return err(
-                    StatusCode::CONFLICT,
-                    "Order services changed; reload and try again",
-                );
-            }
-            Err(error) => {
-                tracing::error!(%error, %invoice_id, "mark patient billing services invoiced");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to create invoice",
-                );
-            }
-        }
-    }
+    // The draft reserves its services through the allocations; they become
+    // `invoiced` when the invoice is released.
     if invoice_snapshot_has_package_overage(&snapshot)
         && let Some(order_id) = body.order_id
         && let Err(error) = sqlx::query(
@@ -6560,16 +6726,8 @@ async fn create_patient_billing_invoice(
         tracing::error!(%error, %invoice_id, "persist patient billing request");
         return err(StatusCode::CONFLICT, "This billing request was already processed");
     }
-    if let Err(error) = transaction.commit().await {
-        tracing::error!(%error, %invoice_id, "commit patient billing invoice");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create invoice",
-        );
-    }
-
-    write_invoice_audit(
-        &state,
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "create_patient_billing_invoice",
         invoice_id,
@@ -6581,7 +6739,21 @@ async fn create_patient_billing_invoice(
             "service_line_count": snapshot.allocations.len(),
         }),
     )
-    .await;
+    .await
+    {
+        tracing::error!(%error, %invoice_id, "audit patient billing invoice");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create invoice",
+        );
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %invoice_id, "commit patient billing invoice");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create invoice",
+        );
+    }
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -6769,45 +6941,8 @@ async fn create_invoice_from_quote(
                 }
             }
 
-            let completed_source_ids = invoice_snapshot
-                .allocations
-                .iter()
-                .filter(|allocation| allocation.completes_quote_line)
-                .filter_map(|allocation| allocation.order_leistung_id)
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect::<Vec<_>>();
-            if invoice_type != "advance" && !completed_source_ids.is_empty() {
-                let mark_result = sqlx::query(
-                    "UPDATE order_leistungen
-                     SET status = 'invoiced'
-                     WHERE order_id = $1
-                       AND id = ANY($2)
-                       AND status <> 'invoiced'",
-                )
-                .bind(ctx.order_id)
-                .bind(&completed_source_ids)
-                .execute(&mut *transaction)
-                .await;
-                match mark_result {
-                    Ok(result)
-                        if result.rows_affected()
-                            == u64::try_from(completed_source_ids.len()).unwrap_or(u64::MAX) => {}
-                    Ok(_) => {
-                        return err(
-                            StatusCode::CONFLICT,
-                            "Order services changed; reload and try again",
-                        );
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, invoice_id = %invoice_id, order_id = %ctx.order_id, "mark invoiced services");
-                        return err(
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Failed to mark order services as invoiced",
-                        );
-                    }
-                }
-            }
+            // The draft reserves its services through the allocations; they
+            // become `invoiced` when the invoice is released.
             if invoice_snapshot_has_package_overage(&invoice_snapshot)
                 && let Err(e) = sqlx::query(
                     r#"UPDATE service_package_consumptions consumption
@@ -6832,19 +6967,11 @@ async fn create_invoice_from_quote(
                 );
             }
 
-            if let Err(e) = transaction.commit().await {
-                tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice creation");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to create invoice",
-                );
-            }
-
-            state.audit_sender.try_send(audit::domain_event(
+            if let Err(e) = write_invoice_audit_tx(
+                &mut transaction,
+                auth.user_id,
                 "create_invoice",
-                Some(auth.user_id),
-                "invoice",
-                Some(invoice_id),
+                invoice_id,
                 serde_json::json!({
                     "invoice_number": null,
                     "invoice_type": invoice_type,
@@ -6856,7 +6983,22 @@ async fn create_invoice_from_quote(
                     "order_number": ctx.order_number,
                     "line_allocations": invoice_snapshot.allocations.len(),
                 }),
-            ));
+            )
+            .await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "audit invoice creation");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+            if let Err(e) = transaction.commit().await {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice creation");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
 
             crate::realtime::publish_invoice_event(
                 &state,
@@ -6898,6 +7040,67 @@ async fn create_invoice_from_quote(
             )
         }
     }
+}
+
+/// Marks the order services a just released invoice bills as `invoiced`
+/// once released invoices bill their whole quantity (quote-line allocations
+/// and termination final-invoice lines). Drafts only reserve services: the
+/// allocation counts against the quantity still to invoice, the status stays.
+async fn mark_released_invoice_services(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    invoice_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"WITH billed AS (
+               SELECT allocation.order_leistung_id AS service_id
+               FROM invoice_order_line_allocations allocation
+               WHERE allocation.invoice_id = $1
+                 AND allocation.order_leistung_id IS NOT NULL
+               UNION
+               SELECT (item.value ->> 'source_order_leistung_id')::UUID
+               FROM invoices invoice
+               CROSS JOIN LATERAL jsonb_array_elements(
+                   CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                        THEN invoice.line_items ELSE '[]'::jsonb END
+               ) AS item(value)
+               WHERE invoice.id = $1
+                 AND item.value ->> 'source' = 'termination_order_service'
+           ), released AS (
+               SELECT billed.service_id,
+                      COALESCE((
+                          SELECT SUM(allocation.quantity)
+                          FROM invoice_order_line_allocations allocation
+                          JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                          WHERE allocation.order_leistung_id = billed.service_id
+                            AND invoice.released_at IS NOT NULL
+                            AND invoice.status <> 'cancelled'
+                            AND invoice.invoice_type <> 'advance'
+                      ), 0)
+                      + COALESCE((
+                          SELECT SUM(NULLIF(item.value ->> 'quantity', '')::NUMERIC)
+                          FROM invoices invoice
+                          CROSS JOIN LATERAL jsonb_array_elements(
+                              CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
+                                   THEN invoice.line_items ELSE '[]'::jsonb END
+                          ) AS item(value)
+                          WHERE invoice.released_at IS NOT NULL
+                            AND invoice.status <> 'cancelled'
+                            AND item.value ->> 'source' = 'termination_order_service'
+                            AND item.value ->> 'source_order_leistung_id' = billed.service_id::text
+                      ), 0) AS quantity
+               FROM billed
+           )
+           UPDATE order_leistungen service
+           SET status = 'invoiced'
+           FROM released
+           WHERE service.id = released.service_id
+             AND service.status NOT IN ('invoiced', 'cancelled')
+             AND released.quantity >= round(service.quantity, 2)"#,
+    )
+    .bind(invoice_id)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn recompute_invoice_settlement_status(
@@ -6985,7 +7188,11 @@ async fn recompute_invoice_settlement_status(
                           WHEN cash.paid_amount - refund.refunded_amount + locked.prepayment_applied_amount > 0
                               THEN 'partially_paid'
                           WHEN locked.status IN ('paid', 'partially_paid')
-                           AND locked.due_date < CURRENT_DATE THEN 'overdue'
+                           AND locked.due_date < CURRENT_DATE
+                           AND NOT EXISTS (
+                               SELECT 1 FROM invoice_dunning_blocks block
+                               WHERE block.invoice_id = locked.id AND block.cleared_at IS NULL
+                           ) THEN 'overdue'
                           WHEN locked.status IN ('paid', 'partially_paid', 'overdue') THEN 'sent'
                           ELSE locked.status
                       END AS next_status
@@ -7232,6 +7439,27 @@ async fn apply_invoice_prepayment(
         );
     }
 
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
+        auth.user_id,
+        "apply_invoice_prepayment",
+        invoice_id,
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "request_id": body.request_id,
+            "advance_invoice_id": body.advance_invoice_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await
+    {
+        tracing::error!(%error, "audit apply_invoice_prepayment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to apply prepayment",
+        );
+    }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice prepayment");
         return err(
@@ -7286,19 +7514,6 @@ async fn apply_invoice_prepayment(
         }
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "apply_invoice_prepayment",
-        Some(auth.user_id),
-        "invoice",
-        Some(invoice_id),
-        serde_json::json!({
-            "allocation_id": allocation_id,
-            "request_id": body.request_id,
-            "advance_invoice_id": body.advance_invoice_id,
-            "amount_gross": decimal_to_string(amount_gross),
-            "patient_id": patient_id,
-        }),
-    ));
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -7414,6 +7629,26 @@ async fn release_invoice_prepayment(
             "Failed to release prepayment",
         );
     }
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
+        auth.user_id,
+        "release_invoice_prepayment",
+        invoice_id,
+        serde_json::json!({
+            "allocation_id": allocation_id,
+            "advance_invoice_id": advance_invoice_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "patient_id": patient_id,
+        }),
+    )
+    .await
+    {
+        tracing::error!(%error, "audit release_invoice_prepayment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to release prepayment",
+        );
+    }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit prepayment release");
         return err(
@@ -7422,18 +7657,6 @@ async fn release_invoice_prepayment(
         );
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "release_invoice_prepayment",
-        Some(auth.user_id),
-        "invoice",
-        Some(invoice_id),
-        serde_json::json!({
-            "allocation_id": allocation_id,
-            "advance_invoice_id": advance_invoice_id,
-            "amount_gross": decimal_to_string(amount_gross),
-            "patient_id": patient_id,
-        }),
-    ));
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -8269,6 +8492,44 @@ async fn create_invoice_payment(
             );
         }
     };
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
+        auth.user_id,
+        "payment_recorded",
+        invoice_id,
+        serde_json::json!({
+            "payment_transaction_id": payment_id,
+            "request_id": body.request_id,
+            "amount_gross": decimal_to_string(amount_gross),
+            "overpayment_gross": decimal_to_string(overpayment_gross),
+            "payment_method": payment_method,
+            "payment_reference": payment_reference,
+            "received_on": received_on.to_string(),
+            "patient_id": patient_id,
+        }),
+    )
+    .await
+    {
+        tracing::error!(%error, "audit payment_recorded");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
+    if let Err(error) = advance_application::audit_applied_advances_tx(
+        &mut transaction,
+        auth.user_id,
+        "advance_paid",
+        &applied_advances,
+    )
+    .await
+    {
+        tracing::error!(%error, "audit advances applied by payment");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record payment",
+        );
+    }
     if let Err(e) = transaction.commit().await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice payment");
         return err(
@@ -8286,23 +8547,6 @@ async fn create_invoice_payment(
     )
     .await;
 
-    write_invoice_audit(
-        &state,
-        auth.user_id,
-        "payment_recorded",
-        invoice_id,
-        serde_json::json!({
-            "payment_transaction_id": payment_id,
-            "request_id": body.request_id,
-            "amount_gross": decimal_to_string(amount_gross),
-            "overpayment_gross": decimal_to_string(overpayment_gross),
-            "payment_method": payment_method,
-            "payment_reference": payment_reference,
-            "received_on": received_on.to_string(),
-            "patient_id": patient_id,
-        }),
-    )
-    .await;
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -8612,16 +8856,8 @@ async fn reverse_invoice_payment(
             "Failed to reverse payment",
         );
     }
-    if let Err(e) = transaction.commit().await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit payment reversal");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to reverse payment",
-        );
-    }
-
-    write_invoice_audit(
-        &state,
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "payment_reversed",
         invoice_id,
@@ -8633,7 +8869,22 @@ async fn reverse_invoice_payment(
             "patient_id": patient_id,
         }),
     )
-    .await;
+    .await
+    {
+        tracing::error!(%error, "audit payment_reversed");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse payment",
+        );
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit payment reversal");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse payment",
+        );
+    }
+
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -9050,14 +9301,8 @@ async fn correct_invoice_payment(
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after payment correction");
         return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
     }
-    if let Err(e) = transaction.commit().await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit payment correction");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
-    }
-    run_paid_invoice_follow_up(&state, &auth, invoice_id, corrected_id).await;
-
-    write_invoice_audit(
-        &state,
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "payment_corrected",
         invoice_id,
@@ -9082,7 +9327,17 @@ async fn correct_invoice_payment(
             "patient_id": patient_id,
         }),
     )
-    .await;
+    .await
+    {
+        tracing::error!(%error, "audit payment_corrected");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit payment correction");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    run_paid_invoice_follow_up(&state, &auth, invoice_id, corrected_id).await;
+
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -9349,10 +9604,11 @@ async fn create_invoice_credit_note(
     if context.credited_amount + amount_gross > context.total_gross {
         return err(StatusCode::CONFLICT, "Credit note exceeds invoice total");
     }
-    let sequence = match sqlx::query_scalar::<_, i64>(
-        "SELECT nextval('invoice_credit_note_number_seq')",
+    // Gapless: the counter row is locked until this transaction ends.
+    let sequence = match release::next_correction_number(
+        &mut transaction,
+        release::SERIES_CREDIT_NOTE,
     )
-    .fetch_one(&mut *transaction)
     .await
     {
         Ok(value) => value,
@@ -9364,7 +9620,7 @@ async fn create_invoice_credit_note(
             );
         }
     };
-    let document_number = format!("CN-{}-{sequence:06}", issued_on.year());
+    let document_number = release::credit_note_number("CN", issued_on, sequence);
     let portal_visible = body.portal_visible.unwrap_or(true);
     let credit_note_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_credit_note_transactions (
@@ -9419,20 +9675,26 @@ async fn create_invoice_credit_note(
             "Failed to create credit note",
         );
     }
-    if let Err(e) = transaction.commit().await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice credit note");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create credit note",
-        );
-    }
-
-    write_invoice_audit(
-        &state,
+    // GoBD: the document is rendered once, at issue, and kept.
+    let document = match credit_note_pdf::store_issued_credit_note(
+        &mut transaction,
+        invoice_id,
+        credit_note_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let audited = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "credit_note_created",
         invoice_id,
         serde_json::json!({
+            "document_sha256": document.sha256,
+            "document_file_name": document.file_name,
             "credit_note_transaction_id": credit_note_id,
             "document_number": document_number,
             "credit_mode": plan.mode,
@@ -9450,6 +9712,20 @@ async fn create_invoice_credit_note(
         }),
     )
     .await;
+    let committed = match audited {
+        Ok(()) => transaction.commit().await,
+        Err(error) => Err(error),
+    };
+    if let Err(e) = committed {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice credit note");
+        if let Some(blob) = document.blob {
+            blob.discard().await;
+        }
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create credit note",
+        );
+    }
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -9602,10 +9878,10 @@ async fn reverse_invoice_credit_note(
     let currency = row
         .try_get::<String, _>("currency")
         .unwrap_or_else(|_| "EUR".to_string());
-    let sequence = match sqlx::query_scalar::<_, i64>(
-        "SELECT nextval('invoice_credit_note_number_seq')",
+    let sequence = match release::next_correction_number(
+        &mut transaction,
+        release::SERIES_CREDIT_NOTE,
     )
-    .fetch_one(&mut *transaction)
     .await
     {
         Ok(value) => value,
@@ -9617,7 +9893,7 @@ async fn reverse_invoice_credit_note(
             );
         }
     };
-    let document_number = format!("CNR-{}-{sequence:06}", issued_on.year());
+    let document_number = release::credit_note_number("CNR", issued_on, sequence);
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_credit_note_transactions (
                 invoice_id, transaction_type, reverses_transaction_id,
@@ -9687,16 +9963,19 @@ async fn reverse_invoice_credit_note(
             "Failed to reverse credit note",
         );
     }
-    if let Err(e) = transaction.commit().await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit credit-note reversal");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to reverse credit note",
-        );
-    }
-
-    write_invoice_audit(
-        &state,
+    let document = match credit_note_pdf::store_issued_credit_note(
+        &mut transaction,
+        invoice_id,
+        reversal_id,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let audited = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "credit_note_reversed",
         invoice_id,
@@ -9704,6 +9983,7 @@ async fn reverse_invoice_credit_note(
             "credit_note_transaction_id": credit_note_id,
             "reversal_transaction_id": reversal_id,
             "document_number": document_number,
+            "document_sha256": document.sha256,
             "amount_gross": decimal_to_string(amount_gross),
             "currency": currency,
             "reason": reason,
@@ -9711,6 +9991,20 @@ async fn reverse_invoice_credit_note(
         }),
     )
     .await;
+    let committed = match audited {
+        Ok(()) => transaction.commit().await,
+        Err(error) => Err(error),
+    };
+    if let Err(e) = committed {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit credit-note reversal");
+        if let Some(blob) = document.blob {
+            blob.discard().await;
+        }
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse credit note",
+        );
+    }
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -10168,13 +10462,8 @@ async fn create_invoice_refund(
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after refund");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
     }
-    if let Err(e) = transaction.commit().await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice refund");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
-    }
-
-    write_invoice_audit(
-        &state,
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "refund_recorded",
         invoice_id,
@@ -10189,7 +10478,16 @@ async fn create_invoice_refund(
             "patient_id": patient_id,
         }),
     )
-    .await;
+    .await
+    {
+        tracing::error!(%error, "audit refund_recorded");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice refund");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+    }
+
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -10432,16 +10730,8 @@ async fn reverse_invoice_refund(
             "Failed to reverse refund",
         );
     }
-    if let Err(e) = transaction.commit().await {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit refund reversal");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to reverse refund",
-        );
-    }
-
-    write_invoice_audit(
-        &state,
+    if let Err(error) = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "refund_reversed",
         invoice_id,
@@ -10453,7 +10743,22 @@ async fn reverse_invoice_refund(
             "patient_id": patient_id,
         }),
     )
-    .await;
+    .await
+    {
+        tracing::error!(%error, "audit refund_reversed");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse refund",
+        );
+    }
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit refund reversal");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reverse refund",
+        );
+    }
+
     crate::realtime::publish_invoice_event(
         &state,
         Some(auth.user_id),
@@ -11147,11 +11452,22 @@ async fn create_dunning_event(
             ),
         }
     };
-    // The event, the overdue status and the letter it sends are one step.
+    // The event, the overdue status, the letter it sends and the audit row
+    // are one step.
     let mut transaction = match state.db.begin().await {
         Ok(transaction) => transaction,
         Err(error) => return failed(error),
     };
+    match dunning_blocks::is_blocked(&mut transaction, invoice_id).await {
+        Ok(false) => {}
+        Ok(true) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Dunning is blocked for this invoice; clear the dunning block first",
+            );
+        }
+        Err(error) => return failed(error),
+    }
     let payment_term_days =
         match dunning_letters::load_dunning_payment_term_days(&mut transaction).await {
             Ok(days) => days,
@@ -11208,15 +11524,8 @@ async fn create_dunning_event(
         Err(resp) => return resp,
     };
     let letter_sha256 = stored_documents::sha256_hex(&letter.bytes);
-    if let Err(error) = transaction.commit().await {
-        if let Some(blob) = letter.blob {
-            blob.discard().await;
-        }
-        return failed(error);
-    }
-
-    write_invoice_audit(
-        &state,
+    let audited = write_invoice_audit_tx(
+        &mut transaction,
         auth.user_id,
         "create_invoice_dunning_event",
         invoice_id,
@@ -11231,6 +11540,16 @@ async fn create_dunning_event(
         }),
     )
     .await;
+    let committed = match audited {
+        Ok(()) => transaction.commit().await,
+        Err(error) => Err(error),
+    };
+    if let Err(error) = committed {
+        if let Some(blob) = letter.blob {
+            blob.discard().await;
+        }
+        return failed(error);
+    }
 
     crate::realtime::publish_invoice_event(
         &state,
@@ -11966,6 +12285,40 @@ async fn update_invoice_status(
         );
     }
     let releasing = locked_status == "draft" && requested_status == "sent";
+    // An overdue invoice goes back to `sent` only under a dunning block
+    // (Mahnsperre) with its reason; otherwise the hourly scheduler would mark
+    // it overdue again at once.
+    let unblocking_overdue =
+        locked_status == "overdue" && requested_status == "sent" && !settles_through_payment;
+    let block_reason = if unblocking_overdue {
+        match dunning_blocks::normalize_block_reason(
+            body.reason.as_deref().or(body.notes.as_deref()),
+        ) {
+            Some(reason) => Some(reason),
+            None => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "A reason of 3 to 1000 characters is required to move an overdue invoice back to sent; it blocks automatic dunning",
+                );
+            }
+        }
+    } else {
+        None
+    };
+    // Cancelling a released invoice issues its cancellation document
+    // (Stornorechnung); a draft cancelled before release gets none.
+    let cancelling_released =
+        requested_status == "cancelled" && locked_status != "cancelled" && locked_released;
+    let storno_reason = cancelling_released.then(|| {
+        normalize_optional(body.reason.as_deref().or(body.notes.as_deref()))
+            .filter(|reason| reason.chars().count() <= 1000)
+            .unwrap_or_else(|| {
+                format!(
+                    "Stornierung der Rechnung {}",
+                    locked_invoice_number.clone().unwrap_or_default()
+                )
+            })
+    });
     let invoice_date = invoice_document_date(Utc::now());
     let release_due_date = if releasing {
         let payment_term_days =
@@ -12317,6 +12670,42 @@ async fn update_invoice_status(
                 );
             }
 
+            // Order services become `invoiced` when the invoice billing them
+            // is released; the draft only reserved them.
+            if releasing
+                && locked_invoice_type != "advance"
+                && let Err(e) = mark_released_invoice_services(&mut transaction, invoice_id).await
+            {
+                tracing::error!(error = %e, invoice_id = %invoice_id, "mark released invoice services");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+
+            let dunning_block_id = match &block_reason {
+                Some(reason) => {
+                    match dunning_blocks::set_block_tx(
+                        &mut transaction,
+                        invoice_id,
+                        reason,
+                        auth.user_id,
+                    )
+                    .await
+                    {
+                        Ok(value) => value,
+                        Err(e) => {
+                            tracing::error!(error = %e, invoice_id = %invoice_id, "set dunning block for overdue invoice");
+                            return err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to update invoice",
+                            );
+                        }
+                    }
+                }
+                None => None,
+            };
+
             if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await
             {
                 tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after status update");
@@ -12325,6 +12714,42 @@ async fn update_invoice_status(
                     "Failed to update invoice",
                 );
             }
+
+            let issued_storno = match &storno_reason {
+                Some(reason) => {
+                    match storno::issue_storno_tx(
+                        &mut transaction,
+                        invoice_id,
+                        reason,
+                        auth.user_id,
+                    )
+                    .await
+                    {
+                        Ok(value) => Some(value),
+                        Err(e) => {
+                            tracing::error!(error = %e, invoice_id = %invoice_id, "issue cancellation document");
+                            return err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to issue the cancellation document",
+                            );
+                        }
+                    }
+                }
+                None => None,
+            };
+            let storno_document = match &issued_storno {
+                Some(_) => match credit_note_pdf::store_issued_storno(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(value) => Some(value),
+                    Err(resp) => return resp,
+                },
+                None => None,
+            };
 
             // Releasing the final invoice credits the order's paid advances.
             let applied_advances = if locked_status == "draft"
@@ -12412,10 +12837,62 @@ async fn update_invoice_status(
                 None
             };
             let stored_sha256 = stored_blob.as_ref().map(|blob| blob.sha256.clone());
-
-            if let Err(e) = transaction.commit().await {
+            let released_number = if releasing {
+                release_number.clone().or(locked_invoice_number.clone())
+            } else {
+                None
+            };
+            let storno_blob = storno_document.and_then(|document| {
+                document
+                    .blob
+                    .map(|blob| (blob, document.file_name, document.sha256))
+            });
+            let audited = async {
+                write_invoice_audit_tx(
+                    &mut transaction,
+                    auth.user_id,
+                    "update_invoice_status",
+                    invoice_id,
+                    serde_json::json!({
+                        "from_status": locked_status,
+                        "status": effective_status.clone(),
+                        "paid_amount": decimal_to_string(effective_paid_amount),
+                        "prepayment_applied_amount": decimal_to_string(effective_prepayment_amount),
+                        "legacy_payment_transaction_id": legacy_payment_transaction_id,
+                        "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
+                        "released": releasing,
+                        "invoice_number": released_number,
+                        "stored_document_sha256": stored_sha256,
+                        "dunning_block_id": dunning_block_id,
+                        "dunning_block_reason": block_reason,
+                        "storno_document_id": issued_storno.as_ref().map(|storno| storno.id),
+                        "storno_document_number": issued_storno.as_ref().map(|storno| storno.document_number.clone()),
+                        "storno_issued_on": issued_storno.as_ref().map(|storno| storno.issued_on.to_string()),
+                        "storno_reason": storno_reason,
+                        "storno_amount_gross": issued_storno.as_ref().map(|storno| decimal_to_string(storno.amount_gross)),
+                        "storno_document_sha256": storno_blob.as_ref().map(|(_, _, sha)| sha.clone()),
+                    }),
+                )
+                .await?;
+                advance_application::audit_applied_advances_tx(
+                    &mut transaction,
+                    auth.user_id,
+                    "final_invoice_released",
+                    &applied_advances,
+                )
+                .await
+            }
+            .await;
+            let committed = match audited {
+                Ok(()) => transaction.commit().await,
+                Err(error) => Err(error),
+            };
+            if let Err(e) = committed {
                 tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice status update");
                 if let Some(blob) = stored_blob {
+                    blob.discard().await;
+                }
+                if let Some((blob, _, _)) = storno_blob {
                     blob.discard().await;
                 }
                 return err(
@@ -12441,28 +12918,6 @@ async fn update_invoice_status(
             {
                 return resp;
             }
-
-            let released_number = if releasing {
-                release_number.clone().or(locked_invoice_number.clone())
-            } else {
-                None
-            };
-            state.audit_sender.try_send(audit::domain_event(
-                "update_invoice_status",
-                Some(auth.user_id),
-                "invoice",
-                Some(invoice_id),
-                serde_json::json!({
-                    "status": effective_status.clone(),
-                    "paid_amount": decimal_to_string(effective_paid_amount),
-                    "prepayment_applied_amount": decimal_to_string(effective_prepayment_amount),
-                    "legacy_payment_transaction_id": legacy_payment_transaction_id,
-                    "due_date": release_due_date.or(due_date).map(|value| value.to_string()),
-                    "released": releasing,
-                    "invoice_number": released_number,
-                    "stored_document_sha256": stored_sha256,
-                }),
-            ));
 
             crate::realtime::publish_invoice_event(
                 &state,

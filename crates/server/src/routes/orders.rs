@@ -3547,6 +3547,9 @@ async fn get_order(
                    FROM invoice_order_line_allocations allocation
                    JOIN invoices invoice ON invoice.id = allocation.invoice_id
                    WHERE allocation.order_leistung_id = ol.id
+                     -- A draft only reserves the service; it is billed once
+                     -- the invoice is released.
+                     AND invoice.released_at IS NOT NULL
                      AND invoice.status <> 'cancelled'
                    GROUP BY invoice.id
                ) item

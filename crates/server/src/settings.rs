@@ -193,6 +193,15 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
     if key == "password_expire_days" && parsed == 0 {
         return Ok(Value::from(0));
     }
+    // 0 sends the first automatic reminder the day after the due date.
+    if key == "auto_dunning_grace_days" {
+        if !(0..=90).contains(&parsed) {
+            return Err(UpdateError::InvalidValue(
+                "The dunning grace period must be between 0 and 90 days".into(),
+            ));
+        }
+        return Ok(Value::from(parsed));
+    }
     if parsed < 1 {
         return Err(UpdateError::InvalidValue("Value must be at least 1".into()));
     }
@@ -497,6 +506,22 @@ mod tests {
         for invalid in ["0", "366", "two weeks"] {
             assert!(matches!(
                 validate_positive_integer_setting(key, invalid),
+                Err(UpdateError::InvalidValue(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn dunning_grace_days_allow_zero_up_to_ninety() {
+        for (raw, value) in [("0", 0), ("7", 7), ("90", 90)] {
+            assert_eq!(
+                validate_positive_integer_setting("auto_dunning_grace_days", raw).unwrap(),
+                Value::from(value)
+            );
+        }
+        for invalid in ["-1", "91", "a week"] {
+            assert!(matches!(
+                validate_positive_integer_setting("auto_dunning_grace_days", invalid),
                 Err(UpdateError::InvalidValue(_))
             ));
         }

@@ -64,6 +64,40 @@ pub(super) async fn next_invoice_number(
     Ok(gen_invoice_number(invoice_date, value))
 }
 
+/// Number range of credit notes and their reversals (`CN-…`, `CNR-…`).
+pub(super) const SERIES_CREDIT_NOTE: &str = "credit_note";
+/// Number range of cancellation documents (`STORNO-…`).
+pub(super) const SERIES_INVOICE_STORNO: &str = "invoice_storno";
+
+/// Takes the next number of a correction document range inside the issuing
+/// transaction. The counter row stays locked until the transaction ends, so a
+/// failed issue rolls its number back and the range has no gaps (GoBD).
+pub(super) async fn next_correction_number(
+    conn: &mut PgConnection,
+    series: &str,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"UPDATE invoice_document_number_counters
+           SET last_value = last_value + 1
+           WHERE series = $1
+           RETURNING last_value"#,
+    )
+    .bind(series)
+    .fetch_one(conn)
+    .await
+}
+
+/// `CN-2026-000042`, `CNR-2026-000043`: credit notes and their reversals
+/// share one range.
+pub(super) fn credit_note_number(prefix: &str, issued_on: NaiveDate, value: i64) -> String {
+    format!("{prefix}-{}-{value:06}", issued_on.format("%Y"))
+}
+
+/// `STORNO-20260928-0001`, dated like the invoice numbers.
+pub(super) fn storno_number(issued_on: NaiveDate, value: i64) -> String {
+    format!("STORNO-{}-{value:04}", issued_on.format("%Y%m%d"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +125,19 @@ mod tests {
             ),
             Ok(day("2026-09-27"))
         );
+    }
+
+    #[test]
+    fn correction_document_numbers_keep_their_formats() {
+        assert_eq!(
+            credit_note_number("CN", day("2026-09-28"), 42),
+            "CN-2026-000042"
+        );
+        assert_eq!(
+            credit_note_number("CNR", day("2026-01-02"), 7),
+            "CNR-2026-000007"
+        );
+        assert_eq!(storno_number(day("2026-09-28"), 1), "STORNO-20260928-0001");
     }
 
     #[test]

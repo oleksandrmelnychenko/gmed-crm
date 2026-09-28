@@ -230,23 +230,41 @@ async fn load_open_termination_uninvoiced_movements(
         else {
             continue;
         };
-        let debit = settlement.statement_uninvoiced_gross();
-        if debit <= Decimal::ZERO {
-            continue;
-        }
         let terminated_at = row.try_get::<DateTime<Utc>, _>("terminated_at")?;
-        movements.push(SettlementMovement {
-            id: format!("termination-uninvoiced:{order_id}"),
-            kind: "termination_uninvoiced".to_string(),
-            entry_date: crate::app_time::date_of(terminated_at),
-            occurred_at: terminated_at,
-            order_id: Some(order_id),
-            order_number: row.try_get("order_number")?,
-            document_number: None,
-            description: "Termination settlement: accrued, not yet invoiced".to_string(),
-            debit,
-            credit: Decimal::ZERO,
-        });
+        let debit = settlement.statement_uninvoiced_gross();
+        if debit > Decimal::ZERO {
+            movements.push(SettlementMovement {
+                id: format!("termination-uninvoiced:{order_id}"),
+                kind: "termination_uninvoiced".to_string(),
+                entry_date: crate::app_time::date_of(terminated_at),
+                occurred_at: terminated_at,
+                order_id: Some(order_id),
+                order_number: row.try_get("order_number")?,
+                document_number: None,
+                description: "Termination settlement: accrued, not yet invoiced".to_string(),
+                debit,
+                credit: Decimal::ZERO,
+            });
+        }
+        // Services invoiced in advance but never delivered did not accrue:
+        // until a credit note corrects the invoice, the settlement owes them
+        // back to the patient.
+        let to_credit = settlement.to_credit_gross();
+        if to_credit > Decimal::ZERO {
+            movements.push(SettlementMovement {
+                id: format!("termination-to-credit:{order_id}"),
+                kind: "termination_to_credit".to_string(),
+                entry_date: crate::app_time::date_of(terminated_at),
+                occurred_at: terminated_at,
+                order_id: Some(order_id),
+                order_number: row.try_get("order_number")?,
+                document_number: None,
+                description: "Termination settlement: invoiced in advance, not delivered"
+                    .to_string(),
+                debit: Decimal::ZERO,
+                credit: to_credit,
+            });
+        }
     }
     Ok(movements)
 }
@@ -384,8 +402,33 @@ async fn load_patient_settlement_ledger(
                   0::numeric AS credit
            FROM scoped_invoices invoice
            WHERE invoice.invoice_type <> 'advance'
-             AND invoice.status NOT IN ('draft', 'cancelled')
+             AND (
+                    invoice.status NOT IN ('draft', 'cancelled')
+                    -- A released invoice that was cancelled stays on the
+                    -- account together with its cancellation document.
+                    OR EXISTS (
+                        SELECT 1 FROM invoice_storno_documents storno
+                        WHERE storno.invoice_id = invoice.id
+                    )
+             )
              AND ($2::date IS NULL OR invoice.issued_at::date <= $2)
+
+           UNION ALL
+
+           SELECT 'storno:' || storno.id::text,
+                  'storno'::text,
+                  storno.issued_on,
+                  storno.created_at,
+                  invoice.order_id,
+                  invoice.order_number,
+                  storno.document_number,
+                  'Cancellation of invoice ' || storno.original_invoice_number,
+                  0::numeric,
+                  -storno.amount_gross
+           FROM invoice_storno_documents storno
+           JOIN scoped_invoices invoice ON invoice.id = storno.invoice_id
+           WHERE invoice.invoice_type <> 'advance'
+             AND ($2::date IS NULL OR storno.issued_on <= $2)
 
            UNION ALL
 
@@ -684,7 +727,7 @@ async fn load_patient_settlement_ledger(
         .filter(|movement| {
             matches!(
                 movement.kind.as_str(),
-                "invoice" | "credit_note" | "credit_note_reversal"
+                "invoice" | "credit_note" | "credit_note_reversal" | "storno"
             )
         })
         .fold(Decimal::ZERO, |total, movement| {
@@ -934,10 +977,16 @@ async fn load_patient_account_statement(
             || !row
                 .try_get::<bool, _>("hide_amounts_from_patient")
                 .unwrap_or(true);
+        let display_status =
+            crate::routes::invoices::invoice_display_status(&status, total_gross, credited)
+                .to_string();
         let payment_state = if !amounts_visible {
             "amount_hidden"
         } else if status == "draft" {
             "not_issued"
+        } else if display_status == crate::routes::invoices::INVOICE_DISPLAY_CREDITED {
+            // Fully covered by credit notes: settled by the correction.
+            "credited"
         } else if due <= Decimal::ZERO {
             "paid"
         } else if paid + applied > Decimal::ZERO {
@@ -986,6 +1035,7 @@ async fn load_patient_account_statement(
             "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
             "document_number": row.try_get::<String, _>("invoice_number").unwrap_or_default(),
             "description": if invoice_type == "advance" { "Advance payment" } else { "Patient invoice" },
+            "display_status": display_status,
             "status": status,
             "payment_state": payment_state,
             "paid_by": "patient",
@@ -1266,6 +1316,7 @@ async fn load_patient_account_statement(
                       service.status, orders.order_number,
                       COALESCE(SUM(allocation.quantity) FILTER (
                           WHERE invoice.status <> 'cancelled'
+                            AND invoice.released_at IS NOT NULL
                       ), 0) AS invoiced_quantity
                FROM order_leistungen service
                JOIN orders ON orders.id = service.order_id
