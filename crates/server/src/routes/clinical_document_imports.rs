@@ -2498,7 +2498,7 @@ async fn abandon_import(
         }
     };
     if let Err(error) = audit::write_in_transaction(
-        &mut *tx,
+        &mut tx,
         &audit::domain_event(
             "clinical_document_import_abandoned",
             Some(auth.user_id),

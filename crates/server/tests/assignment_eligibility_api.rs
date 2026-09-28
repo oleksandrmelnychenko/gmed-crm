@@ -9,7 +9,12 @@ use axum::http::{Request, StatusCode};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use uuid::Uuid;
+
+/// Every appointment gets its own day, so no slot conflicts arise.
+static NEXT_DAY: AtomicU32 = AtomicU32::new(0);
 
 use gmed_server::auth::jwt;
 
@@ -113,7 +118,9 @@ fn appointment_body(
         "interpreter_id": interpreter_id,
         "appointment_type": "medical",
         "title": format!("Visit {}", tag()),
-        "date": "2026-11-12",
+        "date": (chrono::NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
+            + chrono::Duration::days(i64::from(NEXT_DAY.fetch_add(1, Ordering::SeqCst))))
+        .to_string(),
         "time_start": "08:30",
         "time_end": "09:15",
         "location": "Clinic reception"

@@ -120,7 +120,7 @@ pub async fn close_stuck_requests(state: &AppState) -> Result<u64, sqlx::Error> 
     .await?;
     for row in &rows {
         audit::write_in_transaction(
-            &mut *tx,
+            &mut tx,
             &audit::domain_event(
                 "document_signature_closed_untrackable",
                 None,
@@ -251,7 +251,7 @@ pub(crate) async fn abandon(
     .await
     .map_err(db_error)?;
     audit::write_in_transaction(
-        &mut *tx,
+        &mut tx,
         &audit::domain_event(
             "document_signature_abandoned",
             Some(auth.user_id),
@@ -327,7 +327,7 @@ pub(crate) async fn resolve_review(
     .map_err(db_error)?
     .ok_or_else(|| error(StatusCode::CONFLICT, "signature_not_in_review"))?;
     audit::write_in_transaction(
-        &mut *tx,
+        &mut tx,
         &audit::domain_event(
             "document_signature_review_resolved",
             Some(auth.user_id),
