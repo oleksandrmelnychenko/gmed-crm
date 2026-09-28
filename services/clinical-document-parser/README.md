@@ -250,6 +250,15 @@ pivots through English. Attribution and licenses: `MT_MODELS_NOTICE`
 `/app/mt-models`), `MT_MAX_LOADED_MODELS` (default 2, about 250 MB RAM per
 tc-big model) and `MT_THREADS` (default 2 intra-op threads per model).
 
+Per-language model routing (optional, off by default): `MT_MODEL_ROUTES` is a
+comma-separated list of `src>tgt:model` overrides for direct pairs, e.g.
+`de>uk:de-zle-opus_ft_clean_0_3,uk>de:zle-de-opus_ft_clean_0_3`; unlisted pairs
+keep their baseline model. Routed models are looked up in `MT_MODEL_DIR`, then in
+`MT_EXTRA_MODEL_DIR` (a read-only folder of extra CTranslate2 packages, which
+never shadows an installed baseline name). A routed model that is missing falls
+back to the baseline with a warning. DEV mounts such a folder through
+`docker-compose.dev-mt-ft.yml` (see that file for rollback).
+
 Decode guard (`DecodeGuard` in `app/mt_engine.py`): the model may not emit
 `<unk>` (`MT_DISABLE_UNK`, default 1), output is capped at
 `min(MT_MAX_DECODING_LENGTH=512, MT_MAX_LENGTH_RATIO=1.5 × source tokens +

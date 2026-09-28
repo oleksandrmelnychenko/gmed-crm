@@ -565,3 +565,83 @@ def test_symbols_missing_from_model_vocabulary_are_unencodable(tmp_path):
     # "°" encodes without unk but is not in the model vocabulary; "ґ" is a
     # letter and must not be masked; "®" is unknown to SentencePiece itself.
     assert backend.unencodable("de-zle", {"°", "ґ", "®", ",", "a", "1"}) == {"°", "®"}
+
+
+# -- per-language model routing (MT_MODEL_ROUTES / MT_EXTRA_MODEL_DIR) -------
+
+from app.mt_engine import parse_model_routes  # noqa: E402
+
+
+def test_model_routes_parse_valid_entries_and_skip_invalid_ones():
+    routes = parse_model_routes(
+        " de>uk:de-zle-opus_ft_clean_0_3, uk>de:zle-de-opus_ft_clean_0_3 ,ru>de:zle-de-opus_ft_clean_0_3,"
+        "ru>uk:pivot-model,de>de:x,xx>de:y,de>ru:../escape,de>en:,garbage"
+    )
+    assert routes == {
+        ("de", "uk"): "de-zle-opus_ft_clean_0_3",
+        ("uk", "de"): "zle-de-opus_ft_clean_0_3",
+        ("ru", "de"): "zle-de-opus_ft_clean_0_3",
+    }
+    assert parse_model_routes(None) == {} and parse_model_routes("") == {}
+
+
+def test_without_routes_every_pair_uses_the_baseline_model(monkeypatch):
+    monkeypatch.delenv("MT_MODEL_ROUTES", raising=False)
+    eng = engine()
+    assert eng.routes == {}
+    for source, target in (("de", "uk"), ("de", "ru"), ("uk", "de"), ("ru", "de"), ("ru", "uk")):
+        assert eng.hops(source, target) == route(source, target)
+
+
+def test_routes_from_environment_override_only_the_configured_pairs(monkeypatch):
+    monkeypatch.setenv("MT_MODEL_ROUTES", "de>uk:de-zle-ft,uk>de:zle-de-ft,ru>de:zle-de-ft")
+    backend = FakeBackend()
+    eng = engine(backend)
+    assert eng.hops("de", "uk") == [Hop("de-zle-ft", ">>ukr<<")]
+    assert eng.hops("de", "ru") == [Hop("de-zle", ">>rus<<")]
+    assert eng.hops("uk", "de") == [Hop("zle-de-ft")]
+    assert eng.hops("ru", "de") == [Hop("zle-de-ft")]
+    eng.translate("Guten Tag.", "de", "uk")
+    eng.translate("Guten Tag.", "de", "ru")
+    assert [call[:2] for call in backend.calls] == [("de-zle-ft", ">>ukr<<"), ("de-zle", ">>rus<<")]
+
+
+def test_missing_routed_model_falls_back_to_baseline_with_one_warning(caplog):
+    backend = FakeBackend(missing={"de-zle-ft"})
+    eng = MTEngine(backend, Glossary.load(DEFAULT_GLOSSARY_PATH), routes={("de", "uk"): "de-zle-ft"})
+    with caplog.at_level("WARNING", logger="app.mt_engine"):
+        eng.translate("Guten Tag.", "de", "uk")
+        eng.translate("Guten Abend.", "de", "uk")
+    assert {call[0] for call in backend.calls} == {"de-zle"}
+    warnings = [r for r in caplog.records if "unavailable" in r.getMessage()]
+    assert len(warnings) == 1 and "de-zle-ft" in warnings[0].getMessage()
+    assert "Guten" not in caplog.text  # never log medical text
+
+
+def _model_dir(root, name):
+    directory = root / name
+    directory.mkdir(parents=True)
+    for file in ("model.bin", "source.spm", "target.spm"):
+        (directory / file).write_bytes(b"x")
+    return directory
+
+
+def test_extra_model_dir_serves_only_names_missing_from_the_main_dir(tmp_path):
+    main, extra = tmp_path / "main", tmp_path / "extra"
+    _model_dir(main, "de-zle")
+    _model_dir(extra, "de-zle")  # must never shadow the baseline
+    ft = _model_dir(extra, "de-zle-ft")
+    backend = CTranslate2Backend(main, extra_model_dir=extra, guard=DecodeGuard())
+    assert backend.directory("de-zle") == main / "de-zle"
+    assert backend.directory("de-zle-ft") == ft and backend.available("de-zle-ft")
+    assert not backend.available("zle-de-ft")
+    assert not CTranslate2Backend(main, guard=DecodeGuard()).available("de-zle-ft")
+
+
+def test_extra_model_dir_from_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("MT_EXTRA_MODEL_DIR", str(tmp_path / "extra"))
+    ft = _model_dir(tmp_path / "extra", "zle-de-ft")
+    backend = CTranslate2Backend(tmp_path / "main", guard=DecodeGuard())
+    assert backend.directory("zle-de-ft") == ft
+    monkeypatch.delenv("MT_EXTRA_MODEL_DIR")
+    assert CTranslate2Backend(tmp_path / "main", guard=DecodeGuard()).extra_model_dir is None

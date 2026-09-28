@@ -50,6 +50,10 @@ compose() {
   if [[ -f "$1/.release-images.pins" ]]; then
     image_options=(--env-file "$1/.release-images.pins" -f "$1/docker-compose.ghcr.yml")
   fi
+  # Optional DEV-only fine-tuned MT models (host folder mounted read-only).
+  if [[ -f "$1/docker-compose.dev-mt-ft.yml" ]]; then
+    image_options+=(-f "$1/docker-compose.dev-mt-ft.yml")
+  fi
   docker compose \
     --project-name gmed-crm \
     --env-file "$1/release.env" \

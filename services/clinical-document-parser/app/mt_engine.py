@@ -19,6 +19,7 @@ fake backend. Never log source or translated text: it is medical data.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import textwrap
@@ -37,6 +38,9 @@ RETRY_BEAM = 8
 MAX_SEGMENT_CHARS = 400
 
 _ZLE_TAG = {"ru": ">>rus<<", "uk": ">>ukr<<"}
+_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,6 +63,30 @@ def route(source: str, target: str) -> list[Hop]:
     if target in zle:
         return [Hop(f"{source}-zle", _ZLE_TAG[target])]
     return [Hop(f"{source}-{target}")]
+
+
+def parse_model_routes(spec: str | None) -> dict[tuple[str, str], str]:
+    """``MT_MODEL_ROUTES``: comma-separated ``src>tgt:model`` overrides.
+
+    Example: ``de>uk:de-zle-opus_ft_clean_0_3,uk>de:zle-de-opus_ft_clean_0_3``.
+    Only direct (single-hop) pairs can be overridden; the model name is a
+    directory name (no paths). Invalid entries are skipped with a warning, so a
+    typo never breaks translation: the pair keeps its baseline model.
+    """
+    routes: dict[tuple[str, str], str] = {}
+    for entry in (spec or "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        pair, _, model = entry.partition(":")
+        source, _, target = pair.strip().partition(">")
+        source, target, model = source.strip(), target.strip(), model.strip()
+        if (source not in LANGUAGES or target not in LANGUAGES or source == target
+                or len(route(source, target)) != 1 or not _MODEL_NAME.fullmatch(model)):
+            _log.warning("MT_MODEL_ROUTES: ignoring invalid entry %r", entry)
+            continue
+        routes[(source, target)] = model
+    return routes
 
 
 class TranslationError(Exception):
@@ -639,9 +667,30 @@ class TranslationResult:
 
 
 class MTEngine:
-    def __init__(self, backend: Backend, glossary: Glossary | None = None) -> None:
+    def __init__(self, backend: Backend, glossary: Glossary | None = None,
+                 routes: dict[tuple[str, str], str] | None = None) -> None:
         self.backend = backend
         self.glossary = glossary if glossary is not None else Glossary.load(DEFAULT_GLOSSARY_PATH)
+        self.routes = routes if routes is not None else parse_model_routes(os.environ.get("MT_MODEL_ROUTES"))
+        self._missing_routes: set[str] = set()
+
+    def hops(self, source: str, target: str) -> list[Hop]:
+        """Baseline route, with a configured model override for a direct pair.
+
+        A routed model that is not installed falls back to the baseline model
+        (warned once per model), so a missing package never fails a request.
+        """
+        hops = route(source, target)
+        model = self.routes.get((source, target))
+        if model is None or len(hops) != 1:
+            return hops
+        if not self.backend.available(model):
+            if model not in self._missing_routes:
+                self._missing_routes.add(model)
+                _log.warning("MT route %s>%s: model %s unavailable, using baseline %s",
+                             source, target, model, hops[0].model)
+            return hops
+        return [Hop(model, hops[0].tag)]
 
     def translate(self, text: str, source_language: str | None, target_language: str,
                   protected: list[str] | tuple[str, ...] = ()) -> TranslationResult:
@@ -652,7 +701,7 @@ class MTEngine:
         if target_language not in LANGUAGES or (source_language is not None and source_language not in LANGUAGES):
             raise UnsupportedLanguage()
         source = source_language or detect_language(text)
-        hops = route(source, target_language)
+        hops = self.hops(source, target_language)
         for hop in hops:
             if not self.backend.available(hop.model):
                 raise ModelUnavailable(hop.model)
@@ -866,8 +915,13 @@ class CTranslate2Backend:
     """
 
     def __init__(self, model_dir: Path | None = None, max_loaded: int | None = None, threads: int | None = None,
-                 guard: DecodeGuard | None = None) -> None:
+                 guard: DecodeGuard | None = None, extra_model_dir: Path | str | None = None) -> None:
         self.model_dir = Path(model_dir or os.environ.get("MT_MODEL_DIR", "/app/mt-models"))
+        # Optional read-only directory with additional (e.g. fine-tuned) models,
+        # selected through MT_MODEL_ROUTES. Consulted only for names that are
+        # not installed in model_dir, so it can never shadow a baseline model.
+        extra = extra_model_dir if extra_model_dir is not None else os.environ.get("MT_EXTRA_MODEL_DIR")
+        self.extra_model_dir = Path(extra) if extra else None
         self.max_loaded = max_loaded or _env_int("MT_MAX_LOADED_MODELS", 2)
         self.threads = threads or _env_int("MT_THREADS", 2)
         self.guard = guard or DecodeGuard.from_env()
@@ -876,9 +930,21 @@ class CTranslate2Backend:
         self._registry_lock = threading.Lock()
         self._spm: dict[str, tuple[object, object]] = {}
 
-    def available(self, model: str) -> bool:
-        directory = self.model_dir / model
+    @staticmethod
+    def _complete(directory: Path) -> bool:
         return all((directory / name).is_file() for name in ("model.bin", "source.spm", "target.spm"))
+
+    def directory(self, model: str) -> Path:
+        """``model_dir/<model>``; ``extra_model_dir/<model>`` only if the former is not installed."""
+        primary = self.model_dir / model
+        if self.extra_model_dir is not None and not self._complete(primary) and _MODEL_NAME.fullmatch(model):
+            extra = self.extra_model_dir / model
+            if self._complete(extra):
+                return extra
+        return primary
+
+    def available(self, model: str) -> bool:
+        return self._complete(self.directory(model))
 
     def _tokenizers(self, model: str) -> tuple[object, object]:
         """SentencePiece models only (small); cached independently of the LRU."""
@@ -887,7 +953,7 @@ class CTranslate2Backend:
             if entry is None:
                 import sentencepiece
 
-                directory = self.model_dir / model
+                directory = self.directory(model)
                 entry = (
                     sentencepiece.SentencePieceProcessor(model_file=str(directory / "source.spm")),
                     sentencepiece.SentencePieceProcessor(model_file=str(directory / "target.spm")),
@@ -899,7 +965,7 @@ class CTranslate2Backend:
         with self._registry_lock:
             entry = self._vocab.get(model)
             if entry is None:
-                entry = _load_vocabularies(self.model_dir / model)
+                entry = _load_vocabularies(self.directory(model))
                 self._vocab[model] = entry
             return entry
 
@@ -946,7 +1012,7 @@ class CTranslate2Backend:
             import ctranslate2
             import sentencepiece
 
-            directory = self.model_dir / model
+            directory = self.directory(model)
             translator = ctranslate2.Translator(
                 str(directory), device="cpu", compute_type="int8",
                 inter_threads=1, intra_threads=self.threads,
