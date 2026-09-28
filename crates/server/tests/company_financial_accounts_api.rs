@@ -198,6 +198,34 @@ async fn company_accounts_track_real_cash_and_keep_adjustments_auditable() {
     let (forbidden_status, _) = request_json(&ctx.app, Method::GET, list_path, &sales, None).await;
     assert_eq!(forbidden_status, StatusCode::FORBIDDEN);
 
+    // The CEO assistant reads the company finance page, accounts included,
+    // but cannot change them.
+    let assistant_id = seed_user(&ctx.pool, &tag, "ceo_assistant").await;
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+    let (assistant_status, assistant_accounts) =
+        request_json(&ctx.app, Method::GET, list_path, &assistant, None).await;
+    assert_eq!(
+        assistant_status,
+        StatusCode::OK,
+        "assistant accounts: {assistant_accounts:?}"
+    );
+    let (assistant_create_status, _) = request_json(
+        &ctx.app,
+        Method::POST,
+        "/api/v1/company-financial-accounts",
+        &assistant,
+        Some(json!({
+            "name": format!("Assistant cash {tag}"),
+            "account_type": "cash",
+            "currency": "EUR",
+            "opening_balance": "0",
+            "opening_balance_on": "2020-01-01",
+            "is_default": false
+        })),
+    )
+    .await;
+    assert_eq!(assistant_create_status, StatusCode::FORBIDDEN);
+
     let (create_status, created) = request_json(
         &ctx.app,
         Method::POST,
