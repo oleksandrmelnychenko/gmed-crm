@@ -47,7 +47,7 @@ import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
 import { clearApiCache } from "@/lib/api";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
-import { formatUnknownValue, useLang } from "@/lib/i18n";
+import { formatUnknownValue, uiText, useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -68,6 +68,7 @@ import {
   setAdminUserActive,
   unlockAdminUser,
   updateAdminUser,
+  type UserDeactivationResult,
 } from "@/pages/admin/data/admin-api";
 import {
   ADMIN_USER_ROLE_KEYS,
@@ -391,6 +392,12 @@ function useAdminUsersPageContent() {
     setAdminUsersField("loading", value);
   const setError = (value: SetStateAction<string | null>) =>
     setAdminUsersField("error", value);
+  // Shown after a deactivation: revoked patient links and the open work the
+  // account still holds (nothing is reassigned automatically).
+  const [deactivationReport, setDeactivationReport] = useState<{
+    name: string;
+    result: UserDeactivationResult;
+  } | null>(null);
   const setSearch = (value: SetStateAction<string>) =>
     setAdminUsersField("search", value);
   const setShowCreate = (value: SetStateAction<boolean>) =>
@@ -959,8 +966,12 @@ function useAdminUsersPageContent() {
 
   const toggleActive = async (user: User) => {
     setError(null);
+    setDeactivationReport(null);
     try {
-      await setAdminUserActive(user.id, !user.is_active);
+      const result = await setAdminUserActive(user.id, !user.is_active);
+      if (user.is_active && result && typeof result === "object") {
+        setDeactivationReport({ name: user.name, result });
+      }
       clearApiCache("/users");
       void loadUsers();
     } catch (e) {
@@ -1444,6 +1455,55 @@ function useAdminUsersPageContent() {
 
       {loading ? <TabLoader /> : null}
       {!loading && error ? <Banner tone="error">{error}</Banner> : null}
+      {deactivationReport ? (
+        <Banner tone="warning">
+          <div className="space-y-1 text-sm" data-testid="user-deactivation-report">
+            <p>
+              {deactivationReport.name}:{" "}
+              {uiText("users_deactivated_summary", undefined, {
+                count: deactivationReport.result.revoked_patient_assignments,
+              })}
+            </p>
+            {deactivationReport.result.open_tasks.length > 0 ||
+            deactivationReport.result.owned_appointments.length > 0 ? (
+              <>
+                <p>{uiText("users_deactivated_open_work")}</p>
+                {deactivationReport.result.open_tasks.length > 0 ? (
+                  <div>
+                    <p className="font-medium">
+                      {uiText("users_deactivated_open_tasks")} ({deactivationReport.result.open_tasks.length})
+                    </p>
+                    <ul className="list-disc pl-5">
+                      {deactivationReport.result.open_tasks.map((task) => (
+                        <li key={task.id}>
+                          {task.title}
+                          {task.due_date ? ` · ${formatAppDate(task.due_date)}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {deactivationReport.result.owned_appointments.length > 0 ? (
+                  <div>
+                    <p className="font-medium">
+                      {uiText("users_deactivated_owned_appointments")} (
+                      {deactivationReport.result.owned_appointments.length})
+                    </p>
+                    <ul className="list-disc pl-5">
+                      {deactivationReport.result.owned_appointments.map((appointment) => (
+                        <li key={appointment.id}>
+                          {formatAppDate(appointment.date)}
+                          {appointment.time_start ? ` ${appointment.time_start}` : ""} · {appointment.title}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </Banner>
+      ) : null}
 
       {!loading && !error ? (
         <AdminTableCard

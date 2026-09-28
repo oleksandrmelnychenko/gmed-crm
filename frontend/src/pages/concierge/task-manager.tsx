@@ -32,7 +32,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { SelectField } from "@/components/ui/select-field";
 import { Section } from "@/components/ui-shell";
 import { appDateTimeFormat, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
-import type { Lang } from "@/lib/i18n";
+import { uiText, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
@@ -410,6 +410,15 @@ function TaskCard({
             >
               <span className="truncate">{task.assigned_to_name}</span>
             </Badge>
+            {task.assigned_to_active === false ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 rounded-full border-red-200 bg-red-50 text-[10px] font-medium text-red-700"
+                data-testid="task-assignee-deactivated"
+              >
+                {uiText("tasks_assignee_deactivated")}
+              </Badge>
+            ) : null}
           </div>
           {task.task_audience === "external" && task.external_assignee_name ? <p className="truncate font-medium text-foreground">{task.external_assignee_name}</p> : null}
         </div>

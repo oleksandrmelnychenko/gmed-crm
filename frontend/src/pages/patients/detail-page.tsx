@@ -1922,11 +1922,13 @@ function usePatientDetailPageContent() {
     detail.legal_status && typeof detail.legal_status === "object"
       ? (detail.legal_status as Record<string, unknown>)
       : {};
+  // A restricted file may still be closed (owner decision 2026-09-28), not
+  // reactivated.
   const canTogglePatientActivation =
     (user?.role === "ceo" || user?.role === "patient_manager") &&
     hasCapability(user, "patients.edit") &&
     detail.lifecycle_status !== "prospective" &&
-    legalFlags.processing_restricted !== true &&
+    (legalFlags.processing_restricted !== true || detail.is_active) &&
     !legalFlags.anonymized_at;
   // Revoking needs the patient-manager role on the server (CEO included).
   const canRevokeAssignments = user?.role === "ceo" || user?.role === "patient_manager";

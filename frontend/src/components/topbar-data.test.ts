@@ -27,6 +27,31 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.2026 00:30");
 });
 
+it("words the daily compliance deadline digest in German and Russian", () => {
+  const digest = {
+    kind: "compliance_deadline_digest",
+    title: "Compliance deadlines 04.03.2030",
+    entity_type: "compliance_digest",
+    entity_id: null,
+    body: JSON.stringify({
+      digest_date: "2030-03-04",
+      privacy: { overdue: 2, due_soon: 1, due_soon_days: 7 },
+      incidents: { within_deadline: 0, deadline_missed: 1 },
+      consents: { expiring: 3, within_days: 30 },
+    }),
+  } as Notification;
+  const de = localizedNotificationCopy(digest, "de");
+  expect(de.title).toBe("Datenschutz-Fristen · 04.03.2030");
+  expect(de.body).toContain("2 überfällig");
+  expect(de.body).toContain("1 nach der 72-h-Frist");
+  expect(de.body).toContain("in 30 Tagen ab: 3");
+  const ru = localizedNotificationCopy(digest, "ru");
+  expect(ru.title).toBe("Сроки по защите данных · 04.03.2030");
+  expect(ru.body).toContain("просрочено 2");
+  expect(notificationHrefForRole(digest, "it_admin")).toBe("/admin/compliance");
+  expect(notificationHrefForRole(digest, "patient_manager")).toBeNull();
+});
+
 it("shows the overdue supplier invoice notice in German and Russian", () => {
   const notice = {
     kind: "external_invoice_overdue",

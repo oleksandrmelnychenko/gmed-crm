@@ -21,7 +21,7 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { uiText, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalPrivacyRequest,
@@ -305,6 +305,15 @@ export function PatientPrivacyPage() {
                   {item.reason ? (
                     <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                       {item.reason}
+                    </div>
+                  ) : null}
+                  {item.decision_reason ? (
+                    <div
+                      className={cn("mt-2 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}
+                      data-testid="privacy-decision-reason"
+                    >
+                      <span className="font-medium">{uiText("privacy_decision_reason_label")}:</span>{" "}
+                      {item.decision_reason}
                     </div>
                   ) : null}
                 </ListItem>

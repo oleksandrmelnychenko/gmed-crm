@@ -539,6 +539,8 @@ export type PortalPrivacyRequest = {
   requested_at: string;
   reviewed_at: string | null;
   executed_at: string | null;
+  /** Why the request was refused or put on hold (Art. 12 Abs. 4 DSGVO). */
+  decision_reason?: string | null;
 };
 
 export type PortalFeedbackItem = {
