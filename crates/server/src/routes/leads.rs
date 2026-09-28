@@ -397,6 +397,9 @@ async fn list_leads(
     let source_pattern = format!("%{}%", query.source.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
     let concierge_grid_only = lead_service_grid_only(&auth);
+    // Search only in what the caller may read: without medical access the
+    // request text, notes and program do not match (no inference by search).
+    let contact_search_only = concierge_grid_only || !lead_medical_visible(&auth);
 
     match sqlx::query(
         r#"SELECT id, first_name, last_name, email, phone, source, country,
@@ -464,7 +467,7 @@ async fn list_leads(
     .bind(query.intake_source)
     .bind(query.lead_type)
     .bind(query.flow)
-    .bind(concierge_grid_only)
+    .bind(contact_search_only)
     .fetch_all(&state.db)
     .await
     {
@@ -2487,6 +2490,11 @@ async fn get_lead(
                   notes, user_agent, created_at, updated_at,
                   requested_specialties, wizard_state, status_changed_at,
                   intake_model, prospect_patient_id, referrer_patient_id,
+                  repeat_patient_id,
+                  (
+                      SELECT p.patient_id FROM patients p
+                      WHERE p.id = leads.repeat_patient_id
+                  ) AS repeat_patient_pid,
                   (
                       SELECT p.patient_id FROM patients p
                       WHERE p.id = leads.referrer_patient_id
@@ -2847,6 +2855,21 @@ async fn get_lead(
             .map(|id| json!(id))
             .unwrap_or(Value::Null),
     );
+    // A repeat intake of an existing patient. The wizard switches to its
+    // repeat mode (document review, debt check, no new patient card) from
+    // this field, whether the lead is opened from the patient or the leads list.
+    obj.insert(
+        "repeat_patient_id".into(),
+        row.try_get::<Option<Uuid>, _>("repeat_patient_id")
+            .ok()
+            .flatten()
+            .map(|id| json!(id))
+            .unwrap_or(Value::Null),
+    );
+    obj.insert(
+        "repeat_patient_pid".into(),
+        s_opt(&row, "repeat_patient_pid"),
+    );
     obj.insert(
         "referrer_patient_id".into(),
         row.try_get::<Option<Uuid>, _>("referrer_patient_id")
@@ -2945,6 +2968,9 @@ async fn get_lead(
     if lead_service_grid_only(&auth) {
         return Json(lead_service_grid_projection(&lead)).into_response();
     }
+    if !lead_medical_visible(&auth) {
+        return Json(lead_without_medical_fields(lead)).into_response();
+    }
     Json(lead).into_response()
 }
 
@@ -2953,6 +2979,89 @@ async fn get_lead(
 /// get the full lead.
 fn lead_service_grid_only(auth: &AuthUser) -> bool {
     auth.can(Capability::LeadsView) && !auth.can(Capability::LeadsEdit)
+}
+
+/// Whether the caller may read what a lead says about health: the medical
+/// access of patients (`patients.medical.view`). Sales works leads without it
+/// and sees contact, source, status, country and language, dates and the
+/// responsible person, but none of the fields in [`LEAD_MEDICAL_FIELDS`]
+/// (owner decision 2026-09-28).
+fn lead_medical_visible(auth: &AuthUser) -> bool {
+    auth.can(Capability::PatientsMedicalView)
+}
+
+/// Lead fields with medical content: the request text, the requested
+/// specialties and program, notes (mixed content, so hidden as a whole), the
+/// questionnaire answers on treatment, travel risk and records, insurance, and
+/// the raw questionnaire and wizard payloads (clinical intake draft).
+const LEAD_MEDICAL_FIELDS: &[&str] = &[
+    "primary_concern_text",
+    "additional_concerns",
+    "message",
+    "notes",
+    "selected_program",
+    "currently_in_treatment",
+    "has_health_risk_for_travel",
+    "has_medical_records",
+    "records_in_accepted_language",
+    "has_insurance",
+    "insurance_covers_germany",
+    "insurance_provider",
+    "insurance_number",
+    "insurance_type",
+    "raw_payload",
+];
+
+/// A lead payload without its medical content, for callers without
+/// [`lead_medical_visible`]. The fields stay present as null (lists and
+/// records empty) so the lead screens render; `medical_fields_hidden` tells
+/// them to leave out the medical blocks.
+fn lead_without_medical_fields(lead: Value) -> Value {
+    let Value::Object(mut fields) = lead else {
+        return lead;
+    };
+    for key in LEAD_MEDICAL_FIELDS {
+        if fields.contains_key(*key) {
+            fields.insert((*key).to_string(), Value::Null);
+        }
+    }
+    fields.insert("requested_specialties".into(), json!([]));
+    fields.insert("wizard_state".into(), json!({}));
+    // Questionnaire uploads are medical records; only their number stays.
+    if let Some(attachments) = fields.get("attachments").and_then(Value::as_array) {
+        let count = attachments.len();
+        fields.insert("attachment_count".into(), json!(count));
+        fields.insert("attachments".into(), json!([]));
+    }
+    fields.insert("medical_fields_hidden".into(), Value::Bool(true));
+    Value::Object(fields)
+}
+
+/// The medical fields a lead update carries; a caller without medical access
+/// may not overwrite what it cannot read.
+fn lead_update_medical_fields(body: &UpdateLeadRequest) -> Vec<&'static str> {
+    [
+        ("notes", body.notes.is_some()),
+        ("primary_concern_text", body.primary_concern_text.is_some()),
+        ("additional_concerns", body.additional_concerns.is_some()),
+        ("selected_program", body.selected_program.is_some()),
+        ("has_insurance", body.has_insurance.is_some()),
+        (
+            "insurance_covers_germany",
+            body.insurance_covers_germany.is_some(),
+        ),
+        ("insurance_provider", body.insurance_provider.is_some()),
+        ("insurance_number", body.insurance_number.is_some()),
+        ("insurance_type", body.insurance_type.is_some()),
+        (
+            "requested_specialties",
+            body.requested_specialties.is_some(),
+        ),
+        ("wizard_state", body.wizard_state.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(field, sent)| sent.then_some(field))
+    .collect()
 }
 
 /// Fields of a lead the service grid may show: who the lead is, where it
@@ -3184,6 +3293,12 @@ async fn update_lead(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::LeadsEdit) {
         return e;
+    }
+    if !lead_medical_visible(&auth) && !lead_update_medical_fields(&body).is_empty() {
+        return err(
+            StatusCode::FORBIDDEN,
+            "Medical lead fields require medical access",
+        );
     }
 
     let compliance_status = body.compliance_status.as_deref().map(str::to_lowercase);
@@ -3858,18 +3973,63 @@ async fn qualify_lead(
         }
     }
 
-    match sqlx::query(
+    // Returning an archived lead to work reopens the order its archiving
+    // withdrew, in the same transaction as the status change.
+    let restores_archived_lead = failed_outcome_status == "archived"
+        && matches!(body.status.as_str(), "new" | "in_progress" | "qualified");
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin qualify lead");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let update_result = sqlx::query(
         "UPDATE leads
          SET qualification_status = $2,
              status_changed_at = CASE WHEN qualification_status <> $2 THEN now() ELSE status_changed_at END,
              failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END
          WHERE id = $1",
     )
-        .bind(lead_id)
-        .bind(&body.status)
-        .execute(&state.db)
+    .bind(lead_id)
+    .bind(&body.status)
+    .execute(&mut *tx)
+    .await;
+    let mut reopened_order_ids = Vec::new();
+    if restores_archived_lead && matches!(&update_result, Ok(r) if r.rows_affected() > 0) {
+        reopened_order_ids = match crate::routes::orders::reopen_withdrawn_lead_orders_in_tx(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+        )
         .await
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    }
+    if matches!(&update_result, Ok(r) if r.rows_affected() > 0)
+        && let Err(e) = tx.commit().await
     {
+        tracing::error!(error = %e, lead_id = %lead_id, "commit qualify lead");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    for order_id in &reopened_order_ids {
+        crate::realtime::publish_order_event(
+            &state,
+            Some(auth.user_id),
+            "order.status_changed",
+            *order_id,
+            json!({
+                "from_status": "cancelled",
+                "status": "active",
+                "note": "lead_restored",
+            }),
+        )
+        .await;
+    }
+
+    match update_result {
         Ok(r) if r.rows_affected() > 0 => {
             state.audit_sender.try_send(audit::domain_event(
                 "qualify_lead",
@@ -6147,15 +6307,27 @@ async fn resolve_failed_lead(
         );
     }
 
+    // The lead, its preparation orders and the outcome change together.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin failed-lead resolution");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve failed lead",
+            );
+        }
+    };
     let current = match sqlx::query(
         r#"SELECT qualification_status,
                   converted_patient_id,
                   failed_outcome_status
            FROM leads
-           WHERE id = $1"#,
+           WHERE id = $1
+           FOR UPDATE"#,
     )
     .bind(lead_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(row)) => row,
@@ -6205,6 +6377,26 @@ async fn resolve_failed_lead(
         "deleted"
     };
 
+    // A failed lead no longer needs the order opened while it was prepared:
+    // it is withdrawn in this transaction, so the order list never shows an
+    // active order of an archived or deleted lead.
+    let withdrawn_orders = match crate::routes::orders::withdraw_lead_orders_in_tx(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        if resolution == "archive" {
+            crate::routes::orders::LEAD_ARCHIVED_CANCELLATION_REASON
+        } else {
+            crate::routes::orders::LEAD_DELETED_CANCELLATION_REASON
+        },
+        reason,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
     let update_result = if resolution == "archive" {
         sqlx::query(
             r#"UPDATE leads
@@ -6223,44 +6415,59 @@ async fn resolve_failed_lead(
         .bind(reason)
         .bind(note)
         .bind(auth.user_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
+        .map(|result| (result, None))
     } else {
-        let deleted_result = purge_lead_and_prospect(
-            &state.db,
+        purge_lead_and_prospect_in_tx(
+            &mut tx,
             lead_id,
             Some(current_status.clone()),
             reason,
             note,
             Some(auth.user_id),
         )
-        .await;
-
-        match deleted_result {
-            Ok((result, purged_prospect)) => {
-                if result.rows_affected() > 0 {
-                    let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
-                        .bind(lead_id)
-                        .execute(&state.db)
-                        .await;
-                }
-                if let Some(prospect_id) = purged_prospect {
-                    state.audit_sender.try_send(audit::domain_event(
-                        "purge_prospect_patient",
-                        Some(auth.user_id),
-                        "patient",
-                        Some(prospect_id),
-                        json!({
-                            "reason": "storage_limitation_retention",
-                            "source_lead_id": lead_id,
-                            "gdpr_article": "5(1)(e)",
-                        }),
-                    ));
-                }
-                Ok(result)
+        .await
+    };
+    let update_result = match update_result {
+        Ok((result, purged_prospect)) if result.rows_affected() > 0 => {
+            if let Err(e) = tx.commit().await {
+                tracing::error!(error = %e, lead_id = %lead_id, "commit failed-lead resolution");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to resolve failed lead",
+                );
             }
-            Err(error) => Err(error),
+            if resolution != "archive" {
+                let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+                    .bind(lead_id)
+                    .execute(&state.db)
+                    .await;
+            }
+            if let Some(prospect_id) = purged_prospect {
+                state.audit_sender.try_send(audit::domain_event(
+                    "purge_prospect_patient",
+                    Some(auth.user_id),
+                    "patient",
+                    Some(prospect_id),
+                    json!({
+                        "reason": "storage_limitation_retention",
+                        "source_lead_id": lead_id,
+                        "gdpr_article": "5(1)(e)",
+                    }),
+                ));
+            }
+            crate::routes::orders::publish_withdrawn_lead_orders(
+                &state,
+                auth.user_id,
+                &withdrawn_orders,
+            )
+            .await;
+            Ok(result)
         }
+        // Nothing changed: the transaction rolls back when it is dropped.
+        Ok((result, _)) => Ok(result),
+        Err(error) => Err(error),
     };
 
     match update_result {
@@ -6393,6 +6600,10 @@ async fn download_attachment(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::LeadsView) {
         return e;
+    }
+    // Questionnaire uploads are medical records (see lead_without_medical_fields).
+    if !lead_medical_visible(&auth) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
     match sqlx::query(
@@ -7062,6 +7273,29 @@ async fn purge_lead_and_prospect(
     processed_by: Option<Uuid>,
 ) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
     let mut tx = pool.begin().await?;
+    let purged = purge_lead_and_prospect_in_tx(
+        &mut tx,
+        lead_id,
+        failed_from_status,
+        reason,
+        note,
+        processed_by,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(purged)
+}
+
+/// [`purge_lead_and_prospect`] inside the caller's transaction, so the
+/// failed-lead workflow withdraws the lead's order in the same commit.
+async fn purge_lead_and_prospect_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    failed_from_status: Option<String>,
+    reason: &str,
+    note: Option<&str>,
+    processed_by: Option<Uuid>,
+) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
     let purge_candidate: Option<Uuid> = sqlx::query_scalar(
         r#"SELECT p.id
            FROM leads l
@@ -7072,7 +7306,7 @@ async fn purge_lead_and_prospect(
            FOR UPDATE OF l, p"#,
     )
     .bind(lead_id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let purged_prospect = if let Some(patient_id) = purge_candidate {
         // The audit trigger permits this only while the locked patient is still
@@ -7080,19 +7314,19 @@ async fn purge_lead_and_prospect(
         // the subsequent patient cascade never collides with audit immutability.
         sqlx::query("DELETE FROM patient_clinical_versions WHERE patient_id = $1")
             .bind(patient_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
         sqlx::query_scalar(
             "DELETE FROM patients WHERE id = $1 AND lifecycle_status = 'prospective' RETURNING id",
         )
         .bind(patient_id)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?
     } else {
         None
     };
     let result = anonymize_lead_pii(
-        &mut *tx,
+        &mut **tx,
         lead_id,
         failed_from_status,
         reason,
@@ -7100,7 +7334,6 @@ async fn purge_lead_and_prospect(
         processed_by,
     )
     .await?;
-    tx.commit().await?;
     Ok((result, purged_prospect))
 }
 

@@ -25,6 +25,7 @@ import {
   draftFromLead,
   intakeAsksDiscoverySource,
   isMinor,
+  isRepeatIntakeLead,
   nextStep,
   orderLineClientReference,
   orderResumeFromLead,
@@ -34,7 +35,10 @@ import {
   orderLinesAreReady,
   orderLinePayload,
   orderNeedsDescription,
+  prepaymentDueAtPatch,
   prevStep,
+  repeatIntakePatientId,
+  repeatIntakePatientNumber,
   resumeStep,
   stepIsComplete,
   wizardUpdatePayload,
@@ -129,6 +133,56 @@ describe("discovery source", () => {
 
   it("does not require the recommending customer on a repeat intake", () => {
     expect(discoveryReferrerMissing(referral, true)).toBe(false);
+  });
+});
+
+describe("prepaymentDueAtPatch", () => {
+  it("sends a typed deadline the order does not hold yet, read as Berlin time", () => {
+    expect(prepaymentDueAtPatch(true, "2026-10-05T12:00", null)).toBe("2026-10-05T10:00:00.000Z");
+    expect(
+      prepaymentDueAtPatch(true, "2026-10-05T12:00", "2026-10-04T10:00:00Z"),
+    ).toBe("2026-10-05T10:00:00.000Z");
+  });
+
+  it("sends nothing when the order already holds the typed deadline", () => {
+    expect(prepaymentDueAtPatch(true, "2026-10-05T12:00", "2026-10-05T10:00:00Z")).toBeUndefined();
+    expect(prepaymentDueAtPatch(true, "", null)).toBeUndefined();
+  });
+
+  it("clears a deadline removed from the field and skips incomplete input", () => {
+    expect(prepaymentDueAtPatch(true, "", "2026-10-05T10:00:00Z")).toBe("");
+    expect(prepaymentDueAtPatch(true, "2026-10-05T", null)).toBeUndefined();
+  });
+
+  it("leaves the deadline to the server when no prepayment is required", () => {
+    expect(prepaymentDueAtPatch(false, "2026-10-05T12:00", null)).toBeUndefined();
+  });
+});
+
+describe("repeat intake mode", () => {
+  const repeatLead = lead({
+    repeat_patient_id: "patient-1",
+    prospect_patient_id: "patient-1",
+    repeat_patient_pid: "PT-0001",
+  });
+
+  it("follows the lead when the wizard is opened from the leads list", () => {
+    expect(isRepeatIntakeLead("lead", repeatLead)).toBe(true);
+    expect(repeatIntakePatientId(true, null, repeatLead)).toBe("patient-1");
+    expect(repeatIntakePatientNumber(null, repeatLead)).toBe("PT-0001");
+  });
+
+  it("uses the patient card context while the lead is not loaded yet", () => {
+    expect(isRepeatIntakeLead("repeat-patient", null)).toBe(true);
+    expect(repeatIntakePatientId(true, "patient-2", null)).toBe("patient-2");
+    expect(repeatIntakePatientNumber("PT-0002", repeatLead)).toBe("PT-0002");
+  });
+
+  it("keeps a first intake with its own new patient out of repeat mode", () => {
+    const firstIntake = lead({ repeat_patient_id: null, prospect_patient_id: "patient-3" });
+    expect(isRepeatIntakeLead("lead", firstIntake)).toBe(false);
+    expect(isRepeatIntakeLead("lead", null)).toBe(false);
+    expect(repeatIntakePatientId(false, null, firstIntake)).toBeNull();
   });
 });
 

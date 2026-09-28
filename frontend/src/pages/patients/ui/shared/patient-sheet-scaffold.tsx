@@ -26,6 +26,7 @@ export function PatientSheetScaffold({
   width = "default",
   maxWidthClassName,
   onSubmit,
+  noValidate,
   children,
   footer,
   footerError,
@@ -42,6 +43,8 @@ export function PatientSheetScaffold({
   width?: PatientSheetWidthPreset;
   maxWidthClassName?: string;
   onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  /** The form checks its fields itself and shows the app's messages, not the browser's. */
+  noValidate?: boolean;
   children: ReactNode;
   footer?: ReactNode;
   footerError?: ReactNode;
@@ -76,7 +79,7 @@ export function PatientSheetScaffold({
         )}
       >
         {onSubmit ? (
-          <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <form onSubmit={onSubmit} noValidate={noValidate} className="flex min-h-0 flex-1 flex-col">
             {content}
           </form>
         ) : (

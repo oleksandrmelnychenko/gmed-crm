@@ -101,6 +101,21 @@ export function normalizeOrderCancellationSummary(value: unknown): OrderCancella
   };
 }
 
+/**
+ * The shown cancellation reason: staff text as typed, the reserved reasons of
+ * a lead's order withdrawn by the failed-lead workflow in the staff language.
+ */
+export function orderCancellationReasonLabel(reason: string, lang: string): string {
+  const de = lang === "de";
+  if (reason === "lead_archived") {
+    return de ? "Lead archiviert (Auftrag zurückgezogen)" : "Лид архивирован (заказ отозван)";
+  }
+  if (reason === "lead_deleted") {
+    return de ? "Lead gelöscht und anonymisiert" : "Лид удалён и анонимизирован";
+  }
+  return reason;
+}
+
 /** Counts characters like the server does: Unicode scalars of the trimmed text. */
 export function isValidOrderCancelReason(reason: string) {
   const length = Array.from(reason.trim()).length;
