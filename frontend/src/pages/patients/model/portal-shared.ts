@@ -730,13 +730,23 @@ const PORTAL_INVOICE_TYPE_LABEL_KEYS = {
   interim: "portal_invoice_type_interim",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+// All seven request types the server accepts (admin_compliance.rs
+// normalize_privacy_request_type).
 const PORTAL_PRIVACY_REQUEST_LABEL_KEYS = {
   erasure: "portal_privacy_request_erasure",
   restriction: "portal_privacy_request_restriction",
   third_party_revoke: "portal_privacy_request_third_party_revoke",
+  access: "portal_privacy_request_access",
+  rectification: "portal_privacy_request_rectification",
+  portability: "portal_privacy_request_portability",
+  objection: "portal_privacy_request_objection",
 } satisfies Partial<Record<string, TranslationKey>>;
 
+// The server stores patient_request, admin_intake or legal_hold.
 const PORTAL_PRIVACY_SOURCE_LABEL_KEYS = {
+  patient_request: "compliance_privacy_source_patient_request",
+  admin_intake: "portal_privacy_source_staff_workspace",
+  legal_hold: "compliance_privacy_source_legal_hold",
   patient_portal: "portal_privacy_source_patient_portal",
   staff_workspace: "portal_privacy_source_staff_workspace",
 } satisfies Partial<Record<string, TranslationKey>>;

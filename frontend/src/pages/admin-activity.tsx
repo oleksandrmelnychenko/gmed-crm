@@ -436,6 +436,10 @@ export function actionLabel(action: string, translations: Translations): string 
   if (exact !== translations.common_unknown_value && exact !== translations.common_unknown) {
     return exact;
   }
+  // Status changes of records and accounts (privacy, documents, signatures,
+  // imports, users, feedback, announcements, providers).
+  const statusChange = translations.uiText?.[`activity_action_${action}`];
+  if (statusChange) return statusChange;
 
   const [entityKey, eventKey] = action.split(".");
   const entityLabel = entityKey

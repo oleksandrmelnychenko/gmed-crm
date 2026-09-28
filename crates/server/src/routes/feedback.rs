@@ -585,6 +585,10 @@ async fn review_feedback(
     if let Err(resp) = auth.require_capability(Capability::FeedbackView) {
         return resp;
     }
+    // The CEO assistant reads feedback but does not decide on it.
+    if !feedback_role_can_review(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
 
     let status = match body.status.trim() {
         "reviewed" => "reviewed",
@@ -1581,6 +1585,12 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+/// Marking feedback reviewed or archived is a decision; the CEO assistant has
+/// read-only access and only reads the feedback it may see.
+fn feedback_role_can_review(role: Role) -> bool {
+    role != Role::CeoAssistant
 }
 
 #[allow(clippy::result_large_err)]

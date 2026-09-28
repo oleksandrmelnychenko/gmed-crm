@@ -223,6 +223,19 @@ pub(crate) async fn ensure_can_manage_target(
     user_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     auth.require_capability(Capability::UsersManage)?;
+    ensure_can_act_on_account(state, auth, user_id).await
+}
+
+/// Security actions on an existing account from the admin security and
+/// session screens (unlock, forced password change, the admin-approval MFA
+/// flag, forced logout) follow the same rule as editing it: a CEO account
+/// needs `users.manage_ceo`, so the technical admin cannot act on the CEO.
+#[allow(clippy::result_large_err)]
+pub(crate) async fn ensure_can_act_on_account(
+    state: &AppState,
+    auth: &AuthUser,
+    user_id: Uuid,
+) -> Result<(), axum::response::Response> {
     let target_role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_optional(&state.db)

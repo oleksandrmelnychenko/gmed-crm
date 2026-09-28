@@ -1231,13 +1231,25 @@ async fn upsert_patient_consent(
         None
     };
 
+    // Closing the current grant and writing the new row happen together, so a
+    // failed insert never leaves the consent silently withdrawn.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "begin patient consent update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update patient consent state",
+            );
+        }
+    };
     let closed_active_rows = sqlx::query(
         "UPDATE consent_records SET revoked_at = $3 WHERE patient_id = $1 AND consent_type = $2 AND granted = true AND revoked_at IS NULL",
     )
     .bind(patient_id)
     .bind(&consent_type)
     .bind(happened_at)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
 
     let closed_active_rows = match closed_active_rows {
@@ -1279,7 +1291,7 @@ async fn upsert_patient_consent(
         "action": action.clone(),
         "closed_active_rows": closed_active_rows,
     }))
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await;
 
     let created = match created {
@@ -1292,6 +1304,13 @@ async fn upsert_patient_consent(
             );
         }
     };
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, patient_id = %patient_id, "commit patient consent");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to save patient consent",
+        );
+    }
 
     let audit_action = if action == "grant" {
         "consent_granted"
@@ -1660,7 +1679,7 @@ async fn review_privacy_request(
                reviewed_at = $6,
                updated_at = now(),
                context = COALESCE(context, '{}'::jsonb) || $7
-           WHERE id = $1"#,
+           WHERE id = $1 AND status IN ('requested', 'retention_hold')"#,
     )
     .bind(request_id)
     .bind(next_status)
@@ -1672,12 +1691,22 @@ async fn review_privacy_request(
     .execute(&state.db)
     .await;
 
-    if let Err(e) = updated {
-        tracing::error!(error = %e, request_id = %request_id, "review privacy request");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to review privacy request",
-        );
+    match updated {
+        Ok(result) if result.rows_affected() == 0 => {
+            // Someone else decided in the meantime.
+            return err(
+                StatusCode::CONFLICT,
+                "Privacy request can no longer be reviewed",
+            );
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "review privacy request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to review privacy request",
+            );
+        }
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -2553,14 +2582,16 @@ async fn complete_privacy_request_execution(
     };
 
     let executed_at = Utc::now();
-    sqlx::query(
+    // Only an approved request completes, and only once: a second, parallel
+    // execution finds it completed and records nothing.
+    let completed = sqlx::query(
         r#"UPDATE patient_privacy_requests
            SET status = 'completed',
                executed_by = $2,
                executed_at = $3,
                updated_at = now(),
                context = COALESCE(context, '{}'::jsonb) || $4
-           WHERE id = $1"#,
+           WHERE id = $1 AND status = 'approved'"#,
     )
     .bind(request_id)
     .bind(actor_id)
@@ -2578,6 +2609,12 @@ async fn complete_privacy_request_execution(
             "Failed to finalize privacy request",
         )
     })?;
+    if completed.rows_affected() == 0 {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Privacy request was already executed",
+        ));
+    }
 
     state.audit_sender.try_send(audit::domain_event(
         "privacy_request_executed",
@@ -2706,6 +2743,13 @@ async fn anonymize_patient_record(
                intake_profile = '{}'::jsonb,
                lead_snapshot = '{}'::jsonb,
                is_active = false,
+               -- is_active is dual-written with the lifecycle: an erased
+               -- file is no longer an active one.
+               lifecycle_status = CASE WHEN lifecycle_status = 'active' THEN 'inactive'
+                                       ELSE lifecycle_status END,
+               inactive_since = CASE WHEN lifecycle_status IN ('active', 'inactive')
+                                     THEN COALESCE(inactive_since, now())
+                                     ELSE inactive_since END,
                legal_status = COALESCE(legal_status, '{}'::jsonb) || $3,
                updated_at = now()
            WHERE id = $1"#,

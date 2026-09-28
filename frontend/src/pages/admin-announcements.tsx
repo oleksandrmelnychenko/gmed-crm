@@ -24,7 +24,7 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import {
-  appDateKeyOf,
+  formatAppDate,
   berlinLocalInputToIso,
   isoToBerlinLocalInput,
 } from "@/lib/app-time-zone";
@@ -79,9 +79,22 @@ const ADMIN_ANNOUNCEMENT_REALTIME_EVENTS = [
   "announcement.deleted",
 ] as const;
 
+/** Switched off, not started yet, past its end, or shown to users right now. */
+export function announcementWindowStatus(
+  announcement: { is_active: boolean; starts_at?: string | null; ends_at?: string | null },
+  now: number = Date.now(),
+): "inactive" | "scheduled" | "expired" | "active" {
+  if (!announcement.is_active) return "inactive";
+  const starts = announcement.starts_at ? Date.parse(announcement.starts_at) : Number.NaN;
+  if (!Number.isNaN(starts) && starts > now) return "scheduled";
+  const ends = announcement.ends_at ? Date.parse(announcement.ends_at) : Number.NaN;
+  if (!Number.isNaN(ends) && ends <= now) return "expired";
+  return "active";
+}
+
 function compactDt(dt: string | null | undefined): string {
   if (!dt) return "-";
-  return appDateKeyOf(dt) || dt;
+  return formatAppDate(dt) || dt;
 }
 
 function toDateTimeLocalInput(value: Date): string {
@@ -494,19 +507,38 @@ function useAdminAnnouncementsController(t: AdminAnnouncementsTranslations) {
     {
       id: "status",
       label: t.users_status,
-      accessor: (announcement) => announcement.is_active,
+      accessor: (announcement) => announcementWindowStatus(announcement),
       sortable: true,
       width: 130,
-      render: (announcement) =>
-        announcement.is_active ? (
-          <Badge className="bg-green-500/15 text-green-700 dark:text-green-400">
-            {t.ann_active}
+      render: (announcement) => {
+        // Users see an announcement only while it is switched on and inside
+        // its start/end window (announcements.rs list_active).
+        const status = announcementWindowStatus(announcement);
+        if (status === "active") {
+          return (
+            <Badge className="bg-green-500/15 text-green-700 dark:text-green-400">
+              {t.ann_active}
+            </Badge>
+          );
+        }
+        const label =
+          status === "scheduled"
+            ? t.uiText.announcements_status_scheduled ?? "scheduled"
+            : status === "expired"
+              ? t.uiText.announcements_status_expired ?? "expired"
+              : t.uiText.announcements_status_inactive ?? t.providers_inactive;
+        return (
+          <Badge
+            className={
+              status === "scheduled"
+                ? "bg-sky-500/15 text-sky-700 dark:text-sky-400"
+                : "bg-neutral-500/15 text-neutral-700 dark:text-neutral-400"
+            }
+          >
+            {label}
           </Badge>
-        ) : (
-          <Badge className="bg-neutral-500/15 text-neutral-700 dark:text-neutral-400">
-            {t.providers_inactive}
-          </Badge>
-        ),
+        );
+      },
     },
     {
       id: "starts_at",

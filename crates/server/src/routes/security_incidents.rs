@@ -179,7 +179,7 @@ async fn report_incident(
     .bind(format!("Security incident {reference}: {title}"))
     .bind(format!(
         "Assess the risk. A report to the supervisory authority is due by {}.",
-        (became_aware_at + Duration::hours(AUTHORITY_DEADLINE_HOURS)).format("%Y-%m-%d %H:%M UTC")
+        authority_deadline_label(became_aware_at)
     ))
     .bind(incident_id)
     .bind(auth.user_id)
@@ -370,6 +370,13 @@ async fn update_incident(
     Json(payload).into_response()
 }
 
+/// The 72-hour deadline as staff read it: German wall-clock time, DD.MM.YYYY.
+fn authority_deadline_label(became_aware_at: DateTime<Utc>) -> String {
+    crate::app_time::local(became_aware_at + Duration::hours(AUTHORITY_DEADLINE_HOURS))
+        .format("%d.%m.%Y %H:%M")
+        .to_string()
+}
+
 fn is_severity(value: &str) -> bool {
     matches!(value, "low" | "medium" | "high" | "critical")
 }
@@ -421,4 +428,22 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         Json(json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authority_deadline_is_shown_in_german_time_and_date_format() {
+        let summer = DateTime::parse_from_rfc3339("2026-09-28T08:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(authority_deadline_label(summer), "01.10.2026 10:00");
+
+        let winter = DateTime::parse_from_rfc3339("2026-12-01T08:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(authority_deadline_label(winter), "04.12.2026 09:00");
+    }
 }

@@ -15,7 +15,8 @@ use crate::{
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
     routes::documents::{
-        MAX_FILE_SIZE, NewStoredDocument, persist_document_file, remove_document_blob,
+        MAX_FILE_SIZE, NewStoredDocument, caller_can_view_document, load_assignment_set,
+        persist_document_file, remove_document_blob,
     },
     state::AppState,
 };
@@ -59,6 +60,9 @@ async fn list_provider_documents(
                   document.mime_type, document.file_size, document.document_date,
                   document.notes, document.created_at, document.updated_at,
                   uploader.name AS uploaded_by_name,
+                  (document.patient_id IS NOT NULL OR document.lead_id IS NOT NULL
+                   OR document.order_id IS NOT NULL OR document.appointment_id IS NOT NULL
+                   OR document.is_medical) AS record_bound,
                   NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
                   patient.patient_id AS patient_number
            FROM provider_document_links link
@@ -91,6 +95,31 @@ async fn list_provider_documents(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load provider documents");
         }
     };
+    // A document tied to a patient, lead, order or appointment, or a medical
+    // one, is listed only when the caller may open it under the ordinary
+    // document rules (assignment, medical access, record ACLs). The provider
+    // page must not show patient names or medical files to roles without that
+    // access; general commercial files keep their provider-page contract.
+    let assignments = match load_assignment_set(&state, &auth).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let mut visible_rows = Vec::with_capacity(rows.len());
+    for row in rows {
+        let record_bound = row.try_get::<bool, _>("record_bound").unwrap_or(true);
+        if record_bound {
+            let Ok(document_id) = row.try_get::<Uuid, _>("id") else {
+                continue;
+            };
+            match caller_can_view_document(&state, &auth, document_id, &assignments).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(response) => return response,
+            }
+        }
+        visible_rows.push(row);
+    }
+    let rows = visible_rows;
     Json(rows.iter().filter_map(|row| Some(serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").ok()?,
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),

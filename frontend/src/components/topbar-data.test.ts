@@ -213,6 +213,18 @@ describe("notificationHrefForRole", () => {
     expect(notificationHrefForRole(notification("concierge_expense"), "concierge")).toBe("/concierge");
     expect(notificationHrefForRole(notification("concierge_expense"), "patient_manager")).toBeNull();
   });
+
+  it("opens compliance notifications where the recipient decides them", () => {
+    const retention = notification("patient", "patient-1");
+    retention.kind = "privacy_request";
+    expect(notificationHrefForRole(retention, "it_admin")).toBe("/admin/compliance");
+    expect(notificationHrefForRole(retention, "ceo")).toBe("/admin/compliance");
+    expect(notificationHrefForRole(retention, "patient_manager")).toBe("/patients?patient=patient-1");
+
+    const incident = notification("security_incident", "incident-1");
+    incident.kind = "security_incident";
+    expect(notificationHrefForRole(incident, "it_admin")).toBe("/incidents");
+  });
 });
 
 describe("localizedNotificationCopy", () => {

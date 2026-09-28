@@ -611,7 +611,8 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     assert_eq!(body["execution"]["mode"], "erasure");
 
     let patient_row = sqlx::query(
-        r#"SELECT patient_id, first_name, last_name, email, is_active
+        r#"SELECT patient_id, first_name, last_name, email, is_active,
+                  lifecycle_status, inactive_since IS NOT NULL AS has_inactive_since
            FROM patients
            WHERE id = $1"#,
     )
@@ -619,6 +620,39 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    // is_active and the lifecycle stay in step: an erased file is inactive.
+    assert_eq!(
+        patient_row
+            .try_get::<String, _>("lifecycle_status")
+            .unwrap(),
+        "inactive"
+    );
+    assert!(
+        patient_row
+            .try_get::<bool, _>("has_inactive_since")
+            .unwrap()
+    );
+
+    // The anonymised shell is neither reactivated nor edited.
+    let ceo_auth = auth_header_for(admin_id, "ceo");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/activate"),
+        &ceo_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::LOCKED, "{body}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute"),
+        &auth_header_for(it_admin_id, "it_admin"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
 
     let anonymized_pid = patient_row.try_get::<String, _>("patient_id").unwrap();
     assert!(anonymized_pid.starts_with("ANON-"));
@@ -836,6 +870,57 @@ async fn restriction_request_updates_legal_status_and_queue_is_assignment_scoped
     )
     .await;
     assert_eq!(status, StatusCode::LOCKED);
+
+    // … the patient's documents are kept unchanged (no edit, no file deletion) …
+    let document_id = seed_document(&pool, patient_a, pm_a, &tag, "internal").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &auth_header_for(pm_a, "patient_manager"),
+        Some(json!({ "notes": "changed while restricted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::LOCKED, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/delete"),
+        &auth_header_for(pm_a, "patient_manager"),
+        Some(json!({ "reason": "cleanup while restricted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::LOCKED, "{body}");
+
+    // … but taking access away stays possible: it only narrows processing.
+    let interpreter = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    seed_patient_assignment(&pool, patient_a, interpreter, admin_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_a}/revoke"),
+        &auth_header_for(pm_a, "patient_manager"),
+        Some(json!({ "user_id": interpreter })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_a}/assignments"),
+        &auth_header_for(pm_a, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let revoked = body
+        .as_array()
+        .expect("assignments")
+        .iter()
+        .find(|row| row["user_id"] == interpreter.to_string())
+        .expect("revoked interpreter link");
+    assert!(revoked["revoked_at"].is_string());
+    assert_eq!(revoked["source"], "manual");
 
     // … lifting needs a reason …
     let (status, _) = json_request(

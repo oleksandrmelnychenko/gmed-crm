@@ -357,6 +357,24 @@ async fn update_interpreter_profile(
         Ok(value) => value,
         Err(resp) => return resp,
     };
+    // Status, contract and compliance (AVV, confidentiality, work permit,
+    // credentials) live in this profile; every change is audited.
+    let changed_sections: Vec<String> = incoming_profile
+        .as_object()
+        .map(|sections| sections.keys().cloned().collect())
+        .unwrap_or_default();
+    let audit_profile_update = |profile: &Value| {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_interpreter_profile",
+            Some(auth.user_id),
+            "interpreter",
+            Some(interpreter_id),
+            json!({
+                "changed_sections": changed_sections,
+                "status": profile.get("status").cloned(),
+            }),
+        ));
+    };
     let mut profile = match load_interpreter_profile_payload(&state, interpreter_id).await {
         Ok(Some(payload)) => merge_profile_payload(
             payload
@@ -396,6 +414,7 @@ async fn update_interpreter_profile(
                 "Failed to save interpreter profile",
             );
         }
+        audit_profile_update(&profile);
 
         return match load_interpreter_profile_payload(&state, interpreter_id).await {
             Ok(Some(payload)) => Json(payload).into_response(),
@@ -455,6 +474,7 @@ async fn update_interpreter_profile(
             "Failed to save interpreter profile",
         );
     }
+    audit_profile_update(&profile);
 
     match load_interpreter_profile_payload(&state, interpreter_id).await {
         Ok(Some(payload)) => Json(payload).into_response(),

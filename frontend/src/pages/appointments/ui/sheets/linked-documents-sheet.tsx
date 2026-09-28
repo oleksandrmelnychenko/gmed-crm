@@ -2,6 +2,10 @@ import { memo, useEffect, useRef, useState } from "react";
 import { LoaderCircle } from "lucide-react";
 
 import { DocumentsGrid } from "@/components/documents-grid";
+import {
+  formatDocumentStatusLabel,
+  formatVisibilityLabel,
+} from "@/pages/documents/model/document-model";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { Banner, EmptyCell } from "@/components/ui-shell";
 import {
@@ -151,8 +155,8 @@ function LinkedDocumentsSheet({
             statusBadge={linkedDocumentStatusBadge}
             visibilityBadge={linkedDocumentVisibilityBadge}
             sensitivityBadge={linkedDocumentSensitivityBadge}
-            formatStatusLabel={(value) => value}
-            formatVisibilityLabel={(value) => value}
+            formatStatusLabel={(value) => formatDocumentStatusLabel(value, t)}
+            formatVisibilityLabel={(value) => formatVisibilityLabel(value, t)}
             formatSensitivityLabel={() =>
               appointmentText("appointments_standard")
             }

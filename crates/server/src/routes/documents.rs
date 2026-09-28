@@ -10708,6 +10708,22 @@ struct DocumentTranslationQueueQuery {
     patient_id: Option<Uuid>,
 }
 
+/// The ordinary view rule for one document (role scope, patient assignment,
+/// medical classification and explicit record ACLs), for document lists that
+/// are assembled outside this module, e.g. a provider's documents.
+pub(crate) async fn caller_can_view_document(
+    state: &AppState,
+    auth: &AuthUser,
+    document_id: Uuid,
+    assignments: &HashSet<Uuid>,
+) -> Result<bool, axum::response::Response> {
+    let Some(row) = fetch_document_row(state, document_id, auth.user_id).await? else {
+        return Ok(false);
+    };
+    let baseline = can_view_document_row(auth, &row, assignments);
+    document_row_capability_allowed(state, auth, &row, AccessCapability::View, baseline).await
+}
+
 /// Signing exports the PDF and changes its version, so all three capabilities
 /// must pass, including explicit record denies and patient assignment rules.
 pub(crate) async fn signature_document_access(
@@ -20296,6 +20312,9 @@ async fn list_document_intake_queue(
              AND (
                 COALESCE(d.category, '') = ''
                 OR d.category = 'portal_upload'
+                -- a classified scan stays "for review" until it is linked and
+                -- released (is_document_intake_queue_candidate)
+                OR (d.ursprung = 'manual_intake' AND d.status = 'draft')
                 OR (d.ursprung = 'interpreter_upload' AND d.status = 'draft')
                 OR d.art IN (
                     'document',
@@ -21406,7 +21425,7 @@ async fn update_document_translation_request(
                    WHEN $15 = 'completed' THEN COALESCE(completed_at, now())
                    ELSE now()
                END
-           WHERE id = $1"#,
+           WHERE id = $1 AND status = $15"#,
     )
     .bind(request_id)
     .bind(next_status)
@@ -21425,12 +21444,37 @@ async fn update_document_translation_request(
     .bind(&current_status)
     .execute(&state.db)
     .await
-    {
-        tracing::error!(error = %e, request_id = %request_id, "update document translation request");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to update translation request",
-        );
+    .map_err(Some)
+    .and_then(|result| {
+        // The transition was checked against the status read above; a
+        // parallel change makes this one stale.
+        if result.rows_affected() == 0 {
+            Err(None)
+        } else {
+            Ok(result)
+        }
+    }) {
+        return match e {
+            None => err(
+                StatusCode::CONFLICT,
+                "Translation request was changed in the meantime",
+            ),
+            // Reopening while another open request for the same document and
+            // language exists hits the one-open-request index.
+            Some(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23505") => {
+                err(
+                    StatusCode::CONFLICT,
+                    "An open translation request for this document and language already exists",
+                )
+            }
+            Some(e) => {
+                tracing::error!(error = %e, request_id = %request_id, "update document translation request");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update translation request",
+                )
+            }
+        };
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -24237,6 +24281,16 @@ async fn upload_document_with_mode(
         Err(resp) => return resp,
     };
 
+    // Art. 18 / Art. 17 DSGVO: staff file nothing new into a restricted or
+    // anonymised patient file.
+    if let Some(document_patient_id) = patient_id
+        && let Err(resp) =
+            super::patients::ensure_patient_processing_not_restricted(&state, document_patient_id)
+                .await
+    {
+        return resp;
+    }
+
     if !manual_intake
         && patient_id.is_none()
         && lead_id.is_none()
@@ -24753,6 +24807,16 @@ async fn update_document(
         Err(resp) => return resp,
     };
 
+    // Art. 18 / Art. 17 DSGVO: the file of a restricted or anonymised patient
+    // is kept and readable but not changed, and no document is filed into it.
+    for locked_patient in [current_patient_id, patient_id].into_iter().flatten() {
+        if let Err(resp) =
+            super::patients::ensure_patient_processing_not_restricted(&state, locked_patient).await
+        {
+            return resp;
+        }
+    }
+
     let auto_name = body.auto_name.clone().unwrap_or_else(|| {
         current
             .try_get::<String, _>("auto_name")
@@ -25248,6 +25312,16 @@ async fn delete_document_file(
         if !allowed {
             return err(StatusCode::FORBIDDEN, "Insufficient permissions");
         }
+    }
+    // Art. 18 DSGVO: a restriction is often asked for instead of erasure, so
+    // the files of a restricted (or already anonymised) patient are kept.
+    if let Some(patient_id) = current
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+        && let Err(resp) =
+            super::patients::ensure_patient_processing_not_restricted(&state, patient_id).await
+    {
+        return resp;
     }
 
     // Signing creation and archival lock this same row. Lock before checking
@@ -26611,16 +26685,30 @@ async fn confirm_document_share(
 
     let shared_with_user_id: Option<Uuid> =
         share.try_get("shared_with_user_id").unwrap_or_default();
-    let can_confirm = matches!(auth.role, Role::Ceo | Role::PatientManager)
-        || shared_with_user_id == Some(auth.user_id);
+    let is_recipient = shared_with_user_id == Some(auth.user_id);
+    let can_confirm = is_recipient || matches!(auth.role, Role::Ceo | Role::PatientManager);
     if !can_confirm {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    // Confirming on someone else's behalf needs access to the document itself
+    // (a patient manager only for own patients).
+    if !is_recipient {
+        let assignments = match load_assignment_set(&state, &auth).await {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+        match caller_can_view_document(&state, &auth, id, &assignments).await {
+            Ok(true) => {}
+            Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+            Err(resp) => return resp,
+        }
+    }
 
+    // The first confirmation is the evidence; a repeated click keeps its time.
     match sqlx::query(
         r#"UPDATE document_shares
-           SET confirmed = true, confirmed_at = now()
-           WHERE id = $1 AND document_id = $2"#,
+           SET confirmed = true, confirmed_at = COALESCE(confirmed_at, now())
+           WHERE id = $1 AND document_id = $2 AND revoked_at IS NULL"#,
     )
     .bind(share_id)
     .bind(id)

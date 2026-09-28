@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Banner, Section } from "@/components/ui-shell";
-import { appDateKeyOf } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { fetchPatientRecipients, type PatientRecipient } from "@/pages/admin/data/admin-api";
+import { signatureStatusText } from "@/pages/documents/ui/signature-status";
 
 function day(value: string | null) {
-  return value ? appDateKeyOf(value) || value : "";
+  return value ? formatAppDate(value) || value : "";
 }
 
 /**
@@ -16,8 +17,22 @@ function day(value: string | null) {
  * the request.
  */
 export function PatientRecipientsSection({ patientId }: { patientId: string }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
+  // `detail` is a share channel, a staff role or a signature status key.
+  const detailLabel = useCallback(
+    (recipient: PatientRecipient) => {
+      const detail = recipient.detail ?? "";
+      if (!detail) return "";
+      if (recipient.kind === "signature_provider") return signatureStatusText(detail, lang);
+      if (recipient.kind === "staff") {
+        const role = (t as unknown as Record<string, unknown>)[`role_${detail}`];
+        return typeof role === "string" ? role : detail;
+      }
+      return t.uiText[`documents_share_channel_${detail}`] ?? detail;
+    },
+    [lang, t],
+  );
   const [recipients, setRecipients] = useState<PatientRecipient[]>([]);
   const [error, setError] = useState("");
 
@@ -51,7 +66,7 @@ export function PatientRecipientsSection({ patientId }: { patientId: string }) {
           >
             <Badge className="bg-slate-500/15 text-slate-700">{l(`recipients_kind_${recipient.kind}`)}</Badge>
             <span className="font-medium">{recipient.recipient}</span>
-            {recipient.detail ? <span className="text-xs text-muted-foreground">{recipient.detail}</span> : null}
+            {recipient.detail ? <span className="text-xs text-muted-foreground">{detailLabel(recipient)}</span> : null}
             {recipient.subject ? <span className="text-xs text-muted-foreground">· {recipient.subject}</span> : null}
             <span className="ml-auto text-xs text-muted-foreground">
               {day(recipient.since)}

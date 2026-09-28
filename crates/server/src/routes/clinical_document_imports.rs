@@ -2413,6 +2413,18 @@ async fn retry_import(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to retry import");
         }
     };
+    state.audit_sender.try_send(audit::domain_event(
+        "clinical_document_import_retried",
+        Some(auth.user_id),
+        "clinical_document_import",
+        Some(import_id),
+        json!({
+            "patient_id": patient_id,
+            "document_id": row.get::<Uuid, _>("document_id"),
+            "previous_status": "failed",
+            "status": "queued",
+        }),
+    ));
     Json(import_json(&row)).into_response()
 }
 
@@ -3078,6 +3090,19 @@ async fn prepare_import(
             "Failed to prepare import",
         );
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "clinical_document_import_prepared",
+        Some(auth.user_id),
+        "clinical_document_import",
+        Some(import_id),
+        json!({
+            "patient_id": patient_id,
+            "previous_status": "review_required",
+            "status": "applying",
+            "source_country": source_country,
+            "patient_identity_confirmed": body.patient_identity_confirmed,
+        }),
+    ));
     Json(json!({
         "ok": true,
         "id": import_id,

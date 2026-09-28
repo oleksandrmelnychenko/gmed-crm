@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { appDateKeyOf } from "@/lib/app-time-zone";
+import { formatAppDate } from "@/lib/app-time-zone";
 import type { Translations } from "@/lib/i18n";
 import { recordCompliancePrivacyRequestStep } from "@/pages/admin/data/admin-api";
 
@@ -25,7 +25,7 @@ const NOTIFY_CHANNELS = ["email", "portal", "postal_mail", "phone", "in_person"]
 const MIN_EXTENSION_REASON = 10;
 
 function day(value?: string) {
-  return value ? appDateKeyOf(value) || value : "";
+  return value ? formatAppDate(value) || value : "";
 }
 
 /**
@@ -43,6 +43,15 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
 
   const merged = { ...facts, ...local };
   const isOpen = status !== "completed" && status !== "rejected";
+  // Recorded steps show the same labels as the pickers, never the raw key.
+  const methodLabel = (method?: string) =>
+    method && (IDENTITY_METHODS as readonly string[]).includes(method)
+      ? t[`compliance_steps_method_${method as (typeof IDENTITY_METHODS)[number]}`]
+      : (method ?? "");
+  const channelLabel = (channel?: string) =>
+    channel && (NOTIFY_CHANNELS as readonly string[]).includes(channel)
+      ? t[`compliance_steps_channel_${channel as (typeof NOTIFY_CHANNELS)[number]}`]
+      : (channel ?? "");
 
   const record = async (
     step: "verify_identity" | "extend_deadline" | "notify_subject" | "notify_recipients",
@@ -73,7 +82,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
         <p className="text-xs text-muted-foreground">
           {t.compliance_steps_identity}:{" "}
           {merged.identity_verification
-            ? `${t.compliance_steps_done} · ${merged.identity_verification.method ?? ""} · ${day(merged.identity_verification.at)}`
+            ? `${t.compliance_steps_done} · ${methodLabel(merged.identity_verification.method)} · ${day(merged.identity_verification.at)}`
             : t.compliance_steps_open}
         </p>
         {!merged.identity_verification ? (
@@ -137,7 +146,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
         <p className="text-xs text-muted-foreground">
           {t.compliance_steps_notified}:{" "}
           {merged.subject_notification
-            ? `${t.compliance_steps_done} · ${merged.subject_notification.channel ?? ""} · ${day(merged.subject_notification.at)}`
+            ? `${t.compliance_steps_done} · ${channelLabel(merged.subject_notification.channel)} · ${day(merged.subject_notification.at)}`
             : t.compliance_steps_open}
         </p>
         {!merged.subject_notification ? (
@@ -171,7 +180,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
         <p className="text-xs text-muted-foreground">
           {t.compliance_steps_recipients}:{" "}
           {merged.recipients_notification
-            ? `${t.compliance_steps_done} · ${merged.recipients_notification.channel ?? ""} · ${day(merged.recipients_notification.at)}`
+            ? `${t.compliance_steps_done} · ${channelLabel(merged.recipients_notification.channel)} · ${day(merged.recipients_notification.at)}`
             : t.compliance_steps_recipients_hint}
         </p>
         {!merged.recipients_notification ? (

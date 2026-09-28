@@ -6544,7 +6544,7 @@ async fn list_assignments(
     }
 
     let rows = sqlx::query(
-        r#"SELECT pa.user_id, pa.assigned_at, pa.revoked_at,
+        r#"SELECT pa.user_id, pa.assigned_at, pa.revoked_at, pa.source,
                   u.name AS user_name, u.email AS user_email, u.role AS user_role, u.is_active,
                   pa.assigned_by, assigned_by_user.name AS assigned_by_name
            FROM patient_assignments pa
@@ -6572,6 +6572,7 @@ async fn list_assignments(
             "user_email": row.try_get::<String, _>("user_email").unwrap_or_default(),
             "user_role": row.try_get::<String, _>("user_role").unwrap_or_default(),
             "user_active": row.try_get::<bool, _>("is_active").unwrap_or(false),
+            "source": row.try_get::<String, _>("source").unwrap_or_else(|_| "manual".to_string()),
             "assigned_by": row.try_get::<Uuid, _>("assigned_by").unwrap_or_else(|_| Uuid::nil()),
             "assigned_by_name": row.try_get::<Option<String>, _>("assigned_by_name").unwrap_or_default(),
             "assigned_at": row
@@ -9055,11 +9056,14 @@ async fn get_patient_timeline(
                    consent.id AS entity_id,
                    concat('Consent: ', consent.consent_type) AS title,
                    'consent'::text AS category,
+                   -- A grant and a revoke are separate rows; a renewed grant
+                   -- also closes the previous grant, so revoked_at on a grant
+                   -- row does not mean it was withdrawn.
+                   CASE WHEN consent.granted THEN 'granted' ELSE 'revoked' END AS status,
                    CASE
-                       WHEN consent.revoked_at IS NOT NULL OR NOT consent.granted THEN 'revoked'
-                       ELSE 'granted'
-                   END AS status,
-                   COALESCE(consent.revoked_at, consent.granted_at, consent.created_at) AS happened_at,
+                       WHEN consent.granted THEN COALESCE(consent.granted_at, consent.created_at)
+                       ELSE COALESCE(consent.revoked_at, consent.created_at)
+                   END AS happened_at,
                    consent_user.name AS source_label
             FROM consent_records consent
             LEFT JOIN users consent_user ON consent_user.id = consent.user_id
@@ -9074,8 +9078,15 @@ async fn get_patient_timeline(
                        WHEN al.action = 'dsgvo_anonymize' THEN 'Patient anonymized'
                        WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction requested'
                        WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'third_party_revoke' THEN 'Third-party sharing revocation requested'
-                       WHEN al.action = 'privacy_request_created' THEN 'Privacy erasure requested'
+                       WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'erasure' THEN 'Privacy erasure requested'
+                       WHEN al.action = 'privacy_request_created' THEN 'Privacy request created'
+                       WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'reject' THEN 'Privacy request rejected'
+                       WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'hold' THEN 'Privacy request put on retention hold'
+                       WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'approve' THEN 'Privacy request approved'
                        WHEN al.action = 'privacy_request_reviewed' THEN 'Privacy request reviewed'
+                       WHEN al.action = 'processing_restriction_lifted' THEN 'Processing restriction lifted'
+                       WHEN al.action = 'activate_patient' THEN 'Patient file activated'
+                       WHEN al.action = 'deactivate_patient' THEN 'Patient file deactivated'
                        WHEN al.action = 'privacy_request_executed' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction applied'
                        WHEN al.action = 'privacy_request_executed' AND COALESCE(al.context->>'request_type', 'erasure') = 'third_party_revoke' THEN 'Third-party sharing revoked'
                        WHEN al.action = 'privacy_request_executed' THEN 'Privacy request executed'
@@ -9093,6 +9104,8 @@ async fn get_patient_timeline(
                        WHEN al.action = 'dsgvo_data_export' THEN 'dsgvo_export'
                        WHEN al.action = 'dsgvo_anonymize' THEN 'dsgvo_anonymize'
                        WHEN al.action LIKE 'privacy_request_%' THEN 'privacy_request'
+                       WHEN al.action = 'processing_restriction_lifted' THEN 'privacy_request'
+                       WHEN al.action IN ('activate_patient', 'deactivate_patient') THEN 'lifecycle'
                        WHEN al.action IN ('consent_granted', 'consent_revoked') THEN 'consent'
                        WHEN al.action LIKE 'feedback_%' THEN 'feedback'
                        WHEN al.action LIKE 'workflow_checklist_item_%' THEN 'workflow'
@@ -9105,6 +9118,7 @@ async fn get_patient_timeline(
                            'workflow_checklist_item_created',
                            'workflow_checklist_item_reopened'
                        ) THEN 'open'
+                       WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'reject' THEN 'rejected'
                        WHEN al.action IN ('privacy_request_reviewed') THEN 'in_progress'
                        ELSE 'completed'
                    END AS status,
@@ -9128,7 +9142,10 @@ async fn get_patient_timeline(
                         'workflow_checklist_item_reopened',
                         'privacy_request_created',
                         'privacy_request_reviewed',
-                        'privacy_request_executed'
+                        'privacy_request_executed',
+                        'processing_restriction_lifted',
+                        'activate_patient',
+                        'deactivate_patient'
                     )
                     OR (
                         al.action = 'update_patient'
@@ -10007,12 +10024,17 @@ pub(crate) async fn has_patient_access(
 /// be stored and read, but no longer changed. Every patient mutation goes
 /// through `has_patient_edit_access`, so the block lives here; only compliance
 /// (lifting the restriction, erasure) writes around it.
+///
+/// Art. 17 DSGVO: an anonymised record is what is left after erasure (kept
+/// for commercial records only). It is not reactivated or filled with new
+/// personal data, so it is locked the same way.
 pub(crate) async fn ensure_patient_processing_not_restricted(
     state: &AppState,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    let restricted = sqlx::query_scalar::<_, bool>(
-        r#"SELECT COALESCE((legal_status->>'processing_restricted')::boolean, false)
+    let flags = sqlx::query_as::<_, (bool, bool)>(
+        r#"SELECT COALESCE((legal_status->>'processing_restricted')::boolean, false),
+                  (legal_status->>'anonymized_at') IS NOT NULL
            FROM patients
            WHERE id = $1"#,
     )
@@ -10025,13 +10047,13 @@ pub(crate) async fn ensure_patient_processing_not_restricted(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to validate patient access",
         )
-    })?
-    .unwrap_or(false);
+    })?;
 
-    if restricted {
-        return Err(err(StatusCode::LOCKED, "patient processing is restricted"));
+    match flags {
+        Some((_, true)) => Err(err(StatusCode::LOCKED, "patient record is anonymized")),
+        Some((true, false)) => Err(err(StatusCode::LOCKED, "patient processing is restricted")),
+        _ => Ok(()),
     }
-    Ok(())
 }
 
 pub(crate) async fn has_patient_edit_access(
@@ -10807,7 +10829,11 @@ async fn revoke_assignment(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
-    match has_patient_edit_access(&state, &auth, patient_id).await {
+    // Taking access away only narrows processing, so it stays possible on a
+    // restricted (Art. 18) record; the restriction check is skipped here.
+    match has_patient_secondary_capability_access(&state, &auth, patient_id, AccessCapability::Edit)
+        .await
+    {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(response) => return response,
@@ -10840,12 +10866,20 @@ async fn revoke_assignment(
             {
                 return response;
             }
+            let source: Option<String> = sqlx::query_scalar(
+                "SELECT source FROM patient_assignments WHERE patient_id = $1 AND user_id = $2",
+            )
+            .bind(patient_id)
+            .bind(body.user_id)
+            .fetch_optional(&state.db)
+            .await
+            .unwrap_or_default();
             state.audit_sender.try_send(audit::domain_event(
                 "revoke_assignment",
                 Some(auth.user_id),
                 "patient",
                 Some(patient_id),
-                serde_json::json!({ "revoked_user_id": body.user_id }),
+                serde_json::json!({ "revoked_user_id": body.user_id, "source": source }),
             ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, revoked = %body.user_id, "Assignment revoked");
             crate::realtime::publish_patient_event_with_targets(

@@ -5529,6 +5529,8 @@ async fn convert_lead(
                     r#"UPDATE patients
                        SET lifecycle_status = 'active',
                            is_active = true,
+                           -- an active file has no retention clock running
+                           inactive_since = NULL,
                            intake_profile = jsonb_set(
                                COALESCE(intake_profile, '{}'::jsonb),
                                '{lead_intakes}',

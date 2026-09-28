@@ -250,6 +250,7 @@ type PatientDetailWorkspaceContentProps = {
   canEditPatientProfile: boolean;
   canExportPatientCompliance: boolean;
   canManage: boolean;
+  canRevokeAssignments: boolean;
   canManageContracts: boolean;
   canManageDocuments: boolean;
   canManageInvoices: boolean;
@@ -349,7 +350,8 @@ type PatientDetailWorkspaceContentProps = {
   onTimelineRangeFilterChange: (value: PatientTimelineRangeFilter) => void;
   onTimelineSearchChange: (value: string) => void;
   onTimelineSourceFilterChange: (value: string) => void;
-  onTogglePatientActivation: () => Promise<void>;
+  /** Absent when the viewer may not change the patient status (server: CEO or PM, not a prospect, not restricted or anonymised). */
+  onTogglePatientActivation?: () => Promise<void>;
   onWorkflowCompleteItem: (itemId: string) => void | Promise<void>;
   onWorkflowDueDateChange: (value: string) => void;
   onWorkflowItemTextChange: (value: string) => void;
@@ -417,6 +419,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canEditPatientProfile,
     canExportPatientCompliance,
     canManage,
+    canRevokeAssignments,
     canManageContracts,
     canManageDocuments,
     canManageInvoices,
@@ -864,6 +867,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               assignableStaff={assignableStaff}
               assignBusy={assignBusy}
               canManage={canManage}
+              canRevoke={canRevokeAssignments}
               formInputClassName={formInputClassName}
               l={l}
               onAssign={onAssign}

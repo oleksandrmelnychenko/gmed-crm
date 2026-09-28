@@ -44,6 +44,7 @@
 - `architecture/04_frontend-patients-workspace-refactor-plan_ua.md` - канонічний tracker наступного frontend-рефактора `record-workspace -> patients split`
 - `architecture/05_frontend-dashboard-refactor-plan_ua.md` - канонічний tracker dashboard route/staff dashboard refactor і route-level perf split
 - `architecture/06_frontend-feature-pages-refactor-plan_ua.md` - канонічний tracker наступної хвилі міграції root feature pages до патерну `appointments` / `patients`
+- `architecture/statuses/README_ua.md` - довідники моделей статусів (значення RU/DE, переходи, ролі, автоматичні переходи) для тестувальників
 
 ### Engineering
 

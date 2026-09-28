@@ -30,6 +30,14 @@ export function formatDocumentSourceLabel(source: string | null | undefined, tr:
     case "manual_intake":
       return `${tr.orders_billing_source_manual} · ${tr.documents_upload}`;
     default:
-      return value;
+      break;
   }
+
+  // Other system origins the server writes (documents.ursprung and
+  // translation request_source); generated documents carry the template id.
+  const origin = value.toLowerCase();
+  if (/^(template|provider_template|auto_preparation):/.test(origin)) {
+    return tr.documents_generate_from_template;
+  }
+  return tr.uiText[`documents_origin_${origin}`] ?? value;
 }

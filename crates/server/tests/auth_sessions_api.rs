@@ -517,6 +517,61 @@ async fn login_locks_after_max_failed_password_attempts() {
 }
 
 #[tokio::test]
+async fn expired_lock_restarts_the_failed_attempt_count() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+
+    let tag = Uuid::new_v4().simple();
+    let email = format!("auth-lock-expired-{tag}@example.com");
+    let user_id = seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "billing",
+        "real-password-only",
+        true,
+        false,
+        Some(Utc::now() - Duration::minutes(1)),
+    )
+    .await;
+    sqlx::query("UPDATE users SET failed_login_attempts = 5 WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // The lock ran out: one typo is an ordinary failed attempt, not a new lock.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email.clone(), "password": "bad-pass" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    let (attempts, locked): (i32, bool) = sqlx::query_as(
+        "SELECT failed_login_attempts, locked_until IS NOT NULL FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attempts, 1);
+    assert!(!locked);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "real-password-only" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn refresh_rotates_refresh_token_and_old_refresh_triggers_theft() {
     let Some((app, _pool)) = test_context().await else {
         return;

@@ -67,6 +67,32 @@ describe("timeline labels", () => {
     );
   });
 
+  it("localizes compliance and file-status titles and consent types", () => {
+    const compliance: Record<string, string> = {
+      timeline_title_privacy_request_rejected: "Запрос по защите данных отклонён",
+      timeline_title_patient_deactivated: "Карта пациента деактивирована",
+      timeline_title_consent: "Согласие",
+      consents_type_dsgvo_data_transfer: "Обработка и передача данных (DSGVO)",
+    };
+    const lc = (key: string) => compliance[key] ?? key;
+    expect(localizeTimelineTitle("Privacy request rejected", lc)).toBe(
+      "Запрос по защите данных отклонён",
+    );
+    expect(localizeTimelineTitle("Patient file deactivated", lc)).toBe(
+      "Карта пациента деактивирована",
+    );
+    expect(localizeTimelineTitle("Consent: dsgvo_data_transfer", lc)).toBe(
+      "Согласие: Обработка и передача данных (DSGVO)",
+    );
+    expect(localizeTimelineTitle("Consent: custom_type", lc)).toBe(
+      "Согласие: Custom Type",
+    );
+    // Without a translation the server title stays readable.
+    expect(localizeTimelineTitle("Privacy request approved", lc)).toBe(
+      "Privacy request approved",
+    );
+  });
+
   it("localizes workflow keys returned as task titles", () => {
     expect(localizeTimelineTitle("workflow_item_scope_review", l)).toBe(
       "Проверить объём заказа",

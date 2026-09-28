@@ -262,6 +262,18 @@ async fn update_announcement(
         id, body.title, body.message, variant, body.is_active.unwrap_or(true), ends
     ).execute(&state.db).await {
         Ok(r) if r.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "update_announcement",
+                Some(auth.user_id),
+                "announcement",
+                Some(id),
+                serde_json::json!({
+                    "title": body.title,
+                    "variant": variant,
+                    "is_active": body.is_active.unwrap_or(true),
+                    "ends_at": ends,
+                }),
+            ));
             crate::realtime::publish_announcement_event(
                 &state,
                 Some(auth.user_id),
@@ -288,9 +300,25 @@ async fn delete_announcement(
         return e;
     }
 
-    let _ = sqlx::query!("DELETE FROM announcements WHERE id = $1", id)
+    let deleted = sqlx::query!("DELETE FROM announcements WHERE id = $1", id)
         .execute(&state.db)
         .await;
+    match deleted {
+        Ok(result) if result.rows_affected() > 0 => {
+            state.audit_sender.try_send(audit::domain_event(
+                "delete_announcement",
+                Some(auth.user_id),
+                "announcement",
+                Some(id),
+                serde_json::json!({}),
+            ));
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "delete announcement");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
     crate::realtime::publish_announcement_event(
         &state,
         Some(auth.user_id),
