@@ -80,7 +80,7 @@ async fn list_tasks(
     match sqlx::query(
         r#"SELECT t.id, t.title, t.description, t.assigned_to, t.assigned_by, t.patient_id,
                   t.order_id, t.appointment_id, t.due_date, t.priority, t.status,
-                  t.completed_at, t.created_at, t.updated_at,
+                  t.completed_at, t.archived_at, t.created_at, t.updated_at,
                   assignee.name AS assigned_to_name, assignee.role AS assigned_to_role,
                   assigner.name AS assigned_by_name, assigner.role AS assigned_by_role
            FROM tasks t
@@ -156,7 +156,7 @@ async fn get_task(
     match sqlx::query(
         r#"SELECT t.id, t.title, t.description, t.assigned_to, t.assigned_by, t.patient_id,
                   t.order_id, t.appointment_id, t.due_date, t.priority, t.status,
-                  t.completed_at, t.created_at, t.updated_at,
+                  t.completed_at, t.archived_at, t.created_at, t.updated_at,
                   assignee.name AS assigned_to_name, assignee.role AS assigned_to_role,
                   assigner.name AS assigned_by_name, assigner.role AS assigned_by_role
            FROM tasks t
@@ -390,13 +390,18 @@ fn build_task_json(task_id: Uuid, row: &sqlx::postgres::PgRow) -> serde_json::Va
         "priority": row.try_get::<String, _>("priority").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        // An archived task keeps its status until it is restored.
+        "archived_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("archived_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
 }
 
 fn is_valid_task_status(value: &str) -> bool {
-    matches!(value, "open" | "in_progress" | "completed" | "cancelled")
+    matches!(
+        value,
+        "open" | "in_progress" | "on_hold" | "review" | "completed" | "cancelled"
+    )
 }
 
 fn is_valid_task_priority(value: &str) -> bool {

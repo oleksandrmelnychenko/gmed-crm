@@ -328,6 +328,18 @@ async fn completing_workflow_item_closes_task_and_writes_patient_timeline_event(
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(task_body["status"], "completed");
+    // The task history records the completion with its cause.
+    let history: Vec<Value> = sqlx::query_scalar(
+        r#"SELECT payload FROM concierge_operational_task_events
+           WHERE task_id = $1::uuid AND event_type = 'status_changed'"#,
+    )
+    .bind(task_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(history.len(), 1, "{history:?}");
+    assert_eq!(history[0]["status"], "completed");
+    assert_eq!(history[0]["reason"], "checklist_item_completed");
 
     let (status, timeline_body) = json_request(
         &app,
@@ -602,6 +614,22 @@ async fn checklist_task_cannot_be_deleted_and_not_required_closes_item_until_reo
     assert_eq!(checklist["open_count"].as_u64().unwrap(), initial_open - 1);
     assert_eq!(checklist["not_required_count"], 1);
     assert_eq!(checklist["completed_count"], 0);
+
+    // A "not required" item is not completed on top: that would complete its
+    // cancelled task.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("{checklist_path}/{item_id}/complete"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (_, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    let item = checklist_item(&checklist, &item_id);
+    assert_eq!(item["not_required"], true, "{item}");
+    assert_eq!(item["linked_task_status"], "cancelled", "{item}");
 
     // Reopening brings the item and its task back.
     let (status, body) = json_request(

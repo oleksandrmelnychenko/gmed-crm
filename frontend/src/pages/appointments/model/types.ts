@@ -364,6 +364,8 @@ export type TaskEntry = {
   priority: string;
   status: string;
   completed_at: string | null;
+  /** Set while the task is archived; its status is frozen until restored. */
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 };

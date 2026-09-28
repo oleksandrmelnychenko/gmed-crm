@@ -22,14 +22,18 @@ function isKnownStatus(value: string): value is ConciergeTaskStatus {
  * Statuses an actor may pick for an appointment task. Appointment tasks follow
  * the work-center rules (`POST /concierge-operational-items/{id}/status`): the
  * assignee moves the task to review, and the creator or a higher role closes
- * it. The current status is always first.
+ * it. The current status is always first. An archived task is restored in the
+ * work center before its status changes, so it offers only its own status.
  */
 export function appointmentTaskStatusOptions(
-  task: Pick<TaskEntry, "status" | "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<
+    TaskEntry,
+    "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "archived_at"
+  >,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ): string[] {
-  if (!isKnownStatus(task.status)) return [task.status];
+  if (!isKnownStatus(task.status) || task.archived_at) return [task.status];
   return availableConciergeTaskStatuses(
     {
       status: task.status,

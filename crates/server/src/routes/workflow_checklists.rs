@@ -1314,17 +1314,29 @@ async fn complete_workflow_item(
     scope_id: Uuid,
     item_id: Uuid,
 ) -> axum::response::Response {
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, item_id = %item_id, "Failed to begin checklist completion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update checklist item",
+            );
+        }
+    };
     let row = match sqlx::query(
-        r#"SELECT patient_id, order_id, owner_user_id, owner_role, linked_task_id, is_completed, item_text
+        r#"SELECT patient_id, order_id, owner_user_id, owner_role, linked_task_id, is_completed,
+                  not_required, item_text
            FROM workflow_checklist_items
            WHERE id = $1
              AND scope_type = $2
-             AND scope_id = $3"#,
+             AND scope_id = $3
+           FOR UPDATE"#,
     )
     .bind(item_id)
     .bind(scope.as_str())
     .bind(scope_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await
     {
         Ok(Some(row)) => row,
@@ -1355,17 +1367,27 @@ async fn complete_workflow_item(
     if !can_complete_workflow_item(auth, owner_user_id, owner_role.as_str()) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    // A "not required" item is closed already; completing it would also
+    // complete its cancelled task. It is reopened first.
+    if row.try_get::<bool, _>("not_required").unwrap_or(false) {
+        return err(
+            StatusCode::CONFLICT,
+            "The checklist item is marked as not required; reopen it first",
+        );
+    }
+    if is_completed {
+        return Json(json!({ "ok": true })).into_response();
+    }
 
-    if !is_completed
-        && let Err(e) = sqlx::query(
-            r#"UPDATE workflow_checklist_items
-               SET is_completed = true, completed_by = $2, completed_at = now(), updated_at = now()
-               WHERE id = $1"#,
-        )
-        .bind(item_id)
-        .bind(auth.user_id)
-        .execute(&state.db)
-        .await
+    if let Err(e) = sqlx::query(
+        r#"UPDATE workflow_checklist_items
+           SET is_completed = true, completed_by = $2, completed_at = now(), updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(item_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
     {
         tracing::error!(error = %e, item_id = %item_id, "Failed to complete workflow checklist item");
         return err(
@@ -1374,19 +1396,112 @@ async fn complete_workflow_item(
         );
     }
 
+    // The linked task follows in the same transaction, with a history entry
+    // and a notice to its author like any work-center status change. A
+    // cancelled or archived task stays as it is.
     let linked_task_id: Option<Uuid> = row.try_get("linked_task_id").unwrap_or_default();
+    let mut completed_task: Option<(Uuid, Option<Uuid>)> = None;
     if let Some(linked_task_id) = linked_task_id {
-        let _ = sqlx::query(
-            r#"UPDATE tasks
-               SET status = 'completed',
-                   completed_at = COALESCE(completed_at, now()),
-                   updated_at = now()
+        let task = match sqlx::query_as::<_, (String, Uuid, Uuid, String)>(
+            r#"SELECT status, assigned_to, assigned_by, title
+               FROM tasks
                WHERE id = $1
                  AND deleted_at IS NULL
-                 AND status != 'completed'"#,
+                 AND archived_at IS NULL
+               FOR UPDATE"#,
         )
         .bind(linked_task_id)
-        .execute(&state.db)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, item_id = %item_id, task_id = %linked_task_id, "Failed to lock checklist task");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update checklist item",
+                );
+            }
+        };
+        if let Some((previous_status, assigned_to, assigned_by, title)) = task
+            && !matches!(previous_status.as_str(), "completed" | "cancelled")
+        {
+            let failed = |e: sqlx::Error| {
+                tracing::error!(error = %e, item_id = %item_id, task_id = %linked_task_id, "Failed to complete checklist task");
+                err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update checklist item",
+                )
+            };
+            if let Err(e) = sqlx::query(
+                r#"UPDATE tasks
+                   SET status = 'completed',
+                       completed_at = COALESCE(completed_at, now()),
+                       updated_at = now()
+                   WHERE id = $1"#,
+            )
+            .bind(linked_task_id)
+            .execute(&mut *tx)
+            .await
+            {
+                return failed(e);
+            }
+            if let Err(e) = sqlx::query(
+                r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+                   VALUES ($1, 'status_changed', $2, $3)"#,
+            )
+            .bind(linked_task_id)
+            .bind(auth.user_id)
+            .bind(json!({
+                "assigned_to": assigned_to,
+                "status": "completed",
+                "previous_status": previous_status,
+                "reason": "checklist_item_completed",
+                "checklist_item_id": item_id,
+            }))
+            .execute(&mut *tx)
+            .await
+            {
+                return failed(e);
+            }
+            let notification_id = if assigned_by != auth.user_id {
+                match sqlx::query_scalar::<_, Uuid>(
+                    r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                       VALUES ($1, 'operational_task_updated', 'Task status changed', $2, 'concierge_task', $3)
+                       RETURNING id"#,
+                )
+                .bind(assigned_by)
+                .bind(&title)
+                .bind(linked_task_id)
+                .fetch_one(&mut *tx)
+                .await
+                {
+                    Ok(id) => Some(id),
+                    Err(e) => return failed(e),
+                }
+            } else {
+                None
+            };
+            completed_task = Some((assigned_by, notification_id));
+        }
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, item_id = %item_id, "Failed to commit checklist completion");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update checklist item",
+        );
+    }
+    if let (Some(task_id), Some((author_id, Some(notification_id)))) =
+        (linked_task_id, completed_task)
+    {
+        crate::realtime::publish_notification_event(
+            state,
+            author_id,
+            "notification.created",
+            Some(notification_id),
+            json!({ "entity_type": "concierge_task", "entity_id": task_id }),
+        )
         .await;
     }
 
@@ -1420,7 +1535,7 @@ async fn complete_workflow_item(
         }),
     )
     .await;
-    if let Some(linked_task_id) = linked_task_id {
+    if let (Some(linked_task_id), Some(_)) = (linked_task_id, completed_task) {
         crate::realtime::publish_task_event(
             state,
             Some(auth.user_id),

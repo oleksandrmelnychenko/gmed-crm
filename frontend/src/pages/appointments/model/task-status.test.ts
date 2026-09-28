@@ -34,6 +34,13 @@ describe("appointment task status options", () => {
     expect(appointmentTaskStatusOptions(task, "someone-else", "concierge")).toEqual(["open"]);
   });
 
+  it("freezes an archived task until it is restored", () => {
+    const archived = { ...task, status: "completed", archived_at: "2026-09-27T12:00:00+00:00" };
+    expect(appointmentTaskStatusOptions(archived, "manager-1", "patient_manager")).toEqual([
+      "completed",
+    ]);
+  });
+
   it("posts to the work-center endpoint with the optimistic-lock token", () => {
     expect(appointmentTaskStatusRequest(task, "in_progress")).toEqual({
       path: "/concierge-operational-items/task-1/status",

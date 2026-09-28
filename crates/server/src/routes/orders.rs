@@ -2256,7 +2256,9 @@ async fn load_order_followup_readiness(
                 COUNT(*) FILTER (WHERE r.title ILIKE 'Package-end:%') AS package_end_reminders
            FROM reminders r
            JOIN appointments a ON a.id = r.appointment_id
-           WHERE a.order_id = $1"#,
+           WHERE a.order_id = $1
+             -- A cancelled visit closed its reminders; they plan nothing.
+             AND a.status <> 'cancelled'"#,
     )
     .bind(order_id)
     .fetch_one(&state.db)
