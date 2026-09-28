@@ -88,6 +88,10 @@ pub fn router() -> Router<AppState> {
             post(rescan_import),
         )
         .route(
+            "/patients/{patient_id}/clinical-document-imports/{import_id}/abandon",
+            post(abandon_import),
+        )
+        .route(
             "/patients/{patient_id}/clinical-document-imports/{import_id}/complete",
             post(complete_import),
         )
@@ -2393,7 +2397,7 @@ async fn retry_import(
     let row = match sqlx::query(
         r#"UPDATE clinical_document_imports
            SET status = 'queued', error_message = NULL, worker_id = NULL,
-               locked_at = NULL, completed_at = NULL, updated_at = now()
+               locked_at = NULL, completed_at = NULL, attempts = 0, updated_at = now()
            WHERE id = $1 AND patient_id = $2 AND status = 'failed' AND deleted_at IS NULL
            RETURNING id, patient_id, document_id, status, document_type, source_language,
                      parser_version, draft, reviewed_draft, applied_counts, error_message, worker_id,
@@ -2426,6 +2430,98 @@ async fn retry_import(
         }),
     ));
     Json(import_json(&row)).into_response()
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AbandonImportRequest {
+    reason: String,
+}
+
+/// An `applying` import whose browser-driven apply stopped halfway is given
+/// up with a reason (owner decision 2026-09-28, Q10): terminal `abandoned`,
+/// audited in the same transaction. Clinical rows already written stay part
+/// of the record; the document can be imported again.
+async fn abandon_import(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<AbandonImportRequest>,
+) -> axum::response::Response {
+    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    let reason = body.reason.trim().to_string();
+    if !(10..=2000).contains(&reason.chars().count()) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A reason of 10 to 2000 characters is required",
+        );
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, import_id = %import_id, "begin abandon clinical import");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+        }
+    };
+    let updated = sqlx::query(
+        r#"UPDATE clinical_document_imports
+           SET status = 'abandoned', abandoned_at = now(), abandoned_by = $3,
+               abandon_reason = $4, worker_id = NULL, locked_at = NULL, updated_at = now()
+           WHERE id = $1 AND patient_id = $2 AND status = 'applying' AND deleted_at IS NULL
+           RETURNING document_id, prepared_at"#,
+    )
+    .bind(import_id)
+    .bind(patient_id)
+    .bind(auth.user_id)
+    .bind(&reason)
+    .fetch_optional(&mut *tx)
+    .await;
+    let updated = match updated {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Only an import in the apply stage can be abandoned",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, import_id = %import_id, "abandon clinical import");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+        }
+    };
+    if let Err(error) = audit::write_in_transaction(
+        &mut *tx,
+        &audit::domain_event(
+            "clinical_document_import_abandoned",
+            Some(auth.user_id),
+            "clinical_document_import",
+            Some(import_id),
+            json!({
+                "patient_id": patient_id,
+                "document_id": updated.get::<Uuid, _>("document_id"),
+                "previous_status": "applying",
+                "status": "abandoned",
+                "prepared_at": updated.get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepared_at"),
+                "reason": reason,
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, import_id = %import_id, "audit abandon clinical import");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, import_id = %import_id, "commit abandon clinical import");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to abandon import");
+    }
+    match fetch_import(&state, patient_id, import_id).await {
+        Ok(Some(row)) => Json(import_json(&row)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Import not found"),
+        Err(response) => response,
+    }
 }
 
 async fn rescan_import(
@@ -2530,7 +2626,7 @@ async fn rescan_import(
                    prepared_source_country = NULL, prepared_candidate_payloads = '{}'::jsonb,
                    prepared_patient_identity_confirmed = false,
                    prepared_identity_gate_version = 0, prepared_at = NULL,
-                   force_reextract = true, updated_at = now()
+                   force_reextract = true, attempts = 0, updated_at = now()
                WHERE id = $1 AND patient_id = $2
                  AND status IN ('review_required', 'failed')
                  AND deleted_at IS NULL
@@ -3507,6 +3603,7 @@ fn import_select() -> &'static str {
               i.applied_counts, i.error_message, i.worker_id, i.requested_by, i.reviewed_by,
               i.applied_by, i.locked_at, i.completed_at, i.applied_at,
               i.created_at, i.updated_at, i.force_reextract, i.replaces_import_id,
+              i.attempts, i.abandoned_at, i.abandon_reason,
               d.original_filename AS document_name, d.mime_type
        FROM clinical_document_imports i
        JOIN documents d ON d.id = i.document_id"#
@@ -3519,6 +3616,7 @@ fn import_list_select() -> &'static str {
               i.prepared_identity_gate_version, i.prepared_at,
               i.completed_at, i.applied_at, i.created_at, i.updated_at,
               i.force_reextract, i.replaces_import_id,
+              i.attempts, i.abandoned_at, i.abandon_reason,
               COALESCE(jsonb_array_length(i.draft->'candidates'), 0)::bigint AS candidate_count,
               d.original_filename AS document_name, d.mime_type
        FROM clinical_document_imports i
@@ -3549,6 +3647,9 @@ fn import_summary_json(row: &sqlx::postgres::PgRow) -> Value {
         "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at"),
         "force_reextract": row.try_get::<bool, _>("force_reextract").unwrap_or(false),
         "replaces_import_id": row.try_get::<Option<Uuid>, _>("replaces_import_id").unwrap_or_default(),
+        "attempts": row.try_get::<i32, _>("attempts").unwrap_or(0),
+        "abandoned_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("abandoned_at").unwrap_or_default(),
+        "abandon_reason": row.try_get::<Option<String>, _>("abandon_reason").unwrap_or_default(),
     })
 }
 
@@ -3581,6 +3682,9 @@ fn import_json(row: &sqlx::postgres::PgRow) -> Value {
         "updated_at": row.get::<chrono::DateTime<chrono::Utc>, _>("updated_at"),
         "force_reextract": row.try_get::<bool, _>("force_reextract").unwrap_or(false),
         "replaces_import_id": row.try_get::<Option<Uuid>, _>("replaces_import_id").unwrap_or_default(),
+        "attempts": row.try_get::<i32, _>("attempts").unwrap_or(0),
+        "abandoned_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("abandoned_at").unwrap_or_default(),
+        "abandon_reason": row.try_get::<Option<String>, _>("abandon_reason").unwrap_or_default(),
     })
 }
 

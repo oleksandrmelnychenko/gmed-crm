@@ -91,6 +91,98 @@ interface HealthData {
       last_lease_exhausted_at: string | null;
     };
   };
+  clinical_imports: ClinicalImportHealth;
+}
+
+/** Clinical document parser queue (admin_security.rs load_clinical_import_health). */
+export interface ClinicalImportHealth {
+  available: boolean;
+  operational_status: "healthy" | "attention" | "unavailable";
+  queued: number;
+  processing: number;
+  stale_processing: number;
+  retried_processing: number;
+  stale_applying: number;
+  failed_last_24h: number;
+  attempts_exhausted_last_24h: number;
+  oldest_queued_seconds: number | null;
+  max_attempts: number;
+}
+
+const DEFAULT_CLINICAL_IMPORT_HEALTH: ClinicalImportHealth = {
+  available: false,
+  operational_status: "unavailable",
+  queued: 0,
+  processing: 0,
+  stale_processing: 0,
+  retried_processing: 0,
+  stale_applying: 0,
+  failed_last_24h: 0,
+  attempts_exhausted_last_24h: 0,
+  oldest_queued_seconds: null,
+  max_attempts: 3,
+};
+
+/** Defaults every field, for servers that do not send the section yet. */
+export function normalizeClinicalImportHealth(
+  value: Partial<ClinicalImportHealth> | null | undefined,
+): ClinicalImportHealth {
+  return { ...DEFAULT_CLINICAL_IMPORT_HEALTH, ...(value ?? {}) };
+}
+
+export function clinicalImportHealthCopy(lang: "ru" | "de") {
+  return lang === "de"
+    ? {
+        section: "Klinischer Dokumentimport",
+        healthy: "Stabil",
+        attention: "Prüfung erforderlich",
+        unavailable: "Nicht verfügbar",
+        queue: "Warteschlange",
+        queued: "Wartend",
+        processing: "In Verarbeitung",
+        oldestQueued: "Ältester Auftrag wartet seit",
+        stale: "Verarbeitung hängt",
+        retried: "Wiederholte Versuche",
+        staleApplying: "Übernahme abgebrochen",
+        staleApplyingHint: "Im Import öffnen und abschließen oder mit Begründung aufgeben",
+        failed24h: "Fehlgeschlagen (24 h)",
+        exhausted24h: "Versuche erschöpft (24 h)",
+        exhaustedHint: (max: number) => `nach ${max} Versuchen`,
+      }
+    : {
+        section: "Импорт клинических документов",
+        healthy: "Стабильно",
+        attention: "Требует проверки",
+        unavailable: "Недоступно",
+        queue: "Очередь",
+        queued: "Ожидают",
+        processing: "Обрабатываются",
+        oldestQueued: "Самый старый запрос ждёт",
+        stale: "Обработка зависла",
+        retried: "Повторные попытки",
+        staleApplying: "Применение прервано",
+        staleApplyingHint: "Откройте импорт и завершите его или закройте с причиной",
+        failed24h: "Ошибки (24 ч)",
+        exhausted24h: "Попытки исчерпаны (24 ч)",
+        exhaustedHint: (max: number) => `после ${max} попыток`,
+      };
+}
+
+/** Attention items of the clinical import queue for the page banner. */
+export function clinicalImportAttention(
+  health: ClinicalImportHealth,
+  copy: ReturnType<typeof clinicalImportHealthCopy>,
+  age: (seconds: number | null) => string,
+): string[] {
+  const items: string[] = [];
+  if (health.operational_status === "unavailable") items.push(`${copy.section}: ${copy.unavailable}`);
+  if (health.stale_processing > 0) items.push(`${copy.section} · ${copy.stale}: ${health.stale_processing}`);
+  if (health.stale_applying > 0) items.push(`${copy.section} · ${copy.staleApplying}: ${health.stale_applying}`);
+  if (health.failed_last_24h > 0) items.push(`${copy.section} · ${copy.failed24h}: ${health.failed_last_24h}`);
+  if ((health.oldest_queued_seconds ?? 0) > 300) {
+    items.push(`${copy.section} · ${copy.oldestQueued}: ${age(health.oldest_queued_seconds)}`);
+  }
+  return items;
 }
 
 const DEFAULT_MEDICATION_AI_HEALTH: HealthData["medication_ai"] = {
@@ -151,6 +243,7 @@ function normalizeHealthData(payload: HealthData): HealthData {
   return {
     ...payload,
     medication_ai: normalizeMedicationAiHealth(payload.medication_ai),
+    clinical_imports: normalizeClinicalImportHealth(payload.clinical_imports),
   };
 }
 
@@ -627,6 +720,7 @@ function AdminHealthHeaderActions({
 export function AdminHealthPage() {
   const { t, lang } = useLang();
   const aiCopy = useMemo(() => aiHealthCopy(lang), [lang]);
+  const importCopy = useMemo(() => clinicalImportHealthCopy(lang), [lang]);
   const [adminHealthState, dispatchAdminHealthState] = useReducer(
     adminHealthReducer,
     undefined,
@@ -736,8 +830,11 @@ export function AdminHealthPage() {
         `${aiCopy.attentionDelayed}: ${aiQueueAge(data.medication_ai.queue.oldest_requested_seconds, lang)}`,
       );
     }
+    attention.push(
+      ...clinicalImportAttention(data.clinical_imports, importCopy, (seconds) => aiQueueAge(seconds, lang)),
+    );
     return attention;
-  }, [aiCopy, data, lang, t.health_mfa_pending, t.health_users_locked]);
+  }, [aiCopy, data, importCopy, lang, t.health_mfa_pending, t.health_users_locked]);
 
   const datasetVolume = data
     ? data.data.patients + data.data.leads + data.data.orders
@@ -1005,6 +1102,34 @@ export function AdminHealthPage() {
                 label={aiCopy.leaseExhausted24h}
                 value={data.medication_ai.queue.lease_exhausted_last_24h}
                 description={aiEventTimestamp(data.medication_ai.queue.last_lease_exhausted_at, lang, aiCopy)}
+              />
+            </div>
+          </Section>
+
+          <Section title={importCopy.section}>
+            <div className="mb-3 text-sm font-medium text-foreground">
+              {importCopy[data.clinical_imports.operational_status]}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <StatCard
+                label={importCopy.queue}
+                value={data.clinical_imports.queued + data.clinical_imports.processing}
+                description={`${importCopy.queued}: ${data.clinical_imports.queued} · ${importCopy.processing}: ${data.clinical_imports.processing} · ${importCopy.oldestQueued}: ${aiQueueAge(data.clinical_imports.oldest_queued_seconds, lang)}`}
+              />
+              <StatCard
+                label={importCopy.stale}
+                value={data.clinical_imports.stale_processing}
+                description={`${importCopy.retried}: ${data.clinical_imports.retried_processing}`}
+              />
+              <StatCard
+                label={importCopy.staleApplying}
+                value={data.clinical_imports.stale_applying}
+                description={importCopy.staleApplyingHint}
+              />
+              <StatCard
+                label={importCopy.failed24h}
+                value={data.clinical_imports.failed_last_24h}
+                description={`${importCopy.exhausted24h}: ${data.clinical_imports.attempts_exhausted_last_24h} (${importCopy.exhaustedHint(data.clinical_imports.max_attempts)})`}
               />
             </div>
           </Section>

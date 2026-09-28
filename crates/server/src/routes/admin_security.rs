@@ -398,9 +398,81 @@ async fn system_health(
             "provider": ai_provider,
             "operational_status": ai_operational_status,
             "queue": ai_queue.as_json(),
-        }
+        },
+        "clinical_imports": load_clinical_import_health(&state).await,
     }))
     .into_response()
+}
+
+/// A parser lease (`PARSER_LEASE_SECONDS`, 1200 s in the release stack):
+/// processing longer than this means the worker stopped without a result.
+const CLINICAL_IMPORT_STALE_PROCESSING_SECONDS: i64 = 1200;
+/// The apply stage is a few browser requests; an hour means it stopped.
+const CLINICAL_IMPORT_STALE_APPLYING_SECONDS: i64 = 3600;
+/// Queued this long without a claim: the parser service is not running.
+const CLINICAL_IMPORT_QUEUE_ATTENTION_SECONDS: i64 = 300;
+
+/// Queue health of the clinical document parser (owner decision 2026-09-28,
+/// Q10): stuck and failed counts and the age of the oldest queued job.
+async fn load_clinical_import_health(state: &AppState) -> serde_json::Value {
+    let row = sqlx::query(
+        r#"SELECT
+               count(*) FILTER (WHERE status = 'queued')::bigint AS queued,
+               count(*) FILTER (WHERE status = 'processing')::bigint AS processing,
+               count(*) FILTER (
+                   WHERE status = 'processing'
+                     AND locked_at < now() - ($1::bigint * interval '1 second')
+               )::bigint AS stale_processing,
+               count(*) FILTER (
+                   WHERE status = 'applying'
+                     AND COALESCE(prepared_at, updated_at) < now() - ($2::bigint * interval '1 second')
+               )::bigint AS stale_applying,
+               count(*) FILTER (
+                   WHERE status = 'failed' AND completed_at > now() - interval '24 hours'
+               )::bigint AS failed_last_24h,
+               count(*) FILTER (
+                   WHERE status = 'failed'
+                     AND error_message LIKE 'CLINICAL_DOCUMENT_PARSER_ATTEMPTS_EXHAUSTED%'
+                     AND completed_at > now() - interval '24 hours'
+               )::bigint AS attempts_exhausted_last_24h,
+               count(*) FILTER (WHERE status = 'processing' AND attempts > 1)::bigint AS retried_processing,
+               EXTRACT(EPOCH FROM now() - min(created_at) FILTER (WHERE status = 'queued'))::bigint
+                   AS oldest_queued_seconds
+           FROM clinical_document_imports
+           WHERE deleted_at IS NULL"#,
+    )
+    .bind(CLINICAL_IMPORT_STALE_PROCESSING_SECONDS)
+    .bind(CLINICAL_IMPORT_STALE_APPLYING_SECONDS)
+    .fetch_one(&state.db)
+    .await;
+    let row = match row {
+        Ok(row) => row,
+        Err(error) => {
+            tracing::warn!(%error, "clinical import health");
+            return serde_json::json!({ "available": false, "operational_status": "unavailable" });
+        }
+    };
+    let count = |name: &str| row.try_get::<i64, _>(name).unwrap_or(0);
+    let oldest_queued_seconds = row
+        .try_get::<Option<i64>, _>("oldest_queued_seconds")
+        .unwrap_or_default();
+    let attention = count("stale_processing") > 0
+        || count("stale_applying") > 0
+        || count("failed_last_24h") > 0
+        || oldest_queued_seconds.is_some_and(|seconds| seconds > CLINICAL_IMPORT_QUEUE_ATTENTION_SECONDS);
+    serde_json::json!({
+        "available": true,
+        "operational_status": if attention { "attention" } else { "healthy" },
+        "queued": count("queued"),
+        "processing": count("processing"),
+        "stale_processing": count("stale_processing"),
+        "retried_processing": count("retried_processing"),
+        "stale_applying": count("stale_applying"),
+        "failed_last_24h": count("failed_last_24h"),
+        "attempts_exhausted_last_24h": count("attempts_exhausted_last_24h"),
+        "oldest_queued_seconds": oldest_queued_seconds,
+        "max_attempts": 3,
+    })
 }
 
 #[derive(Default)]

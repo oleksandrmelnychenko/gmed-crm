@@ -3851,7 +3851,7 @@ async fn update_patient_lab_result(
                 );
             }
         };
-        if import_status.as_deref() != Some("applied") {
+        if !matches!(import_status.as_deref(), Some("applied" | "abandoned")) {
             return err(
                 StatusCode::CONFLICT,
                 "Imported lab result can only be corrected after the clinical import is applied",
@@ -4083,7 +4083,7 @@ async fn delete_patient_lab_result(
                 );
             }
         };
-        if import_status.as_deref() != Some("applied") {
+        if !matches!(import_status.as_deref(), Some("applied" | "abandoned")) {
             return err(
                 StatusCode::CONFLICT,
                 "Imported lab result can only be deleted after the clinical import is applied",

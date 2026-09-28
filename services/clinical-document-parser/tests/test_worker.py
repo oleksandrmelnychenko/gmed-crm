@@ -38,9 +38,30 @@ class WorkerHardeningTest(unittest.TestCase):
                 job = worker.claim_job(connection)
 
         self.assertEqual(job["storage_key"], "file.pdf")
-        self.assertEqual(cursor.executions[0][1], (37, "worker-test"))
-        self.assertIn("interval '1 second'", cursor.executions[0][0])
-        self.assertIn("import.force_reextract", cursor.executions[0][0])
+        # The first statement fails exhausted jobs, the second claims.
+        self.assertEqual(
+            cursor.executions[0][1], (worker.ATTEMPTS_EXHAUSTED_ERROR, 37, worker.MAX_ATTEMPTS)
+        )
+        self.assertEqual(cursor.executions[1][1], (37, worker.MAX_ATTEMPTS, "worker-test"))
+        self.assertIn("interval '1 second'", cursor.executions[1][0])
+        self.assertIn("import.force_reextract", cursor.executions[1][0])
+        self.assertIn("attempts = import.attempts + 1", cursor.executions[1][0])
+
+    def test_claim_job_fails_jobs_that_exhausted_their_attempts(self) -> None:
+        cursor = FakeCursor(rowcount=1, fetch_rows=[None])
+        connection = FakeConnection(cursor)
+        fake_psycopg_rows = SimpleNamespace(dict_row=object())
+
+        with patch.dict(sys.modules, {"psycopg.rows": fake_psycopg_rows}):
+            job = worker.claim_job(connection)
+
+        self.assertIsNone(job)
+        exhaust_sql, exhaust_parameters = cursor.executions[0]
+        self.assertIn("status = 'failed'", exhaust_sql)
+        self.assertIn("attempts >= %s", exhaust_sql)
+        self.assertEqual(worker.MAX_ATTEMPTS, 3)
+        self.assertTrue(exhaust_parameters[0].startswith(worker.ATTEMPTS_EXHAUSTED_CODE))
+        self.assertIn("attempts < %s", cursor.executions[1][0])
 
     def test_force_reextract_job_ignores_stale_document_text_cache(self) -> None:
         cursor = FakeCursor(

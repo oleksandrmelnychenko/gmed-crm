@@ -22,6 +22,7 @@ import {
   RefreshCw,
   RotateCcw,
   Stethoscope,
+  XCircle,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -41,6 +42,7 @@ import {
   uploadDocument,
 } from "@/pages/documents/data/document-api";
 import {
+  abandonClinicalDocumentImport,
   completeClinicalDocumentImport,
   clinicalDocumentImportAfterPrepare,
   clinicalDocumentPreviewPage,
@@ -349,6 +351,7 @@ const importStatusLabels: Record<
   applying: { ru: "Применение зафиксировано", de: "Übernahme vorbereitet" },
   applied: { ru: "Добавлено в карту", de: "Übernommen" },
   failed: { ru: "Ошибка", de: "Fehlgeschlagen" },
+  abandoned: { ru: "Применение прервано", de: "Übernahme abgebrochen" },
 };
 
 const importStatusTone: Record<ClinicalDocumentImportStatus, string> = {
@@ -358,12 +361,13 @@ const importStatusTone: Record<ClinicalDocumentImportStatus, string> = {
   applying: "border-violet-200 bg-violet-50 text-violet-800",
   applied: "border-emerald-200 bg-emerald-50 text-emerald-700",
   failed: "border-rose-200 bg-rose-50 text-rose-700",
+  abandoned: "border-slate-200 bg-slate-50 text-slate-600",
 };
 
 function ImportStatusGlyph({ status }: { status: ClinicalDocumentImportStatus }) {
   if (status === "processing") return <LoaderCircle className="size-4 animate-spin" />;
   if (status === "queued") return <Clock3 className="size-4" />;
-  if (status === "failed") return <AlertTriangle className="size-4" />;
+  if (status === "failed" || status === "abandoned") return <AlertTriangle className="size-4" />;
   return <CheckCircle2 className="size-4" />;
 }
 
@@ -1180,6 +1184,38 @@ export function ClinicalDocumentImportSheet({
       );
     } finally {
       setDeleteBusy(false);
+      setHistoryBusyId(null);
+    }
+  }
+
+  // An import stuck in the apply stage is given up with a reason (audited);
+  // clinical rows already written stay in the record.
+  async function abandonHistoryImport(item: ClinicalDocumentImportSummary) {
+    if (historyBusyId) return;
+    const reason = window.prompt(
+      tx(
+        "Почему применение прерывается? Уже добавленные данные останутся в карте. (10–2000 символов)",
+        "Warum wird die Übernahme abgebrochen? Bereits übernommene Daten bleiben in der Akte. (10–2000 Zeichen)",
+      ),
+    );
+    if (reason === null) return;
+    const trimmed = reason.trim();
+    if (trimmed.length < 10 || trimmed.length > 2000) {
+      toast.error(tx("Причина должна содержать от 10 до 2000 символов.", "Die Begründung muss 10 bis 2000 Zeichen lang sein."));
+      return;
+    }
+    setHistoryBusyId(item.id);
+    try {
+      const updated = await abandonClinicalDocumentImport(patientId, item.id, trimmed);
+      setImports((current) => current.map((entry) => (entry.id === item.id ? { ...entry, status: updated.status, abandon_reason: updated.abandon_reason ?? trimmed } : entry)));
+      toast.success(tx("Применение прервано", "Übernahme abgebrochen"));
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : tx("Не удалось прервать применение", "Übernahme konnte nicht abgebrochen werden"),
+      );
+    } finally {
       setHistoryBusyId(null);
     }
   }
@@ -2333,6 +2369,20 @@ export function ClinicalDocumentImportSheet({
                                 }
                               >
                                 <RotateCcw className={cn("size-4", historyBusyId === item.id && "animate-spin")} />
+                              </Button>
+                            ) : null}
+                            {item.status === "applying" ? (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                disabled={deleteBusy || historyBusyId === item.id}
+                                onClick={() => void abandonHistoryImport(item)}
+                                aria-label={tx("Прервать применение", "Übernahme abbrechen")}
+                                title={tx("Прервать зависшее применение с указанием причины", "Hängende Übernahme mit Begründung abbrechen")}
+                              >
+                                <XCircle className="size-4" />
                               </Button>
                             ) : null}
                             <Button

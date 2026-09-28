@@ -133,7 +133,9 @@ export type ClinicalDocumentImportStatus =
   | "review_required"
   | "applying"
   | "applied"
-  | "failed";
+  | "failed"
+  // An `applying` import given up with a reason (owner decision 2026-09-28).
+  | "abandoned";
 
 export type ClinicalDocumentImportSummary = {
   id: string;
@@ -158,6 +160,9 @@ export type ClinicalDocumentImportSummary = {
   applied_at: string | null;
   created_at: string;
   updated_at: string;
+  attempts?: number;
+  abandoned_at?: string | null;
+  abandon_reason?: string | null;
 };
 
 export type ClinicalDocumentImport = {
@@ -184,6 +189,9 @@ export type ClinicalDocumentImport = {
   applied_at: string | null;
   created_at: string;
   updated_at: string;
+  attempts?: number;
+  abandoned_at?: string | null;
+  abandon_reason?: string | null;
 };
 
 export type ImportedMedicationPayload = {
@@ -385,6 +393,14 @@ export function deleteClinicalDocumentImport(patientId: string, importId: string
   return apiFetch<void>(
     `/patients/${patientId}/clinical-document-imports/${importId}`,
     { method: "DELETE" },
+  );
+}
+
+/** Gives up an import stuck in the apply stage; the reason is audited. */
+export function abandonClinicalDocumentImport(patientId: string, importId: string, reason: string) {
+  return apiFetch<ClinicalDocumentImport>(
+    `/patients/${patientId}/clinical-document-imports/${importId}/abandon`,
+    { method: "POST", body: JSON.stringify({ reason }) },
   );
 }
 
