@@ -66,6 +66,13 @@ describe("task notifications", () => {
     expect(copy.body).not.toContain("Order checklist");
   });
 
+  it("words the author's review decision for the assignee", () => {
+    expect(localizedNotificationCopy(taskNotice("operational_task_review_decision", "Task returned for rework", "Flowers"), "ru").title)
+      .toBe("Задача возвращена на доработку");
+    expect(localizedNotificationCopy(taskNotice("operational_task_review_decision", "Task accepted", "Flowers"), "de").title)
+      .toBe("Aufgabe angenommen");
+  });
+
   it("keeps unknown titles and other notification kinds unchanged", () => {
     expect(localizedNotificationCopy(taskNotice("operational_task_updated", "Something new", "Flowers"), "ru").title)
       .toBe("Something new");
@@ -129,6 +136,15 @@ describe("interpreter work notifications", () => {
     expect(localizedNotificationCopy(notice("interpreter_report_auto_rejected", {
       appointment_title: "Kardiologie", reason: "interpreter_changed",
     }), "ru").body).toBe("Kardiologie — Причина: назначен другой переводчик");
+  });
+
+  it("shows a delivered appointment reminder with its visit", () => {
+    const reminder = localizedNotificationCopy(notice("appointment_reminder", {
+      reminder_title: "Unterlagen mitnehmen", appointment_title: "Kardiologie", appointment_date: "2026-10-02", time_start: "09:30",
+    }), "ru");
+    expect(reminder.title).toBe("Напоминание по приёму");
+    expect(reminder.body).toBe("Unterlagen mitnehmen — Kardiologie · 02.10.2026 09:30");
+    expect(localizedNotificationCopy(notice("appointment_reminder", {}), "de").title).toBe("Terminerinnerung");
   });
 
   it("survives a body that is not JSON", () => {

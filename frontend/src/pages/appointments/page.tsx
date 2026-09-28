@@ -80,6 +80,7 @@ import { useProviderDoctorOptions } from "@/pages/appointments/data/use-provider
 import {
   convertAppointmentRequest,
   deleteAppointment,
+  cancelAppointmentRequest,
   reviewAppointmentRequest,
   type ConvertAppointmentRequestInput,
 } from "@/pages/appointments/data/appointment-mutations";
@@ -214,6 +215,7 @@ const APPOINTMENT_REALTIME_EVENTS = [
   "appointment_request.created",
   "appointment_request.reviewed",
   "appointment_request.converted",
+  "appointment_request.cancelled",
   "concierge_service.created",
   "concierge_service.updated",
   "concierge_service.cancelled",
@@ -1331,6 +1333,32 @@ function useStaffAppointmentsPageContent() {
     ],
   );
 
+  const handleCancelAppointmentRequest = useCallback(
+    async (requestId: string, reason: string) => {
+      const busyKey = `${requestId}:cancelled`;
+      setRequestActionBusy(busyKey);
+      setAppointmentRequestsError("");
+      try {
+        await cancelAppointmentRequest(requestId, reason);
+        clearApiCache("/appointments/requests");
+        reportAppointmentsNotice(appointmentText("appointments_request_cancelled_notice"));
+        refreshAppointments();
+      } catch (error) {
+        setAppointmentRequestsError(
+          appointmentActionErrorMessage(error, tr.common_failed_save),
+        );
+      } finally {
+        setRequestActionBusy((current) => (current === busyKey ? "" : current));
+      }
+    },
+    [
+      refreshAppointments,
+      reportAppointmentsNotice,
+      setAppointmentRequestsError,
+      tr.common_failed_save,
+    ],
+  );
+
   const handleReviewAppointmentRequest = useCallback(
     async (requestId: string, status: "approved" | "rejected") => {
       const busyKey = `${requestId}:${status}`;
@@ -1797,6 +1825,7 @@ function useStaffAppointmentsPageContent() {
             onStatusChange: performStatusChange,
             onReviewRequest: handleReviewAppointmentRequest,
             onConvertRequest: handleConvertAppointmentRequest,
+            onCancelRequest: handleCancelAppointmentRequest,
           }}
           toolbar={{
             searchAriaLabel: t.common_search,

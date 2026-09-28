@@ -306,6 +306,8 @@ export type ChecklistItem = {
   item_text: string;
   is_completed: boolean;
   completed_at: string | null;
+  /** Closed without completion (see model/closure.ts). */
+  closed_reason?: string | null;
 };
 
 export type ReminderEntry = {
@@ -317,6 +319,10 @@ export type ReminderEntry = {
   description: string | null;
   is_completed: boolean;
   completed_at: string | null;
+  /** Closed without completion (see model/closure.ts). */
+  closed_reason?: string | null;
+  /** When the reminder was delivered as a notification. */
+  sent_at?: string | null;
 };
 
 export type PatientAssignment = {

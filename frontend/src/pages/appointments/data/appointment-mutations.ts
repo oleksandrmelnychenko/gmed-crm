@@ -114,6 +114,14 @@ export function deleteAppointment(appointmentId: string) {
   );
 }
 
+/** Staff cancel an open appointment request; a reason is required. */
+export function cancelAppointmentRequest(requestId: string, reason: string) {
+  return apiFetch<AppointmentRequestItem>(
+    `/appointments/requests/${requestId}/cancel`,
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
 export function reviewAppointmentRequest(
   requestId: string,
   status: Extract<AppointmentRequestStatus, "approved" | "rejected">,

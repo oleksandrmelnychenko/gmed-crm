@@ -468,6 +468,9 @@ export type PortalAppointmentRequestItem = {
   reviewed_by_name: string | null;
   reviewed_at: string | null;
   requested_at: string;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  cancelled_by_patient?: boolean;
   converted_appointment_id: string | null;
   converted_appointment_title: string | null;
   converted_appointment_date: string | null;

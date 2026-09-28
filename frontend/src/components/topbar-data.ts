@@ -55,6 +55,18 @@ export function localizedNotificationCopy(
           body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
         };
   }
+  const reminderCopy = appointmentReminderNotificationCopy(item, lang);
+  if (reminderCopy) return reminderCopy;
+  if (item.kind === "appointment_request_withdrawn") {
+    const data = parseNotificationBody<{ patient_pid?: string | null; patient_name?: string | null; reason?: string | null }>(item.body);
+    const patient = [data?.patient_pid, data?.patient_name].filter(Boolean).join(" · ");
+    return {
+      title: lang === "de" ? "Terminanfrage vom Patienten zurückgezogen" : "Пациент отозвал запрос на приём",
+      body: [patient, data?.reason ? `${lang === "de" ? "Grund" : "Причина"}: ${data.reason}` : null]
+        .filter(Boolean)
+        .join(" — ") || null,
+    };
+  }
   const overdueSupplierCopy = externalInvoiceOverdueNotificationCopy(item, lang);
   if (overdueSupplierCopy) return overdueSupplierCopy;
   const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
@@ -95,6 +107,31 @@ function externalInvoiceOverdueNotificationCopy(
         ? `Rechnung ${number}, fällig am ${due}: ${money}`
         : `Счёт ${number}, срок оплаты ${due}: ${money}`,
   };
+}
+
+// A due appointment reminder, delivered by the server scheduler at its German
+// time; the reminder title (and possibly a generated follow-up template) is
+// shown with the visit it belongs to.
+function appointmentReminderNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "appointment_reminder") return null;
+  const title = lang === "de" ? "Terminerinnerung" : "Напоминание по приёму";
+  const data = parseNotificationBody<{
+    reminder_title?: string | null;
+    description?: string | null;
+    appointment_title?: string | null;
+    appointment_date?: string | null;
+    time_start?: string | null;
+  }>(item.body);
+  if (!data) return { title, body: item.body };
+  const when = [data.appointment_date ? formatAppDate(data.appointment_date) : null, data.time_start]
+    .filter(Boolean)
+    .join(" ");
+  const visit = [data.appointment_title, when].filter(Boolean).join(" · ");
+  const reminder = data.reminder_title ? localizeTaskTitle(data.reminder_title, lang) : null;
+  return { title, body: [reminder, visit].filter(Boolean).join(" — ") || null };
 }
 
 function parseNotificationBody<T extends object>(body: string | null): T | null {
@@ -354,6 +391,10 @@ const TASK_NOTIFICATION_TITLES: Record<string, { de: string; ru: string }> = {
   "Task deleted": { de: "Aufgabe gelöscht", ru: "Задача удалена" },
   "New task comment": { de: "Neuer Kommentar zur Aufgabe", ru: "Новый комментарий к задаче" },
   "Task reminder": { de: "Aufgabenerinnerung", ru: "Напоминание о задаче" },
+  // Review decisions of the author, sent to the assignee.
+  "Task accepted": { de: "Aufgabe angenommen", ru: "Задача принята" },
+  "Task returned for rework": { de: "Aufgabe zur Nacharbeit zurückgegeben", ru: "Задача возвращена на доработку" },
+  "Task cancelled after review": { de: "Aufgabe nach Prüfung storniert", ru: "Задача отменена после проверки" },
 };
 
 function taskNotificationTitle(item: Notification, lang: "ru" | "de"): string | null {
