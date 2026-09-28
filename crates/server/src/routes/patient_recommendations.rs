@@ -284,15 +284,19 @@ async fn create_patient_recommendation(
         }),
     ));
 
-    notify_patient_users(
-        &state,
-        patient_id,
-        recommendation_id,
-        "recommendation",
-        "New recommendation",
-        &title,
-    )
-    .await;
+    // A recommendation hidden from the portal is internal; the patient is not
+    // told about it.
+    if portal_visible {
+        notify_patient_users(
+            &state,
+            patient_id,
+            recommendation_id,
+            "recommendation",
+            "New recommendation",
+            &title,
+        )
+        .await;
+    }
 
     crate::realtime::publish_patient_event(
         &state,
@@ -793,6 +797,13 @@ async fn create_my_recommendation_appointment_request(
     .await
     {
         Ok(id) => id,
+        // At most one open request per patient, requester, type and care path.
+        Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
+            return err(
+                StatusCode::CONFLICT,
+                "An open appointment request of this kind already exists",
+            );
+        }
         Err(e) => {
             tracing::error!(error = %e, recommendation_id = %recommendation_id, "create appointment request from recommendation");
             return err(
@@ -1425,21 +1436,29 @@ async fn notify_staff_user(
 /// One pass of the reminder scheduler: deliver every due, not-yet-sent
 /// reminder exactly once. Returns the number of reminders delivered.
 ///
-/// A reminder is due when the recommendation is still `aktiv`, has not been
-/// sent yet (`reminder_sent_at IS NULL`), and either its explicit
-/// `reminder_at` date has arrived or its `valid_to` is within
-/// `reminder_lead_days` of today. Each row is processed independently and a
-/// per-row failure is logged without aborting the rest of the batch.
+/// A reminder is due when the recommendation is still open (`status =
+/// 'active'`, lifecycle `aktiv`), has not been sent yet (`reminder_sent_at IS
+/// NULL`), and either its explicit `reminder_at` date has arrived or its
+/// `valid_to` is within `reminder_lead_days` of today (Europe/Berlin). The
+/// rows are claimed (stamped) in one statement, so parallel ticks never send
+/// a reminder twice. The patient is reminded only of recommendations visible
+/// in the portal. Each row is processed independently and a per-row failure
+/// is logged without aborting the rest of the batch.
 async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
     let due = match sqlx::query(
-        r#"SELECT id, patient_id, title, created_by, source_doctor_id
-           FROM patient_recommendations
-           WHERE lifecycle_status = 'aktiv' AND reminder_sent_at IS NULL
+        r#"UPDATE patient_recommendations
+           SET reminder_sent_at = now()
+           WHERE status = 'active'
+             AND lifecycle_status = 'aktiv'
+             AND reminder_sent_at IS NULL
              AND (
-               (reminder_at IS NOT NULL AND reminder_at <= to_char((now() AT TIME ZONE 'utc'), 'YYYY-MM-DD'))
+               (reminder_at IS NOT NULL
+                AND reminder_at <= to_char(now() AT TIME ZONE 'Europe/Berlin', 'YYYY-MM-DD'))
                OR (valid_to IS NOT NULL AND reminder_lead_days IS NOT NULL
-                   AND (valid_to::date - reminder_lead_days) <= (now() AT TIME ZONE 'utc')::date)
-             )"#,
+                   AND (valid_to::date - reminder_lead_days)
+                       <= (now() AT TIME ZONE 'Europe/Berlin')::date)
+             )
+           RETURNING id, patient_id, title, created_by, portal_visible"#,
     )
     .fetch_all(&state.db)
     .await
@@ -1473,20 +1492,24 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
         };
         let title: String = row.try_get("title").unwrap_or_default();
         let created_by: Option<Uuid> = row.try_get("created_by").ok().flatten();
+        let portal_visible: bool = row.try_get("portal_visible").unwrap_or(false);
 
         let reminder_title = "Erinnerung an Empfehlung";
         let reminder_body = format!("Erinnerung: {title}");
 
-        // (a) Patient side — the patient's linked portal users.
-        notify_patient_users(
-            state,
-            patient_id,
-            id,
-            "recommendation_reminder",
-            reminder_title,
-            &reminder_body,
-        )
-        .await;
+        // (a) Patient side — the patient's linked portal users, only for a
+        //     recommendation the portal shows.
+        if portal_visible {
+            notify_patient_users(
+                state,
+                patient_id,
+                id,
+                "recommendation_reminder",
+                reminder_title,
+                &reminder_body,
+            )
+            .await;
+        }
 
         // (b) Staff side — the author (created_by) directly, plus the
         //     patient's assigned managers/CEO. source_doctor_id references
@@ -1512,24 +1535,7 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
             &reminder_body,
         )
         .await;
-
-        // Stamp so this reminder never re-fires on the next tick.
-        match sqlx::query(
-            "UPDATE patient_recommendations SET reminder_sent_at = now() WHERE id = $1",
-        )
-        .bind(id)
-        .execute(&state.db)
-        .await
-        {
-            Ok(_) => delivered += 1,
-            Err(error) => {
-                tracing::error!(
-                    error = %error,
-                    recommendation_id = %id,
-                    "Failed to mark recommendation reminder as sent"
-                );
-            }
-        }
+        delivered += 1;
     }
 
     delivered
