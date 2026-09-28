@@ -461,6 +461,64 @@ async fn manual_assignment_takes_over_a_booking_link() {
 }
 
 #[tokio::test]
+async fn a_managers_revocation_is_not_undone_by_bookings() {
+    let tag = format!("booking-link-revoked-{}", Uuid::new_v4().simple());
+    let Some(fx) = fixture(&tag).await else {
+        return;
+    };
+    let interpreter = seed_user(&fx.pool, &tag, "interpreter").await;
+    let visit = book(
+        &fx,
+        interpreter,
+        today() + Duration::days(4),
+        "Consultation",
+    )
+    .await;
+    assert_eq!(link(&fx, interpreter).await, booking_link(true));
+
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/patients/{}/revoke", fx.patient_id),
+        &fx.pm,
+        Some(json!({ "user_id": interpreter })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(link(&fx, interpreter).await, booking_link(false));
+
+    // Neither the interpreter's response nor a new booking grants it back.
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/appointments/{visit}/interpreter-response"),
+        &bearer(interpreter, "interpreter"),
+        Some(json!({ "response": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(link(&fx, interpreter).await, booking_link(false));
+    book(&fx, interpreter, today() + Duration::days(9), "Follow-up").await;
+    assert_eq!(link(&fx, interpreter).await, booking_link(false));
+    assert_eq!(patient_card(&fx, interpreter).await, StatusCode::FORBIDDEN);
+
+    // A manager's new assignment lifts it.
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/patients/{}/assign", fx.patient_id),
+        &fx.pm,
+        Some(json!({ "user_id": interpreter })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        link(&fx, interpreter).await,
+        Some(("manual".to_string(), true))
+    );
+}
+
+#[tokio::test]
 async fn booked_visit_stays_workable_without_the_patient_link() {
     let tag = format!("booking-link-visit-{}", Uuid::new_v4().simple());
     let Some(fx) = fixture(&tag).await else {

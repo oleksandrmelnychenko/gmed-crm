@@ -156,7 +156,7 @@ async fn list_my_feedback(
                   f.concierge_score, f.treatment_score, f.doctor_score, f.organization_score,
                   f.service_score, f.infrastructure_score, f.price_value_score,
                   f.treatment_success, f.complication_reported, f.nps_score,
-                  f.comments, f.improvement_notes, f.review_note, f.submitted_at, f.reviewed_at,
+                  f.comments, f.improvement_notes, f.submitted_at, f.reviewed_at,
                   a.title AS appointment_title, a.date AS appointment_date,
                   p.name AS provider_name, d.name AS doctor_name,
                   pm.name AS patient_manager_name, i.name AS interpreter_name,
@@ -681,10 +681,11 @@ async fn review_feedback(
         Some(auth.user_id),
         "feedback.reviewed",
         feedback_id,
+        // The patient's portal session receives this event too, so the
+        // internal review note stays out of it; staff reload the list.
         json!({
             "patient_id": patient_id,
             "status": status,
-            "review_note": review_note.clone(),
             "reviewed_at": reviewed_at.to_rfc3339(),
         }),
     )
@@ -1482,13 +1483,6 @@ fn feedback_row_json(row: sqlx::postgres::PgRow, include_internal: bool) -> Valu
             ),
         ),
         (
-            "review_note".to_string(),
-            json!(
-                row.try_get::<Option<String>, _>("review_note")
-                    .unwrap_or_default()
-            ),
-        ),
-        (
             "submitted_by_name".to_string(),
             json!(
                 row.try_get::<Option<String>, _>("submitted_by_name")
@@ -1525,6 +1519,15 @@ fn feedback_row_json(row: sqlx::postgres::PgRow, include_internal: bool) -> Valu
             "internal_note".to_string(),
             json!(
                 row.try_get::<Option<String>, _>("internal_note")
+                    .unwrap_or_default()
+            ),
+        );
+        // The review note is the team's own follow-up: staff see it, the
+        // patient portal does not (owner decision 2026-09-28).
+        object.insert(
+            "review_note".to_string(),
+            json!(
+                row.try_get::<Option<String>, _>("review_note")
                     .unwrap_or_default()
             ),
         );

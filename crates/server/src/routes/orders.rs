@@ -2948,6 +2948,17 @@ async fn create_order(
     {
         return resp;
     }
+    // Art. 18 DSGVO: a restricted patient gets no new orders.
+    if let Some(patient_id) = patient_id
+        && let Err(resp) = super::patients::ensure_patient_processing_allows(
+            &state,
+            patient_id,
+            "creating an order",
+        )
+        .await
+    {
+        return resp;
+    }
 
     let lead_wizard_draft_allowed = if let Some(source_lead_id) = source_lead_id {
         let lead = match sqlx::query(

@@ -1229,6 +1229,16 @@ async fn convert_appointment_request(
             "Only approved appointment requests can be converted",
         );
     }
+    // Art. 18 DSGVO: a restricted patient gets no new appointments.
+    if let Err(resp) = super::patients::ensure_patient_processing_allows(
+        &state,
+        patient_id,
+        "creating an appointment",
+    )
+    .await
+    {
+        return resp;
+    }
     let title = body.title.trim().to_string();
     if title.is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "title is required");
@@ -1840,6 +1850,7 @@ async fn list_attention_items(
                   u.name AS interpreter_name,
                   owner.name AS owner_name,
                   owner.role AS owner_role,
+                  COALESCE(owner.is_active, true) AS owner_is_active,
                   COALESCE(checklists.open_count, 0) AS open_checklist_count,
                   COALESCE(tasks.open_count, 0) AS open_task_count,
                   COALESCE(reminders.overdue_count, 0) AS overdue_reminder_count,
@@ -1933,6 +1944,10 @@ async fn list_attention_items(
                             OR (a.date <= $17 AND latest_report.approval_status = 'pending')
                             OR (a.status = 'completed' AND latest_report.approval_status IS DISTINCT FROM 'approved')
                         )
+                    )
+                 OR (
+                        a.status NOT IN ('completed', 'cancelled')
+                        AND owner.is_active = false
                     )
              )
              AND ($1::text = '%%'
@@ -2150,6 +2165,15 @@ async fn list_attention_items(
                         serde_json::json!({}),
                     );
                 }
+                // The owner's account was deactivated: the open visit needs a
+                // new owner (nothing is reassigned automatically).
+                if !terminal && !row.try_get::<bool, _>("owner_is_active").unwrap_or(true) {
+                    push_reason(
+                        "appointments_attention_reason_owner_deactivated",
+                        "The owner's account is deactivated; assign a new owner".to_string(),
+                        serde_json::json!({}),
+                    );
+                }
                 if reasons.is_empty() {
                     continue;
                 }
@@ -2352,6 +2376,16 @@ async fn create_appointment(
     match ensure_patient_access(&state, &auth, body.patient_id).await {
         Ok(()) => {}
         Err(resp) => return resp,
+    }
+    // Art. 18 DSGVO: a restricted patient gets no new appointments.
+    if let Err(resp) = super::patients::ensure_patient_processing_allows(
+        &state,
+        body.patient_id,
+        "creating an appointment",
+    )
+    .await
+    {
+        return resp;
     }
     if let Some(interpreter_id) = body.interpreter_id {
         match load_active_interpreter_role(&state, interpreter_id).await {

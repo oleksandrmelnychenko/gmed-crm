@@ -597,11 +597,33 @@ async fn patient_manager_erasure_request_can_be_reviewed_and_executed() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "approved");
+    assert_eq!(body["identity_verification_required"], true);
+
+    // The patient filed it: no erasure before the identity check is recorded.
+    let execute_path = format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &execute_path,
+        &auth_header_for(it_admin_id, "it_admin"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/step"),
+        &auth_header_for(it_admin_id, "it_admin"),
+        Some(json!({ "step": "verify_identity", "method": "callback" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
 
     let (status, body) = json_request(
         &app,
         "POST",
-        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute"),
+        &execute_path,
         &auth_header_for(it_admin_id, "it_admin"),
         None,
     )
