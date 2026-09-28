@@ -1611,6 +1611,17 @@ async fn update_item(
         return response;
     }
 
+    if existing_status != body.status
+        && let Err(response) = crate::services::concierge_service_tasks::prepare_task_status_change(
+            &mut tx,
+            item_id,
+            &body.status,
+            auth.user_id,
+        )
+        .await
+    {
+        return response;
+    }
     let result = sqlx::query(
         r#"UPDATE tasks
            SET title = $2,
@@ -1670,6 +1681,11 @@ async fn update_item(
         Ok(result) if result.rows_affected() == 1 => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "Operational item not found"),
         Err(error) => {
+            if let Some(response) =
+                crate::services::concierge_service_tasks::service_state_error_response(&error)
+            {
+                return response;
+            }
             tracing::error!(error = %error, item_id = %item_id, "update concierge operational item");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
@@ -1921,6 +1937,17 @@ pub(crate) async fn update_item_status(
             Err(response) => response,
         };
     }
+    // A concierge service follows its task; a billed one cannot be cancelled.
+    if let Err(response) = crate::services::concierge_service_tasks::prepare_task_status_change(
+        &mut tx,
+        item_id,
+        &body.status,
+        auth.user_id,
+    )
+    .await
+    {
+        return response;
+    }
 
     if let Err(error) = sqlx::query(
         r#"UPDATE tasks
@@ -1939,6 +1966,11 @@ pub(crate) async fn update_item_status(
     .execute(&mut *tx)
     .await
     {
+        if let Some(response) =
+            crate::services::concierge_service_tasks::service_state_error_response(&error)
+        {
+            return response;
+        }
         tracing::error!(error = %error, item_id = %item_id, "update concierge task status");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
@@ -2160,6 +2192,16 @@ async fn close_children(
     let mut checklist_changes = Vec::new();
     let mut notifications = Vec::new();
     for child in &open_children {
+        if let Err(response) = crate::services::concierge_service_tasks::prepare_task_status_change(
+            &mut tx,
+            child.id,
+            &body.status,
+            auth.user_id,
+        )
+        .await
+        {
+            return response;
+        }
         if let Err(error) = sqlx::query(
             r#"UPDATE tasks
                SET status = $2,
@@ -4301,6 +4343,31 @@ async fn ensure_service_not_converted_in_transaction(
             "Concierge service request already converted to a task",
         ));
     }
+    // The service follows its task: a new task would reopen a closed service
+    // behind the back of the people who closed it.
+    let closed = sqlx::query_scalar::<_, bool>(
+        r#"SELECT service.status IN ('completed', 'cancelled')
+           FROM concierge_services service
+           WHERE service.id = $1
+             AND NOT EXISTS (
+                 SELECT 1 FROM tasks task
+                 WHERE task.id = $2 AND task.concierge_service_id = service.id
+             )"#,
+    )
+    .bind(service_id)
+    .bind(current_task_id)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, "check closed concierge service");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    if closed == Some(true) {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "The concierge service is already closed; reopen it before linking a task",
+        ));
+    }
     Ok(())
 }
 
@@ -4930,7 +4997,11 @@ fn require_operational_role(auth: &AuthUser) -> Result<(), axum::response::Respo
     ])
 }
 
-fn can_mutate_operational_item(auth: &AuthUser, assigned_by: Uuid, assigned_by_role: &str) -> bool {
+pub(crate) fn can_mutate_operational_item(
+    auth: &AuthUser,
+    assigned_by: Uuid,
+    assigned_by_role: &str,
+) -> bool {
     if auth.user_id == assigned_by {
         return true;
     }
@@ -5067,7 +5138,7 @@ fn can_view_operational_item(
     can_collaborate_on_operational_item(auth, assigned_to, assigned_by, assigned_by_role)
 }
 
-fn is_allowed_status_transition(from: &str, to: &str, can_review: bool) -> bool {
+pub(crate) fn is_allowed_status_transition(from: &str, to: &str, can_review: bool) -> bool {
     if from == to {
         return true;
     }

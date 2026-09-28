@@ -14,6 +14,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
 use crate::routes::me::resolve_self_patient_id;
+use crate::services::concierge_service_tasks as service_tasks;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -43,6 +44,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/concierge-services/{service_id}/book-provider",
             post(book_concierge_service_provider),
+        )
+        .route(
+            "/concierge-services/{service_id}/keep-booking",
+            post(keep_concierge_service_booking),
         )
         .route(
             "/concierge-services/{service_id}/key-events",
@@ -408,33 +413,59 @@ pub(crate) async fn mark_services_ready_for_billing(
     }
 
     // A cancelled service was not delivered: it stays cancelled and is not
-    // handed to billing when the appointment completes.
-    let rows = sqlx::query(
-        r#"UPDATE concierge_services
-           SET status = CASE
-                   WHEN status IN ('planned', 'booked', 'confirmed', 'in_service')
-                       THEN 'completed'
-                   ELSE status
-               END,
-               completed_at = COALESCE(completed_at, now()),
-               billing_status = CASE
-                   WHEN billing_status = 'draft' THEN 'ready'
-                   ELSE billing_status
-               END
-           WHERE appointment_id = $1
-             AND status <> 'cancelled'
-           RETURNING id, status, billing_status"#,
-    )
-    .bind(appointment_id)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| {
+    // handed to billing when the appointment completes. Every other service
+    // is completed through its task (Q1), which hands it to billing.
+    let completed: Result<(Vec<sqlx::postgres::PgRow>, Vec<_>), sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        let service_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id FROM concierge_services
+               WHERE appointment_id = $1
+                 AND status NOT IN ('completed', 'cancelled')
+               ORDER BY created_at, id
+               FOR UPDATE"#,
+        )
+        .bind(appointment_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut checklist_changes = Vec::new();
+        for service_id in &service_ids {
+            checklist_changes.extend(
+                service_tasks::close_service_in_tx(
+                    &mut tx,
+                    *service_id,
+                    "completed",
+                    &service_tasks::SystemStep {
+                        actor_id: created_by,
+                        reason: "appointment_completed",
+                    },
+                )
+                .await?,
+            );
+        }
+        let rows = sqlx::query(
+            r#"SELECT id, status, billing_status FROM concierge_services
+               WHERE id = ANY($1)"#,
+        )
+        .bind(&service_ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok((rows, checklist_changes))
+    }
+    .await;
+    let (rows, checklist_changes) = completed.map_err(|e| {
         tracing::error!(error = %e, appointment_id = %appointment_id, "Failed to mark concierge services ready for billing");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to update concierge services",
         )
     })?;
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        state,
+        created_by,
+        &checklist_changes,
+    )
+    .await;
 
     for row in rows {
         if let Ok(service_id) = row.try_get::<Uuid, _>("id") {
@@ -785,16 +816,26 @@ async fn cancel_my_concierge_service(
         );
     }
 
-    match sqlx::query(
-        r#"UPDATE concierge_services
-           SET status = 'cancelled'
-           WHERE id = $1"#,
-    )
-    .bind(service_id)
-    .execute(&state.db)
-    .await
-    {
-        Ok(_) => {
+    // Q1 / Q3: the request's task (if it already has one) is cancelled with a
+    // history entry and the service follows it; an unbilled request is
+    // waived.
+    let cancelled: Result<(), sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        service_tasks::close_service_in_tx(
+            &mut tx,
+            service_id,
+            "cancelled",
+            &service_tasks::SystemStep {
+                actor_id: auth.user_id,
+                reason: "patient_cancelled",
+            },
+        )
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    match cancelled {
+        Ok(()) => {
             state.audit_sender.try_send(audit::domain_event(
                 "cancel_patient_portal_concierge_service",
                 Some(auth.user_id),
@@ -867,39 +908,8 @@ async fn list_concierge_services(
         query.assigned_concierge_id
     };
 
-    let rows = match sqlx::query(
-        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
-                  cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
-                  cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
-                  cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
-                  cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
-                  cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
-                  p.patient_id AS patient_code, p.first_name, p.last_name,
-                  pr.name AS provider_name, pr.provider_type AS linked_provider_type,
-                  sc.service_name AS provider_service_name,
-                  ptn.code AS taxonomy_node_code, ptn.name_de AS taxonomy_node_name_de,
-                  ptn.name_ru AS taxonomy_node_name_ru,
-                  u.name AS assigned_concierge_name,
-                  ku.name AS key_responsible_user_name,
-                  a.title AS appointment_title, a.appointment_type AS linked_appointment_type,
-                  (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
-                  AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
-                      AS task_eligible,
-                  (SELECT linked_task.id
-                     FROM tasks linked_task
-                    WHERE linked_task.concierge_service_id = cs.id
-                      AND linked_task.task_scope IN ('general', 'concierge_operational')
-                      AND linked_task.deleted_at IS NULL
-                    ORDER BY linked_task.created_at, linked_task.id
-                    LIMIT 1) AS linked_task_id
-           FROM concierge_services cs
-           JOIN patients p ON p.id = cs.patient_id
-           LEFT JOIN providers pr ON pr.id = cs.provider_id
-           LEFT JOIN service_catalog sc ON sc.id = cs.provider_service_id
-           LEFT JOIN provider_taxonomy_nodes ptn ON ptn.id = cs.taxonomy_node_id
-           LEFT JOIN users u ON u.id = cs.assigned_concierge_id
-           LEFT JOIN users ku ON ku.id = cs.key_responsible_user_id
-           LEFT JOIN appointments a ON a.id = cs.appointment_id
+    let sql = format!(
+        r#"{SERVICE_ROW_SELECT}
            WHERE ($1::text = '%%'
                   OR de_normalize(concat_ws(' ',
                        cs.title, cs.booking_reference, cs.vendor_name, cs.vendor_contact,
@@ -937,19 +947,20 @@ async fn list_concierge_services(
                 )
              )
            ORDER BY COALESCE(cs.starts_at, cs.created_at) DESC, cs.created_at DESC
-           LIMIT 200"#,
-    )
-    .bind(search_pattern)
-    .bind(query.patient_id)
-    .bind(query.appointment_id)
-    .bind(query.provider_id)
-    .bind(effective_assignee)
-    .bind(query.service_kind)
-    .bind(query.status)
-    .bind(query.billing_status)
-    .bind(query.taxonomy_node_id)
-    .fetch_all(&state.db)
-    .await
+           LIMIT 200"#
+    );
+    let rows = match sqlx::query(&sql)
+        .bind(search_pattern)
+        .bind(query.patient_id)
+        .bind(query.appointment_id)
+        .bind(query.provider_id)
+        .bind(effective_assignee)
+        .bind(query.service_kind)
+        .bind(query.status)
+        .bind(query.billing_status)
+        .bind(query.taxonomy_node_id)
+        .fetch_all(&state.db)
+        .await
     {
         Ok(rows) => rows,
         Err(e) => {
@@ -968,7 +979,7 @@ async fn list_concierge_services(
             .try_get::<Option<Uuid>, _>("assigned_concierge_id")
             .unwrap_or_default();
         match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
-            Ok(true) => items.push(build_service_json_for_role(&row, auth.role)),
+            Ok(true) => items.push(build_service_json_for_actor(&row, &auth)),
             Ok(false) => {}
             Err(resp) => return resp,
         }
@@ -1001,7 +1012,7 @@ async fn get_concierge_service(
                 .try_get::<Option<Uuid>, _>("assigned_concierge_id")
                 .unwrap_or_default();
             match can_access_service(&state, &auth, patient_id, assigned_concierge_id).await {
-                Ok(true) => Json(build_service_json_for_role(&row, auth.role)).into_response(),
+                Ok(true) => Json(build_service_json_for_actor(&row, &auth)).into_response(),
                 Ok(false) => err(StatusCode::FORBIDDEN, "Insufficient permissions"),
                 Err(resp) => resp,
             }
@@ -1159,6 +1170,76 @@ async fn delete_concierge_service(
     .await;
 
     StatusCode::NO_CONTENT.into_response()
+}
+
+/// Q4: a partner booking whose appointment was cancelled is not cancelled
+/// automatically. Someone who runs services decides: cancel the service
+/// (through its task) or keep the booking here, which clears the flag.
+async fn keep_concierge_service_booking(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) =
+        auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge])
+    {
+        return response;
+    }
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_operational_service_access(&state, &auth, &service).await {
+        return response;
+    }
+    let cleared = match sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
+        r#"UPDATE concierge_services service
+           SET booking_decision_required_at = NULL
+           FROM (
+               SELECT booking_decision_required_at FROM concierge_services
+               WHERE id = $1 FOR UPDATE
+           ) previous
+           WHERE service.id = $1
+             AND previous.booking_decision_required_at IS NOT NULL
+           RETURNING previous.booking_decision_required_at"#,
+    )
+    .bind(service_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, service_id = %service_id, "keep concierge booking");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let Some(flagged_at) = cleared else {
+        return err(
+            StatusCode::CONFLICT,
+            "This service does not wait for a booking decision",
+        );
+    };
+    state.audit_sender.try_send(audit::domain_event(
+        "keep_concierge_service_booking",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({ "flagged_at": flagged_at.to_rfc3339() }),
+    ));
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.updated",
+        service_id,
+        serde_json::json!({ "booking_decision": "kept" }),
+    )
+    .await;
+    match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => Json(build_service_json_for_actor(&row, &auth)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => response,
+    }
 }
 
 async fn book_concierge_service_provider(
@@ -1340,7 +1421,7 @@ async fn book_concierge_service_provider(
         }
         return match load_service_row(&state, service_id).await {
             Ok(Some(row)) => Json(serde_json::json!({
-                "service": build_service_json_for_role(&row, auth.role),
+                "service": build_service_json_for_actor(&row, &auth),
                 "interaction_id": interaction_id,
             }))
             .into_response(),
@@ -1647,7 +1728,7 @@ async fn book_concierge_service_provider(
 
     match load_service_row(&state, service_id).await {
         Ok(Some(row)) => Json(serde_json::json!({
-            "service": build_service_json_for_role(&row, auth.role),
+            "service": build_service_json_for_actor(&row, &auth),
             "interaction_id": interaction_id,
         }))
         .into_response(),
@@ -3995,7 +4076,7 @@ async fn create_concierge_service(
                 Ok(Some(service)) => {
                     (
                         StatusCode::CREATED,
-                        Json(build_service_json_for_role(&service, auth.role)),
+                        Json(build_service_json_for_actor(&service, &auth)),
                     )
                         .into_response()
                 }
@@ -4071,17 +4152,38 @@ async fn update_concierge_service(
             "Use the provider booking endpoint for booked or confirmed status",
         );
     }
-    if let Some(next_status) = body.status.as_deref()
-        && !is_allowed_service_status_transition(
-            &current_status,
-            next_status,
-            matches!(auth.role, Role::Ceo | Role::PatientManager),
-        )
-    {
-        return err(
-            StatusCode::CONFLICT,
-            "Concierge service status transition is not allowed",
-        );
+    // Q1: the service status follows its task. A requested status is a move
+    // of the task under the work-center rules (assignee starts, author or a
+    // higher role completes, cancels and reopens); a legacy service in a
+    // medical context has no task and keeps the service lifecycle.
+    let requested_status = body.status.clone().filter(|value| *value != current_status);
+    let task_state = service_tasks::ServiceTaskState::from_row(&existing);
+    let standalone = task_state.linked_task_id.is_none()
+        && !existing
+            .try_get::<bool, _>("task_eligible")
+            .unwrap_or(false);
+    if let Some(next_status) = requested_status.as_deref() {
+        if standalone {
+            if !is_allowed_service_status_transition(
+                &current_status,
+                next_status,
+                matches!(auth.role, Role::Ceo | Role::PatientManager),
+            ) {
+                return err(
+                    StatusCode::CONFLICT,
+                    "Concierge service status transition is not allowed",
+                );
+            }
+            if next_status == "cancelled"
+                && service_tasks::is_financially_locked(&task_state.billing_status)
+            {
+                return service_tasks::ServiceStatusRefusal::Billed.response();
+            }
+        } else if let Err(refusal) =
+            service_tasks::plan_service_status_change(&auth, &task_state.facts(), next_status)
+        {
+            return refusal.response();
+        }
     }
     let expected_updated_at = match body.expected_updated_at.as_deref() {
         Some(value) => match chrono::DateTime::parse_from_rfc3339(value) {
@@ -4353,81 +4455,276 @@ async fn update_concierge_service(
             .map(|service| service.currency.clone())
     });
 
-    let completed_at = match body.status.as_deref() {
-        Some("completed") => Some(chrono::Utc::now()),
-        _ => None,
+    let existing_billing = existing
+        .try_get::<String, _>("billing_status")
+        .unwrap_or_else(|_| "draft".to_string());
+    // Q3: the amounts of a billed or settled service are locked; the forms
+    // resend unchanged values with every save.
+    if service_tasks::is_financially_locked(&existing_billing) {
+        let money_changed = |next: Option<f64>, current: Option<f64>| match (next, current) {
+            (Some(next), Some(current)) => (next - current).abs() >= 0.005,
+            (None, None) => false,
+            _ => true,
+        };
+        let existing_currency = existing
+            .try_get::<String, _>("currency")
+            .unwrap_or_default();
+        let existing_provider_service = existing
+            .try_get::<Option<Uuid>, _>("provider_service_id")
+            .unwrap_or_default();
+        if money_changed(cost_estimate, existing_cost_estimate)
+            || money_changed(actual_cost, existing_actual_cost)
+            || quantity.is_some_and(|value| (value - existing_quantity).abs() >= 0.005)
+            || (unit_price.is_some() && money_changed(unit_price, existing_unit_price))
+            || currency
+                .as_ref()
+                .is_some_and(|value| !value.trim().eq_ignore_ascii_case(&existing_currency))
+            || body
+                .provider_service_id
+                .is_some_and(|value| Some(value) != existing_provider_service)
+        {
+            return conflict_with_code(
+                service_tasks::AMOUNTS_LOCKED_CODE,
+                service_tasks::AMOUNTS_LOCKED_MESSAGE,
+            );
+        }
+    }
+
+    // Q3: billing moves draft -> ready -> billed -> settled, waived only from
+    // draft or ready; readiness itself follows the task. The forms resend the
+    // unchanged billing status, which is no billing decision.
+    let status_after = requested_status
+        .clone()
+        .unwrap_or_else(|| current_status.clone());
+    let billing_after_status = match requested_status.as_deref() {
+        Some(target) => {
+            service_tasks::billing_after_service_status(&current_status, target, &existing_billing)
+        }
+        None => existing_billing.clone(),
     };
-    // The service forms resend the unchanged billing status with every save.
-    // An unchanged value is no billing decision, so completing a draft
-    // service still hands it to billing ("ready").
-    let billing_status_update = body.billing_status.clone().filter(|value| {
-        !existing
-            .try_get::<String, _>("billing_status")
-            .is_ok_and(|current| *value == current)
-    });
+    let billing_status_update = body
+        .billing_status
+        .clone()
+        .filter(|value| *value != existing_billing && *value != billing_after_status);
+    if let Some(next) = billing_status_update.as_deref()
+        && !service_tasks::manual_billing_move_allowed(&billing_after_status, next, &status_after)
+    {
+        return conflict_with_code(
+            "concierge_service_billing_transition",
+            &service_tasks::manual_billing_refusal_message(&billing_after_status, next),
+        );
+    }
     let billed_at = match billing_status_update.as_deref() {
         Some("billed") | Some("settled") => Some(chrono::Utc::now()),
         _ => None,
     };
-    let automatically_ready_for_billing = body.status.as_deref() == Some("completed")
-        && billing_status_update.is_none()
-        && existing
-            .try_get::<String, _>("billing_status")
-            .is_ok_and(|value| value == "draft");
-    let audit_status = body.status.clone();
-    let audit_billing_status = if automatically_ready_for_billing {
-        Some("ready".to_string())
-    } else {
-        billing_status_update.clone()
-    };
+    let audit_status = requested_status.clone();
+    let audit_billing_status = billing_status_update.clone();
     let audit_assigned_concierge_id = body.assigned_concierge_id;
 
-    match sqlx::query(
+    let task_id = match (requested_status.as_deref(), standalone) {
+        (Some(_), false) => match ensure_task_for_service(&state, service_id).await {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        },
+        _ => None,
+    };
+
+    let failed = |error: sqlx::Error| {
+        if let Some(response) = service_tasks::service_state_error_response(&error) {
+            return response;
+        }
+        tracing::error!(error = %error, service_id = %service_id, "update concierge service");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => return failed(error),
+    };
+    if let Err(error) = service_tasks::set_audit_actor(&mut tx, auth.user_id).await {
+        return failed(error);
+    }
+    // The task is locked before its service, in the order of the work center.
+    let task_row = match task_id {
+        Some(task_id) => match sqlx::query(
+            r#"SELECT task.status, task.assigned_to, task.assigned_by, task.title,
+                      task.archived_at IS NOT NULL AS archived, author.role AS author_role
+               FROM tasks task
+               JOIN users author ON author.id = task.assigned_by
+               WHERE task.id = $1
+               FOR UPDATE OF task"#,
+        )
+        .bind(task_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(row)) => Some((task_id, row)),
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Service task not found"),
+            Err(error) => return failed(error),
+        },
+        None => None,
+    };
+    let locked = match sqlx::query_as::<_, (String, String, chrono::DateTime<chrono::Utc>)>(
+        "SELECT status, billing_status, updated_at FROM concierge_services WHERE id = $1 FOR UPDATE",
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(error) => return failed(error),
+    };
+    if expected_updated_at.is_some_and(|expected| expected != locked.2)
+        || locked.0 != current_status
+        || locked.1 != existing_billing
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Concierge service changed; refresh before saving",
+        );
+    }
+
+    let mut checklist_changes = Vec::new();
+    let mut task_change: Option<(Uuid, Uuid, String, String)> = None;
+    let mut author_notification: Option<(Uuid, Uuid, Uuid)> = None;
+    if let (Some((task_id, task)), Some(target)) = (task_row.as_ref(), requested_status.as_deref())
+    {
+        let task_status = task.try_get::<String, _>("status").unwrap_or_default();
+        let assigned_to = task.try_get::<Uuid, _>("assigned_to").unwrap_or_default();
+        let assigned_by = task.try_get::<Uuid, _>("assigned_by").unwrap_or_default();
+        let author_role = task.try_get::<String, _>("author_role").unwrap_or_default();
+        let facts = service_tasks::ServiceTaskFacts {
+            service_status: &locked.0,
+            billing_status: &locked.1,
+            task_status: &task_status,
+            task_archived: task.try_get::<bool, _>("archived").unwrap_or(false),
+            task_assignee: assigned_to,
+            task_author: assigned_by,
+            task_author_role: &author_role,
+        };
+        let steps = match service_tasks::plan_service_status_change(&auth, &facts, target) {
+            Ok(value) => value,
+            Err(refusal) => return refusal.response(),
+        };
+        let mut from = task_status.clone();
+        for step in &steps {
+            match service_tasks::move_service_task_in_tx(
+                &mut tx,
+                *task_id,
+                assigned_to,
+                &from,
+                step,
+                auth.user_id,
+                "service_status_changed",
+                Some(service_id),
+            )
+            .await
+            {
+                Ok(changes) => checklist_changes.extend(changes),
+                Err(error) => return failed(error),
+            }
+            from = (*step).to_string();
+        }
+        // "In service" is booking progress of an active task.
+        if target == "in_service" {
+            if let Err(error) = sqlx::query(
+                "UPDATE concierge_services SET status = 'in_service' WHERE id = $1 AND status <> 'in_service'",
+            )
+            .bind(service_id)
+            .execute(&mut *tx)
+            .await
+            {
+                return failed(error);
+            }
+            if let Err(error) =
+                sqlx::query("UPDATE tasks SET service_status = 'in_service' WHERE id = $1")
+                    .bind(task_id)
+                    .execute(&mut *tx)
+                    .await
+            {
+                return failed(error);
+            }
+        }
+        if !steps.is_empty() {
+            task_change = Some((*task_id, assigned_to, task_status.clone(), from.clone()));
+            if auth.user_id != assigned_by {
+                let title = task.try_get::<String, _>("title").unwrap_or_default();
+                match sqlx::query_scalar::<_, Uuid>(
+                    r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                       VALUES ($1, 'operational_task_updated', 'Task status changed', $2, 'concierge_task', $3)
+                       RETURNING id"#,
+                )
+                .bind(assigned_by)
+                .bind(&title)
+                .bind(task_id)
+                .fetch_one(&mut *tx)
+                .await
+                {
+                    Ok(notification_id) => {
+                        author_notification = Some((notification_id, assigned_by, *task_id));
+                    }
+                    Err(error) => return failed(error),
+                }
+            }
+        }
+    } else if let Some(target) = requested_status.as_deref() {
+        // A legacy service in a medical context without a task.
+        if let Err(error) = sqlx::query(
+            r#"UPDATE concierge_services
+               SET status = $2,
+                   billing_status = CASE
+                       WHEN $2 = 'completed' AND billing_status = 'draft' THEN 'ready'
+                       WHEN $2 = 'cancelled' AND billing_status IN ('draft', 'ready') THEN 'waived'
+                       WHEN status = 'completed' AND billing_status = 'ready' THEN 'draft'
+                       WHEN status = 'cancelled' AND billing_status = 'waived' THEN 'draft'
+                       ELSE billing_status
+                   END,
+                   completed_at = CASE WHEN $2 = 'completed' THEN COALESCE(completed_at, now()) ELSE NULL END
+               WHERE id = $1"#,
+        )
+        .bind(service_id)
+        .bind(target)
+        .execute(&mut *tx)
+        .await
+        {
+            return failed(error);
+        }
+    }
+
+    if let Err(error) = sqlx::query(
         r#"UPDATE concierge_services
            SET provider_id = COALESCE($2, provider_id),
                assigned_concierge_id = COALESCE($3, assigned_concierge_id),
                service_kind = COALESCE($4, service_kind),
                title = COALESCE($5, title),
-               status = COALESCE($6, status),
-               billing_status = CASE
-                   WHEN $7 IS NOT NULL THEN $7
-                   WHEN $6 = 'completed' AND billing_status = 'draft' THEN 'ready'
-                   ELSE billing_status
-               END,
-               booking_reference = $8,
-               vendor_name = $9,
-               vendor_contact = $10,
-               service_address = $11,
-               starts_at = $12,
-               ends_at = $13,
-               cost_estimate = $14,
-               actual_cost = $15,
-               currency = COALESCE($16, currency),
-               service_notes = $17,
-               billing_notes = $18,
-               completed_at = CASE
-                   WHEN $6 IS NULL THEN completed_at
-                   WHEN $19 IS NOT NULL THEN COALESCE(completed_at, $19)
-                   ELSE NULL
-               END,
+               billing_status = COALESCE($6, billing_status),
+               booking_reference = $7,
+               vendor_name = $8,
+               vendor_contact = $9,
+               service_address = $10,
+               starts_at = $11,
+               ends_at = $12,
+               cost_estimate = $13,
+               actual_cost = $14,
+               currency = COALESCE($15, currency),
+               service_notes = $16,
+               billing_notes = $17,
                billed_at = CASE
-                   WHEN $7 IS NULL THEN billed_at
-                   WHEN $20 IS NOT NULL THEN COALESCE(billed_at, $20)
-                   ELSE NULL
+                   WHEN $18::timestamptz IS NOT NULL THEN COALESCE(billed_at, $18)
+                   ELSE billed_at
                END,
-               taxonomy_node_id = COALESCE($21, taxonomy_node_id),
-               provider_service_id = COALESCE($22, provider_service_id),
-               quantity = COALESCE($23, quantity),
-               unit_price = COALESCE($24, unit_price)
-           WHERE id = $1
-             AND ($25::timestamptz IS NULL OR updated_at = $25)"#,
+               taxonomy_node_id = COALESCE($19, taxonomy_node_id),
+               provider_service_id = COALESCE($20, provider_service_id),
+               quantity = COALESCE($21, quantity),
+               unit_price = COALESCE($22, unit_price)
+           WHERE id = $1"#,
     )
     .bind(service_id)
     .bind(provider_id_update)
     .bind(body.assigned_concierge_id)
     .bind(body.service_kind)
     .bind(body.title.map(|value| value.trim().to_string()))
-    .bind(body.status)
     .bind(billing_status_update)
     .bind(booking_reference)
     .bind(vendor_name)
@@ -4440,91 +4737,142 @@ async fn update_concierge_service(
     .bind(currency.map(|value| value.to_uppercase()))
     .bind(service_notes)
     .bind(billing_notes)
-    .bind(completed_at)
     .bind(billed_at)
     .bind(body.taxonomy_node_id)
     .bind(body.provider_service_id)
     .bind(quantity)
     .bind(unit_price)
-    .bind(expected_updated_at)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
-        Ok(result) if result.rows_affected() > 0 => {
-            state.audit_sender.try_send(audit::domain_event(
-                "update_concierge_service",
-                Some(auth.user_id),
-                "concierge_service",
-                Some(service_id),
-                serde_json::json!({
-                    "status": audit_status.clone(),
-                    "billing_status": audit_billing_status.clone(),
-                    "assigned_concierge_id": audit_assigned_concierge_id,
-                }),
-            ));
-
-            let realtime_event_type = if audit_status.as_deref() == Some("cancelled") {
-                "concierge_service.cancelled"
-            } else {
-                "concierge_service.updated"
-            };
-            crate::realtime::publish_concierge_service_event(
-                &state,
-                Some(auth.user_id),
-                realtime_event_type,
-                service_id,
-                serde_json::json!({
-                    "status": audit_status,
-                    "billing_status": audit_billing_status,
-                    "assigned_concierge_id": audit_assigned_concierge_id,
-                }),
-            )
-            .await;
-            if automatically_ready_for_billing {
-                crate::realtime::publish_concierge_service_event(
-                    &state,
-                    Some(auth.user_id),
-                    "concierge_service.billing_ready",
-                    service_id,
-                    serde_json::json!({
-                        "status": "completed",
-                        "billing_status": "ready",
-                    }),
-                )
-                .await;
-            }
-
-            match load_service_row(&state, service_id).await {
-                Ok(Some(service)) => {
-                    Json(build_service_json_for_role(&service, auth.role)).into_response()
-                }
-                Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
-                Err(resp) => resp,
-            }
-        }
-        Ok(_) if body.expected_updated_at.is_some() => err(
-            StatusCode::CONFLICT,
-            "Concierge service changed; refresh before saving",
-        ),
-        Ok(_) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
-        Err(e) => {
-            tracing::error!(error = %e, service_id = %service_id, "update concierge service");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
-        }
+        return failed(error);
     }
+    if let Err(error) = tx.commit().await {
+        return failed(error);
+    }
+
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(service)) => service,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(resp) => return resp,
+    };
+    let final_billing = service
+        .try_get::<String, _>("billing_status")
+        .unwrap_or_default();
+    state.audit_sender.try_send(audit::domain_event(
+        "update_concierge_service",
+        Some(auth.user_id),
+        "concierge_service",
+        Some(service_id),
+        serde_json::json!({
+            "status": audit_status.clone(),
+            "billing_status": audit_billing_status.clone().or_else(|| {
+                (final_billing != existing_billing).then(|| final_billing.clone())
+            }),
+            "assigned_concierge_id": audit_assigned_concierge_id,
+            "task_id": task_change.as_ref().map(|change| change.0),
+        }),
+    ));
+    if let Some((task_id, assigned_to, previous_status, next_status)) = task_change.as_ref() {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_concierge_operational_item_status",
+            Some(auth.user_id),
+            "task",
+            Some(*task_id),
+            serde_json::json!({
+                "assigned_to": assigned_to,
+                "status": next_status,
+                "previous_status": previous_status,
+                "reason": "service_status_changed",
+                "concierge_service_id": service_id,
+            }),
+        ));
+        crate::realtime::publish_concierge_operational_task_event(
+            &state,
+            Some(auth.user_id),
+            "concierge_operational_item.updated",
+            *task_id,
+            *assigned_to,
+            serde_json::json!({
+                "assigned_to": assigned_to,
+                "status": next_status,
+                "previous_status": previous_status,
+            }),
+        )
+        .await;
+    }
+    if let Some((notification_id, user_id, task_id)) = author_notification {
+        crate::realtime::publish_notification_event(
+            &state,
+            user_id,
+            "notification.created",
+            Some(notification_id),
+            serde_json::json!({ "entity_type": "concierge_task", "entity_id": task_id }),
+        )
+        .await;
+    }
+    let realtime_event_type = if audit_status.as_deref() == Some("cancelled") {
+        "concierge_service.cancelled"
+    } else {
+        "concierge_service.updated"
+    };
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        realtime_event_type,
+        service_id,
+        serde_json::json!({
+            "status": audit_status,
+            "billing_status": final_billing,
+            "assigned_concierge_id": audit_assigned_concierge_id,
+        }),
+    )
+    .await;
+    if existing_billing == "draft" && final_billing == "ready" {
+        crate::realtime::publish_concierge_service_event(
+            &state,
+            Some(auth.user_id),
+            "concierge_service.billing_ready",
+            service_id,
+            serde_json::json!({
+                "status": service.try_get::<String, _>("status").unwrap_or_default(),
+                "billing_status": "ready",
+            }),
+        )
+        .await;
+    }
+    Json(build_service_json_for_actor(&service, &auth)).into_response()
 }
 
-async fn load_service_row(
-    state: &AppState,
-    service_id: Uuid,
-) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
-    sqlx::query(
-        r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
+fn conflict_with_code(code: &str, message: &str) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(serde_json::json!({
+            "error": "Conflict",
+            "code": code,
+            "message": message,
+        })),
+    )
+        .into_response()
+}
+
+/// A service with its canonical task (Q1: the task is the single source of
+/// truth) and the task facts the service rules need; a service without a
+/// task yet reports the task it will get (its creator as author, for a
+/// patient-portal request the coordinating staff member).
+const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_id, cs.provider_id, cs.provider_service_id, cs.assigned_concierge_id,
                   cs.service_kind, cs.taxonomy_node_id, cs.title, cs.status, cs.booking_reference, cs.vendor_name,
                   cs.vendor_contact, cs.service_address, cs.starts_at, cs.ends_at, cs.cost_estimate, cs.actual_cost,
                   cs.quantity, cs.unit_price, cs.currency, cs.billing_status, cs.service_notes, cs.billing_notes, cs.request_source,
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
+                  cs.booking_decision_required_at,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name, pr.provider_type AS linked_provider_type,
                   sc.service_name AS provider_service_name,
@@ -4533,16 +4881,17 @@ async fn load_service_row(
                   u.name AS assigned_concierge_name,
                   ku.name AS key_responsible_user_name,
                   a.title AS appointment_title, a.appointment_type AS linked_appointment_type,
+                  a.status AS linked_appointment_status,
                   (cs.provider_id IS NULL OR pr.provider_type = 'non_medical')
                   AND (cs.appointment_id IS NULL OR a.appointment_type = 'non_medical')
                       AS task_eligible,
-                  (SELECT linked_task.id
-                     FROM tasks linked_task
-                    WHERE linked_task.concierge_service_id = cs.id
-                      AND linked_task.task_scope IN ('general', 'concierge_operational')
-                      AND linked_task.deleted_at IS NULL
-                    ORDER BY linked_task.created_at, linked_task.id
-                    LIMIT 1) AS linked_task_id
+                  service_task.id AS linked_task_id,
+                  service_task.status AS linked_task_status,
+                  service_task.archived AS linked_task_archived,
+                  COALESCE(service_task.assigned_to, cs.assigned_concierge_id, service_task_author.author_id)
+                      AS task_assignee_id,
+                  service_task_author.author_id AS task_author_id,
+                  task_author.role AS task_author_role
            FROM concierge_services cs
            JOIN patients p ON p.id = cs.patient_id
            LEFT JOIN providers pr ON pr.id = cs.provider_id
@@ -4551,8 +4900,29 @@ async fn load_service_row(
            LEFT JOIN users u ON u.id = cs.assigned_concierge_id
            LEFT JOIN users ku ON ku.id = cs.key_responsible_user_id
            LEFT JOIN appointments a ON a.id = cs.appointment_id
-           WHERE cs.id = $1"#,
-    )
+           LEFT JOIN users service_creator ON service_creator.id = cs.created_by
+           LEFT JOIN LATERAL (
+               SELECT task.id, task.status, task.assigned_to, task.assigned_by,
+                      task.archived_at IS NOT NULL AS archived
+               FROM tasks task
+               WHERE task.id = concierge_service_canonical_task_id(cs.id)
+           ) service_task ON true
+           LEFT JOIN LATERAL (
+               SELECT COALESCE(
+                          service_task.assigned_by,
+                          CASE WHEN service_creator.role = 'patient'
+                               THEN concierge_service_coordinator_id(cs.patient_id)
+                               ELSE cs.created_by
+                          END
+                      ) AS author_id
+           ) service_task_author ON true
+           LEFT JOIN users task_author ON task_author.id = service_task_author.author_id"#;
+
+async fn load_service_row(
+    state: &AppState,
+    service_id: Uuid,
+) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
+    sqlx::query(&format!("{SERVICE_ROW_SELECT} WHERE cs.id = $1"))
     .bind(service_id)
     .fetch_optional(&state.db)
     .await
@@ -4666,7 +5036,7 @@ pub(crate) async fn ensure_task_for_service(
                created_at, updated_at
            )
            SELECT title, service_notes,
-                  COALESCE(assigned_concierge_id, created_by), created_by,
+                  COALESCE(assigned_concierge_id, author.id), author.id,
                   patient_id, appointment_id,
                   (SELECT appointment.order_id FROM appointments appointment
                    WHERE appointment.id = concierge_services.appointment_id),
@@ -4696,7 +5066,20 @@ pub(crate) async fn ensure_task_for_service(
                   billing_notes, billed_at, key_status,
                   key_responsible_user_id, key_status_at, created_at, updated_at
            FROM concierge_services
-           WHERE id = $1
+           -- Q15: a patient-portal request is authored by the staff member
+           -- who coordinates the patient's services, never by the patient.
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(
+                          CASE WHEN creator.role = 'patient'
+                               THEN concierge_service_coordinator_id(concierge_services.patient_id)
+                               ELSE concierge_services.created_by
+                          END,
+                          concierge_services.created_by
+                      ) AS id
+               FROM users creator
+               WHERE creator.id = concierge_services.created_by
+           ) author
+           WHERE concierge_services.id = $1
            RETURNING id"#,
     )
     .bind(service_id)
@@ -5819,6 +6202,82 @@ fn build_service_json_for_role(row: &sqlx::postgres::PgRow, role: Role) -> serde
     }
 
     value
+}
+
+/// The service as this actor sees it, with what the actor may change now:
+/// the service statuses its task rules allow (Q1), the billing moves (Q3)
+/// and whether the amounts are locked because the service is billed.
+fn build_service_json_for_actor(row: &sqlx::postgres::PgRow, auth: &AuthUser) -> serde_json::Value {
+    let mut value = build_service_json_for_role(row, auth.role);
+    let state = service_tasks::ServiceTaskState::from_row(row);
+    let task_eligible = row.try_get::<bool, _>("task_eligible").unwrap_or(false);
+    let allowed_statuses = if state.linked_task_id.is_none() && !task_eligible {
+        standalone_allowed_statuses(auth, &state.service_status)
+    } else {
+        service_tasks::allowed_service_statuses(auth, &state.facts())
+    };
+    if let Some(service) = value.as_object_mut() {
+        service.insert(
+            "linked_task_status".to_string(),
+            serde_json::json!(
+                row.try_get::<Option<String>, _>("linked_task_status")
+                    .unwrap_or_default()
+            ),
+        );
+        service.insert(
+            "allowed_statuses".to_string(),
+            serde_json::json!(allowed_statuses),
+        );
+        service.insert(
+            "allowed_billing_statuses".to_string(),
+            serde_json::json!(service_tasks::allowed_billing_statuses(
+                auth.role,
+                &state.service_status,
+                &state.billing_status,
+            )),
+        );
+        service.insert(
+            "financial_locked".to_string(),
+            serde_json::json!(service_tasks::is_financially_locked(&state.billing_status)),
+        );
+        service.insert(
+            "booking_decision_required_at".to_string(),
+            serde_json::json!(
+                row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(
+                    "booking_decision_required_at"
+                )
+                .unwrap_or_default()
+                .map(|value| value.to_rfc3339())
+            ),
+        );
+        service.insert(
+            "linked_appointment_status".to_string(),
+            serde_json::json!(
+                row.try_get::<Option<String>, _>("linked_appointment_status")
+                    .unwrap_or_default()
+            ),
+        );
+    }
+    value
+}
+
+/// A legacy service in a medical context never gets a task; its status keeps
+/// the service lifecycle (reopening for CEO and patient manager).
+fn standalone_allowed_statuses(auth: &AuthUser, current: &str) -> Vec<String> {
+    let mut allowed = vec![current.to_string()];
+    if !matches!(
+        auth.role,
+        Role::Ceo | Role::PatientManager | Role::Concierge
+    ) {
+        return allowed;
+    }
+    let can_reopen = matches!(auth.role, Role::Ceo | Role::PatientManager);
+    for target in ["planned", "in_service", "completed", "cancelled"] {
+        if target != current && is_allowed_service_status_transition(current, target, can_reopen) {
+            allowed.push(target.to_string());
+        }
+    }
+    allowed
 }
 
 fn build_key_event_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
