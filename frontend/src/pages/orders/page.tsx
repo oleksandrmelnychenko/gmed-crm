@@ -75,6 +75,7 @@ import { paymentStatusLabel } from "@/lib/payment-status";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
+  agencyServiceStoredName,
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
 import { useAuth } from "@/lib/auth";
@@ -2271,7 +2272,7 @@ function useOrdersPageContent() {
       ...blankLeistungForm(),
       agencyServiceId: service.id,
       agencyServicePriceVersionId: selectedPrice.id,
-      description: agencyServiceNameLabel(
+      description: agencyServiceStoredName(
         service.service_key,
         service.service_name,
         t,
@@ -9075,7 +9076,7 @@ function useOrdersPageContent() {
                         agencyServiceId,
                         agencyServicePriceVersionId: selectedPrice?.id ?? "",
                         description: service
-                          ? agencyServiceNameLabel(
+                          ? agencyServiceStoredName(
                               service.service_key,
                               service.service_name,
                               t,

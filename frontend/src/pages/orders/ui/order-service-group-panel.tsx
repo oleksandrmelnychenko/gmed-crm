@@ -34,8 +34,8 @@ import {
 } from "@/pages/contracts/model/contracts-model";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
 import {
-  agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
+  agencyServiceStoredName,
 } from "@/lib/agency-service-labels";
 import type {
   CreateOrderServiceGroupInput,
@@ -771,13 +771,13 @@ function WizardBasicsSection({
       ...current,
       agency_service_id: service.id,
       agency_service_price_version_id: selectedPrice?.id ?? "",
-      group_title: agencyServiceNameLabel(
+      group_title: agencyServiceStoredName(
         service.service_key,
         service.service_name,
         t,
       ),
       description: service.description
-        ? agencyServiceDescriptionLabel(service.service_key, service.description, t)
+        ? service.description.trim()
         : current.description,
       unit_price: selectedPrice
         ? String(selectedPrice.unit_price ?? "")

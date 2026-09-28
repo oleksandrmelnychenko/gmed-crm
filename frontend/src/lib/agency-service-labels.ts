@@ -75,6 +75,20 @@ export function agencyServiceNameLabel(
   );
 }
 
+/**
+ * The text stored on an order line (and copied to quotes, invoices and credit
+ * notes) when a catalog service is picked: the catalog's own name, never the
+ * label of the current UI language. A Russian UI must not put "Организация
+ * лечения" on a German invoice; display code still localizes known names.
+ */
+export function agencyServiceStoredName(
+  serviceKey: string | null | undefined,
+  serviceName: string | null | undefined,
+  translations: Translations,
+) {
+  return serviceName?.trim() || agencyServiceNameLabel(serviceKey, serviceName, translations);
+}
+
 export function agencyServiceDescriptionLabel(
   serviceKey: string | null | undefined,
   description: string | null | undefined,
