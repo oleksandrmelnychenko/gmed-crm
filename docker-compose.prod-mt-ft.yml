@@ -1,0 +1,26 @@
+# PROD: fine-tuned OPUS-MT packages next to the baseline models baked into the
+# image (/app/mt-models, untouched). scripts/deploy-prod.sh adds this file only
+# while the host folder below exists; without it PROD runs the baseline models.
+#
+# Same packages and routes as DEV (docker-compose.dev-mt-ft.yml): the fine-tuned
+# models beat the baseline on de>uk, uk>de and ru>de in the 2026-09-28 engine
+# evaluation and lose on de>ru, which therefore stays on the baseline de-zle.
+# The folder holds CTranslate2 int8 packages (model.bin, source.spm, target.spm,
+# shared_vocabulary.json per model) and is mounted read-only; a routed package
+# that is missing falls back to the baseline with a warning.
+#
+# Roll back: move /home/gmed/mt-models-ft away and rerun
+# `sudo -n /opt/gmed/repo/scripts/deploy-prod.sh --upgrade-only`.
+
+services:
+  machine-translation:
+    environment:
+      MT_EXTRA_MODEL_DIR: /app/mt-models-ft
+      MT_MODEL_ROUTES: "de>uk:de-zle-opus_ft_clean_0_3,uk>de:zle-de-opus_ft_clean_0_3,ru>de:zle-de-opus_ft_clean_0_3"
+    volumes:
+      - type: bind
+        source: /home/gmed/mt-models-ft
+        target: /app/mt-models-ft
+        read_only: true
+        bind:
+          create_host_path: false

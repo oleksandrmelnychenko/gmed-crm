@@ -347,6 +347,11 @@ compose_cmd=(
   -f docker-compose.prod-hetzner.yml
   -f docker-compose.ghcr.yml
 )
+# Fine-tuned MT packages: only while the host folder exists (see the file).
+if [[ -d /home/gmed/mt-models-ft ]]; then
+  compose_cmd+=(-f docker-compose.prod-mt-ft.yml)
+  echo "Fine-tuned MT models enabled from /home/gmed/mt-models-ft"
+fi
 
 prepare_upload_volume() {
   "${compose_cmd[@]}" run --rm --no-deps \
