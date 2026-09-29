@@ -13,6 +13,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
+use crate::routes::invoices::service_reversal;
 use crate::routes::me::resolve_self_patient_id;
 use crate::services::concierge_service_tasks as service_tasks;
 use crate::state::AppState;
@@ -48,6 +49,14 @@ pub fn router() -> Router<AppState> {
         .route(
             "/concierge-services/{service_id}/keep-booking",
             post(keep_concierge_service_booking),
+        )
+        .route(
+            "/concierge-services/{service_id}/billing-reversal-options",
+            get(concierge_service_billing_reversal_options),
+        )
+        .route(
+            "/concierge-services/{service_id}/cancel-with-billing-reversal",
+            post(cancel_concierge_service_with_billing_reversal),
         )
         .route(
             "/concierge-services/{service_id}/key-events",
@@ -1175,6 +1184,429 @@ async fn delete_concierge_service(
 /// Q4: a partner booking whose appointment was cancelled is not cancelled
 /// automatically. Someone who runs services decides: cancel the service
 /// (through its task) or keep the booking here, which clears the flag.
+#[derive(Deserialize)]
+struct CancelWithBillingReversalRequest {
+    reason: String,
+    /// The order line that billed the service; `None` when it was billed
+    /// outside GMED (only the service's billing state is reversed).
+    order_leistung_id: Option<Uuid>,
+    /// Confirms the credit note for a line on a released invoice.
+    issue_credit_note: Option<bool>,
+}
+
+const SERVICE_NOT_BILLED_CODE: &str = "concierge_service_not_billed";
+
+/// Order lines of the service's patient that can have billed it: service and
+/// logistics lines (no medical appointment, interpreter report or medical
+/// provider), not cancelled; lines of the service's own order first.
+const BILLING_REVERSAL_CANDIDATES_SQL: &str = r#"SELECT line.id, line.order_id, orders.order_number
+    FROM order_leistungen line
+    JOIN orders ON orders.id = line.order_id
+    LEFT JOIN providers provider ON provider.id = line.provider_id
+    WHERE orders.patient_id = $1
+      AND line.status <> 'cancelled'
+      AND line.source_medical_appointment_id IS NULL
+      AND line.source_interpreter_report_id IS NULL
+      AND line.doctor_id IS NULL
+      AND (line.provider_id IS NULL OR provider.provider_type = 'non_medical')"#;
+
+/// What cancelling a billed service with its billing reversed involves: the
+/// order lines that can have billed it, each with what its cancellation does
+/// (plain cancellation or credit note with amount).
+async fn concierge_service_billing_reversal_options(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return response;
+    }
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_operational_service_access(&state, &auth, &service).await {
+        return response;
+    }
+    let patient_id: Uuid = service.try_get("patient_id").unwrap_or_default();
+    let appointment_order_id = match service
+        .try_get::<Option<Uuid>, _>("appointment_id")
+        .unwrap_or_default()
+    {
+        Some(appointment_id) => {
+            sqlx::query_scalar::<_, Option<Uuid>>("SELECT order_id FROM appointments WHERE id = $1")
+                .bind(appointment_id)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten()
+        }
+        None => None,
+    };
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(error = %error, %service_id, "acquire billing reversal options");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let candidates = match sqlx::query(&format!(
+        "{BILLING_REVERSAL_CANDIDATES_SQL}
+         ORDER BY (line.order_id = $2) DESC NULLS LAST, line.created_at DESC, line.id
+         LIMIT 30"
+    ))
+    .bind(patient_id)
+    .bind(appointment_order_id)
+    .fetch_all(&mut *conn)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, %service_id, "load billing reversal candidates");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let mut lines = Vec::with_capacity(candidates.len());
+    for row in candidates {
+        let line_id: Uuid = row.try_get("id").unwrap_or_default();
+        match service_reversal::preview_order_service_reversal(&mut conn, line_id).await {
+            Ok(Some(preview)) => {
+                let mut value = preview.to_json();
+                if let Some(map) = value.as_object_mut() {
+                    map.insert(
+                        "order_number".to_string(),
+                        serde_json::json!(
+                            row.try_get::<Option<String>, _>("order_number")
+                                .unwrap_or_default()
+                        ),
+                    );
+                    map.insert(
+                        "same_order".to_string(),
+                        serde_json::json!(
+                            appointment_order_id
+                                == row
+                                    .try_get::<Option<Uuid>, _>("order_id")
+                                    .unwrap_or_default()
+                        ),
+                    );
+                }
+                lines.push(value);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, %service_id, %line_id, "preview billing reversal line");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+    Json(serde_json::json!({
+        "service_id": service_id,
+        "billing_status": service.try_get::<String, _>("billing_status").unwrap_or_default(),
+        "can_issue_credit_note": service_reversal::can_issue_credit_notes(&auth),
+        "order_lines": lines,
+    }))
+    .into_response()
+}
+
+/// Cancels a billed or settled service and reverses its billing in one
+/// transaction (owner decision 2026-09-29): the chosen order line is
+/// cancelled (with a credit note when a released invoice bills it — CEO or
+/// billing only), the service's billing becomes `reversed` with who, when,
+/// why and which line, and the service is cancelled through its task under
+/// the work-center rules (author or a higher role).
+async fn cancel_concierge_service_with_billing_reversal(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(service_id): Path<Uuid>,
+    Json(body): Json<CancelWithBillingReversalRequest>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return response;
+    }
+    let reason = body.reason.trim();
+    if !service_reversal::is_valid_reason(reason) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A cancellation reason of 3 to 1000 characters is required",
+        );
+    }
+    let service = match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => return response,
+    };
+    if let Err(response) = ensure_operational_service_access(&state, &auth, &service).await {
+        return response;
+    }
+    let task_state = service_tasks::ServiceTaskState::from_row(&service);
+    if !service_tasks::is_financially_locked(&task_state.billing_status)
+        || task_state.service_status == "cancelled"
+    {
+        return conflict_with_code(
+            SERVICE_NOT_BILLED_CODE,
+            "Only a billed or settled service is cancelled with billing reversal; cancel it as usual",
+        );
+    }
+    let patient_id: Uuid = service.try_get("patient_id").unwrap_or_default();
+    if let Some(line_id) = body.order_leistung_id {
+        let candidate = sqlx::query_scalar::<_, Uuid>(&format!(
+            "{BILLING_REVERSAL_CANDIDATES_SQL} AND line.id = $2"
+        ))
+        .bind(patient_id)
+        .bind(line_id)
+        .fetch_optional(&state.db)
+        .await;
+        match candidate {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The order line is not an open service line of this patient's orders",
+                );
+            }
+            Err(error) => {
+                tracing::error!(error = %error, %service_id, "check billing reversal line");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+    let standalone = task_state.linked_task_id.is_none()
+        && !service.try_get::<bool, _>("task_eligible").unwrap_or(false);
+    let task_id = if standalone {
+        None
+    } else {
+        match ensure_task_for_service(&state, service_id).await {
+            Ok(value) => Some(value),
+            Err(response) => return response,
+        }
+    };
+
+    let failed = |error: sqlx::Error| {
+        if let Some(response) = service_tasks::service_state_error_response(&error) {
+            return response;
+        }
+        tracing::error!(error = %error, service_id = %service_id, "cancel concierge service with billing reversal");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(value) => value,
+        Err(error) => return failed(error),
+    };
+    if let Err(error) = service_tasks::set_audit_actor(&mut tx, auth.user_id).await {
+        return failed(error);
+    }
+    // The task is locked before its service, in the order of the work center.
+    let task_row = match task_id {
+        Some(task_id) => match sqlx::query(
+            r#"SELECT task.status, task.assigned_to, task.assigned_by,
+                      task.archived_at IS NOT NULL AS archived, author.role AS author_role
+               FROM tasks task
+               JOIN users author ON author.id = task.assigned_by
+               WHERE task.id = $1
+               FOR UPDATE OF task"#,
+        )
+        .bind(task_id)
+        .fetch_optional(&mut *tx)
+        .await
+        {
+            Ok(Some(row)) => Some((task_id, row)),
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Service task not found"),
+            Err(error) => return failed(error),
+        },
+        None => None,
+    };
+    let locked = match sqlx::query_as::<_, (String, String)>(
+        "SELECT status, billing_status FROM concierge_services WHERE id = $1 FOR UPDATE",
+    )
+    .bind(service_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(error) => return failed(error),
+    };
+    if !service_tasks::is_financially_locked(&locked.1) || locked.0 == "cancelled" {
+        return conflict_with_code(
+            SERVICE_NOT_BILLED_CODE,
+            "Only a billed or settled service is cancelled with billing reversal; cancel it as usual",
+        );
+    }
+    let steps = match &task_row {
+        Some((_, task)) => {
+            let task_status = task.try_get::<String, _>("status").unwrap_or_default();
+            let author_role = task.try_get::<String, _>("author_role").unwrap_or_default();
+            let facts = service_tasks::ServiceTaskFacts {
+                service_status: &locked.0,
+                billing_status: &locked.1,
+                task_status: &task_status,
+                task_archived: task.try_get::<bool, _>("archived").unwrap_or(false),
+                task_assignee: task.try_get::<Uuid, _>("assigned_to").unwrap_or_default(),
+                task_author: task.try_get::<Uuid, _>("assigned_by").unwrap_or_default(),
+                task_author_role: &author_role,
+            };
+            match service_tasks::plan_billed_service_cancellation(&auth, &facts) {
+                Ok(value) => value,
+                Err(refusal) => return refusal.response(),
+            }
+        }
+        None => Vec::new(),
+    };
+
+    let mut reversal = None;
+    if let Some(line_id) = body.order_leistung_id {
+        match service_reversal::reverse_order_service_in_tx(
+            &mut tx,
+            &service_reversal::ReverseServiceRequest {
+                leistung_id: line_id,
+                reason,
+                allow_credit_note: body.issue_credit_note.unwrap_or(false),
+                actor: &auth,
+                origin: "concierge_service_cancellation",
+                origin_id: Some(service_id),
+            },
+        )
+        .await
+        {
+            Ok(value) => reversal = Some(value),
+            Err(response) => return response,
+        }
+    }
+    let discard = |reversal: Option<service_reversal::ServiceReversal>| async move {
+        if let Some(mut reversal) = reversal {
+            reversal.discard_documents().await;
+        }
+    };
+
+    if let Err(error) = sqlx::query(
+        r#"UPDATE concierge_services
+           SET billing_status = 'reversed',
+               billing_reversed_at = now(),
+               billing_reversed_by = $2,
+               billing_reversal_reason = $3,
+               billing_reversal_order_leistung_id = $4
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .bind(auth.user_id)
+    .bind(reason)
+    .bind(body.order_leistung_id)
+    .execute(&mut *tx)
+    .await
+    {
+        discard(reversal).await;
+        return failed(error);
+    }
+
+    let mut checklist_changes = Vec::new();
+    if let Some((task_id, task)) = &task_row {
+        let assigned_to = task.try_get::<Uuid, _>("assigned_to").unwrap_or_default();
+        let mut from = task.try_get::<String, _>("status").unwrap_or_default();
+        for step in &steps {
+            match service_tasks::move_service_task_in_tx(
+                &mut tx,
+                *task_id,
+                assigned_to,
+                &from,
+                step,
+                auth.user_id,
+                "billing_reversed",
+                Some(service_id),
+            )
+            .await
+            {
+                Ok(changes) => checklist_changes.extend(changes),
+                Err(error) => {
+                    discard(reversal).await;
+                    return failed(error);
+                }
+            }
+            from = (*step).to_string();
+        }
+    } else if let Err(error) = sqlx::query(
+        // A legacy service in a medical context without a task.
+        r#"UPDATE concierge_services
+           SET status = 'cancelled',
+               completed_at = NULL,
+               booking_decision_required_at = NULL
+           WHERE id = $1"#,
+    )
+    .bind(service_id)
+    .execute(&mut *tx)
+    .await
+    {
+        discard(reversal).await;
+        return failed(error);
+    }
+
+    let credit_notes = reversal
+        .as_ref()
+        .map(|value| value.credit_notes_json())
+        .unwrap_or_default();
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_diff_event(
+            "reverse_concierge_service_billing",
+            Some(auth.user_id),
+            "concierge_service",
+            Some(service_id),
+            serde_json::json!({ "status": locked.0, "billing_status": locked.1 }),
+            serde_json::json!({
+                "status": "cancelled",
+                "billing_status": "reversed",
+                "reason": reason,
+                "order_leistung_id": body.order_leistung_id,
+                "credit_notes": credit_notes,
+            }),
+        ),
+    )
+    .await
+    {
+        discard(reversal).await;
+        return failed(error);
+    }
+    if let Err(error) = tx.commit().await {
+        discard(reversal).await;
+        return failed(error);
+    }
+    if let Some(reversal) = &reversal {
+        reversal.publish(&state, auth.user_id).await;
+    }
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
+    crate::realtime::publish_concierge_service_event(
+        &state,
+        Some(auth.user_id),
+        "concierge_service.updated",
+        service_id,
+        serde_json::json!({ "status": "cancelled", "billing_status": "reversed" }),
+    )
+    .await;
+    match load_service_row(&state, service_id).await {
+        Ok(Some(row)) => {
+            let mut value = build_service_json_for_actor(&row, &auth);
+            if let Some(map) = value.as_object_mut() {
+                map.insert(
+                    "billing_reversal".to_string(),
+                    serde_json::json!({
+                        "order_leistung": reversal.as_ref().map(|value| value.to_json()),
+                        "credit_notes": credit_notes,
+                    }),
+                );
+            }
+            Json(value).into_response()
+        }
+        Ok(None) => err(StatusCode::NOT_FOUND, "Concierge service not found"),
+        Err(response) => response,
+    }
+}
+
 async fn keep_concierge_service_booking(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1447,7 +1879,7 @@ async fn book_concierge_service_provider(
             .try_get::<String, _>("billing_status")
             .unwrap_or_default()
             .as_str(),
-        "billed" | "settled" | "waived"
+        "billed" | "settled" | "waived" | "reversed"
     ) {
         return err(
             StatusCode::CONFLICT,
@@ -2470,7 +2902,7 @@ async fn apply_partner_quote_as_cost_estimate(
                 .try_get::<String, _>("billing_status")
                 .unwrap_or_default()
                 .as_str(),
-            "billed" | "settled" | "waived"
+            "billed" | "settled" | "waived" | "reversed"
         )
     {
         return err(
@@ -2703,7 +3135,7 @@ async fn book_task_provider(
     }
     if matches!(
         task.billing_status.as_str(),
-        "billed" | "settled" | "waived"
+        "billed" | "settled" | "waived" | "reversed"
     ) {
         return err(StatusCode::CONFLICT, "Closed billing task cannot be booked");
     }
@@ -3704,7 +4136,7 @@ async fn apply_task_partner_quote_as_cost_estimate(
                 .try_get::<String, _>("billing_status")
                 .unwrap_or_default()
                 .as_str(),
-            "billed" | "settled" | "waived"
+            "billed" | "settled" | "waived" | "reversed"
         )
     {
         return err(
@@ -4885,6 +5317,7 @@ const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_
                   cs.key_status, cs.key_responsible_user_id, cs.key_status_at,
                   cs.completed_at, cs.billed_at, cs.created_at, cs.updated_at,
                   cs.booking_decision_required_at,
+                  cs.billing_reversed_at, cs.billing_reversal_reason, cs.billing_reversal_order_leistung_id,
                   p.patient_id AS patient_code, p.first_name, p.last_name,
                   pr.name AS provider_name, pr.provider_type AS linked_provider_type,
                   sc.service_name AS provider_service_name,
@@ -5959,7 +6392,10 @@ fn is_allowed_service_status_transition(current: &str, next: &str, can_reopen: b
 }
 
 fn is_valid_billing_status(value: &str) -> bool {
-    matches!(value, "draft" | "ready" | "billed" | "settled" | "waived")
+    matches!(
+        value,
+        "draft" | "ready" | "billed" | "settled" | "waived" | "reversed"
+    )
 }
 
 /// The service kind a non-medical partner category implies, when it is
@@ -6137,6 +6573,9 @@ fn build_service_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "staff".to_string()),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "billed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("billed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "billing_reversed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("billing_reversed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "billing_reversal_reason": row.try_get::<Option<String>, _>("billing_reversal_reason").unwrap_or_default(),
+        "billing_reversal_order_leistung_id": row.try_get::<Option<Uuid>, _>("billing_reversal_order_leistung_id").unwrap_or_default(),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
