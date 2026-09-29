@@ -715,3 +715,198 @@ async fn backfill_leaves_links_manual_when_the_audit_trail_is_incomplete() {
         Some(("manual".to_string(), true))
     );
 }
+
+/// Reported hours of a report payload (a decimal string).
+fn hours_of(report: &Value) -> f64 {
+    report["hours"]
+        .as_str()
+        .expect("report hours")
+        .parse()
+        .expect("decimal hours")
+}
+
+/// QA C-13: taken off a visit, the interpreter keeps reading the reports it
+/// wrote there (hours, visit date and time, the decision and its reason, its
+/// own text), read-only; the visit card and the patient follow the booking.
+#[tokio::test]
+async fn unbooked_interpreter_keeps_reading_its_own_reports_read_only() {
+    let tag = format!("booking-link-own-report-{}", Uuid::new_v4().simple());
+    let Some(fx) = fixture(&tag).await else {
+        return;
+    };
+    let interpreter = seed_user(&fx.pool, &tag, "interpreter").await;
+    let teamlead = seed_user(&fx.pool, &format!("{tag}-tl"), "teamlead_interpreter").await;
+    let interpreter_bearer = bearer(interpreter, "interpreter");
+    let teamlead_bearer = bearer(teamlead, "teamlead_interpreter");
+
+    let visit_date = today();
+    let visit = book(&fx, interpreter, visit_date, "Cardiology consultation").await;
+    sqlx::query("UPDATE appointments SET status = 'confirmed' WHERE id = $1")
+        .bind(visit)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(patient_card(&fx, interpreter).await, StatusCode::OK);
+
+    // First report returned with a reason, the second one approved.
+    let report_path = format!("/api/v1/appointments/{visit}/report");
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(json!({ "hours": 1.5, "report_text": "Synthetic first report" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/appointments/{visit}/report/reject"),
+        &teamlead_bearer,
+        Some(json!({ "notes": "Please correct the hours" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(json!({ "hours": 1.25, "report_text": "Synthetic corrected report" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let approved_report_id = body["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/appointments/{visit}/report/approve"),
+        &teamlead_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The manager takes the interpreter off the visit.
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/appointments/{visit}/update"),
+        &fx.pm,
+        Some(json!({
+            "provider_id": fx.provider_id,
+            "doctor_id": fx.doctor_id,
+            "owner_user_id": fx.pm_id,
+            "interpreter_id": Value::Null,
+            "title": "Cardiology consultation",
+            "date": visit_date.to_string(),
+            "time_start": "09:00",
+            "time_end": "10:00"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The visit card and the patient are closed to the interpreter now.
+    let (status, body) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/appointments/{visit}"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(patient_card(&fx, interpreter).await, StatusCode::FORBIDDEN);
+
+    // Its own latest report stays readable, read-only, without visit details.
+    let (status, report) =
+        json_request(&fx.app, "GET", &report_path, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{report}");
+    assert_eq!(report["id"], approved_report_id.as_str());
+    assert!((hours_of(&report) - 1.25).abs() < 1e-9, "{report}");
+    assert_eq!(report["approval_status"], "approved");
+    assert_eq!(report["report_text"], "Synthetic corrected report");
+    assert_eq!(report["appointment_date"], visit_date.to_string());
+    assert_eq!(report["appointment_time_start"], "09:00");
+    assert_eq!(report["appointment_time_end"], "10:00");
+    assert_eq!(report["read_only"], true);
+    assert_eq!(report["appointment_access"], false);
+    let payload = report.to_string();
+    assert!(!payload.contains("Cardiology consultation"), "{payload}");
+    assert!(!payload.contains(&format!("Patient {tag}")), "{payload}");
+
+    // Both reports stay in its list, the returned one with the reason.
+    let (status, list) = json_request(
+        &fx.app,
+        "GET",
+        "/api/v1/appointments/my-reports",
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let reports = list.as_array().expect("own reports");
+    assert_eq!(reports.len(), 2, "{list}");
+    assert!(
+        reports
+            .iter()
+            .all(|item| item["appointment_id"] == visit.to_string()
+                && item["appointment_access"] == false)
+    );
+    let returned = reports
+        .iter()
+        .find(|item| item["approval_status"] == "rejected")
+        .expect("returned report");
+    assert_eq!(returned["notes"], "Please correct the hours");
+    assert!((hours_of(returned) - 1.5).abs() < 1e-9, "{list}");
+    assert!(!list.to_string().contains(&format!("Patient {tag}")), "{list}");
+
+    // The report cannot be changed without the booking.
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &report_path,
+        &interpreter_bearer,
+        Some(json!({ "hours": 2.0, "report_text": "Late change" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+
+    // Its KPI still counts the approved hours.
+    let (status, kpis) =
+        json_request(&fx.app, "GET", "/api/v1/stats/my-kpis", &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{kpis}");
+    let approved_hours: f64 = kpis["kpi"]["approved_hours_30d"]
+        .as_str()
+        .expect("approved hours")
+        .parse()
+        .unwrap();
+    assert!((approved_hours - 1.25).abs() < f64::EPSILON, "{kpis}");
+
+    // The team lead and the manager read the report as before.
+    for reader in [&teamlead_bearer, &fx.pm] {
+        let (status, report) = json_request(&fx.app, "GET", &report_path, reader, None).await;
+        assert_eq!(status, StatusCode::OK, "{report}");
+        assert_eq!(report["id"], approved_report_id.as_str());
+        assert_eq!(report["interpreter_id"], interpreter.to_string());
+        assert!(report.get("read_only").is_none(), "{report}");
+    }
+
+    // Another interpreter never reads it.
+    let stranger = seed_user(&fx.pool, &format!("{tag}-other"), "interpreter").await;
+    let (status, body) =
+        json_request(&fx.app, "GET", &report_path, &bearer(stranger, "interpreter"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    let (status, list) = json_request(
+        &fx.app,
+        "GET",
+        "/api/v1/appointments/my-reports",
+        &bearer(stranger, "interpreter"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert!(list.as_array().expect("own reports").is_empty(), "{list}");
+}

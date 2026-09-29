@@ -614,10 +614,6 @@ async fn reviewed_portal_feedback_flows_back_into_patient_history() {
         items[0]["review_note"],
         "Reviewed with the clinic and no follow-up is needed."
     );
-    assert_eq!(
-        items[0]["reviewed_by_name"],
-        format!("patient_manager {tag}-pm")
-    );
     assert!(
         items[0]["reviewed_at"].as_str().is_some(),
         "patient portal history should expose reviewed_at after staff review"
@@ -625,6 +621,25 @@ async fn reviewed_portal_feedback_flows_back_into_patient_history() {
     assert!(
         items[0].get("internal_note").is_none(),
         "patient portal history must not expose internal feedback notes"
+    );
+    assert!(
+        items[0].get("reviewed_by_name").is_none(),
+        "patient portal history must not name the reviewing staff member"
+    );
+
+    // Staff keep seeing who reviewed the feedback.
+    let (status, staff_list) =
+        json_request(&app, "GET", "/api/v1/feedback", &pm_auth, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let staff_item = staff_list
+        .as_array()
+        .expect("staff feedback list")
+        .iter()
+        .find(|item| item["id"] == feedback_id)
+        .expect("reviewer sees the feedback");
+    assert_eq!(
+        staff_item["reviewed_by_name"],
+        format!("patient_manager {tag}-pm")
     );
 
     let (status, summary) =

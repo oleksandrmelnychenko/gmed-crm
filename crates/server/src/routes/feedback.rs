@@ -160,7 +160,7 @@ async fn list_my_feedback(
                   a.title AS appointment_title, a.date AS appointment_date,
                   p.name AS provider_name, d.name AS doctor_name,
                   pm.name AS patient_manager_name, i.name AS interpreter_name,
-                  c.name AS concierge_name, reviewed_by_user.name AS reviewed_by_name
+                  c.name AS concierge_name
            FROM patient_feedback_forms f
            LEFT JOIN appointments a ON a.id = f.appointment_id
            LEFT JOIN providers p ON p.id = f.provider_id
@@ -168,7 +168,6 @@ async fn list_my_feedback(
            LEFT JOIN users pm ON pm.id = f.patient_manager_id
            LEFT JOIN users i ON i.id = f.interpreter_id
            LEFT JOIN users c ON c.id = f.concierge_id
-           LEFT JOIN users reviewed_by_user ON reviewed_by_user.id = f.reviewed_by
            WHERE f.patient_id = $1
            ORDER BY f.submitted_at DESC, f.created_at DESC"#,
     )
@@ -1485,20 +1484,6 @@ fn feedback_row_json(row: sqlx::postgres::PgRow, include_internal: bool) -> Valu
             ),
         ),
         (
-            "submitted_by_name".to_string(),
-            json!(
-                row.try_get::<Option<String>, _>("submitted_by_name")
-                    .unwrap_or_default()
-            ),
-        ),
-        (
-            "reviewed_by_name".to_string(),
-            json!(
-                row.try_get::<Option<String>, _>("reviewed_by_name")
-                    .unwrap_or_default()
-            ),
-        ),
-        (
             "submitted_at".to_string(),
             json!(
                 row.try_get::<DateTime<Utc>, _>("submitted_at")
@@ -1516,11 +1501,27 @@ fn feedback_row_json(row: sqlx::postgres::PgRow, include_internal: bool) -> Valu
         ),
     ]);
 
+    // The patient's own history carries the review answer (`review_note`)
+    // but not the internal note or who on the staff captured or reviewed it.
     if include_internal {
         object.insert(
             "internal_note".to_string(),
             json!(
                 row.try_get::<Option<String>, _>("internal_note")
+                    .unwrap_or_default()
+            ),
+        );
+        object.insert(
+            "submitted_by_name".to_string(),
+            json!(
+                row.try_get::<Option<String>, _>("submitted_by_name")
+                    .unwrap_or_default()
+            ),
+        );
+        object.insert(
+            "reviewed_by_name".to_string(),
+            json!(
+                row.try_get::<Option<String>, _>("reviewed_by_name")
                     .unwrap_or_default()
             ),
         );

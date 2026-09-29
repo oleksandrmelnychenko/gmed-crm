@@ -550,11 +550,6 @@ function usePatientDocumentsPageContent() {
                       <dl className="grid gap-3 sm:grid-cols-2">
                         <InfoRow
                           className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                          label={t.portal_documents_released_by}
-                          value={item.shared_by_name || t.portal_documents_care_team}
-                        />
-                        <InfoRow
-                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
                           label={t.portal_documents_released_at}
                           value={formatPortalDateTime(item.shared_at)}
                         />
@@ -569,12 +564,6 @@ function usePatientDocumentsPageContent() {
                           value={portalDocumentSourceLabel(item.ursprung, item.klinik)}
                         />
                       </dl>
-
-                      {item.notes ? (
-                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
-                          {item.notes}
-                        </div>
-                      ) : null}
 
                       <div className="flex flex-wrap gap-2">
                         <Button

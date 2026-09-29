@@ -95,6 +95,7 @@ pub fn router() -> Router<AppState> {
         .route("/appointments/meta/conflicts", get(get_conflicts))
         .route("/appointments/meta/attention", get(list_attention_items))
         .route("/appointments/requests", get(list_appointment_requests))
+        .route("/appointments/my-reports", get(list_my_reports))
         .route(
             "/appointments/requests/{id}/review",
             post(review_appointment_request),
@@ -527,6 +528,18 @@ fn build_appointment_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
     })
 }
 
+/// The patient's own appointment request as the portal returns it: the
+/// request, its status and the review note answering it, without who on the
+/// staff reviewed it.
+fn build_portal_appointment_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    let mut value = build_appointment_request_json(row);
+    if let Some(map) = value.as_object_mut() {
+        map.remove("reviewed_by");
+        map.remove("reviewed_by_name");
+    }
+    value
+}
+
 async fn load_appointment_request_row(
     state: &AppState,
     request_id: Uuid,
@@ -662,7 +675,7 @@ async fn list_my_appointment_requests(
     {
         Ok(rows) => Json(
             rows.iter()
-                .map(build_appointment_request_json)
+                .map(build_portal_appointment_request_json)
                 .collect::<Vec<_>>(),
         )
         .into_response(),
@@ -951,7 +964,7 @@ async fn create_my_appointment_request(
     match load_appointment_request_row(&state, request_id).await {
         Ok(Some(row)) => (
             StatusCode::CREATED,
-            Json(build_appointment_request_json(&row)),
+            Json(build_portal_appointment_request_json(&row)),
         )
             .into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Appointment request not found"),
@@ -8216,6 +8229,123 @@ pub fn spawn_interpreter_report_billing_sync_scheduler(state: AppState) {
     });
 }
 
+/// One of the caller's own interpreter reports, as its author reads it:
+/// the hours, the visit's date and time, the review decision with its note
+/// (the reason when returned) and the author's own text. Nothing of the
+/// appointment card (title, place, briefing, patient) is part of it.
+fn own_interpreter_report_json(
+    row: &sqlx::postgres::PgRow,
+    appointment_access: bool,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+        "appointment_id": row.try_get::<Uuid, _>("appointment_id").unwrap_or_default(),
+        "interpreter_id": row.try_get::<Uuid, _>("interpreter_id").unwrap_or_default(),
+        "hours": row.try_get::<rust_decimal::Decimal, _>("hours").map(|value| value.to_string()).unwrap_or_default(),
+        "report_text": row.try_get::<Option<String>, _>("report_text").unwrap_or_default(),
+        "approval_status": row.try_get::<String, _>("approval_status").unwrap_or_default(),
+        "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        "approved_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("approved_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+        "appointment_date": row.try_get::<chrono::NaiveDate, _>("appointment_date").map(|value| value.to_string()).unwrap_or_default(),
+        "appointment_time_start": row.try_get::<Option<chrono::NaiveTime>, _>("time_start").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
+        "appointment_time_end": row.try_get::<Option<chrono::NaiveTime>, _>("time_end").unwrap_or_default().map(|value| value.format("%H:%M").to_string()),
+        // Whether the author can still open the appointment (and change the
+        // report there); without it the report is read-only.
+        "appointment_access": appointment_access,
+        "read_only": !appointment_access,
+    })
+}
+
+/// The caller's own interpreter reports ("Hours and reports"), newest visit
+/// first — also those on appointments the caller has since been taken off.
+/// The author keeps reading the report it wrote; the appointment card, its
+/// briefing and the patient follow the booking (QA coordinator decision
+/// 2026-09-28, pending the owner's confirmation).
+async fn list_my_reports(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_capability(Capability::InterpretersHoursSubmit) {
+        return e;
+    }
+
+    let rows = match sqlx::query(
+        r#"SELECT ir.id, ir.appointment_id, ir.interpreter_id, ir.hours, ir.report_text,
+                  ir.approval_status, ir.notes, ir.approved_at, ir.created_at,
+                  a.date AS appointment_date, a.time_start, a.time_end,
+                  a.interpreter_id AS appointment_interpreter_id, a.owner_user_id
+           FROM interpreter_reports ir
+           JOIN appointments a ON a.id = ir.appointment_id
+           WHERE ir.interpreter_id = $1
+           ORDER BY a.date DESC, a.time_start DESC NULLS LAST, ir.created_at DESC
+           LIMIT 500"#,
+    )
+    .bind(auth.user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %auth.user_id, "list own interpreter reports");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    // The interpreter opens the appointment only while booked on it (or as
+    // its owner); the team lead's team scope covers every visit with a report.
+    let scope = access::AppointmentScope::for_role(auth.role);
+    let items = rows
+        .iter()
+        .map(|row| {
+            let appointment_access = scope.interpreter_team
+                || scope.admits_directly(
+                    auth.user_id,
+                    row.try_get::<Option<Uuid>, _>("appointment_interpreter_id")
+                        .unwrap_or_default(),
+                    row.try_get::<Option<Uuid>, _>("owner_user_id")
+                        .unwrap_or_default(),
+                ) == Some(true);
+            own_interpreter_report_json(row, appointment_access)
+        })
+        .collect::<Vec<_>>();
+    Json(items).into_response()
+}
+
+/// The report of an appointment the caller can no longer open, for its
+/// author: an interpreter taken off the visit keeps reading the latest
+/// report it wrote there, read-only (changing it needs the booking, see
+/// `submit_report`). Anyone else gets 403 as before.
+async fn own_report_without_appointment_access(
+    state: &AppState,
+    auth: &AuthUser,
+    apt_id: Uuid,
+) -> axum::response::Response {
+    match sqlx::query(
+        r#"SELECT ir.id, ir.appointment_id, ir.interpreter_id, ir.hours, ir.report_text,
+                  ir.approval_status, ir.notes, ir.approved_at, ir.created_at,
+                  a.date AS appointment_date, a.time_start, a.time_end
+           FROM interpreter_reports ir
+           JOIN appointments a ON a.id = ir.appointment_id
+           WHERE ir.appointment_id = $1
+             AND ir.interpreter_id = $2
+           ORDER BY ir.created_at DESC, ir.id DESC
+           LIMIT 1"#,
+    )
+    .bind(apt_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => Json(own_interpreter_report_json(&row, false)).into_response(),
+        Ok(None) => err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(e) => {
+            tracing::error!(error = %e, appointment_id = %apt_id, user_id = %auth.user_id, "load own interpreter report");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
 async fn get_report(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8231,7 +8361,7 @@ async fn get_report(
     }
     match can_access_appointment(&state, &auth, apt_id, None, None, None).await {
         Ok(true) => {}
-        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Ok(false) => return own_report_without_appointment_access(&state, &auth, apt_id).await,
         Err(resp) => return resp,
     }
 
