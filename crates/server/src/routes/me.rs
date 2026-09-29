@@ -444,6 +444,10 @@ async fn list_my_document_alerts(
     Json(payload).into_response()
 }
 
+/// Documents released to the patient. The portal gets what was published —
+/// the file, its type and source, and the release and confirmation state —
+/// not the staff's working data: the document's processing notes (`notes`)
+/// and the name of the staff member who released it stay internal.
 async fn list_my_documents(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -460,14 +464,13 @@ async fn list_my_documents(
     match sqlx::query(
         r#"SELECT d.id, d.patient_id, d.order_id, d.appointment_id,
                   d.auto_name, d.original_filename, d.art, d.category, d.status, d.visibility,
-                  d.is_medical, d.mime_type, d.file_size, d.storage_key, d.klinik, d.ursprung,
-                  d.notes, d.created_at, d.updated_at,
+                  d.is_medical, d.mime_type, d.file_size, d.klinik, d.ursprung,
+                  d.created_at, d.updated_at,
                   ds.id AS share_id, ds.channel, ds.requires_confirmation, ds.confirmed,
-                  ds.confirmed_at, ds.shared_at,
-                  sharer.name AS shared_by_name
+                  ds.confirmed_at, ds.shared_at
            FROM documents d
            JOIN LATERAL (
-                SELECT id, channel, requires_confirmation, confirmed, confirmed_at, shared_at, shared_by
+                SELECT id, channel, requires_confirmation, confirmed, confirmed_at, shared_at
                 FROM document_shares
                 WHERE document_id = d.id
                   AND shared_with_user_id = $1
@@ -475,7 +478,6 @@ async fn list_my_documents(
                 ORDER BY shared_at DESC
                 LIMIT 1
            ) ds ON TRUE
-           LEFT JOIN users sharer ON sharer.id = ds.shared_by
            WHERE d.patient_id = $2
              AND d.visibility = 'patient_visible'
            ORDER BY COALESCE(ds.shared_at, d.updated_at) DESC"#,
@@ -504,14 +506,12 @@ async fn list_my_documents(
                         "file_size": row.try_get::<Option<i64>, _>("file_size").unwrap_or_default(),
                         "klinik": row.try_get::<Option<String>, _>("klinik").unwrap_or_default(),
                         "ursprung": row.try_get::<Option<String>, _>("ursprung").unwrap_or_default(),
-                        "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
                         "share_id": row.try_get::<Uuid, _>("share_id").unwrap_or_else(|_| Uuid::nil()),
                         "channel": row.try_get::<Option<String>, _>("channel").unwrap_or_default(),
                         "requires_confirmation": row.try_get::<bool, _>("requires_confirmation").unwrap_or(false),
                         "confirmed": row.try_get::<bool, _>("confirmed").unwrap_or(false),
                         "confirmed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("confirmed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "shared_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("shared_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                        "shared_by_name": row.try_get::<Option<String>, _>("shared_by_name").unwrap_or_default(),
                         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                     })

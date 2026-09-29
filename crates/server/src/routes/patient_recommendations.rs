@@ -610,7 +610,7 @@ async fn list_my_recommendations(
     {
         Ok(rows) => Json(
             rows.iter()
-                .map(recommendation_json)
+                .map(portal_recommendation_json)
                 .collect::<Vec<serde_json::Value>>(),
         )
         .into_response(),
@@ -746,7 +746,7 @@ async fn create_my_recommendation_decision(
     .await;
 
     match load_recommendation_row(&state, recommendation_id).await {
-        Ok(Some(row)) => Json(recommendation_json(&row)).into_response(),
+        Ok(Some(row)) => Json(portal_recommendation_json(&row)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Recommendation not found"),
         Err(resp) => resp,
     }
@@ -921,7 +921,7 @@ async fn create_my_recommendation_appointment_request(
     .await;
 
     match load_recommendation_row(&state, recommendation_id).await {
-        Ok(Some(row)) => Json(recommendation_json(&row)).into_response(),
+        Ok(Some(row)) => Json(portal_recommendation_json(&row)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Recommendation not found"),
         Err(resp) => resp,
     }
@@ -1121,6 +1121,32 @@ async fn load_portal_recommendation_row(
             "Failed to load recommendation",
         )
     })
+}
+
+/// Staff-only fields of a recommendation: the internal note, the staff's
+/// outcome tracking (lifecycle status, outcome note and date) and who on the
+/// staff created or last changed it.
+const STAFF_ONLY_RECOMMENDATION_KEYS: [&str; 8] = [
+    "note_intern",
+    "lifecycle_status",
+    "outcome_note",
+    "outcome_at",
+    "created_by",
+    "created_by_name",
+    "updated_by",
+    "updated_by_name",
+];
+
+/// A recommendation published to the patient portal: what the patient is
+/// asked to do and their own decision, without the staff-only fields.
+fn portal_recommendation_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
+    let mut value = recommendation_json(row);
+    if let Some(map) = value.as_object_mut() {
+        for key in STAFF_ONLY_RECOMMENDATION_KEYS {
+            map.remove(key);
+        }
+    }
+    value
 }
 
 fn recommendation_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {

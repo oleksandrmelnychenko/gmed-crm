@@ -705,10 +705,9 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
         body.as_array().unwrap()[0]["converted_appointment_date"],
         "2026-05-22"
     );
-    assert_eq!(
-        body.as_array().unwrap()[0]["reviewed_by"],
-        patient_manager_id.to_string()
-    );
+    // The patient sees when the request was reviewed, not who reviewed it.
+    assert!(body.as_array().unwrap()[0].get("reviewed_by").is_none());
+    assert!(body.as_array().unwrap()[0].get("reviewed_by_name").is_none());
     assert!(
         body.as_array().unwrap()[0]["reviewed_at"]
             .as_str()
@@ -846,7 +845,9 @@ async fn rejected_request_stays_in_patient_history_and_never_creates_appointment
         items[0]["review_note"],
         "The requested slot range is not available; please submit a new range."
     );
-    assert_eq!(items[0]["reviewed_by"], patient_manager_id.to_string());
+    // The review note answers the patient; the reviewer stays internal.
+    assert!(items[0].get("reviewed_by").is_none());
+    assert!(items[0].get("reviewed_by_name").is_none());
     assert!(items[0]["converted_appointment_id"].is_null());
 
     let (status, body) = json_request(

@@ -49,12 +49,10 @@ async fn list_my_translation_requests(
 
     match sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
-                  dtr.status, dtr.note, dtr.source_language, dtr.source_text,
-                  dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.status, dtr.source_language, dtr.requested_by,
                   dtr.request_source, dtr.requested_at, dtr.completed_at,
                   dtr.translated_at, dtr.updated_at,
                   requester.name AS requested_by_name,
-                  translator.name AS translated_by_name,
                   d.auto_name AS document_name,
                   d.original_filename,
                   d.art AS document_art,
@@ -62,7 +60,6 @@ async fn list_my_translation_requests(
            FROM document_translation_requests dtr
            JOIN documents d ON d.id = dtr.document_id
            LEFT JOIN users requester ON requester.id = dtr.requested_by
-           LEFT JOIN users translator ON translator.id = dtr.translated_by
            WHERE dtr.patient_id = $1
              AND dtr.requested_by = $2
              AND dtr.request_source = 'patient_portal'
@@ -272,12 +269,10 @@ async fn load_translation_request(
 ) -> Result<Option<sqlx::postgres::PgRow>, axum::response::Response> {
     sqlx::query(
         r#"SELECT dtr.id, dtr.document_id, dtr.patient_id, dtr.requested_language,
-                  dtr.status, dtr.note, dtr.source_language, dtr.source_text,
-                  dtr.translated_text, dtr.requested_by, dtr.translated_by,
+                  dtr.status, dtr.source_language, dtr.requested_by,
                   dtr.request_source, dtr.requested_at, dtr.completed_at,
                   dtr.translated_at, dtr.updated_at,
                   requester.name AS requested_by_name,
-                  translator.name AS translated_by_name,
                   d.auto_name AS document_name,
                   d.original_filename,
                   d.art AS document_art,
@@ -285,7 +280,6 @@ async fn load_translation_request(
            FROM document_translation_requests dtr
            JOIN documents d ON d.id = dtr.document_id
            LEFT JOIN users requester ON requester.id = dtr.requested_by
-           LEFT JOIN users translator ON translator.id = dtr.translated_by
            WHERE dtr.id = $1
              AND dtr.requested_by = $2
              AND dtr.request_source = 'patient_portal'"#,
@@ -303,6 +297,11 @@ async fn load_translation_request(
     })
 }
 
+/// The patient's translation request as the portal shows it: what was asked
+/// for and how far it is. The staff's working data stays internal — the
+/// request note (staff may rewrite it while processing), the extracted source
+/// text, the draft translation and who translated it. A finished translation
+/// reaches the patient only as a document released to the portal.
 fn translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -310,15 +309,10 @@ fn translation_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
         "requested_language": row.try_get::<String, _>("requested_language").unwrap_or_default(),
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
-        "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
         "source_language": row.try_get::<Option<String>, _>("source_language").unwrap_or_default(),
-        "source_text": row.try_get::<Option<String>, _>("source_text").unwrap_or_default(),
-        "translated_text": row.try_get::<Option<String>, _>("translated_text").unwrap_or_default(),
         "request_source": row.try_get::<String, _>("request_source").unwrap_or_else(|_| "patient_portal".to_string()),
         "requested_by": row.try_get::<Uuid, _>("requested_by").unwrap_or_else(|_| Uuid::nil()),
         "requested_by_name": row.try_get::<Option<String>, _>("requested_by_name").unwrap_or_default(),
-        "translated_by": row.try_get::<Option<Uuid>, _>("translated_by").unwrap_or_default(),
-        "translated_by_name": row.try_get::<Option<String>, _>("translated_by_name").unwrap_or_default(),
         "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "translated_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("translated_at").unwrap_or_default().map(|value| value.to_rfc3339()),

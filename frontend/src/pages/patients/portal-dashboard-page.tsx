@@ -669,7 +669,6 @@ function usePatientDashboardPageContent() {
                         {[
                           portalDocumentValueLabel(item.art),
                           item.category ? portalDocumentValueLabel(item.category) : null,
-                          item.shared_by_name,
                         ].filter(Boolean).join(" / ")}
                       </p>
                     </div>

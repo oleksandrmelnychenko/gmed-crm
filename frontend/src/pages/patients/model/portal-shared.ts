@@ -26,14 +26,14 @@ export type PortalDocumentItem = {
   file_size: number | null;
   klinik: string | null;
   ursprung: string | null;
-  notes: string | null;
+  // No processing notes and no staff name: the portal receives only what was
+  // released to the patient.
   share_id: string;
   channel: string | null;
   requires_confirmation: boolean;
   confirmed: boolean;
   confirmed_at: string | null;
   shared_at: string;
-  shared_by_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -376,10 +376,6 @@ export type PortalRecommendationItem = {
   decided_at: string | null;
   appointment_request_id: string | null;
   appointment_request_status: string | null;
-  created_by: string | null;
-  created_by_name: string | null;
-  updated_by: string | null;
-  updated_by_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -412,20 +408,10 @@ export type PortalTranslationRequestItem = {
   patient_id: string | null;
   requested_language: string;
   status: string;
-  note: string | null;
   source_language: string | null;
-  source_text: string | null;
-  translated_text: string | null;
   request_source: string;
   requested_by: string;
   requested_by_name: string | null;
-  assigned_to?: string | null;
-  assigned_to_name?: string | null;
-  assigned_at?: string | null;
-  translated_by: string | null;
-  translated_by_name: string | null;
-  translated_document_id?: string | null;
-  translated_document_name?: string | null;
   requested_at: string;
   completed_at: string | null;
   translated_at: string | null;
@@ -474,8 +460,6 @@ export type PortalAppointmentRequestItem = {
   notes: string | null;
   status: string;
   review_note: string | null;
-  reviewed_by: string | null;
-  reviewed_by_name: string | null;
   reviewed_at: string | null;
   requested_at: string;
   cancelled_at?: string | null;

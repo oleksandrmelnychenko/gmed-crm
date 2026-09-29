@@ -119,6 +119,7 @@ import {
 } from "@/pages/appointments/ui/scheduler/appointments-scheduler-surface";
 import type { QueueScheduleDraft } from "@/pages/appointments/ui/sheets/queue-sheet";
 import { CreateSheetLayer, preloadCreateSheetLayer } from "@/pages/appointments/ui/sheets/create-sheet-layer";
+import { OwnInterpreterReportsPanel } from "@/pages/appointments/ui/sections/own-reports-panel";
 import {
   LinkedDocumentsSheetLayer,
   LinkedPatientSheetLayer,
@@ -1714,6 +1715,12 @@ function useStaffAppointmentsPageContent() {
           appointmentsAuxiliaryError={appointmentsAuxiliaryError}
           metadataError={metadataError}
         />
+
+        {/* "Hours and reports" (cabinet link `?focus=reports`): the interpreter's
+            own reports, also those on visits it was taken off (read-only). */}
+        {user?.role === "interpreter" && searchParams.get("focus") === "reports" ? (
+          <OwnInterpreterReportsPanel onOpenAppointment={openDetailSheet} />
+        ) : null}
 
         <AppointmentsSchedulerSurface
           useMobileAgenda={useMobileAgenda}

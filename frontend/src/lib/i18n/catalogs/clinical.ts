@@ -202,6 +202,12 @@ export interface ClinicalTranslations {
   appointments_interpreter_saving: string;
   appointments_report_approved_at: string;
   appointments_report_returned_at: string;
+  appointments_own_reports_title: string;
+  appointments_own_reports_hint: string;
+  appointments_own_reports_empty: string;
+  appointments_own_reports_load_error: string;
+  appointments_own_reports_read_only: string;
+  appointments_own_reports_open_appointment: string;
   appointments_recurring_occurrence_summary: string;
   appointments_edit_recurrence_rule_guidance: string;
   appointments_workflow_completion_scope_blocked: string;
@@ -421,6 +427,13 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_interpreter_saving: "Сохранение",
   appointments_report_approved_at: "Утверждено {date}",
   appointments_report_returned_at: "Возвращено {date}",
+  appointments_own_reports_title: "Мои отчёты и часы",
+  appointments_own_reports_hint:
+    "Все ваши отчёты по терминам. Если вас сняли с термина, отчёт остаётся доступен только для чтения.",
+  appointments_own_reports_empty: "Отчётов пока нет.",
+  appointments_own_reports_load_error: "Не удалось загрузить отчёты.",
+  appointments_own_reports_read_only: "Вы сняты с термина — отчёт доступен только для чтения",
+  appointments_own_reports_open_appointment: "Открыть термин",
   appointments_recurring_occurrence_summary:
     "Приём {index} на {date} ({count} {checklistLabel})",
   appointments_edit_recurrence_rule_guidance: "Изменения правила повтора применяются только при выборе «этот и следующие» или «вся серия». Изменение одного приёма не меняет правило серии.",
@@ -641,6 +654,13 @@ export const clinicalDe: ClinicalTranslations = {
   appointments_interpreter_saving: "Speichern",
   appointments_report_approved_at: "Freigegeben {date}",
   appointments_report_returned_at: "Zurückgegeben {date}",
+  appointments_own_reports_title: "Meine Berichte und Stunden",
+  appointments_own_reports_hint:
+    "Alle Ihre Einsatzberichte. Wurden Sie von einem Termin abgezogen, bleibt der Bericht nur lesbar.",
+  appointments_own_reports_empty: "Noch keine Berichte.",
+  appointments_own_reports_load_error: "Berichte konnten nicht geladen werden.",
+  appointments_own_reports_read_only: "Vom Termin abgezogen – Bericht nur lesbar",
+  appointments_own_reports_open_appointment: "Termin öffnen",
   appointments_recurring_occurrence_summary:
     "Termin {index} am {date} ({count} {checklistLabel})",
   appointments_edit_recurrence_rule_guidance: "Änderungen an der Wiederholungsregel greifen nur, wenn Sie „diesen und folgende“ oder „ganze Serie“ auswählen. Einzeltermine bleiben von Regeländerungen getrennt.",

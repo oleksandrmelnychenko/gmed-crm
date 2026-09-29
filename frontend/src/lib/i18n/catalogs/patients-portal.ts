@@ -501,8 +501,6 @@ export interface PatientsPortalTranslations {
   portal_documents_confirmed: string;
   portal_documents_needs_confirmation: string;
   portal_documents_released: string;
-  portal_documents_released_by: string;
-  portal_documents_care_team: string;
   portal_documents_released_at: string;
   portal_documents_filename: string;
   portal_documents_source: string;
@@ -1459,8 +1457,6 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_documents_confirmed: "Подтверждено",
   portal_documents_needs_confirmation: "Требуется подтверждение",
   portal_documents_released: "Опубликовано",
-  portal_documents_released_by: "Опубликовано",
-  portal_documents_care_team: "Команда сопровождения",
   portal_documents_released_at: "Опубликовано",
   portal_documents_filename: "Имя файла",
   portal_documents_source: "Источник",
@@ -2408,8 +2404,6 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_documents_confirmed: "Bestätigt",
   portal_documents_needs_confirmation: "Bestätigung erforderlich",
   portal_documents_released: "Freigegeben",
-  portal_documents_released_by: "Freigegeben von",
-  portal_documents_care_team: "Betreuungsteam",
   portal_documents_released_at: "Freigegeben am",
   portal_documents_filename: "Dateiname",
   portal_documents_source: "Quelle",

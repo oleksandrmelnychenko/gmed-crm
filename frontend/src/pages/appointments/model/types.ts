@@ -371,6 +371,29 @@ export type ReportSummary = {
   billing_service_key?: string | null;
 };
 
+/**
+ * One of the interpreter's own reports (`GET /appointments/my-reports`):
+ * hours, the visit's date and time, the review decision with its note and
+ * the report text. After the interpreter was taken off the visit the report
+ * stays readable (`read_only`), the appointment itself does not.
+ */
+export type OwnInterpreterReport = {
+  id: string;
+  appointment_id: string;
+  interpreter_id: string;
+  hours: string;
+  report_text: string | null;
+  approval_status: string;
+  notes: string | null;
+  approved_at: string | null;
+  created_at: string;
+  appointment_date: string;
+  appointment_time_start: string | null;
+  appointment_time_end: string | null;
+  appointment_access: boolean;
+  read_only: boolean;
+};
+
 export type TaskEntry = {
   id: string;
   title: string;
