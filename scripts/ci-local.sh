@@ -78,7 +78,7 @@ for step in "${steps[@]}"; do
         rm -rf "$PG_DATA"
         pg initdb -D "$PG_DATA" -U postgres --auth=trust >/dev/null
       fi
-      pg pg_ctl -D "$PG_DATA" -o "-p $PG_PORT -k /tmp -c listen_addresses=127.0.0.1 -c max_connections=300 -c fsync=off" -l "$WORK_DIR/pg.log" -w start >/dev/null
+      pg pg_ctl -D "$PG_DATA" -o "-p $PG_PORT -k /tmp -c listen_addresses=127.0.0.1 -c max_connections=300 -c fsync=off -c jit=off" -l "$WORK_DIR/pg.log" -w start >/dev/null
       started_pg=1
       echo "== cargo test (PostgreSQL on 127.0.0.1:$PG_PORT, $TEST_THREADS threads)"
       TEST_DATABASE_ADMIN_URL="postgres://postgres@127.0.0.1:$PG_PORT/postgres" \
