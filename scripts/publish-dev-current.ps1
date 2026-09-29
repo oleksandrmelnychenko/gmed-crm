@@ -8,10 +8,13 @@ param(
   [switch]$CommittedOnly,
   [switch]$SkipSmoke,
   [switch]$DirectMigrations,
-  # Build the four application images on this workstation (Docker Desktop)
-  # and push them through an SSH tunnel to the DEV-local registry; the DEV
-  # host then only pulls changed layers instead of compiling.
+  # The four application images are built on this workstation (Docker Desktop)
+  # and pushed through an SSH tunnel to the DEV-local registry; the DEV host
+  # only pulls changed layers. This is the default: compiling on the 8 GB DEV
+  # host runs out of memory. -LocalImages is kept for old command lines.
   [switch]$LocalImages,
+  # Compile on the DEV host instead (old behaviour; needs enough free RAM there).
+  [switch]$ServerBuild,
   [int]$LocalBuildJobs = 16,
   [switch]$DryRun
 )
@@ -60,7 +63,7 @@ function Get-DockerCli {
   if ($command) { return $command.Source }
   $fallback = Join-Path $env:LOCALAPPDATA "Programs\DockerDesktop\resources\bin\docker.exe"
   if (Test-Path -LiteralPath $fallback) { return $fallback }
-  throw "Docker CLI not found; start Docker Desktop or drop -LocalImages"
+  throw "Docker CLI not found; start Docker Desktop or pass -ServerBuild to compile on the DEV host"
 }
 
 function Publish-LocalImages {
@@ -255,7 +258,7 @@ try {
   }
 
   $prebuiltTag = ""
-  if ($LocalImages) {
+  if (-not $ServerBuild) {
     $prebuiltTag = ($publishId -replace '[^A-Za-z0-9_.-]', '-')
     Publish-LocalImages -Archive $archive -WorkRoot $temporaryPublishRoot -Tag $prebuiltTag -SshOptions $sshOptions -Remote $remote
   }
