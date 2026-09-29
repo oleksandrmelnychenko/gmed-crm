@@ -1,5 +1,5 @@
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { BellPlus, CalendarPlus, CheckCircle2, LoaderCircle } from "lucide-react";
+import { BellPlus, CalendarPlus, CalendarX2, CheckCircle2, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { updateOrderFollowupFlow } from "../data/order-api";
 import { FOLLOWUP_MILESTONES_ANCHOR_ID } from "../model/blocking-reasons";
 import {
   FOLLOWUP_MILESTONES,
+  followupMilestoneCompletionBlock,
   followupMilestoneKeys,
   followupMilestoneLabel,
   followupMilestoneNeedsDate,
@@ -39,6 +40,11 @@ type Notice = { milestone: FollowupMilestone; text: string; tone: "success" | "e
  * "scheduled" with a date counts for the follow-up gate. A reminder (on the
  * order's appointment) or a follow-up visit can be created directly for the
  * date, with visible confirmation.
+ *
+ * "Completed" follows the milestone's visits: it is offered only once they
+ * took place (or, without a visit, from the planned date on). A visit still
+ * open for a contact marked not required keeps the order from completing, so
+ * it can be cancelled from here.
  */
 export function OrderFollowupMilestones({
   orderId,
@@ -66,6 +72,34 @@ export function OrderFollowupMilestones({
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<FollowupMilestone | null>(null);
+
+  /** Marks the milestone not required and cancels its open visits in one step. */
+  async function cancelOpenVisits(milestone: FollowupMilestone) {
+    const keys = followupMilestoneKeys(milestone);
+    setBusy(`${milestone}:cancel`);
+    setNotice(null);
+    try {
+      await updateOrderFollowupFlow(orderId, {
+        [keys.apiStatus]: "not_required",
+        cancel_open_visits_for: [milestone],
+      });
+      onFormChange((current) => ({ ...current, [keys.statusField]: "not_required" }));
+      const text = tx("Визит отменён.", "Termin abgesagt.");
+      setNotice({ milestone, text, tone: "success" });
+      toast.success(text);
+      onCreated();
+    } catch (error) {
+      const text =
+        error instanceof Error && error.message
+          ? error.message
+          : tx("Не удалось отменить визит.", "Der Termin konnte nicht abgesagt werden.");
+      setNotice({ milestone, text, tone: "error" });
+    } finally {
+      setConfirmCancel(null);
+      setBusy(null);
+    }
+  }
 
   async function create(milestone: FollowupMilestone, kind: "reminder" | "visit") {
     const keys = followupMilestoneKeys(milestone);
@@ -165,6 +199,14 @@ export function OrderFollowupMilestones({
           const needsDate = followupMilestoneNeedsDate(form, milestone);
           const rowNotice = notice?.milestone === milestone ? notice : null;
           const label = followupMilestoneLabel(milestone, tx);
+          const status = form[keys.statusField];
+          const completionBlock = followupMilestoneCompletionBlock(flow, form, milestone);
+          const openVisits = flow[keys.openVisits] ?? 0;
+          const openVisitLabel = formatDateOnly(
+            flow[keys.openVisitDate] ?? "",
+            "de-DE",
+            flow[keys.openVisitDate] ?? "",
+          );
           return (
             <div key={milestone} className="grid gap-2 py-3" data-testid={`followup-milestone-${milestone}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -200,9 +242,13 @@ export function OrderFollowupMilestones({
                   }
                   className="h-9 w-full rounded-lg bg-field text-sm"
                 >
-                  {(["pending", "scheduled", "completed", "not_required"] as const).map((status) => (
-                    <option key={status} value={status}>
-                      {statusLabel(status)}
+                  {(["pending", "scheduled", "completed", "not_required"] as const).map((option) => (
+                    <option
+                      key={option}
+                      value={option}
+                      disabled={option === "completed" && completionBlock !== null && status !== "completed"}
+                    >
+                      {statusLabel(option)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -225,6 +271,88 @@ export function OrderFollowupMilestones({
                     "Datum angeben – ohne Datum zählt der geplante Kontakt nicht.",
                   )}
                 </p>
+              ) : null}
+              {completionBlock && status !== "not_required" ? (
+                <p
+                  className={cn(
+                    "text-xs",
+                    status === "completed" ? "text-amber-700" : "text-muted-foreground",
+                  )}
+                  data-testid={`followup-milestone-${milestone}-completion-block`}
+                >
+                  {completionBlock.kind === "open_visit"
+                    ? tx(
+                        `«${statusLabel("completed")}» — после визита ${openVisitLabel}: сначала отметьте визит проведённым или отмените его.`,
+                        `„${statusLabel("completed")}“ erst nach dem Termin am ${openVisitLabel}: den Termin zuerst als durchgeführt markieren oder absagen.`,
+                      )
+                    : tx(
+                        `«${statusLabel("completed")}» можно отметить не раньше ${formatDateOnly(completionBlock.date, "de-DE", completionBlock.date)}.`,
+                        `„${statusLabel("completed")}“ ist frühestens am ${formatDateOnly(completionBlock.date, "de-DE", completionBlock.date)} möglich.`,
+                      )}
+                </p>
+              ) : null}
+              {status === "not_required" && openVisits > 0 ? (
+                <div
+                  className="flex flex-wrap items-center gap-2 text-xs text-amber-700"
+                  data-testid={`followup-milestone-${milestone}-open-visit`}
+                >
+                  <span>
+                    {tx(
+                      `Визит ${openVisitLabel} по этому контакту ещё запланирован — пока он не отменён, заказ нельзя завершить.`,
+                      `Der Termin am ${openVisitLabel} für diesen Kontakt ist noch geplant – solange er nicht abgesagt ist, kann der Auftrag nicht abgeschlossen werden.`,
+                    )}
+                  </span>
+                  {canManage && confirmCancel !== milestone ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      disabled={busy !== null}
+                      onClick={() => setConfirmCancel(milestone)}
+                    >
+                      <CalendarX2 className="size-3.5" />
+                      {openVisits > 1
+                        ? tx(`Отменить визиты (${openVisits})`, `Termine absagen (${openVisits})`)
+                        : tx("Отменить визит", "Termin absagen")}
+                    </Button>
+                  ) : null}
+                  {canManage && confirmCancel === milestone ? (
+                    <>
+                      <span className="font-medium">
+                        {tx(
+                          "Отменённый визит нельзя вернуть. Отменить?",
+                          "Ein abgesagter Termin lässt sich nicht wiederherstellen. Absagen?",
+                        )}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={busy !== null}
+                        onClick={() => void cancelOpenVisits(milestone)}
+                      >
+                        {busy === `${milestone}:cancel` ? (
+                          <LoaderCircle className="size-3.5 animate-spin" />
+                        ) : (
+                          <CalendarX2 className="size-3.5" />
+                        )}
+                        {tx("Да, отменить", "Ja, absagen")}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={busy !== null}
+                        onClick={() => setConfirmCancel(null)}
+                      >
+                        {tx("Нет", "Nein")}
+                      </Button>
+                    </>
+                  ) : null}
+                </div>
               ) : null}
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span>

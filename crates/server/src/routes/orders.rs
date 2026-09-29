@@ -286,6 +286,11 @@ struct UpdateOrderFollowupFlowRequest {
     package_end_status: Option<String>,
     results_handoff_status: Option<String>,
     followup_summary: Option<String>,
+    /// Milestones (`doctor`, `post_1w`, `post_1m`, `post_6m`, `package_end`)
+    /// marked not required with this update whose planned or confirmed
+    /// visits are cancelled together with it.
+    #[serde(default)]
+    cancel_open_visits_for: Vec<String>,
 }
 
 /// An optional date field of a partial update: `None` keeps the stored value,
@@ -1121,6 +1126,200 @@ fn allowed_order_statuses(current: &str) -> &'static [&'static str] {
     }
 }
 
+/// A follow-up milestone of an order: its status (and, for the 1-week,
+/// 1-month and 6-month contacts, its planned date) in `order_followup_flows`,
+/// and the follow-up visits that belong to it.
+struct FollowupMilestoneSpec {
+    /// Value of `appointments.followup_milestone`.
+    key: &'static str,
+    status_column: &'static str,
+    date_column: Option<&'static str>,
+    /// Name used in blocking reasons.
+    label: &'static str,
+}
+
+const FOLLOWUP_MILESTONE_SPECS: [FollowupMilestoneSpec; 5] = [
+    FollowupMilestoneSpec {
+        key: "doctor",
+        status_column: "doctor_followup_status",
+        date_column: None,
+        label: "Doctor follow-up",
+    },
+    FollowupMilestoneSpec {
+        key: "post_1w",
+        status_column: "followup_1w_status",
+        date_column: Some("followup_1w_date"),
+        label: "1-week follow-up",
+    },
+    FollowupMilestoneSpec {
+        key: "post_1m",
+        status_column: "followup_1m_status",
+        date_column: Some("followup_1m_date"),
+        label: "1-month follow-up",
+    },
+    FollowupMilestoneSpec {
+        key: "post_6m",
+        status_column: "followup_6m_status",
+        date_column: Some("followup_6m_date"),
+        label: "6-month follow-up",
+    },
+    FollowupMilestoneSpec {
+        key: "package_end",
+        status_column: "package_end_status",
+        date_column: None,
+        label: "Package-end follow-up",
+    },
+];
+
+/// Milestone of a follow-up visit: `appointments.followup_milestone`, or for
+/// rows written before that column the title patterns of its backfill
+/// (migrations/20260919190000_appointment_followup_milestone.sql).
+const FOLLOWUP_VISIT_MILESTONE_SQL: &str = r#"COALESCE(followup_milestone, CASE
+        WHEN title ILIKE '1-week follow-up check-in%' OR title ILIKE 'Контроль%1 неделю%' OR title ILIKE 'Nachsorge nach 1 Woche%' THEN 'post_1w'
+        WHEN title ILIKE '1-month follow-up check-in%' OR title ILIKE 'Контроль%1 месяц%' OR title ILIKE 'Nachsorge nach 1 Monat%' THEN 'post_1m'
+        WHEN title ILIKE '6-month follow-up check-in%' OR title ILIKE 'Контроль%6 месяцев%' OR title ILIKE 'Nachsorge nach 6 Monaten%' THEN 'post_6m'
+        WHEN title ILIKE 'Doctor-directed:%' THEN 'doctor'
+        WHEN title ILIKE 'Package-end:%' THEN 'package_end'
+    END)"#;
+
+/// A follow-up visit of an order that is not cancelled.
+#[derive(Debug, Clone)]
+struct FollowupVisit {
+    id: Uuid,
+    milestone: Option<String>,
+    date: chrono::NaiveDate,
+    status: String,
+}
+
+impl FollowupVisit {
+    /// Neither completed nor cancelled yet.
+    fn is_open(&self) -> bool {
+        self.status != "completed"
+    }
+}
+
+/// The order's follow-up visits (follow-up checklist phase or care path) that
+/// are not cancelled, earliest first.
+async fn load_followup_visits<'e, E>(
+    executor: E,
+    order_id: Uuid,
+) -> Result<Vec<FollowupVisit>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let rows = sqlx::query(&format!(
+        r#"SELECT id, date, status, {FOLLOWUP_VISIT_MILESTONE_SQL} AS milestone
+           FROM appointments
+           WHERE order_id = $1
+             AND (checklist_phase = 'followup' OR care_path_kind = 'followup')
+             AND status <> 'cancelled'
+           ORDER BY date, created_at, id"#
+    ))
+    .bind(order_id)
+    .fetch_all(executor)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            Some(FollowupVisit {
+                id: row.try_get("id").ok()?,
+                milestone: row.try_get("milestone").unwrap_or_default(),
+                date: row.try_get("date").ok()?,
+                status: row.try_get("status").unwrap_or_default(),
+            })
+        })
+        .collect())
+}
+
+fn followup_milestone_visits<'a>(
+    visits: &'a [FollowupVisit],
+    milestone: &'a str,
+) -> impl Iterator<Item = &'a FollowupVisit> + 'a {
+    visits
+        .iter()
+        .filter(move |visit| visit.milestone.as_deref() == Some(milestone))
+}
+
+/// Earliest visit of the milestone that is neither completed nor cancelled.
+fn open_followup_visit<'a>(
+    visits: &'a [FollowupVisit],
+    milestone: &'a str,
+) -> Option<&'a FollowupVisit> {
+    followup_milestone_visits(visits, milestone).find(|visit| visit.is_open())
+}
+
+/// Why a follow-up milestone cannot count as completed (yet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FollowupCompletionBlock {
+    /// A visit of the milestone is neither completed nor cancelled.
+    OpenVisit {
+        appointment_id: Uuid,
+        date: chrono::NaiveDate,
+    },
+    /// The milestone has no visit and its planned date is still ahead.
+    BeforeDate { date: chrono::NaiveDate },
+}
+
+impl FollowupCompletionBlock {
+    fn reason(self, label: &str) -> String {
+        match self {
+            Self::OpenVisit { date, .. } => {
+                format!("{label} visit on {} is still open", date.format("%d.%m.%Y"))
+            }
+            Self::BeforeDate { date } => format!(
+                "{label} cannot be completed before {}",
+                date.format("%d.%m.%Y")
+            ),
+        }
+    }
+
+    fn details(self, milestone: &str) -> serde_json::Value {
+        match self {
+            Self::OpenVisit {
+                appointment_id,
+                date,
+            } => serde_json::json!({
+                "code": "followup_visit_open",
+                "milestone": milestone,
+                "appointment_id": appointment_id,
+                "date": date,
+            }),
+            Self::BeforeDate { date } => serde_json::json!({
+                "code": "followup_before_date",
+                "milestone": milestone,
+                "date": date,
+            }),
+        }
+    }
+}
+
+/// A milestone is completed through its visits: every visit of it must be
+/// completed (or cancelled). A milestone without a visit (a call or message)
+/// cannot be completed before its planned date; without a date nothing is
+/// planned yet that the completion could precede.
+fn followup_completion_block(
+    visits: &[FollowupVisit],
+    milestone: &str,
+    planned_date: Option<chrono::NaiveDate>,
+    today: chrono::NaiveDate,
+) -> Option<FollowupCompletionBlock> {
+    if let Some(visit) = open_followup_visit(visits, milestone) {
+        return Some(FollowupCompletionBlock::OpenVisit {
+            appointment_id: visit.id,
+            date: visit.date,
+        });
+    }
+    let has_visits = followup_milestone_visits(visits, milestone)
+        .next()
+        .is_some();
+    match planned_date {
+        Some(date) if !has_visits && date > today => {
+            Some(FollowupCompletionBlock::BeforeDate { date })
+        }
+        _ => None,
+    }
+}
+
 async fn load_order_completion_blockers(
     state: &AppState,
     order_id: Uuid,
@@ -1133,7 +1332,8 @@ async fn load_order_completion_blockers(
 
     let followup = sqlx::query(
         r#"SELECT doctor_followup_status, followup_1w_status, followup_1m_status,
-                  followup_6m_status, package_end_status, results_handoff_status
+                  followup_6m_status, package_end_status, results_handoff_status,
+                  followup_1w_date, followup_1m_date, followup_6m_date
            FROM order_followup_flows
            WHERE order_id = $1"#,
     )
@@ -1153,16 +1353,53 @@ async fn load_order_completion_blockers(
         return Ok(reasons);
     };
 
-    for (column, label) in [
-        ("doctor_followup_status", "Doctor follow-up"),
-        ("followup_1w_status", "1-week follow-up"),
-        ("followup_1m_status", "1-month follow-up"),
-        ("followup_6m_status", "6-month follow-up"),
-        ("package_end_status", "Package-end follow-up"),
-    ] {
-        let value: String = followup.try_get(column).unwrap_or_default();
-        if !matches!(value.as_str(), "completed" | "not_required") {
-            reasons.push(format!("{label} must be completed or marked not required"));
+    let visits = load_followup_visits(&state.db, order_id)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, order_id = %order_id, "load follow-up visits before completion");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate order completion",
+            )
+        })?;
+    let today = crate::app_time::today();
+    for spec in &FOLLOWUP_MILESTONE_SPECS {
+        let value: String = followup.try_get(spec.status_column).unwrap_or_default();
+        match value.as_str() {
+            // A milestone marked completed counts only once its visits took
+            // place and its date is reached.
+            "completed" => {
+                let planned_date = spec
+                    .date_column
+                    .and_then(|column| {
+                        followup
+                            .try_get::<Option<chrono::NaiveDate>, _>(column)
+                            .ok()
+                    })
+                    .flatten();
+                if let Some(block) =
+                    followup_completion_block(&visits, spec.key, planned_date, today)
+                {
+                    reasons.push(block.reason(spec.label));
+                }
+            }
+            // A visit kept for a milestone marked not required must still be
+            // held or cancelled.
+            "not_required" => {
+                if let Some(visit) = open_followup_visit(&visits, spec.key) {
+                    reasons.push(
+                        FollowupCompletionBlock::OpenVisit {
+                            appointment_id: visit.id,
+                            date: visit.date,
+                        }
+                        .reason(spec.label),
+                    );
+                }
+            }
+            _ => reasons.push(format!(
+                "{} must be completed or marked not required",
+                spec.label
+            )),
         }
     }
     let results_handoff_status: String = followup
@@ -2181,60 +2418,26 @@ async fn load_order_followup_readiness(
 
     let patient_id: Uuid = followup_row.try_get("patient_id").unwrap_or_default();
 
-    let activity_row = sqlx::query(
-        r#"SELECT
-                COUNT(*) FILTER (
-                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
-                      AND status <> 'cancelled'
-                ) AS followup_appointments_total,
-                COUNT(*) FILTER (
-                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
-                      AND (followup_milestone = 'doctor' OR title ILIKE 'Doctor-directed:%')
-                      AND status <> 'cancelled'
-                ) AS doctor_followup_visits,
-                COUNT(*) FILTER (
-                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
-                      AND (
-                            followup_milestone = 'post_1w'
-                         OR title ILIKE '1-week follow-up check-in%'
-                         OR title ILIKE 'Контроль%1 неделю%'
-                         OR title ILIKE 'Nachsorge nach 1 Woche%'
-                      )
-                      AND status <> 'cancelled'
-                ) AS followup_1w_visits,
-                COUNT(*) FILTER (
-                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
-                      AND (
-                            followup_milestone = 'post_1m'
-                         OR title ILIKE '1-month follow-up check-in%'
-                         OR title ILIKE 'Контроль%1 месяц%'
-                         OR title ILIKE 'Nachsorge nach 1 Monat%'
-                      )
-                      AND status <> 'cancelled'
-                ) AS followup_1m_visits,
-                COUNT(*) FILTER (
-                    WHERE (checklist_phase = 'followup' OR care_path_kind = 'followup')
-                      AND (
-                            followup_milestone = 'post_6m'
-                         OR title ILIKE '6-month follow-up check-in%'
-                         OR title ILIKE 'Контроль%6 месяцев%'
-                         OR title ILIKE 'Nachsorge nach 6 Monaten%'
-                      )
-                      AND status <> 'cancelled'
-                ) AS followup_6m_visits
-           FROM appointments
-           WHERE order_id = $1"#,
-    )
-    .bind(order_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, order_id = %order_id, "load follow-up appointment activity");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to load order follow-up flow",
-        )
-    })?;
+    let followup_visits = load_followup_visits(&state.db, order_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, order_id = %order_id, "load follow-up appointment activity");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load order follow-up flow",
+            )
+        })?;
+    let milestone_visits = |milestone: &str| -> i64 {
+        followup_milestone_visits(&followup_visits, milestone).count() as i64
+    };
+    let open_milestone_visits = |milestone: &str| -> i64 {
+        followup_milestone_visits(&followup_visits, milestone)
+            .filter(|visit| visit.is_open())
+            .count() as i64
+    };
+    let open_milestone_visit_date = |milestone: &str| -> Option<String> {
+        open_followup_visit(&followup_visits, milestone).map(|visit| visit.date.to_string())
+    };
 
     let reminder_row = sqlx::query(
         r#"SELECT
@@ -2391,21 +2594,11 @@ async fn load_order_followup_readiness(
     let followup_summary: Option<String> =
         followup_row.try_get("followup_summary").unwrap_or_default();
 
-    let followup_appointments_total: i64 = activity_row
-        .try_get("followup_appointments_total")
-        .unwrap_or_default();
-    let doctor_followup_visits: i64 = activity_row
-        .try_get("doctor_followup_visits")
-        .unwrap_or_default();
-    let followup_1w_visits: i64 = activity_row
-        .try_get("followup_1w_visits")
-        .unwrap_or_default();
-    let followup_1m_visits: i64 = activity_row
-        .try_get("followup_1m_visits")
-        .unwrap_or_default();
-    let followup_6m_visits: i64 = activity_row
-        .try_get("followup_6m_visits")
-        .unwrap_or_default();
+    let followup_appointments_total = followup_visits.len() as i64;
+    let doctor_followup_visits = milestone_visits("doctor");
+    let followup_1w_visits = milestone_visits("post_1w");
+    let followup_1m_visits = milestone_visits("post_1m");
+    let followup_6m_visits = milestone_visits("post_6m");
 
     let followup_1w_reminders: i64 = reminder_row
         .try_get("followup_1w_reminders")
@@ -2560,6 +2753,19 @@ async fn load_order_followup_readiness(
             "followup_1w_visits": followup_1w_visits,
             "followup_1m_visits": followup_1m_visits,
             "followup_6m_visits": followup_6m_visits,
+            // Visits of a milestone that are neither completed nor cancelled:
+            // the milestone cannot be completed before them, and they block
+            // the order's completion even when the milestone is not required.
+            "doctor_followup_open_visits": open_milestone_visits("doctor"),
+            "followup_1w_open_visits": open_milestone_visits("post_1w"),
+            "followup_1m_open_visits": open_milestone_visits("post_1m"),
+            "followup_6m_open_visits": open_milestone_visits("post_6m"),
+            "package_end_open_visits": open_milestone_visits("package_end"),
+            "doctor_followup_open_visit_date": open_milestone_visit_date("doctor"),
+            "followup_1w_open_visit_date": open_milestone_visit_date("post_1w"),
+            "followup_1m_open_visit_date": open_milestone_visit_date("post_1m"),
+            "followup_6m_open_visit_date": open_milestone_visit_date("post_6m"),
+            "package_end_open_visit_date": open_milestone_visit_date("package_end"),
             "followup_1w_reminders": followup_1w_reminders,
             "followup_1m_reminders": followup_1m_reminders,
             "followup_6m_reminders": followup_6m_reminders,
@@ -3911,6 +4117,25 @@ fn economics_money(value: rust_decimal::Decimal) -> String {
     money::money_string(value)
 }
 
+/// Net revenue and partner cost of an order's pass-through services.
+#[derive(Debug, Default, Clone, Copy)]
+struct PassthroughAmounts {
+    revenue_net: rust_decimal::Decimal,
+    cost_net: rust_decimal::Decimal,
+}
+
+impl PassthroughAmounts {
+    /// Agency margin of the order: revenue less partner cost, both without
+    /// the pass-through services, which are re-billed at cost.
+    fn margin_of(
+        self,
+        revenue_net: rust_decimal::Decimal,
+        cost_net: rust_decimal::Decimal,
+    ) -> rust_decimal::Decimal {
+        (revenue_net - self.revenue_net) - (cost_net - self.cost_net)
+    }
+}
+
 async fn get_order_economics(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4288,8 +4513,15 @@ async fn get_order_economics(
         }
     };
 
+    // Revenue per order service: what its invoice lines billed, less the
+    // credit notes of those lines. A credit note with credited lines reduces
+    // only them (crediting the interpreter hours leaves the transfer as
+    // billed); a legacy credit note without lines stays spread pro rata over
+    // its invoice. Advance invoices are payments on account, not service
+    // revenue, and an advance applied to a settlement invoice does not reduce
+    // its lines.
     let service_rows = match sqlx::query(
-        r#"WITH credits AS (
+        r#"WITH legacy_credits AS (
                SELECT transaction.invoice_id,
                       COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note'
                                         THEN transaction.amount_net ELSE -transaction.amount_net END), 0) AS amount_net,
@@ -4300,27 +4532,58 @@ async fn get_order_economics(
                FROM invoice_credit_note_transactions transaction
                JOIN invoices invoice ON invoice.id = transaction.invoice_id
                WHERE invoice.order_id = $1
+                 AND transaction.line_items IS NULL
                GROUP BY transaction.invoice_id
+           ), line_credits AS (
+               SELECT transaction.invoice_id,
+                      NULLIF(
+                          invoice.line_items
+                              -> ((credited.value ->> 'invoice_line_index')::INTEGER)
+                              ->> 'quote_line_index',
+                          ''
+                      )::INTEGER AS quote_line_index,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_net', '')::NUMERIC, 0)), 0) AS amount_net,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_vat', '')::NUMERIC, 0)), 0) AS amount_vat,
+                      COALESCE(SUM(CASE WHEN transaction.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                   * COALESCE(NULLIF(credited.value ->> 'line_gross', '')::NUMERIC, 0)), 0) AS amount_gross
+               FROM invoice_credit_note_transactions transaction
+               JOIN invoices invoice ON invoice.id = transaction.invoice_id
+               CROSS JOIN LATERAL jsonb_array_elements(transaction.line_items) AS credited(value)
+               WHERE invoice.order_id = $1
+                 AND transaction.line_items IS NOT NULL
+                 AND jsonb_typeof(invoice.line_items) = 'array'
+               GROUP BY 1, 2
            ), service_revenue AS (
                SELECT allocation.order_leistung_id,
-                      COALESCE(SUM(
+                      COALESCE(SUM(GREATEST(
                           CASE WHEN invoice.total_net > 0 THEN allocation.amount_net_snapshot
-                               * GREATEST(invoice.total_net - COALESCE(credits.amount_net, 0), 0)
+                               * GREATEST(invoice.total_net - COALESCE(legacy.amount_net, 0), 0)
                                / invoice.total_net ELSE 0 END
-                      ), 0) AS amount_net,
-                      COALESCE(SUM(
+                          - COALESCE(line_credit.amount_net, 0),
+                          0
+                      )), 0) AS amount_net,
+                      COALESCE(SUM(GREATEST(
                           CASE WHEN invoice.total_vat > 0 THEN allocation.amount_vat_snapshot
-                               * GREATEST(invoice.total_vat - COALESCE(credits.amount_vat, 0), 0)
+                               * GREATEST(invoice.total_vat - COALESCE(legacy.amount_vat, 0), 0)
                                / invoice.total_vat ELSE 0 END
-                      ), 0) AS amount_vat,
-                      COALESCE(SUM(
+                          - COALESCE(line_credit.amount_vat, 0),
+                          0
+                      )), 0) AS amount_vat,
+                      COALESCE(SUM(GREATEST(
                           CASE WHEN invoice.total_gross > 0 THEN allocation.amount_gross_snapshot
-                               * GREATEST(invoice.total_gross - COALESCE(credits.amount_gross, 0), 0)
+                               * GREATEST(invoice.total_gross - COALESCE(legacy.amount_gross, 0), 0)
                                / invoice.total_gross ELSE 0 END
-                      ), 0) AS amount_gross
+                          - COALESCE(line_credit.amount_gross, 0),
+                          0
+                      )), 0) AS amount_gross
                FROM invoice_order_line_allocations allocation
                JOIN invoices invoice ON invoice.id = allocation.invoice_id
-               LEFT JOIN credits ON credits.invoice_id = invoice.id
+               LEFT JOIN legacy_credits legacy ON legacy.invoice_id = invoice.id
+               LEFT JOIN line_credits line_credit
+                      ON line_credit.invoice_id = invoice.id
+                     AND line_credit.quote_line_index = allocation.quote_line_index
                WHERE invoice.order_id = $1
                  AND invoice.invoice_type <> 'advance'
                  AND invoice.status IN ('sent', 'partially_paid', 'paid', 'overdue')
@@ -4350,6 +4613,7 @@ async fn get_order_economics(
                   COALESCE(service.agency_service_name_snapshot, service.description) AS name,
                   service.description,
                   service.status,
+                  service.is_cost_passthrough,
                   UPPER(service.currency) AS currency,
                   CASE WHEN service.quantity > 0
                              AND service.quantity <= 1000000
@@ -4441,12 +4705,6 @@ async fn get_order_economics(
     let incurred_net = external
         .try_get::<rust_decimal::Decimal, _>("incurred_net")
         .unwrap_or(rust_decimal::Decimal::ZERO);
-    let margin_net = revenue_net - incurred_net;
-    let margin_percent = if revenue_net > rust_decimal::Decimal::ZERO {
-        (margin_net / revenue_net * rust_decimal::Decimal::new(100, 0)).round_commercial(2)
-    } else {
-        rust_decimal::Decimal::ZERO
-    };
 
     let mut planned_revenue_net = rust_decimal::Decimal::ZERO;
     let mut planned_revenue_vat = rust_decimal::Decimal::ZERO;
@@ -4454,6 +4712,11 @@ async fn get_order_economics(
     let mut planned_cost_vat = rust_decimal::Decimal::ZERO;
     let mut planned_cost_gross = rust_decimal::Decimal::ZERO;
     let mut assigned_revenue_net = rust_decimal::Decimal::ZERO;
+    // Pass-through services (Auslagen, hotel at cost) are re-billed at cost:
+    // their revenue and cost stay in the order figures but not in the
+    // agency margin.
+    let mut planned_passthrough = PassthroughAmounts::default();
+    let mut actual_passthrough = PassthroughAmounts::default();
     let services = service_rows
         .into_iter()
         .map(|row| {
@@ -4469,6 +4732,9 @@ async fn get_order_economics(
             let cancelled = row
                 .try_get::<String, _>("status")
                 .is_ok_and(|status| status == "cancelled");
+            let is_cost_passthrough = row
+                .try_get::<bool, _>("is_cost_passthrough")
+                .unwrap_or(false);
             let counts_as_planned = currency_matches_order && calculation_valid && !cancelled;
             let quantity = row
                 .try_get::<rust_decimal::Decimal, _>("quantity")
@@ -4499,6 +4765,10 @@ async fn get_order_economics(
                 planned_cost_net += service_planned_cost_net;
                 planned_cost_vat += service_planned_cost_vat;
                 planned_cost_gross += service_planned_cost_gross;
+                if is_cost_passthrough {
+                    planned_passthrough.revenue_net += service_planned_net;
+                    planned_passthrough.cost_net += service_planned_cost_net;
+                }
             }
 
             let actual_revenue_net = row
@@ -4508,6 +4778,10 @@ async fn get_order_economics(
                 .try_get::<rust_decimal::Decimal, _>("actual_cost_net")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
             assigned_revenue_net += actual_revenue_net;
+            if is_cost_passthrough {
+                actual_passthrough.revenue_net += actual_revenue_net;
+                actual_passthrough.cost_net += actual_cost_net;
+            }
             serde_json::json!({
                 "order_leistung_id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
@@ -4516,6 +4790,8 @@ async fn get_order_economics(
                 "currency_matches_order": currency_matches_order,
                 "calculation_valid": calculation_valid,
                 "cancelled": cancelled,
+                // Re-billed at cost: no agency margin of its own.
+                "is_cost_passthrough": is_cost_passthrough,
                 "planned_revenue_net": counts_as_planned.then(|| economics_money(service_planned_net)),
                 "planned_revenue_vat": counts_as_planned.then(|| economics_money(service_planned_vat)),
                 "planned_revenue_gross": counts_as_planned.then(|| economics_money(service_planned_gross)),
@@ -4530,13 +4806,20 @@ async fn get_order_economics(
                 "actual_partner_cost_gross": (margin_visible && economics_valid).then(|| economics_money(row.try_get::<rust_decimal::Decimal, _>("actual_cost_gross").unwrap_or(rust_decimal::Decimal::ZERO))),
                 "partner_paid_gross": margin_visible.then(|| economics_money(row.try_get::<rust_decimal::Decimal, _>("partner_paid_gross").unwrap_or(rust_decimal::Decimal::ZERO))),
                 "partner_unpaid_gross": margin_visible.then(|| economics_money(row.try_get::<rust_decimal::Decimal, _>("partner_unpaid_gross").unwrap_or(rust_decimal::Decimal::ZERO))),
-                "margin_net": (margin_visible && economics_valid).then(|| economics_money(actual_revenue_net - actual_cost_net)),
+                "margin_net": (margin_visible && economics_valid && !is_cost_passthrough).then(|| economics_money(actual_revenue_net - actual_cost_net)),
             })
         })
         .collect::<Vec<_>>();
 
     let planned_revenue_gross = planned_revenue_net + planned_revenue_vat;
-    let planned_margin_net = planned_revenue_net - planned_cost_net;
+    let planned_margin_net = planned_passthrough.margin_of(planned_revenue_net, planned_cost_net);
+    let agency_revenue_net = revenue_net - actual_passthrough.revenue_net;
+    let margin_net = actual_passthrough.margin_of(revenue_net, incurred_net);
+    let margin_percent = if agency_revenue_net > rust_decimal::Decimal::ZERO {
+        (margin_net / agency_revenue_net * rust_decimal::Decimal::new(100, 0)).round_commercial(2)
+    } else {
+        rust_decimal::Decimal::ZERO
+    };
     let advance_invoiced_gross = advances
         .try_get::<rust_decimal::Decimal, _>("advance_invoiced_gross")
         .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -4606,9 +4889,14 @@ async fn get_order_economics(
             "partner_cost_vat": (margin_visible && economics_valid).then(|| economics_money(planned_cost_vat)),
             "partner_cost_gross": (margin_visible && economics_valid).then(|| economics_money(planned_cost_gross)),
             "margin_net": (margin_visible && economics_valid).then(|| economics_money(planned_margin_net)),
+            "passthrough_revenue_net": economics_money(planned_passthrough.revenue_net),
+            "passthrough_cost_net": (margin_visible && economics_valid).then(|| economics_money(planned_passthrough.cost_net)),
         },
         "actual": {
             "recognized_revenue_net": economics_money(revenue_net),
+            "agency_revenue_net": economics_money(agency_revenue_net),
+            "passthrough_revenue_net": economics_money(actual_passthrough.revenue_net),
+            "passthrough_cost_net": (margin_visible && economics_valid).then(|| economics_money(actual_passthrough.cost_net)),
             "recognized_revenue_vat": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("revenue_vat").unwrap_or(rust_decimal::Decimal::ZERO)),
             "recognized_revenue_gross": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("revenue_gross").unwrap_or(rust_decimal::Decimal::ZERO)),
             "credited_net": economics_money(invoice.try_get::<rust_decimal::Decimal, _>("credited_net").unwrap_or(rust_decimal::Decimal::ZERO)),
@@ -5464,6 +5752,7 @@ async fn cancel_order(
         auth.user_id,
         order_id,
         &cancellation.cancelled_appointment_ids,
+        "order_cancelled",
     )
     .await;
 
@@ -6421,6 +6710,7 @@ async fn update_followup_flow(
         && body.package_end_status.is_none()
         && body.results_handoff_status.is_none()
         && body.followup_summary.is_none()
+        && body.cancel_open_visits_for.is_empty()
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -6521,8 +6811,113 @@ async fn update_followup_flow(
             Err(resp) => return resp,
         };
 
+    let mut cancel_milestones: Vec<&'static str> = Vec::new();
+    for requested in &body.cancel_open_visits_for {
+        let requested = requested.trim().to_lowercase();
+        let Some(spec) = FOLLOWUP_MILESTONE_SPECS
+            .iter()
+            .find(|spec| spec.key == requested)
+        else {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Invalid cancel_open_visits_for milestone",
+            );
+        };
+        if !cancel_milestones.contains(&spec.key) {
+            cancel_milestones.push(spec.key);
+        }
+    }
+
     if let Err(resp) = ensure_order_followup_flow_state(&state, order_id).await {
         return resp;
+    }
+
+    let failed = |error: sqlx::Error, context: &'static str| {
+        tracing::error!(error = %error, order_id = %order_id, "{context}");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update order follow-up flow",
+        )
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return failed(error, "begin follow-up flow update"),
+    };
+    let current = match sqlx::query(
+        r#"SELECT doctor_followup_status, followup_1w_status, followup_1m_status,
+                  followup_6m_status, package_end_status,
+                  followup_1w_date, followup_1m_date, followup_6m_date
+           FROM order_followup_flows
+           WHERE order_id = $1
+           FOR UPDATE"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => return failed(error, "lock follow-up flow"),
+    };
+    let visits = match load_followup_visits(&mut *tx, order_id).await {
+        Ok(value) => value,
+        Err(error) => return failed(error, "load follow-up visits"),
+    };
+
+    // A milestone becomes completed only after its visits (or, without a
+    // visit, its planned date); its visits are cancelled only together with
+    // marking it not required.
+    let today = crate::app_time::today();
+    let mut cancel_visit_ids = Vec::new();
+    for spec in &FOLLOWUP_MILESTONE_SPECS {
+        let (requested_status, requested_date) = match spec.key {
+            "doctor" => (doctor_followup_status.as_deref(), None),
+            "post_1w" => (followup_1w_status.as_deref(), followup_1w_date),
+            "post_1m" => (followup_1m_status.as_deref(), followup_1m_date),
+            "post_6m" => (followup_6m_status.as_deref(), followup_6m_date),
+            _ => (package_end_status.as_deref(), None),
+        };
+        let stored_status: String = current.try_get(spec.status_column).unwrap_or_default();
+        let stored_date: Option<chrono::NaiveDate> = spec
+            .date_column
+            .and_then(|column| current.try_get::<Option<chrono::NaiveDate>, _>(column).ok())
+            .flatten();
+        let status = requested_status.unwrap_or(stored_status.as_str());
+        let planned_date = requested_date.unwrap_or(stored_date);
+        // Clearing the date does not lift it: a contact planned for later is
+        // completed early only by recording the day it took place.
+        let due_date = requested_date.flatten().or(stored_date);
+
+        if status == "completed"
+            && (stored_status != "completed" || planned_date != stored_date)
+            && let Some(block) = followup_completion_block(&visits, spec.key, due_date, today)
+        {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(serde_json::json!({
+                    "error": StatusCode::UNPROCESSABLE_ENTITY
+                        .canonical_reason()
+                        .unwrap_or("error"),
+                    "message": block.reason(spec.label),
+                    "details": block.details(spec.key),
+                })),
+            )
+                .into_response();
+        }
+
+        if cancel_milestones.contains(&spec.key) {
+            if status != "not_required" {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Follow-up visits are cancelled only together with marking their milestone not required",
+                );
+            }
+            cancel_visit_ids.extend(
+                followup_milestone_visits(&visits, spec.key)
+                    .filter(|visit| matches!(visit.status.as_str(), "planned" | "confirmed"))
+                    .map(|visit| visit.id),
+            );
+        }
     }
 
     match sqlx::query(
@@ -6557,52 +6952,70 @@ async fn update_followup_flow(
     .bind(followup_1m_date.flatten())
     .bind(followup_6m_date.is_some())
     .bind(followup_6m_date.flatten())
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await
     {
-        Ok(result) if result.rows_affected() > 0 => {
-            let realtime_payload = serde_json::json!({
-                "doctor_followup_status": doctor_followup_status,
-                "followup_1w_status": followup_1w_status,
-                "followup_1m_status": followup_1m_status,
-                "followup_6m_status": followup_6m_status,
-                "followup_1w_date": followup_1w_date.map(|value| value.map(|date| date.to_string())),
-                "followup_1m_date": followup_1m_date.map(|value| value.map(|date| date.to_string())),
-                "followup_6m_date": followup_6m_date.map(|value| value.map(|date| date.to_string())),
-                "package_end_date": package_end_date.map(|value| value.to_string()),
-                "package_end_status": package_end_status,
-                "results_handoff_status": results_handoff_status,
-                "followup_summary": followup_summary,
-            });
-            state.audit_sender.try_send(audit::domain_event(
-                "update_order_followup_flow",
-                Some(auth.user_id),
-                "order",
-                Some(order_id),
-                realtime_payload.clone(),
-            ));
-            crate::realtime::publish_order_event(
-                &state,
-                Some(auth.user_id),
-                "order.followup_flow_updated",
-                order_id,
-                realtime_payload,
-            )
-            .await;
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => return failed(error, "update follow-up flow"),
+    }
 
-            match load_order_followup_readiness(&state, order_id).await {
-                Ok(readiness) => Json(readiness.payload).into_response(),
-                Err(resp) => resp,
-            }
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(e) => {
-            tracing::error!(error = %e, order_id = %order_id, "update follow-up flow");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update order follow-up flow",
-            )
-        }
+    let cancelled_appointment_ids =
+        match crate::routes::appointments::cancel_open_appointments_in_tx(
+            &mut tx,
+            &cancel_visit_ids,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(resp) => return resp,
+        };
+    if let Err(error) = tx.commit().await {
+        return failed(error, "commit follow-up flow update");
+    }
+
+    let realtime_payload = serde_json::json!({
+        "doctor_followup_status": doctor_followup_status,
+        "followup_1w_status": followup_1w_status,
+        "followup_1m_status": followup_1m_status,
+        "followup_6m_status": followup_6m_status,
+        "followup_1w_date": followup_1w_date.map(|value| value.map(|date| date.to_string())),
+        "followup_1m_date": followup_1m_date.map(|value| value.map(|date| date.to_string())),
+        "followup_6m_date": followup_6m_date.map(|value| value.map(|date| date.to_string())),
+        "package_end_date": package_end_date.map(|value| value.to_string()),
+        "package_end_status": package_end_status,
+        "results_handoff_status": results_handoff_status,
+        "followup_summary": followup_summary,
+        "cancelled_appointment_ids": cancelled_appointment_ids,
+    });
+    state.audit_sender.try_send(audit::domain_event(
+        "update_order_followup_flow",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        realtime_payload.clone(),
+    ));
+    crate::realtime::publish_order_event(
+        &state,
+        Some(auth.user_id),
+        "order.followup_flow_updated",
+        order_id,
+        realtime_payload,
+    )
+    .await;
+    crate::routes::appointments::publish_cancelled_order_appointments(
+        &state,
+        auth.user_id,
+        order_id,
+        &cancelled_appointment_ids,
+        "followup_not_required",
+    )
+    .await;
+
+    match load_order_followup_readiness(&state, order_id).await {
+        Ok(readiness) => Json(readiness.payload).into_response(),
+        Err(resp) => resp,
     }
 }
 
@@ -11984,6 +12397,64 @@ async fn ensure_order_service_patient_allowed(
 mod tests {
     use super::*;
 
+    fn followup_visit(milestone: &str, date: &str, status: &str) -> FollowupVisit {
+        FollowupVisit {
+            id: Uuid::new_v4(),
+            milestone: Some(milestone.to_string()),
+            date: chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+            status: status.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_followup_milestone_is_completed_through_its_visits_and_date() {
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        let ahead = chrono::NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+        let open = followup_visit("post_1w", "2026-10-20", "planned");
+        let visits = vec![
+            open.clone(),
+            followup_visit("post_6m", "2026-09-01", "completed"),
+        ];
+
+        assert_eq!(
+            followup_completion_block(&visits, "post_1w", None, today),
+            Some(FollowupCompletionBlock::OpenVisit {
+                appointment_id: open.id,
+                date: ahead,
+            })
+        );
+        // Held visits complete the milestone, even before its planned date.
+        assert_eq!(
+            followup_completion_block(&visits, "post_6m", Some(ahead), today),
+            None
+        );
+        // Without a visit the planned date decides; no date, nothing ahead.
+        assert_eq!(
+            followup_completion_block(&visits, "post_1m", Some(ahead), today),
+            Some(FollowupCompletionBlock::BeforeDate { date: ahead })
+        );
+        assert_eq!(
+            followup_completion_block(&visits, "post_1m", Some(today), today),
+            None
+        );
+        assert_eq!(
+            followup_completion_block(&visits, "post_1m", None, today),
+            None
+        );
+        assert_eq!(
+            FollowupCompletionBlock::OpenVisit {
+                appointment_id: open.id,
+                date: ahead,
+            }
+            .reason("1-week follow-up"),
+            "1-week follow-up visit on 20.10.2026 is still open"
+        );
+        assert_eq!(
+            FollowupCompletionBlock::BeforeDate { date: ahead }.reason("1-month follow-up"),
+            "1-month follow-up cannot be completed before 20.10.2026"
+        );
+    }
+
     #[test]
     fn a_new_order_requires_a_positive_prepayment_amount() {
         assert_eq!(
@@ -12118,5 +12589,29 @@ mod tests {
         let response = validate_order_date_range(Some(from), Some(to))
             .expect_err("reversed period must be rejected");
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn pass_through_services_stay_out_of_the_agency_margin() {
+        let passthrough = PassthroughAmounts {
+            revenue_net: rust_decimal::Decimal::new(1200, 0),
+            cost_net: rust_decimal::Decimal::new(1150, 0),
+        };
+        // 3846.05 revenue with 1200 pass-through, 1770 cost with 1150
+        // pass-through: 2646.05 - 620.
+        assert_eq!(
+            passthrough.margin_of(
+                rust_decimal::Decimal::new(384_605, 2),
+                rust_decimal::Decimal::new(1770, 0)
+            ),
+            rust_decimal::Decimal::new(202_605, 2)
+        );
+        assert_eq!(
+            PassthroughAmounts::default().margin_of(
+                rust_decimal::Decimal::new(100, 0),
+                rust_decimal::Decimal::new(40, 0)
+            ),
+            rust_decimal::Decimal::new(60, 0)
+        );
     }
 }

@@ -17,6 +17,18 @@ export function OrderEconomicsTable({ economics, lang, formatMoney }: {
     },
     render: service => <span className={`whitespace-nowrap font-mono tabular-nums ${strong ? "font-semibold" : ""}`}>{formatMoney(service[id], economics.currency)}</span>,
   });
+  // A pass-through service is re-billed at cost: it has no agency margin.
+  const passthroughLabel = de ? "Durchlaufposten" : "Транзит";
+  const passthroughHint = de
+    ? "Durchlaufposten: zum Einstandspreis weiterberechnet, nicht in der Agenturmarge."
+    : "Транзитная позиция: перевыставляется по себестоимости и не входит в агентскую маржу.";
+  const moneyMarginColumn = moneyColumn("margin_net", de ? "Marge ohne Mehrwertsteuer" : "Маржа без налога", 195, true);
+  const marginColumn: ColumnDef<OrderServiceEconomics> = {
+    ...moneyMarginColumn,
+    render: service => service.is_cost_passthrough
+      ? <span className="whitespace-nowrap text-xs text-muted-foreground" title={passthroughHint} data-testid="order-economics-passthrough">{passthroughLabel}</span>
+      : moneyMarginColumn.render?.(service),
+  };
   const columns: ColumnDef<OrderServiceEconomics>[] = [
     { id: "name", label: de ? "Leistung" : "Услуга", accessor: service => service.name, required: true, minWidth: 280,
       render: service => <span className="block min-w-0 truncate font-medium" title={service.name}>{service.name}</span> },
@@ -25,7 +37,7 @@ export function OrderEconomicsTable({ economics, lang, formatMoney }: {
     ...(economics.margin_visible ? [
       moneyColumn("planned_partner_cost_net", de ? "Geplante Partnerkosten" : "Плановые затраты на партнёра", 245),
       moneyColumn("actual_partner_cost_net", de ? "Tatsächliche Partnerkosten" : "Фактические затраты на партнёра", 260),
-      moneyColumn("margin_net", de ? "Marge ohne Mehrwertsteuer" : "Маржа без налога", 195, true),
+      marginColumn,
     ] : []),
   ];
   return <section data-testid="order-economics-table" className="min-w-0">

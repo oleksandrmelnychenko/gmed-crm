@@ -2951,29 +2951,58 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
         tracing::error!(error = %e, %order_id, "load upcoming appointments of a cancelled order");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
     })?;
+    cancel_open_appointments_in_tx(tx, &appointment_ids, cancelled_by).await
+}
+
+/// Cancels those of the given appointments that are still planned or
+/// confirmed, inside the caller's transaction, with the side effects of a
+/// manual cancellation (see [`cancel_upcoming_order_appointments_in_tx`]).
+/// Returns the appointments it cancelled; the caller publishes them with
+/// [`publish_cancelled_order_appointments`] after commit.
+pub(crate) async fn cancel_open_appointments_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+    cancelled_by: Uuid,
+) -> Result<Vec<Uuid>, axum::response::Response> {
     if appointment_ids.is_empty() {
-        return Ok(appointment_ids);
+        return Ok(Vec::new());
     }
 
-    if let Err(e) = sqlx::query(
-        "UPDATE appointments SET status = 'cancelled', updated_at = now() WHERE id = ANY($1)",
+    let returned_ids = match sqlx::query_scalar::<_, Uuid>(
+        r#"UPDATE appointments
+           SET status = 'cancelled', updated_at = now()
+           WHERE id = ANY($1)
+             AND status IN ('planned', 'confirmed')
+           RETURNING id"#,
     )
-    .bind(&appointment_ids)
-    .execute(&mut **tx)
+    .bind(appointment_ids)
+    .fetch_all(&mut **tx)
     .await
     {
-        if let Some(resp) = appointment_write_error_response(&e) {
-            return Err(resp);
+        Ok(value) => value,
+        Err(e) => {
+            if let Some(resp) = appointment_write_error_response(&e) {
+                return Err(resp);
+            }
+            tracing::error!(error = %e, "cancel open appointments");
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
         }
-        tracing::error!(error = %e, %order_id, "cancel upcoming appointments of a cancelled order");
-        return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+    };
+    // In the caller's order (RETURNING has none).
+    let cancelled_ids: Vec<Uuid> = appointment_ids
+        .iter()
+        .copied()
+        .filter(|id| returned_ids.contains(id))
+        .collect();
+    if cancelled_ids.is_empty() {
+        return Ok(cancelled_ids);
     }
-    reject_pending_reports_for_cancelled_appointments_in_tx(tx, &appointment_ids, cancelled_by)
+    reject_pending_reports_for_cancelled_appointments_in_tx(tx, &cancelled_ids, cancelled_by)
         .await?;
-    close_terminal_appointment_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
-    close_auto_concierge_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
-    end_interpreter_links_of_cancelled_in_tx(tx, &appointment_ids, cancelled_by).await?;
-    Ok(appointment_ids)
+    close_terminal_appointment_artifacts_in_tx(tx, &cancelled_ids, cancelled_by).await?;
+    close_auto_concierge_artifacts_in_tx(tx, &cancelled_ids, cancelled_by).await?;
+    end_interpreter_links_of_cancelled_in_tx(tx, &cancelled_ids, cancelled_by).await?;
+    Ok(cancelled_ids)
 }
 
 /// The interpreters of cancelled appointments keep their patient link only
@@ -2996,12 +3025,15 @@ async fn end_interpreter_links_of_cancelled_in_tx(
     Ok(())
 }
 
-/// Realtime events for appointments cancelled together with their order.
+/// Realtime events for appointments the order cancelled: together with the
+/// order (`order_cancelled`) or with a follow-up milestone marked not required
+/// (`followup_not_required`).
 pub(crate) async fn publish_cancelled_order_appointments(
     state: &AppState,
     actor_user_id: Uuid,
     order_id: Uuid,
     appointment_ids: &[Uuid],
+    reason: &'static str,
 ) {
     for appointment_id in appointment_ids {
         crate::realtime::publish_appointment_event(
@@ -3013,7 +3045,7 @@ pub(crate) async fn publish_cancelled_order_appointments(
                 "status": "cancelled",
                 "recurrence_scope": "single",
                 "affected_count": 1,
-                "reason": "order_cancelled",
+                "reason": reason,
                 "order_id": order_id,
             }),
         )

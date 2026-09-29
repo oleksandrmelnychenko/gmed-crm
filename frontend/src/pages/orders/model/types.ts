@@ -267,7 +267,11 @@ export type OrderEconomicsAmounts = {
   partner_cost_net: string | null;
   partner_cost_vat: string | null;
   partner_cost_gross: string | null;
+  /** Agency margin: without the pass-through services. */
   margin_net: string | null;
+  /** Revenue and partner cost of pass-through services (not in the margin). */
+  passthrough_revenue_net?: string;
+  passthrough_cost_net?: string | null;
 };
 
 export type OrderServiceEconomics = {
@@ -277,6 +281,8 @@ export type OrderServiceEconomics = {
   currency: string;
   currency_matches_order: boolean;
   calculation_valid: boolean;
+  /** Re-billed at cost: no agency margin of its own (`margin_net` is null). */
+  is_cost_passthrough?: boolean;
   planned_revenue_net: string | null;
   planned_revenue_vat: string | null;
   planned_revenue_gross: string | null;
@@ -304,6 +310,11 @@ export type OrderEconomics = {
     recognized_revenue_net: string;
     recognized_revenue_vat: string;
     recognized_revenue_gross: string;
+    /** Recognized revenue without the pass-through services. */
+    agency_revenue_net?: string;
+    /** Pass-through services: re-billed at cost, not in the agency margin. */
+    passthrough_revenue_net?: string;
+    passthrough_cost_net?: string | null;
     credited_net: string;
     credited_vat: string;
     credited_gross: string;
@@ -334,6 +345,7 @@ export type OrderEconomics = {
     unpaid_to_partner_gross: string | null;
     paid_directly_by_patient_gross: string;
     unbilled_patient_receivable_gross: string;
+    /** Agency margin (without pass-through services) and its share of the agency revenue. */
     margin_net: string | null;
     margin_percent: string | null;
   };
@@ -503,6 +515,20 @@ export type OrderFollowupFlow = {
   followup_1w_visits: number;
   followup_1m_visits: number;
   followup_6m_visits: number;
+  /**
+   * Visits of a milestone that are neither completed nor cancelled, and the
+   * date of the earliest one: the milestone cannot be completed before them.
+   */
+  doctor_followup_open_visits?: number;
+  followup_1w_open_visits?: number;
+  followup_1m_open_visits?: number;
+  followup_6m_open_visits?: number;
+  package_end_open_visits?: number;
+  doctor_followup_open_visit_date?: string | null;
+  followup_1w_open_visit_date?: string | null;
+  followup_1m_open_visit_date?: string | null;
+  followup_6m_open_visit_date?: string | null;
+  package_end_open_visit_date?: string | null;
   followup_1w_reminders: number;
   followup_1m_reminders: number;
   followup_6m_reminders: number;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { orderBlockingReasonAnchor, orderBlockingReasonSection } from "./blocking-reasons";
 import { blankOrderFollowupForm } from "./order-model";
 import {
+  followupMilestoneCompletionBlock,
   followupMilestoneNeedsDate,
   followupMilestoneTitle,
   followupReminderAt,
@@ -69,6 +70,66 @@ describe("withFollowupMilestoneStatus", () => {
     expect(
       followupMilestoneNeedsDate({ ...blankOrderFollowupForm(), followup6mStatus: "scheduled" }, "post_6m"),
     ).toBe(true);
+  });
+});
+
+describe("followupMilestoneCompletionBlock", () => {
+  const noVisits = {
+    followup_1w_visits: 0,
+    followup_1m_visits: 0,
+    followup_6m_visits: 0,
+  };
+  // 12:00 in Berlin on 28 Sep 2026.
+  const today = new Date("2026-09-28T10:00:00Z");
+
+  it("waits for an open visit of the milestone (QA D-19)", () => {
+    const flow = {
+      ...noVisits,
+      followup_1w_visits: 1,
+      followup_1w_open_visits: 1,
+      followup_1w_open_visit_date: "2026-10-20",
+    };
+    expect(followupMilestoneCompletionBlock(flow, blankOrderFollowupForm(), "post_1w", today)).toEqual({
+      kind: "open_visit",
+      date: "2026-10-20",
+      count: 1,
+    });
+  });
+
+  it("allows completion once every visit took place, whatever the planned date", () => {
+    const flow = { ...noVisits, followup_6m_visits: 1, followup_6m_open_visits: 0 };
+    const form = { ...blankOrderFollowupForm(), followup6mDate: "2027-03-28" };
+    expect(followupMilestoneCompletionBlock(flow, form, "post_6m", today)).toBeNull();
+  });
+
+  it("keeps a contact without a visit until its planned Berlin date", () => {
+    const form = { ...blankOrderFollowupForm(), followup1mDate: "2026-10-28" };
+    expect(followupMilestoneCompletionBlock(noVisits, form, "post_1m", today)).toEqual({
+      kind: "before_date",
+      date: "2026-10-28",
+    });
+    expect(
+      followupMilestoneCompletionBlock(noVisits, { ...form, followup1mDate: "2026-09-28" }, "post_1m", today),
+    ).toBeNull();
+    // 00:30 on 29 Sep in Berlin is still 28 Sep in UTC.
+    expect(
+      followupMilestoneCompletionBlock(
+        noVisits,
+        { ...form, followup1mDate: "2026-09-29" },
+        "post_1m",
+        new Date("2026-09-28T22:30:00Z"),
+      ),
+    ).toBeNull();
+    expect(followupMilestoneCompletionBlock(noVisits, blankOrderFollowupForm(), "post_1m", today)).toBeNull();
+    // Clearing the date in the form keeps the saved one.
+    expect(
+      followupMilestoneCompletionBlock(
+        { ...noVisits, followup_1m_date: "2026-10-28" },
+        blankOrderFollowupForm(),
+        "post_1m",
+        today,
+      ),
+    ).toEqual({ kind: "before_date", date: "2026-10-28" });
   });
 });
 
