@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isOrderReadinessGateApplicable,
+  orderBlockingReasonAnchor,
   orderBlockingReasonSection,
   resolveOrderBlockingReason,
 } from "./blocking-reasons";
@@ -123,6 +124,31 @@ describe("orderBlockingReasonSection", () => {
       key: "orders_blocking_patient_invoice_unpaid",
       values: { number: "RE-2026-0007" },
     });
+  });
+
+  it("translates follow-up milestones that cannot count as completed yet", () => {
+    expect(resolveOrderBlockingReason("1-week follow-up visit on 20.10.2026 is still open")).toEqual({
+      key: "orders_blocking_followup_visit_open_1w",
+      values: { date: "20.10.2026" },
+    });
+    expect(resolveOrderBlockingReason("Package-end follow-up visit on 01.03.2027 is still open")).toEqual({
+      key: "orders_blocking_followup_visit_open_package_end",
+      values: { date: "01.03.2027" },
+    });
+    expect(resolveOrderBlockingReason("6-month follow-up cannot be completed before 28.03.2027")).toEqual({
+      key: "orders_blocking_followup_before_date_6m",
+      values: { date: "28.03.2027" },
+    });
+    expect(resolveOrderBlockingReason("Doctor follow-up cannot be completed before 28.03.2027")).toBeNull();
+
+    expect(orderBlockingReasonSection("6-month follow-up visit on 28.03.2027 is still open")).toBe("followup");
+    expect(orderBlockingReasonAnchor("6-month follow-up visit on 28.03.2027 is still open")).toBe(
+      "order-followup-milestones",
+    );
+    expect(orderBlockingReasonAnchor("1-month follow-up cannot be completed before 28.10.2026")).toBe(
+      "order-followup-milestones",
+    );
+    expect(orderBlockingReasonAnchor("Doctor follow-up visit on 01.10.2026 is still open")).toBeNull();
   });
 
   it("sends planning blockers to planning and everything else to the gates", () => {

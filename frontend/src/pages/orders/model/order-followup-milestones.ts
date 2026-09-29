@@ -24,6 +24,11 @@ type MilestoneKeys = {
   recommended: "recommended_followup_1w_at" | "recommended_followup_1m_at" | "recommended_followup_6m_at";
   ready: "followup_1w_ready" | "followup_1m_ready" | "followup_6m_ready";
   visits: "followup_1w_visits" | "followup_1m_visits" | "followup_6m_visits";
+  openVisits: "followup_1w_open_visits" | "followup_1m_open_visits" | "followup_6m_open_visits";
+  openVisitDate:
+    | "followup_1w_open_visit_date"
+    | "followup_1m_open_visit_date"
+    | "followup_6m_open_visit_date";
   reminders: "followup_1w_reminders" | "followup_1m_reminders" | "followup_6m_reminders";
   offset: { days?: number; months?: number };
 };
@@ -37,6 +42,8 @@ const MILESTONE_KEYS: Record<FollowupMilestone, MilestoneKeys> = {
     recommended: "recommended_followup_1w_at",
     ready: "followup_1w_ready",
     visits: "followup_1w_visits",
+    openVisits: "followup_1w_open_visits",
+    openVisitDate: "followup_1w_open_visit_date",
     reminders: "followup_1w_reminders",
     offset: { days: 7 },
   },
@@ -48,6 +55,8 @@ const MILESTONE_KEYS: Record<FollowupMilestone, MilestoneKeys> = {
     recommended: "recommended_followup_1m_at",
     ready: "followup_1m_ready",
     visits: "followup_1m_visits",
+    openVisits: "followup_1m_open_visits",
+    openVisitDate: "followup_1m_open_visit_date",
     reminders: "followup_1m_reminders",
     offset: { months: 1 },
   },
@@ -59,6 +68,8 @@ const MILESTONE_KEYS: Record<FollowupMilestone, MilestoneKeys> = {
     recommended: "recommended_followup_6m_at",
     ready: "followup_6m_ready",
     visits: "followup_6m_visits",
+    openVisits: "followup_6m_open_visits",
+    openVisitDate: "followup_6m_open_visit_date",
     reminders: "followup_6m_reminders",
     offset: { months: 6 },
   },
@@ -144,4 +155,47 @@ export function followupMilestoneNeedsDate(
 ): boolean {
   const { statusField, dateField } = MILESTONE_KEYS[milestone];
   return form[statusField] === "scheduled" && !form[dateField];
+}
+
+/** Why a milestone cannot be marked completed yet. */
+export type FollowupCompletionBlock =
+  /** A visit of the milestone (earliest on `date`) is not held or cancelled yet. */
+  | { kind: "open_visit"; date: string; count: number }
+  /** The milestone has no visit and is planned for a later date. */
+  | { kind: "before_date"; date: string };
+
+/**
+ * The server's rule for "completed" (see `followup_completion_block` in
+ * orders.rs): every visit of the milestone must be held or cancelled; a
+ * contact without a visit cannot be completed before its planned date (the
+ * date in the form; a cleared date keeps the saved one).
+ */
+export function followupMilestoneCompletionBlock(
+  flow: Pick<
+    OrderFollowupFlow,
+    | "followup_1w_date"
+    | "followup_1m_date"
+    | "followup_6m_date"
+    | "followup_1w_visits"
+    | "followup_1m_visits"
+    | "followup_6m_visits"
+    | "followup_1w_open_visits"
+    | "followup_1m_open_visits"
+    | "followup_6m_open_visits"
+    | "followup_1w_open_visit_date"
+    | "followup_1m_open_visit_date"
+    | "followup_6m_open_visit_date"
+  >,
+  form: OrderFollowupFormState,
+  milestone: FollowupMilestone,
+  today: Date = new Date(),
+): FollowupCompletionBlock | null {
+  const keys = MILESTONE_KEYS[milestone];
+  const openVisits = flow[keys.openVisits] ?? 0;
+  if (openVisits > 0) {
+    return { kind: "open_visit", date: flow[keys.openVisitDate] ?? "", count: openVisits };
+  }
+  if ((flow[keys.visits] ?? 0) > 0) return null;
+  const date = form[keys.dateField] || flow[keys.apiDate] || "";
+  return date && date > appDateKey(today) ? { kind: "before_date", date } : null;
 }

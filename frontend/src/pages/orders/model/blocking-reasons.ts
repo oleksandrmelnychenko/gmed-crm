@@ -105,11 +105,49 @@ const OVERDUE_DEBT_REASON_KEYS: Record<string, string> = {
   "are in escalated debt-management": "orders_debt_reason_escalated_overdue",
 };
 
+// Follow-up milestones in the server's blocking reasons (label -> key suffix).
+const FOLLOWUP_MILESTONE_REASON_SUFFIX: Record<string, string> = {
+  "Doctor follow-up": "doctor",
+  "1-week follow-up": "1w",
+  "1-month follow-up": "1m",
+  "6-month follow-up": "6m",
+  "Package-end follow-up": "package_end",
+};
+const FOLLOWUP_VISIT_OPEN_REASON =
+  /^(Doctor follow-up|1-week follow-up|1-month follow-up|6-month follow-up|Package-end follow-up) visit on (\d{2}\.\d{2}\.\d{4}) is still open$/;
+const FOLLOWUP_BEFORE_DATE_REASON =
+  /^(1-week follow-up|1-month follow-up|6-month follow-up) cannot be completed before (\d{2}\.\d{2}\.\d{4})$/;
+
+/**
+ * A follow-up milestone that cannot count as completed yet: a visit of it is
+ * still open (completion follows the visits) or its planned date is ahead.
+ */
+function followupCompletionReason(reason: string): OrderBlockingReasonTranslation | null {
+  const openVisit = reason.match(FOLLOWUP_VISIT_OPEN_REASON);
+  if (openVisit) {
+    return {
+      key: `orders_blocking_followup_visit_open_${FOLLOWUP_MILESTONE_REASON_SUFFIX[openVisit[1]]}`,
+      values: { date: openVisit[2] },
+    };
+  }
+  const beforeDate = reason.match(FOLLOWUP_BEFORE_DATE_REASON);
+  if (beforeDate) {
+    return {
+      key: `orders_blocking_followup_before_date_${FOLLOWUP_MILESTONE_REASON_SUFFIX[beforeDate[1]]}`,
+      values: { date: beforeDate[2] },
+    };
+  }
+  return null;
+}
+
 export function resolveOrderBlockingReason(
   reason: string,
 ): OrderBlockingReasonTranslation | null {
   const exactKey = EXACT_REASON_KEYS[reason];
   if (exactKey) return { key: exactKey };
+
+  const followupCompletion = followupCompletionReason(reason);
+  if (followupCompletion) return followupCompletion;
 
   const patientDebtHold = reason.match(
     /^(\d+) overdue invoice\(s\) keep the patient in debt-management hold$/,
@@ -262,7 +300,12 @@ export const FOLLOWUP_MILESTONES_ANCHOR_ID = "order-followup-milestones";
  * "Open" link scrolls to it after opening the section.
  */
 export function orderBlockingReasonAnchor(reason: string): string | null {
-  return FOLLOWUP_MILESTONE_REASONS.has(reason) ? FOLLOWUP_MILESTONES_ANCHOR_ID : null;
+  if (FOLLOWUP_MILESTONE_REASONS.has(reason)) return FOLLOWUP_MILESTONES_ANCHOR_ID;
+  // The 1-week / 1-month / 6-month contacts are closed in the planner.
+  const completion = reason.match(FOLLOWUP_VISIT_OPEN_REASON) ?? reason.match(FOLLOWUP_BEFORE_DATE_REASON);
+  return completion && /^\d-(week|month) follow-up$/.test(completion[1])
+    ? FOLLOWUP_MILESTONES_ANCHOR_ID
+    : null;
 }
 
 /**
@@ -297,7 +340,11 @@ export function orderBlockingReasonSection(reason: string): OrderSectionKey {
     return "invoices";
   }
   if (EXECUTION_REASONS.has(reason)) return "execution";
-  if (FOLLOWUP_REASONS.has(reason) || COMPLETION_FOLLOWUP_REASONS.has(reason)) {
+  if (
+    FOLLOWUP_REASONS.has(reason) ||
+    COMPLETION_FOLLOWUP_REASONS.has(reason) ||
+    followupCompletionReason(reason)
+  ) {
     return "followup";
   }
   return "gates";

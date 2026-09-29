@@ -1321,3 +1321,514 @@ async fn economics_bills_issued_advances_once() {
     assert_eq!(second["actual"]["prepayment_applied_gross"], "500");
     assert_eq!(second["actual"]["billed_to_patient_gross"], "669");
 }
+
+fn economics_service<'a>(economics: &'a Value, service_id: Uuid) -> &'a Value {
+    economics["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|service| service["order_leistung_id"] == json!(service_id))
+        .unwrap_or_else(|| panic!("service {service_id} in {economics:?}"))
+}
+
+/// QA D-20 (order A-20260928-0005): six services, one of them pass-through
+/// ("Voraussichtliche Auslagen"), a paid 1000 EUR advance, an interim invoice
+/// (700) and a final invoice (3608.90) the advance is applied to, and a line
+/// credit note of 226.10 for the interpreter hours only.
+///
+/// Every service shows what its own invoice lines billed: the credit note
+/// reduces only the interpreter line, the advance changes no line. The
+/// pass-through service stays out of the agency margin on both sides.
+#[tokio::test]
+async fn economics_assigns_line_credits_and_keeps_pass_through_out_of_the_margin() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'followup', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let clinic_id = seed_provider(&pool, &tag, "Charite").await;
+
+    // (description, quantity, unit price, VAT %, pass-through, planned cost, clinic)
+    let lines: [(&str, i64, Decimal, i64, bool, Decimal, bool); 6] = [
+        (
+            "Organisation der Behandlung",
+            1,
+            Decimal::new(550, 0),
+            0,
+            false,
+            Decimal::ZERO,
+            false,
+        ),
+        (
+            "Anpassung",
+            1,
+            Decimal::new(12605, 2),
+            19,
+            false,
+            Decimal::ZERO,
+            false,
+        ),
+        (
+            "Interpreter support",
+            10,
+            Decimal::new(95, 0),
+            19,
+            false,
+            Decimal::ZERO,
+            false,
+        ),
+        (
+            "Airport transfer",
+            2,
+            Decimal::new(180, 0),
+            19,
+            false,
+            Decimal::ZERO,
+            false,
+        ),
+        (
+            "Voraussichtliche Auslagen",
+            1,
+            Decimal::new(1200, 0),
+            0,
+            true,
+            Decimal::new(1200, 0),
+            false,
+        ),
+        (
+            "QA Kardiologischer Check-up",
+            1,
+            Decimal::new(850, 0),
+            0,
+            false,
+            Decimal::new(600, 0),
+            true,
+        ),
+    ];
+    let mut service_ids = Vec::new();
+    let mut quote_lines = Vec::new();
+    for (description, quantity, unit_price, vat_rate, passthrough, planned_cost, at_clinic) in lines
+    {
+        let service_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO order_leistungen (
+                   order_id, patient_id, description, quantity, unit_price, currency,
+                   vat_rate, is_cost_passthrough, provider_id, status,
+                   planned_partner_cost_net, planned_partner_cost_vat,
+                   planned_partner_cost_gross
+               ) VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7, $8, 'invoiced', $9, 0, $9)
+               RETURNING id"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(description)
+        .bind(Decimal::new(quantity, 0))
+        .bind(unit_price)
+        .bind(Decimal::new(vat_rate, 0))
+        .bind(passthrough)
+        .bind(at_clinic.then_some(clinic_id))
+        .bind(planned_cost)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        service_ids.push(service_id);
+        quote_lines.push(json!({
+            "description": description,
+            "quantity": quantity.to_string(),
+            "unit_price": unit_price.to_string(),
+            "vat_rate": vat_rate.to_string(),
+            "is_cost_passthrough": passthrough,
+            "source_order_leistung_id": service_id,
+        }));
+    }
+    let [
+        organisation,
+        amendment,
+        interpreter,
+        transfer,
+        auslagen,
+        kardio,
+    ] = <[Uuid; 6]>::try_from(service_ids).unwrap();
+    let quote_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO quotes (
+               order_id, quote_number, total_net, total_vat, total_gross, status,
+               line_items, created_by
+           ) VALUES ($1, $2, 4036.05, 272.85, 4308.90, 'accepted', $3, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(format!("KV-{tag}"))
+    .bind(Value::Array(quote_lines))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // One settlement invoice per slice of the quote. A line is
+    // (quote line, service, quantity, net, VAT, gross, VAT %, pass-through).
+    type InvoiceLine<'a> = (
+        i32,
+        Uuid,
+        &'a str,
+        i64,
+        &'a str,
+        &'a str,
+        &'a str,
+        &'a str,
+        bool,
+    );
+    let issue = |kind: &'static str, suffix: &'static str, lines: Vec<InvoiceLine<'static>>| {
+        let pool = pool.clone();
+        let tag = tag.clone();
+        async move {
+            let net: Decimal = lines
+                .iter()
+                .map(|line| line.4.parse::<Decimal>().unwrap())
+                .sum();
+            let vat: Decimal = lines
+                .iter()
+                .map(|line| line.5.parse::<Decimal>().unwrap())
+                .sum();
+            let items = lines
+                .iter()
+                .map(|line| {
+                    json!({
+                        "description": line.2,
+                        "quantity": line.3.to_string(),
+                        "vat_rate": line.7,
+                        "is_cost_passthrough": line.8,
+                        "line_net": line.4,
+                        "line_vat": line.5,
+                        "line_gross": line.6,
+                        "quote_line_index": line.0,
+                        "source_order_leistung_id": line.1,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let invoice_id: Uuid = sqlx::query_scalar(
+                r#"INSERT INTO invoices (
+                       order_id, patient_id, quote_id, invoice_number, invoice_type, status,
+                       total_net, total_vat, total_gross, line_items, created_by
+                   ) VALUES ($1, $2, $3, $4, $5, 'sent', $6, $7, $8, $9, $10)
+                   RETURNING id"#,
+            )
+            .bind(order_id)
+            .bind(patient_id)
+            .bind(quote_id)
+            .bind(format!("INV-{tag}-{suffix}"))
+            .bind(kind)
+            .bind(net)
+            .bind(vat)
+            .bind(net + vat)
+            .bind(Value::Array(items))
+            .bind(admin_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            for line in &lines {
+                sqlx::query(
+                    r#"INSERT INTO invoice_order_line_allocations (
+                           invoice_id, quote_id, quote_line_index, order_leistung_id, quantity,
+                           description_snapshot, unit_price_net_snapshot, vat_rate_snapshot,
+                           amount_net_snapshot, amount_vat_snapshot, amount_gross_snapshot
+                       ) VALUES ($1, $2, $3, $4, $5, $6, $7 / $5, $8, $7, $9, $10)"#,
+                )
+                .bind(invoice_id)
+                .bind(quote_id)
+                .bind(line.0)
+                .bind(line.1)
+                .bind(Decimal::new(line.3, 0))
+                .bind(line.2)
+                .bind(line.4.parse::<Decimal>().unwrap())
+                .bind(line.7.parse::<Decimal>().unwrap())
+                .bind(line.5.parse::<Decimal>().unwrap())
+                .bind(line.6.parse::<Decimal>().unwrap())
+                .execute(&pool)
+                .await
+                .unwrap();
+            }
+            invoice_id
+        }
+    };
+    let _advance = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &tag,
+        "advance",
+        "advance",
+        "sent",
+        Decimal::new(1000, 0),
+        Decimal::ZERO,
+        Decimal::new(1000, 0),
+    )
+    .await;
+    let _interim = issue(
+        "interim",
+        "interim",
+        vec![
+            (
+                0,
+                organisation,
+                "Organisation der Behandlung",
+                1,
+                "550",
+                "0",
+                "550",
+                "0",
+                false,
+            ),
+            (
+                1,
+                amendment,
+                "Anpassung",
+                1,
+                "126.05",
+                "23.95",
+                "150",
+                "19",
+                false,
+            ),
+        ],
+    )
+    .await;
+    let final_id = issue(
+        "final",
+        "final",
+        vec![
+            (
+                2,
+                interpreter,
+                "Interpreter support",
+                10,
+                "950",
+                "180.50",
+                "1130.50",
+                "19",
+                false,
+            ),
+            (
+                3,
+                transfer,
+                "Airport transfer",
+                2,
+                "360",
+                "68.40",
+                "428.40",
+                "19",
+                false,
+            ),
+            (
+                4,
+                auslagen,
+                "Voraussichtliche Auslagen",
+                1,
+                "1200",
+                "0",
+                "1200",
+                "0",
+                true,
+            ),
+            (
+                5,
+                kardio,
+                "QA Kardiologischer Check-up",
+                1,
+                "850",
+                "0",
+                "850",
+                "0",
+                false,
+            ),
+        ],
+    )
+    .await;
+    // The advance is credited into the final invoice (a payment, no revenue).
+    sqlx::query("UPDATE invoices SET prepayment_applied_amount = 1000 WHERE id = $1")
+        .bind(final_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Credit note for the interpreter line (line 0 of the final invoice).
+    let credited_lines = json!([{
+        "invoice_line_index": 0,
+        "description": "Interpreter support",
+        "vat_rate": "19",
+        "is_cost_passthrough": false,
+        "line_net": "190",
+        "line_vat": "36.10",
+        "line_gross": "226.10",
+    }]);
+    let credit_note_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoice_credit_note_transactions (
+               invoice_id, transaction_type, request_id, document_number, reason,
+               amount_net, amount_vat, amount_gross, currency, issued_on, created_by,
+               credit_mode, line_items
+           ) VALUES ($1, 'credit_note', $2, $3, 'Two interpreter hours not used',
+                     190, 36.10, 226.10, 'EUR', CURRENT_DATE, $4, 'lines', $5)
+           RETURNING id"#,
+    )
+    .bind(final_id)
+    .bind(Uuid::new_v4())
+    .bind(format!("CN-{tag}"))
+    .bind(admin_id)
+    .bind(&credited_lines)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Supplier costs: the clinic for the check-up and the receipts behind the
+    // pass-through line.
+    for (service_id, number, net) in [
+        (kardio, "CHA", Decimal::new(620, 0)),
+        (auslagen, "HOTEL", Decimal::new(1150, 0)),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO external_invoices (
+                   order_id, patient_id, provider_id, order_leistung_id,
+                   external_invoice_number, amount_net, amount_vat, amount_gross,
+                   currency, status, paid_by, service_delivered, created_by
+               ) VALUES ($1, $2, $3, $4, $5, $6, 0, $6, 'EUR', 'approved', 'unpaid', true, $7)"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(clinic_id)
+        .bind(service_id)
+        .bind(format!("{number}-{tag}"))
+        .bind(net)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let ceo = auth_header(admin_id, "ceo");
+    let load = || async {
+        let (status, economics) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/orders/{order_id}/economics"),
+            &ceo,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "economics: {economics:?}");
+        economics
+    };
+    let economics = load().await;
+
+    for (service_id, revenue, margin) in [
+        (organisation, "550", json!("550")),
+        (amendment, "126.05", json!("126.05")),
+        (interpreter, "760", json!("760")),
+        (transfer, "360", json!("360")),
+        (auslagen, "1200", Value::Null),
+        (kardio, "850", json!("230")),
+    ] {
+        let service = economics_service(&economics, service_id);
+        assert_eq!(service["actual_revenue_net"], revenue, "{service:?}");
+        assert_eq!(service["margin_net"], margin, "{service:?}");
+        assert_eq!(
+            service["is_cost_passthrough"],
+            service_id == auslagen,
+            "{service:?}"
+        );
+    }
+    assert_eq!(
+        economics_service(&economics, interpreter)["actual_revenue_gross"],
+        "904.4"
+    );
+    assert_eq!(
+        economics_service(&economics, auslagen)["actual_partner_cost_net"],
+        "1150"
+    );
+
+    let actual = &economics["actual"];
+    assert_eq!(actual["recognized_revenue_net"], "3846.05");
+    assert_eq!(actual["passthrough_revenue_net"], "1200");
+    assert_eq!(actual["agency_revenue_net"], "2646.05");
+    assert_eq!(actual["partner_cost_net"], "1770");
+    assert_eq!(actual["passthrough_cost_net"], "1150");
+    assert_eq!(actual["margin_net"], "2026.05");
+    assert_eq!(actual["margin_percent"], "76.57");
+    let planned = &economics["planned"];
+    assert_eq!(planned["revenue_net"], "4036.05");
+    assert_eq!(planned["passthrough_revenue_net"], "1200");
+    assert_eq!(planned["partner_cost_net"], "1800");
+    assert_eq!(planned["passthrough_cost_net"], "1200");
+    assert_eq!(planned["margin_net"], "2236.05");
+    assert!(
+        !economics["warnings"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("unassigned_invoice_revenue")),
+        "{economics:?}"
+    );
+
+    // Reversing the credit note gives the interpreter line its revenue back.
+    sqlx::query(
+        r#"INSERT INTO invoice_credit_note_transactions (
+               invoice_id, transaction_type, reverses_transaction_id, document_number, reason,
+               amount_net, amount_vat, amount_gross, currency, issued_on, created_by,
+               credit_mode, line_items
+           ) VALUES ($1, 'reversal', $2, $3, 'Credit note issued in error',
+                     190, 36.10, 226.10, 'EUR', CURRENT_DATE, $4, 'lines', $5)"#,
+    )
+    .bind(final_id)
+    .bind(credit_note_id)
+    .bind(format!("CN-{tag}-R"))
+    .bind(admin_id)
+    .bind(&credited_lines)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let economics = load().await;
+    assert_eq!(
+        economics_service(&economics, interpreter)["actual_revenue_net"],
+        "950"
+    );
+    assert_eq!(
+        economics_service(&economics, transfer)["actual_revenue_net"],
+        "360"
+    );
+    assert_eq!(economics["actual"]["recognized_revenue_net"], "4036.05");
+    assert_eq!(economics["actual"]["margin_net"], "2216.05");
+
+    // The patient-side readers see the transit revenue but no margin.
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, manager_view) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &auth_header(manager_id, "patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{manager_view:?}");
+    assert_eq!(manager_view["actual"]["passthrough_revenue_net"], "1200");
+    assert!(manager_view["actual"]["passthrough_cost_net"].is_null());
+    assert!(manager_view["actual"]["margin_net"].is_null());
+}

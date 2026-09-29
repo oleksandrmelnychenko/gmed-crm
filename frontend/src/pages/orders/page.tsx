@@ -2895,10 +2895,15 @@ function useOrdersPageContent() {
       });
       triggerReload();
     } catch (error) {
+      // A milestone refused as completed (visit still open, date ahead)
+      // comes back as a blocking reason of the follow-up section.
+      const reason = error instanceof Error ? resolveOrderBlockingReason(error.message) : null;
       setFollowupError(
-        error instanceof Error
-          ? error.message
-          : l("orders_error_update_followup_flow"),
+        reason
+          ? l(reason.key, reason.values)
+          : error instanceof Error
+            ? error.message
+            : l("orders_error_update_followup_flow"),
       );
     } finally {
       setFollowupBusy(false);
@@ -4730,6 +4735,19 @@ function useOrdersPageContent() {
                                         />
                                       </>
                                     ) : null}
+                                    {Number(orderEconomics.planned.passthrough_revenue_net ?? 0) > 0 ? (
+                                      <OrderFinancialMetric
+                                        label={
+                                          lang === "de"
+                                            ? "Davon Durchlaufposten (ohne Marge)"
+                                            : "В т. ч. транзитные позиции (вне маржи)"
+                                        }
+                                        value={formatMoney(
+                                          orderEconomics.planned.passthrough_revenue_net,
+                                          orderEconomics.currency,
+                                        )}
+                                      />
+                                    ) : null}
                                   </dl>
                                 </div>
 
@@ -4745,6 +4763,19 @@ function useOrdersPageContent() {
                                         orderEconomics.currency,
                                       )}
                                     />
+                                    {Number(orderEconomics.actual.passthrough_revenue_net ?? 0) > 0 ? (
+                                      <OrderFinancialMetric
+                                        label={
+                                          lang === "de"
+                                            ? "Davon Durchlaufposten (ohne Marge)"
+                                            : "В т. ч. транзитные позиции (вне маржи)"
+                                        }
+                                        value={formatMoney(
+                                          orderEconomics.actual.passthrough_revenue_net,
+                                          orderEconomics.currency,
+                                        )}
+                                      />
+                                    ) : null}
                                     <OrderFinancialMetric
                                       label={lang === "de" ? "Vom Patienten erhalten" : "Получено от пациента"}
                                       value={formatMoney(

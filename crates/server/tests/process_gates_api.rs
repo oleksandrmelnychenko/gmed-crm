@@ -2192,6 +2192,236 @@ async fn followup_flow_recognizes_localized_and_completed_reminders() {
     assert_eq!(flow["blocking_reasons"], json!([]));
 }
 
+async fn order_completion_reasons(app: &axum::Router, bearer: &str, order_id: Uuid) -> Vec<String> {
+    let (status, detail) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    detail["lifecycle"]["allowed_status_transitions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|transition| transition["status"] == "completed")
+        .unwrap_or_else(|| panic!("completion transition: {detail}"))["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|reason| reason.as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// QA D-19: a follow-up milestone is completed through its visits. While a
+/// visit of the milestone is still planned (or, without a visit, before its
+/// planned date) "completed" is refused, and a visit kept for a milestone
+/// marked not required keeps the order open until it is held or cancelled.
+#[tokio::test]
+async fn followup_milestone_completion_follows_its_visits() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("followup-visit-completion");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm, &tag).await;
+    let order_id = create_order(&app, &pm, patient_id).await;
+    sqlx::query("UPDATE orders SET phase = 'followup' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let today = gmed_server::app_time::today();
+    let week_date = today + Duration::days(22);
+    let half_year_date = today + Duration::days(181);
+    // An older visit recognised by its title only, and a visit typed by
+    // `followup_milestone` whose title says nothing about the milestone.
+    let week_visit: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status,
+                care_path_kind, created_by
+           ) VALUES ($1, $2, 'medical', 'Контроль через 1 неделю (QA)', $3, 'planned',
+                     'followup', $4)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(week_date)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let half_year_visit: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (
+                patient_id, order_id, appointment_type, title, date, status,
+                care_path_kind, followup_milestone, created_by
+           ) VALUES ($1, $2, 'medical', 'Kontrolltermin Kardiologie', $3, 'confirmed',
+                     'followup', 'post_6m', $4)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(half_year_date)
+    .bind(pm_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let followup = |body: Value| {
+        let app = app.clone();
+        let pm = pm.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/orders/{order_id}/followup-flow"),
+                &pm,
+                Some(body),
+            )
+            .await
+        }
+    };
+    let week_label = week_date.format("%d.%m.%Y").to_string();
+    let half_year_label = half_year_date.format("%d.%m.%Y").to_string();
+
+    // The 1-week visit on its date is still ahead: the milestone is not done.
+    let (status, body) = followup(json!({ "followup_1w_status": "completed" })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        format!("1-week follow-up visit on {week_label} is still open")
+    );
+    assert_eq!(body["details"]["code"], "followup_visit_open");
+    assert_eq!(body["details"]["appointment_id"], json!(week_visit));
+
+    // A contact without a visit is not completed before its planned date,
+    // also not by clearing the date; recording the day it took place does.
+    let (status, body) = followup(json!({
+        "followup_1m_status": "completed",
+        "followup_1m_date": (today + Duration::days(30)).to_string(),
+    }))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["details"]["code"], "followup_before_date");
+    let (status, body) = followup(json!({
+        "followup_1m_status": "scheduled",
+        "followup_1m_date": (today + Duration::days(30)).to_string(),
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = followup(json!({
+        "followup_1m_status": "completed",
+        "followup_1m_date": "",
+    }))
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        format!(
+            "1-month follow-up cannot be completed before {}",
+            (today + Duration::days(30)).format("%d.%m.%Y")
+        )
+    );
+    let (status, flow) = followup(json!({
+        "followup_1m_status": "completed",
+        "followup_1m_date": today.to_string(),
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_1w_status"], "pending", "refused change kept");
+    assert_eq!(flow["followup_1m_status"], "completed");
+    assert_eq!(flow["followup_1w_visits"], 1);
+    assert_eq!(flow["followup_1w_open_visits"], 1);
+    assert_eq!(flow["followup_1w_open_visit_date"], week_date.to_string());
+    assert_eq!(flow["followup_6m_open_visits"], 1);
+
+    // Marking the 6-month contact not required leaves its visit in place,
+    // and that visit keeps the order open.
+    let (status, flow) = followup(json!({
+        "doctor_followup_status": "not_required",
+        "followup_6m_status": "not_required",
+        "package_end_status": "not_required",
+        "results_handoff_status": "completed",
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    let reasons = order_completion_reasons(&app, &pm, order_id).await;
+    let half_year_reason = format!("6-month follow-up visit on {half_year_label} is still open");
+    assert!(reasons.contains(&half_year_reason), "{reasons:?}");
+    assert!(
+        reasons.contains(&"1-week follow-up must be completed or marked not required".to_string()),
+        "{reasons:?}"
+    );
+
+    // Cancelling visits needs the milestone marked not required.
+    let (status, body) = followup(json!({ "cancel_open_visits_for": ["post_1w"] })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = followup(json!({ "cancel_open_visits_for": ["post_2w"] })).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, flow) = followup(json!({ "cancel_open_visits_for": ["post_6m"] })).await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    assert_eq!(flow["followup_6m_open_visits"], 0);
+    let statuses: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT id, status FROM appointments WHERE id = ANY($1) ORDER BY date")
+            .bind(vec![week_visit, half_year_visit])
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        statuses,
+        vec![
+            (week_visit, "planned".to_string()),
+            (half_year_visit, "cancelled".to_string()),
+        ]
+    );
+    let reasons = order_completion_reasons(&app, &pm, order_id).await;
+    assert!(!reasons.contains(&half_year_reason), "{reasons:?}");
+
+    // A milestone already stored as completed (before this rule) still does
+    // not count while its visit is open.
+    sqlx::query(
+        "UPDATE order_followup_flows SET followup_1w_status = 'completed' WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let reasons = order_completion_reasons(&app, &pm, order_id).await;
+    assert!(
+        reasons.contains(&format!(
+            "1-week follow-up visit on {week_label} is still open"
+        )),
+        "{reasons:?}"
+    );
+
+    // Once the visit took place the milestone counts as completed.
+    sqlx::query("UPDATE appointments SET date = $2, status = 'completed' WHERE id = $1")
+        .bind(week_visit)
+        .bind(today - Duration::days(1))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE order_followup_flows SET followup_1w_status = 'pending' WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, flow) = followup(json!({ "followup_1w_status": "completed" })).await;
+    assert_eq!(status, StatusCode::OK, "{flow}");
+    let reasons = order_completion_reasons(&app, &pm, order_id).await;
+    assert!(
+        !reasons.iter().any(|reason| reason.contains("follow-up")),
+        "{reasons:?}"
+    );
+}
+
 #[tokio::test]
 async fn order_amendment_requires_separate_approval_and_updates_total() {
     let Some((app, pool, _admin_id)) = test_context().await else {
