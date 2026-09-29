@@ -7,6 +7,10 @@ import {
   updateAppointmentStatus,
 } from "@/pages/appointments/data/appointment-mutations";
 import { appointmentText } from "@/pages/appointments/model/labels";
+import {
+  billingReversalRequestFromError,
+  requestAppointmentBillingReversal,
+} from "@/pages/appointments/model/billing-reversal-request";
 import { statusActionKey } from "@/pages/appointments/model/form-factories";
 import {
   buildLocalScheduleWarnings,
@@ -143,6 +147,19 @@ export function useAppointmentSchedulerActions({
           onRefreshDetail();
         }
       } catch (error) {
+        // A visit with a billed interpreter report: offer the cancellation
+        // with billing reversal instead of an error (decision 2026-09-29).
+        const reversal =
+          status === "cancelled"
+            ? billingReversalRequestFromError(error, appointmentId, recurrenceScope, () => {
+                onRefreshAppointments();
+                if (selectedId === appointmentId) onRefreshDetail();
+              })
+            : null;
+        if (reversal) {
+          requestAppointmentBillingReversal(reversal);
+          return;
+        }
         const message = formatScheduleConflictError(
           error,
           appointmentText("appointments_failed_to_change_status"),

@@ -93,6 +93,7 @@ export interface ClinicalTranslations {
   appointment_billing_status_cancelled: string;
   appointment_billing_status_billed: string;
   appointment_billing_status_waived: string;
+  appointment_billing_status_reversed: string;
   appointment_follow_up_preset_post_1w_label: string;
   appointment_follow_up_preset_post_1w_title: string;
   appointment_follow_up_preset_post_1m_label: string;
@@ -315,6 +316,7 @@ export const clinicalRu: ClinicalTranslations = {
   appointment_billing_status_cancelled: "Отменено",
   appointment_billing_status_billed: "Выставлен счёт",
   appointment_billing_status_waived: "Списано",
+  appointment_billing_status_reversed: "Сторнировано",
   appointment_follow_up_preset_post_1w_label: "1 неделя",
   appointment_follow_up_preset_post_1w_title: "Контрольный контакт через 1 неделю",
   appointment_follow_up_preset_post_1m_label: "1 месяц",
@@ -542,6 +544,7 @@ export const clinicalDe: ClinicalTranslations = {
   appointment_billing_status_cancelled: "Abgebrochen",
   appointment_billing_status_billed: "In Rechnung gestellt",
   appointment_billing_status_waived: "Erlassen",
+  appointment_billing_status_reversed: "Storniert",
   appointment_follow_up_preset_post_1w_label: "1 Woche",
   appointment_follow_up_preset_post_1w_title: "Nachsorge nach 1 Woche",
   appointment_follow_up_preset_post_1m_label: "1 Monat",

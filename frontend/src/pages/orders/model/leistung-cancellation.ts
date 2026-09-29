@@ -1,4 +1,9 @@
 import { ApiRequestError } from "@/lib/api";
+import {
+  billingReversalBlockedMessage,
+  billingReversalFinanceHint,
+  type BillingReversalBlockedReason,
+} from "@/lib/billing-reversal";
 
 import type { Leistung } from "./types";
 
@@ -21,12 +26,20 @@ export function isValidLeistungCancelReason(reason: string) {
   return length >= LEISTUNG_CANCEL_REASON_MIN && length <= LEISTUNG_CANCEL_REASON_MAX;
 }
 
-/** Only a still-planned line can be cancelled, and only with `orders.edit`. */
+/**
+ * Any line that is not cancelled yet can be cancelled by `orders.edit` or
+ * `invoices.finance` (decision 2026-09-29). The dialog asks the server what
+ * that does: an invoiced line gets a credit note (CEO / billing only), a line
+ * on a draft invoice waits until the draft is cancelled.
+ */
 export function canCancelLeistung(
   leistung: Pick<Leistung, "status">,
-  canEditOrders: boolean,
+  canCancelOrderServices: boolean,
 ) {
-  return canEditOrders && leistung.status === "planned";
+  return (
+    canCancelOrderServices &&
+    ["planned", "delivered", "approved", "invoiced"].includes(leistung.status)
+  );
 }
 
 export function leistungCancelReasonHint(tx: Bilingual) {
@@ -36,8 +49,20 @@ export function leistungCancelReasonHint(tx: Bilingual) {
   );
 }
 
+/** A refusal the billing-reversal texts explain (draft invoice, …). */
+function billingReversalErrorMessageIfKnown(error: ApiRequestError, tx: Bilingual) {
+  const code = typeof error.body?.code === "string" ? error.body.code : "";
+  if (code === "order_service_cancel_requires_credit_note") {
+    return tx(
+      "Услуга уже в выпущенном счёте: подтвердите выставление кредит-ноты.",
+      "Die Leistung ist bereits abgerechnet: Bitte die Gutschrift bestätigen.",
+    );
+  }
+  return billingReversalBlockedMessage({ blocked_reason: code as BillingReversalBlockedReason }, tx);
+}
+
 /**
- * A 409 (line no longer planned) or 404 (line gone) means the page shows a
+ * A 409 (line changed, e.g. already cancelled) or 404 (line gone) means the page shows a
  * stale line; the caller reloads the order so the real status appears.
  */
 export function isStaleLeistungCancelError(error: unknown) {
@@ -47,14 +72,20 @@ export function isStaleLeistungCancelError(error: unknown) {
 export function leistungCancelErrorMessage(error: unknown, tx: Bilingual) {
   if (error instanceof ApiRequestError) {
     switch (error.status) {
-      case 409:
+      case 409: {
+        const specific = billingReversalErrorMessageIfKnown(error, tx);
+        if (specific) return specific;
         return tx(
-          "Услугу уже нельзя отменить: отменить можно только запланированную услугу. Данные заказа обновлены.",
-          "Die Leistung kann nicht mehr storniert werden: Nur geplante Leistungen lassen sich stornieren. Die Auftragsdaten wurden aktualisiert.",
+          "Услугу уже нельзя отменить в этом виде. Данные заказа обновлены.",
+          "Die Leistung kann so nicht mehr storniert werden. Die Auftragsdaten wurden aktualisiert.",
         );
+      }
       case 422:
         return leistungCancelReasonHint(tx);
       case 403:
+        if (error.body?.code === "order_service_reversal_requires_finance") {
+          return billingReversalFinanceHint(tx);
+        }
         return tx(
           "Недостаточно прав для отмены услуги в этом заказе.",
           "Keine Berechtigung, Leistungen in diesem Auftrag zu stornieren.",

@@ -116,6 +116,10 @@ import type {
 } from "@/pages/appointments/model/types";
 import { assignableInterpreterOptions } from "@/pages/appointments/model/types";
 import {
+  billingReversalRequestFromError,
+  requestAppointmentBillingReversal,
+} from "@/pages/appointments/model/billing-reversal-request";
+import {
   CHECKLIST_PHASES,
   FOLLOW_UP_PRESETS,
   INTERPRETER_RESPONSE_OPTIONS,
@@ -2058,6 +2062,16 @@ function AppointmentStatusToggleControl({
       onRefresh?.();
     } catch (error) {
       setOptimisticStatus({ appointmentId: detail.id, status: previousStatus });
+      // A visit with a billed interpreter report: offer the cancellation with
+      // billing reversal instead of an error (decision 2026-09-29).
+      const reversal =
+        status === "cancelled"
+          ? billingReversalRequestFromError(error, detail.id, recurrenceScope, () => onRefresh?.())
+          : null;
+      if (reversal) {
+        requestAppointmentBillingReversal(reversal);
+        return;
+      }
       onError(
         appointmentActionErrorMessage(
           error,

@@ -253,6 +253,7 @@ const SERVICE_BILLING_STATUS_LABEL_KEYS = {
   billed: "staff_services_billing_status_billed",
   settled: "staff_services_billing_status_settled",
   waived: "appointment_billing_status_waived",
+  reversed: "appointment_billing_status_reversed",
 } satisfies Partial<Record<string, TranslationKey>>;
 
 const SERVICE_KIND_LABEL_KEYS = {
@@ -647,7 +648,7 @@ function buildServiceColumns(t: Translations, lang: Lang): ColumnDef<StaffConcie
       label: t.staff_services_column_billing,
       accessor: (row) => row.billing_status,
       filterType: "enum",
-      filterOptions: ["draft", "ready", "billed", "settled", "waived"].map((value) => ({
+      filterOptions: ["draft", "ready", "billed", "settled", "waived", "reversed"].map((value) => ({
         value,
         label: billingStatusLabel(value, t),
       })),

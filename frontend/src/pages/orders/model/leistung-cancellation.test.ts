@@ -15,8 +15,13 @@ import {
 const ru = (ruText: string) => ruText;
 const de = (_ruText: string, deText: string) => deText;
 
-function apiError(status: number, code = "http_error", message = "server text") {
-  return new ApiRequestError(message, { status, code });
+function apiError(
+  status: number,
+  code = "http_error",
+  message = "server text",
+  body: Record<string, unknown> | null = null,
+) {
+  return new ApiRequestError(message, { status, code, body });
 }
 
 describe("isValidLeistungCancelReason", () => {
@@ -36,19 +41,31 @@ describe("isValidLeistungCancelReason", () => {
 });
 
 describe("canCancelLeistung", () => {
-  it("allows only planned lines for users with orders.edit", () => {
-    expect(canCancelLeistung({ status: "planned" }, true)).toBe(true);
-    expect(canCancelLeistung({ status: "planned" }, false)).toBe(false);
-    for (const status of ["delivered", "approved", "invoiced", "cancelled"] as const) {
-      expect(canCancelLeistung({ status }, true)).toBe(false);
+  it("allows every line that is not cancelled yet to users who may cancel services", () => {
+    for (const status of ["planned", "delivered", "approved", "invoiced"] as const) {
+      expect(canCancelLeistung({ status }, true)).toBe(true);
+      expect(canCancelLeistung({ status }, false)).toBe(false);
     }
+    expect(canCancelLeistung({ status: "cancelled" }, true)).toBe(false);
   });
 });
 
 describe("leistungCancelErrorMessage", () => {
   it("localizes conflict and validation responses instead of showing server text", () => {
-    expect(leistungCancelErrorMessage(apiError(409), de)).toContain("Nur geplante Leistungen");
-    expect(leistungCancelErrorMessage(apiError(409), ru)).toContain("только запланированную");
+    expect(leistungCancelErrorMessage(apiError(409), de)).toContain("nicht mehr storniert");
+    expect(leistungCancelErrorMessage(apiError(409), ru)).toContain("нельзя отменить");
+    expect(
+      leistungCancelErrorMessage(
+        apiError(409, "http_error", "x", { code: "order_service_on_draft_invoice" }),
+        de,
+      ),
+    ).toContain("Rechnungsentwurf");
+    expect(
+      leistungCancelErrorMessage(
+        apiError(403, "http_error", "x", { code: "order_service_reversal_requires_finance" }),
+        ru,
+      ),
+    ).toContain("Кредит-ноту");
     expect(leistungCancelErrorMessage(apiError(422), de)).toBe(
       "Bitte einen Stornogrund angeben (3–1000 Zeichen).",
     );
