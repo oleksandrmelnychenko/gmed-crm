@@ -3849,7 +3849,7 @@ pub(crate) async fn publish_cancelled_order_appointments(
             Some(*appointment_id),
             serde_json::json!({
                 "to": "cancelled",
-                "reason": "order_cancelled",
+                "reason": reason,
                 "order_id": order_id,
             }),
         ));

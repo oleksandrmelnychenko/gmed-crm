@@ -1127,6 +1127,7 @@ pub(crate) async fn publish_terminated_orders(
             actor_user_id,
             order.order_id,
             &order.cancelled_appointment_ids,
+            "order_cancelled",
         )
         .await;
     }

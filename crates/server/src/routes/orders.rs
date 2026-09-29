@@ -6207,6 +6207,7 @@ pub(crate) async fn publish_withdrawn_lead_orders(
             actor_id,
             order.order_id,
             &order.cancellation.cancelled_appointment_ids,
+            "order_cancelled",
         )
         .await;
     }
