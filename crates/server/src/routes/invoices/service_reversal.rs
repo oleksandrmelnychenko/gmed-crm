@@ -146,11 +146,12 @@ async fn plan(
         r#"SELECT service.order_id, service.status, service.description, service.quantity,
                   round(service.quantity * service.unit_price * (1 + service.vat_rate / 100), 2)
                       AS line_gross,
-                  service.currency
+                  service.currency, orders.patient_id
            FROM order_leistungen service
+           JOIN orders ON orders.id = service.order_id
            WHERE service.id = $1
            {}"#,
-        if lock { "FOR UPDATE" } else { "" }
+        if lock { "FOR UPDATE OF service" } else { "" }
     );
     let Some(row) = sqlx::query(&sql)
         .bind(leistung_id)
@@ -160,6 +161,9 @@ async fn plan(
         return Ok(None);
     };
     let status: String = row.try_get("status")?;
+    // An order still being prepared from a lead may have no patient yet; it
+    // has no invoices either.
+    let patient_id: Option<Uuid> = row.try_get("patient_id")?;
     let mut preview = ServiceReversalPreview {
         leistung_id,
         order_id: row.try_get("order_id")?,
@@ -183,7 +187,7 @@ async fn plan(
         invoice_line_unknown: false,
     };
     // Advance invoices bill a prepayment, not the service; cancelled
-    // invoices bill nothing.
+    // invoices bill nothing. Only the patient's invoices can bill the service.
     let invoice_ids = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT DISTINCT invoice.id
            FROM invoices invoice
@@ -191,12 +195,14 @@ async fn plan(
                CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
                     THEN invoice.line_items ELSE '[]'::jsonb END
            ) AS item(value)
-           WHERE invoice.status <> 'cancelled'
+           WHERE invoice.patient_id = $2
+             AND invoice.status <> 'cancelled'
              AND invoice.invoice_type <> 'advance'
              AND lower(btrim(item.value ->> 'source_order_leistung_id')) = $1::text
            ORDER BY invoice.id"#,
     )
     .bind(leistung_id.to_string())
+    .bind(patient_id)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -256,7 +262,7 @@ async fn plan(
     preview.invoice_line_unknown = status == "invoiced"
         && preview.credits.is_empty()
         && preview.draft_invoice_ids.is_empty()
-        && !fully_credited_line_exists(conn, leistung_id).await?;
+        && !fully_credited_line_exists(conn, leistung_id, patient_id).await?;
     Ok(Some(Plan { preview, contexts }))
 }
 
@@ -265,6 +271,7 @@ async fn plan(
 async fn fully_credited_line_exists(
     conn: &mut PgConnection,
     leistung_id: Uuid,
+    patient_id: Option<Uuid>,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         r#"SELECT EXISTS (
@@ -274,12 +281,14 @@ async fn fully_credited_line_exists(
                    CASE WHEN jsonb_typeof(invoice.line_items) = 'array'
                         THEN invoice.line_items ELSE '[]'::jsonb END
                ) AS item(value)
-               WHERE invoice.status NOT IN ('cancelled', 'draft')
+               WHERE invoice.patient_id = $2
+                 AND invoice.status NOT IN ('cancelled', 'draft')
                  AND invoice.invoice_type <> 'advance'
                  AND lower(btrim(item.value ->> 'source_order_leistung_id')) = $1::text
            )"#,
     )
     .bind(leistung_id.to_string())
+    .bind(patient_id)
     .fetch_one(conn)
     .await
 }
