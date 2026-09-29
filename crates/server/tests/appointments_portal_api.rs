@@ -707,7 +707,11 @@ async fn approved_request_can_be_converted_and_patient_sees_schedule() {
     );
     // The patient sees when the request was reviewed, not who reviewed it.
     assert!(body.as_array().unwrap()[0].get("reviewed_by").is_none());
-    assert!(body.as_array().unwrap()[0].get("reviewed_by_name").is_none());
+    assert!(
+        body.as_array().unwrap()[0]
+            .get("reviewed_by_name")
+            .is_none()
+    );
     assert!(
         body.as_array().unwrap()[0]["reviewed_at"]
             .as_str()

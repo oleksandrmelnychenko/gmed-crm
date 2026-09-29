@@ -641,8 +641,7 @@ async fn reviewed_portal_feedback_flows_back_into_patient_history() {
     );
 
     // Staff keep seeing who reviewed the feedback.
-    let (status, staff_list) =
-        json_request(&app, "GET", "/api/v1/feedback", &pm_auth, None).await;
+    let (status, staff_list) = json_request(&app, "GET", "/api/v1/feedback", &pm_auth, None).await;
     assert_eq!(status, StatusCode::OK);
     let staff_item = staff_list
         .as_array()

@@ -919,7 +919,10 @@ async fn unbooked_interpreter_keeps_reading_its_own_reports_read_only() {
         .expect("returned report");
     assert_eq!(returned["notes"], "Please correct the hours");
     assert!((hours_of(returned) - 1.5).abs() < 1e-9, "{list}");
-    assert!(!list.to_string().contains(&format!("Patient {tag}")), "{list}");
+    assert!(
+        !list.to_string().contains(&format!("Patient {tag}")),
+        "{list}"
+    );
 
     // The report cannot be changed without the booking.
     let (status, body) = json_request(
@@ -933,8 +936,14 @@ async fn unbooked_interpreter_keeps_reading_its_own_reports_read_only() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 
     // Its KPI still counts the approved hours.
-    let (status, kpis) =
-        json_request(&fx.app, "GET", "/api/v1/stats/my-kpis", &interpreter_bearer, None).await;
+    let (status, kpis) = json_request(
+        &fx.app,
+        "GET",
+        "/api/v1/stats/my-kpis",
+        &interpreter_bearer,
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK, "{kpis}");
     let approved_hours: f64 = kpis["kpi"]["approved_hours_30d"]
         .as_str()
@@ -954,8 +963,14 @@ async fn unbooked_interpreter_keeps_reading_its_own_reports_read_only() {
 
     // Another interpreter never reads it.
     let stranger = seed_user(&fx.pool, &format!("{tag}-other"), "interpreter").await;
-    let (status, body) =
-        json_request(&fx.app, "GET", &report_path, &bearer(stranger, "interpreter"), None).await;
+    let (status, body) = json_request(
+        &fx.app,
+        "GET",
+        &report_path,
+        &bearer(stranger, "interpreter"),
+        None,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     let (status, list) = json_request(
         &fx.app,
