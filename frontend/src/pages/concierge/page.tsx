@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  CalendarCheck,
   CalendarClock,
   CalendarDays,
   ClipboardPenLine,
@@ -8,6 +9,7 @@ import {
   Clock3,
   Columns3,
   List,
+  ListChecks,
   ListPlus,
   KeyRound,
   LoaderCircle,
@@ -37,6 +39,7 @@ import {
   CONCIERGE_BOARD_COLUMNS,
   conciergeServiceCostVariance,
   conciergeServiceColumn,
+  conciergeServiceNeedsBookingDecision,
   conciergeServiceDisplayTitle,
   conciergeServiceTaxonomyLabel,
   canModifyConciergeTask,
@@ -175,6 +178,11 @@ const text = {
     keyHandover: "Schlüssel",
     editRequest: "Bearbeiten",
     createTaskFromRequest: "Aufgabe anlegen",
+    openTask: "Aufgabe öffnen",
+    keepBooking: "Buchung behalten",
+    bookingDecision: "Termin abgesagt – Entscheidung nötig",
+    bookingDecisionHint: "Der Termin dieser Partnerbuchung wurde abgesagt. Buchung behalten oder den Service stornieren.",
+    keepBookingFailed: "Die Buchung konnte nicht bestätigt werden.",
     status: "Status",
   },
   ru: {
@@ -231,6 +239,11 @@ const text = {
     keyHandover: "Ключ",
     editRequest: "Изменить",
     createTaskFromRequest: "Создать задачу",
+    openTask: "Открыть задачу",
+    keepBooking: "Сохранить бронирование",
+    bookingDecision: "Термин отменён — нужно решение",
+    bookingDecisionHint: "Термин этого бронирования у партнёра отменён. Сохраните бронирование или отмените услугу.",
+    keepBookingFailed: "Не удалось сохранить бронирование.",
     status: "Статус",
   },
 } as const;
@@ -296,9 +309,13 @@ function ServiceCard({
   onOpenPartner,
   onOpenExpense,
   onOpenKey,
+  onOpenTask,
+  onKeepBooking,
   canReopen,
   compact = false,
 }: {
+  onOpenTask: (taskId: string) => void;
+  onKeepBooking?: (service: ConciergeService) => void;
   service: ConciergeService;
   lang: Lang;
   labels: ConciergeText;
@@ -320,6 +337,7 @@ function ServiceCard({
     : service.provider_name || service.vendor_name;
   const overdue = isConciergeServiceOverdue(service, now);
   const costVariance = conciergeServiceCostVariance(service);
+  const needsDecision = conciergeServiceNeedsBookingDecision(service);
   const actionButtonClass = cn(
     "h-8 w-full rounded-md bg-card text-xs hover:border-primary/30 hover:bg-primary/5 hover:text-primary",
     compact && "sm:w-auto",
@@ -347,6 +365,16 @@ function ServiceCard({
           {overdue ? (
             <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-[10px] text-rose-700">
               {labels.overdue}
+            </Badge>
+          ) : null}
+          {needsDecision ? (
+            <Badge
+              variant="outline"
+              className="rounded-full border-amber-300 bg-amber-50 text-[10px] text-amber-800"
+              title={labels.bookingDecisionHint}
+              data-testid={`concierge-service-decision-${service.id}`}
+            >
+              {labels.bookingDecision}
             </Badge>
           ) : null}
           <Badge
@@ -435,16 +463,42 @@ function ServiceCard({
           <ClipboardPenLine />
           {labels.editRequest}
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className={actionButtonClass}
-          onClick={() => onCreateTask(service)}
-        >
-          <ListPlus />
-          {labels.createTaskFromRequest}
-        </Button>
+        {service.linked_task_id ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={actionButtonClass}
+            onClick={() => onOpenTask(service.linked_task_id as string)}
+          >
+            <ListChecks />
+            {labels.openTask}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={actionButtonClass}
+            onClick={() => onCreateTask(service)}
+          >
+            <ListPlus />
+            {labels.createTaskFromRequest}
+          </Button>
+        )}
+        {needsDecision && onKeepBooking ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(actionButtonClass, "border-amber-300 text-amber-800")}
+            disabled={updating}
+            onClick={() => onKeepBooking(service)}
+          >
+            <CalendarCheck />
+            {labels.keepBooking}
+          </Button>
+        ) : null}
         {onOpenPartner ? (
           <Button
             type="button"
@@ -670,9 +724,16 @@ export function ConciergeWorkspacePage() {
     };
   }, [labels.loadFailed, taskListPath, user, version]);
 
+  // A service stays on the board with all its steps after it becomes a task
+  // (its task is the single source of truth of its status); the calendar and
+  // map show converted services as their tasks.
   const visibleServices = useMemo(
-    () => sortConciergeServices(filterConciergeServices(unconvertedConciergeServices(services), query)),
+    () => sortConciergeServices(filterConciergeServices(services, query)),
     [query, services],
+  );
+  const scheduleServices = useMemo(
+    () => unconvertedConciergeServices(visibleServices),
+    [visibleServices],
   );
   const workspaceTasks = useMemo(
     () => conciergeTasksAssignedToActor(tasks, user?.id),
@@ -954,11 +1015,39 @@ export function ConciergeWorkspacePage() {
       );
       clearApiCache("/concierge-services");
       setServices((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      // The status moved the service's task; the task list follows.
+      requestRefresh();
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : labels.updateFailed);
     } finally {
       setUpdatingId(null);
     }
+  }
+
+  async function keepServiceBooking(service: ConciergeService) {
+    if (updatingId) return;
+    setUpdatingId(service.id);
+    setError("");
+    try {
+      const updated = await apiFetch<ConciergeService>(
+        `/concierge-services/${service.id}/keep-booking`,
+        { method: "POST" },
+      );
+      clearApiCache("/concierge-services");
+      setServices((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (keepError) {
+      setError(keepError instanceof Error ? keepError.message : labels.keepBookingFailed);
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  function openServiceTask(taskId: string) {
+    setDetailTaskId(taskId);
+    const next = new URLSearchParams(searchParams);
+    next.set("task", taskId);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
   }
 
   function openCreateTask() {
@@ -1148,7 +1237,7 @@ export function ConciergeWorkspacePage() {
 
       {viewMode === "calendar" ? (
         <ConciergeAgendaView
-          services={visibleServices}
+          services={scheduleServices}
           tasks={workspaceTasks}
           providersById={providersById}
           patientNames={patientNames}
@@ -1158,7 +1247,7 @@ export function ConciergeWorkspacePage() {
         />
       ) : viewMode === "map" ? (
         <ConciergeMapView
-          services={visibleServices}
+          services={scheduleServices}
           tasks={workspaceTasks}
           providers={providers}
           lang={lang}
@@ -1200,6 +1289,8 @@ export function ConciergeWorkspacePage() {
                               onStatusChange={(item, status) => void changeServiceStatus(item, status)}
                               onEdit={openEditRequest}
                               onCreateTask={openCreateTaskFromRequest}
+                              onOpenTask={openServiceTask}
+                              onKeepBooking={(item) => void keepServiceBooking(item)}
                               onOpenExpense={(item) => void openExpenseReceipt(item)}
                               onOpenKey={isConciergeKeyService(service) ? (item) => void openKeyHandover(item) : undefined}
                               canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
@@ -1229,6 +1320,8 @@ export function ConciergeWorkspacePage() {
                     onStatusChange={(item, status) => void changeServiceStatus(item, status)}
                     onEdit={openEditRequest}
                     onCreateTask={openCreateTaskFromRequest}
+                    onOpenTask={openServiceTask}
+                    onKeepBooking={(item) => void keepServiceBooking(item)}
                     onOpenExpense={(item) => void openExpenseReceipt(item)}
                     onOpenKey={isConciergeKeyService(service) ? (item) => void openKeyHandover(item) : undefined}
                     canReopen={user?.role === "ceo" || user?.role === "patient_manager"}

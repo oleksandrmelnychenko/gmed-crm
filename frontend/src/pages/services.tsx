@@ -56,7 +56,11 @@ import { roundCents } from "@/lib/money";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { servicesPermissions } from "@/pages/services.model";
-import { conciergeServiceStatusOptions } from "@/pages/concierge/model";
+import {
+  conciergeBillingStatusOptions,
+  conciergeServiceStatusOptions,
+  isConciergeServiceFinancialLocked,
+} from "@/pages/concierge/model";
 import {
   formatEnumLabelFromKeys,
   useLang,
@@ -123,6 +127,11 @@ type StaffConciergeService = {
   request_source: string;
   completed_at: string | null;
   billed_at: string | null;
+  linked_task_id?: string | null;
+  allowed_statuses?: string[];
+  allowed_billing_statuses?: string[];
+  financial_locked?: boolean;
+  booking_decision_required_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -1160,6 +1169,8 @@ function useStaffServicesPageContent() {
     () => providerServiceUnitPrice(selectedEditProviderService),
     [selectedEditProviderService],
   );
+  // The amounts of a billed service are locked (the server refuses changes).
+  const amountsLocked = selectedService ? isConciergeServiceFinancialLocked(selectedService) : false;
   const selectedEditProviderServiceTotal = useMemo(
     () =>
       editForm
@@ -1898,6 +1909,7 @@ function useStaffServicesPageContent() {
                           {conciergeServiceStatusOptions(
                             selectedService?.status ?? editForm.status,
                             user?.role === "ceo" || user?.role === "patient_manager",
+                            selectedService?.allowed_statuses,
                           ).map((status) => (
                             <option key={status} value={status}>
                               {serviceStatusLabel(status, t)}
@@ -2129,7 +2141,7 @@ function useStaffServicesPageContent() {
                             </span>
                             <Input
                               inputMode="decimal"
-                              readOnly={selectedEditProviderServiceTotal !== null}
+                              readOnly={selectedEditProviderServiceTotal !== null || amountsLocked}
                               value={editForm.costEstimate}
                               onChange={(event) =>
                                 setEditForm((current) =>
@@ -2150,6 +2162,7 @@ function useStaffServicesPageContent() {
                         <Input
                           inputMode="decimal"
                           value={editForm.actualCost}
+                          readOnly={amountsLocked}
                           onChange={(event) =>
                             setEditForm((current) =>
                               current
@@ -2168,6 +2181,7 @@ function useStaffServicesPageContent() {
                             </span>
                             <Input
                               value={editForm.currency}
+                              readOnly={amountsLocked}
                               onChange={(event) =>
                                 setEditForm((current) =>
                                   current ? { ...current, currency: event.target.value } : current,
@@ -2192,7 +2206,7 @@ function useStaffServicesPageContent() {
                               }
                               className={formSelectClassName}
                             >
-                              {["draft", "ready", "billed", "settled", "waived"].map((status) => (
+                              {conciergeBillingStatusOptions(selectedService?.billing_status ?? editForm.billingStatus, selectedService?.allowed_billing_statuses).map((status) => (
                                 <option key={status} value={status}>
                                   {billingStatusLabel(status, t)}
                                 </option>

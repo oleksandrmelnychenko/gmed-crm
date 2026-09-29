@@ -75,6 +75,8 @@ export function localizedNotificationCopy(
   if (expenseCopy) return expenseCopy;
   const serviceRequestCopy = conciergeServiceRequestNotificationCopy(item, lang);
   if (serviceRequestCopy) return serviceRequestCopy;
+  const bookingDecisionCopy = conciergeBookingDecisionNotificationCopy(item, lang);
+  if (bookingDecisionCopy) return bookingDecisionCopy;
   const taskTitle = taskNotificationTitle(item, lang);
   if (taskTitle) {
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
@@ -224,6 +226,40 @@ function conciergeServiceRequestNotificationCopy(
     || (lang === "de" ? "ohne Wunschtermin" : "без желаемого времени");
   const kind = SERVICE_KIND_LABELS[data.service_kind ?? ""]?.[lang];
   return { title, body: [kind, data.title, slot].filter(Boolean).join(" · ") };
+}
+
+// A partner booking whose appointment was cancelled is not cancelled
+// automatically; its concierge decides (keep the booking or cancel the service).
+function conciergeBookingDecisionNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "concierge_booking_decision") return null;
+  const data = parseNotificationBody<{
+    title?: string;
+    vendor_name?: string | null;
+    starts_at?: string | null;
+    reason?: string;
+  }>(item.body);
+  const changed = data?.reason === "appointment_type_changed";
+  const title = lang === "de"
+    ? changed
+      ? "Termin geändert – Concierge-Buchung prüfen"
+      : "Termin abgesagt – Concierge-Buchung prüfen"
+    : changed
+      ? "Термин изменён — проверьте бронирование консьержа"
+      : "Термин отменён — проверьте бронирование консьержа";
+  if (!data) return { title, body: item.body };
+  const slot = data.starts_at ? formatAppDateTime(data.starts_at) : "";
+  const hint = lang === "de"
+    ? "Buchung behalten oder Service stornieren"
+    : "Сохраните бронирование или отмените услугу";
+  return {
+    title,
+    body: [[data.title, data.vendor_name, slot].filter(Boolean).join(" · "), hint]
+      .filter(Boolean)
+      .join(". "),
+  };
 }
 
 const INTERPRETER_WORK_TITLES: Record<string, { de: string; ru: string }> = {

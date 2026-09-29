@@ -182,6 +182,16 @@ describe("concierge expense and service request notifications", () => {
     expect(copy.title).toBe("Запрос услуги от пациента: PT-1 · Anna");
     expect(copy.body).toBe("Трансфер · Airport pickup · без желаемого времени");
   });
+
+  it("asks for a decision on a concierge booking whose appointment was cancelled", () => {
+    const body = JSON.stringify({ title: "Hotel Adlon", vendor_name: "Adlon", starts_at: null, reason: "appointment_cancelled" });
+    expect(localizedNotificationCopy(notice("concierge_booking_decision", body), "de")).toEqual({
+      title: "Termin abgesagt – Concierge-Buchung prüfen",
+      body: "Hotel Adlon · Adlon. Buchung behalten oder Service stornieren",
+    });
+    expect(localizedNotificationCopy(notice("concierge_booking_decision", body), "ru").title)
+      .toBe("Термин отменён — проверьте бронирование консьержа");
+  });
 });
 
 describe("oldestNewLead", () => {
