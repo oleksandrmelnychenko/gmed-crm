@@ -55,6 +55,18 @@ export function localizedNotificationCopy(
           body: "Безопасная обработка завершилась ошибкой; локальный пакет не изменён.",
         };
   }
+  const reminderCopy = appointmentReminderNotificationCopy(item, lang);
+  if (reminderCopy) return reminderCopy;
+  if (item.kind === "appointment_request_withdrawn") {
+    const data = parseNotificationBody<{ patient_pid?: string | null; patient_name?: string | null; reason?: string | null }>(item.body);
+    const patient = [data?.patient_pid, data?.patient_name].filter(Boolean).join(" · ");
+    return {
+      title: lang === "de" ? "Terminanfrage vom Patienten zurückgezogen" : "Пациент отозвал запрос на приём",
+      body: [patient, data?.reason ? `${lang === "de" ? "Grund" : "Причина"}: ${data.reason}` : null]
+        .filter(Boolean)
+        .join(" — ") || null,
+    };
+  }
   const overdueSupplierCopy = externalInvoiceOverdueNotificationCopy(item, lang);
   if (overdueSupplierCopy) return overdueSupplierCopy;
   const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
@@ -95,6 +107,31 @@ function externalInvoiceOverdueNotificationCopy(
         ? `Rechnung ${number}, fällig am ${due}: ${money}`
         : `Счёт ${number}, срок оплаты ${due}: ${money}`,
   };
+}
+
+// A due appointment reminder, delivered by the server scheduler at its German
+// time; the reminder title (and possibly a generated follow-up template) is
+// shown with the visit it belongs to.
+function appointmentReminderNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "appointment_reminder") return null;
+  const title = lang === "de" ? "Terminerinnerung" : "Напоминание по приёму";
+  const data = parseNotificationBody<{
+    reminder_title?: string | null;
+    description?: string | null;
+    appointment_title?: string | null;
+    appointment_date?: string | null;
+    time_start?: string | null;
+  }>(item.body);
+  if (!data) return { title, body: item.body };
+  const when = [data.appointment_date ? formatAppDate(data.appointment_date) : null, data.time_start]
+    .filter(Boolean)
+    .join(" ");
+  const visit = [data.appointment_title, when].filter(Boolean).join(" · ");
+  const reminder = data.reminder_title ? localizeTaskTitle(data.reminder_title, lang) : null;
+  return { title, body: [reminder, visit].filter(Boolean).join(" — ") || null };
 }
 
 function parseNotificationBody<T extends object>(body: string | null): T | null {
@@ -210,6 +247,27 @@ const INTERPRETER_WORK_TITLES: Record<string, { de: string; ru: string }> = {
     de: "Dolmetscher hat den Einsatz abgelehnt",
     ru: "Переводчик отказался от назначения",
   },
+  // Changes of the interpreter's own booking (sent to the interpreter).
+  interpreter_booking_assigned: {
+    de: "Sie wurden als Dolmetscher gebucht",
+    ru: "Вас назначили переводчиком",
+  },
+  interpreter_booking_removed: {
+    de: "Ihre Dolmetscherbuchung wurde aufgehoben",
+    ru: "Вас сняли с назначения",
+  },
+  interpreter_appointment_cancelled: {
+    de: "Gebuchter Termin abgesagt",
+    ru: "Приём, на который вы назначены, отменён",
+  },
+  interpreter_appointment_rescheduled: {
+    de: "Gebuchter Termin geändert",
+    ru: "Приём, на который вы назначены, изменён",
+  },
+  interpreter_report_auto_rejected: {
+    de: "Dolmetscherbericht automatisch zurückgewiesen",
+    ru: "Отчёт переводчика отклонён автоматически",
+  },
 };
 
 type InterpreterWorkNotificationBody = {
@@ -221,7 +279,57 @@ type InterpreterWorkNotificationBody = {
   reviewer_name?: string | null;
   notes?: string | null;
   comment?: string | null;
+  location?: string | null;
+  previous_date?: string | null;
+  previous_time_start?: string | null;
+  previous_location?: string | null;
+  response_reset?: boolean | null;
+  reason?: string | null;
+  occurrence_count?: number | null;
+  deleted?: boolean | null;
 };
+
+const AUTO_REJECTION_REASONS: Record<string, { de: string; ru: string }> = {
+  appointment_cancelled: { de: "Termin abgesagt", ru: "приём отменён" },
+  interpreter_changed: { de: "anderer Dolmetscher gebucht", ru: "назначен другой переводчик" },
+};
+
+/** The booking-change lines of a notification sent to the interpreter. */
+function interpreterBookingNoticeParts(
+  kind: string,
+  data: InterpreterWorkNotificationBody,
+  lang: "ru" | "de",
+): string[] {
+  const parts: string[] = [];
+  if (kind === "interpreter_appointment_rescheduled") {
+    const previous = [
+      data.previous_date ? formatAppDate(data.previous_date) : null,
+      data.previous_time_start,
+    ].filter(Boolean).join(" ");
+    if (previous) parts.push(`${lang === "de" ? "Vorher" : "Было"}: ${previous}`);
+    if (data.previous_location && data.previous_location !== data.location) {
+      parts.push(`${lang === "de" ? "Ort vorher" : "Место было"}: ${data.previous_location}`);
+    }
+    if (data.response_reset) {
+      parts.push(lang === "de" ? "Bitte den Einsatz erneut bestätigen" : "Подтвердите участие ещё раз");
+    }
+  }
+  if (kind === "interpreter_booking_assigned") {
+    parts.push(lang === "de" ? "Bitte den Einsatz bestätigen oder ablehnen" : "Подтвердите или отклоните участие");
+  }
+  if (kind === "interpreter_appointment_cancelled" && data.deleted) {
+    parts.push(lang === "de" ? "Termin gelöscht" : "Приём удалён");
+  }
+  if (kind === "interpreter_report_auto_rejected" && data.reason) {
+    const reason = AUTO_REJECTION_REASONS[data.reason]?.[lang] ?? data.reason;
+    parts.push(`${lang === "de" ? "Grund" : "Причина"}: ${reason}`);
+  }
+  const count = Number(data.occurrence_count);
+  if (Number.isFinite(count) && count > 1) {
+    parts.push(lang === "de" ? `Serie: ${count} Termine` : `Серия: ${count} приёмов`);
+  }
+  return parts;
+}
 
 // Interpreter report and clarification notifications store their facts as
 // JSON; the wording follows the staff language.
@@ -265,6 +373,7 @@ function interpreterWorkNotificationCopy(
   ) {
     parts.push([data.interpreter_name, data.comment].filter(Boolean).join(": "));
   }
+  parts.push(...interpreterBookingNoticeParts(item.kind, data, lang));
   const body = parts.filter(Boolean).join(" — ");
   return { title: titles[lang], body: body || null };
 }
@@ -282,6 +391,10 @@ const TASK_NOTIFICATION_TITLES: Record<string, { de: string; ru: string }> = {
   "Task deleted": { de: "Aufgabe gelöscht", ru: "Задача удалена" },
   "New task comment": { de: "Neuer Kommentar zur Aufgabe", ru: "Новый комментарий к задаче" },
   "Task reminder": { de: "Aufgabenerinnerung", ru: "Напоминание о задаче" },
+  // Review decisions of the author, sent to the assignee.
+  "Task accepted": { de: "Aufgabe angenommen", ru: "Задача принята" },
+  "Task returned for rework": { de: "Aufgabe zur Nacharbeit zurückgegeben", ru: "Задача возвращена на доработку" },
+  "Task cancelled after review": { de: "Aufgabe nach Prüfung storniert", ru: "Задача отменена после проверки" },
 };
 
 function taskNotificationTitle(item: Notification, lang: "ru" | "de"): string | null {

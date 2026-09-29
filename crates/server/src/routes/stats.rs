@@ -1715,6 +1715,7 @@ async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Err
                  )::numeric, 0)
                  FROM appointments
                  WHERE interpreter_id IS NOT NULL
+                   AND interpreter_response IS DISTINCT FROM 'declined'
                    AND status = 'completed'
                    AND date >= CURRENT_DATE - 30
                    AND time_start IS NOT NULL
@@ -1724,6 +1725,7 @@ async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Err
                  )::numeric, 0)
                  FROM appointments
                  WHERE interpreter_id IS NOT NULL
+                   AND interpreter_response IS DISTINCT FROM 'declined'
                    AND status IN ('planned', 'confirmed', 'in_progress')
                    AND date BETWEEN CURRENT_DATE AND CURRENT_DATE + 30
                    AND time_start IS NOT NULL
@@ -1731,6 +1733,7 @@ async fn load_interpreter_team_kpis(state: &AppState) -> Result<Value, sqlx::Err
                 (SELECT COUNT(*)::bigint
                  FROM appointments
                  WHERE interpreter_id IS NOT NULL
+                   AND interpreter_response IS DISTINCT FROM 'declined'
                    AND status = 'completed'
                    AND date >= CURRENT_DATE - 30) AS completed_appointments_30d,
                 (SELECT ROUND(AVG(interpreter_score)::numeric, 2)
@@ -1810,6 +1813,7 @@ async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Err
                     )::numeric, 0)
                     FROM appointments a
                     WHERE a.interpreter_id = u.id
+                      AND a.interpreter_response IS DISTINCT FROM 'declined'
                       AND a.status = 'completed'
                       AND a.date >= CURRENT_DATE - 30
                       AND a.time_start IS NOT NULL
@@ -1821,6 +1825,7 @@ async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Err
                     )::numeric, 0)
                     FROM appointments a
                     WHERE a.interpreter_id = u.id
+                      AND a.interpreter_response IS DISTINCT FROM 'declined'
                       AND a.status IN ('planned', 'confirmed', 'in_progress')
                       AND a.date >= CURRENT_DATE
                       AND a.date <= CURRENT_DATE + 30
@@ -1831,6 +1836,7 @@ async fn load_interpreter_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Err
                     SELECT COUNT(*)::bigint
                     FROM appointments a
                     WHERE a.interpreter_id = u.id
+                      AND a.interpreter_response IS DISTINCT FROM 'declined'
                       AND a.status = 'completed'
                       AND a.date >= CURRENT_DATE - 30
                 ) AS completed_appointments_30d,

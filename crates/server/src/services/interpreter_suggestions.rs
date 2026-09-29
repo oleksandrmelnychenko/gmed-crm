@@ -47,6 +47,7 @@ pub async fn load_appointment_interpreter_suggestions(
                       AND ir.interpreter_id = a.interpreter_id
                 WHERE a.patient_id = (SELECT patient_id FROM target)
                   AND a.interpreter_id IS NOT NULL
+                  AND a.interpreter_response IS DISTINCT FROM 'declined'
                   AND a.id <> $1
                 GROUP BY a.interpreter_id
            ),

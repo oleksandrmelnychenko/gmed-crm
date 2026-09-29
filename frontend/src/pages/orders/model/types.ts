@@ -558,7 +558,7 @@ export type WorkflowChecklistItem = {
   is_completed: boolean;
   /** Closed as "не требуется" rather than done; `is_completed` is true too. */
   not_required?: boolean;
-  not_required_reason?: "manual" | "phase_passed" | "task_cancelled" | null;
+  not_required_reason?: "manual" | "phase_passed" | "task_cancelled" | "order_cancelled" | null;
   completed_at: string | null;
   completed_by_name?: string | null;
   sort_order: number;

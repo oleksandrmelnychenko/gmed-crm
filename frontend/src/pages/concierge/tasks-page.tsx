@@ -35,6 +35,8 @@ import { ConciergeTaskManager } from "./task-manager";
 import { openSubtaskCount } from "./task-workflow";
 import {
   closeOpenSubtasks,
+  skippedSubtasksNotice,
+  subtaskCloseStatus,
   completableParentAfterChild,
   completeParentTask,
   ParentCloseChoiceDialog,
@@ -225,15 +227,18 @@ export function ConciergeTaskManagerPage() {
   async function changeTaskStatus(task: ConciergeTask, status: string): Promise<string | null> {
     if (updatingTaskId || task.archived_at || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return labels.updateFailed;
     if (!availableConciergeTaskStatuses(task, user?.id, user?.role).includes(status as ConciergeTaskStatus)) return labels.updateFailed;
-    const openChildren = status === "completed" ? openSubtaskCount(task, tasks) : 0;
-    if (openChildren > 0) {
-      // Completing a parent with open sub-tasks is a decision, not a side effect.
+    const closeStatus = subtaskCloseStatus(status);
+    const openChildren = closeStatus ? openSubtaskCount(task, tasks) : 0;
+    if (openChildren > 0 && closeStatus) {
+      // Completing or cancelling a parent with open sub-tasks is a decision,
+      // not a side effect.
       setParentCloseRequest({
         task,
         openCount: openChildren,
         archive: false,
+        status: closeStatus,
         run: async (closeChildren) => {
-          if (closeChildren && !(await closeChildrenOf(task, "completed"))) return;
+          if (closeChildren && !(await closeChildrenOf(task, closeStatus))) return;
           await applyTaskStatus(task, status);
           if (closeChildren) requestRefresh();
         },
@@ -245,7 +250,9 @@ export function ConciergeTaskManagerPage() {
 
   async function closeChildrenOf(task: ConciergeTask, status: "completed" | "cancelled") {
     try {
-      await closeOpenSubtasks(task.id, status);
+      const result = await closeOpenSubtasks(task.id, status);
+      const skipped = skippedSubtasksNotice(result, lang);
+      if (skipped) setError(skipped);
       return true;
     } catch (closeError) {
       setError(conciergeTaskErrorMessage(closeError, lang, labels.updateFailed));

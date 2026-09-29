@@ -56,6 +56,10 @@ import {
   isAppointmentCompletionTooEarly,
   isClosedAppointmentStatus,
 } from "@/pages/appointments/model/completion-rules";
+import {
+  CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
+  closedWithoutCompletionLabel,
+} from "@/pages/appointments/model/closure";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
@@ -1279,20 +1283,26 @@ function AppointmentChecklistSection({
         label: t.users_status,
         // "Offen" / "Открыто" as a state, not the "open" action verb.
         accessor: (item) =>
-          item.is_completed ? t.common_completed : t.appointment_task_status_open,
+          closedWithoutCompletionLabel(item)
+          ?? (item.is_completed ? t.common_completed : t.appointment_task_status_open),
         filterType: "enum",
         filterOptions: (rows) =>
           [
             ...new Set(
               rows.map((item) =>
-                item.is_completed ? t.common_completed : t.appointment_task_status_open,
+                closedWithoutCompletionLabel(item)
+                ?? (item.is_completed ? t.common_completed : t.appointment_task_status_open),
               ),
             ),
           ].map((label) => ({ value: label, label })),
         sortable: true,
         width: 220,
         render: (item) =>
-          item.is_completed ? (
+          closedWithoutCompletionLabel(item) ? (
+            <span className={CLOSED_WITHOUT_COMPLETION_BADGE_CLASS}>
+              {closedWithoutCompletionLabel(item)}
+            </span>
+          ) : item.is_completed ? (
             <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-medium text-emerald-700">
               {t.common_completed} {formatDateTimeLabel(item.completed_at)}
             </span>

@@ -43,6 +43,7 @@ const STAFF_DASHBOARD_REALTIME_EVENTS = [
   "appointment_request.created",
   "appointment_request.reviewed",
   "appointment_request.converted",
+  "appointment_request.cancelled",
   "case.created",
   "case.updated",
   "case.medication_expiry_confirmed",

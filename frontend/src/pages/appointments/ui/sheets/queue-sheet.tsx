@@ -108,7 +108,61 @@ export type QueueSheetProps = {
     requestId: string,
     input: ConvertAppointmentRequestInput,
   ) => Promise<void> | void;
+  /** Cancels an open (requested or approved) request with a reason. */
+  onCancelRequest?: (requestId: string, reason: string) => Promise<void> | void;
 };
+
+/**
+ * Cancelling an open appointment request needs a reason, which the patient
+ * sees in the portal (owner decision 2026-09-28).
+ */
+function CancelRequestControl({
+  disabled,
+  onCancel,
+}: {
+  disabled: boolean;
+  onCancel: (reason: string) => Promise<void> | void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const valid = reason.trim().length >= 3;
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="h-8 rounded-lg text-muted-foreground"
+        disabled={disabled}
+        onClick={() => setOpen(true)}
+      >
+        <XCircle className="size-3.5" />
+        {appointmentText("appointments_request_cancel")}
+      </Button>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        value={reason}
+        maxLength={1000}
+        placeholder={appointmentText("appointments_request_cancel_reason")}
+        onChange={(event) => setReason(event.target.value)}
+        className="h-8 min-w-[220px] flex-1 rounded-lg text-sm"
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="destructive"
+        className="h-8 rounded-lg"
+        disabled={disabled || !valid}
+        onClick={() => void onCancel(reason.trim())}
+      >
+        {appointmentText("appointments_request_cancel")}
+      </Button>
+    </div>
+  );
+}
 
 type ConvertAppointmentRequestInput = {
   providerId: string | null;
@@ -259,6 +313,7 @@ function useQueueSheetContent({
   onStatusChange,
   onReviewRequest,
   onConvertRequest,
+  onCancelRequest,
 }: QueueSheetProps) {
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
@@ -499,6 +554,13 @@ function useQueueSheetContent({
                 {item.specialty ? <p className="break-words">{item.specialty}</p> : null}
                 {item.reason ? <p className="break-words">{item.reason}</p> : null}
               </div>
+              {onCancelRequest
+              && (item.status === "requested" || item.status === "approved") ? (
+                <CancelRequestControl
+                  disabled={Boolean(requestActionBusy)}
+                  onCancel={(reason) => onCancelRequest(item.id, reason)}
+                />
+              ) : null}
               {item.status === "requested" ? (
                 <div className="flex flex-wrap gap-2">
                   <Button

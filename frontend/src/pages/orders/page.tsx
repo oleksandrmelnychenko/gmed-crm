@@ -2799,8 +2799,16 @@ function useOrdersPageContent() {
     }
   }
 
+  // The steps of a completed or cancelled order are locked on the server.
+  const orderStepsLocked =
+    orderDetail?.status === "completed" || orderDetail?.status === "cancelled";
+
   async function handleSavePlanningPreparation() {
     if (!selectedOrderId || planningBusy || !planningDirty) return;
+    if (orderStepsLocked) {
+      setPlanningError(l("orders_steps_locked"));
+      return;
+    }
 
     setPlanningBusy(true);
     setPlanningError(null);
@@ -2830,6 +2838,10 @@ function useOrdersPageContent() {
 
   async function handleSaveExecutionFlow() {
     if (!selectedOrderId || executionBusy || !executionDirty) return;
+    if (orderStepsLocked) {
+      setExecutionError(l("orders_steps_locked"));
+      return;
+    }
 
     setExecutionBusy(true);
     setExecutionError(null);
@@ -2857,6 +2869,10 @@ function useOrdersPageContent() {
 
   async function handleSaveFollowupFlow() {
     if (!selectedOrderId || followupBusy || !followupDirty) return;
+    if (orderStepsLocked) {
+      setFollowupError(l("orders_steps_locked"));
+      return;
+    }
 
     setFollowupBusy(true);
     setFollowupError(null);
@@ -5485,7 +5501,7 @@ function useOrdersPageContent() {
                                   onClick={() =>
                                     void handleSavePlanningPreparation()
                                   }
-                                  disabled={planningBusy || !planningDirty}
+                                  disabled={planningBusy || !planningDirty || orderStepsLocked}
                                 >
                                   {planningBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -5859,7 +5875,7 @@ function useOrdersPageContent() {
                               <Button
                                 type="button"
                                 onClick={() => void handleSaveExecutionFlow()}
-                                disabled={executionBusy || !executionDirty}
+                                disabled={executionBusy || !executionDirty || orderStepsLocked}
                               >
                                   {executionBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -6205,7 +6221,7 @@ function useOrdersPageContent() {
                               <Button
                                 type="button"
                                 onClick={() => void handleSaveFollowupFlow()}
-                                disabled={followupBusy || !followupDirty}
+                                disabled={followupBusy || !followupDirty || orderStepsLocked}
                               >
                                   {followupBusy ? (
                                     <LoaderCircle className="mr-2 size-4 animate-spin" />
@@ -6886,6 +6902,7 @@ function useOrdersPageContent() {
                                                   ) : null}
                                                 </div>
                                               ) : notRequired &&
+                                                item.not_required_reason !== "order_cancelled" &&
                                                 permissions.canManagePhase ? (
                                                 <Button
                                                   type="button"

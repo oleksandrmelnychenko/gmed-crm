@@ -8686,7 +8686,8 @@ async fn get_patient_timeline(
                    reminder.id AS entity_id,
                    reminder.title AS title,
                    'scheduling'::text AS category,
-                   CASE WHEN reminder.is_completed THEN 'completed' ELSE 'open' END AS status,
+                   CASE WHEN reminder.closed_reason IS NOT NULL THEN 'closed'
+                        WHEN reminder.is_completed THEN 'completed' ELSE 'open' END AS status,
                    COALESCE(reminder.completed_at, reminder.remind_at, reminder.created_at) AS happened_at,
                    reminder_user.name AS source_label
             FROM reminders reminder

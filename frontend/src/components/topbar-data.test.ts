@@ -66,6 +66,13 @@ describe("task notifications", () => {
     expect(copy.body).not.toContain("Order checklist");
   });
 
+  it("words the author's review decision for the assignee", () => {
+    expect(localizedNotificationCopy(taskNotice("operational_task_review_decision", "Task returned for rework", "Flowers"), "ru").title)
+      .toBe("Задача возвращена на доработку");
+    expect(localizedNotificationCopy(taskNotice("operational_task_review_decision", "Task accepted", "Flowers"), "de").title)
+      .toBe("Aufgabe angenommen");
+  });
+
   it("keeps unknown titles and other notification kinds unchanged", () => {
     expect(localizedNotificationCopy(taskNotice("operational_task_updated", "Something new", "Flowers"), "ru").title)
       .toBe("Something new");
@@ -101,6 +108,43 @@ describe("interpreter work notifications", () => {
     }), "ru");
     expect(declined.title).toBe("Переводчик отказался от назначения");
     expect(declined.body).toBe("Kardiologie · 26.09.2026 — Iwan: Krank");
+  });
+
+  it("tells the interpreter about changes of the own booking in RU and DE", () => {
+    const booked = localizedNotificationCopy(notice("interpreter_booking_assigned", {
+      appointment_title: "Kardiologie", appointment_date: "2026-10-02", time_start: "09:30", occurrence_count: 3,
+    }), "de");
+    expect(booked.title).toBe("Sie wurden als Dolmetscher gebucht");
+    expect(booked.body).toBe("Kardiologie · 02.10.2026 09:30 — Bitte den Einsatz bestätigen oder ablehnen — Serie: 3 Termine");
+
+    expect(localizedNotificationCopy(notice("interpreter_booking_removed", { appointment_title: "Kardiologie" }), "ru").title)
+      .toBe("Вас сняли с назначения");
+
+    const moved = localizedNotificationCopy(notice("interpreter_appointment_rescheduled", {
+      appointment_title: "Kardiologie", appointment_date: "2026-10-03", time_start: "11:00",
+      previous_date: "2026-10-02", previous_time_start: "09:30", response_reset: true,
+    }), "ru");
+    expect(moved.title).toBe("Приём, на который вы назначены, изменён");
+    expect(moved.body).toBe("Kardiologie · 03.10.2026 11:00 — Было: 02.10.2026 09:30 — Подтвердите участие ещё раз");
+
+    const deleted = localizedNotificationCopy(notice("interpreter_appointment_cancelled", {
+      appointment_title: "Kardiologie", appointment_date: "2026-10-02", deleted: true,
+    }), "de");
+    expect(deleted.title).toBe("Gebuchter Termin abgesagt");
+    expect(deleted.body).toBe("Kardiologie · 02.10.2026 — Termin gelöscht");
+
+    expect(localizedNotificationCopy(notice("interpreter_report_auto_rejected", {
+      appointment_title: "Kardiologie", reason: "interpreter_changed",
+    }), "ru").body).toBe("Kardiologie — Причина: назначен другой переводчик");
+  });
+
+  it("shows a delivered appointment reminder with its visit", () => {
+    const reminder = localizedNotificationCopy(notice("appointment_reminder", {
+      reminder_title: "Unterlagen mitnehmen", appointment_title: "Kardiologie", appointment_date: "2026-10-02", time_start: "09:30",
+    }), "ru");
+    expect(reminder.title).toBe("Напоминание по приёму");
+    expect(reminder.body).toBe("Unterlagen mitnehmen — Kardiologie · 02.10.2026 09:30");
+    expect(localizedNotificationCopy(notice("appointment_reminder", {}), "de").title).toBe("Terminerinnerung");
   });
 
   it("survives a body that is not JSON", () => {

@@ -7,6 +7,10 @@ import {
 } from "@/components/data-table/data-table-pager";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
+import {
+  CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
+  closedWithoutCompletionLabel,
+} from "@/pages/appointments/model/closure";
 import { EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
@@ -156,7 +160,8 @@ export function AppointmentRemindersTable({
         id: "status",
         label: tr.users_status,
         accessor: (item) =>
-          item.is_completed ? tr.common_completed : tr.common_pending,
+          closedWithoutCompletionLabel(item)
+          ?? (item.is_completed ? tr.common_completed : tr.common_pending),
         filterType: "enum",
         filterOptions: [
           { value: tr.common_completed, label: tr.common_completed },
@@ -164,7 +169,11 @@ export function AppointmentRemindersTable({
         ],
         sortable: true,
         width: 140,
-        render: (item) => (
+        render: (item) => closedWithoutCompletionLabel(item) ? (
+          <span className={CLOSED_WITHOUT_COMPLETION_BADGE_CLASS}>
+            {closedWithoutCompletionLabel(item)}
+          </span>
+        ) : (
           <Badge
             variant="outline"
             className={cn(

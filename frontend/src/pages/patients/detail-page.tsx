@@ -803,6 +803,7 @@ const PATIENT_DETAIL_REALTIME_EVENTS = [
   "appointment_request.created",
   "appointment_request.reviewed",
   "appointment_request.converted",
+  "appointment_request.cancelled",
   "concierge_service.created",
   "concierge_service.updated",
   "concierge_service.cancelled",

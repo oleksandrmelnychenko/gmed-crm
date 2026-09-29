@@ -83,7 +83,7 @@ import type {
 } from "./expense-receipt-model";
 import { ConciergeTaskAttachments } from "./task-attachments";
 import { openSubtaskCount, subtaskProgress } from "./task-workflow";
-import { closeOpenSubtasks, completableParentAfterChild, completeParentTask, ParentCloseChoiceDialog, ParentCompletionSuggestionDialog, type ParentCloseRequest, type ParentCompletionSuggestion } from "./subtask-flow";
+import { closeOpenSubtasks, completableParentAfterChild, completeParentTask, ParentCloseChoiceDialog, skippedSubtasksNotice, subtaskCloseStatus, ParentCompletionSuggestionDialog, type ParentCloseRequest, type ParentCompletionSuggestion } from "./subtask-flow";
 
 const copy = {
   de: {
@@ -894,13 +894,16 @@ export function ConciergeTaskDetailDialog({
       return;
     }
     const status = pendingStatus;
-    const openChildren = status === "completed" ? openSubtaskCount(detail.item, relatedTasks) : 0;
-    if (openChildren > 0) {
-      // Completing a parent with open sub-tasks is a decision, not a side effect.
+    const closeStatus = subtaskCloseStatus(status);
+    const openChildren = closeStatus ? openSubtaskCount(detail.item, relatedTasks) : 0;
+    if (openChildren > 0 && closeStatus) {
+      // Completing or cancelling a parent with open sub-tasks is a decision,
+      // not a side effect.
       setParentCloseRequest({
         task: detail.item,
         openCount: openChildren,
         archive: false,
+        status: closeStatus,
         run: (closeChildren) => applyStatus(status, closeChildren),
       });
       return;
@@ -914,7 +917,12 @@ export function ConciergeTaskDetailDialog({
     setBusy(true);
     setError("");
     try {
-      if (closeChildren) await closeOpenSubtasks(taskId, "completed");
+      const closeStatus = subtaskCloseStatus(status);
+      let skippedNotice: string | null = null;
+      if (closeChildren && closeStatus) {
+        skippedNotice = skippedSubtasksNotice(await closeOpenSubtasks(taskId, closeStatus), lang);
+      }
+      if (skippedNotice) setError(skippedNotice);
       await apiFetch(`/concierge-operational-items/${taskId}/status`, {
         method: "POST",
         body: JSON.stringify({

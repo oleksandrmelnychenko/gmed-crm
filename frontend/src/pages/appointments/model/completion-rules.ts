@@ -14,6 +14,15 @@ export const APPOINTMENT_REPORTED_FUTURE_DATE_CODE = "appointment_reported_futur
 export const APPOINTMENT_REPORT_STATUS_NOT_OPEN_CODE = "appointment_report_status_not_open";
 
 /**
+ * Error code the server returns when a visit with an approved, billed
+ * interpreter report is cancelled before that billing is reversed.
+ */
+export const APPOINTMENT_CANCEL_BILLED_REPORT_CODE = "appointment_cancel_billed_report";
+
+/** Error code the server returns when a team lead reviews its own report. */
+export const INTERPRETER_REPORT_SELF_REVIEW_CODE = "interpreter_report_self_review";
+
+/**
  * Completed and cancelled appointments are closed: the server refuses to
  * reschedule them, to assign an interpreter or to change their checklist.
  */

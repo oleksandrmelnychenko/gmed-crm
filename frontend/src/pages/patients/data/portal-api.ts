@@ -128,6 +128,11 @@ export function createPortalAppointmentRequest(payload: JsonPayload) {
   return postJson("/me/appointment-requests", payload);
 }
 
+/** The patient withdraws its own open (requested or approved) request. */
+export function withdrawPortalAppointmentRequest(requestId: string) {
+  return postJson(`/me/appointment-requests/${requestId}/withdraw`, {});
+}
+
 export async function fetchPortalDocumentsWorkspace() {
   const [releasedDocuments, uploadedDocuments, documentAlerts, translationRequests] = await Promise.all([
     apiFetch<PortalDocumentItem[]>("/me/documents", {

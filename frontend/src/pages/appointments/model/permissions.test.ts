@@ -46,7 +46,7 @@ describe("appointment role contracts", () => {
         canAssignInterpreter: true,
         canApproveReport: true,
         canRejectReport: true,
-        canSubmitReport: false,
+        canSubmitReport: true,
         canManageChecklist: false,
         canManageConciergeServices: false,
       }),
@@ -273,7 +273,7 @@ describe("appointment report actions", () => {
       }).canSubmitInterpreterReport,
     ).toBe(false);
 
-    // The server accepts reports from the `interpreter` role only.
+    // A team lead booked as the interpreter reports its visit too.
     expect(
       appointmentReportActions({
         permissions: appointmentPermissions("teamlead_interpreter"),
@@ -281,7 +281,36 @@ describe("appointment report actions", () => {
         interpreterId,
         report: null,
       }).canSubmitInterpreterReport,
+    ).toBe(true);
+    expect(
+      appointmentReportActions({
+        permissions: appointmentPermissions("teamlead_interpreter"),
+        currentUserId: interpreterId,
+        interpreterId: "interpreter-2",
+        report: null,
+      }).canSubmitInterpreterReport,
     ).toBe(false);
+  });
+
+  it("leaves the review of a team lead's own report to someone else", () => {
+    const permissions = appointmentPermissions("teamlead_interpreter");
+    const ownPending = { approval_status: "pending", interpreter_id: interpreterId };
+    expect(
+      appointmentReportActions({
+        permissions,
+        currentUserId: interpreterId,
+        interpreterId,
+        report: ownPending,
+      }).showReportReviewActions,
+    ).toBe(false);
+    expect(
+      appointmentReportActions({
+        permissions,
+        currentUserId: "teamlead-2",
+        interpreterId,
+        report: ownPending,
+      }).showReportReviewActions,
+    ).toBe(true);
   });
 
   it("offers the review decision to approvers while the report is pending", () => {

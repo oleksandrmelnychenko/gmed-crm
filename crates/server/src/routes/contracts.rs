@@ -2856,8 +2856,20 @@ async fn terminate_framework_contract(
     // bookings, reminders and concierge work) are cancelled and pending
     // amount amendments are rejected. Its quotes stay open: they anchor the
     // final settlement invoice.
+    let mut checklist_changes = Vec::new();
     for order in &mut terminated_orders {
         let order_id = order.order_id();
+        // Open checklist work of the stopped order no longer applies.
+        match crate::routes::workflow_checklists::resolve_items_of_cancelled_order_in_tx(
+            &mut tx,
+            order_id,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(changes) => checklist_changes.extend(changes),
+            Err(e) => return failed(e),
+        }
         order.cancelled_appointment_ids =
             match crate::routes::appointments::cancel_upcoming_order_appointments_in_tx(
                 &mut tx,
@@ -2970,6 +2982,12 @@ async fn terminate_framework_contract(
     if let Err(e) = tx.commit().await {
         return failed(e);
     }
+    crate::routes::workflow_checklists::publish_checklist_item_changes(
+        &state,
+        auth.user_id,
+        &checklist_changes,
+    )
+    .await;
 
     crate::realtime::publish_contract_event(
         &state,

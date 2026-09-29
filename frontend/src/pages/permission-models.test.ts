@@ -293,7 +293,7 @@ describe("appointments model", () => {
         canViewReminders: view,
         canManageReminders: status,
         canRespondToAssignment: submit && ["interpreter", "teamlead_interpreter"].includes(role),
-        canSubmitReport: submit && role === "interpreter",
+        canSubmitReport: submit && ["interpreter", "teamlead_interpreter"].includes(role),
         canViewReport: approve || submit,
         canApproveReport: approve,
         canRejectReport: approve,

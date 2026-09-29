@@ -39,6 +39,10 @@ import {
   appointmentSoftPanelClassName,
   appointmentTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
+import {
+  CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
+  closedWithoutCompletionLabel,
+} from "@/pages/appointments/model/closure";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
@@ -363,7 +367,8 @@ function useAppointmentIncomingDataSectionContent({
         id: "status",
         label: tr.users_status,
         accessor: (item) =>
-          item.is_completed ? tr.common_completed : tr.common_pending,
+          closedWithoutCompletionLabel(item)
+          ?? (item.is_completed ? tr.common_completed : tr.common_pending),
         filterType: "enum",
         filterOptions: [
           { value: tr.common_completed, label: tr.common_completed },
@@ -371,7 +376,11 @@ function useAppointmentIncomingDataSectionContent({
         ],
         sortable: true,
         width: 220,
-        render: (item) => (
+        render: (item) => closedWithoutCompletionLabel(item) ? (
+          <span className={CLOSED_WITHOUT_COMPLETION_BADGE_CLASS}>
+            {closedWithoutCompletionLabel(item)}
+          </span>
+        ) : (
           <span
             className={cn(
               "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",
@@ -1048,7 +1057,8 @@ function useAppointmentFindingsSectionContent({
         id: "status",
         label: tr.users_status,
         accessor: (item) =>
-          item.is_completed ? tr.common_completed : tr.common_pending,
+          closedWithoutCompletionLabel(item)
+          ?? (item.is_completed ? tr.common_completed : tr.common_pending),
         filterType: "enum",
         filterOptions: [
           { value: tr.common_completed, label: tr.common_completed },
@@ -1056,7 +1066,11 @@ function useAppointmentFindingsSectionContent({
         ],
         sortable: true,
         width: 220,
-        render: (item) => (
+        render: (item) => closedWithoutCompletionLabel(item) ? (
+          <span className={CLOSED_WITHOUT_COMPLETION_BADGE_CLASS}>
+            {closedWithoutCompletionLabel(item)}
+          </span>
+        ) : (
           <span
             className={cn(
               "inline-flex rounded-full border px-2 py-0.5 font-mono text-[10px] font-medium",

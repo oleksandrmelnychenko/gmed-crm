@@ -74,6 +74,9 @@ async fn main() {
     gmed_server::routes::appointments::spawn_interpreter_report_billing_sync_scheduler(
         app_state.clone(),
     );
+    gmed_server::routes::appointments::spawn_appointment_reminder_delivery_scheduler(
+        app_state.clone(),
+    );
     gmed_server::routes::patient_recommendations::spawn_recommendation_reminder_scheduler(
         app_state.clone(),
     );

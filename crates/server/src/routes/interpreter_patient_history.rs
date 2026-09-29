@@ -70,6 +70,7 @@ async fn get_interpreter_patient_history(
                        ON ir.appointment_id = a.id
                       AND ir.interpreter_id = $1
                 WHERE a.interpreter_id = $1
+                  AND a.interpreter_response IS DISTINCT FROM 'declined'
                   AND (
                         $2::uuid IS NULL
                         OR EXISTS (
@@ -194,6 +195,7 @@ async fn get_patient_interpreter_history(
                       AND ir.interpreter_id = a.interpreter_id
                 WHERE a.patient_id = $1
                   AND a.interpreter_id IS NOT NULL
+                  AND a.interpreter_response IS DISTINCT FROM 'declined'
                 GROUP BY a.interpreter_id
            ),
            feedback AS (

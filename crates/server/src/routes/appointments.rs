@@ -90,6 +90,14 @@ pub fn router() -> Router<AppState> {
             "/me/appointment-requests",
             get(list_my_appointment_requests).post(create_my_appointment_request),
         )
+        .route(
+            "/me/appointment-requests/{id}/withdraw",
+            post(withdraw_my_appointment_request),
+        )
+        .route(
+            "/appointments/requests/{id}/cancel",
+            post(cancel_appointment_request),
+        )
         .route("/appointments/meta/interpreters", get(list_interpreters))
         .route("/appointments/meta/staff", get(list_staff))
         .route("/appointments/meta/conflicts", get(get_conflicts))
@@ -404,6 +412,11 @@ struct ReviewAppointmentRequest {
     review_note: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+struct CancelAppointmentRequestBody {
+    reason: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct ConvertAppointmentRequest {
     provider_id: Option<Uuid>,
@@ -524,6 +537,9 @@ fn build_appointment_request_json(row: &sqlx::postgres::PgRow) -> serde_json::Va
         "converted_appointment_id": row.try_get::<Option<Uuid>, _>("converted_appointment_id").unwrap_or_default(),
         "converted_appointment_title": row.try_get::<Option<String>, _>("converted_appointment_title").unwrap_or_default(),
         "converted_appointment_date": row.try_get::<Option<chrono::NaiveDate>, _>("converted_appointment_date").unwrap_or_default().map(|value| value.to_string()),
+        "cancelled_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "cancellation_reason": row.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
+        "cancelled_by_patient": row.try_get::<bool, _>("cancelled_by_patient").unwrap_or(false),
     })
 }
 
@@ -538,6 +554,7 @@ async fn load_appointment_request_row(
                   par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
                   par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
                   par.reviewed_at, par.requested_at, par.converted_appointment_id,
+                  par.cancelled_at, par.cancellation_reason, par.cancelled_by_patient,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
@@ -636,6 +653,7 @@ async fn list_my_appointment_requests(
                   par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
                   par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
                   par.reviewed_at, par.requested_at, par.converted_appointment_id,
+                  par.cancelled_at, par.cancellation_reason, par.cancelled_by_patient,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
@@ -993,6 +1011,7 @@ async fn list_appointment_requests(
                   par.requested_provider_id, par.requested_doctor_id, par.specialty, par.location,
                   par.reason, par.notes, par.status, par.review_note, par.reviewed_by,
                   par.reviewed_at, par.requested_at, par.converted_appointment_id,
+                  par.cancelled_at, par.cancellation_reason, par.cancelled_by_patient,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
                   o.order_number,
@@ -1178,6 +1197,252 @@ async fn review_appointment_request(
     .await;
 
     match load_appointment_request_row(&state, id).await {
+        Ok(Some(row)) => Json(build_appointment_request_json(&row)).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Appointment request not found"),
+        Err(resp) => resp,
+    }
+}
+
+/// The patient withdraws its own open (requested or approved) appointment
+/// request in the portal; the request ends as `cancelled` (owner decision
+/// 2026-09-28). The patient's managers are notified.
+async fn withdraw_my_appointment_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Patient]) {
+        return resp;
+    }
+    let patient_id = match resolve_self_patient_id(&state, auth.user_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    // The reason is optional for the patient; an empty body is fine.
+    let body: CancelAppointmentRequestBody = if body.iter().all(u8::is_ascii_whitespace) {
+        CancelAppointmentRequestBody::default()
+    } else {
+        match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid request body"),
+        }
+    };
+    let reason = normalize_optional_text(body.reason);
+    if reason
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > 1000)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The reason must not exceed 1000 characters",
+        );
+    }
+    cancel_open_appointment_request(&state, &auth, id, Some(patient_id), reason, true).await
+}
+
+/// Staff (CEO, patient manager with access to the patient) cancel an open
+/// appointment request with a reason; the patient is notified.
+async fn cancel_appointment_request(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CancelAppointmentRequestBody>,
+) -> axum::response::Response {
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+        return resp;
+    }
+    let reason = normalize_optional_text(body.reason);
+    if !reason
+        .as_deref()
+        .is_some_and(|value| (3..=1000).contains(&value.chars().count()))
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A cancellation reason of 3 to 1000 characters is required",
+        );
+    }
+    cancel_open_appointment_request(&state, &auth, id, None, reason, false).await
+}
+
+async fn cancel_open_appointment_request(
+    state: &AppState,
+    auth: &AuthUser,
+    id: Uuid,
+    own_patient_id: Option<Uuid>,
+    reason: Option<String>,
+    by_patient: bool,
+) -> axum::response::Response {
+    let row = match load_appointment_request_row(state, id).await {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Appointment request not found"),
+        Err(resp) => return resp,
+    };
+    let patient_id = row
+        .try_get::<Uuid, _>("patient_id")
+        .unwrap_or_else(|_| Uuid::nil());
+    let requested_by = row
+        .try_get::<Uuid, _>("requested_by")
+        .unwrap_or_else(|_| Uuid::nil());
+    let previous_status = row.try_get::<String, _>("status").unwrap_or_default();
+    match own_patient_id {
+        // A patient only ever sees the requests it sent itself.
+        Some(own) if own != patient_id || requested_by != auth.user_id => {
+            return err(StatusCode::NOT_FOUND, "Appointment request not found");
+        }
+        Some(_) => {}
+        None => {
+            if let Err(resp) = ensure_patient_access(state, auth, patient_id).await
+                && auth.role != Role::Ceo
+            {
+                return resp;
+            }
+        }
+    }
+    if !matches!(previous_status.as_str(), "requested" | "approved") {
+        return err(
+            StatusCode::CONFLICT,
+            "Only a requested or approved appointment request can be cancelled",
+        );
+    }
+    // The status guard sits in the UPDATE, so a concurrent review or
+    // conversion is never overwritten.
+    match sqlx::query(
+        r#"UPDATE patient_appointment_requests
+           SET status = 'cancelled',
+               cancelled_at = now(),
+               cancelled_by = $2,
+               cancellation_reason = $3,
+               cancelled_by_patient = $4
+           WHERE id = $1
+             AND status IN ('requested', 'approved')"#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .bind(reason.as_deref())
+    .bind(by_patient)
+    .execute(&state.db)
+    .await
+    {
+        Ok(result) if result.rows_affected() == 1 => {}
+        Ok(_) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Only a requested or approved appointment request can be cancelled",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %id, "cancel appointment request");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to cancel appointment request",
+            );
+        }
+    }
+
+    state.audit_sender.try_send(audit::domain_event(
+        if by_patient {
+            "withdraw_appointment_request"
+        } else {
+            "cancel_appointment_request"
+        },
+        Some(auth.user_id),
+        "appointment_request",
+        Some(id),
+        serde_json::json!({
+            "patient_id": patient_id,
+            "from": previous_status,
+            "to": "cancelled",
+            "reason": reason,
+            "by_patient": by_patient,
+        }),
+    ));
+
+    // Who has to know: the patient when staff cancelled, the patient's
+    // managers when the patient withdrew.
+    let notifications = if by_patient {
+        sqlx::query_as::<_, (Uuid, Uuid)>(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+               SELECT pa.user_id, 'appointment_request_withdrawn', 'Appointment request withdrawn',
+                      $3, 'appointment_request', $1
+               FROM patient_assignments pa
+               JOIN users u ON u.id = pa.user_id
+               WHERE pa.patient_id = $2
+                 AND pa.revoked_at IS NULL
+                 AND u.is_active
+                 AND u.role IN ('patient_manager', 'ceo')
+               RETURNING id, user_id"#,
+        )
+        .bind(id)
+        .bind(patient_id)
+        .bind(
+            serde_json::json!({
+                "patient_pid": row.try_get::<Option<String>, _>("patient_pid").unwrap_or_default(),
+                "patient_name": row.try_get::<Option<String>, _>("patient_name").unwrap_or_default(),
+                "reason": reason,
+            })
+            .to_string(),
+        )
+        .fetch_all(&state.db)
+        .await
+    } else if requested_by != Uuid::nil() {
+        sqlx::query_as::<_, (Uuid, Uuid)>(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+               VALUES ($1, 'appointment_request_update', 'Appointment request cancelled', $2,
+                       'appointment_request', $3)
+               RETURNING id, user_id"#,
+        )
+        .bind(requested_by)
+        .bind(format!(
+            "Your appointment request was cancelled.{}",
+            reason
+                .as_deref()
+                .map(|value| format!(" Reason: {value}"))
+                .unwrap_or_default()
+        ))
+        .bind(id)
+        .fetch_all(&state.db)
+        .await
+    } else {
+        Ok(Vec::new())
+    };
+    match notifications {
+        Ok(rows) => {
+            for (notification_id, user_id) in rows {
+                crate::realtime::publish_notification_event(
+                    state,
+                    user_id,
+                    "notification.created",
+                    Some(notification_id),
+                    serde_json::json!({
+                        "entity_type": "appointment_request",
+                        "entity_id": id,
+                    }),
+                )
+                .await;
+            }
+        }
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %id, "notify about cancelled appointment request");
+        }
+    }
+
+    crate::realtime::publish_appointment_request_event(
+        state,
+        Some(auth.user_id),
+        "appointment_request.cancelled",
+        id,
+        patient_id,
+        (requested_by != Uuid::nil()).then_some(requested_by),
+        serde_json::json!({
+            "status": "cancelled",
+            "previous_status": previous_status,
+            "by_patient": by_patient,
+        }),
+    )
+    .await;
+
+    match load_appointment_request_row(state, id).await {
         Ok(Some(row)) => Json(build_appointment_request_json(&row)).into_response(),
         Ok(None) => err(StatusCode::NOT_FOUND, "Appointment request not found"),
         Err(resp) => resp,
@@ -1451,6 +1716,26 @@ async fn convert_appointment_request(
             "Failed to convert appointment request",
         );
     }
+    let booking_notifications = match body.interpreter_id {
+        Some(interpreter_id) => match insert_interpreter_booking_notifications(
+            &mut tx,
+            InterpreterBookingNotice::Booked,
+            &[BookingNoticeTarget::new(appointment_id, interpreter_id)],
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, request_id = %id, "notify interpreter booked during request conversion");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to convert appointment request",
+                );
+            }
+        },
+        None => Vec::new(),
+    };
 
     let request_update = sqlx::query(
         r#"UPDATE patient_appointment_requests
@@ -1490,6 +1775,7 @@ async fn convert_appointment_request(
             "Failed to convert appointment request",
         );
     }
+    publish_appointment_notifications(&state, &booking_notifications).await;
 
     if request_type == "non_medical"
         && let Err(resp) = bootstrap_non_medical_artifacts(
@@ -2630,11 +2916,38 @@ async fn create_appointment(
         tracing::error!(error = %e, "create appointment: link booked interpreter to patient");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    // One notification per booked interpreter, also for a whole series.
+    let booking_notifications = match interpreter_id {
+        Some(interpreter_id) => {
+            let targets = created_appointments
+                .iter()
+                .map(|(appointment_id, _)| {
+                    BookingNoticeTarget::new(*appointment_id, interpreter_id)
+                })
+                .collect();
+            match insert_interpreter_booking_notifications(
+                &mut tx,
+                InterpreterBookingNotice::Booked,
+                &one_notice_per_interpreter(targets),
+                auth.user_id,
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(e) => {
+                    tracing::error!(error = %e, "create appointment: notify booked interpreter");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+        None => Vec::new(),
+    };
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, "create appointment: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_appointment_notifications(&state, &booking_notifications).await;
 
     for (appointment_id, occurrence_date) in &created_appointments {
         if appointment_type == "non_medical"
@@ -2818,6 +3131,124 @@ fn report_status_not_open(
     )
 }
 
+const APPOINTMENT_CANCEL_BILLED_REPORT_CODE: &str = "appointment_cancel_billed_report";
+
+/// SQL condition (on `appointments a`): the appointment has an approved
+/// interpreter report whose billing is still in force, i.e. its order line
+/// does not exist yet (the billing sync creates it) or is not cancelled.
+const APPROVED_REPORT_BILLING_ACTIVE_SQL: &str = r#"EXISTS (
+    SELECT 1
+    FROM interpreter_reports billed_report
+    LEFT JOIN order_leistungen billed_line
+           ON billed_line.source_interpreter_report_id = billed_report.id
+    WHERE billed_report.appointment_id = a.id
+      AND billed_report.approval_status = 'approved'
+      AND billed_line.status IS DISTINCT FROM 'cancelled'
+)"#;
+
+/// An approved interpreter report bills the visit's hours, so the visit took
+/// place: cancelling it would leave billed hours on a cancelled appointment.
+/// Cancelling is refused until that billing is reversed (the report's order
+/// line is cancelled); the answer names the report and the order line (owner
+/// decision 2026-09-28).
+async fn ensure_no_billed_reports_before_cancel_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+) -> Result<(), axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT report.id AS report_id,
+                  report.appointment_id,
+                  report.hours::text AS hours,
+                  interpreter.name AS interpreter_name,
+                  a.title AS appointment_title,
+                  a.date AS appointment_date,
+                  line.id AS order_leistung_id,
+                  line.status AS order_leistung_status,
+                  line.description AS order_leistung_description,
+                  o.id AS order_id,
+                  o.order_number
+           FROM interpreter_reports report
+           JOIN appointments a ON a.id = report.appointment_id
+           LEFT JOIN users interpreter ON interpreter.id = report.interpreter_id
+           LEFT JOIN order_leistungen line ON line.source_interpreter_report_id = report.id
+           LEFT JOIN orders o ON o.id = COALESCE(line.order_id, a.order_id)
+           WHERE report.appointment_id = ANY($1)
+             AND report.approval_status = 'approved'
+             AND line.status IS DISTINCT FROM 'cancelled'
+           ORDER BY a.date, report.created_at, report.id
+           LIMIT 1"#,
+    )
+    .bind(appointment_ids)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "check billed interpreter reports before cancelling");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    let report_id: Uuid = row.try_get("report_id").unwrap_or_default();
+    let hours: String = row.try_get("hours").unwrap_or_default();
+    let order_leistung_id: Option<Uuid> = row.try_get("order_leistung_id").unwrap_or_default();
+    let order_number: Option<String> = row.try_get("order_number").unwrap_or_default();
+    let message = match order_leistung_id {
+        Some(line_id) => format!(
+            "The appointment has an approved interpreter report ({report_id}, {hours} h) billed on order line {line_id}{}; reverse that billing before cancelling the appointment",
+            order_number
+                .as_deref()
+                .map(|number| format!(" of order {number}"))
+                .unwrap_or_default()
+        ),
+        None => format!(
+            "The appointment has an approved interpreter report ({report_id}, {hours} h) whose hours are billable; reverse that billing before cancelling the appointment"
+        ),
+    };
+    Err(err_with_details(
+        StatusCode::CONFLICT,
+        &message,
+        serde_json::json!({
+            "code": APPOINTMENT_CANCEL_BILLED_REPORT_CODE,
+            "appointment_id": row.try_get::<Uuid, _>("appointment_id").unwrap_or_default(),
+            "appointment_title": row.try_get::<String, _>("appointment_title").unwrap_or_default(),
+            "appointment_date": row.try_get::<chrono::NaiveDate, _>("appointment_date").ok(),
+            "report_id": report_id,
+            "hours": hours,
+            "interpreter_name": row.try_get::<Option<String>, _>("interpreter_name").unwrap_or_default(),
+            "order_leistung_id": order_leistung_id,
+            "order_leistung_status": row.try_get::<Option<String>, _>("order_leistung_status").unwrap_or_default(),
+            "order_leistung_description": row.try_get::<Option<String>, _>("order_leistung_description").unwrap_or_default(),
+            "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
+            "order_number": order_number,
+        }),
+    ))
+}
+
+const INTERPRETER_REPORT_SELF_REVIEW_CODE: &str = "interpreter_report_self_review";
+
+/// A team lead booked as the interpreter reports its own visit; approving or
+/// returning that report is left to another team lead, a patient manager or
+/// the CEO (owner decision 2026-09-28).
+fn ensure_not_own_report(
+    appointment_id: Uuid,
+    report_id: Uuid,
+    report_interpreter_id: Uuid,
+    auth: &AuthUser,
+) -> Result<(), axum::response::Response> {
+    if report_interpreter_id != auth.user_id {
+        return Ok(());
+    }
+    Err(err_with_details(
+        StatusCode::FORBIDDEN,
+        "An interpreter report cannot be reviewed by its own interpreter",
+        serde_json::json!({
+            "code": INTERPRETER_REPORT_SELF_REVIEW_CODE,
+            "appointment_id": appointment_id,
+            "report_id": report_id,
+        }),
+    ))
+}
+
 /// Completion counts as delivery (billing lines, order execution evidence), so
 /// it only opens on the appointment's own day in the business timezone. The
 /// same holds for interpreter reports, whose approval bills the hours.
@@ -2952,6 +3383,7 @@ async fn close_terminal_appointment_artifacts_in_tx(
     sqlx::query(
         r#"UPDATE appointment_checklists
            SET is_completed = true,
+               closed_reason = 'appointment_cancelled',
                completed_by = COALESCE(completed_by, $2),
                completed_at = COALESCE(completed_at, now())
            WHERE appointment_id = ANY($1)
@@ -2978,6 +3410,7 @@ async fn close_terminal_appointment_artifacts_in_tx(
     sqlx::query(
         r#"UPDATE reminders
            SET is_completed = true,
+               closed_reason = 'appointment_cancelled',
                completed_at = COALESCE(completed_at, now())
            WHERE appointment_id = ANY($1)
              AND NOT is_completed"#,
@@ -2997,7 +3430,7 @@ async fn reject_pending_reports_for_cancelled_appointments_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     appointment_ids: &[Uuid],
     rejected_by: Uuid,
-) -> Result<(), axum::response::Response> {
+) -> Result<Vec<PendingAppointmentNotification>, axum::response::Response> {
     reject_pending_reports_in_tx(
         tx,
         appointment_ids,
@@ -3018,6 +3451,7 @@ async fn close_unbooked_interpreter_reminders_in_tx(
     sqlx::query(
         r#"UPDATE reminders
            SET is_completed = true,
+               closed_reason = 'interpreter_unbooked',
                completed_at = now()
            WHERE appointment_id = $1
              AND user_id = $2
@@ -3069,12 +3503,14 @@ impl ReportAutoRejection {
 
 /// Rejects the pending interpreter reports of these appointments, recording
 /// who caused it, and writes an audit row per report in the same transaction.
+/// Each report's interpreter is notified; the returned notifications are
+/// published after commit.
 async fn reject_pending_reports_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     appointment_ids: &[Uuid],
     rejected_by: Uuid,
     cause: ReportAutoRejection,
-) -> Result<(), axum::response::Response> {
+) -> Result<Vec<PendingAppointmentNotification>, axum::response::Response> {
     let failed = |e: sqlx::Error| {
         tracing::error!(error = %e, reason = cause.reason(), "reject pending interpreter reports");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
@@ -3096,6 +3532,19 @@ async fn reject_pending_reports_in_tx(
     .fetch_all(&mut **tx)
     .await
     .map_err(failed)?;
+    let targets: Vec<BookingNoticeTarget> = rejected
+        .iter()
+        .map(
+            |(report_id, appointment_id, interpreter_id)| BookingNoticeTarget {
+                appointment_id: *appointment_id,
+                interpreter_id: *interpreter_id,
+                extra: serde_json::json!({
+                    "report_id": report_id,
+                    "reason": cause.reason(),
+                }),
+            },
+        )
+        .collect();
     for (report_id, appointment_id, interpreter_id) in rejected {
         audit::write_in_transaction(
             tx,
@@ -3116,29 +3565,64 @@ async fn reject_pending_reports_in_tx(
         .await
         .map_err(failed)?;
     }
-    Ok(())
+    insert_interpreter_booking_notifications(
+        tx,
+        InterpreterBookingNotice::ReportAutoRejected,
+        &targets,
+        rejected_by,
+    )
+    .await
+    .map_err(failed)
+}
+
+/// Tells the interpreters booked on these (just cancelled) appointments that
+/// the visits no longer take place; a declined booking is not told again.
+/// Several occurrences of one interpreter make one notification.
+async fn notify_interpreters_of_cancellation_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+    cancelled_by: Uuid,
+) -> Result<Vec<PendingAppointmentNotification>, axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, "notify interpreters of cancelled appointments");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    };
+    let targets = load_booked_interpreter_targets_in_tx(tx, appointment_ids)
+        .await
+        .map_err(failed)?;
+    insert_interpreter_booking_notifications(
+        tx,
+        InterpreterBookingNotice::AppointmentCancelled,
+        &one_notice_per_interpreter(targets),
+        cancelled_by,
+    )
+    .await
+    .map_err(failed)
 }
 
 /// Cancels an order's upcoming appointments (planned or confirmed, dated
 /// today or later) inside the caller's order-cancellation transaction, with
 /// the side effects of a manual cancellation: pending interpreter reports are
 /// rejected, checklists, tasks and reminders close and automatic concierge
-/// artifacts are closed. Returns the cancelled appointments; the caller
-/// publishes them with [`publish_cancelled_order_appointments`] after commit.
+/// artifacts are closed. An appointment with an approved interpreter report
+/// whose billing is in force took place and stays (it is part of the order's
+/// settlement). Returns the cancelled appointments; the caller publishes them
+/// with [`publish_cancelled_order_appointments`] after commit.
 pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     order_id: Uuid,
     cancelled_by: Uuid,
 ) -> Result<Vec<Uuid>, axum::response::Response> {
-    let appointment_ids = sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id
-           FROM appointments
-           WHERE order_id = $1
-             AND status IN ('planned', 'confirmed')
-             AND date >= $2
-           ORDER BY date, id
-           FOR UPDATE"#,
-    )
+    let appointment_ids = sqlx::query_scalar::<_, Uuid>(&format!(
+        r#"SELECT a.id
+           FROM appointments a
+           WHERE a.order_id = $1
+             AND a.status IN ('planned', 'confirmed')
+             AND a.date >= $2
+             AND NOT {APPROVED_REPORT_BILLING_ACTIVE_SQL}
+           ORDER BY a.date, a.id
+           FOR UPDATE OF a"#
+    ))
     .bind(order_id)
     .bind(berlin_today())
     .fetch_all(&mut **tx)
@@ -3164,8 +3648,11 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
         tracing::error!(error = %e, %order_id, "cancel upcoming appointments of a cancelled order");
         return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
     }
+    // The interpreters' notifications are published after commit by
+    // `publish_cancelled_order_appointments`.
     reject_pending_reports_for_cancelled_appointments_in_tx(tx, &appointment_ids, cancelled_by)
         .await?;
+    notify_interpreters_of_cancellation_in_tx(tx, &appointment_ids, cancelled_by).await?;
     // The workflow checklist items of the cancelled tasks change in this
     // transaction; the order cancellation itself carries the audit trail.
     close_terminal_appointment_artifacts_in_tx(tx, &appointment_ids, cancelled_by).await?;
@@ -3194,13 +3681,50 @@ async fn end_interpreter_links_of_cancelled_in_tx(
     Ok(())
 }
 
-/// Realtime events for appointments cancelled together with their order.
+/// Realtime events for appointments cancelled together with their order,
+/// including the interpreter notifications written in that transaction.
 pub(crate) async fn publish_cancelled_order_appointments(
     state: &AppState,
     actor_user_id: Uuid,
     order_id: Uuid,
     appointment_ids: &[Uuid],
 ) {
+    if !appointment_ids.is_empty() {
+        match sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
+            r#"SELECT id, user_id, entity_id
+               FROM user_notifications
+               WHERE entity_type = 'appointment'
+                 AND entity_id = ANY($1)
+                 AND kind = ANY($2)
+                 AND NOT is_read
+                 AND created_at >= now() - interval '10 minutes'"#,
+        )
+        .bind(appointment_ids)
+        .bind(vec![
+            InterpreterBookingNotice::AppointmentCancelled.kind(),
+            InterpreterBookingNotice::ReportAutoRejected.kind(),
+        ])
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(rows) => {
+                let notifications: Vec<PendingAppointmentNotification> = rows
+                    .into_iter()
+                    .map(
+                        |(id, user_id, appointment_id)| PendingAppointmentNotification {
+                            id,
+                            user_id,
+                            appointment_id,
+                        },
+                    )
+                    .collect();
+                publish_appointment_notifications(state, &notifications).await;
+            }
+            Err(error) => {
+                tracing::error!(error = %error, %order_id, "load interpreter notifications of a cancelled order");
+            }
+        }
+    }
     for appointment_id in appointment_ids {
         state.audit_sender.try_send(audit::domain_event(
             "update_appointment_status",
@@ -4501,6 +5025,46 @@ async fn delete_appointment(
         }
     };
 
+    // A booked interpreter learns that the visit is gone (a cancelled one was
+    // announced when it was cancelled). The notification has no link.
+    let booking_notifications = if status == "cancelled" {
+        Vec::new()
+    } else {
+        let targets = match load_booked_interpreter_targets_in_tx(&mut tx, &[apt_id]).await {
+            Ok(targets) => targets
+                .into_iter()
+                .map(|mut target| {
+                    target.extra = serde_json::json!({ "deleted": true });
+                    target
+                })
+                .collect::<Vec<_>>(),
+            Err(error) => {
+                tracing::error!(error = %error, appointment_id = %apt_id, "load booked interpreter before appointment delete");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to delete appointment",
+                );
+            }
+        };
+        match insert_interpreter_booking_notifications(
+            &mut tx,
+            InterpreterBookingNotice::AppointmentCancelled,
+            &targets,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, appointment_id = %apt_id, "notify interpreter before appointment delete");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to delete appointment",
+                );
+            }
+        }
+    };
+
     let deleted = match sqlx::query("DELETE FROM appointments WHERE id = $1")
         .bind(apt_id)
         .execute(&mut *tx)
@@ -4543,6 +5107,7 @@ async fn delete_appointment(
             "Failed to delete appointment",
         );
     }
+    publish_appointment_notifications(&state, &booking_notifications).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "delete_appointment",
@@ -5211,6 +5776,12 @@ async fn update_appointment(
     let mut created_targets = Vec::new();
     let mut cancelled_target_ids = Vec::new();
     let mut archived_series_id = None;
+    // Interpreter notifications (owner decision 2026-09-28), written after the
+    // changes in this transaction and published after commit.
+    let mut notifications = Vec::new();
+    let mut booked_notices: Vec<BookingNoticeTarget> = Vec::new();
+    let mut unbooked_notices: Vec<BookingNoticeTarget> = Vec::new();
+    let mut rescheduled_notices: Vec<BookingNoticeTarget> = Vec::new();
     let target_ids: Vec<Uuid> = targets.iter().map(|target| target.id).collect();
     // Completed appointments cannot be rescheduled at all. One with a
     // submitted or approved interpreter report counts as delivered too; moving
@@ -5283,6 +5854,12 @@ async fn update_appointment(
             Some(_) => target.interpreter_response.as_deref(),
             None => None,
         };
+        // A booking that stays declined does not hold the interpreter's slot.
+        let overlap_interpreter_id = if interpreter_response == Some("declined") {
+            None
+        } else {
+            body.interpreter_id
+        };
 
         if let Err(resp) = acquire_appointment_schedule_locks(
             &mut tx,
@@ -5299,7 +5876,7 @@ async fn update_appointment(
             &mut tx,
             &auth,
             target.patient_id,
-            body.interpreter_id,
+            overlap_interpreter_id,
             body.doctor_id,
             target_date,
             time_start,
@@ -5382,7 +5959,7 @@ async fn update_appointment(
         // The previous interpreter's report waiting for approval cannot be
         // approved any more, exactly as when the interpreter is reassigned.
         if interpreter_changed && let Some(previous_interpreter_id) = target.interpreter_id {
-            if let Err(resp) = reject_pending_reports_in_tx(
+            match reject_pending_reports_in_tx(
                 &mut tx,
                 &[target.id],
                 auth.user_id,
@@ -5390,7 +5967,8 @@ async fn update_appointment(
             )
             .await
             {
-                return resp;
+                Ok(value) => notifications.extend(value),
+                Err(resp) => return resp,
             }
             if let Err(resp) = close_unbooked_interpreter_reminders_in_tx(
                 &mut tx,
@@ -5400,6 +5978,34 @@ async fn update_appointment(
             .await
             {
                 return resp;
+            }
+            if target.interpreter_response.as_deref() != Some("declined") {
+                unbooked_notices.push(BookingNoticeTarget::new(target.id, previous_interpreter_id));
+            }
+        }
+        if let Some(interpreter_id) = body.interpreter_id {
+            if interpreter_changed {
+                booked_notices.push(BookingNoticeTarget::new(target.id, interpreter_id));
+            } else if interpreter_response != Some("declined")
+                && (target.date != target_date
+                    || target.time_start != time_start
+                    || target.time_end != time_end
+                    || target.location != location
+                    || target.provider_id != body.provider_id
+                    || target.doctor_id != body.doctor_id)
+            {
+                rescheduled_notices.push(BookingNoticeTarget {
+                    appointment_id: target.id,
+                    interpreter_id,
+                    extra: serde_json::json!({
+                        "previous_date": target.date,
+                        "previous_time_start": target.time_start.map(|value| value.format("%H:%M").to_string()),
+                        "previous_time_end": target.time_end.map(|value| value.format("%H:%M").to_string()),
+                        "previous_location": target.location,
+                        "response_reset": interpreter_response == Some("pending")
+                            && target.interpreter_response.as_deref() != Some("pending"),
+                    }),
+                });
             }
         }
         if let Some(interpreter_id) = body.interpreter_id
@@ -5482,6 +6088,7 @@ async fn update_appointment(
             }
             if let Some(interpreter_id) = body.interpreter_id {
                 booked_pairs.push((patient_id, interpreter_id));
+                booked_notices.push(BookingNoticeTarget::new(appointment_id, interpreter_id));
             }
             updated_targets.push((appointment_id, patient_id, target_date));
             created_targets.push((appointment_id, patient_id, target_date));
@@ -5489,6 +6096,11 @@ async fn update_appointment(
     }
     if !recurrence_dates.is_empty() && recurrence_dates.len() < targets.len() {
         let trimmed_targets = &targets[recurrence_dates.len()..];
+        let trimmed_ids: Vec<Uuid> = trimmed_targets.iter().map(|target| target.id).collect();
+        if let Err(resp) = ensure_no_billed_reports_before_cancel_in_tx(&mut tx, &trimmed_ids).await
+        {
+            return resp;
+        }
         if let Some(root) = trimmed_targets.first() {
             let archive_root_id = root.id;
             archived_series_id = Some(archive_root_id);
@@ -5536,14 +6148,25 @@ async fn update_appointment(
     }
     let mut checklist_changes = Vec::new();
     if !cancelled_target_ids.is_empty() {
-        if let Err(resp) = reject_pending_reports_for_cancelled_appointments_in_tx(
+        match reject_pending_reports_for_cancelled_appointments_in_tx(
             &mut tx,
             &cancelled_target_ids,
             auth.user_id,
         )
         .await
         {
-            return resp;
+            Ok(value) => notifications.extend(value),
+            Err(resp) => return resp,
+        }
+        match notify_interpreters_of_cancellation_in_tx(
+            &mut tx,
+            &cancelled_target_ids,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => notifications.extend(value),
+            Err(resp) => return resp,
         }
         match close_terminal_appointment_artifacts_in_tx(
             &mut tx,
@@ -5632,6 +6255,26 @@ async fn update_appointment(
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: end interpreter patient links");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    for (notice, targets) in [
+        (InterpreterBookingNotice::Unbooked, unbooked_notices),
+        (InterpreterBookingNotice::Booked, booked_notices),
+        (InterpreterBookingNotice::Rescheduled, rescheduled_notices),
+    ] {
+        match insert_interpreter_booking_notifications(
+            &mut tx,
+            notice,
+            &one_notice_per_interpreter(targets),
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => notifications.extend(value),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, notice = notice.kind(), "update appointment: notify interpreters");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -5642,6 +6285,7 @@ async fn update_appointment(
         &checklist_changes,
     )
     .await;
+    publish_appointment_notifications(&state, &notifications).await;
     if appointment_type == "non_medical" {
         let created_ids: HashSet<Uuid> = created_targets.iter().map(|(id, _, _)| *id).collect();
         for (appointment_id, target_patient_id, target_date) in &updated_targets {
@@ -5994,6 +6638,12 @@ async fn update_status(
     }
     let target_ids: Vec<Uuid> = target_rows.iter().map(|(id, _, _)| *id).collect();
 
+    if body.status == "cancelled"
+        && let Err(resp) = ensure_no_billed_reports_before_cancel_in_tx(&mut tx, &target_ids).await
+    {
+        return resp;
+    }
+
     let requires_completion_gate = body.status == "completed"
         && target_rows
             .iter()
@@ -6068,15 +6718,22 @@ async fn update_status(
     if rows_affected == 0 {
         return err(StatusCode::NOT_FOUND, "Not found");
     }
-    if body.status == "cancelled"
-        && let Err(resp) = reject_pending_reports_for_cancelled_appointments_in_tx(
+    let mut notifications = Vec::new();
+    if body.status == "cancelled" {
+        match reject_pending_reports_for_cancelled_appointments_in_tx(
             &mut tx,
             &target_ids,
             auth.user_id,
         )
         .await
-    {
-        return resp;
+        {
+            Ok(value) => notifications.extend(value),
+            Err(resp) => return resp,
+        }
+        match notify_interpreters_of_cancellation_in_tx(&mut tx, &target_ids, auth.user_id).await {
+            Ok(value) => notifications.extend(value),
+            Err(resp) => return resp,
+        }
     }
     let mut checklist_changes = Vec::new();
     if body.status == "cancelled" {
@@ -6105,6 +6762,7 @@ async fn update_status(
         &checklist_changes,
     )
     .await;
+    publish_appointment_notifications(&state, &notifications).await;
 
     if body.status == "completed" {
         for appointment_id in &target_ids {
@@ -6288,7 +6946,7 @@ async fn assign_interpreter(
     };
     let appointment_ctx = match sqlx::query(
         r#"SELECT patient_id, doctor_id, date, time_start, time_end,
-                  interpreter_id, status
+                  interpreter_id, interpreter_response, status
            FROM appointments
            WHERE id = $1
            FOR UPDATE"#,
@@ -6327,6 +6985,9 @@ async fn assign_interpreter(
     let previous_interpreter_id: Option<Uuid> = appointment_ctx
         .try_get("interpreter_id")
         .unwrap_or_default();
+    let previous_response: Option<String> = appointment_ctx
+        .try_get("interpreter_response")
+        .unwrap_or_default();
 
     if let Err(resp) = acquire_appointment_schedule_locks(
         &mut tx,
@@ -6355,15 +7016,21 @@ async fn assign_interpreter(
         return resp;
     }
 
+    // Booking another interpreter, or booking again the interpreter who
+    // declined, asks for a new answer; re-assigning an interpreter who has
+    // accepted or asked for clarification keeps that answer.
     let result = sqlx::query(
         "UPDATE appointments
             SET interpreter_id = $2,
                 interpreter_response = CASE
-                    WHEN interpreter_id IS DISTINCT FROM $2 THEN 'pending'
+                    WHEN interpreter_id IS DISTINCT FROM $2
+                      OR interpreter_response IS NULL
+                      OR interpreter_response = 'declined' THEN 'pending'
                     ELSE interpreter_response
                 END,
                 interpreter_response_comment = CASE
-                    WHEN interpreter_id IS DISTINCT FROM $2 THEN NULL
+                    WHEN interpreter_id IS DISTINCT FROM $2
+                      OR interpreter_response = 'declined' THEN NULL
                     ELSE interpreter_response_comment
                 END,
                 updated_at = now()
@@ -6384,10 +7051,11 @@ async fn assign_interpreter(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let mut notifications = Vec::new();
     if let Some(previous_interpreter_id) = previous_interpreter_id
         && previous_interpreter_id != body.interpreter_id
     {
-        if let Err(resp) = reject_pending_reports_in_tx(
+        match reject_pending_reports_in_tx(
             &mut tx,
             &[apt_id],
             auth.user_id,
@@ -6395,13 +7063,52 @@ async fn assign_interpreter(
         )
         .await
         {
-            return resp;
+            Ok(value) => notifications.extend(value),
+            Err(resp) => return resp,
         }
         if let Err(resp) =
             close_unbooked_interpreter_reminders_in_tx(&mut tx, apt_id, previous_interpreter_id)
                 .await
         {
             return resp;
+        }
+        // An interpreter who declined asked to be taken off; the others learn
+        // that they are no longer booked.
+        if previous_response.as_deref() != Some("declined") {
+            match insert_interpreter_booking_notifications(
+                &mut tx,
+                InterpreterBookingNotice::Unbooked,
+                &[BookingNoticeTarget::new(apt_id, previous_interpreter_id)],
+                auth.user_id,
+            )
+            .await
+            {
+                Ok(value) => notifications.extend(value),
+                Err(e) => {
+                    tracing::error!(error = %e, appointment_id = %apt_id, "assign interpreter: notify unbooked interpreter");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+    }
+    // A new booking (also of an interpreter who declined before) is news for
+    // the interpreter; re-confirming a standing booking is not.
+    let newly_booked = previous_interpreter_id != Some(body.interpreter_id)
+        || matches!(previous_response.as_deref(), None | Some("declined"));
+    if newly_booked {
+        match insert_interpreter_booking_notifications(
+            &mut tx,
+            InterpreterBookingNotice::Booked,
+            &[BookingNoticeTarget::new(apt_id, body.interpreter_id)],
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(value) => notifications.extend(value),
+            Err(e) => {
+                tracing::error!(error = %e, appointment_id = %apt_id, "assign interpreter: notify booked interpreter");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
     }
     if let Err(e) = booking_links::grant_in_tx(
@@ -6432,6 +7139,7 @@ async fn assign_interpreter(
         tracing::error!(error = %e, appointment_id = %apt_id, "assign interpreter: commit");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    publish_appointment_notifications(&state, &notifications).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "assign_interpreter",
@@ -6565,6 +7273,11 @@ async fn interpreter_response(
         Ok(result) if result.rows_affected() == 1 => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "Not assigned to you"),
         Err(e) => {
+            // Taking back a declined booking fails when the interpreter was
+            // booked elsewhere at that time in the meantime.
+            if let Some(resp) = appointment_write_error_response(&e) {
+                return resp;
+            }
             tracing::error!(error = %e, appointment_id = %apt_id, "interpreter response");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
@@ -6651,14 +7364,37 @@ async fn list_checklist(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
-    match sqlx::query!("SELECT id, phase, item_text, is_completed, completed_at FROM appointment_checklists WHERE appointment_id = $1 ORDER BY phase, sort_order", apt_id)
-        .fetch_all(&state.db).await {
+    match sqlx::query(
+        r#"SELECT id, phase, item_text, is_completed, completed_at, closed_reason
+           FROM appointment_checklists
+           WHERE appointment_id = $1
+           ORDER BY phase, sort_order"#,
+    )
+    .bind(apt_id)
+    .fetch_all(&state.db)
+    .await
+    {
         Ok(rows) => {
-            let mut items = Vec::with_capacity(rows.len());
-            for r in rows { items.push(serde_json::json!({"id": r.id, "phase": r.phase, "item_text": r.item_text, "is_completed": r.is_completed, "completed_at": r.completed_at})); }
+            let items: Vec<serde_json::Value> = rows
+                .iter()
+                .map(|row| {
+                    serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "phase": row.try_get::<String, _>("phase").unwrap_or_default(),
+                        "item_text": row.try_get::<String, _>("item_text").unwrap_or_default(),
+                        "is_completed": row.try_get::<bool, _>("is_completed").unwrap_or(false),
+                        "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default(),
+                        // Closed without completion (e.g. the appointment was cancelled).
+                        "closed_reason": row.try_get::<Option<String>, _>("closed_reason").unwrap_or_default(),
+                    })
+                })
+                .collect();
             Json(items).into_response()
         }
-        Err(e) => { tracing::error!(error = %e, "list checklist"); err(StatusCode::INTERNAL_SERVER_ERROR, "Failed") }
+        Err(e) => {
+            tracing::error!(error = %e, "list checklist");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
     }
 }
 
@@ -6905,7 +7641,7 @@ async fn list_reminders(
 
     match sqlx::query(
         r#"SELECT r.id, r.user_id, r.remind_at, r.title, r.description, r.is_completed,
-                  r.completed_at, u.name AS user_name
+                  r.completed_at, r.closed_reason, r.sent_at, u.name AS user_name
            FROM reminders r
            JOIN users u ON u.id = r.user_id
            WHERE r.appointment_id = $1
@@ -6930,6 +7666,8 @@ async fn list_reminders(
                     "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
                     "is_completed": row.try_get::<bool, _>("is_completed").unwrap_or(false),
                     "completed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("completed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                    "closed_reason": row.try_get::<Option<String>, _>("closed_reason").unwrap_or_default(),
+                    "sent_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("sent_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                 }));
             }
             Json(items).into_response()
@@ -7470,7 +8208,9 @@ async fn submit_report(
     Path(apt_id): Path<Uuid>,
     Json(body): Json<SubmitReport>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_exact_role(&[Role::Interpreter]) {
+    // The booked interpreter reports the visit, also when it is a team lead
+    // (owner decision 2026-09-28); someone else then reviews the report.
+    if let Err(e) = auth.require_exact_role(&[Role::Interpreter, Role::TeamleadInterpreter]) {
         return e;
     }
     if !body.hours.is_finite() {
@@ -7814,6 +8554,213 @@ async fn insert_interpreter_work_notifications(
     rows.iter()
         .map(|row| Ok((row.try_get("id")?, row.try_get("user_id")?)))
         .collect()
+}
+
+/// A change of an interpreter's own booking that the interpreter has to know
+/// about (owner decision 2026-09-28). Stored with its facts as JSON; the staff
+/// UI renders it in the user's language (RU/DE) from the kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterpreterBookingNotice {
+    /// The interpreter was booked on the appointment (or booked again after
+    /// declining it).
+    Booked,
+    /// Another interpreter (or none) is booked now.
+    Unbooked,
+    /// The appointment no longer takes place.
+    AppointmentCancelled,
+    /// Date, time, place, provider or doctor of the booked visit changed.
+    Rescheduled,
+    /// The interpreter's pending report was rejected without a reviewer.
+    ReportAutoRejected,
+}
+
+impl InterpreterBookingNotice {
+    fn kind(self) -> &'static str {
+        match self {
+            InterpreterBookingNotice::Booked => "interpreter_booking_assigned",
+            InterpreterBookingNotice::Unbooked => "interpreter_booking_removed",
+            InterpreterBookingNotice::AppointmentCancelled => "interpreter_appointment_cancelled",
+            InterpreterBookingNotice::Rescheduled => "interpreter_appointment_rescheduled",
+            InterpreterBookingNotice::ReportAutoRejected => "interpreter_report_auto_rejected",
+        }
+    }
+
+    /// Stored fallback title (English, like the other notification kinds).
+    fn title(self) -> &'static str {
+        match self {
+            InterpreterBookingNotice::Booked => "You were booked as interpreter",
+            InterpreterBookingNotice::Unbooked => "Your interpreter booking was removed",
+            InterpreterBookingNotice::AppointmentCancelled => "Booked appointment cancelled",
+            InterpreterBookingNotice::Rescheduled => "Booked appointment rescheduled",
+            InterpreterBookingNotice::ReportAutoRejected => {
+                "Interpreter report rejected automatically"
+            }
+        }
+    }
+}
+
+/// One interpreter to notify about one appointment, with notice-specific
+/// facts (e.g. the previous date of a rescheduled visit).
+#[derive(Clone, Debug)]
+struct BookingNoticeTarget {
+    appointment_id: Uuid,
+    interpreter_id: Uuid,
+    extra: serde_json::Value,
+}
+
+impl BookingNoticeTarget {
+    fn new(appointment_id: Uuid, interpreter_id: Uuid) -> Self {
+        Self {
+            appointment_id,
+            interpreter_id,
+            extra: serde_json::json!({}),
+        }
+    }
+}
+
+/// A notification written inside a transaction and published after commit.
+#[derive(Clone, Copy, Debug)]
+struct PendingAppointmentNotification {
+    id: Uuid,
+    user_id: Uuid,
+    appointment_id: Option<Uuid>,
+}
+
+/// Writes interpreter booking notifications inside the caller's transaction.
+/// Only active interpreters and interpreter team leads are notified, never
+/// about their own action. A notification links the appointment only while
+/// the notified user is still booked on it (an interpreter taken off the
+/// visit can no longer open it). Returns the rows to publish after commit.
+async fn insert_interpreter_booking_notifications(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    notice: InterpreterBookingNotice,
+    targets: &[BookingNoticeTarget],
+    actor_id: Uuid,
+) -> Result<Vec<PendingAppointmentNotification>, sqlx::Error> {
+    if targets.is_empty() {
+        return Ok(Vec::new());
+    }
+    let appointment_ids: Vec<Uuid> = targets.iter().map(|target| target.appointment_id).collect();
+    let interpreter_ids: Vec<Uuid> = targets.iter().map(|target| target.interpreter_id).collect();
+    let extras =
+        serde_json::Value::Array(targets.iter().map(|target| target.extra.clone()).collect());
+    let rows = sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           SELECT interpreter.id, $4, $5,
+                  (jsonb_build_object(
+                       'appointment_title', a.title,
+                       'appointment_date', a.date,
+                       'time_start', left(a.time_start::text, 5),
+                       'time_end', left(a.time_end::text, 5),
+                       'location', a.location
+                   ) || facts.extra)::text,
+                  CASE WHEN a.interpreter_id = interpreter.id AND NOT (facts.extra ? 'deleted')
+                       THEN 'appointment' END,
+                  CASE WHEN a.interpreter_id = interpreter.id AND NOT (facts.extra ? 'deleted')
+                       THEN a.id END
+           FROM unnest($1::uuid[], $2::uuid[]) WITH ORDINALITY
+                AS target(appointment_id, interpreter_id, position)
+           CROSS JOIN LATERAL (
+               SELECT COALESCE($3::jsonb -> (target.position::int - 1), '{}'::jsonb) AS extra
+           ) facts
+           JOIN appointments a ON a.id = target.appointment_id
+           JOIN users interpreter ON interpreter.id = target.interpreter_id
+           WHERE interpreter.is_active
+             AND interpreter.role IN ('interpreter', 'teamlead_interpreter')
+             AND interpreter.id <> $6
+           ORDER BY target.position
+           RETURNING id, user_id, entity_id"#,
+    )
+    .bind(&appointment_ids)
+    .bind(&interpreter_ids)
+    .bind(extras)
+    .bind(notice.kind())
+    .bind(notice.title())
+    .bind(actor_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(PendingAppointmentNotification {
+                id: row.try_get("id")?,
+                user_id: row.try_get("user_id")?,
+                appointment_id: row.try_get("entity_id")?,
+            })
+        })
+        .collect()
+}
+
+/// Interpreters booked (not declined) on these appointments, before a change
+/// that affects them.
+async fn load_booked_interpreter_targets_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+) -> Result<Vec<BookingNoticeTarget>, sqlx::Error> {
+    let rows = sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"SELECT id, interpreter_id
+           FROM appointments
+           WHERE id = ANY($1)
+             AND interpreter_id IS NOT NULL
+             AND interpreter_response IS DISTINCT FROM 'declined'
+           ORDER BY date, time_start NULLS FIRST, id"#,
+    )
+    .bind(appointment_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(appointment_id, interpreter_id)| {
+            BookingNoticeTarget::new(appointment_id, interpreter_id)
+        })
+        .collect())
+}
+
+/// One notification per interpreter for a change of several occurrences of a
+/// series: the earliest appointment, with the number of changed occurrences.
+fn one_notice_per_interpreter(targets: Vec<BookingNoticeTarget>) -> Vec<BookingNoticeTarget> {
+    let mut grouped: Vec<(BookingNoticeTarget, usize)> = Vec::new();
+    for target in targets {
+        match grouped
+            .iter_mut()
+            .find(|(existing, _)| existing.interpreter_id == target.interpreter_id)
+        {
+            Some((_, count)) => *count += 1,
+            None => grouped.push((target, 1)),
+        }
+    }
+    grouped
+        .into_iter()
+        .map(|(mut target, count)| {
+            if count > 1
+                && let Some(extra) = target.extra.as_object_mut()
+            {
+                extra.insert("occurrence_count".to_string(), serde_json::json!(count));
+            }
+            target
+        })
+        .collect()
+}
+
+async fn publish_appointment_notifications(
+    state: &AppState,
+    notifications: &[PendingAppointmentNotification],
+) {
+    for notification in notifications {
+        crate::realtime::publish_notification_event(
+            state,
+            notification.user_id,
+            "notification.created",
+            Some(notification.id),
+            match notification.appointment_id {
+                Some(appointment_id) => serde_json::json!({
+                    "entity_type": "appointment",
+                    "entity_id": appointment_id,
+                }),
+                None => serde_json::json!({}),
+            },
+        )
+        .await;
+    }
 }
 
 async fn publish_interpreter_work_notifications(
@@ -8631,6 +9578,174 @@ pub fn spawn_interpreter_report_billing_sync_scheduler(state: AppState) {
     });
 }
 
+const APPOINTMENT_REMINDER_DELIVERY_INTERVAL_SECS: u64 = 60;
+
+/// Delivers due appointment reminders (remind_at reached, still open, not
+/// delivered yet) to their recipients as user notifications, once each (owner
+/// decision 2026-09-28). A reminder is delivered only while its recipient may
+/// still work on the appointment (the rules of `reminder_recipient_refusal`);
+/// reminders of cancelled appointments are closed and never delivered. Each
+/// delivery marks the reminder (`sent_at`), writes the notification and an
+/// audit row in one transaction. Returns the number of deliveries.
+pub async fn run_appointment_reminder_delivery_once(state: &AppState) -> i64 {
+    let candidates = match sqlx::query(
+        r#"SELECT r.id, r.user_id, recipient.role AS recipient_role,
+                  a.status, a.interpreter_id, a.interpreter_response, a.owner_user_id,
+                  EXISTS (
+                      SELECT 1 FROM patient_assignments assignment
+                      WHERE assignment.patient_id = a.patient_id
+                        AND assignment.user_id = r.user_id
+                        AND assignment.revoked_at IS NULL
+                  ) AS assigned_to_patient
+           FROM reminders r
+           JOIN appointments a ON a.id = r.appointment_id
+           JOIN users recipient ON recipient.id = r.user_id
+           WHERE NOT r.is_completed
+             AND r.sent_at IS NULL
+             AND r.remind_at <= now()
+             AND a.status <> 'cancelled'
+             AND recipient.is_active
+             AND recipient.role NOT IN ('billing', 'it_admin', 'ceo_assistant', 'patient', 'sales')
+           ORDER BY r.remind_at, r.id
+           LIMIT 200"#,
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, "scan due appointment reminders");
+            return 0;
+        }
+    };
+
+    let mut delivered = 0_i64;
+    for row in candidates {
+        let reminder_id: Uuid = row.try_get("id").unwrap_or_default();
+        let user_id: Uuid = row.try_get("user_id").unwrap_or_default();
+        let role: String = row.try_get("recipient_role").unwrap_or_default();
+        let appointment = ReminderAppointment {
+            status: row.try_get("status").unwrap_or_default(),
+            interpreter_id: row.try_get("interpreter_id").unwrap_or_default(),
+            interpreter_response: row.try_get("interpreter_response").unwrap_or_default(),
+            owner_user_id: row.try_get("owner_user_id").unwrap_or_default(),
+        };
+        let assigned_to_patient: bool = row.try_get("assigned_to_patient").unwrap_or(false);
+        if reminder_recipient_refusal(&role, user_id, &appointment, assigned_to_patient).is_some() {
+            continue;
+        }
+        match deliver_appointment_reminder(state, reminder_id).await {
+            Ok(Some(notification)) => {
+                delivered += 1;
+                publish_appointment_notifications(state, &[notification]).await;
+                crate::realtime::publish_reminder_event(
+                    state,
+                    None,
+                    "reminder.sent",
+                    reminder_id,
+                    serde_json::json!({ "reminder_id": reminder_id }),
+                )
+                .await;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, %reminder_id, "deliver appointment reminder");
+            }
+        }
+    }
+    delivered
+}
+
+/// Claims one due reminder and writes its notification and audit row in one
+/// transaction; `None` when another run delivered or closed it meanwhile.
+async fn deliver_appointment_reminder(
+    state: &AppState,
+    reminder_id: Uuid,
+) -> Result<Option<PendingAppointmentNotification>, sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    let claimed = sqlx::query(
+        r#"UPDATE reminders r
+           SET sent_at = now()
+           FROM appointments a
+           WHERE r.id = $1
+             AND a.id = r.appointment_id
+             AND NOT r.is_completed
+             AND r.sent_at IS NULL
+             AND r.remind_at <= now()
+             AND a.status <> 'cancelled'
+           RETURNING r.user_id, r.appointment_id, r.remind_at,
+                     jsonb_build_object(
+                         'reminder_id', r.id,
+                         'reminder_title', r.title,
+                         'description', r.description,
+                         'remind_at', r.remind_at,
+                         'appointment_title', a.title,
+                         'appointment_date', a.date,
+                         'time_start', left(a.time_start::text, 5),
+                         'time_end', left(a.time_end::text, 5),
+                         'location', a.location
+                     )::text AS body"#,
+    )
+    .bind(reminder_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(claimed) = claimed else {
+        return Ok(None);
+    };
+    let user_id: Uuid = claimed.try_get("user_id")?;
+    let appointment_id: Uuid = claimed.try_get("appointment_id")?;
+    let remind_at: chrono::DateTime<chrono::Utc> = claimed.try_get("remind_at")?;
+    let body: String = claimed.try_get("body")?;
+    let notification_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           VALUES ($1, 'appointment_reminder', 'Appointment reminder', $2, 'appointment', $3)
+           RETURNING id"#,
+    )
+    .bind(user_id)
+    .bind(body)
+    .bind(appointment_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "deliver_appointment_reminder",
+            None,
+            "appointment",
+            Some(appointment_id),
+            serde_json::json!({
+                "reminder_id": reminder_id,
+                "recipient_id": user_id,
+                "remind_at": remind_at,
+                "notification_id": notification_id,
+            }),
+        ),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(Some(PendingAppointmentNotification {
+        id: notification_id,
+        user_id,
+        appointment_id: Some(appointment_id),
+    }))
+}
+
+pub fn spawn_appointment_reminder_delivery_scheduler(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            APPOINTMENT_REMINDER_DELIVERY_INTERVAL_SECS,
+        ));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let delivered = run_appointment_reminder_delivery_once(&state).await;
+            if delivered > 0 {
+                tracing::info!(delivered, "Appointment reminders delivered");
+            }
+        }
+    });
+}
+
 async fn get_report(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -8798,8 +9913,8 @@ async fn approve_report(
     ) {
         return resp;
     }
-    let report_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id
+    let report_id = match sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"SELECT id, interpreter_id
            FROM interpreter_reports
            WHERE appointment_id = $1
              AND approval_status = 'pending'
@@ -8811,7 +9926,12 @@ async fn approve_report(
     .fetch_optional(&mut *tx)
     .await
     {
-        Ok(Some(value)) => value,
+        Ok(Some((report_id, interpreter_id))) => {
+            if let Err(resp) = ensure_not_own_report(apt_id, report_id, interpreter_id, &auth) {
+                return resp;
+            }
+            report_id
+        }
         Ok(None) => return err(StatusCode::NOT_FOUND, "No pending report"),
         Err(e) => {
             tracing::error!(error = %e, appointment_id = %apt_id, "lock pending report for approval");
@@ -8928,8 +10048,8 @@ async fn reject_report(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
-    let report_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"SELECT id
+    let report_id = match sqlx::query_as::<_, (Uuid, Uuid)>(
+        r#"SELECT id, interpreter_id
            FROM interpreter_reports
            WHERE appointment_id = $1
              AND approval_status = 'pending'
@@ -8941,7 +10061,12 @@ async fn reject_report(
     .fetch_optional(&mut *tx)
     .await
     {
-        Ok(Some(value)) => value,
+        Ok(Some((report_id, interpreter_id))) => {
+            if let Err(resp) = ensure_not_own_report(apt_id, report_id, interpreter_id, &auth) {
+                return resp;
+            }
+            report_id
+        }
         Ok(None) => return err(StatusCode::NOT_FOUND, "No pending report"),
         Err(e) => {
             tracing::error!(error = %e, appointment_id = %apt_id, "lock pending report for rejection");
@@ -9542,6 +10667,7 @@ async fn close_auto_concierge_artifacts_in_tx(
     sqlx::query(
         r#"UPDATE appointment_checklists
            SET is_completed = true,
+               closed_reason = 'concierge_workflow_closed',
                completed_by = COALESCE(completed_by, $3),
                completed_at = COALESCE(completed_at, now())
            WHERE appointment_id = ANY($1)
@@ -9573,6 +10699,7 @@ async fn close_auto_concierge_artifacts_in_tx(
     sqlx::query(
         r#"UPDATE reminders
            SET is_completed = true,
+               closed_reason = 'concierge_workflow_closed',
                completed_at = COALESCE(completed_at, now())
            WHERE appointment_id = ANY($1)
              AND NOT is_completed
@@ -10511,7 +11638,10 @@ async fn ensure_no_overlapping_appointments_in_tx(
              AND a.status <> 'cancelled'
              AND (
                  a.patient_id = $2
-                 OR ($3::uuid IS NOT NULL AND a.interpreter_id = $3)
+                 -- A declined booking no longer holds the interpreter's slot.
+                 OR ($3::uuid IS NOT NULL
+                     AND a.interpreter_id = $3
+                     AND a.interpreter_response IS DISTINCT FROM 'declined')
                  OR ($4::uuid IS NOT NULL AND a.doctor_id = $4)
              )
              AND NOT (a.id = ANY($5))
@@ -10564,6 +11694,11 @@ async fn ensure_no_overlapping_appointments_in_tx(
                 .try_get::<Option<Uuid>, _>("interpreter_id")
                 .unwrap_or_default()
                 == interpreter_id
+            && row
+                .try_get::<Option<String>, _>("interpreter_response")
+                .unwrap_or_default()
+                .as_deref()
+                != Some("declined")
         {
             scopes.push("interpreter");
         }
@@ -10680,7 +11815,9 @@ async fn load_conflicts_for_scope(
            WHERE a.date = $1
              AND a.status <> 'cancelled'
              AND ($2::uuid IS NULL OR a.patient_id = $2)
-             AND ($3::uuid IS NULL OR a.interpreter_id = $3)
+             AND ($3::uuid IS NULL
+                  OR (a.interpreter_id = $3
+                      AND a.interpreter_response IS DISTINCT FROM 'declined'))
              AND ($4::uuid IS NULL OR a.doctor_id = $4)
              AND ($5::uuid IS NULL OR a.id <> $5)
            ORDER BY a.time_start NULLS FIRST, a.created_at"#,

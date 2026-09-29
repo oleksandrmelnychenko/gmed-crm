@@ -64,6 +64,8 @@ pub(crate) enum NotRequiredReason {
     PhasePassed,
     /// Its linked task was cancelled in the work center.
     TaskCancelled,
+    /// The order was cancelled while the item was still open.
+    OrderCancelled,
 }
 
 impl NotRequiredReason {
@@ -72,6 +74,7 @@ impl NotRequiredReason {
             NotRequiredReason::Manual => "manual",
             NotRequiredReason::PhasePassed => "phase_passed",
             NotRequiredReason::TaskCancelled => "task_cancelled",
+            NotRequiredReason::OrderCancelled => "order_cancelled",
         }
     }
 }
@@ -375,6 +378,47 @@ pub(crate) async fn resolve_passed_phase_items(
     Ok(())
 }
 
+/// Resolves every still-open checklist item of a cancelled order as "not
+/// required" (reason `order_cancelled`) and cancels their linked tasks with a
+/// task history entry, inside the order-cancellation transaction (owner
+/// decision 2026-09-28). Returns the changed items; the caller publishes them
+/// with [`publish_checklist_item_changes`] after commit.
+pub(crate) async fn resolve_items_of_cancelled_order_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    order_id: Uuid,
+    actor_id: Uuid,
+) -> Result<Vec<ChecklistItemSync>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"UPDATE workflow_checklist_items
+           SET is_completed = true,
+               not_required = true,
+               not_required_reason = 'order_cancelled',
+               completed_by = $2,
+               completed_at = now(),
+               updated_at = now()
+           WHERE scope_type = 'order'
+             AND order_id = $1
+             AND NOT is_completed
+           RETURNING id, patient_id, order_id, scope_type, scope_id, item_text, linked_task_id"#,
+    )
+    .bind(order_id)
+    .bind(actor_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut changed = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let item = checklist_sync_from_row(
+            row,
+            ChecklistItemChange::NotRequired(NotRequiredReason::OrderCancelled),
+        )?;
+        if let Some(task_id) = item.task_id {
+            cancel_linked_task(tx, task_id, actor_id, NotRequiredReason::OrderCancelled).await?;
+        }
+        changed.push(item);
+    }
+    Ok(changed)
+}
+
 async fn list_patient_workflow_checklist(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -643,7 +687,7 @@ async fn change_workflow_item_resolution(
         Err(error) => return failed(error),
     };
     let row = match sqlx::query(
-        r#"SELECT owner_user_id, owner_role, is_completed, not_required
+        r#"SELECT owner_user_id, owner_role, is_completed, not_required, not_required_reason
            FROM workflow_checklist_items
            WHERE id = $1
              AND scope_type = $2
@@ -719,8 +763,14 @@ async fn change_workflow_item_resolution(
             }
         }
         ResolutionChange::Reopen => {
+            let reason: Option<String> = row.try_get("not_required_reason").unwrap_or_default();
             if !is_completed {
                 None
+            } else if reason.as_deref() == Some("order_cancelled") {
+                return err(
+                    StatusCode::CONFLICT,
+                    "A checklist item of a cancelled order cannot be reopened",
+                );
             } else if !not_required {
                 return err(
                     StatusCode::CONFLICT,

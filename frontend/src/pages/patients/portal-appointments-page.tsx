@@ -4,6 +4,7 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useState,
   type Dispatch,
   type FormEvent,
   type SetStateAction,
@@ -32,11 +33,12 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { uiText, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalAppointmentRequest,
   fetchPortalAppointmentsWorkspace,
+  withdrawPortalAppointmentRequest,
 } from "@/pages/patients/data/portal-api";
 import {
   appointmentCarePathKindLabel,
@@ -138,6 +140,7 @@ const PORTAL_APPOINTMENT_REALTIME_EVENTS = [
   "appointment_request.created",
   "appointment_request.reviewed",
   "appointment_request.converted",
+  "appointment_request.cancelled",
   "order.phase_changed",
   "order.followup_flow_updated",
   "order.external_invoice_overdue",
@@ -147,6 +150,50 @@ function portalOrderPhaseLabel(
   value: string | null | undefined,
 ) {
   return sharedPortalOrderPhaseLabel(value);
+}
+
+/**
+ * Withdraws an open appointment request (asks once more before doing it).
+ * The server cancels it and tells the care team.
+ */
+function WithdrawRequestButton({
+  requestId,
+  onWithdrawn,
+  onError,
+}: {
+  requestId: string;
+  onWithdrawn: () => void;
+  onError: (message: string) => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  async function withdraw() {
+    setBusy(true);
+    try {
+      await withdrawPortalAppointmentRequest(requestId);
+      onWithdrawn();
+    } catch {
+      onError(uiText("portal_request_withdraw_failed"));
+    } finally {
+      setBusy(false);
+      setConfirming(false);
+    }
+  }
+  return (
+    <div className="flex justify-end">
+      <Button
+        type="button"
+        size="sm"
+        variant={confirming ? "destructive" : "outline"}
+        className="h-8 rounded-lg"
+        disabled={busy}
+        onClick={() => (confirming ? void withdraw() : setConfirming(true))}
+      >
+        {busy ? <LoaderCircle className="mr-2 size-3.5 animate-spin" /> : null}
+        {confirming ? uiText("portal_request_withdraw_confirm") : uiText("portal_request_withdraw")}
+      </Button>
+    </div>
+  );
 }
 
 function formatPortalCountLabel(template: string, count: number) {
@@ -563,6 +610,24 @@ function usePatientAppointmentsPageContent() {
                       <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
                         {t.portal_appointments_review_note}: {item.review_note}
                       </div>
+                    ) : null}
+                    {item.status === "cancelled" && item.cancellation_reason ? (
+                      <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                        {uiText("portal_request_cancelled_reason")}: {item.cancellation_reason}
+                      </div>
+                    ) : null}
+                    {item.status === "requested" || item.status === "approved" ? (
+                      <WithdrawRequestButton
+                        requestId={item.id}
+                        onWithdrawn={() => {
+                          clearApiCache("/me/appointment-requests");
+                          dispatchPageState((current) => ({
+                            notice: uiText("portal_request_withdrawn_notice"),
+                            version: current.version + 1,
+                          }));
+                        }}
+                        onError={(message) => dispatchPageState({ error: message })}
+                      />
                     ) : null}
                     {item.converted_appointment_id ? (
                       <SuccessBanner>

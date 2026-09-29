@@ -1095,28 +1095,33 @@ async fn load_interpreter_operations_payload(
         r#"SELECT
                 (SELECT COUNT(DISTINCT a.patient_id)
                    FROM appointments a
-                  WHERE a.interpreter_id = $1) AS assigned_patients,
+                  WHERE a.interpreter_id = $1
+                    AND a.interpreter_response IS DISTINCT FROM 'declined') AS assigned_patients,
                 (SELECT COUNT(DISTINCT a.patient_id)
                    FROM appointments a
                    JOIN patients p ON p.id = a.patient_id
                   WHERE a.interpreter_id = $1
+                    AND a.interpreter_response IS DISTINCT FROM 'declined'
                     AND p.is_active = true
                     AND a.status <> 'cancelled') AS active_patients,
                 (SELECT COUNT(*)
                    FROM appointments a
                   WHERE a.interpreter_id = $1
+                    AND a.interpreter_response IS DISTINCT FROM 'declined'
                     AND a.date >= date_trunc('month', CURRENT_DATE)::date
                     AND a.date < (date_trunc('month', CURRENT_DATE) + interval '1 month')::date
                     AND a.status <> 'cancelled') AS appointments_this_month,
                 (SELECT COUNT(*)
                    FROM appointments a
                   WHERE a.interpreter_id = $1
+                    AND a.interpreter_response IS DISTINCT FROM 'declined'
                     AND a.date >= CURRENT_DATE
                     AND a.date < CURRENT_DATE + interval '30 days'
                     AND a.status <> 'cancelled') AS appointments_next_30_days,
                 (SELECT COUNT(*)
                    FROM appointments a
                   WHERE a.interpreter_id = $1
+                    AND a.interpreter_response IS DISTINCT FROM 'declined'
                     AND a.status = 'completed') AS completed_appointments,
                 (SELECT ROUND(COALESCE(SUM(
                     CASE
@@ -1129,6 +1134,7 @@ async fn load_interpreter_operations_payload(
                 ), 0)::numeric, 2)
                    FROM appointments a
                   WHERE a.interpreter_id = $1
+                    AND a.interpreter_response IS DISTINCT FROM 'declined'
                     AND a.date >= date_trunc('week', CURRENT_DATE)::date
                     AND a.date < (date_trunc('week', CURRENT_DATE) + interval '7 days')::date
                     AND a.status <> 'cancelled') AS booked_hours_week,
