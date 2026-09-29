@@ -2074,6 +2074,509 @@ async fn interpreter_sees_only_released_medical_documents_for_assigned_patient()
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// How the interpreter is linked to the patient: a manager's manual
+/// assignment, or the link booking him on a visit grants.
+#[derive(Clone, Copy, Debug)]
+enum InterpreterPatientLink {
+    Manual,
+    Booking,
+}
+
+/// A patient document filed on no appointment.
+async fn seed_unfiled_document(
+    pool: &PgPool,
+    uploaded_by: Uuid,
+    patient_id: Uuid,
+    visibility: &str,
+    is_medical: bool,
+    art: &str,
+    tag: &str,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size, version_root_document_id,
+                version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, 'general',
+                'active', $6, $7, 'application/pdf', 1234, $1,
+                1, $8
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(format!("Document {tag}"))
+    .bind(format!("{tag}.pdf"))
+    .bind(art)
+    .bind(visibility)
+    .bind(is_medical)
+    .bind(uploaded_by)
+    .execute(pool)
+    .await
+    .unwrap();
+    document_id
+}
+
+fn listed_ids(body: &Value) -> Vec<String> {
+    body.as_array()
+        .unwrap_or_else(|| panic!("expected a list: {body}"))
+        .iter()
+        .filter_map(|item| item["id"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// Owner decision 2026-09-28 ("only what is opened to him"): the patient
+/// link — manual or from a booking — does not open the patient's documents.
+/// The interpreter sees a document only when it is shared to him, assigned
+/// to him for translation, or filed on his own appointment (as the booked
+/// interpreter or its owner); the patient manager keeps seeing everything.
+async fn assert_interpreter_sees_only_documents_opened_to_him(link: InterpreterPatientLink) {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag(&format!("doc-int-opened-{link:?}").to_lowercase());
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
+    // Visits of the patient on separate days from today on, so a booking
+    // link stays inside the access window.
+    let today = chrono::Utc::now().date_naive();
+    let day = |offset: u64| {
+        (today + chrono::Days::new(offset))
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    let own_visit_id = seed_appointment_on(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-own"),
+        &day(0),
+    )
+    .await;
+    let owned_visit_id = seed_appointment_on(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-owned"),
+        &day(1),
+    )
+    .await;
+    let other_visit_id = seed_appointment_on(
+        &pool,
+        patient_id,
+        provider_id,
+        doctor_id,
+        admin_id,
+        &format!("{tag}-other"),
+        &day(2),
+    )
+    .await;
+
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    sqlx::query("UPDATE appointments SET interpreter_id = $2 WHERE id = $1")
+        .bind(own_visit_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Older data may still name an interpreter as the curator of a visit.
+    sqlx::query("UPDATE appointments SET owner_user_id = $2 WHERE id = $1")
+        .bind(owned_visit_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let source = match link {
+        InterpreterPatientLink::Manual => "manual",
+        InterpreterPatientLink::Booking => "interpreter_booking",
+    };
+    sqlx::query(
+        r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
+           VALUES ($1, $2, $3, $4)"#,
+    )
+    .bind(patient_id)
+    .bind(interpreter_id)
+    .bind(pm_id)
+    .bind(source)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Closed: the patient's documents nobody opened to the interpreter.
+    let internal_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-hotel"),
+    )
+    .await;
+    let portal_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "patient_visible",
+        false,
+        "patient_information",
+        &format!("{tag}-portal"),
+    )
+    .await;
+    let released_medical_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-released"),
+    )
+    .await;
+    let other_visit_doc_id = seed_document(
+        &pool,
+        pm_id,
+        patient_id,
+        other_visit_id,
+        "released_internal",
+        false,
+        "patient_information",
+        &format!("{tag}-other-visit"),
+    )
+    .await;
+    // Unreleased medical findings of his own visit stay closed as before.
+    let own_visit_internal_medical_id = seed_document(
+        &pool,
+        pm_id,
+        patient_id,
+        own_visit_id,
+        "internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-own-internal"),
+    )
+    .await;
+
+    // Open: shared to him, assigned to him for translation, filed on his visit.
+    let shared_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-shared"),
+    )
+    .await;
+    let translation_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-translation"),
+    )
+    .await;
+    let own_visit_doc_id = seed_document(
+        &pool,
+        pm_id,
+        patient_id,
+        own_visit_id,
+        "released_internal",
+        true,
+        "arztbrief",
+        &format!("{tag}-own-visit"),
+    )
+    .await;
+    let owned_visit_doc_id = seed_document(
+        &pool,
+        pm_id,
+        patient_id,
+        owned_visit_id,
+        "released_internal",
+        false,
+        "patient_information",
+        &format!("{tag}-owned-visit"),
+    )
+    .await;
+    // Also open: his own upload, and the source and the result of a
+    // translation request assigned to him, once it is completed too.
+    let own_upload_id = seed_unfiled_document(
+        &pool,
+        interpreter_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-own-upload"),
+    )
+    .await;
+    let completed_source_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-completed-source"),
+    )
+    .await;
+    let completed_result_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-completed-result"),
+    )
+    .await;
+    // Closed: a completed request of another interpreter.
+    let foreign_completed_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "administrative_appointment_confirmation",
+        &format!("{tag}-foreign-completed"),
+    )
+    .await;
+    let colleague_id = seed_user(&pool, &format!("{tag}-colleague"), "interpreter").await;
+    let completed_request_id =
+        seed_document_translation_request(&pool, completed_source_id, patient_id, pm_id).await;
+    sqlx::query(
+        r#"UPDATE document_translation_requests
+           SET assigned_to = $2, status = 'completed', completed_at = now(),
+               translated_document_id = $3
+           WHERE id = $1"#,
+    )
+    .bind(completed_request_id)
+    .bind(interpreter_id)
+    .bind(completed_result_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let foreign_request_id =
+        seed_document_translation_request(&pool, foreign_completed_id, patient_id, pm_id).await;
+    sqlx::query(
+        r#"UPDATE document_translation_requests
+           SET assigned_to = $2, status = 'completed', completed_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(foreign_request_id)
+    .bind(colleague_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{shared_id}/shares"),
+        &pm_bearer,
+        Some(json!({ "shared_with_user_id": interpreter_id, "channel": "portal" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let assigned_request_id =
+        seed_document_translation_request(&pool, translation_id, patient_id, pm_id).await;
+    sqlx::query("UPDATE document_translation_requests SET assigned_to = $2 WHERE id = $1")
+        .bind(assigned_request_id)
+        .bind(interpreter_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // An open request nobody assigned to him does not open the document.
+    let unassigned_request_id =
+        seed_document_translation_request(&pool, internal_id, patient_id, pm_id).await;
+    // A colleague's request on a document shared to him, with her draft,
+    // stays hers.
+    let colleague_request_id =
+        seed_document_translation_request(&pool, shared_id, patient_id, pm_id).await;
+    sqlx::query(
+        r#"UPDATE document_translation_requests
+           SET assigned_to = $2, status = 'in_progress', translated_text = 'Colleague draft'
+           WHERE id = $1"#,
+    )
+    .bind(colleague_request_id)
+    .bind(colleague_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let closed = [
+        internal_id,
+        portal_id,
+        released_medical_id,
+        other_visit_doc_id,
+        own_visit_internal_medical_id,
+        foreign_completed_id,
+    ];
+    let open = [
+        shared_id,
+        translation_id,
+        own_visit_doc_id,
+        owned_visit_doc_id,
+        own_upload_id,
+        completed_source_id,
+        completed_result_id,
+    ];
+
+    for path in [
+        format!("/api/v1/documents?patient_id={patient_id}"),
+        format!("/api/v1/patients/{patient_id}/documents"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &interpreter_bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let mut ids = listed_ids(&body);
+        ids.sort();
+        let mut expected = open.iter().map(Uuid::to_string).collect::<Vec<_>>();
+        expected.sort();
+        assert_eq!(ids, expected, "{link:?} interpreter list {path}");
+
+        let (status, body) = json_request(&app, "GET", &path, &pm_bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let ids = listed_ids(&body);
+        for id in closed.iter().chain(open.iter()) {
+            assert!(
+                ids.contains(&id.to_string()),
+                "patient manager lost {id} in {path}"
+            );
+        }
+    }
+
+    for id in closed {
+        let (status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{id}"),
+            &interpreter_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{link:?} detail of {id}");
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{id}/download"),
+            &interpreter_bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{link:?} download of {id}");
+    }
+    for id in open {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{id}"),
+            &interpreter_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{link:?} detail of {id}: {body}");
+        // The seeded rows carry no file: passing the access check ends at the
+        // missing file, not at 403.
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{id}/download"),
+            &interpreter_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{link:?} download of {id}");
+        assert_eq!(body["message"], "Document file is not stored");
+    }
+    for id in closed.iter().chain(open.iter()) {
+        let (status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{id}"),
+            &pm_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "patient manager detail of {id}");
+    }
+
+    // The translation queue shows him his own requests — open and completed —
+    // not the open request on a document he cannot see, nor a colleague's
+    // request on a document shared to him.
+    let queue = format!(
+        "/api/v1/documents/translation-requests?patient_id={patient_id}\
+         &status=pending,in_progress,completed"
+    );
+    let (status, body) = json_request(&app, "GET", &queue, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mut ids = listed_ids(&body);
+    ids.sort();
+    let mut expected = vec![
+        assigned_request_id.to_string(),
+        completed_request_id.to_string(),
+    ];
+    expected.sort();
+    assert_eq!(ids, expected, "{link:?} interpreter translation queue");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{shared_id}/translation-requests"),
+        &interpreter_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(listed_ids(&body).is_empty(), "{body}");
+
+    let (status, body) = json_request(&app, "GET", &queue, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let ids = listed_ids(&body);
+    for request_id in [
+        assigned_request_id,
+        unassigned_request_id,
+        colleague_request_id,
+        completed_request_id,
+        foreign_request_id,
+    ] {
+        assert!(
+            ids.contains(&request_id.to_string()),
+            "patient manager lost request {request_id}"
+        );
+    }
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{shared_id}/translation-requests"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(listed_ids(&body), vec![colleague_request_id.to_string()]);
+}
+
+#[tokio::test]
+async fn manually_assigned_interpreter_sees_only_documents_opened_to_him() {
+    assert_interpreter_sees_only_documents_opened_to_him(InterpreterPatientLink::Manual).await;
+}
+
+#[tokio::test]
+async fn booked_interpreter_sees_only_documents_opened_to_him() {
+    assert_interpreter_sees_only_documents_opened_to_him(InterpreterPatientLink::Booking).await;
+}
+
 #[tokio::test]
 async fn billing_can_access_financial_documents_but_not_medical_ones() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
@@ -3861,6 +4364,92 @@ async fn patient_document_alerts_report_missing_required_documents() {
     assert_eq!(body["document_pack_complete"], true);
     assert_eq!(body["missing_count"], 0);
     assert!(body["missing_documents"].as_array().unwrap().is_empty());
+}
+
+/// An interpreter's required-document alerts count only the documents opened
+/// to him: a fulfilled rule or a missing count must not reveal a document
+/// closed to him (owner decision 2026-09-28).
+#[tokio::test]
+async fn interpreter_document_alerts_count_only_documents_opened_to_him() {
+    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-alerts-int");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    seed_patient_assignment(&pool, patient_id, interpreter_id, pm_id).await;
+    let interpreter_bearer = auth_header_for(interpreter_id, "interpreter");
+
+    // The same rules as `patient_document_alerts_report_missing_required_documents`:
+    // the setting is global, so concurrent tests must agree on it.
+    configure_required_patient_documents(
+        &pool,
+        json!([
+            {
+                "key": "passport",
+                "label": "Reisepass",
+                "art": ["passport_scan"],
+                "category": ["identity"]
+            },
+            {
+                "key": "consent_form",
+                "label": "Einverständniserklärung",
+                "art": ["consent_form"],
+                "category": ["consent"]
+            }
+        ]),
+    )
+    .await;
+    let passport_id = seed_unfiled_document(
+        &pool,
+        pm_id,
+        patient_id,
+        "internal",
+        false,
+        "passport_scan",
+        &format!("{tag}-passport"),
+    )
+    .await;
+
+    let alerts = format!("/api/v1/patients/{patient_id}/document-alerts");
+    let (status, body) = json_request(&app, "GET", &alerts, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["required_documents"][0]["fulfilled"], true);
+    assert_eq!(body["missing_count"], 1);
+
+    let (status, body) = json_request(&app, "GET", &alerts, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["required_documents"][0]["fulfilled"], false, "{body}");
+    assert!(
+        body["required_documents"][0]["matching_documents"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(body["missing_count"], 2);
+    assert_eq!(body["document_pack_complete"], false);
+    assert_eq!(body["out_of_sync"], false);
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{passport_id}/shares"),
+        &pm_bearer,
+        Some(json!({ "shared_with_user_id": interpreter_id, "channel": "portal" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(&app, "GET", &alerts, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["required_documents"][0]["fulfilled"], true, "{body}");
+    assert_eq!(
+        body["required_documents"][0]["matching_documents"][0]["id"],
+        passport_id.to_string()
+    );
+    assert_eq!(body["missing_count"], 1);
 }
 
 #[tokio::test]
@@ -8495,13 +9084,32 @@ async fn medical_category_or_type_makes_a_document_medical_on_every_write() {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
-    // The release to the assigned interpreter keeps working for medical data.
+    // The interpreter sees only documents opened to him (owner decision
+    // 2026-09-28): the patient link alone does not open the released letter,
+    // a share to him does, and the medical release rule keeps working.
+    let listed = listed_document_ids(&app, &interpreter_bearer, patient_id).await;
+    assert!(!listed.contains(&letter_id.to_string()), "{listed:?}");
+    share_document_with_user(&pool, letter_id, interpreter_id, admin_id).await;
     let listed = listed_document_ids(&app, &interpreter_bearer, patient_id).await;
     assert!(listed.contains(&letter_id.to_string()), "{listed:?}");
     assert_eq!(
         document_detail_status(&app, &interpreter_bearer, letter_id).await,
         StatusCode::OK
     );
+}
+
+/// A share of the document to a staff user, as the share dialog records it.
+async fn share_document_with_user(pool: &PgPool, document_id: Uuid, user_id: Uuid, by: Uuid) {
+    sqlx::query(
+        r#"INSERT INTO document_shares (document_id, shared_with_user_id, shared_by, channel)
+           VALUES ($1, $2, $3, 'portal')"#,
+    )
+    .bind(document_id)
+    .bind(user_id)
+    .bind(by)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -8744,7 +9352,9 @@ async fn medical_classification_repair_closes_non_medical_exposure_and_keeps_rel
         document_detail_status(&app, &concierge_bearer, clinic_letter_id).await,
         StatusCode::OK
     );
-    // The release to the assigned interpreter and the patient keep working.
+    // The release to the patient and to the interpreter it is shared to keep
+    // working (an interpreter sees only documents opened to him).
+    share_document_with_user(&pool, letter_id, interpreter_id, admin_id).await;
     assert_eq!(
         document_detail_status(
             &app,

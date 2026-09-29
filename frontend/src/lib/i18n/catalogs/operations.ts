@@ -555,6 +555,8 @@ export interface OperationsTranslations {
   lead_whatsapp_consent: string;
   lead_attachments: string;
   lead_no_files_uploaded: string;
+  lead_medical_fields_hidden: string;
+  lead_attachments_medical_only: string;
   lead_select_from_queue: string;
   lead_download_attachment: string;
   lead_download_attachment_failed: string;
@@ -1187,6 +1189,9 @@ export const operationsRu: OperationsTranslations = {
   lead_whatsapp_consent: "Согласие на WhatsApp",
   lead_attachments: "Вложения",
   lead_no_files_uploaded: "Файлы не загружены.",
+  lead_medical_fields_hidden:
+    "Медицинские данные обращения (запрос, специализации, заметки, анкета, страховка) видят только сотрудники с медицинским доступом.",
+  lead_attachments_medical_only: "Файлы анкеты — медицинские документы, их открывают сотрудники с медицинским доступом.",
   lead_select_from_queue: "Выберите лид из очереди.",
   lead_download_attachment: "Скачать",
   lead_download_attachment_failed: "Не удалось скачать вложение",
@@ -1834,6 +1839,9 @@ export const operationsDe: OperationsTranslations = {
   lead_whatsapp_consent: "WhatsApp-Einwilligung",
   lead_attachments: "Anhänge",
   lead_no_files_uploaded: "Keine Dateien hochgeladen.",
+  lead_medical_fields_hidden:
+    "Die medizinischen Angaben der Anfrage (Anliegen, Fachrichtungen, Notizen, Fragebogen, Versicherung) sehen nur Mitarbeitende mit medizinischem Zugriff.",
+  lead_attachments_medical_only: "Die Dateien des Fragebogens sind medizinische Dokumente und werden von Mitarbeitenden mit medizinischem Zugriff geöffnet.",
   lead_select_from_queue: "Lead aus der Warteschlange auswählen.",
   lead_download_attachment: "Herunterladen",
   lead_download_attachment_failed:

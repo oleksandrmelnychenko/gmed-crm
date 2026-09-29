@@ -129,7 +129,8 @@ describe("patient detail model", () => {
   const RECORD_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter", "concierge"];
   // The interpreter reads only its own appointments: no orders, no timeline.
   const CARE_HISTORY_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter"];
-  const APPOINTMENT_ROLES = [...CARE_HISTORY_ROLES, "concierge", "interpreter"];
+  // Billing reads orders and the timeline but holds no `appointments.view`.
+  const APPOINTMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "concierge", "interpreter"];
   const ASSIGNMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
 
   it.each(STAFF_ROLES)("derives every surface from capabilities and server role lists for %s", (role) => {
@@ -145,14 +146,18 @@ describe("patient detail model", () => {
       expect(canViewPatientContractsSurface(actor)).toBe(has("contracts.view"));
       expect(canViewPatientInvoicesSurface(actor)).toBe(has("invoices.view"));
       expect(canViewPatientFinanceSurface(actor)).toBe(has("invoices.view"));
-      expect(canViewPatientClinicalProfile(actor)).toBe(has("patients.medical.view"));
+      // The interpreter's `patients.medical.view` covers its appointment
+      // briefing, not the clinical record (owner decision 2026-09-28).
+      expect(canViewPatientClinicalProfile(actor)).toBe(
+        has("patients.medical.view") && role !== "interpreter",
+      );
       expect(canEditPatientClinicalProfile(actor)).toBe(has("patients.medical.edit"));
       expect(canManagePatientProfile(actor)).toBe(has("patients.edit"));
       expect(canViewPatientCareHistorySurface(actor)).toBe(
         (has("orders.view") || has("appointments.view")) && CARE_HISTORY_ROLES.includes(role),
       );
       expect(canViewPatientAppointmentsSurface(actor)).toBe(
-        (has("orders.view") || has("appointments.view")) && APPOINTMENT_ROLES.includes(role),
+        has("appointments.view") && APPOINTMENT_ROLES.includes(role),
       );
       expect(canLoadPatientAssignableStaff(actor)).toBe(has("users.view"));
     });

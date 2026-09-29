@@ -49,6 +49,15 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "framework contract not found": ["Договор больше не найден", "Der Vertrag wurde nicht gefunden"],
   "name required": ["Укажите имя и фамилию", "Vor- und Nachname angeben"],
   "failure reason is required": ["Укажите причину архивации", "Grund für die Archivierung angeben"],
+  // Closing a lead withdraws its order; an order with invoices needs a decision first.
+  "the lead's order already has invoices; settle or cancel the order in the order card before closing the lead": [
+    "По заказу лида уже есть счета. Сначала урегулируйте или отмените заказ в его карточке, затем закройте лид",
+    "Zum Auftrag des Leads gibt es bereits Rechnungen. Klären oder stornieren Sie zuerst den Auftrag in der Auftragskarte und schließen Sie dann den Lead",
+  ],
+  "medical lead fields require medical access": [
+    "Медицинские данные обращения может менять только сотрудник с медицинским доступом",
+    "Medizinische Angaben der Anfrage darf nur ändern, wer medizinischen Zugriff hat",
+  ],
   "audit reason is required": ["Укажите причину удаления", "Grund für die Löschung angeben"],
   "insufficient permissions": ["Недостаточно прав для этого действия", "Keine Berechtigung für diese Aktion"],
   "lead already converted": ["Пациент по этому лиду уже создан", "Für diesen Lead wurde bereits ein Patient angelegt"],

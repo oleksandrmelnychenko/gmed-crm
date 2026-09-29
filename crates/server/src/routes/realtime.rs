@@ -325,6 +325,28 @@ async fn can_receive_event(
         }
     }
 
+    // An interpreter sees only the documents opened to him, not every document
+    // of a patient he is linked to (owner decision 2026-09-28), so document
+    // events follow the document rule instead of the patient link — both ways:
+    // a document shared to him reaches him without a patient link.
+    if auth.role == Role::Interpreter {
+        if event.entity_type == "document" {
+            return crate::routes::documents::current_user_can_view_document(
+                state,
+                auth,
+                event.entity_id,
+            )
+            .await;
+        }
+        if event.entity_type == "patient"
+            && let Some(document_id) = payload_uuid(event, "document_id")
+            && !crate::routes::documents::current_user_can_view_document(state, auth, document_id)
+                .await?
+        {
+            return Ok(false);
+        }
+    }
+
     match event.entity_type.as_str() {
         "patient" => {
             let patient_id = event.patient_id.unwrap_or(event.entity_id);
@@ -351,6 +373,19 @@ async fn can_receive_event(
         "appointment_checklist" | "reminder" if payload_appointment_id(event).is_some() => {
             let appointment_id = payload_appointment_id(event).unwrap_or_default();
             can_receive_appointment_event(state, auth, appointment_id).await
+        }
+        // An order checklist item is part of the order pipeline: closed to
+        // the concierge's and the team lead's order projection and to roles
+        // without `orders.view`, as `GET /orders/{id}/workflow-checklist`.
+        "workflow_checklist_item" if is_order_checklist_event(event) => {
+            if !crate::routes::orders::reads_full_orders(auth) {
+                return Ok(false);
+            }
+            if let Some(patient_id) = event.patient_id {
+                can_receive_patient_event(state, auth, patient_id).await
+            } else {
+                Ok(false)
+            }
         }
         "document"
         | "invoice"
@@ -391,10 +426,22 @@ async fn can_receive_event(
     }
 }
 
-fn payload_appointment_id(event: &RealtimeEvent) -> Option<Uuid> {
+fn is_order_checklist_event(event: &RealtimeEvent) -> bool {
     event
         .payload
-        .get("appointment_id")
+        .get("scope_type")
+        .and_then(|value| value.as_str())
+        == Some("order")
+}
+
+fn payload_appointment_id(event: &RealtimeEvent) -> Option<Uuid> {
+    payload_uuid(event, "appointment_id")
+}
+
+fn payload_uuid(event: &RealtimeEvent, key: &str) -> Option<Uuid> {
+    event
+        .payload
+        .get(key)
         .and_then(|value| value.as_str())
         .and_then(|value| Uuid::parse_str(value).ok())
 }
@@ -448,15 +495,17 @@ async fn can_receive_task_event(
     auth: &AuthUser,
     event: &RealtimeEvent,
 ) -> Result<bool, axum::response::Response> {
-    // Executors (concierge, interpreter) hear only about their own tasks, as
-    // in the task lists: a patient link does not open other staff's tasks.
+    // As in the task lists: the CEO and the CEO assistant see every task; only
+    // the patient manager and the interpreter team lead see the tasks of their
+    // patients. Executors (concierge, interpreter), billing and sales hear only
+    // about their own tasks (owner decision 2026-09-28).
+    if matches!(auth.role, Role::Ceo | Role::CeoAssistant) {
+        return Ok(true);
+    }
     if let Some(patient_id) = event.patient_id
-        && !matches!(auth.role, Role::Concierge | Role::Interpreter)
+        && matches!(auth.role, Role::PatientManager | Role::TeamleadInterpreter)
     {
         return can_receive_patient_event(state, auth, patient_id).await;
-    }
-    if auth.role == Role::Ceo {
-        return Ok(true);
     }
 
     sqlx::query_scalar::<_, bool>(
@@ -480,23 +529,30 @@ async fn can_receive_task_event(
     })
 }
 
+/// The part of the appointment-event decision that depends on the role alone:
+/// `Some` decides, `None` leaves it to the appointment row scope. Billing holds
+/// no `appointments.view` and cannot open an appointment, so it hears nothing
+/// about one either: neither its reminders nor its checklist (which reach this
+/// check through the `patients.view` event gate).
+fn appointment_event_role_decision(role: Role) -> Option<bool> {
+    match role {
+        Role::Ceo | Role::CeoAssistant => Some(true),
+        Role::Patient
+        | Role::PatientManager
+        | Role::TeamleadInterpreter
+        | Role::Interpreter
+        | Role::Concierge => None,
+        _ => Some(false),
+    }
+}
+
 async fn can_receive_appointment_event(
     state: &AppState,
     auth: &AuthUser,
     appointment_id: Uuid,
 ) -> Result<bool, axum::response::Response> {
-    if matches!(auth.role, Role::Ceo | Role::CeoAssistant | Role::Billing) {
-        return Ok(true);
-    }
-    if !matches!(
-        auth.role,
-        Role::Patient
-            | Role::PatientManager
-            | Role::TeamleadInterpreter
-            | Role::Interpreter
-            | Role::Concierge
-    ) {
-        return Ok(false);
+    if let Some(decision) = appointment_event_role_decision(auth.role) {
+        return Ok(decision);
     }
 
     let row =
@@ -709,9 +765,41 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::requires_current_entity_authorization;
+    use super::{
+        appointment_event_role_decision, is_order_checklist_event,
+        requires_current_entity_authorization,
+    };
     use crate::realtime::RealtimeEvent;
+    use gmed_domain::access::capabilities::Capability;
+    use gmed_domain::role::Role;
     use uuid::Uuid;
+
+    #[test]
+    fn appointment_events_never_reach_a_role_without_appointments_view() {
+        for role in [
+            Role::Ceo,
+            Role::CeoAssistant,
+            Role::PatientManager,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::Billing,
+            Role::Sales,
+            Role::ItAdmin,
+        ] {
+            if !role.can(Capability::AppointmentsView) {
+                assert_eq!(
+                    appointment_event_role_decision(role),
+                    Some(false),
+                    "{role:?}"
+                );
+            }
+        }
+        assert_eq!(appointment_event_role_decision(Role::Billing), Some(false));
+        assert_eq!(appointment_event_role_decision(Role::Ceo), Some(true));
+        assert_eq!(appointment_event_role_decision(Role::Concierge), None);
+        assert_eq!(appointment_event_role_decision(Role::Patient), None);
+    }
 
     #[test]
     fn patient_scoped_replay_never_trusts_historical_targets() {
@@ -720,6 +808,20 @@ mod tests {
         event.target_user_ids.push(user_id);
 
         assert!(requires_current_entity_authorization(&event));
+    }
+
+    #[test]
+    fn order_checklist_events_are_told_apart_from_patient_checklist_events() {
+        let item_id = Uuid::new_v4();
+        let mut event = RealtimeEvent::new(
+            "workflow_checklist_item.completed",
+            "workflow_checklist_item",
+            item_id,
+        );
+        event.payload = serde_json::json!({ "scope_type": "order" });
+        assert!(is_order_checklist_event(&event));
+        event.payload = serde_json::json!({ "scope_type": "patient" });
+        assert!(!is_order_checklist_event(&event));
     }
 
     #[test]

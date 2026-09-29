@@ -482,6 +482,9 @@ async fn list_order_workflow_checklist(
     if let Err(resp) = require_workflow_view_role(&auth) {
         return resp;
     }
+    if let Err(resp) = require_order_workflow_access(&auth) {
+        return resp;
+    }
     let patient_id = match sqlx::query_scalar::<_, Option<Uuid>>(
         r#"SELECT COALESCE(o.patient_id, l.converted_patient_id)
            FROM orders o
@@ -536,6 +539,9 @@ async fn add_order_workflow_item(
     if let Err(resp) = require_workflow_manage_role(&auth) {
         return resp;
     }
+    if let Err(resp) = require_order_workflow_access(&auth) {
+        return resp;
+    }
     let context = match load_order_scope_context(&state, order_id).await {
         Ok(context) => context,
         Err(resp) => return resp,
@@ -552,6 +558,9 @@ async fn complete_order_workflow_item(
     Path((order_id, item_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
     if let Err(resp) = require_workflow_view_role(&auth) {
+        return resp;
+    }
+    if let Err(resp) = require_order_workflow_access(&auth) {
         return resp;
     }
     let context = match load_order_scope_context(&state, order_id).await {
@@ -639,6 +648,9 @@ async fn order_workflow_item_resolution(
     change: ResolutionChange,
 ) -> axum::response::Response {
     if let Err(resp) = require_workflow_manage_role(&auth) {
+        return resp;
+    }
+    if let Err(resp) = require_order_workflow_access(&auth) {
         return resp;
     }
     let context = match load_order_scope_context(&state, order_id).await {
@@ -919,6 +931,19 @@ fn require_workflow_view_role(auth: &AuthUser) -> Result<(), axum::response::Res
 
 fn require_workflow_manage_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
     auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Concierge])
+}
+
+/// The order checklist is the order pipeline. The concierge and the
+/// interpreter team lead read only their projection of an order, and roles
+/// without `orders.view` read no order at all, so every order checklist read
+/// and write answers 403 for them (RBAC matrix, `/orders`). A concierge still
+/// closes its order work through the linked task.
+fn require_order_workflow_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if crate::routes::orders::reads_full_orders(auth) {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
 }
 
 async fn ensure_patient_scope_visible(

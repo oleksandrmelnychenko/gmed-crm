@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
 use crate::routes::concierge_operational_items::{
-    can_mutate_operational_item, is_allowed_status_transition,
+    TaskScope, can_mutate_operational_item, is_allowed_status_transition,
 };
 use crate::routes::workflow_checklists::{ChecklistItemSync, sync_checklist_items_for_task_status};
 use gmed_domain::role::Role;
@@ -238,7 +238,14 @@ pub(crate) fn plan_service_status_change(
         return Err(ServiceStatusRefusal::Archived);
     }
     let steps = task_steps(facts.task_status, target).ok_or(ServiceStatusRefusal::Transition)?;
-    let can_review = can_mutate_operational_item(auth, facts.task_author, facts.task_author_role);
+    // The service surface is opened by patient access, so a manager's rank
+    // reaches the task of the service (see `rank_reaches_task`).
+    let can_review = can_mutate_operational_item(
+        auth,
+        facts.task_author,
+        facts.task_author_role,
+        TaskScope::PATIENT_OPENED,
+    );
     if auth.user_id != facts.task_assignee && !can_review {
         return Err(ServiceStatusRefusal::NotParticipant);
     }

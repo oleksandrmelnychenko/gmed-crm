@@ -188,6 +188,8 @@ export interface LeadDetail extends Lead {
   converted_patient_id: string | null;
   intake_model: "legacy" | "patient_first";
   prospect_patient_id: string | null;
+  /** Patient number (PT-…) of the existing patient of a repeat intake. */
+  repeat_patient_pid?: string | null;
   referrer_patient_id: string | null;
   referrer_patient_pid: string | null;
   referrer_patient_name: string | null;
@@ -201,6 +203,12 @@ export interface LeadDetail extends Lead {
   lifecycle: LeadLifecycle;
 
   attachments: LeadAttachment[];
+  /**
+   * Set for a role without medical access (Sales): the server left out the
+   * request text, specialties, notes, questionnaire answers and uploads,
+   * insurance and the wizard state, so the screens hide those blocks.
+   */
+  medical_fields_hidden?: boolean;
 }
 
 export interface LeadTrustedContact {

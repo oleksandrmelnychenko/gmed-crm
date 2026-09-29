@@ -640,6 +640,9 @@ async fn approve_pending(
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
+    if let Err(e) = ensure_can_resolve_pending_login(&state, &auth, pending_id).await {
+        return e;
+    }
 
     // A pending forced password change does not block the approval: the
     // session created on redemption is confined to the password-change
@@ -696,6 +699,9 @@ async fn reject_pending(
     if let Err(e) = auth.require_capability(Capability::AdminSecurity) {
         return e;
     }
+    if let Err(e) = ensure_can_resolve_pending_login(&state, &auth, pending_id).await {
+        return e;
+    }
 
     match sqlx::query!(
         "UPDATE pending_logins SET status = 'rejected', approved_by = $2, resolved_at = now() WHERE id = $1 AND status = 'pending'",
@@ -726,6 +732,32 @@ async fn reject_pending(
             tracing::error!(error = %e, "reject pending");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
         }
+    }
+}
+
+/// A pending login is decided for its account: an existing CEO's sign-in is
+/// approved or rejected only by a CEO (`users.manage_ceo`), like every other
+/// change to the CEO account.
+async fn ensure_can_resolve_pending_login(
+    state: &AppState,
+    auth: &AuthUser,
+    pending_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let user_id: Option<Uuid> =
+        sqlx::query_scalar("SELECT user_id FROM pending_logins WHERE id = $1")
+            .bind(pending_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, pending = %pending_id, "load pending login account");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            })?;
+    match user_id {
+        Some(user_id) => super::users::ensure_can_act_on_account(state, auth, user_id).await,
+        None => Err(err(
+            StatusCode::NOT_FOUND,
+            "Pending login not found or already resolved",
+        )),
     }
 }
 

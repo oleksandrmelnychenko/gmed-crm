@@ -205,7 +205,9 @@ pub(crate) struct PatientViewRuleScope {
 }
 
 impl PatientViewRuleScope {
-    fn decision(&self, patient_id: Uuid) -> Option<bool> {
+    /// The explicit rule deciding the view of one patient, if any (`None`
+    /// leaves the role baseline in control, as in `has_patient_access`).
+    pub(crate) fn decision(&self, patient_id: Uuid) -> Option<bool> {
         self.all
             .iter()
             .chain(
@@ -1553,6 +1555,11 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
         for contact in contacts {
             validate_patient_contact_payload(contact)?;
         }
+    } else {
+        // Without a contact list the legacy fields become the contacts.
+        validate_optional_patient_phone(req.phone_primary.as_deref())?;
+        validate_optional_patient_phone(req.phone_secondary.as_deref())?;
+        validate_optional_patient_email(req.email.as_deref())?;
     }
     if let Some(relations) = req.patient_relations.as_ref() {
         for relation in relations {
@@ -1569,7 +1576,8 @@ fn validate_create(req: &CreatePatientRequest) -> Result<(), &'static str> {
 }
 
 fn validate_patient_contact_payload(contact: &PatientContactRequest) -> Result<(), &'static str> {
-    match contact.contact_kind.trim() {
+    let kind = contact.contact_kind.trim();
+    match kind {
         "phone" | "email" => {}
         _ => return Err("Invalid contact kind"),
     }
@@ -1583,7 +1591,117 @@ fn validate_patient_contact_payload(contact: &PatientContactRequest) -> Result<(
     if contact.notes.as_deref().unwrap_or("").trim().len() > 1000 {
         return Err("Contact notes max 1000");
     }
-    Ok(())
+    // An empty value is dropped by normalize_patient_contacts.
+    if kind == "email" {
+        validate_optional_patient_email(Some(&contact.value))
+    } else {
+        validate_optional_patient_phone(Some(&contact.value))
+    }
+}
+
+/// An e-mail address as the lead wizard accepts it (`^[^\s@]+@[^\s@]+\.[^\s@]+$`
+/// in `frontend/src/lib/contact-validation.ts`): one "@" with text before it,
+/// a domain with a dot that has text on both sides, no spaces.
+pub(crate) fn is_valid_contact_email(value: &str) -> bool {
+    let value = value.trim();
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && !domain.contains('@')
+        && !value.chars().any(char::is_whitespace)
+        && domain
+            .char_indices()
+            .any(|(index, character)| character == '.' && index > 0 && index + 1 < domain.len())
+}
+
+/// A phone number as the lead wizard accepts it: at least six digits, the
+/// same bar the lead identity check uses to compare phone numbers.
+pub(crate) fn is_valid_contact_phone(value: &str) -> bool {
+    value.chars().filter(char::is_ascii_digit).count() >= 6
+}
+
+fn validate_optional_patient_email(value: Option<&str>) -> Result<(), &'static str> {
+    match value.map(str::trim) {
+        Some(email) if !email.is_empty() && !is_valid_contact_email(email) => {
+            Err("Enter a valid email address")
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_optional_patient_phone(value: Option<&str>) -> Result<(), &'static str> {
+    match value.map(str::trim) {
+        Some(phone) if !phone.is_empty() && !is_valid_contact_phone(phone) => {
+            Err("Enter a valid phone number")
+        }
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod patient_contact_validation_tests {
+    use super::{
+        PatientContactRequest, is_valid_contact_email, is_valid_contact_phone,
+        validate_patient_contact_payload,
+    };
+
+    fn contact(kind: &str, value: &str) -> PatientContactRequest {
+        PatientContactRequest {
+            contact_kind: kind.to_string(),
+            contact_type: None,
+            value: value.to_string(),
+            is_primary: None,
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn email_follows_the_lead_wizard_rule() {
+        for valid in [
+            "anna@example.com",
+            " anna.muster@klinik.co.uk ",
+            "a@b.c",
+            "a@b.c.",
+        ] {
+            assert!(is_valid_contact_email(valid), "{valid}");
+        }
+        for invalid in [
+            "bad@x",
+            "bad@",
+            "@example.com",
+            "a b@example.com",
+            "a@@b.de",
+            "a@b.",
+            "plain",
+        ] {
+            assert!(!is_valid_contact_email(invalid), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn phone_needs_at_least_six_digits() {
+        assert!(is_valid_contact_phone("+49 (151) 123-456"));
+        assert!(is_valid_contact_phone("0151123456"));
+        assert!(!is_valid_contact_phone("abc"));
+        assert!(!is_valid_contact_phone("+49 12"));
+    }
+
+    #[test]
+    fn contact_values_are_checked_by_kind_and_may_stay_empty() {
+        assert_eq!(
+            validate_patient_contact_payload(&contact("email", "bad@x")),
+            Err("Enter a valid email address")
+        );
+        assert_eq!(
+            validate_patient_contact_payload(&contact("phone", "abc")),
+            Err("Enter a valid phone number")
+        );
+        assert!(validate_patient_contact_payload(&contact("email", "anna@example.com")).is_ok());
+        assert!(validate_patient_contact_payload(&contact("phone", "+49 151 1234567")).is_ok());
+        assert!(validate_patient_contact_payload(&contact("email", "  ")).is_ok());
+        assert!(validate_patient_contact_payload(&contact("phone", "")).is_ok());
+    }
 }
 
 fn normalize_patient_text(value: impl AsRef<str>, max_len: usize) -> Option<String> {
@@ -3237,6 +3355,9 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    let phone_primary_supplied = body.phone_primary.is_some();
+    let phone_secondary_supplied = body.phone_secondary.is_some();
+    let email_supplied = body.email.is_some();
     let mut phone_primary = match normalize_patient_text_patch(
         body.phone_primary,
         current.try_get("phone_primary").unwrap_or_default(),
@@ -3261,6 +3382,21 @@ async fn update_patient(
         Ok(value) => value,
         Err(response) => return response,
     };
+    // A contact list replaces the legacy fields and was validated above; a
+    // legacy field sent on its own is checked like a contact. Values that are
+    // not sent keep what is stored.
+    if !contacts_patch_supplied {
+        let legacy_checks = [
+            phone_primary_supplied
+                .then(|| validate_optional_patient_phone(phone_primary.as_deref())),
+            phone_secondary_supplied
+                .then(|| validate_optional_patient_phone(phone_secondary.as_deref())),
+            email_supplied.then(|| validate_optional_patient_email(email.as_deref())),
+        ];
+        if let Some(Err(message)) = legacy_checks.into_iter().flatten().find(Result::is_err) {
+            return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+        }
+    }
     let normalized_contacts = contacts_patch.map(|contacts| {
         let contacts = normalize_patient_contacts(
             Some(contacts),
@@ -3671,7 +3807,7 @@ async fn list_patient_lab_results(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
     }
@@ -4395,7 +4531,7 @@ async fn list_patient_vitals(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -6602,6 +6738,11 @@ async fn list_patient_cases(
         Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    // The main request reason is the case's anamnesis, part of the clinical
+    // record: billing (no `patients.medical.view`) and the interpreter do not
+    // read it. The case number, status and manager stay, orders and invoices
+    // refer to them.
+    let can_view_medical = can_read_clinical_record(&auth);
 
     let rows = sqlx::query(
         r#"SELECT c.id, c.case_id, c.status, c.hauptanfragegrund, c.created_at,
@@ -6629,7 +6770,7 @@ async fn list_patient_cases(
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                 "case_id": row.try_get::<String, _>("case_id").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
-                "hauptanfragegrund": row.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default(),
+                "hauptanfragegrund": if can_view_medical { row.try_get::<Option<String>, _>("hauptanfragegrund").unwrap_or_default() } else { None },
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                 "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).ok(),
                 "zuweiser": row.try_get::<Option<String>, _>("zuweiser").unwrap_or_default(),
@@ -6712,10 +6853,13 @@ async fn list_patient_appointments(
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     // The concierge reads the appointments of a visible patient in the patient
     // card (read-only here; its orders and timeline stay closed to the role).
+    // Billing holds no `appointments.view`: it learns about medical visits
+    // from the billing handoff (task), not from the patient's calendar, the
+    // same as `/appointments` answers it 403.
+    auth.require_capability(Capability::AppointmentsView)?;
     auth.require_any_role(&[
         Role::Ceo,
         Role::PatientManager,
-        Role::Billing,
         Role::TeamleadInterpreter,
         Role::Interpreter,
         Role::Concierge,
@@ -6811,6 +6955,9 @@ async fn list_patient_documents(
                   (SELECT linked_appointment.interpreter_id
                      FROM appointments linked_appointment
                     WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
+                  (SELECT linked_appointment.owner_user_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_owner_id,
                   d.version_root_document_id,
                   d.replaces_document_id,
                   d.version_number,
@@ -6856,7 +7003,20 @@ async fn list_patient_documents(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $3
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $3
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $3
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
@@ -7056,6 +7216,19 @@ pub(crate) async fn load_patient_document_alerts_summary(
     state: &AppState,
     patient_uuid: Uuid,
 ) -> Result<PatientDocumentAlertsSummary, axum::response::Response> {
+    evaluate_patient_document_alerts(state, patient_uuid, None).await
+}
+
+/// Required-document alerts of a patient. `visible_document_ids` limits the
+/// evaluation to the documents a caller may see: then the summary is that
+/// caller's view — which rules the visible documents fulfil — and the
+/// manager's stored completeness flag is not disclosed, because it would
+/// betray documents the caller cannot see.
+async fn evaluate_patient_document_alerts(
+    state: &AppState,
+    patient_uuid: Uuid,
+    visible_document_ids: Option<&HashSet<Uuid>>,
+) -> Result<PatientDocumentAlertsSummary, axum::response::Response> {
     let rules = load_required_patient_document_rules(state).await?;
 
     let patient_row = sqlx::query(
@@ -7084,7 +7257,7 @@ pub(crate) async fn load_patient_document_alerts_summary(
         .and_then(|value| value.get("document_pack_complete").and_then(Value::as_bool))
         .unwrap_or(false);
 
-    let document_rows = sqlx::query(
+    let mut document_rows = sqlx::query(
         r#"SELECT d.id,
                   COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
                   d.art,
@@ -7105,6 +7278,12 @@ pub(crate) async fn load_patient_document_alerts_summary(
             "Failed to load patient document alerts",
         )
     })?;
+    if let Some(visible_document_ids) = visible_document_ids {
+        document_rows.retain(|row| {
+            row.try_get::<Uuid, _>("id")
+                .is_ok_and(|document_id| visible_document_ids.contains(&document_id))
+        });
+    }
 
     let mut evaluated_rules = Vec::with_capacity(rules.len());
     let mut missing_documents = Vec::new();
@@ -7160,6 +7339,11 @@ pub(crate) async fn load_patient_document_alerts_summary(
 
     let missing_count = missing_documents.len();
     let document_pack_complete = missing_count == 0;
+    let stored_document_pack_complete = if visible_document_ids.is_some() {
+        document_pack_complete
+    } else {
+        stored_document_pack_complete
+    };
 
     Ok(PatientDocumentAlertsSummary {
         configured_rule_count: rules.len(),
@@ -7246,6 +7430,9 @@ async fn load_staff_visible_patient_document_ids(
                   (SELECT linked_appointment.interpreter_id
                      FROM appointments linked_appointment
                     WHERE linked_appointment.id = d.appointment_id) AS appointment_interpreter_id,
+                  (SELECT linked_appointment.owner_user_id
+                     FROM appointments linked_appointment
+                    WHERE linked_appointment.id = d.appointment_id) AS appointment_owner_id,
                   d.is_medical,
                   d.art,
                   d.category,
@@ -7258,7 +7445,20 @@ async fn load_staff_visible_patient_document_ids(
                     WHERE ds.document_id = d.id
                       AND ds.shared_with_user_id = $2
                       AND ds.revoked_at IS NULL
-                  ) AS shared_to_current
+                  ) AS shared_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests assigned_request
+                    WHERE assigned_request.document_id = d.id
+                      AND assigned_request.assigned_to = $2
+                      AND assigned_request.status IN ('pending', 'in_progress')
+                  ) AS translation_assigned_to_current,
+                  EXISTS(
+                    SELECT 1 FROM document_translation_requests own_request
+                    WHERE (own_request.document_id = d.id
+                           OR own_request.translated_document_id = d.id)
+                      AND own_request.assigned_to = $2
+                      AND own_request.status IN ('pending', 'in_progress', 'completed')
+                  ) AS own_translation_document
            FROM documents d
            WHERE d.patient_id = $1
              AND d.status IN ('draft', 'active')"#,
@@ -7762,9 +7962,17 @@ async fn get_patient_document_alerts(
         Role::Interpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
-    let summary = load_patient_document_alerts_summary(&state, patient_uuid).await?;
     let visible_document_ids =
         load_staff_visible_patient_document_ids(&state, &auth, patient_uuid).await?;
+    // An interpreter sees only the documents opened to him, so his alerts are
+    // counted from those documents: the fulfilled rules and missing counts
+    // must not reveal that the patient has documents closed to him.
+    let summary = evaluate_patient_document_alerts(
+        &state,
+        patient_uuid,
+        (auth.role == Role::Interpreter).then_some(&visible_document_ids),
+    )
+    .await?;
     let mut payload = patient_document_alerts_payload(&summary);
     retain_visible_document_alert_matches(&mut payload, &visible_document_ids);
     Ok(Json(payload))
@@ -8537,6 +8745,17 @@ async fn get_patient_timeline(
         Role::TeamleadInterpreter,
     ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
+    // Billing reads the patient's orders, services and invoices here, but no
+    // medical data and no appointments (docs/backlog/02_rbac-matrix_ua.md).
+    // The events a role may not open are left out of the event set itself, so
+    // the items, totals, facets, filters and search never reveal them.
+    // Without `appointments.view` no appointment (nor its communication or
+    // reminder) is listed; without `patients.medical.view` a medical
+    // appointment is a blocked slot (as for the concierge in `/appointments`),
+    // and cases (anamnesis), medical documents, recommendations and the
+    // clinical records are left out.
+    let can_view_appointments = auth.can(Capability::AppointmentsView);
+    let can_view_medical = auth.can(Capability::PatientsMedicalView);
 
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
     let offset = query.offset.unwrap_or(0).max(0);
@@ -8586,15 +8805,24 @@ async fn get_patient_timeline(
 
             SELECT 'appointment'::text AS entity_type,
                    a.id AS entity_id,
-                   a.title AS title,
+                   CASE
+                       WHEN NOT $11::boolean AND COALESCE(a.appointment_type, 'medical') = 'medical'
+                       THEN 'Blocked medical slot'
+                       ELSE a.title
+                   END AS title,
                    COALESCE(a.appointment_type, 'medical') AS category,
                    a.status AS status,
                    ((a.date::timestamp + COALESCE(a.time_start, time '00:00')) AT TIME ZONE 'Europe/Berlin') AS happened_at,
-                   concat_ws(' · ', p.name, d.name) AS source_label
+                   CASE
+                       WHEN NOT $11::boolean AND COALESCE(a.appointment_type, 'medical') = 'medical'
+                       THEN NULL::text
+                       ELSE concat_ws(' · ', p.name, d.name)
+                   END AS source_label
             FROM appointments a
             LEFT JOIN providers p ON p.id = a.provider_id
             LEFT JOIN provider_doctors d ON d.id = a.doctor_id
             WHERE a.patient_id = $1
+              AND $10::boolean
 
             UNION ALL
 
@@ -8609,6 +8837,7 @@ async fn get_patient_timeline(
             LEFT JOIN leads source_lead
                    ON source_lead.id = COALESCE(c.source_lead_id, c.lead_id)
             WHERE COALESCE(c.patient_id, source_lead.converted_patient_id) = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -8679,6 +8908,11 @@ async fn get_patient_timeline(
             LEFT JOIN providers provider ON provider.id = communication.provider_id
             LEFT JOIN provider_doctors doctor ON doctor.id = communication.doctor_id
             WHERE COALESCE(communication.patient_id, communication_appointment.patient_id) = $1
+              AND $10::boolean
+              AND (
+                    $11::boolean
+                    OR COALESCE(communication_appointment.appointment_type, 'medical') <> 'medical'
+              )
 
             UNION ALL
 
@@ -8694,6 +8928,11 @@ async fn get_patient_timeline(
             JOIN appointments reminder_appointment ON reminder_appointment.id = reminder.appointment_id
             LEFT JOIN users reminder_user ON reminder_user.id = reminder.user_id
             WHERE reminder_appointment.patient_id = $1
+              AND $10::boolean
+              AND (
+                    $11::boolean
+                    OR COALESCE(reminder_appointment.appointment_type, 'medical') <> 'medical'
+              )
 
             UNION ALL
 
@@ -8753,6 +8992,19 @@ async fn get_patient_timeline(
             FROM documents d
             LEFT JOIN leads source_lead ON source_lead.id = d.lead_id
             WHERE COALESCE(d.patient_id, source_lead.converted_patient_id) = $1
+              AND (
+                    $11::boolean
+                    OR NOT (
+                        COALESCE(d.is_medical, false)
+                        OR d.access_category IS NOT DISTINCT FROM 'medical'
+                        OR EXISTS (
+                            SELECT 1
+                            FROM ref_document_categories medical_category
+                            WHERE medical_category.is_medical
+                              AND lower(medical_category.id) IN (lower(d.category), lower(d.art))
+                        )
+                    )
+              )
 
             UNION ALL
 
@@ -8844,6 +9096,7 @@ async fn get_patient_timeline(
             FROM patient_recommendations pr
             LEFT JOIN provider_doctors doctor ON doctor.id = pr.source_doctor_id
             WHERE pr.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -8858,6 +9111,19 @@ async fn get_patient_timeline(
             LEFT JOIN documents d ON d.id = dtr.document_id
             LEFT JOIN users u ON u.id = dtr.requested_by
             WHERE dtr.patient_id = $1
+              AND (
+                    $11::boolean
+                    OR NOT (
+                        COALESCE(d.is_medical, false)
+                        OR d.access_category IS NOT DISTINCT FROM 'medical'
+                        OR EXISTS (
+                            SELECT 1
+                            FROM ref_document_categories medical_category
+                            WHERE medical_category.is_medical
+                              AND lower(medical_category.id) IN (lower(d.category), lower(d.art))
+                        )
+                    )
+              )
 
             UNION ALL
 
@@ -8996,6 +9262,7 @@ async fn get_patient_timeline(
             WHERE al.entity_type = 'case'
               AND al.action = 'drug_match_verified'
               AND c.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9012,6 +9279,7 @@ async fn get_patient_timeline(
             FROM patient_card_entries e
             LEFT JOIN users u ON u.id = e.author_id
             WHERE e.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9039,6 +9307,7 @@ async fn get_patient_timeline(
             FROM patient_medical_orders mo
             LEFT JOIN users u ON u.id = mo.ordered_by
             WHERE mo.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9055,6 +9324,7 @@ async fn get_patient_timeline(
             FROM patient_risk_scores rs
             LEFT JOIN users u ON u.id = rs.recorded_by
             WHERE rs.patient_id = $1
+              AND $11::boolean
 
             UNION ALL
 
@@ -9543,6 +9813,8 @@ async fn get_patient_timeline(
         .bind(can_view_financial)
         .bind(limit)
         .bind(offset)
+        .bind(can_view_appointments)
+        .bind(can_view_medical)
         .fetch_one(&state.db)
         .await
         .map_err(|e| {
@@ -9801,6 +10073,28 @@ async fn ensure_related_patient_usable(
     }
 
     if has_patient_use_access(state, auth, related_patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+/// Whether the caller reads the patient's clinical record: diagnoses,
+/// medication, findings, procedures, allergies/CAVE, anamnesis and course,
+/// vital signs, lab results, vaccinations, the case anamnesis and the PDFs
+/// built from them. It needs `patients.medical.view`, and the interpreter
+/// never reads it, whatever its patient assignment (manual or from a
+/// booking): its medical scope is the briefing of its own appointment and the
+/// documents released to it (owner decision 2026-09-28,
+/// docs/backlog/02_rbac-matrix_ua.md).
+fn can_read_clinical_record(auth: &AuthUser) -> bool {
+    auth.can(Capability::PatientsMedicalView) && auth.role != Role::Interpreter
+}
+
+/// 403 unless [`can_read_clinical_record`].
+#[allow(clippy::result_large_err)]
+fn require_clinical_record_access(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if can_read_clinical_record(auth) {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
@@ -11669,7 +11963,7 @@ async fn get_patient_clinical(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_capability(Capability::PatientsMedicalView)?;
+    require_clinical_record_access(&auth)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -13715,7 +14009,7 @@ async fn list_patient_narrative_history(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14546,7 +14840,7 @@ async fn get_patient_impfstatus(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14805,7 +15099,7 @@ async fn get_patient_clinical_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -14974,7 +15268,7 @@ async fn get_patient_lab_results_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(response) = require_clinical_record_access(&auth) {
         return response;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {
@@ -15215,7 +15509,7 @@ async fn get_patient_medikationsplan_pdf(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientPdfQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::PatientsMedicalView) {
+    if let Err(e) = require_clinical_record_access(&auth) {
         return e;
     }
     match has_patient_access(&state, &auth, patient_uuid).await {

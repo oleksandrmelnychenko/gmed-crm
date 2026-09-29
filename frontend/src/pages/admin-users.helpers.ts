@@ -150,11 +150,21 @@ export function isAdminUserLocked(
  * themselves, and unlock / revoke / TOTP reset only make sense when there
  * is something to unlock, revoke or reset.
  */
+/**
+ * Whether the signed-in administrator may act on an account of `targetRole`:
+ * an existing CEO account is changed only with `users.manage_ceo`. The same
+ * rule covers the security actions of the settings page (sign-out, pending
+ * login approval) — the server answers 403 otherwise.
+ */
+export function canManageAdminAccount(targetRole: string, canManageCeo: boolean) {
+  return canManageCeo || targetRole !== "ceo";
+}
+
 export function getAdminUserActions(
   user: AdminUserActionTarget,
   context: AdminUserActionContext,
 ): AdminUserActions {
-  const canManage = context.canManageCeo || user.role !== "ceo";
+  const canManage = canManageAdminAccount(user.role, context.canManageCeo);
   const isLocked = isAdminUserLocked(user, context.now);
   return {
     canManage,

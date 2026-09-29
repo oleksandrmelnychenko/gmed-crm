@@ -1243,7 +1243,8 @@ function useLeadsPageContent() {
         compliance_status: nonempty(gateForm.complianceStatus),
         consent_healthcare: gateForm.consentHealthcare,
         consent_privacy_practices: gateForm.consentPrivacyPractices,
-        notes: nonempty(gateForm.notes),
+        // Without medical access the notes are not shown, so they are not sent.
+        ...(detailMedicalHidden ? {} : { notes: nonempty(gateForm.notes) }),
       });
       reload();
     } catch (saveError) {
@@ -1290,6 +1291,8 @@ function useLeadsPageContent() {
     filters.leadType !== "" ||
     filters.includeArchived !== "false";
   const detailLeadType = detail ? leadTypeFromLead(detail) : "console";
+  // Sales works leads without their medical content (server projection).
+  const detailMedicalHidden = detail?.medical_fields_hidden === true;
   const detailIsConsoleLead = detailLeadType === "console";
   const detailIsIntakeLead = Boolean(detail) && !detailIsConsoleLead;
   const detailCanPromoteToConsole =
@@ -1582,7 +1585,13 @@ function useLeadsPageContent() {
                   ) : null}
                 </section>
 
-                {detailLeadType === "form" ? (
+                {detailMedicalHidden ? (
+                  <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    {t.lead_medical_fields_hidden}
+                  </p>
+                ) : null}
+
+                {detailLeadType === "form" && !detailMedicalHidden ? (
                   <section className={cardClass("p-4")}>
                     {detail.message ? (
                       <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 whitespace-pre-wrap">
@@ -1616,13 +1625,23 @@ function useLeadsPageContent() {
                         <DetailCard label={t.lead_location} value={leadLocationLabel(detail.location, t)} />
                         <DetailCard label={t.lead_location_detailed} value={leadLocationDetailedLabel(detail.location_detailed, t)} />
                         <DetailCard label={t.lead_wants_membership} value={yesNo(detail.wants_membership, t)} />
-                        <DetailCard label={t.lead_selected_program} value={leadProgramServiceLabel(detail.selected_program, t)} />
+                        {detailMedicalHidden ? null : (
+                          <DetailCard label={t.lead_selected_program} value={leadProgramServiceLabel(detail.selected_program, t)} />
+                        )}
                         <DetailCard label={t.lead_can_travel} value={yesNo(detail.can_travel, t)} />
-                        <DetailCard label={t.lead_has_medical_records} value={leadMedicalRecordsLabel(detail.has_medical_records, t)} />
-                        <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
+                        {detailMedicalHidden ? null : (
+                          <>
+                            <DetailCard label={t.lead_has_medical_records} value={leadMedicalRecordsLabel(detail.has_medical_records, t)} />
+                            <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
+                          </>
+                        )}
                         <DetailCard label={t.lead_has_travel_documents} value={yesNo(detail.has_travel_documents, t)} />
-                        <DetailCard label={t.lead_currently_in_treatment} value={yesNo(detail.currently_in_treatment, t)} />
-                        <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
+                        {detailMedicalHidden ? null : (
+                          <>
+                            <DetailCard label={t.lead_currently_in_treatment} value={yesNo(detail.currently_in_treatment, t)} />
+                            <DetailCard label={t.lead_health_risk_for_travel} value={yesNo(detail.has_health_risk_for_travel, t)} />
+                          </>
+                        )}
                         <DetailCard
                           label={t.lead_services}
                           value={
@@ -1631,8 +1650,12 @@ function useLeadsPageContent() {
                               : t.common_not_set
                           }
                         />
-                        <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
-                        <DetailCard label={t.lead_insurance_covers_germany} value={leadInsuranceCoverageLabel(detail.insurance_covers_germany, t)} />
+                        {detailMedicalHidden ? null : (
+                          <>
+                            <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
+                            <DetailCard label={t.lead_insurance_covers_germany} value={leadInsuranceCoverageLabel(detail.insurance_covers_germany, t)} />
+                          </>
+                        )}
                         <DetailCard label={t.lead_preferred_location} value={leadPreferredLocationLabel(detail.preferred_location, t)} />
                         <DetailCard label={t.lead_visit_timing} value={leadVisitTimingLabel(detail.visit_timing, t)} />
                         <DetailCard label={t.lead_email_consent} value={yesNo(detail.email_consent, t)} />
@@ -2307,20 +2330,23 @@ function useLeadsPageContent() {
                             </p>
                           ) : null}
                         </LeadField>
-                        <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
-                          <Input
-                            id="lead-gate-notes"
-                            className={shellInputClassName}
-                            value={gateForm.notes}
-                            onChange={(event) =>
-                              setGateForm((current) =>
-                                current
-                                  ? { ...current, notes: event.target.value }
-                                  : current
-                              )
-                            }
-                          />
-                        </LeadField>
+                        {/* Notes mix medical content; a role without medical access neither reads nor overwrites them. */}
+                        {detailMedicalHidden ? null : (
+                          <LeadField label={t.patients_notes} htmlFor="lead-gate-notes">
+                            <Input
+                              id="lead-gate-notes"
+                              className={shellInputClassName}
+                              value={gateForm.notes}
+                              onChange={(event) =>
+                                setGateForm((current) =>
+                                  current
+                                    ? { ...current, notes: event.target.value }
+                                    : current
+                                )
+                              }
+                            />
+                          </LeadField>
+                        )}
                       </div>
 
                       <div className="grid gap-3 md:grid-cols-2">
@@ -2394,7 +2420,9 @@ function useLeadsPageContent() {
                           label={t.lead_compliance_status}
                           value={complianceStatusLabel(gateForm.complianceStatus, t)}
                         />
-                        <DetailCard label={t.patients_notes} value={gateForm.notes || t.common_not_set} />
+                        {detailMedicalHidden ? null : (
+                          <DetailCard label={t.patients_notes} value={gateForm.notes || t.common_not_set} />
+                        )}
                         <DetailCard
                           label={t.lead_healthcare_consent_available}
                           value={yesNo(gateForm.consentHealthcare, t)}
@@ -2539,19 +2567,25 @@ function useLeadsPageContent() {
                       <DetailCard label={t.lead_location} value={leadLocationLabel(detail.location, t)} />
                       <DetailCard label={t.lead_location_detailed} value={leadLocationDetailedLabel(detail.location_detailed, t)} />
                       <DetailCard label={t.lead_wants_membership} value={yesNo(detail.wants_membership, t)} />
-                      <DetailCard
-                        label={t.lead_selected_program}
-                        value={leadProgramServiceLabel(detail.selected_program, t)}
-                      />
+                      {detailMedicalHidden ? null : (
+                        <DetailCard
+                          label={t.lead_selected_program}
+                          value={leadProgramServiceLabel(detail.selected_program, t)}
+                        />
+                      )}
                       <DetailCard label={t.lead_can_travel} value={yesNo(detail.can_travel, t)} />
-                      <DetailCard label={t.lead_has_medical_records} value={leadMedicalRecordsLabel(detail.has_medical_records, t)} />
-                      <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
+                      {detailMedicalHidden ? null : (
+                        <>
+                          <DetailCard label={t.lead_has_medical_records} value={leadMedicalRecordsLabel(detail.has_medical_records, t)} />
+                          <DetailCard label={t.lead_records_in_accepted_language} value={yesNo(detail.records_in_accepted_language, t)} />
+                        </>
+                      )}
                       <DetailCard label={t.lead_has_travel_documents} value={yesNo(detail.has_travel_documents, t)} />
                     </div>
                   </section>
                 ) : null}
 
-                {(detail.currently_in_treatment !== null ||
+                {!detailMedicalHidden && (detail.currently_in_treatment !== null ||
                   detail.has_health_risk_for_travel !== null ||
                   detail.primary_concern_text ||
                   detail.additional_concerns) ? (
@@ -2590,8 +2624,12 @@ function useLeadsPageContent() {
                             : t.common_not_set
                         }
                       />
-                      <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
-                      <DetailCard label={t.lead_insurance_covers_germany} value={leadInsuranceCoverageLabel(detail.insurance_covers_germany, t)} />
+                      {detailMedicalHidden ? null : (
+                        <>
+                          <DetailCard label={t.lead_has_insurance} value={yesNo(detail.has_insurance, t)} />
+                          <DetailCard label={t.lead_insurance_covers_germany} value={leadInsuranceCoverageLabel(detail.insurance_covers_germany, t)} />
+                        </>
+                      )}
                     </div>
                   </section>
                 ) : null}
@@ -2629,9 +2667,11 @@ function useLeadsPageContent() {
 
                 <section className={cardClass("p-4")}>
                   <SectionTitle>
-                    {`${t.lead_attachments} (${detail.attachments?.length ?? 0})`}
+                    {`${t.lead_attachments} (${detailMedicalHidden ? detail.attachment_count ?? 0 : detail.attachments?.length ?? 0})`}
                   </SectionTitle>
-                  {detail.attachments && detail.attachments.length > 0 ? (
+                  {detailMedicalHidden ? (
+                    <p className="mt-3 text-sm text-slate-500">{t.lead_attachments_medical_only}</p>
+                  ) : detail.attachments && detail.attachments.length > 0 ? (
                     <ul className="mt-4 space-y-1.5">
                       {detail.attachments.map((file) => (
                         <li

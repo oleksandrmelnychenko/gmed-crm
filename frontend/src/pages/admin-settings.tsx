@@ -61,6 +61,7 @@ import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import { canManageAdminAccount } from "@/pages/admin-users.helpers";
 import {
   approvePendingMfaLogin,
   fetchAdminSettingsWorkspace,
@@ -379,7 +380,9 @@ function createAdminSettingsFieldPatch<K extends keyof AdminSettingsState>(
 function useAdminSettingsPageContent() {
   const { t, lang } = useLang();
   const { user: currentUser } = useAuth();
-  // Mirrors the server: forced logout of a CEO needs `users.manage_ceo`.
+  // Mirrors the server: signing out an existing CEO or deciding the CEO's
+  // pending login is a change to the CEO account, so it needs
+  // `users.manage_ceo` (the CEO).
   const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
   const tr = t as unknown as Record<string, string>;
   const [settingsState, dispatchSettingsState] = useReducer(
@@ -511,7 +514,6 @@ function useAdminSettingsPageContent() {
       formatEnumLabelFromKeys(value, ROLE_LABEL_KEYS, t),
     [t],
   );
-
   const groupHasChanges =
     selectedGroup?.fields.some((field) => hasFieldChanged(field.key)) ?? false;
 
@@ -801,13 +803,16 @@ function useAdminSettingsPageContent() {
       render: (entry) => {
         const approveBusy = actionBusyKey === `mfa:approve:${entry.id}`;
         const rejectBusy = actionBusyKey === `mfa:reject:${entry.id}`;
+        const canDecide = canManageAdminAccount(entry.role, canManageCeo);
+        const lockedTitle = canDecide ? undefined : t.users_ceo_managed_by_ceo_only;
         return (
           <div className="flex items-center gap-1.5">
             <Button
               type="button"
               size="sm"
               className="h-8 rounded-lg"
-              disabled={approveBusy || rejectBusy}
+              disabled={!canDecide || approveBusy || rejectBusy}
+              title={lockedTitle}
               onClick={(event) => {
                 event.stopPropagation();
                 void approvePending(entry.id);
@@ -821,7 +826,8 @@ function useAdminSettingsPageContent() {
               size="sm"
               variant="destructive"
               className="h-8 rounded-lg"
-              disabled={approveBusy || rejectBusy}
+              disabled={!canDecide || approveBusy || rejectBusy}
+              title={lockedTitle}
               onClick={(event) => {
                 event.stopPropagation();
                 void rejectPending(entry.id);
@@ -837,6 +843,7 @@ function useAdminSettingsPageContent() {
   ], [
     actionBusyKey,
     approvePending,
+    canManageCeo,
     lang,
     rejectPending,
     t.activity_time,
@@ -847,6 +854,7 @@ function useAdminSettingsPageContent() {
     t.mfa_approve,
     t.mfa_reject,
     t.users_actions,
+    t.users_ceo_managed_by_ceo_only,
     roleLabel,
   ]);
 
@@ -922,16 +930,15 @@ function useAdminSettingsPageContent() {
       width: 170,
       render: (session) => {
         const busy = actionBusyKey === `session:${session.user_id}`;
-        if (session.role === "ceo" && !canManageCeo) {
-          return <span className="text-xs text-muted-foreground">—</span>;
-        }
+        const canSignOut = canManageAdminAccount(session.role, canManageCeo);
         return (
           <Button
             type="button"
             variant="destructive"
             size="sm"
             className="h-8 rounded-lg"
-            disabled={busy}
+            disabled={!canSignOut || busy}
+            title={canSignOut ? undefined : t.users_ceo_managed_by_ceo_only}
             onClick={(event) => {
               event.stopPropagation();
               void logoutUser(session.user_id);
@@ -955,6 +962,7 @@ function useAdminSettingsPageContent() {
     t.settings_last_active,
     t.settings_logout_user,
     t.users_actions,
+    t.users_ceo_managed_by_ceo_only,
     t.users_role,
     roleLabel,
   ]);

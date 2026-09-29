@@ -276,6 +276,17 @@ describe("lead errors", () => {
     expect(leadErrorMessage(conflict, de)).toContain("bereits in einen Patienten umgewandelt");
   });
 
+  it("explains why a lead with an invoiced order cannot be closed", () => {
+    const conflict = Object.assign(
+      new Error(
+        "The lead's order already has invoices; settle or cancel the order in the order card before closing the lead",
+      ),
+      { status: 409 },
+    );
+    expect(leadErrorMessage(conflict, ru)).toContain("По заказу лида уже есть счета");
+    expect(leadErrorMessage(conflict, de)).toContain("bereits Rechnungen");
+  });
+
   it("sends a patient-first lead to the intake wizard instead of asking for a reload", () => {
     const conflict = Object.assign(
       new Error("Patient-first lead requires a prospect patient before conversion"),

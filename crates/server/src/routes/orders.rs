@@ -5409,6 +5409,8 @@ fn normalize_order_cancellation_reason(
     let reason_len = reason.chars().count();
     if !(3..=1000).contains(&reason_len)
         || reason == crate::routes::invoices::termination_settlements::CONTRACT_TERMINATED_REASON
+        || reason == LEAD_ARCHIVED_CANCELLATION_REASON
+        || reason == LEAD_DELETED_CANCELLATION_REASON
     {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -5736,6 +5738,287 @@ async fn cancel_order(
         "cancellation": cancellation.summary_json(Some(reason)),
     }))
     .into_response()
+}
+
+/// Cancellation reason of a lead's preparation order withdrawn because the
+/// failed-lead workflow archived the lead. Reserved like
+/// `contract_terminated`: staff cannot enter it, and returning the lead to
+/// work reopens exactly the orders that carry it.
+pub(crate) const LEAD_ARCHIVED_CANCELLATION_REASON: &str = "lead_archived";
+/// Cancellation reason of a lead's preparation order withdrawn because the
+/// lead was deleted and anonymised; that cancellation is final.
+pub(crate) const LEAD_DELETED_CANCELLATION_REASON: &str = "lead_deleted";
+
+/// A lead's preparation order withdrawn together with the failed lead. A
+/// preparation order was opened for the lead while staff prepare it and no
+/// patient has taken it over: a first intake's order before the conversion
+/// (`patient_id IS NULL`) or a repeat intake's draft (`intake_state =
+/// 'draft'`). A converted lead's order belongs to the patient.
+pub(crate) struct WithdrawnLeadOrder {
+    order_id: Uuid,
+    reason: &'static str,
+    cancellation: OrderCancellation,
+}
+
+/// Withdraws, inside the failed-lead transaction, the lead's open preparation
+/// orders: each is cancelled like any order ([`cancel_order_in_tx`] cancels
+/// planned services and upcoming appointments, closes open quotes and rejects
+/// pending amendments) with a reserved reason, and audited in the same
+/// transaction. An order with an invoice (patient or supplier, even a draft)
+/// is never cancelled as a side effect: the lead stays open until the order
+/// is settled in the order card (409). A lead's order has no workflow
+/// checklist before it belongs to a patient, so no checklist task is open.
+pub(crate) async fn withdraw_lead_orders_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor_id: Uuid,
+    reason: &'static str,
+    lead_reason: &str,
+) -> Result<Vec<WithdrawnLeadOrder>, axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %lead_id, "withdraw lead orders");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to withdraw the lead's order",
+        )
+    };
+    let order_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM orders
+           WHERE source_lead_id = $1
+             AND status IN ('active', 'paused')
+             AND (patient_id IS NULL OR intake_state = 'draft')
+           ORDER BY created_at, id
+           FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+    if order_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let invoiced: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+                   SELECT 1 FROM invoices
+                   WHERE order_id = ANY($1) AND status <> 'cancelled'
+               ) OR EXISTS (
+                   SELECT 1 FROM external_invoices
+                   WHERE order_id = ANY($1) AND status <> 'cancelled'
+               )"#,
+    )
+    .bind(&order_ids)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(failed)?;
+    if invoiced {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "The lead's order already has invoices; settle or cancel the order in the order card before closing the lead",
+        ));
+    }
+
+    let mut withdrawn = Vec::with_capacity(order_ids.len());
+    for order_id in order_ids {
+        let cancellation = cancel_order_in_tx(tx, order_id, actor_id, reason).await?;
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "cancel_order",
+                Some(actor_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "from_status": cancellation.previous_status,
+                    "status": "cancelled",
+                    "phase": cancellation.phase,
+                    "reason": reason,
+                    "source_lead_id": lead_id,
+                    "lead_reason": lead_reason,
+                    "cancelled_service_ids": cancellation.cancelled_service_ids,
+                    "cancelled_appointment_ids": cancellation.cancelled_appointment_ids,
+                    "closed_quote_ids": cancellation
+                        .closed_quotes
+                        .iter()
+                        .map(|quote| quote.id)
+                        .collect::<Vec<_>>(),
+                    "rejected_amendment_ids": cancellation.rejected_amendment_ids,
+                }),
+            ),
+        )
+        .await
+        .map_err(failed)?;
+        for quote in &cancellation.closed_quotes {
+            audit::write_in_transaction(
+                tx,
+                &audit::domain_event(
+                    "close_quote_for_cancelled_order",
+                    Some(actor_id),
+                    "quote",
+                    Some(quote.id),
+                    serde_json::json!({
+                        "quote_number": quote.quote_number,
+                        "previous_status": quote.previous_status,
+                        "status": "rejected",
+                        "order_id": order_id,
+                        "source_lead_id": lead_id,
+                    }),
+                ),
+            )
+            .await
+            .map_err(failed)?;
+        }
+        withdrawn.push(WithdrawnLeadOrder {
+            order_id,
+            reason,
+            cancellation,
+        });
+    }
+    Ok(withdrawn)
+}
+
+/// Realtime events for lead orders withdrawn by a committed failed-lead
+/// transaction.
+pub(crate) async fn publish_withdrawn_lead_orders(
+    state: &AppState,
+    actor_id: Uuid,
+    withdrawn: &[WithdrawnLeadOrder],
+) {
+    for order in withdrawn {
+        for quote in &order.cancellation.closed_quotes {
+            crate::realtime::publish_quote_event(
+                state,
+                Some(actor_id),
+                "quote.status_changed",
+                quote.id,
+                serde_json::json!({
+                    "status": "rejected",
+                    "previous_status": quote.previous_status,
+                    "order_id": order.order_id,
+                    "reason": "order_cancelled",
+                }),
+            )
+            .await;
+        }
+        crate::realtime::publish_order_event(
+            state,
+            Some(actor_id),
+            "order.status_changed",
+            order.order_id,
+            serde_json::json!({
+                "from_status": order.cancellation.previous_status,
+                "status": "cancelled",
+                "phase": order.cancellation.phase,
+                "note": order.reason,
+            }),
+        )
+        .await;
+        crate::routes::appointments::publish_cancelled_order_appointments(
+            state,
+            actor_id,
+            order.order_id,
+            &order.cancellation.cancelled_appointment_ids,
+        )
+        .await;
+    }
+}
+
+/// Reopens, when an archived lead returns to work, the preparation orders its
+/// archiving withdrew ([`LEAD_ARCHIVED_CANCELLATION_REASON`]), together with
+/// the planned services that withdrawal cancelled. Quotes it closed stay
+/// closed: the restored intake confirms its quote again. Audited in the same
+/// transaction as the lead's status change; returns the reopened order ids.
+pub(crate) async fn reopen_withdrawn_lead_orders_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    actor_id: Uuid,
+) -> Result<Vec<Uuid>, axum::response::Response> {
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, %lead_id, "reopen lead orders");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to reopen the lead's order",
+        )
+    };
+    let orders = sqlx::query(
+        r#"SELECT id, cancelled_at, cancelled_by
+           FROM orders
+           WHERE source_lead_id = $1
+             AND status = 'cancelled'
+             AND cancellation_reason = $2
+             AND (patient_id IS NULL OR intake_state = 'draft')
+           ORDER BY created_at, id
+           FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .bind(LEAD_ARCHIVED_CANCELLATION_REASON)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(failed)?;
+
+    let mut reopened = Vec::with_capacity(orders.len());
+    for order in orders {
+        let order_id: Uuid = order.try_get("id").map_err(failed)?;
+        let cancelled_at: Option<chrono::DateTime<chrono::Utc>> =
+            order.try_get("cancelled_at").map_err(failed)?;
+        // The withdrawal cancelled the planned services in its own
+        // transaction, so they share the order's cancellation time and reason.
+        let restored_service_ids: Vec<Uuid> = sqlx::query_scalar(
+            r#"UPDATE order_leistungen
+               SET status = 'planned',
+                   cancelled_at = NULL,
+                   cancelled_by = NULL,
+                   cancellation_reason = NULL
+               WHERE order_id = $1
+                 AND status = 'cancelled'
+                 AND cancellation_reason = $2
+                 AND cancelled_at IS NOT DISTINCT FROM $3
+               RETURNING id"#,
+        )
+        .bind(order_id)
+        .bind(LEAD_ARCHIVED_CANCELLATION_REASON)
+        .bind(cancelled_at)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(failed)?;
+        sqlx::query(
+            r#"UPDATE orders
+               SET status = 'active',
+                   cancelled_at = NULL,
+                   cancelled_by = NULL,
+                   cancellation_reason = NULL,
+                   total_estimated = COALESCE(order_service_total_gross(id), total_estimated)
+               WHERE id = $1"#,
+        )
+        .bind(order_id)
+        .execute(&mut **tx)
+        .await
+        .map_err(failed)?;
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(
+                "reopen_lead_order",
+                Some(actor_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "from_status": "cancelled",
+                    "status": "active",
+                    "source_lead_id": lead_id,
+                    "previous_reason": LEAD_ARCHIVED_CANCELLATION_REASON,
+                    "previous_cancelled_at": cancelled_at,
+                    "previous_cancelled_by": order
+                        .try_get::<Option<Uuid>, _>("cancelled_by")
+                        .unwrap_or_default(),
+                    "restored_service_ids": restored_service_ids,
+                }),
+            ),
+        )
+        .await
+        .map_err(failed)?;
+        reopened.push(order_id);
+    }
+    Ok(reopened)
 }
 
 /// What cancelling the order would do, without changing anything: the
@@ -12088,6 +12371,13 @@ impl OrderReadScope {
     fn is_scoped(self) -> bool {
         self != Self::Full
     }
+}
+
+/// Whether the caller reads whole orders: `orders.view` outside the
+/// concierge's and the team lead's projection. The order checklist (the order
+/// pipeline) and its realtime events are open only to such readers.
+pub(crate) fn reads_full_orders(auth: &AuthUser) -> bool {
+    auth.can(Capability::OrdersView) && !OrderReadScope::for_role(auth.role).is_scoped()
 }
 
 /// Endpoints that expose the commercial or clinical side of an order are not

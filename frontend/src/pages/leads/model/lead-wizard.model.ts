@@ -1,5 +1,9 @@
 import type { LeadDetail } from "@/lib/api/types";
-import { appWallClock } from "@/lib/app-time-zone";
+import {
+  appWallClock,
+  isoToBerlinLocalInput,
+  parseBerlinLocalInput,
+} from "@/lib/app-time-zone";
 import { moneyLineAmounts, roundCents } from "@/lib/money";
 import type {
   ClinicalMedication,
@@ -74,6 +78,43 @@ export function draftFromLead(lead: LeadDetail): WizardDraft {
  */
 export function intakeAsksDiscoverySource(repeatIntake: boolean): boolean {
   return !repeatIntake;
+}
+
+export type LeadWizardEntryPoint = "lead" | "repeat-patient";
+
+/**
+ * A lead opened for an existing patient is a repeat intake wherever the wizard
+ * is opened from: the patient card passes its entry point, the leads registry
+ * only has the lead's `repeat_patient_id`. Both run the repeat mode (document
+ * review, debt check, closing the request instead of creating a patient).
+ */
+export function isRepeatIntakeLead(
+  entryPoint: LeadWizardEntryPoint,
+  lead: Pick<LeadDetail, "repeat_patient_id"> | null | undefined,
+): boolean {
+  return entryPoint === "repeat-patient" || Boolean(lead?.repeat_patient_id);
+}
+
+/**
+ * The existing patient whose documents, contracts and debt a repeat intake
+ * reviews; `null` for a first intake. A first intake that has already
+ * created its patient only has `prospect_patient_id`, which is not a repeat.
+ */
+export function repeatIntakePatientId(
+  repeatIntake: boolean,
+  existingPatientId: string | null | undefined,
+  lead: Pick<LeadDetail, "repeat_patient_id" | "prospect_patient_id"> | null | undefined,
+): string | null {
+  if (!repeatIntake) return null;
+  return existingPatientId || lead?.repeat_patient_id || lead?.prospect_patient_id || null;
+}
+
+/** The patient number shown next to "Повторное обращение". */
+export function repeatIntakePatientNumber(
+  existingPatientNumber: string | null | undefined,
+  lead: Pick<LeadDetail, "repeat_patient_pid"> | null | undefined,
+): string | null {
+  return existingPatientNumber || lead?.repeat_patient_pid || null;
 }
 
 /** The recommending customer is required once "customer referral" is picked. */
@@ -350,6 +391,26 @@ export function orderResumeWizardState(
     contract_id: input.contractId ?? null,
     contract_started: Boolean(input.contractId),
   };
+}
+
+/**
+ * The `prepayment_due_at` to send with a commercial save of the lead wizard,
+ * or `undefined` when the order already holds the typed deadline. The field
+ * commits on blur, but an action started without that blur (e.g. "Подтвердить
+ * смету" right after picking the date) must still save what staff typed:
+ * otherwise the reload after the action shows the order's empty deadline.
+ * An empty field clears the deadline; an incomplete value is not sent.
+ */
+export function prepaymentDueAtPatch(
+  prepaymentRequired: boolean,
+  typedDeadline: string,
+  persistedDueAt: string | null | undefined,
+): string | undefined {
+  if (!prepaymentRequired) return undefined;
+  const typed = typedDeadline.trim();
+  if (typed === isoToBerlinLocalInput(persistedDueAt)) return undefined;
+  if (!typed) return "";
+  return parseBerlinLocalInput(typed)?.toISOString();
 }
 
 /**

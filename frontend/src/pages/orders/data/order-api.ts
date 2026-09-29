@@ -238,17 +238,26 @@ export function fetchOrderDebtQueue(providerTaxonomyNodeId = "") {
   );
 }
 
+/**
+ * A role that reads only its part of an order (concierge, interpreter team
+ * lead) gets no order checklist: the pipeline and its owner choice are closed
+ * to it (403), so the workspace does not request them.
+ */
 export async function fetchOrderWorkspace(
   orderId: string,
+  options: { readsOnlyOrderPart?: boolean } = {},
 ): Promise<OrderWorkspacePayload> {
+  const withWorkflow = !options.readsOnlyOrderPart;
   const [detail, documents, workflow] = await Promise.all([
     apiFetch<OrderDetail>(`/orders/${orderId}`),
     apiFetch<SupportingDocumentOption[]>(`/documents?order_id=${orderId}`).catch(() => []),
-    apiFetch<WorkflowChecklistResponse>(`/orders/${orderId}/workflow-checklist`).catch(
-      () => null,
-    ),
+    withWorkflow
+      ? apiFetch<WorkflowChecklistResponse>(`/orders/${orderId}/workflow-checklist`).catch(
+          () => null,
+        )
+      : Promise.resolve(null),
   ]);
-  const assignments = detail.patient_id
+  const assignments = withWorkflow && detail.patient_id
     ? await apiFetch<PatientAssignmentOption[]>(
         `/patients/${detail.patient_id}/assignments`,
       ).catch(() => [])

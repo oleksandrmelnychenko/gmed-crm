@@ -19,13 +19,14 @@
   - `local(instant)` — берлінський час для друку в документах, номерах і сповіщеннях;
   - `from_local(naive)` — момент часу для берлінського «настінного» часу. Під час осіннього перекриття береться раніший момент, а час у весняному «розриві» (02:00–03:00) переходить на перший дійсний момент.
 - У SQL для часу прийому використовуйте `(date::timestamp + time) AT TIME ZONE 'Europe/Berlin'`.
+- Якщо API віддає час прийому в одному полі разом з іншими моментами (наприклад, `due_at` у `/me/next-actions`), це момент RFC 3339 з `from_local(date + time)`, а не «наївний» `YYYY-MM-DDTHH:MM`: браузер поза Німеччиною прочитав би такий рядок як свій місцевий час.
 - Явний UTC лишається лише там, де він частина формату: метадані PDF/ZUGFeRD, підписи з позначкою `UTC`, ключі ідемпотентності фонових задач.
 
 ## Фронтенд
 
 Помічники зібрані в `frontend/src/lib/app-time-zone.ts`.
 
-- **Відображення.** `appDateTimeFormat(locale, options)` та `cachedDateTimeFormat` підставляють `timeZone: "Europe/Berlin"`, якщо виклик не задає пояс явно. ESLint (`no-restricted-properties`) забороняє прямі `Intl.DateTimeFormat`, `toLocaleDateString` і `toLocaleTimeString` поза цими модулями.
+- **Відображення.** `appDateTimeFormat(locale, options)` та `cachedDateTimeFormat` підставляють `timeZone: "Europe/Berlin"`, якщо виклик не задає пояс явно. ESLint (`no-restricted-properties`) забороняє прямі `Intl.DateTimeFormat`, `toLocaleDateString` і `toLocaleTimeString` поза цими модулями. `formatAppDate`, `formatAppDateTime` і `formatAppTime` показують момент часу за Берліном, дату `YYYY-MM-DD` — без зсуву, а «наївний» `YYYY-MM-DDTHH:mm[:ss]` без поясу — як берлінський час без перерахунку.
 - **Сьогодні.** `appDateKey()` дає поточну берлінську дату `YYYY-MM-DD`, `appDateKeyOf(value)` — берлінську дату моменту часу, `appWallClock()` — берлінські год/хв/день тижня. Арифметика над датами (`addDaysToDateKey`, `startOfIsoWeekKey`, `daysBetweenDateKeys` тощо) працює з ключами дат, а не з локальними геттерами `Date`.
 - **Поля `datetime-local`.** Заповнюються через `isoToBerlinLocalInput`, а зберігаються через `berlinLocalInputToIso`, тому на сервер іде момент часу з поясом. Значення за замовчуванням для полів `date` — `appDateKey()`.
 - **Календар прийомів.** Показує «наївні» рядки `${date}T${time}` без перерахунку. Поточний момент (`now={berlinCalendarNow}`) береться з берлінського часу.

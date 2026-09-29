@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use gmed_db::DbPool;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::access::resource_access::{
     AccessEffect, AccessRuleSource, ResourceAccessDecision, ResourceAccessRequest,
     passes_absolute_resource_boundary,
@@ -111,9 +112,11 @@ impl AppointmentScope {
             },
             // The patient portal has its own `/me/appointments` contract; the
             // remaining staff roles are not assignment-scoped and are gated
-            // by capabilities before any row is read.
+            // by capabilities before any row is read. A role without
+            // `appointments.view` (billing, sales, IT admin) opens no
+            // appointment row even where a capability gate is missing.
             role => Self {
-                all: !requires_patient_assignment(role),
+                all: !requires_patient_assignment(role) && role.can(Capability::AppointmentsView),
                 ..none
             },
         }
@@ -514,9 +517,24 @@ mod tests {
             Some(true)
         );
         assert_eq!(
-            AppointmentScope::for_role(Role::Billing).admits_directly(me, None, None),
+            AppointmentScope::for_role(Role::CeoAssistant).admits_directly(me, None, None),
             Some(true)
         );
+    }
+
+    #[test]
+    fn roles_without_appointments_view_open_no_appointment_row() {
+        let me = Uuid::new_v4();
+        for role in [Role::Billing, Role::Sales, Role::ItAdmin] {
+            let scope = AppointmentScope::for_role(role);
+            assert!(!scope.all, "{role:?}");
+            assert_eq!(
+                scope.admits_directly(me, None, None),
+                Some(false),
+                "{role:?}"
+            );
+            assert_eq!(scope.admits_directly(me, Some(me), Some(me)), Some(false));
+        }
     }
 
     #[test]

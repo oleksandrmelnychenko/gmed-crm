@@ -208,4 +208,15 @@ describe("app date display", () => {
     expect(formatAppTime("2026-09-27T22:30:00Z")).toBe("00:30");
     expect(formatAppTime("2026-09-28")).toBe("");
   });
+
+  it("shows a date and time without an offset as Berlin wall-clock time", () => {
+    // Read as browser-local time these would be 08:00 in Kyiv and 11:00 in UTC.
+    expect(formatAppDateTime("2026-09-28T09:00:00")).toBe("28.09.2026 09:00");
+    expect(formatAppDateTime("2026-09-28T09:00")).toBe("28.09.2026 09:00");
+    expect(formatAppTime("2026-12-01T09:05:30")).toBe("09:05");
+    // Just after midnight stays on its own day in any browser zone.
+    expect(formatAppDate("2026-09-28T00:30:00")).toBe("28.09.2026");
+    expect(formatAppDateTime("2026-02-30T09:00:00")).toBe("");
+    expect(formatAppDateTime("2026-09-28T24:00:00")).toBe("");
+  });
 });

@@ -676,6 +676,10 @@ export interface PatientsPortalTranslations {
   patient_profile_editor_edit_patient_profile: string;
   patient_profile_editor_cancel: string;
   patient_profile_editor_save_patient: string;
+  patient_profile_editor_required_field: string;
+  patient_profile_editor_invalid_email: string;
+  patient_profile_editor_invalid_phone: string;
+  patient_profile_editor_check_fields: string;
   patient_profile_editor_personal_data: string;
   patient_profile_editor_title: string;
   patient_profile_editor_first_name: string;
@@ -1630,6 +1634,10 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_editor_edit_patient_profile: "Редактировать профиль пациента",
   patient_profile_editor_cancel: "Отмена",
   patient_profile_editor_save_patient: "Сохранить пациента",
+  patient_profile_editor_required_field: "Обязательное поле",
+  patient_profile_editor_invalid_email: "Введите корректный адрес электронной почты",
+  patient_profile_editor_invalid_phone: "Введите корректный номер телефона",
+  patient_profile_editor_check_fields: "Проверьте отмеченные поля",
   patient_profile_editor_personal_data: "Личные данные",
   patient_profile_editor_title: "Обращение",
   patient_profile_editor_first_name: "Имя",
@@ -2575,6 +2583,10 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_editor_edit_patient_profile: "Patientenprofil bearbeiten",
   patient_profile_editor_cancel: "Abbrechen",
   patient_profile_editor_save_patient: "Patient speichern",
+  patient_profile_editor_required_field: "Pflichtfeld",
+  patient_profile_editor_invalid_email: "Gültige E-Mail-Adresse eingeben",
+  patient_profile_editor_invalid_phone: "Gültige Telefonnummer eingeben",
+  patient_profile_editor_check_fields: "Markierte Felder prüfen",
   patient_profile_editor_personal_data: "Persönliche Daten",
   patient_profile_editor_title: "Titel",
   patient_profile_editor_first_name: "Vorname",

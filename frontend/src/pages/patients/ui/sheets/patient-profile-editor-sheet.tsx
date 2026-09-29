@@ -49,6 +49,10 @@ import {
 } from "../../model/list-model";
 import { createPatientLeadOrigin } from "../../model/patient-lead-origin";
 import {
+  patientProfileFieldKey,
+  validatePatientProfileForm,
+} from "../../model/profile-validation";
+import {
   patientToEditForm,
   type PatientEditFormState,
 } from "../../model/sheet-forms";
@@ -203,10 +207,55 @@ function PatientProfileEditorSheet(props: PatientProfileEditorSheetProps) {
   );
 }
 
+/** DOM id of a profile field, so an error can name and focus it. */
+function profileFieldDomId(fieldKey: string) {
+  return `patient-profile-${fieldKey.replace(/[^a-zA-Z0-9-]/g, "-")}`;
+}
+
+function ProfileFieldError({ fieldKey, message }: { fieldKey: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={`${profileFieldDomId(fieldKey)}-error`} className="text-xs text-destructive">
+      {message}
+    </p>
+  );
+}
+
+/** The profile checks of the lead wizard, with this editor's messages. */
+function patientProfileFieldErrors(
+  form: PatientEditFormState,
+  trustedContacts: PatientTrustedContactFormState[],
+  dictionary: Record<string, string>,
+) {
+  const age = computeAge(form.birthDate);
+  return validatePatientProfileForm(
+    form,
+    patientEditFormContacts(form),
+    trustedContacts,
+    age !== null && age < 18,
+    {
+      required: dictionary.patient_profile_editor_required_field,
+      invalidEmail: dictionary.patient_profile_editor_invalid_email,
+      invalidPhone: dictionary.patient_profile_editor_invalid_phone,
+    },
+  );
+}
+
+/** id and ARIA state of a field that may carry a validation error. */
+function profileFieldProps(fieldKey: string, fieldErrors: Record<string, string>) {
+  const invalid = Boolean(fieldErrors[fieldKey]);
+  return {
+    id: profileFieldDomId(fieldKey),
+    "aria-invalid": invalid || undefined,
+    "aria-describedby": invalid ? `${profileFieldDomId(fieldKey)}-error` : undefined,
+  };
+}
+
 type PatientProfileEditorFormSectionsProps = {
   dictionary: Record<string, string> & { uiText?: Record<string, string> };
   lang: string;
   form: PatientEditFormState;
+  fieldErrors: Record<string, string>;
   trustedContacts: PatientTrustedContactFormState[];
   trustedContactsLoading: boolean;
   statusLabel: (status: string) => string;
@@ -220,6 +269,7 @@ function PatientProfileEditorFormSections({
   dictionary,
   lang,
   form,
+  fieldErrors,
   trustedContacts,
   trustedContactsLoading,
   statusLabel,
@@ -347,33 +397,40 @@ function PatientProfileEditorFormSections({
                       className={formInputClassName}
                     />
                   </FormField>
-                  <FormField label={dictionary.patient_profile_editor_first_name} required className="lg:col-span-2">
+                  <FormField label={dictionary.patient_profile_editor_first_name} htmlFor={profileFieldDomId(patientProfileFieldKey.firstName)} required className="lg:col-span-2">
                     <Input
+                      {...profileFieldProps(patientProfileFieldKey.firstName, fieldErrors)}
                       value={form.firstName}
                       onChange={(event) => updateField("firstName", event.target.value)}
                       required
                       className={formInputClassName}
                     />
+                    <ProfileFieldError fieldKey={patientProfileFieldKey.firstName} message={fieldErrors[patientProfileFieldKey.firstName]} />
                   </FormField>
-                  <FormField label={dictionary.patient_profile_editor_last_name} required className="lg:col-span-2">
+                  <FormField label={dictionary.patient_profile_editor_last_name} htmlFor={profileFieldDomId(patientProfileFieldKey.lastName)} required className="lg:col-span-2">
                     <Input
+                      {...profileFieldProps(patientProfileFieldKey.lastName, fieldErrors)}
                       value={form.lastName}
                       onChange={(event) => updateField("lastName", event.target.value)}
                       required
                       className={formInputClassName}
                     />
+                    <ProfileFieldError fieldKey={patientProfileFieldKey.lastName} message={fieldErrors[patientProfileFieldKey.lastName]} />
                   </FormField>
-                  <FormField label={dictionary.patients_birth_date} required className="lg:col-span-3">
+                  <FormField label={dictionary.patients_birth_date} htmlFor={profileFieldDomId(patientProfileFieldKey.birthDate)} required className="lg:col-span-3">
                     <Input
+                      {...profileFieldProps(patientProfileFieldKey.birthDate, fieldErrors)}
                       type="date"
                       value={form.birthDate}
                       onChange={(event) => handleBirthDateChange(event.target.value)}
                       required
                       className={formInputClassName}
                     />
+                    <ProfileFieldError fieldKey={patientProfileFieldKey.birthDate} message={fieldErrors[patientProfileFieldKey.birthDate]} />
                   </FormField>
-                  <FormField label={dictionary.patients_gender} required className="lg:col-span-3">
+                  <FormField label={dictionary.patients_gender} htmlFor={profileFieldDomId(patientProfileFieldKey.gender)} required className="lg:col-span-3">
                     <NativeComboboxSelect
+                      {...profileFieldProps(patientProfileFieldKey.gender, fieldErrors)}
                       value={form.gender}
                       onChange={(event) => updateField("gender", event.target.value)}
                       required
@@ -383,6 +440,7 @@ function PatientProfileEditorFormSections({
                       <option value="female">{text.patients_gender_female ?? dictionary.gender_female}</option>
                       <option value="diverse">{text.patients_gender_diverse ?? dictionary.gender_diverse}</option>
                     </NativeComboboxSelect>
+                    <ProfileFieldError fieldKey={patientProfileFieldKey.gender} message={fieldErrors[patientProfileFieldKey.gender]} />
                   </FormField>
                 </div>
                 {isMinor ? (
@@ -519,14 +577,19 @@ function PatientProfileEditorFormSections({
                             </option>
                           </NativeComboboxSelect>
                         </FormField>
-                        <FormField label={contactValueLabel(contact.contactKind)} className="sm:col-span-2 xl:col-span-1">
+                        <FormField label={contactValueLabel(contact.contactKind)} htmlFor={profileFieldDomId(patientProfileFieldKey.contact(contact.id))} className="sm:col-span-2 xl:col-span-1">
                           <Input
+                            {...profileFieldProps(patientProfileFieldKey.contact(contact.id), fieldErrors)}
                             type={contact.contactKind === "email" ? "email" : "tel"}
                             value={contact.value}
                             onChange={(event) =>
                               updateContact(contact.id, { value: event.target.value })
                             }
                             className={formInputClassName}
+                          />
+                          <ProfileFieldError
+                            fieldKey={patientProfileFieldKey.contact(contact.id)}
+                            message={fieldErrors[patientProfileFieldKey.contact(contact.id)]}
                           />
                         </FormField>
                       </div>
@@ -712,20 +775,30 @@ function PatientProfileEditorFormSections({
                           </Button>
                         </div>
                         <div className="grid gap-2.5 md:grid-cols-3">
-                          <FormField label={dictionary.patient_profile_editor_contact_2}>
+                          <FormField label={dictionary.patient_profile_editor_contact_2} htmlFor={profileFieldDomId(patientProfileFieldKey.trustedName(contact.id))}>
                             <Input
+                              {...profileFieldProps(patientProfileFieldKey.trustedName(contact.id), fieldErrors)}
                               value={contact.name}
                               onChange={(event) => patchTrustedContact(contact.id, { name: event.target.value })}
                               required={isMinor || Boolean(contact.phone || contact.relation || contact.notes)}
                               className={formInputClassName}
                             />
+                            <ProfileFieldError
+                              fieldKey={patientProfileFieldKey.trustedName(contact.id)}
+                              message={fieldErrors[patientProfileFieldKey.trustedName(contact.id)]}
+                            />
                           </FormField>
-                          <FormField label={dictionary.patient_profile_editor_phone}>
+                          <FormField label={dictionary.patient_profile_editor_phone} htmlFor={profileFieldDomId(patientProfileFieldKey.trustedPhone(contact.id))}>
                             <Input
+                              {...profileFieldProps(patientProfileFieldKey.trustedPhone(contact.id), fieldErrors)}
                               value={contact.phone}
                               onChange={(event) => patchTrustedContact(contact.id, { phone: event.target.value })}
                               required={isMinor}
                               className={formInputClassName}
+                            />
+                            <ProfileFieldError
+                              fieldKey={patientProfileFieldKey.trustedPhone(contact.id)}
+                              message={fieldErrors[patientProfileFieldKey.trustedPhone(contact.id)]}
                             />
                           </FormField>
                           <FormField label={dictionary.patient_profile_editor_relation}>
@@ -935,6 +1008,11 @@ function PatientProfileEditorSheetContent({
   const [trustedContactsLoading, setTrustedContactsLoading] = useState(Boolean(open && patientId));
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState("");
+  // Field errors appear after the first save attempt and then follow the input.
+  const [validationAttempted, setValidationAttempted] = useState(false);
+  const fieldErrors = validationAttempted && form
+    ? patientProfileFieldErrors(form, trustedContacts, dictionary)
+    : {};
 
   useEffect(() => {
     if (!open || !patientId) {
@@ -995,6 +1073,15 @@ function PatientProfileEditorSheetContent({
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (!patientId || !form || !dirty || busy || trustedContactsLoading) return;
+      const firstInvalidField = Object.keys(
+        patientProfileFieldErrors(form, trustedContacts, dictionary),
+      )[0];
+      if (firstInvalidField) {
+        setValidationAttempted(true);
+        setSaveError(dictionary.patient_profile_editor_check_fields);
+        document.getElementById(profileFieldDomId(firstInvalidField))?.focus();
+        return;
+      }
       setBusy(true);
       setSaveError("");
       onError("");
@@ -1114,8 +1201,7 @@ function PatientProfileEditorSheetContent({
       busy,
       dirty,
       trustedContactsLoading,
-      dictionary.common_active,
-      dictionary.common_failed_update,
+      dictionary,
       form,
       initialTrustedContactIds,
       lang,
@@ -1133,6 +1219,7 @@ function PatientProfileEditorSheetContent({
       onOpenChange={onOpenChange}
       width="detail-wide"
       onSubmit={handleSubmit}
+      noValidate
       title={dictionary.patient_profile_editor_edit_patient_profile}
       description={detail ? (
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1172,6 +1259,7 @@ function PatientProfileEditorSheetContent({
           dictionary={dictionary}
           lang={lang}
           form={form}
+          fieldErrors={fieldErrors}
           trustedContacts={trustedContacts}
           trustedContactsLoading={trustedContactsLoading}
           statusLabel={statusLabel}

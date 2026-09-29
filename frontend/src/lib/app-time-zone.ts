@@ -13,7 +13,9 @@
  *   those are browser-local midnight and render as the previous day in Berlin
  *   when the browser is east of Germany.
  * - Appointment wall times ("HH:MM[:SS]" next to a date): already Berlin time,
- *   shown as-is and never shifted.
+ *   shown as-is and never shifted. `formatAppDateTime` and friends show a
+ *   naive "YYYY-MM-DDTHH:mm[:ss]" the same way; APIs send a timed moment
+ *   they sort or compare with instants as RFC 3339 instead.
  * - "Today" is `appDateKey()`, never a browser-local getter.
  */
 
@@ -295,7 +297,10 @@ export function appDayEnd(key: string): Date {
 
 type AppDateValue = string | number | Date | null | undefined;
 
-/** Berlin wall clock of an instant, or only the day of a calendar date; null when unparseable. */
+/**
+ * Berlin wall clock of an instant, the wall time of a naive date and time, or
+ * only the day of a calendar date; null when unparseable.
+ */
 function appDisplayParts(
   value: AppDateValue,
 ): { year: number; month: number; day: number; hour?: number; minute?: number } | null {
@@ -306,6 +311,16 @@ function appDisplayParts(
     if (!trimmed) return null;
     // A calendar date has no time and must never shift to another day.
     if (DATE_KEY.test(trimmed)) return parseDateKey(trimmed);
+    // A date and time without an offset is already Berlin wall-clock time
+    // (an appointment slot, a datetime-local value). `new Date` would read it
+    // as browser-local time and shift it when the browser is outside Germany.
+    const naive = LOCAL_INPUT.exec(trimmed);
+    if (naive) {
+      const [year, month, day, hour, minute] = naive.slice(1, 6).map(Number);
+      return validCalendarDate(year, month, day) && hour <= 23 && minute <= 59
+        ? { year, month, day, hour, minute }
+        : null;
+    }
     input = trimmed;
   }
   const date = input instanceof Date ? input : new Date(input);

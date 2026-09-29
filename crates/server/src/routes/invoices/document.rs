@@ -1,18 +1,19 @@
 //! Content of the printed invoice beyond the stored invoice row: who receives
-//! it, when the services were rendered and how the amounts split by VAT rate
-//! (§ 14 Abs. 4 Nr. 1, 6 and 8 UStG).
+//! it, when the services were rendered, how the amounts split by VAT rate
+//! (§ 14 Abs. 4 Nr. 1, 6 and 8 UStG) and which advances a settlement invoice
+//! deducts (§ 14 Abs. 5 Satz 2 UStG).
 //!
 //! The recipient is resolved once here and used by both the printed invoice
 //! and the ZUGFeRD buyer, so the visible document and the embedded XML cannot
-//! name different parties.
+//! name different parties. The same holds for the deducted advances.
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use sqlx::{PgConnection, Row, postgres::PgRow};
 use uuid::Uuid;
 
-use super::{InvoicePdfLineItem, zugferd};
+use super::{InvoicePdfLineItem, credit_notes, zugferd};
 use crate::money::CommercialRounding;
 
 /// Select list naming the recipient candidates. Needs `invoices i`,
@@ -370,37 +371,45 @@ pub(super) struct VatBreakdownRow {
     pub gross: Decimal,
 }
 
-/// Net, VAT and gross per rate, summed from the stored line amounts so the
-/// rows add up to the invoice totals. Taxed rates come first, highest first.
-pub(super) fn vat_breakdown(lines: &[InvoicePdfLineItem]) -> Vec<VatBreakdownRow> {
-    let mut rows: Vec<VatBreakdownRow> = Vec::new();
-    for line in lines {
-        let kind = if line.vat_rate_value > Decimal::ZERO {
-            VatGroupKind::Taxed
-        } else if line.is_cost_passthrough {
-            VatGroupKind::Passthrough
-        } else {
-            VatGroupKind::ZeroRated
-        };
-        let rate = line.vat_rate_value.normalize();
-        match rows
-            .iter_mut()
-            .find(|row| row.kind == kind && row.rate == rate)
-        {
-            Some(row) => {
-                row.net += line.line_net;
-                row.vat += line.line_vat;
-                row.gross += line.line_gross_value;
-            }
-            None => rows.push(VatBreakdownRow {
-                kind,
-                rate,
-                net: line.line_net,
-                vat: line.line_vat,
-                gross: line.line_gross_value,
-            }),
-        }
+fn vat_group_kind(vat_rate: Decimal, is_cost_passthrough: bool) -> VatGroupKind {
+    if vat_rate > Decimal::ZERO {
+        VatGroupKind::Taxed
+    } else if is_cost_passthrough {
+        VatGroupKind::Passthrough
+    } else {
+        VatGroupKind::ZeroRated
     }
+}
+
+/// Adds one line's amounts to the row of its kind and rate.
+fn add_to_vat_rows(
+    rows: &mut Vec<VatBreakdownRow>,
+    kind: VatGroupKind,
+    rate: Decimal,
+    (net, vat, gross): (Decimal, Decimal, Decimal),
+) {
+    let rate = rate.normalize();
+    match rows
+        .iter_mut()
+        .find(|row| row.kind == kind && row.rate == rate)
+    {
+        Some(row) => {
+            row.net += net;
+            row.vat += vat;
+            row.gross += gross;
+        }
+        None => rows.push(VatBreakdownRow {
+            kind,
+            rate,
+            net,
+            vat,
+            gross,
+        }),
+    }
+}
+
+/// Rounds the summed rows to cents; taxed rates first, highest first.
+fn finish_vat_rows(mut rows: Vec<VatBreakdownRow>) -> Vec<VatBreakdownRow> {
     for row in &mut rows {
         row.net = row.net.round_cents();
         row.vat = row.vat.round_cents();
@@ -412,6 +421,153 @@ pub(super) fn vat_breakdown(lines: &[InvoicePdfLineItem]) -> Vec<VatBreakdownRow
             .then_with(|| right.rate.cmp(&left.rate))
     });
     rows
+}
+
+/// Net, VAT and gross per rate, summed from the stored line amounts so the
+/// rows add up to the invoice totals. Taxed rates come first, highest first.
+pub(super) fn vat_breakdown(lines: &[InvoicePdfLineItem]) -> Vec<VatBreakdownRow> {
+    let mut rows: Vec<VatBreakdownRow> = Vec::new();
+    for line in lines {
+        add_to_vat_rows(
+            &mut rows,
+            vat_group_kind(line.vat_rate_value, line.is_cost_passthrough),
+            line.vat_rate_value,
+            (line.line_net, line.line_vat, line.line_gross_value),
+        );
+    }
+    finish_vat_rows(rows)
+}
+
+/// An advance invoice credited against a settlement invoice, as the
+/// settlement invoice states it (§ 14 Abs. 5 Satz 2 UStG): the advance
+/// invoice's number and date, and the net and VAT per rate of the amount
+/// credited (the rows add up to it).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct DeductedAdvance {
+    pub invoice_number: String,
+    pub issue_date: NaiveDate,
+    pub rows: Vec<VatBreakdownRow>,
+}
+
+/// Net, VAT and gross per rate that an advance invoice still charges once
+/// its active credit notes are taken off: the VAT split the advance invoice
+/// itself printed (a prepayment advance splits the prepayment over the
+/// quote's VAT groups when it is created, see
+/// `build_prepayment_advance_snapshot`).
+pub(super) fn advance_vat_rows(
+    line_items: &Value,
+    credits: &[credit_notes::ExistingCredit],
+) -> Vec<VatBreakdownRow> {
+    let mut rows: Vec<VatBreakdownRow> = Vec::new();
+    for line in credit_notes::creditable_lines(line_items, credits) {
+        add_to_vat_rows(
+            &mut rows,
+            vat_group_kind(line.vat_rate, line.is_cost_passthrough),
+            line.vat_rate,
+            (
+                line.net - line.credited_net,
+                line.vat - line.credited_vat,
+                line.gross - line.credited_gross,
+            ),
+        );
+    }
+    let mut rows = finish_vat_rows(rows);
+    rows.retain(|row| row.gross > Decimal::ZERO);
+    rows
+}
+
+/// The part of an advance's VAT rows that `amount` (gross) credits. The
+/// whole advance keeps its rows exactly as invoiced. A part (an advance paid
+/// only in part, or larger than what the settlement invoice asks for) takes
+/// the same share of every row's gross and VAT, the share the advance
+/// invoice's own payment is booked with (`invoice_cash_targets`); rounding
+/// cents go to the first row that is not a pass-through cost, so the
+/// pass-through share matches that booking exactly.
+pub(super) fn deducted_advance_rows(
+    advance_rows: &[VatBreakdownRow],
+    amount: Decimal,
+) -> Vec<VatBreakdownRow> {
+    let amount = amount.round_cents();
+    let total: Decimal = advance_rows.iter().map(|row| row.gross).sum();
+    if amount <= Decimal::ZERO || total <= Decimal::ZERO {
+        return Vec::new();
+    }
+    if amount >= total {
+        return advance_rows.to_vec();
+    }
+    let share = |part: Decimal| (amount * part / total).round_cents();
+    let mut rows = advance_rows
+        .iter()
+        .map(|row| {
+            let (gross, vat) = (share(row.gross), share(row.vat));
+            VatBreakdownRow {
+                kind: row.kind,
+                rate: row.rate,
+                net: gross - vat,
+                vat,
+                gross,
+            }
+        })
+        .collect::<Vec<_>>();
+    let rest = amount - rows.iter().map(|row| row.gross).sum::<Decimal>();
+    if !rest.is_zero() {
+        let index = rows
+            .iter()
+            .position(|row| row.kind != VatGroupKind::Passthrough)
+            .unwrap_or(0);
+        rows[index].gross += rest;
+        rows[index].net += rest;
+    }
+    rows.retain(|row| !row.gross.is_zero() || !row.vat.is_zero());
+    rows
+}
+
+/// Advances credited against `invoice_id`, oldest advance invoice first, one
+/// entry per advance invoice however often it was applied. Read through the
+/// caller's connection, so a release renders exactly the advances it has
+/// just credited.
+pub(super) async fn load_deducted_advances(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Vec<DeductedAdvance>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"SELECT SUM(allocation.amount_gross) AS amount_gross,
+                  advance.id AS advance_invoice_id, advance.invoice_number,
+                  advance.issued_at, advance.line_items,
+                  advance.total_net, advance.total_vat, advance.total_gross
+           FROM invoice_prepayment_allocations allocation
+           JOIN invoices advance ON advance.id = allocation.advance_invoice_id
+           WHERE allocation.target_invoice_id = $1
+           GROUP BY advance.id
+           ORDER BY advance.issued_at, advance.id"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut advances = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut line_items = row.try_get::<Value, _>("line_items")?;
+        if line_items.as_array().is_none_or(Vec::is_empty) {
+            // Early advance invoices carry no lines: their totals are one
+            // group, the rate implied by their VAT and net.
+            line_items = json!([{
+                "line_net": row.try_get::<Decimal, _>("total_net")?.to_string(),
+                "line_vat": row.try_get::<Decimal, _>("total_vat")?.to_string(),
+                "line_gross": row.try_get::<Decimal, _>("total_gross")?.to_string(),
+            }]);
+        }
+        let credits =
+            credit_notes::load_active_credits(conn, row.try_get("advance_invoice_id")?).await?;
+        let amount_gross = row.try_get::<Decimal, _>("amount_gross")?;
+        advances.push(DeductedAdvance {
+            invoice_number: row
+                .try_get::<Option<String>, _>("invoice_number")?
+                .unwrap_or_default(),
+            issue_date: super::invoice_document_date(row.try_get::<DateTime<Utc>, _>("issued_at")?),
+            rows: deducted_advance_rows(&advance_vat_rows(&line_items, &credits), amount_gross),
+        });
+    }
+    Ok(advances)
 }
 
 /// The statutory reason printed for 0 % lines that are not pass-through
@@ -571,5 +727,146 @@ mod tests {
         );
         // Pass-through lines alone carry no § 4 note.
         assert_eq!(zero_rate_exemption_note(&lines[..1]), None);
+    }
+
+    fn summary(rows: &[VatBreakdownRow]) -> Vec<String> {
+        rows.iter()
+            .map(|row| {
+                format!(
+                    "{:?} {}% {} {} {}",
+                    row.kind,
+                    row.rate,
+                    crate::money::cents_string(row.net),
+                    crate::money::cents_string(row.vat),
+                    crate::money::cents_string(row.gross)
+                )
+            })
+            .collect()
+    }
+
+    /// Prepayment advance of the QA walkthrough: 1,000 over a quote with a
+    /// 19 % group, medical care and pass-through costs.
+    fn walkthrough_advance_lines() -> Value {
+        json!([
+            {
+                "description": "Anzahlung – Anteil 0 % USt.", "quantity": "1",
+                "unit_price": "336.63", "vat_rate": "0", "is_cost_passthrough": false,
+                "line_net": "336.63", "line_vat": "0", "line_gross": "336.63"
+            },
+            {
+                "description": "Anzahlung – Anteil 19 % USt.", "quantity": "1",
+                "unit_price": "314.98", "vat_rate": "19", "is_cost_passthrough": false,
+                "line_net": "314.98", "line_vat": "59.85", "line_gross": "374.83"
+            },
+            {
+                "description": "Anzahlung – Anteil Auslagen", "quantity": "1",
+                "unit_price": "288.54", "vat_rate": "0", "is_cost_passthrough": true,
+                "line_net": "288.54", "line_vat": "0", "line_gross": "288.54"
+            }
+        ])
+    }
+
+    #[test]
+    fn a_fully_credited_advance_keeps_the_vat_split_it_was_invoiced_with() {
+        let advance = advance_vat_rows(&walkthrough_advance_lines(), &[]);
+        let expected = vec![
+            "Taxed 19% 314.98 59.85 374.83",
+            "ZeroRated 0% 336.63 0.00 336.63",
+            "Passthrough 0% 288.54 0.00 288.54",
+        ];
+        assert_eq!(summary(&advance), expected);
+        assert_eq!(
+            summary(&deducted_advance_rows(&advance, Decimal::new(1000, 0))),
+            expected
+        );
+        assert!(deducted_advance_rows(&advance, Decimal::ZERO).is_empty());
+    }
+
+    #[test]
+    fn a_partly_credited_advance_takes_the_same_share_of_every_row() {
+        // Only 400 of the 1,000 advance was paid, so only 400 is credited:
+        // 40 % of every row's gross and VAT, as the payment was booked.
+        let advance = advance_vat_rows(&walkthrough_advance_lines(), &[]);
+        let rows = deducted_advance_rows(&advance, Decimal::new(400, 0));
+        assert_eq!(
+            summary(&rows),
+            vec![
+                "Taxed 19% 125.99 23.94 149.93",
+                "ZeroRated 0% 134.65 0.00 134.65",
+                "Passthrough 0% 115.42 0.00 115.42",
+            ]
+        );
+        // 1.50: the shares add up to 1.49; the cent goes to the first row
+        // that is not a pass-through cost.
+        let rows = deducted_advance_rows(&advance, Decimal::new(150, 2));
+        assert_eq!(
+            summary(&rows),
+            vec![
+                "Taxed 19% 0.48 0.09 0.57",
+                "ZeroRated 0% 0.50 0.00 0.50",
+                "Passthrough 0% 0.43 0.00 0.43",
+            ]
+        );
+    }
+
+    #[test]
+    fn credit_notes_on_the_advance_leave_their_rate_out_of_the_deduction() {
+        // A credit note took 100 gross off the 19 % share of the advance.
+        let credit = credit_notes::ExistingCredit {
+            vat: Decimal::new(1597, 2),
+            gross: Decimal::new(100, 0),
+            lines: Some(vec![credit_notes::CreditNoteLine {
+                invoice_line_index: 1,
+                description: "Anzahlung – Anteil 19 % USt.".to_string(),
+                quantity: None,
+                unit_price: None,
+                vat_rate: Decimal::new(19, 0),
+                is_cost_passthrough: false,
+                net: Decimal::new(8403, 2),
+                vat: Decimal::new(1597, 2),
+                gross: Decimal::new(100, 0),
+            }]),
+        };
+        let advance = advance_vat_rows(&walkthrough_advance_lines(), &[credit]);
+        assert_eq!(
+            summary(&advance),
+            vec![
+                "Taxed 19% 230.95 43.88 274.83",
+                "ZeroRated 0% 336.63 0.00 336.63",
+                "Passthrough 0% 288.54 0.00 288.54",
+            ]
+        );
+        // A fully credited line drops out.
+        let whole_line = credit_notes::ExistingCredit {
+            vat: Decimal::ZERO,
+            gross: Decimal::new(28854, 2),
+            lines: Some(vec![credit_notes::CreditNoteLine {
+                invoice_line_index: 2,
+                description: String::new(),
+                quantity: None,
+                unit_price: None,
+                vat_rate: Decimal::ZERO,
+                is_cost_passthrough: true,
+                net: Decimal::new(28854, 2),
+                vat: Decimal::ZERO,
+                gross: Decimal::new(28854, 2),
+            }]),
+        };
+        let advance = advance_vat_rows(&walkthrough_advance_lines(), &[whole_line]);
+        assert_eq!(advance.len(), 2);
+        assert!(
+            advance
+                .iter()
+                .all(|row| row.kind != VatGroupKind::Passthrough)
+        );
+    }
+
+    #[test]
+    fn an_advance_without_lines_is_one_group_at_its_implied_rate() {
+        let rows = advance_vat_rows(
+            &json!([{ "line_net": "100.00", "line_vat": "19.00", "line_gross": "119.00" }]),
+            &[],
+        );
+        assert_eq!(summary(&rows), vec!["Taxed 19% 100.00 19.00 119.00"]);
     }
 }

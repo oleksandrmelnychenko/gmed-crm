@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ADMIN_USER_ROLE_KEYS,
+  canManageAdminAccount,
   canSaveAdminUserEdit,
   describeAdminUserError,
   getAdminUserActions,
@@ -163,6 +164,14 @@ describe("admin users page model", () => {
       canDeactivate: true,
       canActivate: false,
     });
+  });
+
+  it("leaves the CEO's sessions and pending logins to the CEO on the settings page", () => {
+    expect(canManageAdminAccount("ceo", false)).toBe(false);
+    expect(canManageAdminAccount("ceo", true)).toBe(true);
+    for (const role of ADMIN_USER_ROLE_KEYS.filter((key) => key !== "ceo")) {
+      expect(canManageAdminAccount(role, false), role).toBe(true);
+    }
   });
 
   it("offers unlock, revoke and TOTP reset only when there is something to act on", () => {

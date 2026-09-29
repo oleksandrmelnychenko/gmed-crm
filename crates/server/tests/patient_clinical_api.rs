@@ -43,6 +43,27 @@ async fn json_request(
     (status, payload)
 }
 
+/// A request whose answer may be a PDF: the status and the body as lossy text.
+async fn raw_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    bearer: &str,
+) -> (StatusCode, String) {
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 16 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn auth_header_for(user_id: Uuid, role: &str) -> String {
     let token = jwt::issue_access_token(TEST_SECRET, user_id, role, Uuid::new_v4()).unwrap();
     format!("Bearer {token}")
@@ -3171,6 +3192,99 @@ async fn patient_passport_round_trips_and_flags_expiry() {
 }
 
 #[tokio::test]
+async fn patient_profile_rejects_invalid_email_and_phone_like_the_lead_wizard() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("contact-validation");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo_id = seed_user(&pool, &format!("{tag}-ceo"), "ceo").await;
+    seed_patient_assignment(&pool, patient_id, ceo_id, admin_id).await;
+    let ceo_bearer = auth_header_for(ceo_id, "ceo");
+    let update_path = format!("/api/v1/patients/{patient_id}/update");
+
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &ceo_bearer,
+        Some(json!({
+            "contacts": [
+                { "contact_kind": "phone", "value": "+49 151 1234567", "is_primary": true },
+                { "contact_kind": "email", "value": "anna@example.com", "is_primary": true },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+
+    // The profile editor sends the contact list; the legacy fields alone are
+    // checked the same way.
+    for (payload, message) in [
+        (
+            json!({ "contacts": [{ "contact_kind": "email", "value": "bad@x" }] }),
+            "Enter a valid email address",
+        ),
+        (
+            json!({ "contacts": [{ "contact_kind": "phone", "value": "abc" }] }),
+            "Enter a valid phone number",
+        ),
+        (json!({ "email": "bad@x" }), "Enter a valid email address"),
+        (
+            json!({ "phone_primary": "abc" }),
+            "Enter a valid phone number",
+        ),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &update_path,
+            &ceo_bearer,
+            Some(payload.clone()),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{payload}: {body}"
+        );
+        assert_eq!(body["message"], message, "{payload}: {body}");
+    }
+
+    let (phone, email): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT phone_primary, email FROM patients WHERE id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(phone.as_deref(), Some("+49 151 1234567"));
+    assert_eq!(email.as_deref(), Some("anna@example.com"));
+
+    // Optional contacts may stay empty.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &update_path,
+        &ceo_bearer,
+        Some(json!({
+            "contacts": [
+                { "contact_kind": "phone", "value": "+49 151 1234567", "is_primary": true },
+                { "contact_kind": "email", "value": "" },
+            ],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let email: Option<String> = sqlx::query_scalar("SELECT email FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(email, None);
+}
+
+#[tokio::test]
 async fn patient_passport_expiring_soon_is_a_non_blocking_compliance_warning() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
@@ -5391,7 +5505,9 @@ async fn patient_medication_pdf_exports_only_current_prescriptions() {
 
 /// The clinical routes are gated by `patients.medical.view` / `patients.medical.edit`
 /// plus the patient assignment: an assigned patient manager reads and writes, an
-/// assigned interpreter only reads, an unassigned patient manager and billing see 403.
+/// unassigned patient manager and billing see 403. The interpreter never opens
+/// the clinical record or its PDFs, even with a manual assignment (owner
+/// decision 2026-09-28): its medical scope is the briefing of its appointments.
 #[tokio::test]
 async fn clinical_routes_follow_medical_capabilities_and_patient_assignment() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -5423,6 +5539,15 @@ async fn clinical_routes_follow_medical_capabilities_and_patient_assignment() {
             format!("/api/v1/patients/{patient}/clinical"),
             format!("/api/v1/patients/{patient}/vitals"),
             format!("/api/v1/patients/{patient}/lab-results"),
+            format!("/api/v1/patients/{patient}/narrative/history"),
+            format!("/api/v1/patients/{patient}/impfstatus"),
+        ]
+    };
+    let pdf_paths = |patient: Uuid| {
+        vec![
+            format!("/api/v1/patients/{patient}/clinical.pdf"),
+            format!("/api/v1/patients/{patient}/lab-results.pdf"),
+            format!("/api/v1/patients/{patient}/medikationsplan.pdf"),
         ]
     };
 
@@ -5430,6 +5555,15 @@ async fn clinical_routes_follow_medical_capabilities_and_patient_assignment() {
     for path in read_paths(patient_id) {
         let (status, _) = json_request(&app, "GET", &path, &manager_bearer, None).await;
         assert_eq!(status, StatusCode::OK, "patient_manager GET {path}");
+    }
+    // The PDFs open for the manager (an empty medication plan is a 422, not a 403).
+    for path in pdf_paths(patient_id) {
+        let (status, _) = raw_request(&app, "GET", &path, &manager_bearer).await;
+        assert_ne!(status, StatusCode::FORBIDDEN, "patient_manager GET {path}");
+        assert!(
+            status.is_success() || status == StatusCode::UNPROCESSABLE_ENTITY,
+            "{path}: {status}"
+        );
     }
     let (status, _) = json_request(
         &app,
@@ -5476,21 +5610,44 @@ async fn clinical_routes_follow_medical_capabilities_and_patient_assignment() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // Assigned interpreter: view only.
-    for path in read_paths(patient_id) {
-        let (status, _) = json_request(&app, "GET", &path, &interpreter_bearer, None).await;
-        assert_eq!(status, StatusCode::OK, "interpreter GET {path}");
+    // Interpreter with a manual assignment: no clinical record, no medical PDF,
+    // no case anamnesis; the patient itself stays visible.
+    for path in read_paths(patient_id)
+        .into_iter()
+        .chain(pdf_paths(patient_id))
+    {
+        let (status, body) = raw_request(&app, "GET", &path, &interpreter_bearer).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "interpreter GET {path}");
+        assert!(!body.contains("\"heart_rate\""), "{path}: {body}");
     }
-    let (status, body) = json_request(
+    let (status, _) = json_request(
         &app,
         "GET",
-        &format!("/api/v1/patients/{patient_id}/vitals"),
+        &format!("/api/v1/patients/{patient_id}"),
         &interpreter_bearer,
         None,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["count"], 1);
+    sqlx::query(
+        r#"INSERT INTO cases (case_id, patient_id, manager_id, status, hauptanfragegrund)
+           VALUES ($1, $2, $3, 'open', $4)"#,
+    )
+    .bind(format!("C-{tag}"))
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(format!("Anamnesis {tag}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let cases_path = format!("/api/v1/patients/{patient_id}/cases");
+    let (status, body) = json_request(&app, "GET", &cases_path, &interpreter_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body[0]["case_id"], format!("C-{tag}"), "{body}");
+    assert_eq!(body[0]["hauptanfragegrund"], Value::Null, "{body}");
+    let (status, body) = json_request(&app, "GET", &cases_path, &manager_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body[0]["hauptanfragegrund"], format!("Anamnesis {tag}"));
     let (status, _) = json_request(
         &app,
         "POST",

@@ -343,6 +343,54 @@ async fn next_actions_uses_invoice_visibility_contract() {
 }
 
 #[tokio::test]
+async fn next_actions_send_the_visit_time_as_a_berlin_instant() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("agent2-visit");
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let visit_date = gmed_server::app_time::today() + chrono::Duration::days(1);
+    sqlx::query(
+        r#"INSERT INTO appointments (
+                patient_id, appointment_type, title, date, time_start, time_end,
+                status, created_by
+           ) VALUES ($1, 'medical', 'Clinic follow-up', $2, '09:00', '10:00', 'planned', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(visit_date)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let patient_auth = auth_header_for(patient_user_id, "patient");
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/me/next-actions", &patient_auth, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let visit = body["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .find(|item| item["kind"] == "upcoming_appointment")
+        .expect("upcoming appointment action");
+
+    // 09:00 German time as an instant with an offset: a browser in another
+    // time zone shows 09:00, not its own reading of a naive 09:00.
+    let expected = gmed_server::app_time::from_local(visit_date.and_hms_opt(9, 0, 0).unwrap());
+    let due_at = visit["due_at"].as_str().expect("appointment due_at");
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(due_at).expect("RFC 3339 due_at"),
+        expected
+    );
+    // The wall-clock values stay as they are.
+    assert_eq!(visit["metadata"]["date"], json!(visit_date.to_string()));
+    assert_eq!(visit["metadata"]["time_start"], "09:00");
+    assert_eq!(visit["metadata"]["time_end"], "10:00");
+}
+
+#[tokio::test]
 async fn patient_translation_request_requires_own_visible_document() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

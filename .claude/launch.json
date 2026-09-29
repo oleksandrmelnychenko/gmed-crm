@@ -30,6 +30,12 @@
       "runtimeExecutable": "fnm",
       "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "127.0.0.1", "--port", "4177", "--strictPort"],
       "port": 4177
+    },
+    {
+      "name": "frontend-qa",
+      "runtimeExecutable": "fnm",
+      "runtimeArgs": ["exec", "--using", "22", "--", "npm.cmd", "--prefix", "frontend", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4176", "--strictPort"],
+      "port": 4176
     }
   ]
 }

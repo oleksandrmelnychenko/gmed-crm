@@ -45,6 +45,14 @@ pub(super) struct EInvoiceLine {
     pub is_cost_passthrough: bool,
 }
 
+/// An earlier invoice this one refers to (BG-3): the advance invoices a
+/// settlement invoice deducts.
+#[derive(Debug, Clone)]
+pub(super) struct EInvoiceReference {
+    pub number: String,
+    pub issue_date: NaiveDate,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct EInvoice {
     pub number: String,
@@ -52,6 +60,8 @@ pub(super) struct EInvoice {
     pub invoice_type: String,
     pub issue_date: NaiveDate,
     pub due_date: Option<NaiveDate>,
+    /// First and last service day, as printed on the invoice.
+    pub service_period: Option<(NaiveDate, NaiveDate)>,
     pub currency: String,
     pub order_number: Option<String>,
     pub note: Option<String>,
@@ -61,6 +71,12 @@ pub(super) struct EInvoice {
     pub total_gross: Decimal,
     /// Advance payments already applied when the invoice was issued.
     pub prepaid_amount: Decimal,
+    /// The advance invoices behind `prepaid_amount`.
+    pub prepaid_invoices: Vec<EInvoiceReference>,
+    /// Net and VAT per rate of the deducted advances (§ 14 Abs. 5 Satz 2
+    /// UStG) as text: EN 16931 has no structured field for the VAT of a
+    /// prepayment, only its gross (BT-113).
+    pub prepayment_note: Option<String>,
     pub bank_iban: Option<String>,
     pub bank_bic: Option<String>,
     pub bank_holder: Option<String>,
@@ -173,8 +189,9 @@ impl TaxGroup {
 }
 
 /// Why a line carries no VAT, as the e-invoice states it. The printed invoice
-/// uses the same wording so the visible document and the embedded XML agree.
-pub(super) fn line_exemption_reason(
+/// and the order documents (Einzelauftrag, Kostenvoranschlag) use the same
+/// wording so the visible documents and the embedded XML agree.
+pub(crate) fn line_exemption_reason(
     vat_rate: Decimal,
     is_cost_passthrough: bool,
 ) -> Option<&'static str> {
@@ -311,11 +328,13 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
         escape(invoice.number.trim()),
         date(invoice.issue_date)
     ));
-    if let Some(note) = text(&invoice.note) {
-        xml.push_str(&format!(
-            "<ram:IncludedNote><ram:Content>{}</ram:Content></ram:IncludedNote>",
-            escape(note)
-        ));
+    for note in [&invoice.note, &invoice.prepayment_note] {
+        if let Some(note) = text(note) {
+            xml.push_str(&format!(
+                "<ram:IncludedNote><ram:Content>{}</ram:Content></ram:IncludedNote>",
+                escape(note)
+            ));
+        }
     }
     xml.push_str("</rsm:ExchangedDocument><rsm:SupplyChainTradeTransaction>");
 
@@ -353,7 +372,24 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             escape(order_number)
         ));
     }
-    xml.push_str("</ram:ApplicableHeaderTradeAgreement><ram:ApplicableHeaderTradeDelivery/>");
+    xml.push_str("</ram:ApplicableHeaderTradeAgreement>");
+    // Leistungsdatum (§ 14 Abs. 4 Nr. 6 UStG): a single service day is the
+    // actual delivery date (BT-72); a longer period, or the services an
+    // advance invoice bills ahead, is the invoicing period (BG-14) below.
+    let service_period = invoice.service_period.filter(|(first, last)| first <= last);
+    let billing_period = match service_period {
+        Some((first, last)) if first == last && invoice.invoice_type != "advance" => {
+            xml.push_str(&format!(
+                "<ram:ApplicableHeaderTradeDelivery><ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime>{}</ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent></ram:ApplicableHeaderTradeDelivery>",
+                date(first)
+            ));
+            None
+        }
+        period => {
+            xml.push_str("<ram:ApplicableHeaderTradeDelivery/>");
+            period
+        }
+    };
 
     xml.push_str(&format!(
         "<ram:ApplicableHeaderTradeSettlement><ram:PaymentReference>{}</ram:PaymentReference><ram:InvoiceCurrencyCode>{currency}</ram:InvoiceCurrencyCode>",
@@ -406,6 +442,13 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
             plain(group.rate)
         ));
     }
+    if let Some((first, last)) = billing_period {
+        xml.push_str(&format!(
+            "<ram:BillingSpecifiedPeriod><ram:StartDateTime>{}</ram:StartDateTime><ram:EndDateTime>{}</ram:EndDateTime></ram:BillingSpecifiedPeriod>",
+            date(first),
+            date(last)
+        ));
+    }
     if let Some(due_date) = invoice.due_date {
         xml.push_str(&format!(
             "<ram:SpecifiedTradePaymentTerms><ram:DueDateDateTime>{}</ram:DueDateDateTime></ram:SpecifiedTradePaymentTerms>",
@@ -429,6 +472,20 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
         money(invoice.prepaid_amount),
         money(due)
     ));
+    // BG-3: every advance invoice the prepaid amount comes from. The EN 16931
+    // profile of ZUGFeRD 2.5 / Factur-X 1.09 (the schema of the CI validator)
+    // allows several references; older schemas take one, which is why the
+    // prepayment note names every advance invoice as well.
+    for reference in &invoice.prepaid_invoices {
+        if reference.number.trim().is_empty() {
+            continue;
+        }
+        xml.push_str(&format!(
+            r#"<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>{}</ram:IssuerAssignedID><ram:FormattedIssueDateTime><qdt:DateTimeString format="102">{}</qdt:DateTimeString></ram:FormattedIssueDateTime></ram:InvoiceReferencedDocument>"#,
+            escape(reference.number.trim()),
+            reference.issue_date.format("%Y%m%d")
+        ));
+    }
     xml.push_str(
         "</ram:ApplicableHeaderTradeSettlement></rsm:SupplyChainTradeTransaction></rsm:CrossIndustryInvoice>",
     );
@@ -651,6 +708,10 @@ mod tests {
             invoice_type: "final".to_string(),
             issue_date: NaiveDate::from_ymd_opt(2026, 9, 17).unwrap(),
             due_date: NaiveDate::from_ymd_opt(2026, 10, 1),
+            service_period: Some((
+                NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 9, 15).unwrap(),
+            )),
             currency: "EUR".to_string(),
             order_number: Some("ORD-1".to_string()),
             note: Some("Danke & bis bald <GMed>".to_string()),
@@ -689,6 +750,13 @@ mod tests {
             ],
             total_gross: dec("319"),
             prepaid_amount: dec("50"),
+            prepaid_invoices: vec![EInvoiceReference {
+                number: "INV-2026-0000".to_string(),
+                issue_date: NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),
+            }],
+            prepayment_note: Some(
+                "Abzüglich geleisteter Anzahlungen: Anzahlungsrechnung INV-2026-0000 vom 01.09.2026: Durchlaufende Posten (0 %): Netto 50,00 €, MwSt. 0,00 €, Brutto 50,00 €".to_string(),
+            ),
             bank_iban: Some("DE02 1203 0000 0000 2020 51".to_string()),
             bank_bic: Some("BYLADEM1001".to_string()),
             bank_holder: Some("GMed".to_string()),
@@ -879,7 +947,123 @@ mod tests {
         ];
         invoice.total_gross = dec("1145");
         invoice.prepaid_amount = Decimal::ZERO;
+        invoice.prepaid_invoices.clear();
+        invoice.prepayment_note = None;
+        invoice.service_period = None;
         invoice
+    }
+
+    /// Schlussrechnung of the QA walkthrough (order A-20260928-0005): 1,310
+    /// net at 19 % plus 2,050 medical care (0 %), with the paid advance invoice
+    /// of 1,000 (374.83 of it in the 19 % group) credited, services over
+    /// several days.
+    fn sample_final_with_advances() -> EInvoice {
+        let mut invoice = sample();
+        invoice.number = "INV-2026-0003".to_string();
+        invoice.issue_date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        invoice.due_date = NaiveDate::from_ymd_opt(2026, 10, 12);
+        invoice.service_period = Some((
+            NaiveDate::from_ymd_opt(2026, 9, 21).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 9, 28).unwrap(),
+        ));
+        invoice.note = None;
+        invoice.lines = vec![
+            EInvoiceLine {
+                name: "Dolmetscherleistung".to_string(),
+                quantity: dec("13.1"),
+                unit_net: dec("100"),
+                line_net: dec("1310"),
+                vat_rate: dec("19"),
+                is_cost_passthrough: false,
+            },
+            EInvoiceLine {
+                name: "Organisation der Behandlung".to_string(),
+                quantity: dec("1"),
+                unit_net: dec("2050"),
+                line_net: dec("2050"),
+                vat_rate: dec("0"),
+                is_cost_passthrough: false,
+            },
+        ];
+        invoice.total_gross = dec("3608.90");
+        invoice.prepaid_amount = dec("1000");
+        invoice.prepaid_invoices = vec![EInvoiceReference {
+            number: "INV-2026-0002".to_string(),
+            issue_date: NaiveDate::from_ymd_opt(2026, 9, 20).unwrap(),
+        }];
+        invoice.prepayment_note = Some(
+            "Abzüglich geleisteter Anzahlungen (§ 14 Abs. 5 Satz 2 UStG): Anzahlungsrechnung INV-2026-0002 vom 20.09.2026: 19 %: Netto 314,98 €, MwSt. 59,85 €, Brutto 374,83 €; 0 % (steuerbefreit): Netto 625,17 €, MwSt. 0,00 €, Brutto 625,17 €".to_string(),
+        );
+        invoice
+    }
+
+    #[test]
+    fn settlement_invoice_references_its_advance_invoices_and_the_service_period() {
+        let invoice = sample_final_with_advances();
+        assert!(missing_requirements(&invoice).is_empty());
+        let xml = build_cii_xml(&invoice);
+        assert!(xml.contains("<ram:TypeCode>380</ram:TypeCode>"));
+        // Totals of the delivery in full; the advance is prepaid (BT-113).
+        assert!(xml.contains("<ram:LineTotalAmount>3360.00</ram:LineTotalAmount><ram:TaxBasisTotalAmount>3360.00</ram:TaxBasisTotalAmount>"));
+        assert!(
+            xml.contains(r#"<ram:TaxTotalAmount currencyID="EUR">248.90</ram:TaxTotalAmount>"#)
+        );
+        assert!(xml.contains("<ram:GrandTotalAmount>3608.90</ram:GrandTotalAmount><ram:TotalPrepaidAmount>1000.00</ram:TotalPrepaidAmount><ram:DuePayableAmount>2608.90</ram:DuePayableAmount>"));
+        assert!(!xml.contains("RoundingAmount"));
+        // BG-3 after the monetary summation, as the CII schema orders it.
+        assert!(xml.contains(concat!(
+            "</ram:SpecifiedTradeSettlementHeaderMonetarySummation>",
+            "<ram:InvoiceReferencedDocument><ram:IssuerAssignedID>INV-2026-0002</ram:IssuerAssignedID>",
+            r#"<ram:FormattedIssueDateTime><qdt:DateTimeString format="102">20260920</qdt:DateTimeString></ram:FormattedIssueDateTime>"#,
+            "</ram:InvoiceReferencedDocument></ram:ApplicableHeaderTradeSettlement>"
+        )));
+        // The VAT of the advance is stated in the note.
+        assert!(xml.contains("MwSt. 59,85 €"));
+        assert_eq!(xml.matches("<ram:IncludedNote>").count(), 1);
+        // A service period is the invoicing period (BG-14), between the VAT
+        // breakdown and the payment terms.
+        assert!(xml.contains("<ram:ApplicableHeaderTradeDelivery/>"));
+        assert!(xml.contains(concat!(
+            "</ram:ApplicableTradeTax><ram:BillingSpecifiedPeriod>",
+            r#"<ram:StartDateTime><udt:DateTimeString format="102">20260921</udt:DateTimeString></ram:StartDateTime>"#,
+            r#"<ram:EndDateTime><udt:DateTimeString format="102">20260928</udt:DateTimeString></ram:EndDateTime>"#,
+            "</ram:BillingSpecifiedPeriod><ram:SpecifiedTradePaymentTerms>"
+        )));
+
+        // Two advances: one reference each.
+        let mut two = invoice.clone();
+        two.prepaid_invoices.push(EInvoiceReference {
+            number: "INV-2026-0005".to_string(),
+            issue_date: NaiveDate::from_ymd_opt(2026, 9, 25).unwrap(),
+        });
+        assert_eq!(
+            build_cii_xml(&two)
+                .matches("<ram:InvoiceReferencedDocument>")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_single_service_day_is_the_delivery_date() {
+        let xml = build_cii_xml(&sample());
+        assert!(xml.contains(concat!(
+            "<ram:ApplicableHeaderTradeDelivery><ram:ActualDeliverySupplyChainEvent><ram:OccurrenceDateTime>",
+            r#"<udt:DateTimeString format="102">20260915</udt:DateTimeString>"#,
+            "</ram:OccurrenceDateTime></ram:ActualDeliverySupplyChainEvent></ram:ApplicableHeaderTradeDelivery>"
+        )));
+        assert!(!xml.contains("BillingSpecifiedPeriod"));
+        // An advance invoice bills services ahead: a period, not a delivery.
+        let mut advance = sample();
+        advance.invoice_type = "advance".to_string();
+        let xml = build_cii_xml(&advance);
+        assert!(!xml.contains("ActualDeliverySupplyChainEvent"));
+        assert!(xml.contains("<ram:BillingSpecifiedPeriod>"));
+        // Without a known service day the delivery stays empty.
+        let xml = build_cii_xml(&sample_exempt_only());
+        assert!(xml.contains("<ram:ApplicableHeaderTradeDelivery/>"));
+        assert!(!xml.contains("BillingSpecifiedPeriod"));
+        assert!(!xml.contains("InvoiceReferencedDocument"));
     }
 
     #[test]
@@ -935,7 +1119,7 @@ mod tests {
             return;
         };
         std::fs::create_dir_all(&dir).unwrap();
-        for invoice in [sample(), sample_exempt_only()] {
+        for invoice in [sample(), sample_exempt_only(), sample_final_with_advances()] {
             assert!(missing_requirements(&invoice).is_empty());
             let path = std::path::Path::new(&dir).join(format!("{}.xml", invoice.number));
             std::fs::write(path, build_cii_xml(&invoice)).unwrap();

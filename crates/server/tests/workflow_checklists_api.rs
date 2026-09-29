@@ -176,6 +176,83 @@ async fn patient_workflow_starts_empty_while_order_workflow_uses_phase_templates
     }));
 }
 
+/// The order checklist is the order pipeline: the concierge and the
+/// interpreter team lead read only their projection of an order and the
+/// interpreter reads no order, so every order checklist read and write answers
+/// 403 for them even when they are assigned to the patient (RBAC matrix,
+/// `/orders`); the patient manager and the CEO keep it.
+#[tokio::test]
+async fn order_checklist_is_closed_to_order_projection_readers() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("workflow-projection");
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let patient_id = create_patient(&app, &pm_bearer, &tag).await;
+    let order_id = create_order(&app, &pm_bearer, patient_id).await;
+    let checklist_path = format!("/api/v1/orders/{order_id}/workflow-checklist");
+
+    let (status, checklist) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{checklist}");
+    let item_id = checklist["items"][0]["id"]
+        .as_str()
+        .expect("order checklist item")
+        .to_string();
+    let ceo_bearer = auth_header_for(admin_id, "ceo");
+    let (status, ceo_checklist) =
+        json_request(&app, "GET", &checklist_path, &ceo_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{ceo_checklist}");
+
+    for role in ["concierge", "teamlead_interpreter", "interpreter"] {
+        let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
+        sqlx::query(
+            r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by)
+               VALUES ($1, $2, $3)"#,
+        )
+        .bind(patient_id)
+        .bind(user_id)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let bearer = auth_header_for(user_id, role);
+
+        let (status, body) = json_request(&app, "GET", &checklist_path, &bearer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body}");
+        assert!(body.get("items").is_none(), "{role}: {body}");
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &checklist_path,
+            &bearer,
+            Some(json!({ "item_text": "Must not reach the pipeline" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body}");
+        for action in ["complete", "not-required", "reopen"] {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &format!("{checklist_path}/{item_id}/{action}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{role} {action}: {body}");
+        }
+    }
+
+    let (status, unchanged) = json_request(&app, "GET", &checklist_path, &pm_bearer, None).await;
+    assert_eq!(status, StatusCode::OK, "{unchanged}");
+    assert_eq!(
+        unchanged["items"].as_array().map(Vec::len),
+        checklist["items"].as_array().map(Vec::len)
+    );
+    assert_eq!(checklist_item(&unchanged, &item_id)["is_completed"], false);
+}
+
 #[tokio::test]
 async fn order_phase_progression_backfills_new_workflow_groups() {
     let Some((app, pool, _admin_id)) = test_context().await else {

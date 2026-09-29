@@ -163,6 +163,13 @@ export type ConciergeTask = {
   assigned_by: string;
   assigned_by_name: string;
   assigned_by_role?: string | null;
+  /**
+   * Whether the caller may edit, close, archive or delete the task (its
+   * creator, or a higher role whose reach covers the task: a patient manager
+   * only for the patients of its pool). Sent by the work center; the role
+   * hierarchy below is the fallback for payloads without it.
+   */
+  can_manage?: boolean;
   concierge_service_id: string | null;
   due_at: string | null;
   starts_at: string | null;
@@ -229,14 +236,14 @@ function participatesInTaskManager(role: string | null | undefined) {
   return hasCapability(role, "tasks.use");
 }
 
-/** Roles that may create tasks for the concierge (the CEO assistant too). */
+/** Roles that assign tasks to the concierge. */
 const MANAGEMENT_ROLES = new Set(["ceo_assistant", "billing", "patient_manager", "sales"]);
 /**
- * Roles with higher-role rights over concierge-created tasks. The CEO
- * assistant is read-only: it changes only the tasks it created itself
- * (owner decision 2026-09-28, mirrors the server).
+ * Roles that change concierge tasks by rank (within their reach, which only
+ * the server knows: see `can_manage`). The CEO assistant reads every task but
+ * changes only its own.
  */
-const CONCIERGE_TASK_SUPERVISOR_ROLES = new Set(["billing", "patient_manager", "sales"]);
+const CONCIERGE_SUPERVISOR_ROLES = new Set(["billing", "patient_manager", "sales"]);
 
 function canManageConciergeTaskCreatorRole(
   actorRole: string | null | undefined,
@@ -244,7 +251,7 @@ function canManageConciergeTaskCreatorRole(
 ) {
   if (!actorRole || !creatorRole) return false;
   if (actorRole === "ceo") return creatorRole !== "ceo";
-  if (CONCIERGE_TASK_SUPERVISOR_ROLES.has(actorRole)) return creatorRole === "concierge";
+  if (CONCIERGE_SUPERVISOR_ROLES.has(actorRole)) return creatorRole === "concierge";
   if (actorRole === "teamlead_interpreter") return creatorRole === "interpreter";
   return false;
 }
@@ -319,11 +326,12 @@ export function conciergeTasksAssignedToActor(
 }
 
 export function canModifyConciergeTask(
-  task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
   if (!actorId || !actorRole) return false;
+  if (typeof task.can_manage === "boolean") return task.can_manage;
   if (task.assigned_by === actorId) return true;
   if (actorRole === "ceo") return true;
   return canManageConciergeTaskCreatorRole(actorRole, task.assigned_by_role);
@@ -334,7 +342,7 @@ export function canModifyConciergeTask(
  * (who documents its own work). The assignee removes only its own uploads.
  */
 export function canAttachToConciergeTask(
-  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
@@ -345,7 +353,7 @@ export function canAttachToConciergeTask(
 }
 
 export function canChangeConciergeTaskStatus(
-  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
@@ -356,7 +364,7 @@ export function canChangeConciergeTaskStatus(
 }
 
 export function availableConciergeTaskStatuses(
-  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role">,
+  task: Pick<ConciergeTask, "status" | "assigned_to" | "assigned_by" | "assigned_by_role" | "can_manage">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ): ConciergeTaskStatus[] {
@@ -383,7 +391,7 @@ export function availableConciergeTaskStatuses(
 }
 
 export function canDeleteConciergeTask(
-  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role"> & { attachment_count?: number; child_count?: number; workflow_checklist_item_id?: string | null },
+  task: Pick<ConciergeTask, "status" | "comment_count" | "checklist_total" | "archived_at" | "assigned_by" | "assigned_by_role" | "can_manage"> & { attachment_count?: number; child_count?: number; workflow_checklist_item_id?: string | null },
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
@@ -415,19 +423,24 @@ const TASK_SERVICE_CONVERTED_ERROR = "Concierge service request already converte
  * A checklist task that is still open can be closed as "not required": the
  * checklist item and the task are closed together and can be reopened on the
  * order page. Deleting it would leave the item open behind a dead task.
+ * The order checklist is the order pipeline, which the concierge does not
+ * open (403): it closes order work through the task itself.
  */
 export function canMarkConciergeTaskNotRequired(
-  task: Pick<ConciergeTask, "status" | "archived_at" | "assigned_by" | "assigned_by_role" | "workflow_checklist_item_id" | "workflow_checklist_scope_id">,
+  task: Pick<ConciergeTask, "status" | "archived_at" | "assigned_by" | "assigned_by_role" | "can_manage" | "workflow_checklist_item_id" | "workflow_checklist_scope_type" | "workflow_checklist_scope_id">,
   actorId: string | null | undefined,
   actorRole: string | null | undefined,
 ) {
+  const checklistRoles = task.workflow_checklist_scope_type === "patient"
+    ? ["ceo", "patient_manager", "concierge"]
+    : ["ceo", "patient_manager"];
   return Boolean(
     task.workflow_checklist_item_id
     && task.workflow_checklist_scope_id
     && !task.archived_at
     && task.status !== "completed"
     && task.status !== "cancelled"
-    && ["ceo", "patient_manager", "concierge"].includes(actorRole ?? "")
+    && checklistRoles.includes(actorRole ?? "")
     && canModifyConciergeTask(task, actorId, actorRole),
   );
 }

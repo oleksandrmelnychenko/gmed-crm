@@ -584,6 +584,7 @@ export type BindingServiceLine = {
   quantity?: string;
   line_total?: string;
   vat_rate?: string;
+  is_cost_passthrough?: boolean;
   note?: string;
   description_items?: ServiceDescriptionItem[];
 };
@@ -748,7 +749,7 @@ function persistedStructuredBindings(value: Record<string, unknown>) {
   if (Array.isArray(value.service_lines)) {
     const needsStructuredEncoding = value.service_lines.some((line) =>
       line && typeof line === "object" && (
-        "description_items" in line || "vat_rate" in line ||
+        "description_items" in line || "vat_rate" in line || "is_cost_passthrough" in line ||
         Object.values(line).some((field) => typeof field === "string" && /[\n\r|]/u.test(field))
       ));
     const rows = value.service_lines
