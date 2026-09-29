@@ -9696,12 +9696,14 @@ async fn assign_patient(
         load_patient_assignment_notification_context(&state, patient_uuid).await?;
 
     // A manual assignment never expires; it also takes over an interpreter's
-    // booking link, which would otherwise end with the booking.
+    // booking link, which would otherwise end with the booking, and lifts an
+    // earlier manual revocation.
     sqlx::query(
         "INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
          VALUES ($1, $2, $3, 'manual')
          ON CONFLICT (patient_id, user_id) DO UPDATE
-         SET revoked_at = NULL, assigned_by = $3, assigned_at = now(), source = 'manual'",
+         SET revoked_at = NULL, assigned_by = $3, assigned_at = now(), source = 'manual',
+             manually_revoked_at = NULL, revoked_by = NULL",
     )
     .bind(patient_uuid)
     .bind(body.user_id)
@@ -10080,6 +10082,46 @@ pub(crate) async fn ensure_patient_processing_not_restricted(
         Some((_, true)) => Err(err(StatusCode::LOCKED, "patient record is anonymized")),
         Some((true, false)) => Err(err(StatusCode::LOCKED, "patient processing is restricted")),
         _ => Ok(()),
+    }
+}
+
+/// Art. 18 DSGVO scope beyond editing the record (owner decision 2026-09-28):
+/// a restricted patient gets no new appointments or orders, no document shares
+/// to staff, interpreters or third parties, no translation assignment and no
+/// translated documents (so nothing is released to the portal automatically).
+/// Handing an existing document to the patient themselves stays possible, and
+/// so does deactivating the file. `blocked` names the refused action in the
+/// 423 message; an anonymised record is refused the same way.
+pub(crate) async fn ensure_patient_processing_allows(
+    state: &AppState,
+    patient_id: Uuid,
+    blocked: &str,
+) -> Result<(), axum::response::Response> {
+    match ensure_patient_processing_not_restricted(state, patient_id).await {
+        Err(response) if response.status() == StatusCode::LOCKED => {
+            let anonymized = sqlx::query_scalar::<_, bool>(
+                "SELECT (legal_status->>'anonymized_at') IS NOT NULL FROM patients WHERE id = $1",
+            )
+            .bind(patient_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+            Err(err(
+                StatusCode::LOCKED,
+                &if anonymized {
+                    format!(
+                        "The patient record is anonymized (Art. 17 DSGVO): {blocked} is not possible"
+                    )
+                } else {
+                    format!(
+                        "Processing of this patient's data is restricted (Art. 18 DSGVO): {blocked} is not possible until the restriction is lifted"
+                    )
+                },
+            ))
+        }
+        other => other,
     }
 }
 
@@ -10870,10 +10912,17 @@ async fn revoke_assignment(
             Ok(context) => context,
             Err(response) => return response,
         };
-    match sqlx::query!(
-        "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND user_id = $2 AND revoked_at IS NULL",
-        patient_id, body.user_id
+    // The manual revocation is remembered (manually_revoked_at = revoked_at):
+    // an interpreter booking does not grant the link back; only a new
+    // assignment does.
+    match sqlx::query(
+        r#"UPDATE patient_assignments
+           SET revoked_at = now(), manually_revoked_at = now(), revoked_by = $3
+           WHERE patient_id = $1 AND user_id = $2 AND revoked_at IS NULL"#,
     )
+    .bind(patient_id)
+    .bind(body.user_id)
+    .bind(auth.user_id)
     .execute(&state.db)
     .await
     {
@@ -10882,7 +10931,10 @@ async fn revoke_assignment(
                 &state,
                 body.user_id,
                 "patient_assignment_revoked",
-                format!("Patient assignment revoked: {}", patient_context.patient_name),
+                format!(
+                    "Patient assignment revoked: {}",
+                    patient_context.patient_name
+                ),
                 format!(
                     "Your access to patient {} ({}) was revoked.",
                     patient_context.patient_name, patient_context.patient_code
@@ -10906,7 +10958,12 @@ async fn revoke_assignment(
                 Some(auth.user_id),
                 "patient",
                 Some(patient_id),
-                serde_json::json!({ "revoked_user_id": body.user_id, "source": source }),
+                serde_json::json!({
+                    "revoked_user_id": body.user_id,
+                    "source": source,
+                    "reason": "manual",
+                    "blocks_booking_regrant": true,
+                }),
             ));
             tracing::info!(by = %auth.user_id, patient = %patient_id, revoked = %body.user_id, "Assignment revoked");
             crate::realtime::publish_patient_event_with_targets(
@@ -10920,10 +10977,16 @@ async fn revoke_assignment(
             .await;
             Json(serde_json::json!({"ok": true})).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Assignment not found or already revoked"),
+        Ok(_) => err(
+            StatusCode::NOT_FOUND,
+            "Assignment not found or already revoked",
+        ),
         Err(e) => {
             tracing::error!(error = %e, "Failed to revoke assignment");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to revoke assignment")
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to revoke assignment",
+            )
         }
     }
 }
@@ -11003,10 +11066,34 @@ async fn deactivate_patient(
     if let Err(e) = auth.require_any_role(&[Role::PatientManager]) {
         return e;
     }
-    match has_patient_edit_access(&state, &auth, patient_id).await {
+    // Closing a restricted (Art. 18) file only narrows processing and starts
+    // the retention clock, so the restriction does not block it (owner
+    // decision 2026-09-28); an anonymised record stays untouched.
+    match has_patient_secondary_capability_access(&state, &auth, patient_id, AccessCapability::Edit)
+        .await
+    {
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(response) => return response,
+    }
+    let anonymized = match sqlx::query_scalar::<_, bool>(
+        "SELECT (legal_status->>'anonymized_at') IS NOT NULL FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(value) => value.unwrap_or(false),
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "Failed to read patient erasure state");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to deactivate patient",
+            );
+        }
+    };
+    if anonymized {
+        return err(StatusCode::LOCKED, "patient record is anonymized");
     }
     match sqlx::query(
         r#"UPDATE patients

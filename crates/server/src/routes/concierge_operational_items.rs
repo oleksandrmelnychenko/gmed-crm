@@ -300,7 +300,7 @@ const OPERATIONAL_ITEM_RESPONSE_QUERY: &str = r#"SELECT t.id, t.title, t.descrip
           (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL AND ci.is_completed) AS checklist_completed,
           (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id AND cc.deleted_at IS NULL) AS comment_count,
           (SELECT COUNT(*) FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = t.id AND attachment.deleted_at IS NULL) AS attachment_count,
-          assignee.name AS assigned_to_name, assigner.name AS assigned_by_name,
+          assignee.name AS assigned_to_name, assignee.is_active AS assigned_to_active, assigner.name AS assigned_by_name,
           assigner.role AS assigned_by_role,
           NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
           patient.birth_date AS patient_birth_date,
@@ -410,7 +410,7 @@ async fn list_items(
                   (SELECT COUNT(*) FROM concierge_operational_task_checklist_items ci WHERE ci.task_id = t.id AND ci.deleted_at IS NULL AND ci.is_completed) AS checklist_completed,
                   (SELECT COUNT(*) FROM concierge_operational_task_comments cc WHERE cc.task_id = t.id AND cc.deleted_at IS NULL) AS comment_count,
                   (SELECT COUNT(*) FROM concierge_operational_task_attachments attachment WHERE attachment.task_id = t.id AND attachment.deleted_at IS NULL) AS attachment_count,
-                  assignee.name AS assigned_to_name, assigner.name AS assigned_by_name,
+                  assignee.name AS assigned_to_name, assignee.is_active AS assigned_to_active, assigner.name AS assigned_by_name,
                   assigner.role AS assigned_by_role,
                   NULLIF(BTRIM(CONCAT_WS(' ', patient.first_name, patient.last_name)), '') AS patient_name,
                   patient.birth_date AS patient_birth_date,
@@ -4730,6 +4730,9 @@ fn build_item_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "note": row.try_get::<Option<String>, _>("operational_note").unwrap_or_default(),
         "assigned_to": row.try_get::<Uuid, _>("assigned_to").ok()?,
         "assigned_to_name": row.try_get::<String, _>("assigned_to_name").unwrap_or_default(),
+        // A deactivated assignee is flagged; the task is not reassigned
+        // automatically (owner decision 2026-09-28).
+        "assigned_to_active": row.try_get::<bool, _>("assigned_to_active").unwrap_or(true),
         "assigned_by": row.try_get::<Uuid, _>("assigned_by").ok()?,
         "assigned_by_name": row.try_get::<String, _>("assigned_by_name").unwrap_or_default(),
         "assigned_by_role": row.try_get::<String, _>("assigned_by_role").unwrap_or_default(),

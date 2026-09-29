@@ -2,6 +2,11 @@
 //! It does not delete: it opens an erasure request in the compliance register
 //! and tells CEO and IT, because retention holds (open invoices, pending
 //! claims) are a human decision before the record is anonymised.
+//!
+//! A file is left alone while the clinical documentation still has to be kept
+//! (`clinical_retention_until` in the future), and once a sweep-raised request
+//! was rejected for the current inactive period: the decision stands until the
+//! file is reactivated and closed again (a later `inactive_since`).
 
 use chrono::{Duration, Utc};
 use serde_json::json;
@@ -63,11 +68,20 @@ pub async fn flag_expired_patient_files(
              AND p.inactive_since IS NOT NULL
              AND p.inactive_since < now() - make_interval(days => $2::int)
              AND (p.legal_status->>'anonymized_at') IS NULL
+             AND (p.clinical_retention_until IS NULL OR p.clinical_retention_until <= now())
              AND NOT EXISTS (
                  SELECT 1 FROM patient_privacy_requests pr
                  WHERE pr.patient_id = p.id
                    AND pr.request_type = 'erasure'
                    AND pr.status IN ('requested', 'retention_hold', 'approved', 'completed')
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_privacy_requests rejected
+                 WHERE rejected.patient_id = p.id
+                   AND rejected.request_type = 'erasure'
+                   AND rejected.status = 'rejected'
+                   AND rejected.context->>'origin' = 'retention_sweep'
+                   AND COALESCE(rejected.reviewed_at, rejected.updated_at) >= p.inactive_since
              )
            LIMIT 200
            RETURNING patient_id"#,

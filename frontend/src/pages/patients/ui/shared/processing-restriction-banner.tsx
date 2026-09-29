@@ -65,6 +65,7 @@ export function ProcessingRestrictionBanner({
         <div className="min-w-0 flex-1">
           <p className="font-semibold">{l("patients_restriction_title")}</p>
           <p className="text-sm">{l("patients_restriction_body")}</p>
+          <p className="mt-1 text-sm">{l("patients_restricted_blocks_new_work")}</p>
           {restriction.since ? (
             <p className="mt-1 text-xs text-amber-800">
               {l("patients_restriction_since")}: {formatDateTime(restriction.since)}

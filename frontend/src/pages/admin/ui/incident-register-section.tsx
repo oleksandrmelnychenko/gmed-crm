@@ -53,6 +53,8 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
     risk: "",
     authorityReference: "",
     noNotificationReason: "",
+    subjectsReason: "",
+    reopenReason: "",
     measures: "",
   });
 
@@ -106,6 +108,8 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
       risk: incident.risk_assessment,
       authorityReference: incident.authority_reference ?? "",
       noNotificationReason: incident.no_notification_reason ?? "",
+      subjectsReason: incident.subjects_no_notification_reason ?? "",
+      reopenReason: "",
       measures: incident.measures_taken ?? "",
     });
   };
@@ -119,7 +123,13 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
         risk_assessment: decision.risk,
         authority_reference: decision.authorityReference,
         no_notification_reason: decision.noNotificationReason,
+        subjects_no_notification_reason: decision.subjectsReason,
         measures_taken: decision.measures,
+        // Only sent when a closed case is moved back to an open status.
+        reopen_reason:
+          incident.status === "closed" && decision.status !== "closed"
+            ? decision.reopenReason.trim()
+            : undefined,
         ...extra,
       });
       await load();
@@ -231,6 +241,12 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
                   <span className="text-sm font-medium">{incident.title}</span>
                   <Badge className="bg-slate-500/15 text-slate-700">{l(`incidents_status_${incident.status}`)}</Badge>
                   <Badge className="bg-slate-500/15 text-slate-700">{l(`incidents_severity_${incident.severity}`)}</Badge>
+                  {incident.authority_notified_late ? (
+                    <Badge className="bg-red-500/15 text-red-700">{l("incidents_notified_late")}</Badge>
+                  ) : null}
+                  {incident.reopened_at ? (
+                    <Badge className="bg-amber-500/15 text-amber-800">{l("incidents_reopened")}</Badge>
+                  ) : null}
                   {incident.notification_decision_documented ? (
                     <Badge className="bg-emerald-500/15 text-emerald-700">{l("incidents_decision_documented")}</Badge>
                   ) : incident.authority_deadline_missed ? (
@@ -300,6 +316,46 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
                           onChange={(event) => setDecision({ ...decision, noNotificationReason: event.target.value })}
                         />
                       </Field>
+                      {decision.risk === "high_risk" ? (
+                        <Field
+                          label={l("incidents_field_subjects_no_notification_reason")}
+                          htmlFor={`incident-subjects-reason-${incident.id}`}
+                          className="md:col-span-2"
+                        >
+                          <Input
+                            id={`incident-subjects-reason-${incident.id}`}
+                            className="h-9 rounded-lg bg-field"
+                            value={decision.subjectsReason}
+                            onChange={(event) => setDecision({ ...decision, subjectsReason: event.target.value })}
+                          />
+                        </Field>
+                      ) : null}
+                      {decision.risk === "high_risk" &&
+                      decision.status === "closed" &&
+                      !incident.subjects_notified_at &&
+                      decision.subjectsReason.trim() === "" ? (
+                        <p className="text-xs text-red-700 md:col-span-2">{l("incidents_subjects_required")}</p>
+                      ) : null}
+                      {incident.status === "closed" && decision.status !== "closed" ? (
+                        <Field
+                          label={l("incidents_field_reopen_reason")}
+                          htmlFor={`incident-reopen-${incident.id}`}
+                          className="md:col-span-2"
+                          required
+                        >
+                          <Input
+                            id={`incident-reopen-${incident.id}`}
+                            className="h-9 rounded-lg bg-field"
+                            value={decision.reopenReason}
+                            onChange={(event) => setDecision({ ...decision, reopenReason: event.target.value })}
+                          />
+                        </Field>
+                      ) : null}
+                      {incident.reopen_reason ? (
+                        <p className="text-xs text-muted-foreground md:col-span-2">
+                          {l("incidents_reopened")}: {dateTime(incident.reopened_at ?? null)} · {incident.reopen_reason}
+                        </p>
+                      ) : null}
                       <Field label={l("incidents_field_measures")} htmlFor={`incident-measures-${incident.id}`} className="md:col-span-2">
                         <textarea
                           id={`incident-measures-${incident.id}`}
@@ -310,7 +366,17 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
                       </Field>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button type="button" className="h-9 rounded-lg" disabled={busy} onClick={() => void saveDecision(incident)}>
+                      <Button
+                        type="button"
+                        className="h-9 rounded-lg"
+                        disabled={
+                          busy ||
+                          (incident.status === "closed" &&
+                            decision.status !== "closed" &&
+                            decision.reopenReason.trim().length < 10)
+                        }
+                        onClick={() => void saveDecision(incident)}
+                      >
                         {l("incidents_save")}
                       </Button>
                       {!incident.authority_notified_at ? (

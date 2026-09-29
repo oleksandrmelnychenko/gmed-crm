@@ -622,9 +622,10 @@ async fn reviewed_portal_feedback_flows_back_into_patient_history() {
     let items = history.as_array().expect("feedback history");
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["status"], "reviewed");
-    assert_eq!(
-        items[0]["review_note"],
-        "Reviewed with the clinic and no follow-up is needed."
+    // The review note is the team's internal follow-up (owner decision 2026-09-28).
+    assert!(
+        items[0].get("review_note").is_none(),
+        "patient portal history must not expose the review note"
     );
     assert_eq!(
         items[0]["reviewed_by_name"],

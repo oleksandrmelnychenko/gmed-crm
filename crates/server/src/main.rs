@@ -84,6 +84,7 @@ async fn main() {
         app_state.clone(),
     );
     gmed_server::services::interpreter_booking_links::spawn_expiry_sweeper(app_state.clone());
+    gmed_server::services::compliance_digest::spawn_compliance_digest_scheduler(app_state.clone());
     gmed_server::services::bfarm_rote_hand::spawn_bfarm_rote_hand_scheduler(app_state.clone());
     gmed_server::services::gba_ais::initialize_gba_ais_connector(
         &app_state,

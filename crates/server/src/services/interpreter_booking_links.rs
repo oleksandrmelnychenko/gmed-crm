@@ -11,7 +11,10 @@
 //! patient access check (`revoked_at IS NULL`) treats it as no access.
 //!
 //! A manual assignment by a manager (`source = 'manual'`) is never granted or
-//! ended here. Appointment-level access that comes from the booking itself
+//! ended here. Neither is a link a manager revoked by hand
+//! (`manually_revoked_at = revoked_at`): a booking or the interpreter's
+//! response does not grant it back; a manager's new assignment does (owner
+//! decision 2026-09-28). Appointment-level access that comes from the booking itself
 //! (opening the booked visit, submitting its interpreter report) does not
 //! depend on the link.
 //!
@@ -111,6 +114,8 @@ pub async fn grant_in_tx(
             continue;
         }
         // ON CONFLICT locks an existing row even when it is left unchanged.
+        // A link a manager revoked by hand stays revoked (its current
+        // revocation is the manual one) until a manager assigns it again.
         let granted = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO patient_assignments (patient_id, user_id, assigned_by, source)
                VALUES ($1, $2, $3, 'interpreter_booking')
@@ -118,8 +123,11 @@ pub async fn grant_in_tx(
                SET revoked_at = NULL,
                    assigned_by = EXCLUDED.assigned_by,
                    assigned_at = now(),
-                   source = 'interpreter_booking'
+                   source = 'interpreter_booking',
+                   revoked_by = NULL
                WHERE patient_assignments.revoked_at IS NOT NULL
+                 AND patient_assignments.manually_revoked_at IS DISTINCT FROM
+                     patient_assignments.revoked_at
                RETURNING id"#,
         )
         .bind(patient_id)

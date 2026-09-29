@@ -35,8 +35,26 @@ export function unlockAdminUser(userId: string) {
   return postJson(`/users/${userId}/unlock`);
 }
 
+/** What deactivating a staff member left behind: patient links are revoked,
+ * open work stays with the account and is only listed as a warning. */
+export type UserDeactivationResult = {
+  ok: boolean;
+  revoked_patient_assignments: number;
+  open_tasks: Array<{ id: string; title: string; status: string; due_date: string | null }>;
+  owned_appointments: Array<{
+    id: string;
+    title: string;
+    date: string;
+    time_start: string | null;
+    status: string;
+    appointment_type: string;
+  }>;
+};
+
 export function setAdminUserActive(userId: string, isActive: boolean) {
-  return postJson(isActive ? `/users/${userId}/activate` : `/users/${userId}/deactivate`);
+  return postJson<UserDeactivationResult | null>(
+    isActive ? `/users/${userId}/activate` : `/users/${userId}/deactivate`,
+  );
 }
 
 export async function fetchAdminSettingsWorkspace<
@@ -329,6 +347,11 @@ export type SecurityIncident = {
   no_notification_reason: string | null;
   notification_decision_documented: boolean;
   authority_deadline_missed: boolean;
+  authority_notified_late?: boolean;
+  subjects_notification_required?: boolean;
+  subjects_no_notification_reason?: string | null;
+  reopened_at?: string | null;
+  reopen_reason?: string | null;
   subjects_notified_at: string | null;
   affected_subjects_count: number | null;
   data_categories: string[];

@@ -101,7 +101,11 @@ struct PrivacyRequestStepRequest {
 #[derive(Deserialize)]
 struct ReviewPrivacyRequestRequest {
     action: String,
+    /// Internal review note; never shown to the data subject.
     note: Option<String>,
+    /// Reason told to the data subject (Art. 12 Abs. 4 DSGVO): required to
+    /// reject a request and to revise an approved one; shown in the portal.
+    reason: Option<String>,
     retention_days: Option<i64>,
 }
 
@@ -112,6 +116,37 @@ struct PrivacyRequestMeta {
     source: String,
     status: String,
     reason: Option<String>,
+    identity_verified: bool,
+}
+
+/// Length of a reason told to the data subject or recorded for a revision.
+const MIN_DECISION_REASON_CHARS: usize = 10;
+const MAX_DECISION_REASON_CHARS: usize = 2000;
+
+/// Requests the data subject files themselves are executed only after a
+/// recorded identity check for the types that disclose or delete the record
+/// (Art. 12 Abs. 6 DSGVO): access, portability and erasure.
+pub(crate) fn privacy_request_requires_identity_verification(
+    source: &str,
+    request_type: &str,
+) -> bool {
+    source == "patient_request" && matches!(request_type, "access" | "portability" | "erasure")
+}
+
+/// The reason of a rejection or revision, trimmed and bounded.
+#[allow(clippy::result_large_err)]
+fn decision_reason(value: Option<&str>) -> Result<Option<String>, axum::response::Response> {
+    let Some(reason) = normalize_optional(value) else {
+        return Ok(None);
+    };
+    let chars = reason.chars().count();
+    if !(MIN_DECISION_REASON_CHARS..=MAX_DECISION_REASON_CHARS).contains(&chars) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The reason must be between 10 and 2000 characters",
+        ));
+    }
+    Ok(Some(reason))
 }
 
 #[derive(Deserialize, Default)]
@@ -1304,6 +1339,30 @@ async fn upsert_patient_consent(
             );
         }
     };
+    // A withdrawn consent acts at once on what it covered (Art. 7 Abs. 3 DSGVO):
+    // the open shares that relied on it are revoked with the consent.
+    let revoked_shares = if action == "revoke" {
+        match revoke_shares_covered_by_consent(
+            &mut tx,
+            patient_id,
+            &consent_type,
+            auth.user_id,
+            happened_at,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_id, "revoke shares of a withdrawn consent");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save patient consent",
+                );
+            }
+        }
+    } else {
+        RevokedConsentShares::default()
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_id, "commit patient consent");
         return err(
@@ -1327,8 +1386,26 @@ async fn upsert_patient_consent(
             "note": note,
             "closed_active_rows": closed_active_rows,
             "expires_at": expires_at.as_ref().map(|value| value.to_rfc3339()),
+            "revoked_share_count": revoked_shares.share_ids.len(),
+            "third_party_sharing_revoked": revoked_shares.third_party_sharing_revoked,
         }),
     ));
+    if !revoked_shares.share_ids.is_empty() {
+        state.audit_sender.try_send(audit::domain_event(
+            "revoke_document_share_bundle",
+            Some(auth.user_id),
+            "patient",
+            Some(patient_id),
+            json!({
+                "mode": "consent_revoked",
+                "consent_type": consent_type,
+                "revoked_share_count": revoked_shares.share_ids.len(),
+                "revoked_share_ids": revoked_shares.share_ids,
+                "revoked_document_ids": revoked_shares.document_ids,
+                "revoked_at": happened_at.to_rfc3339(),
+            }),
+        ));
+    }
 
     crate::realtime::publish_patient_event(
         &state,
@@ -1360,9 +1437,94 @@ async fn upsert_patient_consent(
             "revoked_at": created.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("revoked_at").unwrap_or_default().map(|value| value.to_rfc3339()),
             "note": created.try_get::<Option<serde_json::Value>, _>("context").unwrap_or_default().and_then(|value| value.get("note").cloned()),
             "created_at": created.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            "revoked_share_count": revoked_shares.share_ids.len(),
+            "third_party_sharing_revoked": revoked_shares.third_party_sharing_revoked,
         })),
     )
         .into_response()
+}
+
+#[derive(Default)]
+struct RevokedConsentShares {
+    share_ids: Vec<Uuid>,
+    document_ids: Vec<Uuid>,
+    third_party_sharing_revoked: bool,
+}
+
+/// Revokes the open document shares a withdrawn consent covered, in the
+/// consent's transaction:
+/// - a channel consent (`document_share_<channel>`): the patient's own shares
+///   over that channel;
+/// - a third-party consent (see `THIRD_PARTY_SHARING_CONSENTS`): every open
+///   provider share, and `third_party_sharing_revoked_at` is recorded so no new
+///   provider share is made until the patient consents again.
+async fn revoke_shares_covered_by_consent(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    consent_type: &str,
+    actor_id: Uuid,
+    revoked_at: DateTime<Utc>,
+) -> Result<RevokedConsentShares, sqlx::Error> {
+    let mut revoked = RevokedConsentShares::default();
+    let rows = if let Some(channel) = consent_type.strip_prefix("document_share_") {
+        sqlx::query(
+            r#"UPDATE document_shares ds
+               SET revoked_at = $3
+               FROM documents d, users recipient
+               WHERE ds.document_id = d.id
+                 AND d.patient_id = $1
+                 AND ds.revoked_at IS NULL
+                 AND ds.channel = $2
+                 AND recipient.id = ds.shared_with_user_id
+                 AND recipient.role = 'patient'
+               RETURNING ds.id, ds.document_id"#,
+        )
+        .bind(patient_id)
+        .bind(channel)
+        .bind(revoked_at)
+        .fetch_all(&mut **tx)
+        .await?
+    } else if super::documents::THIRD_PARTY_SHARING_CONSENTS.contains(&consent_type) {
+        sqlx::query(
+            r#"UPDATE patients
+               SET legal_status = COALESCE(legal_status, '{}'::jsonb) || $2,
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(patient_id)
+        .bind(json!({
+            "third_party_sharing_revoked_at": revoked_at.to_rfc3339(),
+            "third_party_sharing_revoked_by": actor_id.to_string(),
+            "third_party_sharing_revoked_consent": consent_type,
+        }))
+        .execute(&mut **tx)
+        .await?;
+        revoked.third_party_sharing_revoked = true;
+        sqlx::query(
+            r#"UPDATE document_shares ds
+               SET revoked_at = $2
+               FROM documents d
+               WHERE ds.document_id = d.id
+                 AND d.patient_id = $1
+                 AND ds.revoked_at IS NULL
+                 AND ds.shared_with_provider_id IS NOT NULL
+               RETURNING ds.id, ds.document_id"#,
+        )
+        .bind(patient_id)
+        .bind(revoked_at)
+        .fetch_all(&mut **tx)
+        .await?
+    } else {
+        Vec::new()
+    };
+    for row in &rows {
+        revoked.share_ids.push(row.try_get("id")?);
+        let document_id: Uuid = row.try_get("document_id")?;
+        if !revoked.document_ids.contains(&document_id) {
+            revoked.document_ids.push(document_id);
+        }
+    }
+    Ok(revoked)
 }
 
 async fn create_patient_privacy_request(
@@ -1503,7 +1665,7 @@ async fn list_patient_privacy_requests(
                   rv.name AS reviewed_by_name,
                   ex.name AS executed_by_name,
                   pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                  pr.retention_until, pr.review_note, pr.requested_at,
+                  pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
                   pr.reviewed_at, pr.executed_at, pr.context
            FROM patient_privacy_requests pr
            JOIN patients p ON p.id = pr.patient_id
@@ -1552,7 +1714,7 @@ async fn list_privacy_requests(
                       rv.name AS reviewed_by_name,
                       ex.name AS executed_by_name,
                       pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                      pr.retention_until, pr.review_note, pr.requested_at,
+                      pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
                       pr.reviewed_at, pr.executed_at, pr.context
                FROM patient_privacy_requests pr
                JOIN patients p ON p.id = pr.patient_id
@@ -1580,7 +1742,7 @@ async fn list_privacy_requests(
                       rv.name AS reviewed_by_name,
                       ex.name AS executed_by_name,
                       pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                      pr.retention_until, pr.review_note, pr.requested_at,
+                      pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
                       pr.reviewed_at, pr.executed_at, pr.context
                FROM patient_privacy_requests pr
                JOIN patients p ON p.id = pr.patient_id
@@ -1639,16 +1801,52 @@ async fn review_privacy_request(
         );
     }
 
-    if request.status == "approved" {
-        return err(StatusCode::CONFLICT, "Privacy request is already approved");
-    }
-
     let action = match normalize_privacy_review_action(&body.action) {
         Ok(value) => value,
         Err(response) => return response,
     };
+    let reason = match decision_reason(body.reason.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+
+    // An approved request is only revised, never approved twice: CEO or IT
+    // admin may still reject it or put it on hold (for example when a legal
+    // retention duty turns up), and must say why.
+    let revises_approval = request.status == "approved";
+    if revises_approval {
+        if action == "approve" {
+            return err(StatusCode::CONFLICT, "Privacy request is already approved");
+        }
+        if !auth.can(Capability::AdminCompliance) {
+            return err(
+                StatusCode::FORBIDDEN,
+                "Only CEO or IT admin can revise an approved privacy request",
+            );
+        }
+        if reason.is_none() {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Revising an approved request needs a reason of at least 10 characters",
+            );
+        }
+    }
+    // Art. 12 Abs. 4 DSGVO: the data subject is told why a request is refused.
+    if action == "reject" && reason.is_none() {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Rejecting a request needs a reason of at least 10 characters for the data subject",
+        );
+    }
+
     let reviewed_at = Utc::now();
     let review_note = normalize_optional(body.note.as_deref());
+    if review_note
+        .as_deref()
+        .is_some_and(|value| value.chars().count() > MAX_DECISION_REASON_CHARS)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "note too long");
+    }
     let (next_status, retention_until) = match action.as_str() {
         "approve" => ("approved", None),
         "reject" => ("rejected", None),
@@ -1663,7 +1861,21 @@ async fn review_privacy_request(
         }
         _ => unreachable!(),
     };
+    // Approving clears an earlier hold reason; it no longer applies.
+    let next_decision_reason = if action == "approve" {
+        None
+    } else {
+        reason.clone()
+    };
 
+    let decision_entry = json!({
+        "action": action,
+        "from_status": request.status,
+        "to_status": next_status,
+        "reason": next_decision_reason,
+        "by": auth.user_id,
+        "at": reviewed_at.to_rfc3339(),
+    });
     let review_context = json!({
         "review_action": action,
         "reviewed_at": reviewed_at.to_rfc3339(),
@@ -1674,12 +1886,18 @@ async fn review_privacy_request(
         r#"UPDATE patient_privacy_requests
            SET status = $2,
                retention_until = $3,
-               review_note = $4,
+               review_note = COALESCE($4, review_note),
                reviewed_by = $5,
                reviewed_at = $6,
+               decision_reason = $8,
                updated_at = now(),
-               context = COALESCE(context, '{}'::jsonb) || $7
-           WHERE id = $1 AND status IN ('requested', 'retention_hold')"#,
+               context = (COALESCE(context, '{}'::jsonb) || $7)
+                         || jsonb_build_object(
+                                'decision_history',
+                                COALESCE(context->'decision_history', '[]'::jsonb)
+                                    || jsonb_build_array($9::jsonb)
+                            )
+           WHERE id = $1 AND status = $10"#,
     )
     .bind(request_id)
     .bind(next_status)
@@ -1688,6 +1906,9 @@ async fn review_privacy_request(
     .bind(auth.user_id)
     .bind(reviewed_at)
     .bind(review_context)
+    .bind(next_decision_reason.clone())
+    .bind(&decision_entry)
+    .bind(&request.status)
     .execute(&state.db)
     .await;
 
@@ -1710,7 +1931,11 @@ async fn review_privacy_request(
     }
 
     state.audit_sender.try_send(audit::domain_event(
-        "privacy_request_reviewed",
+        if revises_approval {
+            "privacy_request_decision_revised"
+        } else {
+            "privacy_request_reviewed"
+        },
         Some(auth.user_id),
         "patient",
         Some(request.patient_id),
@@ -1720,9 +1945,11 @@ async fn review_privacy_request(
             "source": request.source,
             "reason": request.reason,
             "review_action": action,
+            "previous_status": request.status,
             "status": next_status,
             "retention_until": retention_until.map(|value| value.to_rfc3339()),
             "review_note": review_note,
+            "decision_reason": next_decision_reason,
         }),
     ));
 
@@ -1736,6 +1963,7 @@ async fn review_privacy_request(
             "request_type": request.request_type,
             "source": request.source,
             "review_action": action,
+            "previous_status": request.status,
             "status": next_status,
             "retention_until": retention_until.map(|value| value.to_rfc3339()),
         }),
@@ -1937,6 +2165,17 @@ async fn execute_privacy_request(
         return err(
             StatusCode::FORBIDDEN,
             "Only CEO or IT admin can execute this privacy request type",
+        );
+    }
+
+    // Disclosing or deleting a record on a request the data subject filed
+    // needs a recorded identity check first (method, who, when).
+    if privacy_request_requires_identity_verification(&request.source, &request.request_type)
+        && !request.identity_verified
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Verify and record the requester's identity before executing this request",
         );
     }
 
@@ -2292,7 +2531,8 @@ async fn fetch_privacy_request_meta(
     request_id: Uuid,
 ) -> Result<PrivacyRequestMeta, axum::response::Response> {
     match sqlx::query(
-        r#"SELECT id, patient_id, request_type, source, status, reason
+        r#"SELECT id, patient_id, request_type, source, status, reason,
+                  COALESCE(context, '{}'::jsonb) ? 'identity_verification' AS identity_verified
            FROM patient_privacy_requests
            WHERE id = $1"#,
     )
@@ -2311,6 +2551,7 @@ async fn fetch_privacy_request_meta(
             reason: row
                 .try_get::<Option<String>, _>("reason")
                 .unwrap_or_default(),
+            identity_verified: row.try_get::<bool, _>("identity_verified").unwrap_or(false),
         }),
         Ok(None) => Err(err(StatusCode::NOT_FOUND, "Privacy request not found")),
         Err(e) => {
@@ -2334,7 +2575,7 @@ async fn fetch_privacy_request_payload(
                   rv.name AS reviewed_by_name,
                   ex.name AS executed_by_name,
                   pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                  pr.retention_until, pr.review_note, pr.requested_at,
+                  pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
                   pr.reviewed_at, pr.executed_at, pr.context
            FROM patient_privacy_requests pr
            JOIN patients p ON p.id = pr.patient_id
@@ -3256,6 +3497,10 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
     let due_at = row
         .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("due_at")
         .unwrap_or_default();
+    let source = row.try_get::<String, _>("source").unwrap_or_default();
+    let request_type = row.try_get::<String, _>("request_type").unwrap_or_default();
+    let identity_verification_required =
+        privacy_request_requires_identity_verification(&source, &request_type);
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -3265,13 +3510,16 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "requested_by_name": row.try_get::<String, _>("requested_by_name").unwrap_or_default(),
         "reviewed_by_name": row.try_get::<Option<String>, _>("reviewed_by_name").unwrap_or_default(),
         "executed_by_name": row.try_get::<Option<String>, _>("executed_by_name").unwrap_or_default(),
-        "request_type": row.try_get::<String, _>("request_type").unwrap_or_default(),
-        "source": row.try_get::<String, _>("source").unwrap_or_default(),
+        "request_type": request_type,
+        "source": source,
         "status": row.try_get::<String, _>("status").unwrap_or_default(),
         "reason": row.try_get::<Option<String>, _>("reason").unwrap_or_default(),
         "due_at": due_at.map(|value| value.to_rfc3339()),
         "retention_until": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("retention_until").unwrap_or_default().map(|value| value.to_rfc3339()),
         "review_note": row.try_get::<Option<String>, _>("review_note").unwrap_or_default(),
+        "decision_reason": row.try_get::<Option<String>, _>("decision_reason").unwrap_or_default(),
+        "decision_history": context.get("decision_history").cloned().unwrap_or_else(|| json!([])),
+        "identity_verification_required": identity_verification_required,
         "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         "reviewed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reviewed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "executed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("executed_at").unwrap_or_default().map(|value| value.to_rfc3339()),

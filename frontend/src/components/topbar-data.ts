@@ -3,6 +3,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
+import { uiText } from "@/lib/i18n";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
 export interface Notification {
@@ -67,6 +68,8 @@ export function localizedNotificationCopy(
         .join(" — ") || null,
     };
   }
+  const digestCopy = complianceDigestNotificationCopy(item, lang);
+  if (digestCopy) return digestCopy;
   const overdueSupplierCopy = externalInvoiceOverdueNotificationCopy(item, lang);
   if (overdueSupplierCopy) return overdueSupplierCopy;
   const interpreterCopy = interpreterWorkNotificationCopy(item, lang);
@@ -82,6 +85,52 @@ export function localizedNotificationCopy(
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+type ComplianceDigestBody = {
+  digest_date?: string;
+  privacy?: { overdue?: number; due_soon?: number; due_soon_days?: number };
+  incidents?: { within_deadline?: number; deadline_missed?: number };
+  consents?: { expiring?: number; within_days?: number };
+};
+
+// The daily compliance deadline digest (crates/server/src/services/
+// compliance_digest.rs) stores its counts as JSON; the wording follows the
+// staff language and the date is the German calendar day.
+export function complianceDigestNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind !== "compliance_deadline_digest") return null;
+  const data = parseNotificationBody<ComplianceDigestBody>(item.body) ?? {};
+  const title = `${uiText("digest_title", lang)}${data.digest_date ? ` · ${formatAppDate(data.digest_date)}` : ""}`;
+  const lines: string[] = [];
+  const privacyOverdue = data.privacy?.overdue ?? 0;
+  const privacySoon = data.privacy?.due_soon ?? 0;
+  if (privacyOverdue + privacySoon > 0) {
+    lines.push(
+      uiText("digest_privacy", lang, {
+        overdue: privacyOverdue,
+        soon: privacySoon,
+        days: data.privacy?.due_soon_days ?? 7,
+      }),
+    );
+  }
+  const within = data.incidents?.within_deadline ?? 0;
+  const missed = data.incidents?.deadline_missed ?? 0;
+  if (within + missed > 0) {
+    lines.push(uiText("digest_incidents", lang, { within, missed }));
+  }
+  const expiring = data.consents?.expiring ?? 0;
+  if (expiring > 0) {
+    lines.push(
+      uiText("digest_consents", lang, {
+        count: expiring,
+        days: data.consents?.within_days ?? 30,
+      }),
+    );
+  }
+  return { title, body: lines.join(" · ") || null };
 }
 
 // The supplier-invoice overdue scheduler (crates/server/src/routes/orders.rs)
@@ -545,6 +594,11 @@ export function notificationHrefForRole(item: Notification, role: string) {
     }
   }
 
+  // The daily deadline digest opens the DSGVO register (requests, consents,
+  // incidents are all reachable from there).
+  if (item.entity_type === "compliance_digest") {
+    return role === "ceo" || role === "it_admin" ? "/admin/compliance" : null;
+  }
   if (!item.entity_id) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;

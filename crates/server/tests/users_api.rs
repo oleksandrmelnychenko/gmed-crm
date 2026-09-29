@@ -690,7 +690,7 @@ async fn last_active_ceo_cannot_be_deactivated_or_demoted() {
         json!(null),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     // `admin` is now the only active CEO: demotion is refused and rolled back.
     let (status, body) = json_request(
@@ -725,7 +725,7 @@ async fn last_active_ceo_cannot_be_deactivated_or_demoted() {
         json!(null),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
 
     let third_ceo = seed_user(&pool, "users-api-third-ceo", "ceo").await;
     sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
@@ -849,7 +849,7 @@ async fn it_admin_manages_users_but_never_the_ceo() {
         json!(null),
     )
     .await;
-    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (status, body) = json_request(
         &app,
         "POST",

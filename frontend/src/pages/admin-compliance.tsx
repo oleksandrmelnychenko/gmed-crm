@@ -31,6 +31,7 @@ import { useAuth } from "@/lib/auth";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
+  uiText,
   useLang,
   type TranslationKey,
   type Translations,
@@ -89,6 +90,8 @@ interface PrivacyRequestRecord {
   due_at: string | null;
   retention_until: string | null;
   review_note?: string | null;
+  decision_reason?: string | null;
+  identity_verification_required?: boolean;
   requested_at: string;
   reviewed_at: string | null;
   executed_at: string | null;
@@ -233,9 +236,14 @@ function recordSummaryLabel(summary: RecordSummary | null | undefined, t: Transl
 }
 
 function privacyNotesLabel(record: PrivacyRequestRecord) {
-  const parts = [record.reason?.trim(), record.review_note?.trim()].filter(
-    Boolean,
-  );
+  const decisionReason = record.decision_reason?.trim();
+  const parts = [
+    record.reason?.trim(),
+    decisionReason
+      ? `${uiText("privacy_decision_reason_label")}: ${decisionReason}`
+      : undefined,
+    record.review_note?.trim(),
+  ].filter(Boolean);
   return parts.length > 0 ? parts.join(" / ") : "\u2014";
 }
 
@@ -475,6 +483,8 @@ function useAdminCompliancePageContent() {
     }
   }, []);
 
+  const [decisionReason, setDecisionReason] = useState("");
+  const [reviewNote, setReviewNote] = useState("");
   const [patientOptions, setPatientOptions] = useState<
     Array<{ id: string; label: string }>
   >([]);
@@ -588,7 +598,15 @@ function useAdminCompliancePageContent() {
     setActionError("");
 
     try {
-      await reviewCompliancePrivacyRequest(requestId, { action });
+      // The reason is what the data subject is told (Art. 12 Abs. 4 DSGVO);
+      // the note stays internal.
+      await reviewCompliancePrivacyRequest(requestId, {
+        action,
+        reason: action === "approve" ? undefined : decisionReason.trim() || undefined,
+        note: reviewNote.trim() || undefined,
+      });
+      setDecisionReason("");
+      setReviewNote("");
 
       await Promise.all([
         loadPrivacyQueue(),
@@ -639,6 +657,25 @@ function useAdminCompliancePageContent() {
       setPrivacyActionBusy(null);
     }
   };
+
+  // Open requests are decided by the register roles; an approved one is
+  // revised (hold / reject with a reason) only by CEO and IT admin.
+  const canDecide = (record: PrivacyRequestRecord) =>
+    record.status === "requested" ||
+    record.status === "retention_hold" ||
+    (record.status === "approved" &&
+      (user?.role === "ceo" || user?.role === "it_admin"));
+  const reasonGiven = decisionReason.trim().length >= 10;
+  // The steps panel reloads the queue after recording the identity check.
+  const latestReviewRecord = reviewSheetRecord
+    ? (privacyQueue.find((record) => record.id === reviewSheetRecord.id) ??
+      patientPrivacyRequests.find((record) => record.id === reviewSheetRecord.id) ??
+      reviewSheetRecord)
+    : null;
+  const identityMissing = Boolean(
+    latestReviewRecord?.identity_verification_required &&
+      !latestReviewRecord.identity_verification,
+  );
 
   const reviewSheetImpactSummary = useMemo(() => {
     if (!reviewSheetRecord) {
@@ -1189,6 +1226,68 @@ function useAdminCompliancePageContent() {
                       </Banner>
                     ) : null}
 
+                    {canDecide(reviewSheetRecord) ? (
+                      <div className="space-y-2">
+                        {reviewSheetRecord.status === "approved" ? (
+                          <p className="text-xs text-muted-foreground">{uiText("privacy_revise_hint")}</p>
+                        ) : null}
+                        <Field
+                          label={uiText("privacy_decision_reason")}
+                          htmlFor="privacy-decision-reason"
+                        >
+                          <textarea
+                            id="privacy-decision-reason"
+                            value={decisionReason}
+                            onChange={(event) => setDecisionReason(event.target.value)}
+                            rows={3}
+                            maxLength={2000}
+                            className={textareaClass}
+                          />
+                        </Field>
+                        <p className="text-xs text-muted-foreground">{uiText("privacy_decision_reason_hint")}</p>
+                        <Field label={uiText("privacy_internal_note")} htmlFor="privacy-review-note">
+                          <textarea
+                            id="privacy-review-note"
+                            value={reviewNote}
+                            onChange={(event) => setReviewNote(event.target.value)}
+                            rows={2}
+                            maxLength={2000}
+                            className={textareaClass}
+                          />
+                        </Field>
+                      </div>
+                    ) : null}
+
+                    {reviewSheetRecord.status === "approved" && canDecide(reviewSheetRecord) ? (
+                      <div className="flex flex-wrap gap-2">
+                        {(["hold", "reject"] as const).map((action) => (
+                          <Button
+                            key={action}
+                            type="button"
+                            variant="outline"
+                            className="h-9 rounded-lg"
+                            disabled={privacyActionBusy !== null || !reasonGiven}
+                            onClick={async () => {
+                              const ok = await handleReviewPrivacyRequest(
+                                reviewSheetRecord.id,
+                                reviewSheetRecord.patient_id,
+                                action,
+                              );
+                              if (ok) {
+                                setReviewSheetRecord(null);
+                              }
+                            }}
+                          >
+                            {privacyActionBusy === `${reviewSheetRecord.id}:${action}`
+                              ? t.compliance_saving
+                              : action === "hold"
+                                ? t.compliance_hold
+                                : t.compliance_reject}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+
                     {reviewSheetRecord.status === "requested" ||
                     reviewSheetRecord.status === "retention_hold" ? (
                       <div className="flex flex-wrap gap-2">
@@ -1235,7 +1334,7 @@ function useAdminCompliancePageContent() {
                           type="button"
                           variant="outline"
                           className="h-9 rounded-lg"
-                          disabled={privacyActionBusy !== null}
+                          disabled={privacyActionBusy !== null || !reasonGiven}
                           onClick={async () => {
                             const ok = await handleReviewPrivacyRequest(
                               reviewSheetRecord.id,
@@ -1254,6 +1353,10 @@ function useAdminCompliancePageContent() {
                       </div>
                     ) : null}
 
+                    {reviewSheetRecord.status === "approved" && identityMissing ? (
+                      <Banner tone="warning">{uiText("privacy_identity_required")}</Banner>
+                    ) : null}
+
                     {reviewSheetRecord.status === "approved" &&
                     canExecutePrivacyRequest(
                       user?.role,
@@ -1267,7 +1370,7 @@ function useAdminCompliancePageContent() {
                             : "outline"
                         }
                         className="h-9 rounded-lg"
-                        disabled={privacyActionBusy !== null}
+                        disabled={privacyActionBusy !== null || identityMissing}
                         onClick={async () => {
                           const ok = await handleExecutePrivacyRequest(
                             reviewSheetRecord.id,

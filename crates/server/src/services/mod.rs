@@ -2,6 +2,7 @@ pub mod assignment_eligibility;
 pub mod bfarm_rote_hand;
 pub mod bmp_import;
 pub mod concierge_service_tasks;
+pub mod compliance_digest;
 pub mod drug_matching;
 pub mod gba_ais;
 pub mod interpreter_booking_links;

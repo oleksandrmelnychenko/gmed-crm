@@ -128,7 +128,9 @@ async fn list_my_privacy_requests(
 
     match sqlx::query(
         r#"SELECT id, request_type, source, status, reason, due_at, retention_until,
-                  requested_at, reviewed_at, executed_at
+                  requested_at, reviewed_at, executed_at,
+                  CASE WHEN status IN ('rejected', 'retention_hold') THEN decision_reason END
+                      AS decision_reason
            FROM patient_privacy_requests
            WHERE patient_id = $1
            ORDER BY created_at DESC"#,
@@ -151,6 +153,9 @@ async fn list_my_privacy_requests(
                         "requested_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("requested_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                         "reviewed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reviewed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
                         "executed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("executed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
+                        // Art. 12 Abs. 4 DSGVO: why the request was refused or
+                        // put on hold. The internal review note is not shown.
+                        "decision_reason": row.try_get::<Option<String>, _>("decision_reason").unwrap_or_default(),
                     })
                 })
                 .collect::<Vec<_>>(),

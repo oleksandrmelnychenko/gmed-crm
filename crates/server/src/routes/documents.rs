@@ -9864,6 +9864,60 @@ async fn has_active_patient_share_consent(
     })
 }
 
+/// Consents whose revocation withdraws the permission to pass the patient's
+/// documents to third parties (providers). Revoking one of them revokes the
+/// open provider shares and records `third_party_sharing_revoked_at`.
+pub(crate) const THIRD_PARTY_SHARING_CONSENTS: [&str; 3] = [
+    "dsgvo_data_transfer",
+    "third_party_sharing",
+    "schweigepflicht_release",
+];
+
+/// After a third-party-sharing revoke (`legal_status.third_party_sharing_revoked_at`)
+/// no document goes to a provider until the patient consents again: a grant of
+/// one of [`THIRD_PARTY_SHARING_CONSENTS`] given after the revoke and still in
+/// force (owner decision 2026-09-28).
+async fn ensure_third_party_sharing_allowed(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let blocked = sqlx::query_scalar::<_, bool>(
+        r#"SELECT (p.legal_status->>'third_party_sharing_revoked_at') IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM consent_records consent
+                      WHERE consent.patient_id = p.id
+                        AND consent.consent_type = ANY($2)
+                        AND consent.granted = true
+                        AND consent.revoked_at IS NULL
+                        AND (consent.expires_at IS NULL OR consent.expires_at > now())
+                        AND consent.granted_at >
+                            (p.legal_status->>'third_party_sharing_revoked_at')::timestamptz
+                  )
+           FROM patients p
+           WHERE p.id = $1"#,
+    )
+    .bind(patient_id)
+    .bind(&THIRD_PARTY_SHARING_CONSENTS[..])
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "check third-party sharing revoke");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to validate third-party sharing consent",
+        )
+    })?
+    .unwrap_or(false);
+    if blocked {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The patient revoked sharing with third parties: documents go to providers again only after a new consent",
+        ));
+    }
+    Ok(())
+}
+
 async fn validate_document_share_target(
     state: &AppState,
     document: &ShareableDocumentContext,
@@ -9875,7 +9929,13 @@ async fn validate_document_share_target(
         // Art. 18 DSGVO: a restricted record is not disclosed to third parties.
         // Handing a document to the patient themselves stays possible.
         if let Some(patient_id) = document.patient_id {
-            super::patients::ensure_patient_processing_not_restricted(state, patient_id).await?;
+            super::patients::ensure_patient_processing_allows(
+                state,
+                patient_id,
+                "sharing the document with a provider",
+            )
+            .await?;
+            ensure_third_party_sharing_allowed(state, patient_id).await?;
         }
         if !is_allowed_provider_share_channel(channel) {
             return Err(err(
@@ -10014,6 +10074,19 @@ async fn validate_document_share_target(
                 "Unsupported share target role",
             ));
         };
+
+        // Art. 18 DSGVO: a restricted record is not passed on inside the
+        // company either (staff, interpreters); the patient still receives it.
+        if role != Role::Patient
+            && let Some(patient_id) = document.patient_id
+        {
+            super::patients::ensure_patient_processing_allows(
+                state,
+                patient_id,
+                "sharing the document with staff or interpreters",
+            )
+            .await?;
+        }
 
         if role == Role::Patient {
             if !is_allowed_patient_share_channel(channel) {
@@ -21361,6 +21434,33 @@ async fn update_document_translation_request(
     let assigned_to_provided = assigned_to_update.is_some();
     let assigned_to = assigned_to_update.flatten();
 
+    // Art. 18 DSGVO: the document of a restricted patient is not handed to a
+    // translator, and no translated document is filed (nor released to the
+    // portal automatically).
+    let current_assignee = request_row
+        .try_get::<Option<Uuid>, _>("assigned_to")
+        .unwrap_or_default();
+    let assigns_translator = assigned_to.is_some() && assigned_to != current_assignee;
+    let files_translation =
+        body.create_translated_document.unwrap_or(false) && next_status == "completed";
+    if (assigns_translator || files_translation)
+        && let Some(patient_id) = request_row
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default()
+        && let Err(resp) = super::patients::ensure_patient_processing_allows(
+            &state,
+            patient_id,
+            if assigns_translator {
+                "assigning the translation"
+            } else {
+                "filing the translated document"
+            },
+        )
+        .await
+    {
+        return resp;
+    }
+
     let requested_language = request_row
         .try_get::<String, _>("requested_language")
         .unwrap_or_else(|_| "en".to_string());
@@ -22205,6 +22305,19 @@ async fn create_document_translation(
             .unwrap_or(0),
     )
     .unwrap_or(i32::MAX);
+    // Art. 18 DSGVO: no translated document is filed for a restricted patient.
+    if let Some(patient_id) = row
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+        && let Err(resp) = super::patients::ensure_patient_processing_allows(
+            &state,
+            patient_id,
+            "filing the translated document",
+        )
+        .await
+    {
+        return resp;
+    }
 
     let translation_id: Uuid = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO document_translations (

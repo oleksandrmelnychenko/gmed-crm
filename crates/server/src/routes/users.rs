@@ -835,47 +835,165 @@ async fn deactivate_user(
         }
     }
 
-    let result = sqlx::query!(
-        "UPDATE users SET is_active = false WHERE id = $1 AND is_active = true",
-        user_id
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, target = %user_id, "Failed to deactivate user");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to deactivate user",
+        )
+    };
+    let mut tx = state.db.begin().await.map_err(failed)?;
+    let deactivated_role = sqlx::query_scalar::<_, String>(
+        "UPDATE users SET is_active = false WHERE id = $1 AND is_active = true RETURNING role",
     )
-    .execute(&state.db)
-    .await;
-
-    match result {
-        Ok(r) if r.rows_affected() > 0 => {
-            crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_deactivated").await;
-            tracing::info!(by = %auth.user_id, target = %user_id, "User deactivated");
-            state.audit_sender.try_send(audit::domain_event(
-                "deactivate_user",
-                Some(auth.user_id),
-                "user",
-                Some(user_id),
-                serde_json::json!({ "sessions_revoked": true }),
-            ));
-            crate::realtime::publish_admin_event(
-                &state,
-                Some(auth.user_id),
-                "user.deactivated",
-                "user",
-                user_id,
-                serde_json::json!({ "user_id": user_id }),
-            )
-            .await;
-            Ok(StatusCode::NO_CONTENT)
-        }
-        Ok(_) => Err(err(
+    .bind(user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(failed)?;
+    let Some(deactivated_role) = deactivated_role else {
+        return Err(err(
             StatusCode::NOT_FOUND,
             "User not found or already deactivated",
-        )),
-        Err(e) => {
-            tracing::error!(error = %e, "Failed to deactivate user");
-            Err(err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to deactivate user",
-            ))
-        }
+        ));
+    };
+
+    // A deactivated staff member keeps no patient access (owner decision
+    // 2026-09-28). Every revoked link is audited with the change; a patient's
+    // own portal link is not a staff assignment and stays.
+    let revoked_patient_ids: Vec<Uuid> = if deactivated_role == "patient" {
+        Vec::new()
+    } else {
+        sqlx::query_scalar(
+            r#"UPDATE patient_assignments
+               SET revoked_at = now(), revoked_by = $2
+               WHERE user_id = $1 AND revoked_at IS NULL
+               RETURNING patient_id"#,
+        )
+        .bind(user_id)
+        .bind(auth.user_id)
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(failed)?
+    };
+    for patient_id in &revoked_patient_ids {
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "revoke_assignment",
+                Some(auth.user_id),
+                "patient",
+                Some(*patient_id),
+                serde_json::json!({
+                    "revoked_user_id": user_id,
+                    "reason": "user_deactivated",
+                }),
+            ),
+        )
+        .await
+        .map_err(failed)?;
     }
+
+    // Open work stays with the account: the admin is warned and the items are
+    // flagged in the work lists, but nothing is reassigned automatically.
+    let open_tasks = sqlx::query(
+        r#"SELECT id, title, status, due_date
+           FROM tasks
+           WHERE assigned_to = $1
+             AND status NOT IN ('completed', 'cancelled')
+             AND deleted_at IS NULL
+             AND archived_at IS NULL
+           ORDER BY due_date NULLS LAST, created_at
+           LIMIT 100"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(failed)?
+    .iter()
+    .map(|row| {
+        serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "title": row.try_get::<String, _>("title").unwrap_or_default(),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "due_date": row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("due_date")
+                .unwrap_or_default()
+                .map(|value| value.to_rfc3339()),
+        })
+    })
+    .collect::<Vec<_>>();
+    let owned_appointments = sqlx::query(
+        r#"SELECT id, title, date, time_start, status, appointment_type
+           FROM appointments
+           WHERE owner_user_id = $1
+             AND status NOT IN ('completed', 'cancelled')
+           ORDER BY date, time_start NULLS FIRST
+           LIMIT 100"#,
+    )
+    .bind(user_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(failed)?
+    .iter()
+    .map(|row| {
+        serde_json::json!({
+            "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+            "title": row.try_get::<String, _>("title").unwrap_or_default(),
+            "date": row
+                .try_get::<chrono::NaiveDate, _>("date")
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            "time_start": row
+                .try_get::<Option<chrono::NaiveTime>, _>("time_start")
+                .unwrap_or_default()
+                .map(|value| value.format("%H:%M").to_string()),
+            "status": row.try_get::<String, _>("status").unwrap_or_default(),
+            "appointment_type": row.try_get::<String, _>("appointment_type").unwrap_or_default(),
+        })
+    })
+    .collect::<Vec<_>>();
+    tx.commit().await.map_err(failed)?;
+
+    crate::auth::tokens::revoke_all_families(&state.db, user_id, "user_deactivated").await;
+    tracing::info!(by = %auth.user_id, target = %user_id, "User deactivated");
+    state.audit_sender.try_send(audit::domain_event(
+        "deactivate_user",
+        Some(auth.user_id),
+        "user",
+        Some(user_id),
+        serde_json::json!({
+            "sessions_revoked": true,
+            "revoked_patient_assignments": revoked_patient_ids.len(),
+            "open_tasks": open_tasks.len(),
+            "owned_open_appointments": owned_appointments.len(),
+        }),
+    ));
+    crate::realtime::publish_admin_event(
+        &state,
+        Some(auth.user_id),
+        "user.deactivated",
+        "user",
+        user_id,
+        serde_json::json!({ "user_id": user_id }),
+    )
+    .await;
+    for patient_id in &revoked_patient_ids {
+        crate::realtime::publish_patient_event_with_targets(
+            &state,
+            Some(auth.user_id),
+            "patient.assignment_revoked",
+            *patient_id,
+            vec![user_id],
+            serde_json::json!({ "revoked_user_id": user_id, "reason": "user_deactivated" }),
+        )
+        .await;
+    }
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "revoked_patient_assignments": revoked_patient_ids.len(),
+        "open_tasks": open_tasks,
+        "owned_appointments": owned_appointments,
+    })))
 }
 
 async fn activate_user(

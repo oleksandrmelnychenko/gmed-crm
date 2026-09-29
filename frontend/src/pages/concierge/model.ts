@@ -158,6 +158,8 @@ export type ConciergeTask = {
   note: string | null;
   assigned_to: string;
   assigned_to_name: string;
+  /** false when the assignee's account was deactivated (not reassigned automatically). */
+  assigned_to_active?: boolean;
   assigned_by: string;
   assigned_by_name: string;
   assigned_by_role?: string | null;
