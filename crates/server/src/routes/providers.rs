@@ -194,6 +194,8 @@ struct ListProvidersQuery {
     internal_rating_gte: Option<f64>,
     linked_patient_id: Option<Uuid>,
     insurance_provider: Option<String>,
+    /// `true` lists the archive (deleted providers) instead of the registry.
+    archived: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -980,6 +982,13 @@ async fn list_providers(
            FROM providers p
            LEFT JOIN providers parent ON parent.id = p.parent_provider_id
            WHERE ($20::bool IS NULL OR p.is_active = $20)
+             -- archived (deleted) providers only in the archive view or the
+             -- explicit "inactive" filter, where they can be reactivated
+             -- (owner decision 2026-09-28)
+             AND (
+                 ($25::bool AND p.archived_at IS NOT NULL)
+                 OR (NOT $25::bool AND (p.archived_at IS NULL OR $20::bool IS NOT DISTINCT FROM false))
+             )
              AND ($20::bool IS NOT NULL OR $1::bool = false OR p.is_active = true)
              AND ($2::text IS NULL OR p.provider_type = $2)
              AND (
@@ -1406,6 +1415,7 @@ async fn list_providers(
     .bind(auth.role == Role::Concierge)
     .bind(&concierge_medical_provider_ids)
     .bind(concierge_has_all_view_allow)
+    .bind(query.archived.unwrap_or(false))
     .fetch_all(&state.db)
     .await
     {
@@ -3710,24 +3720,29 @@ async fn delete_provider(
         return resp;
     }
 
-    match sqlx::query("DELETE FROM providers WHERE id = $1")
-        .bind(provider_id)
-        .execute(&state.db)
-        .await
+    // Deleting archives (owner decision 2026-09-28, Q11): the provider stays
+    // on its appointments, services, shares and invoices, becomes inactive
+    // and disappears from the registry and pickers. `activate` restores it.
+    match sqlx::query(
+        r#"UPDATE providers
+           SET is_active = false,
+               archived_at = COALESCE(archived_at, now()),
+               archived_by = COALESCE(archived_by, $2),
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(provider_id)
+    .bind(auth.user_id)
+    .execute(&state.db)
+    .await
     {
         Ok(result) if result.rows_affected() > 0 => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "Provider not found"),
-        Err(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23503") => {
-            return err(
-                StatusCode::CONFLICT,
-                "Provider is referenced by other records and cannot be deleted",
-            );
-        }
         Err(e) => {
-            tracing::error!(error = %e, provider_id = %provider_id, "Failed to delete provider");
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to archive provider");
             return err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to delete provider",
+                "Failed to archive provider",
             );
         }
     }
@@ -3735,10 +3750,10 @@ async fn delete_provider(
     let _ = audit(
         &state,
         auth.user_id,
-        "delete_provider",
+        "archive_provider",
         "provider",
         Some(provider_id),
-        Some(json!({ "provider_id": provider_id })),
+        Some(json!({ "provider_id": provider_id, "archived": true })),
     )
     .await;
     crate::realtime::publish_provider_event(
@@ -3746,7 +3761,7 @@ async fn delete_provider(
         Some(auth.user_id),
         "provider.deleted",
         provider_id,
-        json!({ "provider_id": provider_id }),
+        json!({ "provider_id": provider_id, "archived": true }),
     )
     .await;
 
@@ -7387,11 +7402,19 @@ async fn toggle_provider_active(
         return resp;
     }
 
-    match sqlx::query("UPDATE providers SET is_active = $2, updated_at = now() WHERE id = $1")
-        .bind(provider_id)
-        .bind(is_active)
-        .execute(&state.db)
-        .await
+    // Activating an archived provider restores it from the archive.
+    match sqlx::query(
+        "UPDATE providers
+         SET is_active = $2,
+             archived_at = CASE WHEN $2 THEN NULL ELSE archived_at END,
+             archived_by = CASE WHEN $2 THEN NULL ELSE archived_by END,
+             updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(provider_id)
+    .bind(is_active)
+    .execute(&state.db)
+    .await
     {
         Ok(result) if result.rows_affected() > 0 => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "Provider not found"),

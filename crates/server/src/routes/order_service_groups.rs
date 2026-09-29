@@ -756,6 +756,13 @@ async fn replace_participants_in_tx(
 
     for participant in participants {
         validate_provider_doctor_in_tx(tx, participant.provider_id, participant.doctor_id).await?;
+        ensure_new_participant_provider_active_in_tx(
+            tx,
+            service_group_id,
+            participant.provider_id,
+            participant.doctor_id,
+        )
+        .await?;
         validate_external_invoice_in_tx(tx, order_id, participant.external_invoice_id).await?;
         let role_label = normalize_optional_text(participant.role_label);
         let quantity_override = optional_decimal(participant.quantity_override);
@@ -858,6 +865,48 @@ fn unique_participant_doctor_ids(
         ids.push(participant.doctor_id);
     }
     Ok(ids)
+}
+
+/// A participant that is new to the group (or moves to another provider)
+/// needs an active, not archived provider; kept participants stay (owner
+/// decision 2026-09-28, Q11).
+async fn ensure_new_participant_provider_active_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    service_group_id: Uuid,
+    provider_id: Uuid,
+    doctor_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    let refused = sqlx::query_scalar::<_, bool>(&format!(
+        r#"SELECT NOT EXISTS(
+                  SELECT 1 FROM order_service_group_participants existing
+                  WHERE existing.service_group_id = $1
+                    AND existing.doctor_id = $3
+                    AND existing.provider_id = $2
+                    AND existing.is_active
+              )
+              AND EXISTS(
+                  SELECT 1 FROM providers p
+                  WHERE p.id = $2 AND NOT {}
+              )"#,
+        crate::services::assignment_eligibility::PROVIDER_ACCEPTS_NEW_WORK_SQL
+    ))
+    .bind(service_group_id)
+    .bind(provider_id)
+    .bind(doctor_id)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, provider_id = %provider_id, "check service group provider status");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate provider")
+    })?;
+    if refused {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            crate::services::assignment_eligibility::INACTIVE_PROVIDER_MESSAGE,
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 async fn validate_provider_doctor_in_tx(

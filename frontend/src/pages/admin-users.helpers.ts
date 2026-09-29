@@ -93,12 +93,19 @@ export type AdminUserRoleKey = (typeof ADMIN_USER_ROLE_KEYS)[number];
 /**
  * Roles the signed-in administrator may assign. Only `users.manage_ceo`
  * (the CEO) may hand out the `ceo` role; the technical admin sees every
- * other role.
+ * other role. The `patient` role is never offered: portal accounts come only
+ * from the patient portal activation (server: `reject_patient_role`). An
+ * existing patient account keeps its role in the edit form (`currentRole`).
  */
 export function getAssignableAdminUserRoles(
   canManageCeo: boolean,
+  currentRole?: string | null,
 ): AdminUserRoleKey[] {
-  return ADMIN_USER_ROLE_KEYS.filter((role) => canManageCeo || role !== "ceo");
+  return ADMIN_USER_ROLE_KEYS.filter(
+    (role) =>
+      (canManageCeo || role !== "ceo") &&
+      (role !== "patient" || currentRole === "patient"),
+  );
 }
 
 export type AdminUserActionTarget = {

@@ -92,6 +92,7 @@ async fn main() {
     .await;
     gmed_server::services::medication_ai_jobs::spawn_medication_ai_worker(app_state.clone());
     spawn_blacklist_purger(app_state.db.clone());
+    gmed_server::auth::tokens::spawn_session_sweeper(app_state.clone());
     spawn_message_rewrap_sweeper(app_state.clone());
     spawn_document_blob_sweeper(app_state.clone());
     spawn_expired_message_sweeper(app_state.clone());

@@ -42,6 +42,7 @@ import {
   type Notification,
   dismissActiveAnnouncement,
   fetchNewLeadQueue,
+  isAnnouncementDismissible,
   type NewLeadQueueItem,
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
@@ -839,16 +840,18 @@ function NotificationPanel({
                       <span className="block truncate font-semibold">{a.title}</span>
                       <span className="mt-0.5 line-clamp-2 opacity-90">{a.message}</span>
                     </button>
-                    <button
-                      type="button"
-                      className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current disabled:opacity-50 motion-reduce:transition-none"
-                      onClick={() => dismissAnnouncement(a.id)}
-                      disabled={dismissingAnnouncementId === a.id}
-                      title={t.common_dismiss}
-                      aria-label={`${t.common_dismiss}: ${a.title}`}
-                    >
-                      <X aria-hidden="true" className="size-3.5" />
-                    </button>
+                    {isAnnouncementDismissible(a) ? (
+                      <button
+                        type="button"
+                        className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-black/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current disabled:opacity-50 motion-reduce:transition-none"
+                        onClick={() => dismissAnnouncement(a.id)}
+                        disabled={dismissingAnnouncementId === a.id}
+                        title={t.common_dismiss}
+                        aria-label={`${t.common_dismiss}: ${a.title}`}
+                      >
+                        <X aria-hidden="true" className="size-3.5" />
+                      </button>
+                    ) : null}
                   </div>
                 );
               })}
@@ -937,17 +940,19 @@ function NotificationPanel({
           <p className="whitespace-pre-wrap break-words text-sm leading-6">
             {selectedAnnouncement?.message}
           </p>
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-              onClick={() => selectedAnnouncement && dismissAnnouncement(selectedAnnouncement.id)}
-              disabled={dismissingAnnouncementId === selectedAnnouncement?.id}
-            >
-              <X aria-hidden="true" className="size-4" />
-              {t.common_dismiss}
-            </button>
-          </div>
+          {selectedAnnouncement && isAnnouncementDismissible(selectedAnnouncement) ? (
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                onClick={() => dismissAnnouncement(selectedAnnouncement.id)}
+                disabled={dismissingAnnouncementId === selectedAnnouncement.id}
+              >
+                <X aria-hidden="true" className="size-4" />
+                {t.common_dismiss}
+              </button>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </>

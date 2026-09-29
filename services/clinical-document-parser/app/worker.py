@@ -45,6 +45,15 @@ WORKER_ID = f"{WORKER_NAME}:{os.getpid()}:{uuid.uuid4().hex[:12]}"
 PUBLIC_ERROR_CODE = "CLINICAL_DOCUMENT_PARSER_FAILED"
 PUBLIC_ERROR_MESSAGE = "The document could not be parsed. Review the file and try again."
 PUBLIC_ERROR = f"{PUBLIC_ERROR_CODE}: {PUBLIC_ERROR_MESSAGE}"
+# A job whose worker never finished (crash, out of memory) is claimed again
+# after its lease; after this many claims it fails instead of looping forever
+# (owner decision 2026-09-28, Q10).
+MAX_ATTEMPTS = 3
+ATTEMPTS_EXHAUSTED_CODE = "CLINICAL_DOCUMENT_PARSER_ATTEMPTS_EXHAUSTED"
+ATTEMPTS_EXHAUSTED_ERROR = (
+    f"{ATTEMPTS_EXHAUSTED_CODE}: Parsing stopped after {MAX_ATTEMPTS} attempts without a result. "
+    "Check the file (size, pages, scan quality) and retry or rescan it."
+)
 LOW_OCR_WARNING = "Low-confidence OCR evidence requires manual review."
 INCOMPLETE_OCR_WARNING = (
     "OCR did not finish for every page; all proposed clinical facts require manual review."
@@ -83,6 +92,24 @@ def claim_job(connection: Any) -> dict[str, Any] | None:
     from psycopg.rows import dict_row
 
     with connection.transaction(), connection.cursor(row_factory=dict_row) as cursor:
+        # Jobs whose lease ran out after MAX_ATTEMPTS claims fail for good.
+        cursor.execute(
+            """
+            UPDATE clinical_document_imports
+            SET status = 'failed', error_message = %s, worker_id = NULL, locked_at = NULL,
+                completed_at = now(), updated_at = now()
+            WHERE deleted_at IS NULL
+              AND status = 'processing'
+              AND locked_at < now() - (%s * interval '1 second')
+              AND attempts >= %s
+            """,
+            (ATTEMPTS_EXHAUSTED_ERROR, LEASE_SECONDS, MAX_ATTEMPTS),
+        )
+        if cursor.rowcount:
+            LOGGER.warning(
+                "clinical imports failed after exhausting attempts",
+                extra={"count": cursor.rowcount},
+            )
         cursor.execute(
             """
             WITH next_job AS (
@@ -93,17 +120,19 @@ def claim_job(connection: Any) -> dict[str, Any] | None:
                     status = 'queued'
                     OR (status = 'processing' AND locked_at < now() - (%s * interval '1 second'))
                   )
+                  AND attempts < %s
                 ORDER BY CASE WHEN status = 'queued' THEN 0 ELSE 1 END, created_at
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
             UPDATE clinical_document_imports AS import
-            SET status = 'processing', worker_id = %s, locked_at = now(), updated_at = now()
+            SET status = 'processing', worker_id = %s, locked_at = now(), updated_at = now(),
+                attempts = import.attempts + 1
             FROM next_job
             WHERE import.id = next_job.id
-            RETURNING import.id, import.document_id, import.force_reextract
+            RETURNING import.id, import.document_id, import.force_reextract, import.attempts
             """,
-            (LEASE_SECONDS, WORKER_ID),
+            (LEASE_SECONDS, MAX_ATTEMPTS, WORKER_ID),
         )
         claimed = cursor.fetchone()
         if not claimed:

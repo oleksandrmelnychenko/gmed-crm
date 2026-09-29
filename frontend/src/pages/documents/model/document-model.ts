@@ -1153,16 +1153,24 @@ export function intakeOpenAction(
 
 /**
  * Document types that say nothing about the content ("uploaded document",
- * portal upload kinds). The server refuses to finish an intake review with
- * one of them or without a category (`document_needs_categorization`).
+ * every portal upload kind). The server refuses to finish an intake review
+ * with one of them or without a category, and keeps such documents in the
+ * intake queue whatever their origin (`document_needs_categorization`,
+ * `UNSPECIFIC_DOCUMENT_ARTS` in `documents.rs`).
  */
 const UNSPECIFIC_DOCUMENT_ARTS = new Set([
   "",
   "document",
   "uploaded_document",
+  "patient_upload",
   "patient_general_upload",
   "patient_medical_upload",
   "patient_admin_upload",
+  "patient_correspondence_upload",
+  "patient_analysis_upload",
+  "patient_conclusion_upload",
+  "patient_invoice_upload",
+  "patient_translation_upload",
 ]);
 
 export function isUnspecificDocumentArt(art: string | null | undefined): boolean {

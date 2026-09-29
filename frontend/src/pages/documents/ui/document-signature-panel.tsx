@@ -10,7 +10,7 @@ import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
-import { createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, signatureAction, validSigners, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
+import { abandonSignatureRequest, createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, resolveSignatureReview, signatureAction, signatureReasonValid, validSigners, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
 
 const emptySigner = (role: Signer["role"]): Signer => ({ first_name: "", last_name: "", email: "", role });
 const initialSigners = (policy: SignatureState["signer_policy"] = "flexible") =>
@@ -44,6 +44,24 @@ const statuses: Record<SignatureStatus, [string, string]> = {
   expired: ["Срок запроса истёк", "Anfrage abgelaufen"],
   error: ["Ошибка подписания", "Signatur fehlgeschlagen"],
 };
+
+const closedKindLabels: Record<NonNullable<SignatureRequest["closed_kind"]>, [string, string]> = {
+  auto_expired: ["Закрыт автоматически: Skribble не подтвердил запрос", "Automatisch geschlossen: Skribble hat die Anfrage nicht bestätigt"],
+  abandoned: ["Закрыт сотрудником", "Von Mitarbeitenden geschlossen"],
+  review_accepted: ["Подпись принята после проверки", "Unterschrift nach Prüfung anerkannt"],
+  review_rejected: ["Подпись отклонена после проверки", "Unterschrift nach Prüfung verworfen"],
+};
+
+/** Asks for the reason of an abandon or review decision; null when cancelled or too short. */
+function askSignatureReason(question: string, tx: (ru: string, de: string) => string): string | null {
+  const reason = window.prompt(question);
+  if (reason === null) return null;
+  if (!signatureReasonValid(reason)) {
+    window.alert(tx("Причина должна содержать от 10 до 2000 символов.", "Die Begründung muss 10 bis 2000 Zeichen lang sein."));
+    return null;
+  }
+  return reason.trim();
+}
 
 const ineligibleMessages: Record<string, [string, string]> = {
   pdf_required: ["Для электронной подписи нужен сохранённый PDF. Сначала загрузите PDF-версию документа.", "Für die elektronische Unterschrift wird eine gespeicherte PDF benötigt. Laden Sie zuerst die PDF-Version hoch."],
@@ -263,6 +281,21 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                 {request.has_report ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void run(() => downloadSignatureReport(request.id), false)}>{tx("Отчёт о подписях", "Signaturprotokoll")}</Button> : null}
                 {isSignaturePending(request.status) && state.enabled && state.can_send ? <Button type="button" variant="outline" size="sm" disabled={mutationDisabled} onClick={() => void run(async () => { await signatureAction(request.id, "refresh"); setRefreshCheck({ id: request.id, before: request.updated_at }); })}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : null}{tx("Проверить статус", "Status prüfen")}</Button> : null}
                 {(request.can_withdraw ?? request.status === "pending") && state.enabled && state.can_send ? <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={mutationDisabled} onClick={() => void run(() => signatureAction(request.id, "withdraw"))}>{tx("Отозвать запрос", "Anfrage zurückziehen")}</Button> : null}
+                {request.can_abandon && (state.can_send || state.can_configure) ? <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={mutationDisabled} onClick={() => {
+                  const reason = askSignatureReason(tx("Почему запрос закрывается? (10–2000 символов)", "Warum wird die Anfrage aufgegeben? (10–2000 Zeichen)"), tx);
+                  if (reason) void run(() => abandonSignatureRequest(request.id, reason));
+                }}>{tx("Закрыть запрос как ошибочный", "Anfrage als fehlgeschlagen schließen")}</Button> : null}
+                {request.can_resolve_review && state.can_send ? <>
+                  <Button type="button" variant="outline" size="sm" disabled={mutationDisabled} onClick={() => {
+                    const reason = askSignatureReason(tx("Почему подпись принимается, хотя документ изменился?", "Warum wird die Unterschrift trotz Änderung anerkannt?"), tx);
+                    if (reason) void run(() => resolveSignatureReview(request.id, "accept", reason));
+                  }}>{tx("Принять подпись", "Unterschrift anerkennen")}</Button>
+                  <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={mutationDisabled} onClick={() => {
+                    const reason = askSignatureReason(tx("Почему подпись отклоняется?", "Warum wird die Unterschrift verworfen?"), tx);
+                    if (reason) void run(() => resolveSignatureReview(request.id, "reject", reason));
+                  }}>{tx("Отклонить подпись", "Unterschrift verwerfen")}</Button>
+                </> : null}
+                {request.closed_kind ? <p className="w-full text-xs leading-5 text-muted-foreground">{tx(...closedKindLabels[request.closed_kind])}{request.closed_at ? ` · ${formatAppDateTime(request.closed_at)}` : ""}{request.close_reason && request.closed_kind !== "auto_expired" ? ` · ${request.close_reason}` : ""}</p> : null}
               </div>
             </div>
           </section>)}

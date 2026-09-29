@@ -8,6 +8,13 @@ export type SignatureRequest = {
   result_document_id: string | null; has_report: boolean; last_error: string | null; created_at: string;
   updated_at?: string;
   can_withdraw?: boolean;
+  // Owner decision 2026-09-28 (Q9): untrackable requests can be given up,
+  // `needs_review` is accepted or rejected; both with a reason.
+  can_abandon?: boolean;
+  can_resolve_review?: boolean;
+  closed_kind?: "auto_expired" | "abandoned" | "review_accepted" | "review_rejected" | null;
+  close_reason?: string | null;
+  closed_at?: string | null;
   evidence: { signatures?: { email: string; status: string; signed_at: string | null }[] };
 };
 export type SigningPackage = { template: "single_order" | "confidentiality_release" | "privacy_consents"; documents: { id: string; title: string; version: number }[] };
@@ -28,6 +35,10 @@ export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/do
 const CREATE_SIGNATURE_REQUEST_TIMEOUT_MS = 90_000;
 export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string, signingDocumentIds: string[] = []) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS, body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}), ...(signingDocumentIds.length ? { signing_document_ids: signingDocumentIds } : {}) }) });
 export const signatureAction = (id: string, action: "refresh" | "withdraw") => apiFetch(`/document-signature-requests/${id}/${action}`, { method: "POST" });
+export const abandonSignatureRequest = (id: string, reason: string) => apiFetch(`/document-signature-requests/${id}/abandon`, { method: "POST", body: JSON.stringify({ reason }) });
+export const resolveSignatureReview = (id: string, decision: "accept" | "reject", reason: string) => apiFetch(`/document-signature-requests/${id}/resolve-review`, { method: "POST", body: JSON.stringify({ decision, reason }) });
+/** A reason for an abandon or review decision: 10 to 2000 characters (server rule). */
+export const signatureReasonValid = (reason: string | null | undefined) => { const length = (reason ?? "").trim().length; return length >= 10 && length <= 2000; };
 export type SignatureConnection = { configured: boolean; region: "DE"; mode: "demo" | "live"; username: string | null; source: "database" | "environment" };
 export const fetchSignatureConnection = () => apiFetch<SignatureConnection>("/document-signatures/connection", { forceFresh: true });
 export const saveSignatureConnection = (username: string, apiKey: string, mode: "demo" | "live") => apiFetch<SignatureConnection>("/document-signatures/connection", { method: "POST", body: JSON.stringify({ username, api_key: apiKey, mode }), timeoutMs: 60_000 });

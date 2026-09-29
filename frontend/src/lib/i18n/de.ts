@@ -411,7 +411,7 @@ export const de = {
   providers_amount: "Betrag",
   providers_select_first: "Zuerst Provider auswählen",
   providers_price_numeric: "Preis muss numerisch sein",
-  providers_delete_provider_confirm: "Provider \"{name}\" löschen?",
+  providers_delete_provider_confirm: "Provider \"{name}\" archivieren? Er wird inaktiv; Termine, Leistungen und Dokumente behalten ihn. Wiederherstellen über „Aktivieren“.",
   providers_delete_doctor_confirm: "Arzt \"{name}\" löschen?",
   providers_delete_contact_confirm: "Kontakt \"{name}\" löschen?",
   providers_delete_staff_confirm: "Mitarbeitenden \"{name}\" löschen?",
@@ -765,6 +765,7 @@ export const de = {
   settings_dunning_hint:
     "Die erste automatische Zahlungserinnerung folgt erst nach dieser Karenzzeit nach dem Zahlungsziel (Berliner Kalender). Rechnungen mit Mahnsperre, Ratenplan oder eskaliertem Forderungsfall werden nicht automatisch gemahnt.",
   settings_auto_dunning_grace_days: "Karenzzeit vor der ersten automatischen Erinnerung (Tage)",
+  settings_signature_stuck_request_days: "Nicht nachverfolgbare Signaturanfragen schließen nach (Tagen)",
   settings_sessions: "Sitzungsverwaltung",
   settings_active_sessions: "Aktive Sitzungen",
   settings_logout_user: "Sitzungen beenden",

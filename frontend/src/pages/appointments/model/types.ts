@@ -298,7 +298,26 @@ export type InterpreterOption = {
   id: string;
   name: string;
   role: string;
+  /**
+   * False for a blocked, terminated or (external) AVV-less interpreter: kept
+   * for filters and existing bookings, not offered for new ones (server
+   * `assignment_eligibility`, owner decision 2026-09-28).
+   */
+  assignable?: boolean;
 };
+
+/**
+ * Interpreters a picker offers: the assignable ones plus the one already
+ * selected, so an existing booking stays visible.
+ */
+export function assignableInterpreterOptions(
+  interpreters: readonly InterpreterOption[],
+  selectedId?: string | null,
+): InterpreterOption[] {
+  return interpreters.filter(
+    (member) => member.assignable !== false || (!!selectedId && member.id === selectedId),
+  );
+}
 
 export type ChecklistItem = {
   id: string;

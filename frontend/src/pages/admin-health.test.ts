@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   aiHealthCopy,
+  clinicalImportAttention,
+  clinicalImportHealthCopy,
+  normalizeClinicalImportHealth,
   aiLeaseAttention,
   aiReasonLabel,
   aiStatusLabel,
@@ -54,5 +57,28 @@ describe("Medication AI health localization", () => {
     expect(normalized.queue.lease_exhausted_last_24h).toBe(0);
     expect(normalized.queue.last_lease_recovery_at).toBeNull();
     expect(normalized.queue.last_lease_exhausted_at).toBeNull();
+  });
+});
+
+describe("clinical import health", () => {
+  it("defaults a missing section and flags stuck, failed and waiting imports", () => {
+    const empty = normalizeClinicalImportHealth(undefined);
+    expect(empty.operational_status).toBe("unavailable");
+    const copy = clinicalImportHealthCopy("de");
+    const age = (seconds: number | null) => `${seconds}s`;
+    expect(clinicalImportAttention({ ...empty, operational_status: "healthy" }, copy, age)).toEqual([]);
+
+    const stuck = normalizeClinicalImportHealth({
+      available: true,
+      operational_status: "attention",
+      stale_processing: 1,
+      stale_applying: 2,
+      failed_last_24h: 3,
+      oldest_queued_seconds: 900,
+    });
+    const items = clinicalImportAttention(stuck, copy, age);
+    expect(items).toHaveLength(4);
+    expect(items[1]).toContain("Übernahme abgebrochen: 2");
+    expect(items[3]).toContain("900s");
   });
 });

@@ -409,7 +409,7 @@ export const ru = {
   providers_amount: "Сумма",
   providers_select_first: "Сначала выберите провайдера",
   providers_price_numeric: "Цена должна быть числом",
-  providers_delete_provider_confirm: "Удалить провайдера \"{name}\"?",
+  providers_delete_provider_confirm: "Переместить провайдера \"{name}\" в архив? Он станет неактивным; приёмы, услуги и документы сохранят его. Восстановить: «Активировать».",
   providers_delete_doctor_confirm: "Удалить врача \"{name}\"?",
   providers_delete_contact_confirm: "Удалить контакт \"{name}\"?",
   providers_delete_staff_confirm: "Удалить сотрудника \"{name}\"?",
@@ -762,6 +762,7 @@ export const ru = {
   settings_dunning_hint:
     "Первое автоматическое напоминание отправляется только после этого льготного периода после срока оплаты (по календарю Берлина). Счета с блокировкой напоминаний, планом оплаты или эскалированным долгом автоматически не напоминаются.",
   settings_auto_dunning_grace_days: "Льготный период до первого автоматического напоминания (дней)",
+  settings_signature_stuck_request_days: "Закрывать неотслеживаемые запросы подписи через (дней)",
   settings_sessions: "Управление сессиями",
   settings_active_sessions: "Активные сессии",
   settings_logout_user: "Завершить сессии",

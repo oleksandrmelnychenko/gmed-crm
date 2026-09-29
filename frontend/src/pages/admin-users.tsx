@@ -461,6 +461,10 @@ function useAdminUsersPageContent() {
     () => getAssignableAdminUserRoles(canManageCeo),
     [canManageCeo],
   );
+  const editAssignableRoles = useMemo(
+    () => getAssignableAdminUserRoles(canManageCeo, editUser?.role),
+    [canManageCeo, editUser?.role],
+  );
   const describeError = useCallback(
     (e: unknown, targetRole?: string) => describeAdminUserError(e, t, targetRole),
     [t],
@@ -1276,7 +1280,7 @@ function useAdminUsersPageContent() {
                     onChange={(event) => setEuRole(event.target.value ?? "")}
                     className="h-9 w-full rounded-lg bg-field"
                   >
-                    {assignableRoles.map((key) => (
+                    {editAssignableRoles.map((key) => (
                       <option key={key} value={key}>{roleLabel(key)}</option>
                     ))}
                   </NativeComboboxSelect>

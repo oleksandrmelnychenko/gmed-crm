@@ -76,6 +76,7 @@ import type {
   ProviderSummary,
   StaffOption,
 } from "@/pages/appointments/model/types";
+import { assignableInterpreterOptions } from "@/pages/appointments/model/types";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import {
@@ -821,7 +822,7 @@ function useAppointmentFollowUpVisitSectionContent({
               className={selectClassName}
             >
               <option value="">{t.common_not_set}</option>
-              {interpreters.map((member) => (
+              {assignableInterpreterOptions(interpreters, form.interpreterId).map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.name} · {roleLabel(member.role)}
                 </option>

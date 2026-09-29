@@ -200,6 +200,44 @@ fn last_ceo_protected() -> axum::response::Response {
         .into_response()
 }
 
+/// Patient portal accounts are created and linked only by the CEO/PM portal
+/// activation (`POST /patients/{id}/portal-account/activate`), never by the
+/// generic user administration (owner decision 2026-09-28, Q14).
+#[allow(clippy::result_large_err)]
+fn reject_patient_role(role: &str) -> Result<(), axum::response::Response> {
+    if role == "patient" {
+        Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Patient accounts are created through the patient portal activation",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether another account already uses `email`, compared case-insensitively
+/// like the login (owner decision 2026-09-28, Q12).
+async fn email_taken<'e, E>(
+    executor: E,
+    email: &str,
+    except_user: Option<Uuid>,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar(
+        "SELECT EXISTS(
+             SELECT 1 FROM users
+             WHERE lower(btrim(email)) = lower(btrim($1))
+               AND ($2::uuid IS NULL OR id <> $2)
+         )",
+    )
+    .bind(email)
+    .bind(except_user)
+    .fetch_one(executor)
+    .await
+}
+
 /// Assigning the `ceo` role is reserved to the CEO (`users.manage_ceo`); a
 /// technical admin manages every other role.
 #[allow(clippy::result_large_err)]
@@ -435,7 +473,10 @@ async fn create_user(
 ) -> impl IntoResponse {
     auth.require_capability(Capability::UsersManage)?;
     ensure_can_assign_role(&auth, &body.role)?;
+    reject_patient_role(&body.role)?;
 
+    let mut body = body;
+    body.email = body.email.trim().to_string();
     if let Err(msg) = validate_create(&body) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, msg));
     }
@@ -445,6 +486,17 @@ async fn create_user(
             StatusCode::UNPROCESSABLE_ENTITY,
             "External contractors cannot be created as user accounts",
         ));
+    }
+    match email_taken(&state.db, &body.email, None).await {
+        Ok(false) => {}
+        Ok(true) => return Err(err(StatusCode::CONFLICT, "Email already exists")),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to check e-mail uniqueness");
+            return Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create user",
+            ));
+        }
     }
 
     // Without a password the account is onboarded with a one-time password:
@@ -551,6 +603,8 @@ async fn update_user(
     {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid role"));
     }
+    let mut body = body;
+    body.email = body.email.map(|email| email.trim().to_string());
     if let Some(ref email) = body.email
         && (email.is_empty() || email.len() > 320 || !email.contains('@'))
     {
@@ -586,6 +640,22 @@ async fn update_user(
     let new_role = body.role.as_deref().unwrap_or(&current_role);
     let new_email = body.email.as_deref().unwrap_or(&current_email);
     let role_changed = new_role != current_role.as_str();
+    if role_changed {
+        reject_patient_role(new_role)?;
+    }
+    if new_email != current_email.as_str() {
+        match email_taken(&mut *tx, new_email, Some(user_id)).await {
+            Ok(false) => {}
+            Ok(true) => return Err(err(StatusCode::CONFLICT, "Email already exists")),
+            Err(e) => {
+                tracing::error!(error = %e, user_id = %user_id, "Failed to check e-mail uniqueness");
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update user",
+                ));
+            }
+        }
+    }
 
     if role_changed && current_role == "ceo" {
         let current_is_active: bool = current.try_get("is_active").unwrap_or(false);

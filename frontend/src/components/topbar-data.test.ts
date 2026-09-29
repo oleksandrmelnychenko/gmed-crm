@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isAnnouncementDismissible,
   localizedNotificationCopy,
   notificationHrefForRole,
   oldestNewLead,
@@ -325,4 +326,12 @@ describe("localizedNotificationCopy", () => {
       body: regular.body,
     });
   });
+});
+
+it("keeps an error announcement on screen while it is active", () => {
+  expect(isAnnouncementDismissible({ variant: "error", dismissible: false })).toBe(false);
+  expect(isAnnouncementDismissible({ variant: "warning", dismissible: true })).toBe(true);
+  // Without the flag (older server) the level decides.
+  expect(isAnnouncementDismissible({ variant: "error" })).toBe(false);
+  expect(isAnnouncementDismissible({ variant: "info" })).toBe(true);
 });

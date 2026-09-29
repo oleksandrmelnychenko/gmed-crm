@@ -206,6 +206,15 @@ export function LoginPage() {
       const me = await completeTotp(totpChallenge, totpCode);
       navigate(me.password_change_required ? "/account/password-required" : redirectTo, { replace: true });
     } catch (err) {
+      // The code was right; the account also needs admin approval.
+      if (err instanceof PendingLoginError) {
+        dispatchLoginState({
+          totpChallenge: null,
+          totpCode: "",
+          pendingLogin: { id: err.pendingId, status: "pending" },
+        });
+        return;
+      }
       // An expired or exhausted challenge sends the person back to the password.
       // /auth/totp answers with the HTTP reason ("Unauthorized"), /auth/login with "unauthorized".
       if (

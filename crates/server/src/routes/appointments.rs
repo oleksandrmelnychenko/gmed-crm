@@ -450,6 +450,9 @@ struct InterpreterOptionResponse {
     id: Uuid,
     name: String,
     role: String,
+    /// False for a blocked, terminated or AVV-less (external) interpreter:
+    /// kept for filters and existing bookings, not offered for new ones.
+    assignable: bool,
 }
 
 #[derive(Serialize)]
@@ -769,6 +772,9 @@ async fn create_my_appointment_request(
         )
         .await
     {
+        return resp;
+    }
+    if let Err(resp) = ensure_provider_accepts_new_work(&state, body.requested_provider_id).await {
         return resp;
     }
 
@@ -1511,6 +1517,9 @@ async fn convert_appointment_request(
         validate_provider_doctor_context(&state, body.provider_id, body.doctor_id, &request_type)
             .await
     {
+        return resp;
+    }
+    if let Err(resp) = ensure_provider_accepts_new_work(&state, body.provider_id).await {
         return resp;
     }
     if let Some(interpreter_id) = body.interpreter_id {
@@ -2499,13 +2508,14 @@ async fn list_interpreters(
         Role::Concierge,
     ])?;
 
-    match sqlx::query(
-        r#"SELECT id, name, role
-           FROM users
-           WHERE is_active = true
-             AND role IN ('interpreter', 'teamlead_interpreter')
-           ORDER BY name"#,
-    )
+    match sqlx::query(&format!(
+        r#"SELECT u.id, u.name, u.role, ({}) AS assignable
+               FROM users u
+               WHERE u.is_active = true
+                 AND u.role IN ('interpreter', 'teamlead_interpreter')
+               ORDER BY u.name"#,
+        crate::services::assignment_eligibility::INTERPRETER_ASSIGNABLE_SQL
+    ))
     .fetch_all(&state.db)
     .await
     {
@@ -2516,6 +2526,7 @@ async fn list_interpreters(
                     id: row.try_get("id").unwrap_or_else(|_| Uuid::nil()),
                     name: row.try_get("name").unwrap_or_default(),
                     role: row.try_get("role").unwrap_or_default(),
+                    assignable: row.try_get("assignable").unwrap_or(true),
                 });
             }
             Ok(Json(items))
@@ -2732,6 +2743,9 @@ async fn create_appointment(
     )
     .await
     {
+        return resp;
+    }
+    if let Err(resp) = ensure_provider_accepts_new_work(&state, body.provider_id).await {
         return resp;
     }
 
@@ -5404,6 +5418,11 @@ async fn update_appointment(
         &appointment_type,
     )
     .await
+    {
+        return resp;
+    }
+    if body.provider_id != current_provider_id
+        && let Err(resp) = ensure_provider_accepts_new_work(&state, body.provider_id).await
     {
         return resp;
     }
@@ -11368,7 +11387,23 @@ async fn load_active_interpreter_role(
 ) -> Result<Option<String>, axum::response::Response> {
     match load_active_user_role(state, user_id).await? {
         Some(role) if matches!(role.as_str(), "interpreter" | "teamlead_interpreter") => {
-            Ok(Some(role))
+            // Blocked, terminated or (external) without a signed AVV: not for
+            // new bookings (owner decision 2026-09-28, Q11).
+            match crate::services::assignment_eligibility::interpreter_block_reason(
+                &state.db, user_id,
+            )
+            .await
+            {
+                Ok(None) => Ok(Some(role)),
+                Ok(Some(reason)) => Err(err(StatusCode::UNPROCESSABLE_ENTITY, reason)),
+                Err(e) => {
+                    tracing::error!(error = %e, user_id = %user_id, "Failed to check interpreter status");
+                    Err(err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to validate interpreter",
+                    ))
+                }
+            }
         }
         _ => Ok(None),
     }
@@ -12084,6 +12119,33 @@ async fn create_reminder_record(
     })?
     .try_get("id")
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create reminder"))
+}
+
+/// A new appointment (or a changed provider) needs an active, not archived
+/// provider; existing appointments keep theirs (owner decision 2026-09-28, Q11).
+async fn ensure_provider_accepts_new_work(
+    state: &AppState,
+    provider_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    let Some(provider_id) = provider_id else {
+        return Ok(());
+    };
+    match crate::services::assignment_eligibility::provider_accepts_new_work(&state.db, provider_id)
+        .await
+    {
+        Ok(Some(false)) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            crate::services::assignment_eligibility::INACTIVE_PROVIDER_MESSAGE,
+        )),
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::error!(error = %e, provider_id = %provider_id, "Failed to check provider status");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate provider",
+            ))
+        }
+    }
 }
 
 async fn validate_provider_doctor_context(

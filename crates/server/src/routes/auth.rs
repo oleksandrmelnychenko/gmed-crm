@@ -164,10 +164,16 @@ async fn login(
         }
     }
 
+    // E-mail addresses match case-insensitively (owner decision 2026-09-28,
+    // Q12). New and edited accounts cannot collide that way (users.rs); for a
+    // legacy pair differing only in case, the exact spelling wins.
     let user = match sqlx::query_as::<_, LoginUserRow>(
         "SELECT id, password_hash, role, is_active, mfa_required, failed_login_attempts, locked_until,
                 password_changed_at
-         FROM users WHERE email = $1",
+         FROM users
+         WHERE lower(btrim(email)) = lower(btrim($1))
+         ORDER BY (email = btrim($1)) DESC, created_at
+         LIMIT 1",
     )
     .bind(&body.email)
     .fetch_optional(&state.db)
@@ -383,7 +389,9 @@ async fn login(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.chars().take(512).collect::<String>());
 
-    // An enrolled authenticator app is asked for before any session exists.
+    // An enrolled authenticator app is asked for before any session exists;
+    // an `mfa_required` account then still waits for admin approval
+    // (`complete_totp_login`).
     match super::totp::has_confirmed_totp(&state, user.id).await {
         Ok(true) => {
             match super::totp::open_challenge(
