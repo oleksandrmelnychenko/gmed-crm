@@ -1322,7 +1322,7 @@ async fn economics_bills_issued_advances_once() {
     assert_eq!(second["actual"]["billed_to_patient_gross"], "669");
 }
 
-fn economics_service<'a>(economics: &'a Value, service_id: Uuid) -> &'a Value {
+fn economics_service(economics: &Value, service_id: Uuid) -> &Value {
     economics["services"]
         .as_array()
         .unwrap()
