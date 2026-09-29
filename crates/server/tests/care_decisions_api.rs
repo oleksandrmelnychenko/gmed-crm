@@ -1321,7 +1321,25 @@ async fn recommendation_status_and_lifecycle_follow_each_other() {
     .await;
     assert_eq!(status, StatusCode::OK, "{decided}");
     assert_eq!(decided["status"], "completed");
-    assert_eq!(decided["lifecycle_status"], "erfolg");
+    // The outcome tracking is staff-only (QA C-12): the portal answer leaves
+    // it out, the clinical tab shows it.
+    assert!(decided.get("lifecycle_status").is_none(), "{decided}");
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/recommendations"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    let staff_view = listed
+        .as_array()
+        .expect("recommendation list")
+        .iter()
+        .find(|item| item["id"] == id.as_str())
+        .expect("staff sees the recommendation");
+    assert_eq!(staff_view["lifecycle_status"], "erfolg");
 
     // The clinical tab records "not done": the status follows.
     let update = format!("/api/v1/patients/{patient_id}/recommendations/{id}/update");
