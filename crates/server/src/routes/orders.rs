@@ -13,6 +13,7 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::{self, CommercialRounding};
+use crate::routes::invoices::service_reversal;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -105,6 +106,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/orders/{order_id}/leistungen/{leistung_id}/cancel",
             post(cancel_leistung),
+        )
+        .route(
+            "/orders/{order_id}/leistungen/{leistung_id}/cancellation-preview",
+            get(leistung_cancellation_preview),
         )
         .route(
             "/orders/{order_id}/amendments",
@@ -347,6 +352,9 @@ struct UpdateLeistungPlannedCostRequest {
 #[derive(Deserialize)]
 struct CancelLeistungRequest {
     reason: Option<String>,
+    /// Confirms that a line on a released invoice is cancelled with a credit
+    /// note (finance roles).
+    issue_credit_note: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -10657,22 +10665,72 @@ async fn approve_leistung(
     }
 }
 
-/// Staff cancel a service line that is still planned, e.g. a planned
-/// interpreter block whose hours an approved report already billed. The line
-/// is kept with who, when and why; it no longer counts for quotes, invoices or
-/// the order completion gate. Delivered, approved and invoiced lines cannot be
-/// cancelled here.
+/// Who may cancel order services: `orders.edit` (CEO, PM) and billing
+/// (`invoices.finance`); a service a released invoice bills needs the finance
+/// role, because its cancellation issues a credit note (decision 2026-09-29).
+fn can_cancel_order_services(auth: &AuthUser) -> bool {
+    auth.role.can(Capability::OrdersEdit) || auth.role.can(Capability::InvoicesFinance)
+}
+
+/// What cancelling a service involves: its status, the draft invoices that
+/// reserve it and the credit notes it would issue (confirm dialog).
+async fn leistung_cancellation_preview(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path((order_id, leistung_id)): Path<(Uuid, Uuid)>,
+) -> axum::response::Response {
+    if !can_cancel_order_services(&auth) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    match can_access_order(&state, &auth, order_id, None).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, %leistung_id, "acquire cancellation preview");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    match service_reversal::preview_order_service_reversal(&mut conn, leistung_id).await {
+        Ok(Some(preview)) if preview.order_id == order_id => {
+            let mut body = preview.to_json();
+            if let Some(map) = body.as_object_mut() {
+                map.insert(
+                    "can_issue_credit_note".to_string(),
+                    serde_json::json!(service_reversal::can_issue_credit_notes(&auth)),
+                );
+            }
+            Json(body).into_response()
+        }
+        Ok(_) => err(StatusCode::NOT_FOUND, "Order service not found"),
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, %leistung_id, "order service cancellation preview");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+/// Staff cancel a service line with a reason. A planned, delivered or
+/// approved line that no released invoice bills is simply cancelled; a line
+/// a released invoice bills is cancelled together with a credit note for it
+/// (finance roles, `issue_credit_note: true`); a line on a draft invoice is
+/// refused until the draft is cancelled (owner decision 2026-09-29). The line
+/// is kept with who, when and why; it no longer counts for quotes, invoices
+/// or the order completion gate.
 async fn cancel_leistung(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((order_id, leistung_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<CancelLeistungRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_capability(Capability::OrdersEdit) {
-        return response;
+    if !can_cancel_order_services(&auth) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
     let reason = body.reason.as_deref().map(str::trim).unwrap_or_default();
-    if !(3..=1000).contains(&reason.chars().count()) {
+    if !service_reversal::is_valid_reason(reason) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "A cancellation reason of 3 to 1000 characters is required",
@@ -10684,106 +10742,62 @@ async fn cancel_leistung(
         Err(response) => return response,
     }
 
-    let failed = |error: sqlx::Error, step: &str| {
-        tracing::error!(error = %error, order_id = %order_id, leistung_id = %leistung_id, step, "cancel order service");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to cancel order service",
-        )
-    };
     let mut transaction = match state.db.begin().await {
         Ok(transaction) => transaction,
-        Err(error) => return failed(error, "begin"),
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, %leistung_id, "begin cancel order service");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to cancel order service",
+            );
+        }
     };
-    let current = match sqlx::query(
-        r#"SELECT status, description, quantity
-           FROM order_leistungen
-           WHERE id = $1 AND order_id = $2
-           FOR UPDATE"#,
-    )
-    .bind(leistung_id)
-    .bind(order_id)
-    .fetch_optional(&mut *transaction)
-    .await
+    match sqlx::query_scalar::<_, Uuid>("SELECT order_id FROM order_leistungen WHERE id = $1")
+        .bind(leistung_id)
+        .fetch_optional(&mut *transaction)
+        .await
     {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Order service not found"),
-        Err(error) => return failed(error, "lock"),
-    };
-    let status = current.try_get::<String, _>("status").unwrap_or_default();
-    if status != "planned" {
-        return err(
-            StatusCode::CONFLICT,
-            "Only a planned order service can be cancelled",
-        );
+        Ok(Some(owner)) if owner == order_id => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Order service not found"),
+        Err(error) => {
+            tracing::error!(error = %error, %order_id, %leistung_id, "load order service to cancel");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to cancel order service",
+            );
+        }
     }
-    let description = current
-        .try_get::<String, _>("description")
-        .unwrap_or_default();
-    let quantity = current
-        .try_get::<rust_decimal::Decimal, _>("quantity")
-        .unwrap_or(rust_decimal::Decimal::ZERO);
-    let cancelled_at = match sqlx::query_scalar::<_, chrono::DateTime<chrono::Utc>>(
-        r#"UPDATE order_leistungen
-           SET status = 'cancelled',
-               cancelled_at = now(),
-               cancelled_by = $3,
-               cancellation_reason = $4
-           WHERE id = $1 AND order_id = $2 AND status = 'planned'
-           RETURNING cancelled_at"#,
+    let mut reversal = match service_reversal::reverse_order_service_in_tx(
+        &mut transaction,
+        &service_reversal::ReverseServiceRequest {
+            leistung_id,
+            reason,
+            allow_credit_note: body.issue_credit_note.unwrap_or(false),
+            actor: &auth,
+            origin: "order_service",
+            origin_id: None,
+        },
     )
-    .bind(leistung_id)
-    .bind(order_id)
-    .bind(auth.user_id)
-    .bind(reason)
-    .fetch_one(&mut *transaction)
     .await
     {
         Ok(value) => value,
-        Err(error) => return failed(error, "update"),
+        Err(response) => return response,
     };
-    if let Err(error) = audit::write_in_transaction(
-        &mut transaction,
-        &audit::domain_event(
-            "cancel_order_service",
-            Some(auth.user_id),
-            "order_leistung",
-            Some(leistung_id),
-            serde_json::json!({
-                "order_id": order_id,
-                "previous_status": status,
-                "description": description,
-                "quantity": quantity.normalize().to_string(),
-                "reason": reason,
-            }),
-        ),
-    )
-    .await
-    {
-        return failed(error, "audit");
-    }
     if let Err(error) = transaction.commit().await {
-        return failed(error, "commit");
+        tracing::error!(error = %error, %order_id, %leistung_id, "commit cancel order service");
+        reversal.discard_documents().await;
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to cancel order service",
+        );
     }
+    reversal.publish(&state, auth.user_id).await;
 
-    crate::realtime::publish_order_event(
-        &state,
-        Some(auth.user_id),
-        "order.leistung_cancelled",
-        order_id,
-        serde_json::json!({ "leistung_id": leistung_id }),
-    )
-    .await;
-
-    Json(serde_json::json!({
-        "id": leistung_id,
-        "order_id": order_id,
-        "status": "cancelled",
-        "cancelled_at": cancelled_at.to_rfc3339(),
-        "cancelled_by": auth.user_id,
-        "cancellation_reason": reason,
-    }))
-    .into_response()
+    let mut response = reversal.to_json();
+    if let Some(map) = response.as_object_mut() {
+        map.insert("cancelled_by".to_string(), serde_json::json!(auth.user_id));
+    }
+    Json(response).into_response()
 }
 
 async fn validate_provider_doctor_context(

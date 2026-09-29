@@ -269,6 +269,12 @@ struct AppointmentRecurrence {
 struct StatusUpdate {
     status: String,
     recurrence_scope: Option<String>,
+    /// Cancelling: reverse the billing of approved interpreter reports (their
+    /// order line is cancelled, with a credit note when a released invoice
+    /// bills it) in the same transaction (decision 2026-09-29).
+    #[serde(default)]
+    reverse_billing: Option<bool>,
+    billing_reversal_reason: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -3224,6 +3230,7 @@ const APPROVED_REPORT_BILLING_ACTIVE_SQL: &str = r#"EXISTS (
            ON billed_line.source_interpreter_report_id = billed_report.id
     WHERE billed_report.appointment_id = a.id
       AND billed_report.approval_status = 'approved'
+      AND billed_report.billing_reversed_at IS NULL
       AND billed_line.status IS DISTINCT FROM 'cancelled'
 )"#;
 
@@ -3255,6 +3262,7 @@ async fn ensure_no_billed_reports_before_cancel_in_tx(
            LEFT JOIN orders o ON o.id = COALESCE(line.order_id, a.order_id)
            WHERE report.appointment_id = ANY($1)
              AND report.approval_status = 'approved'
+             AND report.billing_reversed_at IS NULL
              AND line.status IS DISTINCT FROM 'cancelled'
            ORDER BY a.date, report.created_at, report.id
            LIMIT 1"#,
@@ -3272,17 +3280,29 @@ async fn ensure_no_billed_reports_before_cancel_in_tx(
     let report_id: Uuid = row.try_get("report_id").unwrap_or_default();
     let hours: String = row.try_get("hours").unwrap_or_default();
     let order_leistung_id: Option<Uuid> = row.try_get("order_leistung_id").unwrap_or_default();
+    let reversal_preview = match order_leistung_id {
+        Some(line_id) => {
+            crate::routes::invoices::service_reversal::preview_order_service_reversal(tx, line_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "preview billed report reversal");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+                })?
+                .map(|preview| preview.to_json())
+        }
+        None => None,
+    };
     let order_number: Option<String> = row.try_get("order_number").unwrap_or_default();
     let message = match order_leistung_id {
         Some(line_id) => format!(
-            "The appointment has an approved interpreter report ({report_id}, {hours} h) billed on order line {line_id}{}; reverse that billing before cancelling the appointment",
+            "The appointment has an approved interpreter report ({report_id}, {hours} h) billed on order line {line_id}{}; reverse that billing before cancelling the appointment, or cancel it with reverse_billing (the line is cancelled, with a credit note when it is invoiced)",
             order_number
                 .as_deref()
                 .map(|number| format!(" of order {number}"))
                 .unwrap_or_default()
         ),
         None => format!(
-            "The appointment has an approved interpreter report ({report_id}, {hours} h) whose hours are billable; reverse that billing before cancelling the appointment"
+            "The appointment has an approved interpreter report ({report_id}, {hours} h) whose hours are billable; reverse that billing before cancelling the appointment, or cancel it with reverse_billing"
         ),
     };
     Err(err_with_details(
@@ -3301,8 +3321,133 @@ async fn ensure_no_billed_reports_before_cancel_in_tx(
             "order_leistung_description": row.try_get::<Option<String>, _>("order_leistung_description").unwrap_or_default(),
             "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
             "order_number": order_number,
+            "reverse_billing_available": true,
+            "reversal": reversal_preview,
         }),
     ))
+}
+
+/// Cancelling with `reverse_billing` (owner decision 2026-09-29): the
+/// billing of every approved interpreter report of the appointments is
+/// reversed in the caller's transaction. The report's order line is
+/// cancelled — with a credit note when a released invoice bills it (finance
+/// roles only), refused while a draft invoice reserves it — and the report
+/// records who reversed its billing, when and why, so the billing sync never
+/// bills it again. The report itself stays approved (it is the hours record).
+async fn reverse_billed_reports_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    appointment_ids: &[Uuid],
+    auth: &AuthUser,
+    reason: &str,
+) -> Result<Vec<crate::routes::invoices::service_reversal::ServiceReversal>, axum::response::Response>
+{
+    use crate::routes::invoices::service_reversal;
+    let reports = sqlx::query(
+        r#"SELECT report.id AS report_id,
+                  report.appointment_id,
+                  report.hours::text AS hours,
+                  line.id AS order_leistung_id,
+                  line.status AS order_leistung_status
+           FROM interpreter_reports report
+           LEFT JOIN order_leistungen line ON line.source_interpreter_report_id = report.id
+           WHERE report.appointment_id = ANY($1)
+             AND report.approval_status = 'approved'
+             AND report.billing_reversed_at IS NULL
+           ORDER BY report.appointment_id, report.created_at, report.id
+           FOR UPDATE OF report"#,
+    )
+    .bind(appointment_ids)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "load approved reports to reverse");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+    })?;
+
+    let mut reversals: Vec<service_reversal::ServiceReversal> = Vec::new();
+    let discard_all = |mut done: Vec<service_reversal::ServiceReversal>| async move {
+        for reversal in &mut done {
+            reversal.discard_documents().await;
+        }
+    };
+    for report in reports {
+        let report_id: Uuid = report.try_get("report_id").unwrap_or_default();
+        let appointment_id: Uuid = report.try_get("appointment_id").unwrap_or_default();
+        let line_id: Option<Uuid> = report.try_get("order_leistung_id").unwrap_or_default();
+        let line_status: Option<String> =
+            report.try_get("order_leistung_status").unwrap_or_default();
+        let mut reversed_line = None;
+        let mut credit_notes = Vec::new();
+        if let Some(line_id) = line_id
+            && line_status.as_deref() != Some("cancelled")
+        {
+            match service_reversal::reverse_order_service_in_tx(
+                tx,
+                &service_reversal::ReverseServiceRequest {
+                    leistung_id: line_id,
+                    reason,
+                    allow_credit_note: true,
+                    actor: auth,
+                    origin: "appointment_cancellation",
+                    origin_id: Some(appointment_id),
+                },
+            )
+            .await
+            {
+                Ok(reversal) => {
+                    reversed_line = Some(line_id);
+                    credit_notes = reversal.credit_notes_json();
+                    reversals.push(reversal);
+                }
+                Err(response) => {
+                    discard_all(reversals).await;
+                    return Err(response);
+                }
+            }
+        }
+        let marked = sqlx::query(
+            r#"UPDATE interpreter_reports
+               SET billing_reversed_at = now(),
+                   billing_reversed_by = $2,
+                   billing_reversal_reason = $3
+               WHERE id = $1 AND billing_reversed_at IS NULL"#,
+        )
+        .bind(report_id)
+        .bind(auth.user_id)
+        .bind(reason)
+        .execute(&mut **tx)
+        .await;
+        let audited = match marked {
+            Ok(_) => {
+                audit::write_in_transaction(
+                    tx,
+                    &audit::domain_event(
+                        "reverse_interpreter_report_billing",
+                        Some(auth.user_id),
+                        "interpreter_report",
+                        Some(report_id),
+                        serde_json::json!({
+                            "appointment_id": appointment_id,
+                            "hours": report.try_get::<String, _>("hours").unwrap_or_default(),
+                            "order_leistung_id": line_id,
+                            "previous_order_leistung_status": line_status,
+                            "cancelled_order_leistung_id": reversed_line,
+                            "credit_notes": credit_notes,
+                            "reason": reason,
+                        }),
+                    ),
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+        if let Err(e) = audited {
+            tracing::error!(error = %e, %report_id, "mark interpreter report billing reversed");
+            discard_all(reversals).await;
+            return Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"));
+        }
+    }
+    Ok(reversals)
 }
 
 const INTERPRETER_REPORT_SELF_REVIEW_CODE: &str = "interpreter_report_self_review";
@@ -6760,10 +6905,27 @@ async fn update_status(
     }
     let target_ids: Vec<Uuid> = target_rows.iter().map(|(id, _, _)| *id).collect();
 
-    if body.status == "cancelled"
-        && let Err(resp) = ensure_no_billed_reports_before_cancel_in_tx(&mut tx, &target_ids).await
-    {
-        return resp;
+    let mut billing_reversal_reason = None;
+    if body.status == "cancelled" {
+        if body.reverse_billing.unwrap_or(false) {
+            let reason = body
+                .billing_reversal_reason
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default();
+            if !crate::routes::invoices::service_reversal::is_valid_reason(reason) {
+                return err_with_details(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "A billing reversal reason of 3 to 1000 characters is required",
+                    serde_json::json!({ "code": "appointment_billing_reversal_reason" }),
+                );
+            }
+            billing_reversal_reason = Some(reason.to_string());
+        } else if let Err(resp) =
+            ensure_no_billed_reports_before_cancel_in_tx(&mut tx, &target_ids).await
+        {
+            return resp;
+        }
     }
 
     let requires_completion_gate = body.status == "completed"
@@ -6874,9 +7036,24 @@ async fn update_status(
         }
     }
 
+    // Last step before the commit: the credit-note PDFs it archives are
+    // discarded only when this commit fails.
+    let mut billing_reversals = Vec::new();
+    if let Some(reason) = billing_reversal_reason.as_deref() {
+        match reverse_billed_reports_in_tx(&mut tx, &target_ids, &auth, reason).await {
+            Ok(value) => billing_reversals = value,
+            Err(resp) => return resp,
+        }
+    }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, appointment_id = %apt_id, "update appointment status: commit");
+        for reversal in &mut billing_reversals {
+            reversal.discard_documents().await;
+        }
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    for reversal in &billing_reversals {
+        reversal.publish(&state, auth.user_id).await;
     }
     crate::routes::workflow_checklists::publish_checklist_item_changes(
         &state,
@@ -7019,6 +7196,10 @@ async fn update_status(
         },
         "split_performed": split_performed,
         "affected_count": rows_affected,
+        "billing_reversals": billing_reversals
+            .iter()
+            .map(|reversal| reversal.to_json())
+            .collect::<Vec<_>>(),
         "auto_preparation_documents": {
             "templates_matched": auto_preparation_templates_matched,
             "documents_created": auto_preparation_documents_created,
@@ -9324,6 +9505,7 @@ async fn load_interpreter_report_billing_candidates(
                   ON ol.source_interpreter_report_id = ir.id
            WHERE ir.approval_status = 'approved'
              AND ol.id IS NULL
+             AND ir.billing_reversed_at IS NULL
              AND ($1::UUID IS NULL OR ir.appointment_id = $1)
            ORDER BY ir.approved_at NULLS LAST, ir.created_at, ir.id"#,
     )
@@ -9485,6 +9667,7 @@ async fn sync_interpreter_report_billing_candidate(
     let still_approved = sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id FROM interpreter_reports
            WHERE id = $1 AND approval_status = 'approved'
+             AND billing_reversed_at IS NULL
            FOR UPDATE"#,
     )
     .bind(candidate.report_id)

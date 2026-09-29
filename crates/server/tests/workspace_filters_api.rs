@@ -3583,11 +3583,11 @@ async fn approved_interpreter_report_consumes_the_planned_interpreter_line() {
     .await;
 }
 
-/// Staff with `orders.edit` can cancel a line that is still planned (e.g. the
-/// rest of an interpreter block); the reason is kept and audited, other
-/// statuses are refused.
+/// Staff with `orders.edit` can cancel a planned line (e.g. the rest of an
+/// interpreter block) and, since 2026-09-29, an approved line no released
+/// invoice bills; the reason is kept and audited.
 #[tokio::test]
-async fn staff_cancel_only_planned_order_services_with_a_reason() {
+async fn staff_cancel_order_services_with_a_reason() {
     let Some((app, pool, admin_id, _bearer)) = test_context().await else {
         return;
     };
@@ -3595,7 +3595,7 @@ async fn staff_cancel_only_planned_order_services_with_a_reason() {
     let tag = unique_tag("order-service-cancel");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
     let pm_id = seed_user(&pool, &tag, "patient_manager").await;
-    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let concierge_id = seed_user(&pool, &tag, "concierge").await;
     let other_pm_id = seed_user(&pool, &format!("{tag}-other"), "patient_manager").await;
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let order_id = seed_order(
@@ -3630,14 +3630,14 @@ async fn staff_cancel_only_planned_order_services_with_a_reason() {
         &app,
         "POST",
         &path,
-        &auth_header_for(billing_id, "billing"),
+        &auth_header_for(concierge_id, "concierge"),
         Some(json!({ "reason": reason })),
     )
     .await;
     assert_eq!(
         status,
         StatusCode::FORBIDDEN,
-        "billing lacks orders.edit: {body}"
+        "concierge lacks orders.edit: {body}"
     );
     let (status, body) = json_request(
         &app,
@@ -3694,8 +3694,9 @@ async fn staff_cancel_only_planned_order_services_with_a_reason() {
         Some(json!({ "reason": reason })),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "approved line: {body}");
-    assert_eq!(order_service_state(&pool, approved).await.0, "approved");
+    assert_eq!(status, StatusCode::OK, "approved line: {body}");
+    assert_eq!(body["previous_status"], "approved");
+    assert_eq!(order_service_state(&pool, approved).await.0, "cancelled");
     let (status, _) = json_request(
         &app,
         "POST",

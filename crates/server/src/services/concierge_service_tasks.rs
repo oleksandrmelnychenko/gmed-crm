@@ -27,7 +27,7 @@ use crate::routes::workflow_checklists::{ChecklistItemSync, sync_checklist_items
 use gmed_domain::role::Role;
 
 pub(crate) const SERVICE_BILLED_CODE: &str = "concierge_service_billed";
-pub(crate) const SERVICE_BILLED_MESSAGE: &str = "This service is already billed and cannot be cancelled; issue a credit note or reverse the invoice first";
+pub(crate) const SERVICE_BILLED_MESSAGE: &str = "This service is already billed and cannot be cancelled this way; cancel it with billing reversal (its order line is cancelled, with a credit note when it is invoiced)";
 pub(crate) const AMOUNTS_LOCKED_CODE: &str = "concierge_service_amounts_locked";
 pub(crate) const AMOUNTS_LOCKED_MESSAGE: &str =
     "The amounts of a billed service are locked; issue a credit note or reverse the invoice first";
@@ -259,6 +259,48 @@ pub(crate) fn plan_service_status_change(
     Ok(steps)
 }
 
+/// Task steps that cancel a billed or settled service whose billing is
+/// reversed in the same transaction (owner decision 2026-09-29). Only the
+/// task's author or a higher role cancels; a completed task is reopened
+/// (`in_progress`) and cancelled, as the work center would do it.
+pub(crate) fn plan_billed_service_cancellation(
+    auth: &AuthUser,
+    facts: &ServiceTaskFacts<'_>,
+) -> Result<Vec<&'static str>, ServiceStatusRefusal> {
+    if !is_financially_locked(facts.billing_status) || facts.service_status == "cancelled" {
+        return Err(ServiceStatusRefusal::Transition);
+    }
+    if facts.task_archived {
+        return Err(ServiceStatusRefusal::Archived);
+    }
+    let steps: Vec<&'static str> = match facts.task_status {
+        "completed" => vec!["in_progress", "cancelled"],
+        "open" | "in_progress" | "on_hold" | "review" => vec!["cancelled"],
+        _ => return Err(ServiceStatusRefusal::Transition),
+    };
+    let can_review = can_mutate_operational_item(
+        auth,
+        facts.task_author,
+        facts.task_author_role,
+        TaskScope::PATIENT_OPENED,
+    );
+    if !can_review {
+        return Err(if auth.user_id == facts.task_assignee {
+            ServiceStatusRefusal::AuthorOnly
+        } else {
+            ServiceStatusRefusal::NotParticipant
+        });
+    }
+    let mut from = facts.task_status;
+    for step in &steps {
+        if !is_allowed_status_transition(from, step, can_review) {
+            return Err(ServiceStatusRefusal::AuthorOnly);
+        }
+        from = *step;
+    }
+    Ok(steps)
+}
+
 /// The service statuses this actor can pick now: the current one and every
 /// move the task rules allow. The UI offers only these.
 pub(crate) fn allowed_service_statuses(
@@ -338,7 +380,7 @@ pub(crate) fn billing_after_service_status(
         (_, "completed", "draft") => "ready",
         (_, "cancelled", "draft" | "ready") => "waived",
         ("completed", "in_service", "ready") => "draft",
-        ("cancelled", "planned", "waived") => "draft",
+        ("cancelled", "planned", "waived" | "reversed") => "draft",
         _ => billing,
     }
     .to_string()

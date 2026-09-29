@@ -39,6 +39,7 @@ mod document;
 mod dunning_blocks;
 mod dunning_letters;
 mod release;
+pub(crate) mod service_reversal;
 mod stored_documents;
 mod storno;
 pub(crate) mod termination_settlements;
@@ -9778,20 +9779,132 @@ async fn create_invoice_credit_note(
             Err(resp) => resp,
         };
     }
+    let mut issued = match issue_credit_note_locked(
+        &mut transaction,
+        &context,
+        &CreditNoteIssue {
+            selection: &selection,
+            request_selection: &request_selection,
+            reason: &reason,
+            issued_on,
+            portal_visible: body.portal_visible.unwrap_or(true),
+            request_id,
+            user_id: auth.user_id,
+            source_order_leistung_id: None,
+        },
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    if let Err(e) = transaction.commit().await {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice credit note");
+        issued.discard_document().await;
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create credit note",
+        );
+    }
+    issued.publish(&state, auth.user_id).await;
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "credit_note_transaction_id": issued.id,
+                "document_number": issued.document_number,
+                "credit_mode": issued.mode,
+                "amount_net": decimal_to_string(issued.net),
+                "amount_vat": decimal_to_string(issued.vat),
+                "amount_gross": decimal_to_string(issued.gross),
+                "invoice": invoice,
+            })),
+        )
+            .into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(resp) => resp,
+    }
+}
+
+/// What a new credit note credits and why.
+struct CreditNoteIssue<'a> {
+    pub selection: &'a credit_notes::CreditSelection,
+    /// Normalised selection stored for idempotent replays.
+    pub request_selection: &'a Value,
+    pub reason: &'a str,
+    pub issued_on: NaiveDate,
+    pub portal_visible: bool,
+    pub request_id: Uuid,
+    pub user_id: Uuid,
+    /// The order service cancelled together with this credit note.
+    pub source_order_leistung_id: Option<Uuid>,
+}
+
+/// A credit note issued in a transaction that has not committed yet.
+struct IssuedCreditNote {
+    pub id: Uuid,
+    pub invoice_id: Uuid,
+    pub patient_id: Uuid,
+    pub invoice_number: String,
+    pub document_number: String,
+    pub mode: &'static str,
+    pub net: Decimal,
+    pub vat: Decimal,
+    pub gross: Decimal,
+    pub currency: String,
+    blob: Option<stored_documents::PendingBlob>,
+}
+
+impl IssuedCreditNote {
+    /// Removes the archived PDF written for a transaction that did not commit.
+    pub async fn discard_document(&mut self) {
+        if let Some(blob) = self.blob.take() {
+            blob.discard().await;
+        }
+    }
+
+    /// Realtime event after the commit.
+    pub async fn publish(&self, state: &AppState, user_id: Uuid) {
+        crate::realtime::publish_invoice_event(
+            state,
+            Some(user_id),
+            "invoice.credit_note_created",
+            self.invoice_id,
+            serde_json::json!({
+                "credit_note_transaction_id": self.id,
+                "amount_gross": decimal_to_string(self.gross),
+                "patient_id": self.patient_id,
+            }),
+        )
+        .await;
+    }
+}
+
+/// Issues a credit note on an invoice the transaction has locked (`context`
+/// read `FOR UPDATE`): lines and VAT per rate, gapless number, balances,
+/// archived PDF and the audit row, all in the caller's transaction. The
+/// caller commits and, when the commit fails, discards the document.
+async fn issue_credit_note_locked(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    issue: &CreditNoteIssue<'_>,
+) -> Result<IssuedCreditNote, axum::response::Response> {
+    let invoice_id = context.invoice_id;
+    let failed = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create credit note",
+        )
+    };
     // VAT follows the credited lines: a 0 % pass-through line credits no VAT.
-    let existing_credits =
-        match credit_notes::load_active_credits(&mut transaction, invoice_id).await {
-            Ok(value) => value,
-            Err(e) => {
-                tracing::error!(error = %e, invoice_id = %invoice_id, "load active credit notes");
-                return err(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to create credit note",
-                );
-            }
-        };
+    let existing_credits = credit_notes::load_active_credits(transaction, invoice_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load active credit notes");
+            failed()
+        })?;
     let creditable = credit_notes::creditable_lines(&context.line_items, &existing_credits);
-    let planned = match (&selection, creditable.is_empty()) {
+    let planned = match (issue.selection, creditable.is_empty()) {
         (credit_notes::CreditSelection::Amount(amount), true) => {
             Ok(credit_notes::CreditNotePlan::without_lines(
                 *amount,
@@ -9799,69 +9912,57 @@ async fn create_invoice_credit_note(
                 context.total_gross,
             ))
         }
-        _ => credit_notes::plan_credit_note(&creditable, &selection),
+        _ => credit_notes::plan_credit_note(&creditable, issue.selection),
     };
-    let plan = match planned {
-        Ok(value) => value,
-        Err(error) => {
-            return err(
-                if error.is_conflict() {
-                    StatusCode::CONFLICT
-                } else {
-                    StatusCode::UNPROCESSABLE_ENTITY
-                },
-                error.message(),
-            );
-        }
-    };
-    let amount_net = plan.net;
-    let amount_vat = plan.vat;
-    let amount_gross = plan.gross;
-    if context.credited_amount + amount_gross > context.total_gross {
-        return err(StatusCode::CONFLICT, "Credit note exceeds invoice total");
+    let plan = planned.map_err(|error| {
+        err(
+            if error.is_conflict() {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::UNPROCESSABLE_ENTITY
+            },
+            error.message(),
+        )
+    })?;
+    if context.credited_amount + plan.gross > context.total_gross {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "Credit note exceeds invoice total",
+        ));
     }
     // Gapless: the counter row is locked until this transaction ends.
-    let sequence = match release::next_correction_number(
-        &mut transaction,
-        release::SERIES_CREDIT_NOTE,
-    )
-    .await
-    {
-        Ok(value) => value,
-        Err(e) => {
+    let sequence = release::next_correction_number(transaction, release::SERIES_CREDIT_NOTE)
+        .await
+        .map_err(|e| {
             tracing::error!(error = %e, invoice_id = %invoice_id, "allocate credit-note number");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create credit note",
-            );
-        }
-    };
-    let document_number = release::credit_note_number("CN", issued_on, sequence);
-    let portal_visible = body.portal_visible.unwrap_or(true);
+            failed()
+        })?;
+    let document_number = release::credit_note_number("CN", issue.issued_on, sequence);
     let credit_note_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_credit_note_transactions (
                 invoice_id, transaction_type, request_id, document_number, reason,
                 amount_net, amount_vat, amount_gross, currency,
                 issued_on, portal_visible, created_by,
-                credit_mode, line_items, request_selection
-           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                credit_mode, line_items, request_selection, source_order_leistung_id
+           ) VALUES ($1, 'credit_note', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
            RETURNING id"#,
     )
     .bind(invoice_id)
-    .bind(request_id)
+    .bind(issue.request_id)
     .bind(&document_number)
-    .bind(&reason)
-    .bind(amount_net)
-    .bind(amount_vat)
-    .bind(amount_gross)
+    .bind(issue.reason)
+    .bind(plan.net)
+    .bind(plan.vat)
+    .bind(plan.gross)
     .bind(&context.currency)
-    .bind(issued_on)
-    .bind(portal_visible)
-    .bind(auth.user_id)
+    .bind(issue.issued_on)
+    .bind(issue.portal_visible)
+    .bind(issue.user_id)
     .bind(plan.mode)
     .bind(plan.line_items_json())
-    .bind(&request_selection)
-    .fetch_one(&mut *transaction)
+    .bind(issue.request_selection)
+    .bind(issue.source_order_leistung_id)
+    .fetch_one(&mut **transaction)
     .await
     {
         Ok(id) => id,
@@ -9871,106 +9972,133 @@ async fn create_invoice_credit_note(
                 Some("23505" | "23514" | "P0001")
             ) =>
         {
-            return err(
+            return Err(err(
                 StatusCode::CONFLICT,
                 "Credit note violates invoice balance rules",
-            );
+            ));
         }
         Err(e) => {
             tracing::error!(error = %e, invoice_id = %invoice_id, "insert invoice credit note");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to create credit note",
-            );
+            return Err(failed());
         }
     };
-    if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
+    if let Err(e) = recompute_invoice_settlement_status(transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after credit note");
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create credit note",
-        );
+        return Err(failed());
     }
     // GoBD: the document is rendered once, at issue, and kept.
-    let document = match credit_note_pdf::store_issued_credit_note(
-        &mut transaction,
+    let document = credit_note_pdf::store_issued_credit_note(
+        transaction,
         invoice_id,
         credit_note_id,
-        auth.user_id,
+        issue.user_id,
     )
-    .await
-    {
-        Ok(value) => value,
-        Err(resp) => return resp,
+    .await?;
+    let mut issued = IssuedCreditNote {
+        id: credit_note_id,
+        invoice_id,
+        patient_id: context.patient_id,
+        invoice_number: context.invoice_number.clone(),
+        document_number,
+        mode: plan.mode,
+        net: plan.net,
+        vat: plan.vat,
+        gross: plan.gross,
+        currency: context.currency.clone(),
+        blob: document.blob,
     };
     let audited = write_invoice_audit_tx(
-        &mut transaction,
-        auth.user_id,
+        transaction,
+        issue.user_id,
         "credit_note_created",
         invoice_id,
         serde_json::json!({
             "document_sha256": document.sha256,
             "document_file_name": document.file_name,
             "credit_note_transaction_id": credit_note_id,
-            "document_number": document_number,
+            "document_number": issued.document_number,
             "credit_mode": plan.mode,
             "credited_line_indexes": plan
                 .lines
                 .iter()
                 .map(|line| line.invoice_line_index)
                 .collect::<Vec<_>>(),
-            "amount_net": decimal_to_string(amount_net),
-            "amount_vat": decimal_to_string(amount_vat),
-            "amount_gross": decimal_to_string(amount_gross),
+            "amount_net": decimal_to_string(plan.net),
+            "amount_vat": decimal_to_string(plan.vat),
+            "amount_gross": decimal_to_string(plan.gross),
             "currency": context.currency,
-            "reason": reason,
-            "patient_id": patient_id,
+            "reason": issue.reason,
+            "patient_id": context.patient_id,
+            "source_order_leistung_id": issue.source_order_leistung_id,
         }),
     )
     .await;
-    let committed = match audited {
-        Ok(()) => transaction.commit().await,
-        Err(error) => Err(error),
+    if let Err(e) = audited {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "audit invoice credit note");
+        issued.discard_document().await;
+        return Err(failed());
+    }
+    Ok(issued)
+}
+
+/// Reads what the credit-note rules need of an invoice, with its invoice
+/// date; `lock` locks the invoice row for a credit note in this transaction.
+async fn load_invoice_for_credit_note(
+    conn: &mut sqlx::PgConnection,
+    invoice_id: Uuid,
+    lock: bool,
+) -> Result<Option<(InvoicePaymentContext, Option<DateTime<Utc>>)>, sqlx::Error> {
+    let sql = format!(
+        r#"SELECT invoice.order_id, invoice.patient_id, invoice.invoice_number,
+                  invoice.status, invoice.issued_at, invoice.total_vat, invoice.total_gross,
+                  invoice.credited_amount, invoice.prepayment_applied_amount,
+                  invoice.line_items, invoice.currency
+           FROM invoices invoice
+           WHERE invoice.id = $1
+           {}"#,
+        if lock { "FOR UPDATE OF invoice" } else { "" }
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
+        return Ok(None);
     };
-    if let Err(e) = committed {
-        tracing::error!(error = %e, invoice_id = %invoice_id, "commit invoice credit note");
-        if let Some(blob) = document.blob {
-            blob.discard().await;
-        }
-        return err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create credit note",
-        );
-    }
-    crate::realtime::publish_invoice_event(
-        &state,
-        Some(auth.user_id),
-        "invoice.credit_note_created",
+    let context = InvoicePaymentContext {
         invoice_id,
-        serde_json::json!({
-            "credit_note_transaction_id": credit_note_id,
-            "amount_gross": decimal_to_string(amount_gross),
-            "patient_id": patient_id,
-        }),
-    )
-    .await;
-    match load_invoice_detail(&state, invoice_id, &auth).await {
-        Ok(Some(invoice)) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "credit_note_transaction_id": credit_note_id,
-                "document_number": document_number,
-                "credit_mode": plan.mode,
-                "amount_net": decimal_to_string(amount_net),
-                "amount_vat": decimal_to_string(amount_vat),
-                "amount_gross": decimal_to_string(amount_gross),
-                "invoice": invoice,
-            })),
-        )
-            .into_response(),
-        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
-        Err(resp) => resp,
-    }
+        order_id: row
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        patient_id: row.try_get::<Uuid, _>("patient_id")?,
+        invoice_number: row
+            .try_get::<Option<String>, _>("invoice_number")
+            .unwrap_or_default()
+            .unwrap_or_default(),
+        invoice_status: row.try_get::<String, _>("status").unwrap_or_default(),
+        total_vat: row
+            .try_get::<Decimal, _>("total_vat")
+            .unwrap_or(Decimal::ZERO),
+        total_gross: row
+            .try_get::<Decimal, _>("total_gross")
+            .unwrap_or(Decimal::ZERO),
+        credited_amount: row
+            .try_get::<Decimal, _>("credited_amount")
+            .unwrap_or(Decimal::ZERO),
+        prepayment_applied_amount: row
+            .try_get::<Decimal, _>("prepayment_applied_amount")
+            .unwrap_or(Decimal::ZERO),
+        currency: row
+            .try_get::<String, _>("currency")
+            .unwrap_or_else(|_| "EUR".to_string()),
+        line_items: row
+            .try_get::<Value, _>("line_items")
+            .unwrap_or_else(|_| serde_json::json!([])),
+    };
+    let issued_at = row
+        .try_get::<Option<DateTime<Utc>>, _>("issued_at")
+        .unwrap_or_default();
+    Ok(Some((context, issued_at)))
 }
 
 async fn reverse_invoice_credit_note(
@@ -10032,6 +10160,7 @@ async fn reverse_invoice_credit_note(
                   credit.issued_on AS credit_issued_on,
                   credit.currency, credit.transaction_type, credit.portal_visible,
                   credit.credit_mode, credit.line_items AS credit_line_items,
+                  credit.source_order_leistung_id,
                   invoice.order_id, invoice.patient_id, invoice.invoice_number,
                   invoice.status, invoice.total_vat, invoice.total_gross,
                   invoice.credited_amount, invoice.prepayment_applied_amount,
@@ -10071,6 +10200,24 @@ async fn reverse_invoice_credit_note(
     }
     if row.try_get::<bool, _>("already_reversed").unwrap_or(true) {
         return err(StatusCode::CONFLICT, "Credit note was already reversed");
+    }
+    // The credit note of a cancelled order service belongs to that
+    // cancellation (owner decision 2026-09-29): reversing it alone would bill
+    // a service that stays cancelled.
+    if let Some(service_id) = row
+        .try_get::<Option<Uuid>, _>("source_order_leistung_id")
+        .unwrap_or_default()
+    {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({
+                "error": "Conflict",
+                "code": "credit_note_of_cancelled_order_service",
+                "message": "This credit note belongs to the cancellation of an order service and cannot be reversed on its own",
+                "order_leistung_id": service_id,
+            })),
+        )
+            .into_response();
     }
     if issued_on
         < row

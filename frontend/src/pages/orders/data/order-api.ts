@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import type { BillingReversalPreview, IssuedCreditNote } from "@/lib/billing-reversal";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode } from "@/pages/providers/model/types";
 
@@ -392,16 +393,36 @@ export type CancelledOrderLeistung = {
   id: string;
   order_id: string;
   status: "cancelled";
+  previous_status?: string;
   cancelled_at: string;
   cancelled_by: string;
   cancellation_reason: string;
+  /** Credit notes issued for a line on a released invoice. */
+  credit_notes?: IssuedCreditNote[];
 };
 
-/** Cancels a still-planned service line; the server keeps who, when and why. */
-export function cancelOrderLeistung(orderId: string, leistungId: string, reason: string) {
+/**
+ * Cancels a service line; the server keeps who, when and why. A line on a
+ * released invoice needs `issueCreditNote` (CEO / billing): a credit note is
+ * issued in the same transaction.
+ */
+export function cancelOrderLeistung(
+  orderId: string,
+  leistungId: string,
+  reason: string,
+  issueCreditNote = false,
+) {
   return postJson<CancelledOrderLeistung>(
     `/orders/${orderId}/leistungen/${leistungId}/cancel`,
-    { reason },
+    { reason, issue_credit_note: issueCreditNote },
+  );
+}
+
+/** What cancelling the line would do (credit note, draft invoice). */
+export function fetchLeistungCancellationPreview(orderId: string, leistungId: string) {
+  return apiFetch<BillingReversalPreview>(
+    `/orders/${orderId}/leistungen/${leistungId}/cancellation-preview`,
+    { forceFresh: true },
   );
 }
 

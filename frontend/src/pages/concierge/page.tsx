@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  Ban,
   CalendarCheck,
   CalendarClock,
   CalendarDays,
@@ -31,6 +32,7 @@ import { berlinLocalInputToIso, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "./use-task-realtime";
+import { ConciergeBillingReversalDialog } from "./billing-reversal-dialog";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +52,7 @@ import {
   filterConciergeServices,
   filterConciergeTaskAssignees,
   isConciergeKeyService,
+  isConciergeServiceFinancialLocked,
   isConciergeServiceOverdue,
   sortConciergeServices,
   unconvertedConciergeServices,
@@ -311,11 +314,14 @@ function ServiceCard({
   onOpenKey,
   onOpenTask,
   onKeepBooking,
+  onCancelWithReversal,
   canReopen,
   compact = false,
 }: {
   onOpenTask: (taskId: string) => void;
   onKeepBooking?: (service: ConciergeService) => void;
+  /** Billed services are cancelled with their billing reversed (CEO, PM). */
+  onCancelWithReversal?: (service: ConciergeService) => void;
   service: ConciergeService;
   lang: Lang;
   labels: ConciergeText;
@@ -486,6 +492,21 @@ function ServiceCard({
             {labels.createTaskFromRequest}
           </Button>
         )}
+        {onCancelWithReversal &&
+        service.status !== "cancelled" &&
+        isConciergeServiceFinancialLocked(service) ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className={cn(actionButtonClass, "border-destructive/40 text-destructive")}
+            disabled={updating}
+            onClick={() => onCancelWithReversal(service)}
+          >
+            <Ban />
+            {lang === "de" ? "Mit Abrechnungsstorno stornieren" : "Отменить со сторно начисления"}
+          </Button>
+        ) : null}
         {needsDecision && onKeepBooking ? (
           <Button
             type="button"
@@ -585,6 +606,9 @@ export function ConciergeWorkspacePage() {
   const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [version, setVersion] = useState(0);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [reversalService, setReversalService] = useState<ConciergeService | null>(null);
+  // Cancelling a billed service with billing reversal: CEO and patient managers.
+  const canReverseBilling = user?.role === "ceo" || user?.role === "patient_manager";
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ConciergeTask | null>(null);
   const [taskSourceService, setTaskSourceService] = useState<ConciergeService | null>(null);
@@ -1291,6 +1315,7 @@ export function ConciergeWorkspacePage() {
                               onCreateTask={openCreateTaskFromRequest}
                               onOpenTask={openServiceTask}
                               onKeepBooking={(item) => void keepServiceBooking(item)}
+                              onCancelWithReversal={canReverseBilling ? setReversalService : undefined}
                               onOpenExpense={(item) => void openExpenseReceipt(item)}
                               onOpenKey={isConciergeKeyService(service) ? (item) => void openKeyHandover(item) : undefined}
                               canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
@@ -1322,6 +1347,7 @@ export function ConciergeWorkspacePage() {
                     onCreateTask={openCreateTaskFromRequest}
                     onOpenTask={openServiceTask}
                     onKeepBooking={(item) => void keepServiceBooking(item)}
+                    onCancelWithReversal={canReverseBilling ? setReversalService : undefined}
                     onOpenExpense={(item) => void openExpenseReceipt(item)}
                     onOpenKey={isConciergeKeyService(service) ? (item) => void openKeyHandover(item) : undefined}
                     canReopen={user?.role === "ceo" || user?.role === "patient_manager"}
@@ -1486,6 +1512,18 @@ export function ConciergeWorkspacePage() {
           setSearchParams(next, { replace: true });
         }}
         onChanged={requestRefresh}
+      />
+      <ConciergeBillingReversalDialog
+        service={reversalService}
+        lang={lang}
+        onClose={() => setReversalService(null)}
+        onReversed={(updated) => {
+          clearApiCache("/concierge-services");
+          setServices((current) =>
+            current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+          );
+          requestRefresh();
+        }}
       />
     </div>
   );

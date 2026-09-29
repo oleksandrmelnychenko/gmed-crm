@@ -22,6 +22,7 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/lib/auth";
+import { AppointmentBillingReversalDialog } from "@/pages/appointments/ui/shared/appointment-billing-reversal-dialog";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -2067,6 +2068,7 @@ function StaffAppointmentsPage(...args: Parameters<typeof useStaffAppointmentsPa
   return (
     <ReadOnlyScope active={readOnly.active} banner={readOnly.banner}>
       {content}
+      <AppointmentBillingReversalDialog />
     </ReadOnlyScope>
   );
 }

@@ -193,7 +193,7 @@ describe("orders model", () => {
         canManagePhase: has("orders.edit"),
         canAddLeistung: has("orders.edit"),
         canApproveLeistung: has("orders.edit"),
-        canCancelLeistung: has("orders.edit"),
+        canCancelLeistung: has("orders.edit") || has("invoices.finance"),
         canManageExternalInvoices: has("orders.edit") || has("invoices.finance"),
         canDecideExternalInvoicePayment: has("invoices.finance"),
         canManageEconomics: has("orders.economics"),

@@ -176,6 +176,7 @@ const BILLING_STATUS_LABEL_KEYS = {
   cancelled: "appointment_billing_status_cancelled",
   billed: "appointment_billing_status_billed",
   waived: "appointment_billing_status_waived",
+  reversed: "appointment_billing_status_reversed",
 } satisfies LabelKeyMap;
 
 const FOLLOW_UP_PRESET_LABEL_KEYS = {
