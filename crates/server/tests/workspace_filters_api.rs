@@ -10832,9 +10832,24 @@ async fn billing_can_only_update_financial_fields_on_concierge_service() {
         })),
     )
     .await;
+    // Billing readiness follows the service task (owner decision 2026-09-28):
+    // a planned service is not ready for billing.
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/update"),
+        &billing_bearer,
+        Some(json!({
+            "actual_cost": 129.50,
+            "billing_notes": "Ready for invoice handoff"
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["actual_cost"], "129.50");
-    assert_eq!(body["billing_status"], "ready");
+    assert_eq!(body["billing_status"], "draft");
     assert_eq!(body["billing_notes"], "Ready for invoice handoff");
 
     let (status, body) = json_request(
