@@ -131,6 +131,21 @@ export function approveProviderInvoice(externalInvoiceId: string) {
   return postJson<{ id: string }>(`/external-invoices/${externalInvoiceId}/approve`, {});
 }
 
+/**
+ * Correct a supplier invoice without an order (company cost or patient cost
+ * not assigned yet) while it is unpaid; CEO and billing only.
+ */
+export function updateUnassignedProviderInvoice(externalInvoiceId: string, payload: JsonPayload) {
+  return postJson<{ id: string }>(`/external-invoices/${externalInvoiceId}/update`, payload);
+}
+
+/** Cancel an unpaid supplier invoice without an order, with a reason (3–1000 characters). */
+export function cancelUnassignedProviderInvoice(externalInvoiceId: string, reason: string) {
+  return postJson<{ id: string; status: string }>(`/external-invoices/${externalInvoiceId}/cancel`, {
+    reason,
+  });
+}
+
 export function reverseCompanyProviderPayment(
   externalInvoiceId: string,
   paymentId: string,

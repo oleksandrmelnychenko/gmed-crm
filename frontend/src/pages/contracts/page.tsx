@@ -51,7 +51,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { clearApiCache } from "@/lib/api";
-import { berlinLocalInputToIso } from "@/lib/app-time-zone";
+import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { deNormalize } from "@/components/data-table/search";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
@@ -76,8 +76,9 @@ import {
   DEFAULT_CONTRACT_FILTERS,
   DEFAULT_QUOTE_FILTERS,
   QUOTE_FILTER_STATUSES,
-  QUOTE_STATUSES,
   agencyServiceToForm,
+  quoteValidityPassed,
+  selectableQuoteStatuses,
   hasAgencyServiceFormChanges,
   blankAgencyServiceForm,
   blankContractForm,
@@ -441,6 +442,14 @@ function useContractsPageContent() {
         lang === "de"
           ? "Dieses Angebot hat frühere Angebote ersetzt und kann nicht gelöscht werden. Lehnen Sie es stattdessen ab."
           : "Это предложение заменило предыдущие и не может быть удалено. Вместо этого отклоните его.",
+      contractRollbackBlocked:
+        lang === "de"
+          ? "Der Vertrag ist unterschrieben und es laufen Aufträge darunter; er kann nicht auf Entwurf oder Versendet zurückgesetzt werden."
+          : "Договор подписан и по нему идут заказы; вернуть его в черновик или «отправлен» нельзя.",
+      quoteExpired: (validUntil: string) =>
+        lang === "de"
+          ? `Das Angebot ist abgelaufen (gültig bis ${validUntil}). Es kann nicht mehr angenommen werden; erstellen Sie ein neues Angebot.`
+          : `Срок действия предложения истёк (действовало до ${validUntil}). Принять его нельзя — создайте новое предложение.`,
       supersededBy: (quoteNumber: string) =>
         lang === "de"
           ? `Durch das neuere Angebot ${quoteNumber} ersetzt. Aus diesem Angebot kann nichts mehr abgerechnet werden; bereits erstellte Rechnungen bleiben gültig.`
@@ -1902,12 +1911,15 @@ function useContractsPageContent() {
       });
       setContractsReloadToken((current) => current + 1);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "";
       setContractStatusError(
-        contractActionErrorMessage(
-          error,
-          createContractValidationMessages,
-          t.common_error,
-        ),
+        message.includes("cannot go back to draft or sent")
+          ? text.contractRollbackBlocked
+          : contractActionErrorMessage(
+              error,
+              createContractValidationMessages,
+              t.common_error,
+            ),
       );
     } finally {
       setContractStatusBusy(false);
@@ -1925,7 +1937,12 @@ function useContractsPageContent() {
       });
       setQuotesReloadToken((current) => current + 1);
     } catch (error) {
-      setQuoteStatusError(error instanceof Error ? error.message : t.common_error);
+      const message = error instanceof Error ? error.message : "";
+      setQuoteStatusError(
+        /has expired|was valid until/.test(message) && quoteDetail
+          ? text.quoteExpired(formatDate(quoteDetail.valid_until, locale, t.common_not_set))
+          : message || t.common_error,
+      );
     } finally {
       setQuoteStatusBusy(false);
     }
@@ -3137,6 +3154,15 @@ function useContractsPageContent() {
                           {text.supersededBy(quoteDetail.superseded_by_quote_number || t.common_not_set)}
                         </ShellBanner>
                       ) : null}
+                      {!quoteSuperseded
+                      && (quoteDetail.status === "expired"
+                        || (quoteDetail.status !== "accepted"
+                          && quoteDetail.status !== "rejected"
+                          && quoteValidityPassed(quoteDetail.valid_until, appDateKey()))) ? (
+                        <ShellBanner tone="warning">
+                          {text.quoteExpired(formatDate(quoteDetail.valid_until, locale, t.common_not_set))}
+                        </ShellBanner>
+                      ) : null}
                       <div className="grid gap-4 sm:grid-cols-3">
                         <Field label={t.users_status}>
                           <NativeComboboxSelect
@@ -3153,7 +3179,11 @@ function useContractsPageContent() {
                             {quoteSuperseded ? (
                               <option value={quoteDetail.status}>{quoteStatusLabel(quoteDetail.status)}</option>
                             ) : null}
-                            {QUOTE_STATUSES.map((status) => (
+                            {selectableQuoteStatuses(
+                              quoteDetail.status,
+                              quoteDetail.valid_until,
+                              appDateKey(),
+                            ).map((status) => (
                               <option key={status} value={status}>
                                 {quoteStatusLabel(status)}
                               </option>

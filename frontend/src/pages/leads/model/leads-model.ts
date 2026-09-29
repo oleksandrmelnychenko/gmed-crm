@@ -61,6 +61,10 @@ const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
   "failed to create quote": ["Не удалось создать смету", "Kostenvoranschlag konnte nicht erstellt werden"],
   "case intake is incomplete": ["Заполните причину обращения и анамнез", "Anliegen und Anamnese vollständig ausfüllen"],
   "failed to import attachments": ["Не удалось импортировать файлы лида", "Lead-Dateien konnten nicht importiert werden"],
+  "compliance becomes signed only through a signed dsgvo document": [
+    "«Подписано» ставится только после подписания документа DSGVO",
+    "„Unterzeichnet“ wird nur durch ein unterschriebenes DSGVO-Dokument gesetzt",
+  ],
   "invalid compliance_status": ["Выберите корректный статус согласий", "Gültigen Einwilligungsstatus auswählen"],
   "invalid legal_sex": ["Выберите пол по документам", "Geschlecht laut Ausweisdokument auswählen"],
   "invalid date_of_birth (yyyy-mm-dd)": ["Укажите корректную дату рождения", "Gültiges Geburtsdatum angeben"],
@@ -259,6 +263,27 @@ export const COMPLIANCE_OPTIONS = [
   "signed",
   "rejected",
 ] as const;
+
+/**
+ * `signed` comes only from the DSGVO signature (a document marked as signed
+ * DSGVO evidence); staff choose it only to keep a lead that already has it.
+ */
+export function complianceOptionSelectable(option: string, current: string | null | undefined) {
+  return option !== "signed" || current === "signed";
+}
+
+/**
+ * A lead marked `signed` by hand before the rule existed has no signed DSGVO
+ * document behind it; the form says so instead of hiding it.
+ */
+export function complianceSignedWithoutDocument(detail: {
+  compliance_status?: string | null;
+  readiness?: { checks?: Array<{ key?: string; passed?: boolean }> } | null;
+}) {
+  if (detail.compliance_status !== "signed") return false;
+  const check = detail.readiness?.checks?.find((item) => item.key === "dsgvo_document_signed");
+  return check ? check.passed === false : false;
+}
 
 export const LEGAL_SEX_OPTIONS = [
   "female",

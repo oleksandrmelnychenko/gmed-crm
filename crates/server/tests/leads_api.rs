@@ -171,11 +171,18 @@ Content-Type: application/json\r\n\r\n\
     (status, value)
 }
 
-async fn make_lead_ready_for_qualification(
-    app: &axum::Router,
-    bearer: &str,
-    lead_id: &str,
-) -> Value {
+/// Stands for the DSGVO signature flow: only a document marked as signed DSGVO
+/// evidence sets a lead's compliance to `signed` (staff cannot set it by hand).
+async fn record_dsgvo_signature(pool: &PgPool, lead_id: &str) {
+    sqlx::query("UPDATE leads SET compliance_status = 'signed' WHERE id = $1")
+        .bind(Uuid::parse_str(lead_id).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn make_lead_ready_for_qualification(app: &TestApp, bearer: &str, lead_id: &str) -> Value {
+    record_dsgvo_signature(&app.suite.pool, lead_id).await;
     let (status, body) = json_request(
         app,
         "POST",
@@ -187,7 +194,6 @@ async fn make_lead_ready_for_qualification(
             "primary_language": "de",
             "date_of_birth": "1990-01-01",
             "legal_sex": "female",
-            "compliance_status": "signed",
             "consent_healthcare": true,
             "consent_privacy_practices": true
         })),
@@ -1332,6 +1338,90 @@ async fn list_leads_exposes_conversion_ready_field() {
 }
 
 #[tokio::test]
+async fn staff_cannot_mark_lead_compliance_signed_by_hand() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Manual",
+            "last_name": "Compliance",
+            "email": format!("manual-compliance-{tag}@test.local"),
+            "phone": "+49111000001",
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let lead_uuid = Uuid::parse_str(&lead_id).unwrap();
+    let stored = |pool: PgPool| async move {
+        sqlx::query_scalar::<_, String>("SELECT compliance_status FROM leads WHERE id = $1")
+            .bind(lead_uuid)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "compliance_status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["message"],
+        "Compliance becomes signed only through a signed DSGVO document"
+    );
+    assert_eq!(stored(app.suite.pool.clone()).await, "pending");
+
+    // Sending documents is still recorded by hand, audited with the change.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "compliance_status": "documents_sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored(app.suite.pool.clone()).await, "documents_sent");
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'update_lead' AND entity_id = $1
+             AND context->>'compliance_status' = 'documents_sent'
+             AND context->>'previous_compliance_status' = 'pending'"#,
+    )
+    .bind(lead_uuid)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // Once the DSGVO signature set it, the form may send `signed` back.
+    record_dsgvo_signature(&app.suite.pool, &lead_id).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "compliance_status": "signed", "notes": "checked" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(stored(app.suite.pool.clone()).await, "signed");
+}
+
+#[tokio::test]
 async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
     let Some(app) = test_app().await else { return };
     let pm = app.auth_header("patient_manager");
@@ -1358,6 +1448,7 @@ async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
         .execute(&app.suite.pool)
         .await
         .unwrap();
+    record_dsgvo_signature(&app.suite.pool, &lead_id).await;
 
     let (status, _) = json_request(
         &app,

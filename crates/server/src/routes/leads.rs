@@ -634,6 +634,27 @@ fn is_valid_compliance_status(value: &str) -> bool {
     matches!(value, "pending" | "documents_sent" | "signed" | "rejected")
 }
 
+const MANUAL_COMPLIANCE_SIGNED_REFUSED: &str =
+    "Compliance becomes signed only through a signed DSGVO document";
+
+/// The compliance status a manual lead edit may write. Staff record that the
+/// DSGVO documents were sent or rejected (or reset to pending), but `signed`
+/// comes only from the signature itself: a document marked as signed DSGVO
+/// evidence (`documents::mark_document_signed`, also after an e-signature).
+/// A lead that is already `signed` keeps it when the form sends it back
+/// unchanged; leads marked by hand before 2026-09-28 stay as they are.
+fn manual_compliance_update(
+    current: &str,
+    requested: Option<&str>,
+) -> Result<Option<String>, &'static str> {
+    match requested {
+        None => Ok(None),
+        Some("signed") if current == "signed" => Ok(None),
+        Some("signed") => Err(MANUAL_COMPLIANCE_SIGNED_REFUSED),
+        Some(value) => Ok(Some(value.to_string())),
+    }
+}
+
 fn is_valid_legal_sex(value: &str) -> bool {
     matches!(value, "female" | "male" | "diverse" | "no_entry")
 }
@@ -3408,7 +3429,7 @@ async fn update_lead(
     let current_identity = match sqlx::query(
         r#"SELECT first_name, last_name, date_of_birth, email, phone,
                   trusted_contacts, repeat_patient_id, prospect_patient_id,
-                  converted_patient_id, qualification_status
+                  converted_patient_id, qualification_status, compliance_status
              FROM leads WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -3436,6 +3457,14 @@ async fn update_lead(
             "A deleted lead is anonymised and cannot be edited",
         );
     }
+    let current_compliance_status = current_identity
+        .try_get::<String, _>("compliance_status")
+        .unwrap_or_default();
+    let compliance_status =
+        match manual_compliance_update(&current_compliance_status, compliance_status.as_deref()) {
+            Ok(value) => value,
+            Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        };
     let effective_first_name = first_name
         .clone()
         .unwrap_or_else(|| current_identity.get::<String, _>("first_name"));
@@ -3496,7 +3525,17 @@ async fn update_lead(
         return response;
     }
 
-    match sqlx::query(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin lead update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let compliance_changed = compliance_status
+        .as_deref()
+        .is_some_and(|value| value != current_compliance_status);
+    let update_result = sqlx::query(
         r#"UPDATE leads
            SET email = COALESCE($2, email),
                phone = COALESCE($3, phone),
@@ -3571,7 +3610,7 @@ async fn update_lead(
     .bind(primary_language.as_deref())
     .bind(date_of_birth)
     .bind(legal_sex)
-    .bind(compliance_status)
+    .bind(compliance_status.as_deref())
     .bind(body.consent_healthcare)
     .bind(body.consent_privacy_practices)
     .bind(body.notes.as_deref())
@@ -3611,62 +3650,79 @@ async fn update_lead(
     .bind(trusted_contacts.as_ref().map(Value::to_string))
     .bind(referrer_patient_id_supplied)
     .bind(referrer_patient_id)
-    .execute(&state.db)
-    .await
-    {
-        Ok(result) if result.rows_affected() > 0 => {
-            let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
-                Ok(Some(value)) => value,
-                Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
-                Err(resp) => return resp,
-            };
-
-            state.audit_sender.try_send(audit::domain_event(
-                "update_lead",
-                Some(auth.user_id),
-                "lead",
-                Some(lead_id),
-                json!({
-                    "compliance_status": body.compliance_status,
-                    "date_of_birth": body.date_of_birth,
-                    "legal_sex": body.legal_sex,
-                    "contact_updated": body.email.is_some() || body.phone.is_some(),
-                    "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
-                    "consent_healthcare": body.consent_healthcare,
-                    "consent_privacy_practices": body.consent_privacy_practices,
-                    "referrer_patient_id": referrer_patient_id,
-                }),
-            ));
-            crate::realtime::publish_lead_event(
-                &state,
-                Some(auth.user_id),
-                "lead.updated",
-                lead_id,
-                json!({
-                    "compliance_status": body.compliance_status,
-                    "date_of_birth": body.date_of_birth,
-                    "legal_sex": body.legal_sex,
-                    "contact_updated": body.email.is_some() || body.phone.is_some(),
-                    "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
-                    "consent_healthcare": body.consent_healthcare,
-                    "consent_privacy_practices": body.consent_privacy_practices,
-                    "referrer_patient_id": referrer_patient_id,
-                }),
-            )
-            .await;
-
-            Json(json!({
-                "ok": true,
-                "readiness": readiness.payload,
-            }))
-            .into_response()
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
+    .execute(&mut *tx)
+    .await;
+    match update_result {
+        Ok(result) if result.rows_affected() > 0 => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(e) => {
             tracing::error!(error = %e, lead_id = %lead_id, "update lead");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    // The audit row commits with the change (a compliance change is a status
+    // change of the lead).
+    let mut audit_context = json!({
+        "compliance_status": compliance_status,
+        "date_of_birth": body.date_of_birth,
+        "legal_sex": body.legal_sex,
+        "contact_updated": body.email.is_some() || body.phone.is_some(),
+        "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
+        "consent_healthcare": body.consent_healthcare,
+        "consent_privacy_practices": body.consent_privacy_practices,
+        "referrer_patient_id": referrer_patient_id,
+    });
+    if compliance_changed {
+        audit_context["previous_compliance_status"] = json!(current_compliance_status);
+    }
+    if let Err(e) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "update_lead",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            audit_context,
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %e, lead_id = %lead_id, "audit lead update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = %e, lead_id = %lead_id, "commit lead update");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+
+    let readiness = match load_lead_conversion_readiness(&state, lead_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Lead not found"),
+        Err(resp) => return resp,
+    };
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.updated",
+        lead_id,
+        json!({
+            "compliance_status": compliance_status,
+            "date_of_birth": body.date_of_birth,
+            "legal_sex": body.legal_sex,
+            "contact_updated": body.email.is_some() || body.phone.is_some(),
+            "trusted_contacts_count": body.trusted_contacts.as_ref().map(Vec::len),
+            "consent_healthcare": body.consent_healthcare,
+            "consent_privacy_practices": body.consent_privacy_practices,
+            "referrer_patient_id": referrer_patient_id,
+        }),
+    )
+    .await;
+
+    Json(json!({
+        "ok": true,
+        "readiness": readiness.payload,
+    }))
+    .into_response()
 }
 
 async fn promote_lead_to_console(
@@ -3878,29 +3934,49 @@ async fn qualify_lead(
         }
     }
 
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = %e, lead_id = %lead_id, "begin lead qualification");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     match sqlx::query(
         "UPDATE leads
          SET qualification_status = $2,
              status_changed_at = CASE WHEN qualification_status <> $2 THEN now() ELSE status_changed_at END,
              failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END
-         WHERE id = $1",
+         WHERE id = $1 AND qualification_status = $3",
     )
         .bind(lead_id)
         .bind(&body.status)
-        .execute(&state.db)
+        .bind(&current_status)
+        .execute(&mut *tx)
         .await
     {
         Ok(r) if r.rows_affected() > 0 => {
-            state.audit_sender.try_send(audit::domain_event(
-                "qualify_lead",
-                Some(auth.user_id),
-                "lead",
-                Some(lead_id),
-                json!({ "status": body.status.clone() }),
-            ));
+            // Status, history entry and audit row commit together.
+            if let Err(e) = audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "qualify_lead",
+                    Some(auth.user_id),
+                    "lead",
+                    Some(lead_id),
+                    json!({
+                        "status": body.status.clone(),
+                        "previous_status": current_status.clone(),
+                    }),
+                ),
+            )
+            .await
+            {
+                tracing::error!(error = %e, lead_id = %lead_id, "audit lead qualification");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
             if current_status != body.status
-                && let Err(resp) = crate::routes::workflow_lifecycle::record_event(
-                    &state,
+                && let Err(resp) = crate::routes::workflow_lifecycle::record_event_tx(
+                    &mut tx,
                     crate::routes::workflow_lifecycle::RecordEvent {
                         entity_type: "lead",
                         entity_id: lead_id,
@@ -3918,6 +3994,10 @@ async fn qualify_lead(
             {
                 return resp;
             }
+            if let Err(e) = tx.commit().await {
+                tracing::error!(error = %e, lead_id = %lead_id, "commit lead qualification");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
             crate::realtime::publish_lead_event(
                 &state,
                 Some(auth.user_id),
@@ -3931,7 +4011,10 @@ async fn qualify_lead(
             .await;
             Json(json!({ "ok": true })).into_response()
         }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Lead not found"),
+        Ok(_) => err(
+            StatusCode::CONFLICT,
+            "The lead status changed meanwhile; reload the lead and try again",
+        ),
         Err(e) => {
             tracing::error!(error = %e, "qualify lead");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
@@ -6010,6 +6093,48 @@ async fn convert_lead(
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
+    // The conversion's audit row and lead history entry commit with it.
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "convert_lead",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({
+                "patient_id": patient_id,
+                "patient_pid": pid.clone(),
+                "conversion_confirmed": true,
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "audit lead conversion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
+    if let Err(response) = crate::routes::workflow_lifecycle::record_event_tx(
+        &mut tx,
+        crate::routes::workflow_lifecycle::RecordEvent {
+            entity_type: "lead",
+            entity_id: lead_id,
+            from_stage: Some(previous_status.as_str()),
+            to_stage: "converted",
+            transition_kind: "converted",
+            changed_by: Some(auth.user_id),
+            note: Some("Lead converted to patient"),
+            metadata: json!({
+                "patient_id": patient_id,
+                "patient_pid": pid.clone(),
+            }),
+        },
+    )
+    .await
+    {
+        return response;
+    }
+
     if let Err(error) = tx.commit().await {
         tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "commit lead conversion");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -6051,39 +6176,6 @@ async fn convert_lead(
         }
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "convert_lead",
-        Some(auth.user_id),
-        "lead",
-        Some(lead_id),
-        json!({
-            "patient_id": patient_id,
-            "patient_pid": pid.clone(),
-            "conversion_confirmed": true,
-        }),
-    ));
-    let previous_status: String = lead.try_get("qualification_status").unwrap_or_default();
-    if crate::routes::workflow_lifecycle::record_event(
-        &state,
-        crate::routes::workflow_lifecycle::RecordEvent {
-            entity_type: "lead",
-            entity_id: lead_id,
-            from_stage: Some(previous_status.as_str()),
-            to_stage: "converted",
-            transition_kind: "converted",
-            changed_by: Some(auth.user_id),
-            note: Some("Lead converted to patient"),
-            metadata: json!({
-                "patient_id": patient_id,
-                "patient_pid": pid.clone(),
-            }),
-        },
-    )
-    .await
-    .is_err()
-    {
-        tracing::error!(lead_id = %lead_id, patient_id = %patient_id, "failed to record lead conversion lifecycle event");
-    }
     crate::realtime::publish_lead_event(
         &state,
         Some(auth.user_id),
@@ -6227,103 +6319,94 @@ async fn resolve_failed_lead(
         "deleted"
     };
 
+    // The status change, its audit row and the lead history entry commit
+    // together.
+    let lead_audit = audit::domain_event(
+        "resolve_failed_lead",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        json!({
+            "resolution": resolution.clone(),
+            "reason": reason,
+            "note": note,
+            "failed_from_status": current_status.clone(),
+        }),
+    );
+    let lifecycle = crate::routes::workflow_lifecycle::RecordEvent {
+        entity_type: "lead",
+        entity_id: lead_id,
+        from_stage: Some(current_status.as_str()),
+        to_stage: lifecycle_stage,
+        transition_kind: lifecycle_stage,
+        changed_by: Some(auth.user_id),
+        note: Some(reason),
+        metadata: json!({
+            "resolution": outcome_status,
+            "note": note,
+        }),
+    };
     let update_result = if resolution == "archive" {
-        sqlx::query(
-            r#"UPDATE leads
-               SET qualification_status = 'archived',
-                   status_changed_at = now(),
-                   failed_outcome_status = 'archived',
-                   failed_from_status = $2,
-                   failed_reason = $3,
-                   failed_note = $4,
-                   failed_processed_at = now(),
-                   failed_processed_by = $5
-               WHERE id = $1 AND converted_patient_id IS NULL AND failed_outcome_status='none'"#,
-        )
-        .bind(lead_id)
-        .bind(current_status.clone())
-        .bind(reason)
-        .bind(note)
-        .bind(auth.user_id)
-        .execute(&state.db)
+        async {
+            let mut tx = state.db.begin().await?;
+            let result = sqlx::query(
+                r#"UPDATE leads
+                   SET qualification_status = 'archived',
+                       status_changed_at = now(),
+                       failed_outcome_status = 'archived',
+                       failed_from_status = $2,
+                       failed_reason = $3,
+                       failed_note = $4,
+                       failed_processed_at = now(),
+                       failed_processed_by = $5
+                   WHERE id = $1 AND converted_patient_id IS NULL AND failed_outcome_status='none'"#,
+            )
+            .bind(lead_id)
+            .bind(current_status.clone())
+            .bind(reason)
+            .bind(note)
+            .bind(auth.user_id)
+            .execute(&mut *tx)
+            .await?;
+            if result.rows_affected() > 0 {
+                audit::write_in_transaction(&mut tx, &lead_audit).await?;
+                crate::routes::workflow_lifecycle::insert_event(&mut tx, lifecycle).await?;
+            }
+            tx.commit().await?;
+            Ok::<u64, sqlx::Error>(result.rows_affected())
+        }
         .await
     } else {
         let deleted_result = purge_lead_and_prospect(
             &state.db,
-            lead_id,
-            Some(current_status.clone()),
-            reason,
-            note,
-            Some(auth.user_id),
+            LeadPurge {
+                lead_id,
+                failed_from_status: Some(current_status.clone()),
+                reason,
+                note,
+                processed_by: Some(auth.user_id),
+                lead_audit,
+                lifecycle,
+            },
         )
         .await;
 
         match deleted_result {
-            Ok((result, purged_prospect)) => {
+            Ok((result, _)) => {
                 if result.rows_affected() > 0 {
                     let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
                         .bind(lead_id)
                         .execute(&state.db)
                         .await;
                 }
-                if let Some(prospect_id) = purged_prospect {
-                    state.audit_sender.try_send(audit::domain_event(
-                        "purge_prospect_patient",
-                        Some(auth.user_id),
-                        "patient",
-                        Some(prospect_id),
-                        json!({
-                            "reason": "storage_limitation_retention",
-                            "source_lead_id": lead_id,
-                            "gdpr_article": "5(1)(e)",
-                        }),
-                    ));
-                }
-                Ok(result)
+                Ok(result.rows_affected())
             }
             Err(error) => Err(error),
         }
     };
 
     match update_result {
-        Ok(result) if result.rows_affected() > 0 => {
-            state.audit_sender.try_send(audit::domain_event(
-                "resolve_failed_lead",
-                Some(auth.user_id),
-                "lead",
-                Some(lead_id),
-                json!({
-                    "resolution": resolution.clone(),
-                    "reason": reason,
-                    "note": note,
-                    "failed_from_status": current_status.clone(),
-                }),
-            ));
-
-            if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
-                &state,
-                crate::routes::workflow_lifecycle::RecordEvent {
-                    entity_type: "lead",
-                    entity_id: lead_id,
-                    from_stage: Some(current_status.as_str()),
-                    to_stage: lifecycle_stage,
-                    transition_kind: if resolution == "archive" {
-                        "archived"
-                    } else {
-                        "deleted"
-                    },
-                    changed_by: Some(auth.user_id),
-                    note: Some(reason),
-                    metadata: json!({
-                        "resolution": outcome_status,
-                        "note": note,
-                    }),
-                },
-            )
-            .await
-            {
-                return resp;
-            }
+        Ok(rows) if rows > 0 => {
             crate::realtime::publish_lead_event(
                 &state,
                 Some(auth.user_id),
@@ -7070,19 +7153,38 @@ pub(crate) async fn anonymize_lead_pii(
     .await
 }
 
+/// One lead deletion for [`purge_lead_and_prospect`]: what is recorded on the
+/// lead, the audit row and the lead history entry written with it.
+struct LeadPurge<'a> {
+    lead_id: Uuid,
+    failed_from_status: Option<String>,
+    reason: &'a str,
+    note: Option<&'a str>,
+    processed_by: Option<Uuid>,
+    lead_audit: audit::AuditEvent,
+    lifecycle: crate::routes::workflow_lifecycle::RecordEvent<'a>,
+}
+
 /// Anonymise the lead and, in the same transaction, hard-delete its prospect
 /// patient when that patient is still `prospective` and the lead never
 /// converted. A prospect has no independent retention basis (GDPR Art.
 /// 5(1)(e)); the CASCADE removes its clinical record and funnel case. Active
 /// or attached patients are never touched — the guard is in the WHERE clause.
+/// When the lead is anonymised, its audit row, the audit row of a deleted
+/// prospect and the lead history entry commit in the same transaction.
 async fn purge_lead_and_prospect(
     pool: &gmed_db::DbPool,
-    lead_id: Uuid,
-    failed_from_status: Option<String>,
-    reason: &str,
-    note: Option<&str>,
-    processed_by: Option<Uuid>,
+    purge: LeadPurge<'_>,
 ) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
+    let LeadPurge {
+        lead_id,
+        failed_from_status,
+        reason,
+        note,
+        processed_by,
+        lead_audit,
+        lifecycle,
+    } = purge;
     let mut tx = pool.begin().await?;
     let purge_candidate: Option<Uuid> = sqlx::query_scalar(
         r#"SELECT p.id
@@ -7122,6 +7224,27 @@ async fn purge_lead_and_prospect(
         processed_by,
     )
     .await?;
+    if result.rows_affected() > 0 {
+        audit::write_in_transaction(&mut tx, &lead_audit).await?;
+        if let Some(prospect_id) = purged_prospect {
+            audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    "purge_prospect_patient",
+                    processed_by,
+                    "patient",
+                    Some(prospect_id),
+                    json!({
+                        "reason": "storage_limitation_retention",
+                        "source_lead_id": lead_id,
+                        "gdpr_article": "5(1)(e)",
+                    }),
+                ),
+            )
+            .await?;
+        }
+        crate::routes::workflow_lifecycle::insert_event(&mut tx, lifecycle).await?;
+    }
     tx.commit().await?;
     Ok((result, purged_prospect))
 }
@@ -7213,44 +7336,13 @@ pub async fn auto_purge_stale_archived(
     for (lead_id, from_status) in candidates {
         match purge_lead_and_prospect(
             &state.db,
-            lead_id,
-            Some(from_status.clone()),
-            "auto_purge_storage_limitation",
-            Some("Auto-purged per cleanup_archived_leads_days retention"),
-            None,
-        )
-        .await
-        {
-            Ok((result, purged_prospect)) if result.rows_affected() > 0 => {
-                report.anonymized += 1;
-                let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
-                    .bind(lead_id)
-                    .execute(&state.db)
-                    .await;
-                // The lead history shows the automatic deletion like a manual one.
-                if crate::routes::workflow_lifecycle::record_event(
-                    state,
-                    crate::routes::workflow_lifecycle::RecordEvent {
-                        entity_type: "lead",
-                        entity_id: lead_id,
-                        from_stage: Some(from_status.as_str()),
-                        to_stage: "deleted",
-                        transition_kind: "deleted",
-                        changed_by: None,
-                        note: Some("auto_purge_storage_limitation"),
-                        metadata: json!({
-                            "resolution": "delete_anonymized",
-                            "trigger": "retention_sweeper",
-                            "retention_days": retention_days,
-                        }),
-                    },
-                )
-                .await
-                .is_err()
-                {
-                    tracing::error!(%lead_id, "record lead auto-purge lifecycle event");
-                }
-                state.audit_sender.try_send(audit::domain_event(
+            LeadPurge {
+                lead_id,
+                failed_from_status: Some(from_status.clone()),
+                reason: "auto_purge_storage_limitation",
+                note: Some("Auto-purged per cleanup_archived_leads_days retention"),
+                processed_by: None,
+                lead_audit: audit::domain_event(
                     "auto_purge_lead",
                     None,
                     "lead",
@@ -7259,21 +7351,34 @@ pub async fn auto_purge_stale_archived(
                         "reason": "storage_limitation_retention",
                         "retention_days": retention_days,
                         "gdpr_article": "5(1)(e)",
+                        "failed_from_status": from_status.clone(),
                     }),
-                ));
-                if let Some(prospect_id) = purged_prospect {
-                    state.audit_sender.try_send(audit::domain_event(
-                        "purge_prospect_patient",
-                        None,
-                        "patient",
-                        Some(prospect_id),
-                        json!({
-                            "reason": "storage_limitation_retention",
-                            "source_lead_id": lead_id,
-                            "gdpr_article": "5(1)(e)",
-                        }),
-                    ));
-                }
+                ),
+                // The lead history shows the automatic deletion like a manual one.
+                lifecycle: crate::routes::workflow_lifecycle::RecordEvent {
+                    entity_type: "lead",
+                    entity_id: lead_id,
+                    from_stage: Some(from_status.as_str()),
+                    to_stage: "deleted",
+                    transition_kind: "deleted",
+                    changed_by: None,
+                    note: Some("auto_purge_storage_limitation"),
+                    metadata: json!({
+                        "resolution": "delete_anonymized",
+                        "trigger": "retention_sweeper",
+                        "retention_days": retention_days,
+                    }),
+                },
+            },
+        )
+        .await
+        {
+            Ok((result, _)) if result.rows_affected() > 0 => {
+                report.anonymized += 1;
+                let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+                    .bind(lead_id)
+                    .execute(&state.db)
+                    .await;
             }
             Ok(_) => {
                 // Row was concurrently anonymised between SELECT and
@@ -7374,6 +7479,37 @@ mod questionnaire_mapping_tests {
                 && contact.contact_type == "work"
                 && contact.value == "+49 30 9988"
         }));
+    }
+}
+
+#[cfg(test)]
+mod manual_compliance_tests {
+    use super::*;
+
+    #[test]
+    fn staff_cannot_set_signed_by_hand() {
+        for current in ["pending", "documents_sent", "rejected"] {
+            assert_eq!(
+                manual_compliance_update(current, Some("signed")),
+                Err(MANUAL_COMPLIANCE_SIGNED_REFUSED)
+            );
+        }
+    }
+
+    #[test]
+    fn a_signed_lead_keeps_signed_when_the_form_sends_it_back() {
+        assert_eq!(manual_compliance_update("signed", Some("signed")), Ok(None));
+    }
+
+    #[test]
+    fn other_statuses_stay_manual() {
+        assert_eq!(manual_compliance_update("pending", None), Ok(None));
+        for requested in ["pending", "documents_sent", "rejected"] {
+            assert_eq!(
+                manual_compliance_update("signed", Some(requested)),
+                Ok(Some(requested.to_string()))
+            );
+        }
     }
 }
 

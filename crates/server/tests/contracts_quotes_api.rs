@@ -629,7 +629,7 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
         "POST",
         &format!("/api/v1/orders/{order_id}/quotes"),
         &pm_bearer,
-        Some(json!({ "valid_until": "2026-12-31" })),
+        Some(json!({ "valid_until": "2099-12-31" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "response: {quote}");
@@ -914,7 +914,7 @@ async fn quote_creation_from_order_services_computes_totals_and_updates_order() 
         &format!("/api/v1/orders/{order_id}/quotes"),
         &billing_bearer,
         Some(json!({
-            "valid_until": "2026-05-15",
+            "valid_until": "2099-05-15",
             "notes": "Source-derived quote"
         })),
     )
@@ -1385,7 +1385,7 @@ async fn quote_versions_capture_initial_and_status_update_snapshots() {
         &format!("/api/v1/orders/{order_id}/quotes"),
         &billing_bearer,
         Some(json!({
-            "valid_until": "2026-05-15",
+            "valid_until": "2099-05-15",
             "notes": "Initial commercial snapshot"
         })),
     )
@@ -1533,7 +1533,7 @@ async fn ceo_can_manage_contracts_and_quotes_without_patient_assignment() {
         &format!("/api/v1/orders/{order_id}/quotes"),
         &ceo_bearer,
         Some(json!({
-            "valid_until": "2026-05-31",
+            "valid_until": "2099-05-31",
             "notes": "CEO-created quote"
         })),
     )
@@ -1623,7 +1623,7 @@ async fn ceo_assistant_can_read_but_cannot_mutate_contracts_and_quotes() {
         &format!("/api/v1/orders/{order_id}/quotes"),
         &billing_bearer,
         Some(json!({
-            "valid_until": "2026-06-15",
+            "valid_until": "2099-06-15",
             "notes": "Read-only quote"
         })),
     )
@@ -2770,4 +2770,241 @@ async fn new_quote_supersedes_open_quotes_and_the_replacement_history_is_kept() 
     .unwrap();
     assert_eq!(audit_context["previous_status"], "draft");
     assert_eq!(audit_context["status"], "rejected");
+}
+
+#[tokio::test]
+async fn signed_contract_with_running_orders_cannot_go_back_and_expired_is_retired() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("contract-rollback");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm,
+        Some(json!({ "patient_id": patient_id, "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{contract}");
+    let contract_id = contract["id"].as_str().unwrap().to_string();
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, created_by)
+           VALUES ($1, $2, $3::uuid, 'execution', 'active', $4)
+           RETURNING id"#,
+    )
+    .bind(format!("O-{tag}"))
+    .bind(patient_id)
+    .bind(&contract_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let status_path = format!("/api/v1/framework-contracts/{contract_id}/status");
+
+    for target in ["draft", "sent"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &status_path,
+            &pm,
+            Some(json!({ "status": target })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm,
+        Some(json!({ "status": "expired" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm,
+        Some(json!({ "patient_id": patient_id, "status": "expired" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let direct =
+        sqlx::query("UPDATE framework_contracts SET status = 'expired' WHERE id = $1::uuid")
+            .bind(&contract_id)
+            .execute(&pool)
+            .await;
+    assert!(direct.is_err(), "the database no longer accepts expired");
+
+    // Once no order runs under it, a mistaken signature can be withdrawn.
+    sqlx::query("UPDATE orders SET status = 'completed' WHERE id = $1")
+        .bind(order_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &status_path,
+        &pm,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let audit_context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'update_framework_contract_status' AND entity_id = $1::uuid
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(&contract_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_context["previous_status"], "signed");
+    assert_eq!(audit_context["status"], "sent");
+}
+
+#[tokio::test]
+async fn quotes_expire_after_their_validity_date_and_cannot_be_accepted() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("quote-expiry");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm,
+        Some(json!({ "patient_id": patient_id, "needs_description": "Quote expiry" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{order}");
+    let order_id = order["id"].as_str().unwrap().to_string();
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm,
+        Some(json!({
+            "description": "Expiring service",
+            "quantity": 1.0,
+            "unit_price": 100.0,
+            "vat_rate": 19.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{service}");
+
+    let today = gmed_server::app_time::today();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm,
+        Some(json!({ "valid_until": (today - chrono::Duration::days(1)).to_string() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm,
+        Some(json!({ "valid_until": today.to_string() })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // The validity day passes (valid through valid_until, Europe/Berlin).
+    sqlx::query("UPDATE quotes SET valid_until = $2 WHERE id = $1::uuid")
+        .bind(&quote_id)
+        .bind(today - chrono::Duration::days(1))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm,
+        Some(json!({ "status": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let state = gmed_server::state::AppState::new(
+        pool.clone(),
+        TEST_SECRET,
+        gmed_server::settings::SettingsCache::new(gmed_server::settings::TokenSettings::default()),
+    );
+    let summary = gmed_server::routes::contracts::run_quote_expiry_once(&state)
+        .await
+        .unwrap();
+    assert!(summary.expired >= 1);
+    let stored: String = sqlx::query_scalar("SELECT status FROM quotes WHERE id = $1::uuid")
+        .bind(&quote_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, "expired");
+    let (version_status, author): (String, Option<Uuid>) = sqlx::query_as(
+        r#"SELECT status, created_by FROM quote_versions
+           WHERE quote_id = $1::uuid ORDER BY version_number DESC LIMIT 1"#,
+    )
+    .bind(&quote_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(version_status, "expired");
+    assert_eq!(author, None);
+    let audit_context: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'auto_expire_quote' AND entity_id = $1::uuid",
+    )
+    .bind(&quote_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_context["previous_status"], "sent");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/status"),
+        &pm,
+        Some(json!({ "status": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (status, versions) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/quotes/{quote_id}/versions"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{versions}");
+    assert_eq!(versions[0]["created_by_name"], "System");
 }

@@ -978,24 +978,35 @@ async fn create_provider_payment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // A full payment also moves the supplier invoice to paid: the audit row
+    // commits with the payment and that status change.
+    if let Err(error) = audit::write_in_transaction(
+        &mut transaction,
+        &audit::domain_event(
+            "create_provider_payment",
+            Some(auth.user_id),
+            "external_invoice",
+            Some(external_invoice_id),
+            json!({
+                "provider_payment_transaction_id": payment_id,
+                "financial_account_id": body.financial_account_id,
+                "amount_gross": decimal_to_string(input.amount_gross),
+                "currency": context.currency,
+                "paid_on": input.paid_on.to_string(),
+                "status": if new_paid == context.amount_gross { Some("paid") } else { None },
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, payment_id = %payment_id, "audit provider payment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, payment_id = %payment_id, "commit provider payment");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "create_provider_payment",
-        Some(auth.user_id),
-        "external_invoice",
-        Some(external_invoice_id),
-        json!({
-            "provider_payment_transaction_id": payment_id,
-            "financial_account_id": body.financial_account_id,
-            "amount_gross": decimal_to_string(input.amount_gross),
-            "currency": context.currency,
-            "paid_on": input.paid_on.to_string(),
-        }),
-    ));
     crate::realtime::publish_company_finance_event(
         &state,
         Some(auth.user_id),
@@ -1294,24 +1305,34 @@ async fn reverse_provider_payment(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // The reversal may reopen the supplier invoice: audited in the same
+    // transaction.
+    if let Err(error) = audit::write_in_transaction(
+        &mut transaction,
+        &audit::domain_event(
+            "reverse_provider_payment",
+            Some(auth.user_id),
+            "external_invoice",
+            Some(external_invoice_id),
+            json!({
+                "provider_payment_reversal_id": reversal_id,
+                "reverses_provider_payment_id": payment_id,
+                "amount_gross": decimal_to_string(amount_gross),
+                "currency": context.currency,
+                "paid_on": paid_on.to_string(),
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, reversal_id = %reversal_id, "audit provider payment reversal");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, reversal_id = %reversal_id, "commit provider payment reversal");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
 
-    state.audit_sender.try_send(audit::domain_event(
-        "reverse_provider_payment",
-        Some(auth.user_id),
-        "external_invoice",
-        Some(external_invoice_id),
-        json!({
-            "provider_payment_reversal_id": reversal_id,
-            "reverses_provider_payment_id": payment_id,
-            "amount_gross": decimal_to_string(amount_gross),
-            "currency": context.currency,
-            "paid_on": paid_on.to_string(),
-        }),
-    ));
     crate::realtime::publish_company_finance_event(
         &state,
         Some(auth.user_id),

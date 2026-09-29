@@ -31,6 +31,49 @@ pub(crate) async fn record_event(
     state: &AppState,
     event: RecordEvent<'_>,
 ) -> Result<(), axum::response::Response> {
+    let mut conn = state.db.acquire().await.map_err(|e| {
+        tracing::error!(error = %e, "acquire connection for workflow lifecycle event");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record workflow lifecycle event",
+        )
+    })?;
+    record_event_tx(&mut conn, event).await
+}
+
+/// [`record_event`] inside the caller's transaction, so the history entry
+/// commits or rolls back with the status change it describes.
+pub(crate) async fn record_event_tx(
+    conn: &mut sqlx::PgConnection,
+    event: RecordEvent<'_>,
+) -> Result<(), axum::response::Response> {
+    let (entity_type, entity_id, to_stage, transition_kind) = (
+        event.entity_type,
+        event.entity_id,
+        event.to_stage,
+        event.transition_kind,
+    );
+    insert_event(conn, event).await.map_err(|e| {
+        tracing::error!(
+            error = %e,
+            entity_type,
+            entity_id = %entity_id,
+            to_stage,
+            transition_kind,
+            "record workflow lifecycle event"
+        );
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to record workflow lifecycle event",
+        )
+    })
+}
+
+/// The history insert itself, for callers that handle `sqlx::Error`.
+pub(crate) async fn insert_event(
+    conn: &mut sqlx::PgConnection,
+    event: RecordEvent<'_>,
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"INSERT INTO workflow_lifecycle_events (
                 entity_type, entity_id, from_stage, to_stage, transition_kind,
@@ -47,23 +90,9 @@ pub(crate) async fn record_event(
     .bind(event.note)
     .bind(event.metadata)
     .bind(event.changed_by)
-    .execute(&state.db)
+    .execute(conn)
     .await
     .map(|_| ())
-    .map_err(|e| {
-        tracing::error!(
-            error = %e,
-            entity_type = event.entity_type,
-            entity_id = %event.entity_id,
-            to_stage = event.to_stage,
-            transition_kind = event.transition_kind,
-            "record workflow lifecycle event"
-        );
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to record workflow lifecycle event",
-        )
-    })
 }
 
 pub(crate) async fn load_history(

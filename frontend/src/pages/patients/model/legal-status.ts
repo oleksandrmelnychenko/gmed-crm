@@ -20,7 +20,6 @@ export const PATIENT_CONTRACT_STATUS_OPTIONS = [
   "pending",
   "sent",
   "signed",
-  "expired",
   "terminated",
 ] as const;
 

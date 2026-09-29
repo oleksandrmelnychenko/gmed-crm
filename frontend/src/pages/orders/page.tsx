@@ -3181,10 +3181,11 @@ function useOrdersPageContent() {
       }
       triggerReload();
     } catch (error) {
+      const message = error instanceof Error ? error.message : "";
       setDetailError(
-        error instanceof Error
-          ? error.message
-          : l("orders_error_update_external_invoice"),
+        message.includes("allocations of this supplier invoice before cancelling")
+          ? l("orders_external_invoice_cancel_allocations_first")
+          : message || l("orders_error_update_external_invoice"),
       );
     } finally {
       setExternalInvoiceUpdatingId(null);

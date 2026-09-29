@@ -147,6 +147,32 @@ export function resolveOrderBlockingReason(
     };
   }
 
+  // Billing closure (owner decision 2026-09-28): approved services invoiced
+  // and no open patient invoice before follow-up or completion.
+  const approvedUninvoiced = reason.match(
+    /^(\d+) approved service item\(s\) are not invoiced yet$/,
+  );
+  if (approvedUninvoiced) {
+    return {
+      key: "orders_blocking_approved_services_uninvoiced_count",
+      values: { count: Number(approvedUninvoiced[1]) },
+    };
+  }
+  const draftInvoices = reason.match(/^(\d+) draft patient invoice\(s\) are not issued yet$/);
+  if (draftInvoices) {
+    return {
+      key: "orders_blocking_draft_invoices_count",
+      values: { count: Number(draftInvoices[1]) },
+    };
+  }
+  const unpaidInvoice = reason.match(/^Patient invoice (.+) is not paid yet \((\w+)\)$/);
+  if (unpaidInvoice) {
+    return {
+      key: "orders_blocking_patient_invoice_unpaid",
+      values: { number: unpaidInvoice[1] },
+    };
+  }
+
   const missingDocuments = reason.match(
     /^(\d+) required patient document\(s\) are missing$/,
   );
@@ -261,6 +287,14 @@ export function orderBlockingReasonSection(reason: string): OrderSectionKey {
   // in the service list.
   if (/^\d+ service item\(s\) are not approved or invoiced$/.test(reason)) {
     return "services";
+  }
+  // Open billing is closed on the invoices section of the order.
+  if (
+    /^\d+ approved service item\(s\) are not invoiced yet$/.test(reason) ||
+    /^\d+ draft patient invoice\(s\) are not issued yet$/.test(reason) ||
+    /^Patient invoice .+ is not paid yet \(\w+\)$/.test(reason)
+  ) {
+    return "invoices";
   }
   if (EXECUTION_REASONS.has(reason)) return "execution";
   if (FOLLOWUP_REASONS.has(reason) || COMPLETION_FOLLOWUP_REASONS.has(reason)) {

@@ -12,6 +12,9 @@ import {
   validateContractStatusForm,
   canTerminateContractStatus,
   CONTRACT_MANUAL_STATUSES,
+  CONTRACT_STATUSES,
+  quoteValidityPassed,
+  selectableQuoteStatuses,
   isQuoteSuperseded,
   isValidTerminationReason,
   QUOTE_FILTER_STATUSES,
@@ -188,6 +191,28 @@ describe("framework contract termination", () => {
     expect(isValidTerminationReason(" abc ")).toBe(true);
     expect(isValidTerminationReason("x".repeat(1000))).toBe(true);
     expect(isValidTerminationReason("x".repeat(1001))).toBe(false);
+  });
+});
+
+describe("status audit decisions 2026-09-28", () => {
+  it("has no expired framework contract status", () => {
+    expect(CONTRACT_STATUSES).toEqual(["draft", "sent", "signed", "terminated"]);
+  });
+
+  it("treats a quote as valid through its valid-until day", () => {
+    expect(quoteValidityPassed(null, "2026-09-28")).toBe(false);
+    expect(quoteValidityPassed("2026-09-28", "2026-09-28")).toBe(false);
+    expect(quoteValidityPassed("2026-09-27", "2026-09-28")).toBe(true);
+  });
+
+  it("does not offer accepting an expired quote", () => {
+    expect(selectableQuoteStatuses("expired", null, "2026-09-28")).toEqual(["rejected", "expired"]);
+    expect(selectableQuoteStatuses("sent", "2026-09-27", "2026-09-28")).toEqual([
+      "sent",
+      "rejected",
+      "expired",
+    ]);
+    expect(selectableQuoteStatuses("sent", "2026-09-28", "2026-09-28")).toContain("accepted");
   });
 });
 
