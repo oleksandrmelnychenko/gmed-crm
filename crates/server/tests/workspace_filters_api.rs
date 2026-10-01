@@ -13440,6 +13440,7 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
             "name_ru": format!("Managed specialization RU {tag}"),
             "sort_order": 18,
             "is_active": true,
+            "anamnesis_template": "  B-Symptomatik:\r\n- Fieber:\r\n- Nachtschweiß:  ",
         })),
     )
     .await;
@@ -13462,6 +13463,55 @@ async fn pm_can_create_provider_doctor_and_service_via_api_and_round_trip() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+
+    // An update without the key keeps the anamnesis template; an explicit null clears it.
+    let managed_specialization_template = |list: &Value| {
+        list.as_array()
+            .expect("specialization list")
+            .iter()
+            .find(|row| row["code"] == managed_specialization_code)
+            .expect("managed specialization")["anamnesis_template"]
+            .clone()
+    };
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/specializations?include_inactive=true",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        managed_specialization_template(&listed),
+        "B-Symptomatik:\n- Fieber:\n- Nachtschweiß:"
+    );
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/providers/specializations/{managed_specialization_id}/update"),
+        &pm_bearer,
+        Some(json!({
+            "name_en": format!("Managed specialization updated {tag}"),
+            "name_de": format!("Verwaltete Spezialisierung aktualisiert {tag}"),
+            "name_ru": format!("Managed specialization RU updated {tag}"),
+            "sort_order": 19,
+            "is_active": true,
+            "anamnesis_template": null,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        "/api/v1/providers/specializations?include_inactive=true",
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(managed_specialization_template(&listed).is_null());
 
     let (status, _) = json_request(
         &app,

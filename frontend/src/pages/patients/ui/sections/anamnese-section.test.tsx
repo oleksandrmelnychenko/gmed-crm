@@ -7,6 +7,7 @@ import {
   AnamneseSection,
   copyNarrativeVersion,
   editNarrativeVersion,
+  selectedNarrativeSpecializations,
 } from "./anamnese-section";
 
 function narrative(overrides: Partial<ClinicalNarrative> = {}): ClinicalNarrative {
@@ -68,6 +69,57 @@ describe("AnamneseSection", () => {
     expect(draft.specialization_ids).not.toBe(source.specialization_ids);
     expect(draft.specializations).not.toBe(source.specializations);
     expect(draft.specializations?.[0]).not.toBe(source.specializations?.[0]);
+  });
+
+  it("starts a newly added specialization from its anamnesis template and keeps entered texts", () => {
+    const oncology = {
+      id: "specialization-2",
+      code: "oncology",
+      name_en: "Oncology",
+      name_de: "Onkologie",
+      name_ru: "Онкология",
+      is_active: true,
+      sort_order: 2,
+      anamnesis_template: "B-Symptomatik:\n- Fieber:\n",
+    };
+    const cardiologyOption = {
+      id: cardiology.id,
+      code: cardiology.code,
+      name_en: cardiology.name_en,
+      name_de: cardiology.name_de,
+      name_ru: cardiology.name_ru,
+      is_active: true,
+      sort_order: 1,
+    };
+
+    const selected = selectedNarrativeSpecializations(
+      [{ ...cardiology, narrative_text: null }],
+      [{ ...cardiologyOption, anamnesis_template: "Belastbarkeit:" }, oncology],
+    );
+
+    // Cardiology was already part of the version: its emptied text is not refilled.
+    expect(selected[0]).toMatchObject({ id: cardiology.id, narrative_text: null, assessment_text: cardiology.assessment_text });
+    expect(selected[1]).toMatchObject({
+      id: oncology.id,
+      narrative_text: "B-Symptomatik:\n- Fieber:",
+      assessment_text: null,
+    });
+    expect(selectedNarrativeSpecializations([], [cardiologyOption])[0].narrative_text).toBeNull();
+  });
+
+  it("shows the family anamnesis of the active version", () => {
+    const html = renderToStaticMarkup(
+      <AnamneseSection
+        active={narrative({ anamnese_familie: "Vater: Myokardinfarkt mit 58 Jahren." })}
+        canManage
+        lang="de"
+        loadHistory={async () => []}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain("Familienanamnese");
+    expect(html).toContain("Vater: Myokardinfarkt mit 58 Jahren.");
   });
 
   it("renders active version metadata and the copy action", () => {

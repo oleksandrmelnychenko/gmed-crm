@@ -9,7 +9,10 @@ import { cn } from "@/lib/utils";
 import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
-import type { ClinicalNarrative } from "@/pages/patients/data/patient-clinical";
+import type {
+  ClinicalNarrative,
+  ClinicalNarrativeSpecialization,
+} from "@/pages/patients/data/patient-clinical";
 import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
@@ -28,7 +31,8 @@ type NarrativeFieldKey =
   | "anamnese_vorgeschichte"
   | "anamnese_vegetative"
   | "anamnese_sozial"
-  | "beurteilung";
+  | "beurteilung"
+  | "anamnese_familie";
 
 function narrativeFields(tx: Bilingual): Array<{ key: NarrativeFieldKey; label: string }> {
   return [
@@ -37,8 +41,19 @@ function narrativeFields(tx: Bilingual): Array<{ key: NarrativeFieldKey; label: 
     { key: "anamnese_vegetative", label: tx("Вегетативный анамнез", "Vegetative Anamnese") },
     { key: "anamnese_sozial", label: tx("Социальный анамнез", "Sozialanamnese") },
     { key: "beurteilung", label: tx("Оценка", "Beurteilung") },
+    // Shown beside the assessment, in the last cell of the two-column form.
+    { key: "anamnese_familie", label: tx("Семейный анамнез", "Familienanamnese") },
   ];
 }
+
+const NARRATIVE_READ_ORDER: NarrativeFieldKey[] = [
+  "anamnese_aktuelle",
+  "anamnese_vorgeschichte",
+  "anamnese_vegetative",
+  "anamnese_sozial",
+  "anamnese_familie",
+  "beurteilung",
+];
 
 /** A blank version: no id (new INSERT), active by default, fields empty. */
 function blankVersion(): ClinicalNarrative {
@@ -48,6 +63,7 @@ function blankVersion(): ClinicalNarrative {
     anamnese_vorgeschichte: null,
     anamnese_vegetative: null,
     anamnese_sozial: null,
+    anamnese_familie: null,
     beurteilung: null,
     red_flags: null,
     specialization_ids: [],
@@ -83,16 +99,31 @@ export function editNarrativeVersion(version: ClinicalNarrative): ClinicalNarrat
   };
 }
 
+/**
+ * Specializations of the edited version after the selection changed. A newly
+ * added one starts from its anamnesis template of the directory; texts that
+ * were already entered stay as they are.
+ */
+export function selectedNarrativeSpecializations(
+  previous: ClinicalNarrativeSpecialization[],
+  selected: SpecializationItem[],
+): ClinicalNarrativeSpecialization[] {
+  const previousById = new Map(previous.map((item) => [item.id, item]));
+  return selected.map((item) => {
+    const existing = previousById.get(item.id);
+    return {
+      ...item,
+      narrative_text: existing
+        ? existing.narrative_text ?? null
+        : item.anamnesis_template?.trim() || null,
+      assessment_text: existing?.assessment_text ?? null,
+    };
+  });
+}
+
 /** First non-empty field, used as a one-line preview in the history list. */
 function versionSnippet(version: ClinicalNarrative): string {
-  const keys: NarrativeFieldKey[] = [
-    "anamnese_aktuelle",
-    "anamnese_vorgeschichte",
-    "anamnese_vegetative",
-    "anamnese_sozial",
-    "beurteilung",
-  ];
-  for (const key of keys) {
+  for (const key of NARRATIVE_READ_ORDER) {
     const value = version[key];
     if (value && value.trim()) {
       const flat = value.trim().replace(/\s+/g, " ");
@@ -244,10 +275,12 @@ export function AnamneseSection({
     }
   }
 
+  // The saved version reads in clinical order: the family anamnesis belongs
+  // to the anamnesis blocks, before the assessment.
   const activeNonEmpty = active
-    ? fields.filter((field) => {
-        const value = active[field.key];
-        return Boolean(value && value.trim());
+    ? NARRATIVE_READ_ORDER.flatMap((key) => {
+        const field = fields.find((item) => item.key === key);
+        return field && active[key]?.trim() ? [field] : [];
       })
     : [];
   const currentMissing = Boolean(
@@ -647,21 +680,18 @@ export function AnamneseSection({
                 lang={lang}
                 tx={tx}
                 onChange={(specializationIds, selectedItems) =>
-                  setEditing((current) => {
-                    if (!current) return current;
-                    const previous = new Map(
-                      (current.specializations ?? []).map((item) => [item.id, item]),
-                    );
-                    return {
-                      ...current,
-                      specialization_ids: specializationIds,
-                      specializations: selectedItems.map((item) => ({
-                        ...item,
-                        narrative_text: previous.get(item.id)?.narrative_text ?? null,
-                        assessment_text: previous.get(item.id)?.assessment_text ?? null,
-                      })),
-                    };
-                  })
+                  setEditing((current) =>
+                    current
+                      ? {
+                          ...current,
+                          specialization_ids: specializationIds,
+                          specializations: selectedNarrativeSpecializations(
+                            current.specializations ?? [],
+                            selectedItems,
+                          ),
+                        }
+                      : current,
+                  )
                 }
               />
             </div>

@@ -435,6 +435,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
             "Vegetative Anamnese",
         ),
         ("anamnese_sozial", "Социальный анамнез", "Sozialanamnese"),
+        ("anamnese_familie", "Семейный анамнез", "Familienanamnese"),
         (
             "untersuchungsbefund",
             "Данные осмотра",

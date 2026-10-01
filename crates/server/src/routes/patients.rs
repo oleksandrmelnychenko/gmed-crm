@@ -9568,7 +9568,8 @@ async fn get_patient_timeline(
                                narrative.anamnese_aktuelle,
                                narrative.anamnese_vorgeschichte,
                                narrative.anamnese_vegetative,
-                               narrative.anamnese_sozial
+                               narrative.anamnese_sozial,
+                               narrative.anamnese_familie
                            ),
                            ''
                        ) IS NULL THEN 'Anamnese'
@@ -9579,7 +9580,8 @@ async fn get_patient_timeline(
                                    narrative.anamnese_aktuelle,
                                    narrative.anamnese_vorgeschichte,
                                    narrative.anamnese_vegetative,
-                                   narrative.anamnese_sozial
+                                   narrative.anamnese_sozial,
+                                   narrative.anamnese_familie
                                ),
                                120
                            )
@@ -11754,6 +11756,7 @@ fn narrative_version_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "anamnese_vorgeschichte": row.get::<Option<String>, _>("anamnese_vorgeschichte"),
         "anamnese_vegetative": row.get::<Option<String>, _>("anamnese_vegetative"),
         "anamnese_sozial": row.get::<Option<String>, _>("anamnese_sozial"),
+        "anamnese_familie": row.get::<Option<String>, _>("anamnese_familie"),
         "beurteilung": row.get::<Option<String>, _>("beurteilung"),
         "red_flags": row.get::<Option<String>, _>("red_flags"),
         "source_document_id": row.try_get::<Option<Uuid>, _>("source_document_id").unwrap_or_default(),
@@ -12329,7 +12332,7 @@ async fn get_patient_clinical(
 
     // The active version of the patient's Anamnese (one row per patient is active).
     let narrative_row = sqlx::query(
-        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
+        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial, n.anamnese_familie,
                   n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
                   COALESCE(d.original_filename, d.auto_name) AS source_document_name,
                   n.anamnese_at, n.is_active, n.created_at, n.updated_at,
@@ -13636,6 +13639,8 @@ struct PatientNarrativeInput {
     #[serde(default)]
     anamnese_sozial: Option<String>,
     #[serde(default)]
+    anamnese_familie: Option<String>,
+    #[serde(default)]
     beurteilung: Option<String>,
     #[serde(default)]
     red_flags: Option<String>,
@@ -13698,6 +13703,7 @@ async fn save_patient_narrative(
     let vorgeschichte = clinical_opt_text(body.anamnese_vorgeschichte.clone());
     let vegetative = clinical_opt_text(body.anamnese_vegetative.clone());
     let sozial = clinical_opt_text(body.anamnese_sozial.clone());
+    let familie = clinical_opt_text(body.anamnese_familie.clone());
     let beurteilung = clinical_opt_text(body.beurteilung.clone());
     let red_flags = clinical_opt_text(body.red_flags.clone());
 
@@ -13814,6 +13820,7 @@ async fn save_patient_narrative(
                        anamnese_at = $7,
                        is_active = $8,
                        case_id = COALESCE($9, case_id),
+                       anamnese_familie = $12,
                        updated_at = now()
                    WHERE id = $10 AND patient_id = $11"#,
             )
@@ -13828,6 +13835,7 @@ async fn save_patient_narrative(
             .bind(narrative_case_id)
             .bind(id)
             .bind(patient_uuid)
+            .bind(&familie)
             .execute(&mut *tx)
             .await
             {
@@ -13847,8 +13855,9 @@ async fn save_patient_narrative(
             if let Err(e) = sqlx::query(
                 r#"INSERT INTO patient_clinical_narrative
                        (id, patient_id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative,
-                        anamnese_sozial, beurteilung, red_flags, anamnese_at, is_active)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"#,
+                        anamnese_sozial, beurteilung, red_flags, anamnese_at, is_active,
+                        anamnese_familie)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"#,
             )
             .bind(new_id)
             .bind(patient_uuid)
@@ -13861,6 +13870,7 @@ async fn save_patient_narrative(
             .bind(&red_flags)
             .bind(anamnese_at)
             .bind(want_active)
+            .bind(&familie)
             .execute(&mut *tx)
             .await
             {
@@ -13918,7 +13928,7 @@ async fn save_patient_narrative(
     // Re-select the saved version inside the same transaction so the response is
     // consistent with what was committed.
     let saved_row = match sqlx::query(
-        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
+        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial, n.anamnese_familie,
                   n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
                   MAX(COALESCE(d.original_filename, d.auto_name)) AS source_document_name,
                   n.anamnese_at, n.is_active, n.created_at, n.updated_at,
@@ -14019,7 +14029,7 @@ async fn list_patient_narrative_history(
     }
 
     let rows = match sqlx::query(
-        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
+        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial, n.anamnese_familie,
                   n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
                   MAX(COALESCE(d.original_filename, d.auto_name)) AS source_document_name,
                   n.anamnese_at, n.is_active, n.created_at, n.updated_at,
@@ -14120,7 +14130,7 @@ async fn delete_patient_narrative(
         .to_rfc3339();
 
     let active_row = match sqlx::query(
-        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial,
+        r#"SELECT n.id, n.case_id, n.anamnese_aktuelle, n.anamnese_vorgeschichte, n.anamnese_vegetative, n.anamnese_sozial, n.anamnese_familie,
                   n.beurteilung, n.red_flags, n.source_document_id, n.source_import_id,
                   MAX(COALESCE(d.original_filename, d.auto_name)) AS source_document_name,
                   n.anamnese_at, n.is_active, n.created_at, n.updated_at,
@@ -14163,7 +14173,7 @@ async fn delete_patient_narrative(
                    ORDER BY anamnese_at DESC, updated_at DESC, created_at DESC
                    LIMIT 1
                )
-               RETURNING id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial,
+               RETURNING id, case_id, anamnese_aktuelle, anamnese_vorgeschichte, anamnese_vegetative, anamnese_sozial, anamnese_familie,
                          beurteilung, red_flags, source_document_id, source_import_id,
                          anamnese_at, is_active, created_at, updated_at,
                          COALESCE((SELECT array_agg(ms.id ORDER BY pns.sort_order)
