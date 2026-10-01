@@ -12532,6 +12532,27 @@ pub(crate) async fn store_document_blob(
     Ok((file_size, storage_key, original_filename))
 }
 
+/// Removes a blob and reports failure, for callers that must not record a
+/// deletion that did not happen. A blob that is already gone counts as
+/// removed.
+pub(crate) async fn remove_document_blob_checked(storage_key: &str) -> std::io::Result<()> {
+    let storage_key = storage_key.trim();
+    if storage_key.is_empty()
+        || storage_key.contains('/')
+        || storage_key.contains('\\')
+        || storage_key.contains("..")
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "unsafe document storage key",
+        ));
+    }
+    match tokio::fs::remove_file(FsPath::new(UPLOAD_DIR).join(storage_key)).await {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
 pub(crate) async fn remove_document_blob(storage_key: &str) {
     let storage_key = storage_key.trim();
     if storage_key.is_empty()

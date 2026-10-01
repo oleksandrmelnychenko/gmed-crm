@@ -419,16 +419,12 @@ pub(crate) async fn export_archive(
         }
     }
 
-    let mut manifest = String::new();
-    for (path, bytes) in &files {
-        manifest.push_str(&format!(
-            "{}  {path}\n",
-            super::documents::sha256_hex(bytes)
-        ));
-    }
     files.push(("Index.csv".into(), index.into_bytes()));
     files.push(("Pruefbericht.txt".into(), report.into_bytes()));
     files.push(("LIESMICH.txt".into(), README.as_bytes().to_vec()));
+    // Every file but the manifest itself, metadata included, so an edited
+    // index or report fails `sha256sum -c`.
+    let manifest = manifest_lines(&files);
     files.push(("Manifest.sha256".into(), manifest.into_bytes()));
 
     let document_count = documents.len();
@@ -474,6 +470,20 @@ pub(crate) async fn export_archive(
         .into_response()
 }
 
+/// `sha256sum` lines for every file in the export.
+fn manifest_lines(files: &[(String, Vec<u8>)]) -> String {
+    files
+        .iter()
+        .map(|(path, bytes)| {
+            format!(
+                "{}  {path}
+",
+                super::documents::sha256_hex(bytes)
+            )
+        })
+        .collect()
+}
+
 fn build_zip(files: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = zip::write::SimpleFileOptions::default()
@@ -512,6 +522,25 @@ mod tests {
         );
         assert_eq!(folder_name("Doe", "", None), "Doe");
         assert_eq!(folder_name("", "", None), "Mitarbeiter");
+    }
+
+    #[test]
+    fn manifest_covers_metadata_files() {
+        let manifest = manifest_lines(&[
+            ("A/one.pdf".into(), b"%PDF-1.7".to_vec()),
+            ("Index.csv".into(), b"x".to_vec()),
+            ("Pruefbericht.txt".into(), b"ok".to_vec()),
+        ]);
+        assert_eq!(manifest.lines().count(), 3);
+        assert!(manifest.contains(
+            "  Index.csv
+"
+        ));
+        assert!(manifest.contains(
+            "  Pruefbericht.txt
+"
+        ));
+        assert!(!manifest.contains("Manifest.sha256"));
     }
 
     #[test]
