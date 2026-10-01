@@ -134,6 +134,9 @@ describe("AnamneseSection", () => {
       answers: {},
       notes: cardiology.narrative_text,
     });
+    // A list of questions typed by hand is a template, not patient text: it is dropped.
+    const typedList = { ...cardiology, narrative_text: "CVRF (ja/nein):\n-Nikotin (ja/nein+if ja: Note):", checklist: null };
+    expect(narrativeSpecializationChecklist(typedList, [option])?.notes).toBe("");
     // Stored answers keep the template they were given against.
     const stored = { ...cardiology, checklist: { version: 1 as const, template: "Alt (ja/nein)", answers: { "0": { value: "ja" as const } }, notes: "" } };
     expect(narrativeSpecializationChecklist(stored, [option])?.template).toBe("Alt (ja/nein)");

@@ -6,6 +6,7 @@ import {
   composeChecklistText,
   emptySpecializationChecklist,
   isChecklistTemplate,
+  isUnansweredChecklistNotation,
   parseChecklistTemplate,
   readSpecializationChecklist,
 } from "./specialization-checklist";
@@ -72,6 +73,28 @@ describe("parseChecklistTemplate", () => {
     expect(parseChecklistTemplate("NYHA-Stadium (I-IV)")[0]).toMatchObject({ label: "NYHA-Stadium (I-IV)", yesNo: false });
     expect(parseChecklistTemplate("Belastbarkeit (Note)")[0]).toMatchObject({ label: "Belastbarkeit", yesNo: false, fields: [{ kind: "text" }] });
     expect(parseChecklistTemplate("Größe in cm (Number)")[0].fields).toEqual([{ key: "field0", kind: "number", label: "", unit: "" }]);
+  });
+});
+
+describe("the clinic's hand-typed lists", () => {
+  // As found in an anamnesis on DEV: "ja nein" without the slash, "note text".
+  const typed = "- Fieber (ja nein+if ja: note text)\n-Nachtschweiß (ja nein+if ja: note text)\nPositive Familienanamnese (ja/nein+if ja: Note):";
+
+  it("reads 'ja nein' and 'note text' like the slash notation", () => {
+    expect(parseChecklistTemplate(typed).map((item) => [item.label, item.yesNo, item.fields.map((field) => field.kind)])).toEqual([
+      ["Fieber", true, ["text"]],
+      ["Nachtschweiß", true, ["text"]],
+      ["Positive Familienanamnese", true, ["text"]],
+    ]);
+  });
+
+  it("tells a bare list of questions from a text that already says something", () => {
+    expect(isUnansweredChecklistNotation(CLINIC_TEMPLATE)).toBe(true);
+    expect(isUnansweredChecklistNotation(typed)).toBe(true);
+    expect(isUnansweredChecklistNotation("B-Symptomatik: keine\n- Fieber (ja nein+if ja: note text): nein")).toBe(false);
+    expect(isUnansweredChecklistNotation("Belastungsdyspnoe seit März.")).toBe(false);
+    expect(isUnansweredChecklistNotation("Appetit:\nSchlaf:")).toBe(false);
+    expect(isUnansweredChecklistNotation(null)).toBe(false);
   });
 });
 

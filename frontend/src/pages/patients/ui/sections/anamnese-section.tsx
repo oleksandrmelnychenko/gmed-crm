@@ -19,6 +19,7 @@ import {
   composeChecklistText,
   emptySpecializationChecklist,
   isChecklistTemplate,
+  isUnansweredChecklistNotation,
   readSpecializationChecklist,
   type SpecializationChecklist,
 } from "@/pages/patients/data/specialization-checklist";
@@ -63,14 +64,22 @@ const NARRATIVE_READ_ORDER: NarrativeFieldKey[] = [
   "beurteilung",
 ];
 
-/** A blank version: no id (new INSERT), active by default, fields empty. */
+/**
+ * The points the clinic asks in every anamnesis. A new version starts with
+ * them as real, editable text (owner decision 2026-10-01), not as a hint.
+ */
+export const NARRATIVE_FIELD_TEMPLATES = {
+  anamnese_vorgeschichte: "Vorerkrankungen:\n\nRisikofaktoren:",
+  anamnese_vegetative: "Appetit:\nTrinkmenge:\nWasserlassen:\nStuhlgang:\nSchlaf:",
+  anamnese_sozial: "Familienstand:\nKinder:\nWohnsituation:\nBildung:\nBeruf:",
+} as const;
+
+/** A blank version: no id (new INSERT), active by default, the standard points pre-written. */
 function blankVersion(): ClinicalNarrative {
   return {
     id: null,
     anamnese_aktuelle: null,
-    anamnese_vorgeschichte: null,
-    anamnese_vegetative: null,
-    anamnese_sozial: null,
+    ...NARRATIVE_FIELD_TEMPLATES,
     anamnese_familie: null,
     beurteilung: null,
     red_flags: null,
@@ -151,9 +160,11 @@ export function narrativeSpecializationChecklist(
   const stored = readSpecializationChecklist(item.checklist);
   if (stored) return stored;
   const template = options.find((option) => option.id === item.id)?.anamnesis_template?.trim();
-  return template && isChecklistTemplate(template)
-    ? emptySpecializationChecklist(template, item.narrative_text ?? "")
-    : null;
+  if (!template || !isChecklistTemplate(template)) return null;
+  // A list of questions typed by hand before checklists existed is a template
+  // itself, not something said about the patient: it is not kept as free text.
+  const legacyText = isUnansweredChecklistNotation(item.narrative_text) ? "" : item.narrative_text ?? "";
+  return emptySpecializationChecklist(template, legacyText);
 }
 
 /** First non-empty field, used as a one-line preview in the history list. */
