@@ -7,7 +7,7 @@
       "highlight_count": 74,
       "highlight_sha256": "9da4246bd5ce7b7e6b59c5ccacee18b8a48a9ddb74a0819f017ba2b1d8f30432",
       "manual_binding_keys": ["order_sequence", "order_number", "order_date", "contract_date", "party_street", "party_zip", "party_city", "party_country", "party_email", "party_phone", "specialties", "examination_purpose", "treatment_purpose", "period_from", "period_to", "order_components", "quote_number", "service_lines", "bank_holder", "bank_name", "bank_swift", "bank_iban", "party_sign_place", "party_sign_date", "agency_sign_place", "agency_sign_date"],
-      "runtime_tokens": ["GeneratedSingleOrderContext", "patient_pid", "party", "agency", "line_items", "total_net", "total_vat", "total_gross"]
+      "runtime_tokens": ["GeneratedSingleOrderContext", "patient_pid", "party", "agency", "line_items", "total_net", "total_vat", "total_gross", "ContractingDoc", "party_line_groups", "contract_signature_rows"]
     },
     {
       "file": "ADMIN-1. Einzelauftrag vom 11.11.25 (Mit KU)- M. Musterman Kopie.docx",
@@ -15,7 +15,7 @@
       "highlight_count": 32,
       "highlight_sha256": "d03415d5d0ff0831b9c150495b58bf7874520a114eeaf567dbcbfa616607ab07",
       "manual_binding_keys": ["order_sequence", "order_number", "order_date", "contract_date", "specialties", "period_from", "period_to", "payer_salutation", "payer_name", "payer_birth_date", "order_components", "party_sign_place", "party_sign_date", "agency_sign_place", "agency_sign_date"],
-      "runtime_tokens": ["GeneratedSingleOrderContext", "payer", "load_invoice_payer"]
+      "runtime_tokens": ["GeneratedSingleOrderContext", "payer", "load_invoice_payer", "invoice_recipient_resolve"]
     },
     {
       "file": "ADMIN-DSVO und Schweigepflicht für alleinigen Sorgeberechtigten vom 11.11.2025-M. Musterman Kopie.docx",
@@ -40,7 +40,7 @@
       "highlight_count": 87,
       "highlight_sha256": "b822ea6ff9b86c1aea03dc7139750b3f80981795bc903117e1d6cff8a06a9ef7",
       "manual_binding_keys": ["contract_date", "party_street", "party_zip", "party_city", "party_country", "party_email", "party_phone", "order_sequence", "cost_threshold", "extra_release_recipients", "party_sign_place", "party_sign_date", "agency_sign_place", "agency_sign_date"],
-      "runtime_tokens": ["GeneratedFrameworkContractContext", "contract_number", "quote_number", "line_items", "agency_legal_identity", "data_system_name"]
+      "runtime_tokens": ["GeneratedFrameworkContractContext", "contract_number", "quote_number", "line_items", "agency_legal_identity", "data_system_name", "ContractingDoc", "beneficiary_lines", "contract_signature_rows"]
     },
     {
       "file": "ADMIN-Unverbindl. voraussichtl. Kostenschätzung f. med. Unters. vom 11.11.25-M. Musterman Kopie.docx",
@@ -65,7 +65,7 @@
       "highlight_count": 84,
       "highlight_sha256": "0ac5e3a1100759fbf0d1047f57d1f44782cbeb13401cb06d5c373c91c818bd4d",
       "manual_binding_keys": ["order_sequence", "order_date", "contract_date", "quote_number", "payer_salutation", "payer_name", "payer_birth_date", "payer_street", "payer_zip", "payer_city", "payer_country", "payer_email", "bank_holder", "bank_name", "bank_swift", "bank_iban", "service_lines", "payer_sign_place", "payer_sign_date", "agency_sign_place", "agency_sign_date"],
-      "runtime_tokens": ["GeneratedCostCoverageContext", "load_invoice_payer", "line_items", "total_net", "total_vat", "total_gross"]
+      "runtime_tokens": ["GeneratedCostCoverageContext", "load_invoice_payer", "line_items", "total_net", "total_vat", "total_gross", "invoice_recipient_resolve", "debtor_name"]
     },
     {
       "file": "Terminbestätigung vom 19.11.25-M. Musterman Kopie.docx",

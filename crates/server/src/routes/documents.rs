@@ -28,6 +28,8 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::services::contracting_party::PartyKind;
+
 use crate::{
     access, audit,
     auth::middleware::AuthUser,
@@ -508,6 +510,8 @@ struct GeneratedFrameworkContractContext {
     line_items: Vec<GeneratedContractLineItem>,
     text_blocks: Vec<String>,
     generated_at: chrono::DateTime<chrono::Utc>,
+    /// Who contracts: the patient, or a minor's legal representatives.
+    contracting: ContractingDoc,
 }
 
 struct GeneratedVisaInvitationContext {
@@ -1042,6 +1046,7 @@ struct GeneratedSingleOrderContext {
     agency_sign_place: Option<String>,
     agency_sign_date: Option<NaiveDate>,
     generated_at: chrono::DateTime<chrono::Utc>,
+    contracting: ContractingDoc,
 }
 
 #[allow(dead_code)]
@@ -1066,6 +1071,7 @@ struct GeneratedCostCoverageContext {
     agency_sign_place: Option<String>,
     agency_sign_date: Option<NaiveDate>,
     generated_at: chrono::DateTime<chrono::Utc>,
+    contracting: ContractingDoc,
 }
 
 #[allow(dead_code)]
@@ -7898,47 +7904,89 @@ fn build_framework_contract_pdf(
 
     // --- Party designation block ---------------------------------------------
     fc_body(&mut layout, "zwischen");
-    layout.text_block(
-        &fc_patient_salutation_name(context),
-        11.0,
-        true,
-        0.0,
-        TreatmentPlanPdfColor::Body,
-        0.0,
-        0.5,
-    );
-    if let Some(birth) = context.birth_date {
-        fc_body_tight(
-            &mut layout,
-            &format!("geb. am {}", birth.format("%d.%m.%Y")),
+    if context.contracting.parents_contract() {
+        // The legal representatives contract in their own name.
+        for (index, representative) in context.contracting.representatives.iter().enumerate() {
+            if index > 0 {
+                fc_body_tight(&mut layout, "und");
+            }
+            layout.text_block(
+                &representative.name_with_salutation(),
+                11.0,
+                true,
+                0.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                0.5,
+            );
+            if let Some(birth) = representative.birth_date {
+                fc_body_tight(
+                    &mut layout,
+                    &format!("geb. am {}", birth.format("%d.%m.%Y")),
+                );
+            }
+            if let Some(address) = representative.address_line() {
+                fc_body_tight(&mut layout, &address);
+            }
+            if let Some(email) = representative.email.as_deref() {
+                fc_body_tight(&mut layout, &format!("Email: {email}"));
+            }
+        }
+        let patient = DocPartyBlock {
+            name: context.patient_name.clone(),
+            salutation: context.patient_salutation.clone(),
+            birth_date: context.birth_date,
+            ..DocPartyBlock::default()
+        };
+        for line in context.contracting.beneficiary_lines(&patient) {
+            fc_body_tight(&mut layout, &line);
+        }
+    } else {
+        layout.text_block(
+            &fc_patient_salutation_name(context),
+            11.0,
+            true,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            0.5,
         );
-    }
-    if let Some(address) = context
-        .patient_address
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        fc_body_tight(&mut layout, address);
-    }
-    if let Some(email) = context
-        .patient_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        fc_body_tight(&mut layout, &format!("Email: {email}"));
-    }
-    if let Some(phone) = context
-        .patient_phone
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        fc_body_tight(&mut layout, &format!("Tel.: {phone}"));
+        if let Some(birth) = context.birth_date {
+            fc_body_tight(
+                &mut layout,
+                &format!("geb. am {}", birth.format("%d.%m.%Y")),
+            );
+        }
+        if let Some(address) = context
+            .patient_address
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            fc_body_tight(&mut layout, address);
+        }
+        if let Some(email) = context
+            .patient_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            fc_body_tight(&mut layout, &format!("Email: {email}"));
+        }
+        if let Some(phone) = context
+            .patient_phone
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            fc_body_tight(&mut layout, &format!("Tel.: {phone}"));
+        }
+        if let Some(line) = context.contracting.represented_by_line() {
+            fc_body_tight(&mut layout, &line);
+        }
     }
     layout.text_block(
-        "– nachfolgend „Auftraggeber“ genannt –",
+        context.contracting.role_line(),
         11.0,
         false,
         0.0,
@@ -8356,21 +8404,21 @@ fn build_framework_contract_pdf(
     );
 
     // --- Signature blocks (both parties) --------------------------------------
+    // Every legal representative signs on its own line (joint custody,
+    // § 1629 Abs. 1 BGB; joint debtors, § 421 BGB).
     layout.spacer(4.0);
     let agency_signature_name = agency_legal_name(&context.agency);
-    admin_signature_grid(
+    contract_signature_rows(
         &mut layout,
-        AdminSignatureParty {
-            place: context.party_sign_place.as_deref(),
-            date: context.party_sign_date,
-            name: &context.patient_name,
-            role: "Auftraggeber",
-        },
+        &context.contracting.signers(&context.patient_name),
+        context.party_sign_place.as_deref(),
+        context.party_sign_date,
         AdminSignatureParty {
             place: context.agency_sign_place.as_deref(),
             date: context.agency_sign_date,
             name: &agency_signature_name,
             role: "Auftragnehmer",
+            anchor: None,
         },
     );
 
@@ -14256,7 +14304,7 @@ async fn generate_document(
         "framework_contract" => {
             let contract_row = if let Some(order_uuid) = order_id {
                 match sqlx::query(
-                    r#"SELECT fc.contract_number, fc.status, fc.signed_at, fc.valid_from, fc.valid_to, fc.conditions
+                    r#"SELECT fc.id, fc.contract_number, fc.status, fc.signed_at, fc.valid_from, fc.valid_to, fc.conditions
                        FROM orders o
                        LEFT JOIN framework_contracts fc ON fc.id = o.contract_id
                        WHERE o.id = $1"#,
@@ -14274,7 +14322,7 @@ async fn generate_document(
                         Some(row)
                     }
                     Ok(Some(_)) | Ok(None) => match sqlx::query(
-                        r#"SELECT contract_number, status, signed_at, valid_from, valid_to, conditions
+                        r#"SELECT id, contract_number, status, signed_at, valid_from, valid_to, conditions
                            FROM framework_contracts
                            WHERE patient_id = $1
                            ORDER BY created_at DESC
@@ -14303,7 +14351,7 @@ async fn generate_document(
                 }
             } else {
                 match sqlx::query(
-                    r#"SELECT contract_number, status, signed_at, valid_from, valid_to, conditions
+                    r#"SELECT id, contract_number, status, signed_at, valid_from, valid_to, conditions
                        FROM framework_contracts
                        WHERE patient_id = $1
                        ORDER BY created_at DESC, id DESC
@@ -14329,6 +14377,18 @@ async fn generate_document(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Framework contract template requires an existing framework contract in scope",
                 );
+            };
+            let contracting = match load_contracting_doc(
+                &state,
+                patient_uuid,
+                order_id,
+                contract_row.try_get::<Uuid, _>("id").ok(),
+                crate::app_time::today(),
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
             };
 
             let quote_row = if let Some(order_uuid) = order_id {
@@ -14464,6 +14524,7 @@ async fn generate_document(
                 line_items,
                 text_blocks,
                 generated_at,
+                contracting: contracting.clone(),
             };
 
             let preview_html = build_framework_contract_html(&context);
@@ -14632,6 +14693,18 @@ async fn generate_document(
         }
         "single_order" | "order_cost_estimate" => {
             let is_order_cost_estimate = template.id == "order_cost_estimate";
+            let contracting = match load_contracting_doc(
+                &state,
+                patient_uuid,
+                order_id,
+                None,
+                crate::app_time::today(),
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
             let mut agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -14782,6 +14855,7 @@ async fn generate_document(
                 agency_sign_place,
                 agency_sign_date: bindings.agency_sign_date.or(bindings.sign_date),
                 generated_at,
+                contracting: contracting.clone(),
             };
             let preview = admin_preview_html(
                 &context.title_override.clone().unwrap_or_else(|| {
@@ -14814,6 +14888,18 @@ async fn generate_document(
             (preview, pdf_bytes)
         }
         "cost_coverage_declaration" => {
+            let contracting = match load_contracting_doc(
+                &state,
+                patient_uuid,
+                order_id,
+                None,
+                crate::app_time::today(),
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
             let mut agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -14916,6 +15002,7 @@ async fn generate_document(
                 agency_sign_place,
                 agency_sign_date: bindings.agency_sign_date.or(bindings.sign_date),
                 generated_at,
+                contracting: contracting.clone(),
             };
             let preview = admin_preview_html(
                 &context.title_override.clone().unwrap_or_else(|| {
@@ -16188,12 +16275,25 @@ struct AdminSignatureParty<'a> {
     date: Option<NaiveDate>,
     name: &'a str,
     role: &'a str,
+    /// Signature frame role for e-signing; `None` derives it from `role`
+    /// (`agency` for the Auftragnehmer, `client` otherwise).
+    anchor: Option<&'a str>,
 }
 
 fn admin_signature_grid(
     layout: &mut TreatmentPlanPdfLayout,
     left: AdminSignatureParty<'_>,
     right: AdminSignatureParty<'_>,
+) {
+    admin_signature_rows(layout, vec![left, right]);
+}
+
+/// Signature blocks two per row: the first row holds the first party and the
+/// Auftragnehmer, further parties (e.g. a second legal representative) follow
+/// in rows below.
+fn admin_signature_rows(
+    layout: &mut TreatmentPlanPdfLayout,
+    parties: Vec<AdminSignatureParty<'_>>,
 ) {
     const COLUMN_GAP_MM: f32 = 14.0;
     const BLOCK_HEIGHT_MM: f32 = 32.0;
@@ -16202,8 +16302,10 @@ fn admin_signature_grid(
     /// leaves room to write the date by hand under the printed name.
     const PLACE_DATE_OFFSET_MM: f32 = 10.5;
 
+    let rows = parties.len().div_ceil(2).max(1);
+    let total_height_mm = BLOCK_HEIGHT_MM * rows as f32;
     if layout.page_style == PdfPageStyle::Legal {
-        let anchored_top_mm = PDF_LEGAL_CONTENT_BOTTOM_MM + BLOCK_HEIGHT_MM;
+        let anchored_top_mm = PDF_LEGAL_CONTENT_BOTTOM_MM + total_height_mm;
         if layout.y_mm < anchored_top_mm + 12.0 {
             layout.page_break();
             // A dedicated signature page should read from the top down. Keeping
@@ -16214,7 +16316,7 @@ fn admin_signature_grid(
             layout.y_mm = anchored_top_mm;
         }
     } else {
-        layout.ensure_space(BLOCK_HEIGHT_MM);
+        layout.ensure_space(total_height_mm);
     }
 
     let top_y_mm = layout.y_mm;
@@ -16223,7 +16325,13 @@ fn admin_signature_grid(
     let regular_font = layout.regular_font.clone();
     let bold_font = layout.bold_font.clone();
 
-    for (party, x_mm) in [(left, PDF_LEFT_MARGIN_MM), (right, right_x_mm)] {
+    for (index, party) in parties.into_iter().enumerate() {
+        let x_mm = if index % 2 == 0 {
+            PDF_LEFT_MARGIN_MM
+        } else {
+            right_x_mm
+        };
+        let row_top_mm = top_y_mm - BLOCK_HEIGHT_MM * (index / 2) as f32;
         let place = party
             .place
             .map(str::trim)
@@ -16234,7 +16342,7 @@ fn admin_signature_grid(
             8.5,
             column_width_mm,
         );
-        let signature_line_y_mm = top_y_mm - SIGNATURE_LINE_OFFSET_MM;
+        let signature_line_y_mm = row_top_mm - SIGNATURE_LINE_OFFSET_MM;
         append_pdf_filled_rect(
             &mut layout.page_ops,
             x_mm,
@@ -16244,12 +16352,13 @@ fn admin_signature_grid(
             treatment_plan_pdf_color(TreatmentPlanPdfColor::Body),
         );
         // The electronic signature sits in the empty space above the line.
+        let anchor_role = party.anchor.unwrap_or(if party.role == "Auftragnehmer" {
+            "agency"
+        } else {
+            "client"
+        });
         layout.push_signature_anchor(
-            if party.role == "Auftragnehmer" {
-                "agency"
-            } else {
-                "client"
-            },
+            anchor_role,
             x_mm,
             signature_line_y_mm + 0.5,
             column_width_mm.min(60.0),
@@ -16292,7 +16401,222 @@ fn admin_signature_grid(
         );
     }
 
-    layout.y_mm = top_y_mm - BLOCK_HEIGHT_MM;
+    layout.y_mm = top_y_mm - total_height_mm;
+}
+
+/// The Auftraggeber side of an order document and how it signs.
+#[derive(Clone)]
+struct ContractingDoc {
+    kind: PartyKind,
+    representatives: Vec<DocPartyBlock>,
+}
+
+impl Default for ContractingDoc {
+    fn default() -> Self {
+        Self {
+            kind: PartyKind::Patient,
+            representatives: Vec::new(),
+        }
+    }
+}
+
+/// One signature line of the Auftraggeber side.
+struct ContractSigner {
+    name: String,
+    role: &'static str,
+    anchor: String,
+}
+
+impl ContractingDoc {
+    fn from_party(party: &crate::services::contracting_party::ContractingParty) -> Self {
+        Self {
+            kind: party.kind,
+            representatives: party
+                .representatives
+                .iter()
+                .map(|representative| DocPartyBlock {
+                    name: representative.name.clone(),
+                    first_name: representative.first_name.clone(),
+                    last_name: representative.last_name.clone(),
+                    birth_date: representative.birth_date,
+                    street: representative.street.clone(),
+                    zip: representative.zip.clone(),
+                    city: representative.city.clone(),
+                    country: representative.country.clone(),
+                    email: representative.email.clone(),
+                    phone: representative.phone.clone(),
+                    ..DocPartyBlock::default()
+                })
+                .collect(),
+        }
+    }
+
+    /// The legal representatives contract in their own name (§ 328 BGB).
+    fn parents_contract(&self) -> bool {
+        self.kind == PartyKind::LegalRepresentatives && !self.representatives.is_empty()
+    }
+
+    /// The minor patient contracts, represented by the guardians.
+    fn represented(&self) -> bool {
+        self.kind == PartyKind::PatientRepresented && !self.representatives.is_empty()
+    }
+
+    fn representative_names(&self) -> String {
+        crate::services::contracting_party::join_names(
+            &self
+                .representatives
+                .iter()
+                .map(DocPartyBlock::name_with_salutation)
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    /// The Auftraggeber's name as written in running text.
+    fn debtor_name(&self, patient: &DocPartyBlock) -> String {
+        if self.parents_contract() {
+            self.representative_names()
+        } else {
+            patient.name_with_salutation()
+        }
+    }
+
+    /// "gesetzlich vertreten durch …" under a minor party.
+    fn represented_by_line(&self) -> Option<String> {
+        self.represented().then(|| {
+            format!(
+                "gesetzlich vertreten durch {} {}",
+                if self.representatives.len() > 1 {
+                    "die Sorgeberechtigten"
+                } else {
+                    "die/den Sorgeberechtigte(n)"
+                },
+                self.representative_names()
+            )
+        })
+    }
+
+    /// Lines naming the child the parents contract for, and their joint
+    /// liability when more than one parent is the party.
+    fn beneficiary_lines(&self, patient: &DocPartyBlock) -> Vec<String> {
+        if !self.parents_contract() {
+            return Vec::new();
+        }
+        let mut lines = vec![format!(
+            "im eigenen Namen zugunsten des Patienten {}{} (Vertrag zugunsten Dritter, § 328 BGB)",
+            patient.name_with_salutation(),
+            patient
+                .birth_date
+                .map(|date| format!(", geb. am {}", date.format("%d.%m.%Y")))
+                .unwrap_or_default()
+        )];
+        if self.representatives.len() > 1 {
+            lines.push("Mehrere Auftraggeber haften als Gesamtschuldner (§ 421 BGB).".to_string());
+        }
+        lines
+    }
+
+    /// Role line under the party block.
+    fn role_line(&self) -> &'static str {
+        if self.parents_contract() && self.representatives.len() > 1 {
+            "– nachfolgend gemeinsam „Auftraggeber“ genannt –"
+        } else {
+            "– nachfolgend „Auftraggeber“ genannt –"
+        }
+    }
+
+    /// Party block lines: the patient, or each legal representative.
+    fn party_line_groups(&self, patient: &DocPartyBlock) -> Vec<Vec<String>> {
+        if self.parents_contract() {
+            self.representatives
+                .iter()
+                .map(single_order_party_lines)
+                .collect()
+        } else {
+            let mut lines = single_order_party_lines(patient);
+            if let Some(line) = self.represented_by_line() {
+                lines.push(line);
+            }
+            vec![lines]
+        }
+    }
+
+    /// Who signs for the Auftraggeber: the patient, or every legal
+    /// representative on its own line (`guardian_1`, `guardian_2` frames).
+    fn signers(&self, patient_name: &str) -> Vec<ContractSigner> {
+        if self.parents_contract() || self.represented() {
+            let role = if self.parents_contract() {
+                "Auftraggeber"
+            } else {
+                "gesetzl. Vertreter/in"
+            };
+            return self
+                .representatives
+                .iter()
+                .enumerate()
+                .map(|(index, representative)| ContractSigner {
+                    name: representative.name_with_salutation(),
+                    role,
+                    anchor: format!("guardian_{}", index + 1),
+                })
+                .collect();
+        }
+        vec![ContractSigner {
+            name: patient_name.to_string(),
+            role: "Auftraggeber",
+            anchor: "client".to_string(),
+        }]
+    }
+}
+
+/// Signature blocks of a contract: the Auftraggeber side (one per signer)
+/// and the Auftragnehmer.
+fn contract_signature_rows(
+    layout: &mut TreatmentPlanPdfLayout,
+    signers: &[ContractSigner],
+    party_place: Option<&str>,
+    party_date: Option<NaiveDate>,
+    agency: AdminSignatureParty<'_>,
+) {
+    let mut parties = signers
+        .iter()
+        .map(|signer| AdminSignatureParty {
+            place: party_place,
+            date: party_date,
+            name: &signer.name,
+            role: signer.role,
+            anchor: Some(signer.anchor.as_str()),
+        })
+        .collect::<Vec<_>>();
+    let agency_index = 1.min(parties.len());
+    parties.insert(agency_index, agency);
+    admin_signature_rows(layout, parties);
+}
+
+async fn load_contracting_doc(
+    state: &AppState,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+    contract_id: Option<Uuid>,
+    on: NaiveDate,
+) -> Result<ContractingDoc, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %patient_id, "load contracting party");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load contracting party",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    let party = crate::services::contracting_party::resolve(
+        &mut conn,
+        patient_id,
+        order_id,
+        contract_id,
+        on,
+    )
+    .await
+    .map_err(failed)?;
+    Ok(ContractingDoc::from_party(&party))
 }
 
 /// Party block lines for the contract letterhead, using the gendered
@@ -16503,11 +16827,28 @@ fn build_single_order_pdf(
         0.0,
         1.2,
     );
-    legal_party_block(
-        &mut layout,
-        &single_order_party_lines(&context.party),
-        "– nachfolgend „Auftraggeber“ genannt –",
-    );
+    let party_groups = context.contracting.party_line_groups(&context.party);
+    let last_group = party_groups.len().saturating_sub(1);
+    for (index, lines) in party_groups.iter().enumerate() {
+        if index > 0 {
+            layout.text_block(
+                "und",
+                9.0,
+                false,
+                0.0,
+                TreatmentPlanPdfColor::Muted,
+                0.8,
+                0.8,
+            );
+        }
+        if index == last_group {
+            let mut lines = lines.clone();
+            lines.extend(context.contracting.beneficiary_lines(&context.party));
+            legal_party_block(&mut layout, &lines, context.contracting.role_line());
+        } else {
+            legal_party_block(&mut layout, lines, "");
+        }
+    }
     layout.text_block(
         "und",
         9.0,
@@ -16756,19 +17097,17 @@ fn build_single_order_pdf(
 
     let party_name = context.party.name_with_salutation();
     let agency_signature_name = agency_legal_name(&context.agency);
-    admin_signature_grid(
+    contract_signature_rows(
         &mut layout,
-        AdminSignatureParty {
-            place: context.party_sign_place.as_deref(),
-            date: context.party_sign_date,
-            name: &party_name,
-            role: "Auftraggeber",
-        },
+        &context.contracting.signers(&party_name),
+        context.party_sign_place.as_deref(),
+        context.party_sign_date,
         AdminSignatureParty {
             place: context.agency_sign_place.as_deref(),
             date: context.agency_sign_date,
             name: &agency_signature_name,
             role: "Auftragnehmer",
+            anchor: None,
         },
     );
 
@@ -16828,23 +17167,33 @@ fn build_order_cost_estimate_pdf(
     } else {
         order_number
     };
-    legal_meta_grid(
-        &mut layout,
-        &[
-            ("Kostenvoranschlag Nr. :", quote_number.to_string()),
-            ("Datum:", fmt_de_date(context.order_date)),
-            ("Auftraggeber:", context.party.name_with_salutation()),
-            (
-                "Geburtsdatum des Auftraggebers:",
-                fmt_de_date(context.party.birth_date),
-            ),
-            (
-                "Rahmendienstleistungsvertrag Nr.:",
-                contract_number.to_string(),
-            ),
-            ("Einzelauftrag Nr.:", order_number.to_string()),
-        ],
-    );
+    let mut meta_cells = vec![
+        ("Kostenvoranschlag Nr. :", quote_number.to_string()),
+        ("Datum:", fmt_de_date(context.order_date)),
+        (
+            "Auftraggeber:",
+            context.contracting.debtor_name(&context.party),
+        ),
+    ];
+    if context.contracting.parents_contract() {
+        // The parents are the party; the child receives the services.
+        meta_cells.push(("Patient:", context.party.name_with_salutation()));
+        meta_cells.push((
+            "Geburtsdatum des Patienten:",
+            fmt_de_date(context.party.birth_date),
+        ));
+    } else {
+        meta_cells.push((
+            "Geburtsdatum des Auftraggebers:",
+            fmt_de_date(context.party.birth_date),
+        ));
+    }
+    meta_cells.push((
+        "Rahmendienstleistungsvertrag Nr.:",
+        contract_number.to_string(),
+    ));
+    meta_cells.push(("Einzelauftrag Nr.:", order_number.to_string()));
+    legal_meta_grid(&mut layout, &meta_cells);
     admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 3.0);
     admin_block(
         &mut layout,
@@ -17018,19 +17367,17 @@ fn build_order_cost_estimate_pdf(
     }
     let party_name = context.party.name_with_salutation();
     let agency_signature_name = agency_legal_name(&context.agency);
-    admin_signature_grid(
+    contract_signature_rows(
         &mut layout,
-        AdminSignatureParty {
-            place: context.party_sign_place.as_deref(),
-            date: context.party_sign_date,
-            name: &party_name,
-            role: "Auftraggeber",
-        },
+        &context.contracting.signers(&party_name),
+        context.party_sign_place.as_deref(),
+        context.party_sign_date,
         AdminSignatureParty {
             place: context.agency_sign_place.as_deref(),
             date: context.agency_sign_date,
             name: &agency_signature_name,
             role: "Auftragnehmer",
+            anchor: None,
         },
     );
 
@@ -17346,7 +17693,11 @@ fn build_cost_coverage_pdf(
         &format!(
             "bezüglich des {ordinal}. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
             fmt_de_date(context.order_date),
-            cost_coverage_party_accusative(&context.patient),
+            if context.contracting.parents_contract() {
+                context.contracting.debtor_name(&context.patient)
+            } else {
+                cost_coverage_party_accusative(&context.patient)
+            },
             fmt_de_date(context.contract_date)
         ),
         0.0,
@@ -17543,7 +17894,7 @@ fn build_cost_coverage_pdf(
             "Anlage 2: {ordinal}. Einzelauftrag vom {} zum Rahmendienstleistungsvertrag vom {} - Auftraggeber: {};",
             fmt_de_date(context.order_date),
             fmt_de_date(context.contract_date),
-            context.patient.name_with_salutation()
+            context.contracting.debtor_name(&context.patient)
         ),
         format!(
             "Anlage 3: Unverbindliche voraussichtliche Kostenschätzung für medizinische Untersuchungen für {}.",
@@ -17580,7 +17931,10 @@ fn build_cost_coverage_pdf(
     );
     admin_block(
         &mut layout,
-        &format!("Auftraggeber: {}", context.patient.name_with_salutation()),
+        &format!(
+            "Auftraggeber: {}",
+            context.contracting.debtor_name(&context.patient)
+        ),
         0.0,
         0.5,
     );
@@ -17664,12 +18018,14 @@ fn build_cost_coverage_pdf(
             date: context.payer_sign_date,
             name: &context.payer.name,
             role: "Kostenübernehmer",
+            anchor: None,
         },
         AdminSignatureParty {
             place: context.agency_sign_place.as_deref(),
             date: context.agency_sign_date,
             name: &agency_signature_name,
             role: "Auftragnehmer",
+            anchor: None,
         },
     );
 
@@ -20202,78 +20558,157 @@ async fn load_order_quote_summary(
     }))
 }
 
-/// Auto-bind the third-party payer ("Kostenübernehmer") from the most recent
-/// invoice payer contact for the order (preferred) or the patient.
+/// The payer an order document (Einzelauftrag, Kostenvoranschlag,
+/// Kostenübernahmeerklärung) names: the payer set on the order (or its head
+/// order), else the recipient of a non-cancelled invoice of the same order
+/// that is addressed to a payer. Resolved like the invoice recipient (name,
+/// e-mail and postal address); never taken from another order.
 async fn load_invoice_payer(
     state: &AppState,
     order_id: Option<Uuid>,
     patient_id: Uuid,
 ) -> Result<Option<DocPartyBlock>, axum::response::Response> {
-    let row = sqlx::query(
-        r#"SELECT payer_contact_name, payer_contact_email, payer_contact_phone
-           FROM invoices
-           WHERE patient_id = $2
-             AND payer_contact_name IS NOT NULL
-             AND length(trim(payer_contact_name)) > 0
-           ORDER BY ($1::uuid IS NOT NULL AND order_id = $1) DESC, created_at DESC
-           LIMIT 1"#,
-    )
-    .bind(order_id)
-    .bind(patient_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_id, "load invoice payer");
+    let Some(order_id) = order_id else {
+        return Ok(None);
+    };
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %patient_id, %order_id, "load invoice payer");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load payer context",
         )
-    })?;
-
-    Ok(row.and_then(|row| {
-        let name = row
-            .try_get::<Option<String>, _>("payer_contact_name")
-            .ok()
-            .flatten()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())?;
-        Some(DocPartyBlock {
-            name,
-            email: row
-                .try_get::<Option<String>, _>("payer_contact_email")
-                .ok()
-                .flatten(),
-            phone: row
-                .try_get::<Option<String>, _>("payer_contact_phone")
-                .ok()
-                .flatten(),
-            ..DocPartyBlock::default()
-        })
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    let inherited = crate::routes::invoices::payer::inherited_invoice_payer(
+        &mut conn,
+        Some(order_id),
+        patient_id,
+    )
+    .await
+    .map_err(failed)?;
+    let (recipient, phone) = if matches!(inherited.source, "head_order" | "order") {
+        let record = &inherited.record;
+        let value = sqlx::query_scalar::<_, Option<Value>>(
+            "SELECT invoice_recipient_resolve($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(patient_id)
+        .bind(record.payer_patient_id)
+        .bind(record.payer_patient_relation_id)
+        .bind(&record.contact_name)
+        .bind(&record.contact_email)
+        .bind(&record.address_street)
+        .bind(&record.address_zip)
+        .bind(&record.address_city)
+        .bind(&record.address_country)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(failed)?;
+        (value, record.contact_phone.clone())
+    } else {
+        let row = sqlx::query(
+            r#"SELECT COALESCE(invoice.recipient_snapshot, invoice_recipient_resolve(
+                       invoice.patient_id, invoice.payer_patient_id,
+                       invoice.payer_patient_relation_id, invoice.payer_contact_name,
+                       invoice.payer_contact_email, invoice.payer_address_street,
+                       invoice.payer_address_zip, invoice.payer_address_city,
+                       invoice.payer_address_country)) AS recipient,
+                      invoice.payer_contact_phone
+               FROM invoices invoice
+               WHERE invoice.order_id = $1
+                 AND invoice.patient_id = $2
+                 AND invoice.status <> 'cancelled'
+                 AND (invoice.payer_patient_id IS NOT NULL
+                      OR invoice.payer_patient_relation_id IS NOT NULL
+                      OR NULLIF(btrim(invoice.payer_contact_name), '') IS NOT NULL)
+               ORDER BY invoice.released_at DESC NULLS LAST, invoice.created_at DESC
+               LIMIT 1"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(failed)?;
+        match row {
+            Some(row) => (
+                row.try_get::<Option<Value>, _>("recipient")
+                    .unwrap_or_default(),
+                row.try_get::<Option<String>, _>("payer_contact_phone")
+                    .unwrap_or_default(),
+            ),
+            None => (None, None),
+        }
+    };
+    let Some(recipient) = recipient else {
+        return Ok(None);
+    };
+    if !recipient
+        .get("is_payer")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return Ok(None);
+    }
+    let text = |key: &str| {
+        recipient
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    };
+    let Some(name) = text("name") else {
+        return Ok(None);
+    };
+    Ok(Some(DocPartyBlock {
+        name,
+        email: text("email"),
+        phone: phone.filter(|value| !value.trim().is_empty()),
+        street: text("street"),
+        zip: text("zip"),
+        city: text("city"),
+        country: text("country"),
+        ..DocPartyBlock::default()
     }))
 }
 
-/// Merge a manually entered payer with an auto-bound invoice payer: manual
-/// fields win, invoice fills the rest. Returns the manual block unchanged when
-/// no invoice payer exists.
+/// Merge a manually entered payer with the payer of the order: manual fields
+/// win, the order payer fills the rest (the address only as a whole, so a
+/// manual street never mixes with another person's city). Returns the manual
+/// block unchanged when the order has no payer.
 fn merge_payer(manual: DocPartyBlock, invoice: Option<DocPartyBlock>) -> DocPartyBlock {
     let Some(invoice) = invoice else {
         return manual;
     };
+    let manual_named = !manual.name.trim().is_empty();
+    let manual_address = manual.street.is_some()
+        || manual.zip.is_some()
+        || manual.city.is_some()
+        || manual.country.is_some();
+    // A manually named different person brings none of the order payer's
+    // contact data.
+    if manual_named && manual.name.trim() != invoice.name.trim() {
+        return manual;
+    }
+    let (street, zip, city, country) = if manual_address {
+        (manual.street, manual.zip, manual.city, manual.country)
+    } else {
+        (invoice.street, invoice.zip, invoice.city, invoice.country)
+    };
     DocPartyBlock {
-        name: if manual.name.trim().is_empty() {
-            invoice.name
-        } else {
+        name: if manual_named {
             manual.name
+        } else {
+            invoice.name
         },
         title: manual.title,
         salutation: manual.salutation,
         first_name: manual.first_name.or(invoice.first_name),
         last_name: manual.last_name.or(invoice.last_name),
         birth_date: manual.birth_date,
-        street: manual.street,
-        zip: manual.zip,
-        city: manual.city,
-        country: manual.country,
+        street,
+        zip,
+        city,
+        country,
         email: manual.email.or(invoice.email),
         phone: manual.phone.or(invoice.phone),
     }
@@ -28057,6 +28492,124 @@ mod tests {
         assert!(text.contains("Prüfung jeder Zahlung"));
     }
 
+    fn parents_as_party() -> super::ContractingDoc {
+        let parent = |first: &str| DocPartyBlock {
+            name: format!("{first} Muster"),
+            first_name: Some(first.to_string()),
+            last_name: Some("Muster".to_string()),
+            street: Some("Nebenweg 2".to_string()),
+            zip: Some("80331".to_string()),
+            city: Some("München".to_string()),
+            country: Some("Deutschland".to_string()),
+            email: Some(format!("{}@example.test", first.to_lowercase())),
+            ..DocPartyBlock::default()
+        };
+        super::ContractingDoc {
+            kind: super::PartyKind::LegalRepresentatives,
+            representatives: vec![parent("Erika"), parent("Max")],
+        }
+    }
+
+    #[test]
+    fn minor_contract_names_both_parents_as_party_and_gives_each_a_signature_frame() {
+        let contracting = parents_as_party();
+        let child = DocPartyBlock {
+            name: "Mia Muster".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(2015, 3, 4),
+            ..DocPartyBlock::default()
+        };
+        assert_eq!(
+            contracting.debtor_name(&child),
+            "Erika Muster und Max Muster"
+        );
+        let beneficiary = contracting.beneficiary_lines(&child);
+        assert!(beneficiary[0].contains("zugunsten des Patienten Mia Muster, geb. am 04.03.2015"));
+        assert!(beneficiary[0].contains("§ 328 BGB"));
+        assert!(beneficiary[1].contains("Gesamtschuldner"));
+        let signers = contracting.signers("Mia Muster");
+        assert_eq!(
+            signers
+                .iter()
+                .map(|signer| (signer.name.as_str(), signer.anchor.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("Erika Muster", "guardian_1"), ("Max Muster", "guardian_2")]
+        );
+
+        // The child as party, represented by both guardians: both sign.
+        let represented = super::ContractingDoc {
+            kind: super::PartyKind::PatientRepresented,
+            ..contracting.clone()
+        };
+        assert_eq!(represented.debtor_name(&child), "Mia Muster");
+        assert!(represented.represented_by_line().unwrap().contains(
+            "gesetzlich vertreten durch die Sorgeberechtigten Erika Muster und Max Muster"
+        ));
+        assert_eq!(represented.signers("Mia Muster").len(), 2);
+        // An adult signs alone in the client frame.
+        let adult = super::ContractingDoc::default();
+        let signers = adult.signers("Anna Beispiel");
+        assert_eq!(signers.len(), 1);
+        assert_eq!(signers[0].anchor, "client");
+    }
+
+    #[test]
+    fn framework_contract_with_parents_as_party_prints_both_and_their_frames() {
+        let party = legal_test_party("Germany");
+        let agency = legal_test_agency();
+        let context = GeneratedFrameworkContractContext {
+            patient_pid: "PT-LEGAL-2".to_string(),
+            patient_name: "Mia Muster".to_string(),
+            patient_title: None,
+            birth_date: NaiveDate::from_ymd_opt(2015, 3, 4),
+            patient_address: party.address_line(),
+            patient_email: None,
+            patient_phone: None,
+            patient_salutation: None,
+            language: "de".to_string(),
+            auto_name: "Rahmenvertrag".to_string(),
+            title_override: None,
+            introduction: None,
+            closing_note: None,
+            agency,
+            party_sign_place: Some("München".to_string()),
+            party_sign_date: NaiveDate::from_ymd_opt(2026, 10, 1),
+            agency_sign_place: Some("Köln".to_string()),
+            agency_sign_date: NaiveDate::from_ymd_opt(2026, 10, 1),
+            effective_date: NaiveDate::from_ymd_opt(2026, 10, 1),
+            cost_threshold: None,
+            order_sequence: 1,
+            extra_release_recipients: None,
+            contract_number: "RV-2026-0099".to_string(),
+            contract_status: "draft".to_string(),
+            valid_from: NaiveDate::from_ymd_opt(2026, 10, 1),
+            signed_at: None,
+            order_number: None,
+            quote_number: None,
+            quote_valid_until: None,
+            quote_total_net: None,
+            quote_total_vat: None,
+            quote_total_gross: None,
+            quote_notes: None,
+            conditions: Vec::new(),
+            line_items: Vec::new(),
+            text_blocks: Vec::new(),
+            generated_at: Utc.with_ymd_and_hms(2026, 10, 1, 9, 30, 0).unwrap(),
+            contracting: parents_as_party(),
+        };
+        let generated = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-PARENTS").unwrap();
+        let roles = generated
+            .signature_anchors
+            .iter()
+            .map(|anchor| anchor.role.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+        let text = normalized_pdf_pages(&generated.bytes).join(" ");
+        assert!(text.contains("Erika Muster"));
+        assert!(text.contains("Max Muster"));
+        assert!(text.contains("zugunsten des Patienten Mia Muster"));
+        assert!(text.contains("gemeinsam „Auftraggeber“ genannt"));
+    }
+
     #[test]
     fn framework_contract_pdf_keeps_main_contract_and_annex_index_only() {
         let party = legal_test_party("Germany");
@@ -28099,6 +28652,7 @@ mod tests {
             line_items: Vec::new(),
             text_blocks: Vec::new(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 9, 30, 0).unwrap(),
+            contracting: super::ContractingDoc::default(),
         };
 
         let bytes = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-FALLBACK").unwrap();
@@ -28177,12 +28731,14 @@ mod tests {
                 date: NaiveDate::from_ymd_opt(2026, 7, 17),
                 name: "Anna Beispiel",
                 role: "Auftraggeber",
+                anchor: None,
             },
             AdminSignatureParty {
                 place: Some("Köln"),
                 date: NaiveDate::from_ymd_opt(2026, 7, 16),
                 name: "GMED - Agentur für Patientenbetreuung",
                 role: "Auftragnehmer",
+                anchor: None,
             },
         );
 
@@ -28255,12 +28811,14 @@ mod tests {
                 date: NaiveDate::from_ymd_opt(2026, 7, 17),
                 name: "Anna Beispiel",
                 role: "Auftraggeber",
+                anchor: None,
             },
             AdminSignatureParty {
                 place: Some("München"),
                 date: NaiveDate::from_ymd_opt(2026, 7, 17),
                 name: "GMED - Agentur für Patientenbetreuung",
                 role: "Auftragnehmer",
+                anchor: None,
             },
         );
 
@@ -28421,6 +28979,7 @@ mod tests {
             agency_sign_place: Some("Köln".to_string()),
             agency_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 0, 0).unwrap(),
+            contracting: super::ContractingDoc::default(),
         };
 
         let bytes = build_single_order_pdf(&context, "DOC-ORDER-FALLBACK").unwrap();
@@ -28760,6 +29319,7 @@ mod tests {
             agency_sign_place: None,
             agency_sign_date: None,
             generated_at: Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap(),
+            contracting: super::ContractingDoc::default(),
         };
 
         let order_text = assert_legal_pdf_chrome(
@@ -28818,6 +29378,7 @@ mod tests {
             agency_sign_place: None,
             agency_sign_date: None,
             generated_at: Utc.with_ymd_and_hms(2026, 9, 28, 10, 0, 0).unwrap(),
+            contracting: super::ContractingDoc::default(),
         };
         let coverage_text = normalized_pdf_text(
             &super::build_cost_coverage_pdf(&coverage, "DOC-VAT-COVERAGE").unwrap(),
@@ -29337,6 +29898,7 @@ mod tests {
             agency_sign_place: Some("Köln".to_string()),
             agency_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 0, 0).unwrap(),
+            contracting: super::ContractingDoc::default(),
         };
 
         let bytes = build_single_order_pdf(&context, "DOC-ORDER-SAMPLE").unwrap();

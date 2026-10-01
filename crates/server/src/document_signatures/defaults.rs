@@ -140,25 +140,91 @@ fn signer_name(name: &str) -> (String, String) {
     (parts.join(" "), last_name)
 }
 
-fn guardian_signer(contacts: &Value) -> Option<Signer> {
-    contacts.as_array()?.iter().find_map(|contact| {
-        if !is_guardian_relation(contact.get("relation").and_then(Value::as_str)) {
-            return None;
-        }
-        let email = contact.get("email").and_then(Value::as_str)?.trim();
-        let name = contact.get("name").and_then(Value::as_str)?.trim();
-        if email.is_empty() || name.is_empty() {
-            return None;
-        }
-        let (first_name, last_name) = signer_name(name);
-        Some(Signer {
-            first_name,
-            last_name,
-            email: email.to_lowercase(),
-            role: "client".into(),
-            positions: Vec::new(),
-        })
+fn contact_signer(contact: &Value) -> Option<Signer> {
+    let email = contact.get("email").and_then(Value::as_str)?.trim();
+    let name = contact.get("name").and_then(Value::as_str)?.trim();
+    if email.is_empty() || name.is_empty() {
+        return None;
+    }
+    let (first_name, last_name) = signer_name(name);
+    Some(Signer {
+        first_name,
+        last_name,
+        email: email.to_lowercase(),
+        role: "client".into(),
+        positions: Vec::new(),
     })
+}
+
+/// Every recorded guardian with an e-mail address, once each: under joint
+/// custody both parents represent the child together (§ 1629 Abs. 1 BGB) and
+/// both sign; one signs when only one is recorded.
+fn guardian_signers(contacts: &Value) -> Vec<Signer> {
+    let mut signers: Vec<Signer> = Vec::new();
+    for contact in contacts.as_array().into_iter().flatten() {
+        if !is_guardian_relation(contact.get("relation").and_then(Value::as_str)) {
+            continue;
+        }
+        if let Some(signer) = contact_signer(contact)
+            && !signers.iter().any(|known| known.email == signer.email)
+        {
+            signers.push(signer);
+        }
+    }
+    signers
+}
+
+#[cfg(test)]
+fn guardian_signer(contacts: &Value) -> Option<Signer> {
+    guardian_signers(contacts).into_iter().next()
+}
+
+/// The payer of the order a Kostenübernahmeerklärung belongs to: the
+/// Kostenübernehmer signs it, not the patient.
+async fn order_payer_signer(state: &AppState, source: &PgRow) -> Result<Option<Signer>, Response> {
+    let template = source
+        .try_get::<Option<String>, _>("generated_template_id")
+        .unwrap_or_default();
+    if template.as_deref() != Some("cost_coverage_declaration") {
+        return Ok(None);
+    }
+    let (Some(order_id), Some(patient_id)) = (
+        source
+            .try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+        source
+            .try_get::<Option<Uuid>, _>("patient_id")
+            .unwrap_or_default(),
+    ) else {
+        return Ok(None);
+    };
+    let mut conn = state.db.acquire().await.map_err(db_error)?;
+    let inherited = crate::routes::invoices::payer::inherited_invoice_payer(
+        &mut conn,
+        Some(order_id),
+        patient_id,
+    )
+    .await
+    .map_err(db_error)?;
+    if !inherited.record.is_set() {
+        return Ok(None);
+    }
+    let record = &inherited.record;
+    let recipient: Option<Value> =
+        sqlx::query_scalar("SELECT invoice_recipient_resolve($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+            .bind(patient_id)
+            .bind(record.payer_patient_id)
+            .bind(record.payer_patient_relation_id)
+            .bind(&record.contact_name)
+            .bind(&record.contact_email)
+            .bind(&record.address_street)
+            .bind(&record.address_zip)
+            .bind(&record.address_city)
+            .bind(&record.address_country)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(db_error)?;
+    Ok(recipient.as_ref().and_then(contact_signer))
 }
 
 // Called only after checking this document's send permissions. Document access
@@ -169,7 +235,7 @@ pub(super) async fn suggested(
     source: &PgRow,
     policy: SignerPolicy,
 ) -> Result<Vec<Signer>, Response> {
-    let mut client = empty("client");
+    let mut clients = vec![empty("client")];
     let patient_id: Option<Uuid> = source.get("patient_id");
     let lead_id: Option<Uuid> = source.get("lead_id");
     let row = match (patient_id, lead_id) {
@@ -186,7 +252,7 @@ pub(super) async fn suggested(
                         ) || COALESCE((
                           SELECT jsonb_agg(jsonb_build_object(
                             'name', COALESCE(NULLIF(btrim(concat_ws(' ', rp.first_name, rp.last_name)), ''), pr.related_name),
-                            'email', rp.email,
+                            'email', COALESCE(NULLIF(btrim(pr.email), ''), rp.email),
                             'relation', pr.relation_type
                           ))
                           FROM patient_relations pr
@@ -206,19 +272,30 @@ pub(super) async fn suggested(
         let birth_date = row.get::<Option<NaiveDate>, _>("birth_date");
         if is_minor(birth_date) {
             let contacts = row.get::<Value, _>("guardian_contacts");
-            if let Some(guardian) = guardian_signer(&contacts) {
-                client = guardian;
+            let guardians = guardian_signers(&contacts);
+            if !guardians.is_empty() {
+                clients = guardians;
             }
         } else {
+            let client = &mut clients[0];
             client.first_name = row.get("first_name");
             client.last_name = row.get("last_name");
             client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
         }
     }
+    // The Kostenübernehmer signs the cost coverage declaration. Only for
+    // roles that may read the patient's payer data (same as above).
+    if let Some(id) = patient_id
+        && matches!(auth.role, Role::Ceo | Role::PatientManager)
+        && patients::has_patient_access(state, auth, id).await?
+        && let Some(payer) = order_payer_signer(state, source).await?
+    {
+        clients = vec![payer];
+    }
     let mut signers = if policy == SignerPolicy::AgencyOnly {
         Vec::new()
     } else {
-        vec![client]
+        clients
     };
     if policy == SignerPolicy::ClientOnly {
         return Ok(signers);
@@ -273,5 +350,23 @@ mod tests {
         assert_eq!(signer.last_name, "Beispiel");
         assert_eq!(signer.email, "anna@example.org");
         assert_eq!(signer.role, "client");
+    }
+
+    #[test]
+    fn both_guardians_are_suggested_under_joint_custody() {
+        let signers = guardian_signers(&json!([
+            { "name": "Anna Beispiel", "email": "anna@example.org", "relation": "parent" },
+            { "name": "Oma Beispiel", "email": "oma@example.org", "relation": "relative" },
+            { "name": "Ben Beispiel", "email": "ben@example.org", "relation": "guardian" },
+            { "name": "Anna Beispiel", "email": "ANNA@example.org", "relation": "mother" }
+        ]));
+        assert_eq!(
+            signers
+                .iter()
+                .map(|signer| signer.email.as_str())
+                .collect::<Vec<_>>(),
+            vec!["anna@example.org", "ben@example.org"]
+        );
+        assert!(signers.iter().all(|signer| signer.role == "client"));
     }
 }
