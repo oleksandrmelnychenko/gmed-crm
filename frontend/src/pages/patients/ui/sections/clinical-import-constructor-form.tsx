@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,11 @@ export function ClinicalImportConstructorForm({
   const tx = (ru: string, german: string) => (de ? german : ru);
   const [fields, setFields] = useState<ConstructorFields>(initialFields);
   const [showMissing, setShowMissing] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  // Opened from the toolbar, the form can sit below the visible list.
+  useEffect(() => {
+    formRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, []);
   const missing = missingConstructorFields(target, fields);
   const specs = constructorFieldSpecs[target];
   const wide = (kind: string) => kind === "textarea";
@@ -51,6 +56,7 @@ export function ClinicalImportConstructorForm({
 
   return (
     <form
+      ref={formRef}
       data-clinical-import-constructor-form={target}
       className="space-y-4 rounded-xl border border-orange-200 bg-orange-50/30 p-4"
       onSubmit={(event) => {

@@ -8,12 +8,12 @@ import { AuthProvider } from "../../../src/lib/auth";
 import "../../../src/index.css";
 import type { PatientIdentityReference } from "../../../src/pages/patients/data/clinical-document-subject";
 
-declare global { interface Window { __clinicalTestIdentity?: PatientIdentityReference; __clinicalTestRoot?: Root } }
+declare global { interface Window { __clinicalTestIdentity?: PatientIdentityReference; __clinicalTestLang?: "de" | "ru"; __clinicalTestRoot?: Root } }
 
 function Harness() {
   const [open, setOpen] = useState(true);
   return <ClinicalDocumentImportSheet open={open} onOpenChange={setOpen}
-    patientId="00000000-0000-0000-0000-000000000101" lang="de"
+    patientId="00000000-0000-0000-0000-000000000101" lang={window.__clinicalTestLang ?? "de"}
     patientIdentity={window.__clinicalTestIdentity ?? { firstName: "Anna", lastName: "Beispiel", birthDate: "1980-01-01" }}
     existingItems={{ diagnosis: [], anamnesis: [], examination: [], medication: [], recommendation: [], vital: [], lab_result: [] }}
     onApply={async (_record, candidates, _country, payloads) => {
