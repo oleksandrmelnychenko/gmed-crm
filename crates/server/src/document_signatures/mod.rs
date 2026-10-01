@@ -1,15 +1,21 @@
 //! Durable signing workflow. Remote mutations are never retried automatically.
 pub mod closure;
 pub mod connection;
+mod create;
 mod defaults;
+mod effects;
 pub(crate) mod frames;
+mod legal;
 pub(crate) mod package;
 pub mod provider;
+pub mod retention;
 mod review;
 mod summary;
 
 #[cfg(test)]
 mod tests;
+
+use std::collections::HashMap;
 
 use axum::{
     Extension, Json, Router,
@@ -32,7 +38,7 @@ use crate::{
     routes::documents::{self, signature_document_access},
     state::AppState,
 };
-use provider::{MAX_PDF, Signer, VerifiedRequest, normalize_signers, sha256};
+use provider::{Level, MAX_PDF, Signer, VerifiedRequest, sha256};
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -41,6 +47,8 @@ pub fn router() -> Router<AppState> {
         .merge(review::router())
         .route("/document-signatures/statuses", get(summary::list))
         .route("/documents/{id}/signature-requests", get(list).post(create))
+        .route("/signature-packages/candidates", get(create::candidates))
+        .route("/signature-packages", post(create::create_package))
         .route("/document-signature-requests/{id}/refresh", post(refresh))
         .route("/document-signature-requests/{id}/withdraw", post(withdraw))
         .route(
@@ -51,11 +59,23 @@ pub fn router() -> Router<AppState> {
             "/document-signature-requests/{id}/resolve-review",
             post(closure::resolve_review),
         )
+        .route(
+            "/document-signature-requests/{id}/delivered",
+            post(closure::record_delivery),
+        )
         .route("/document-signature-requests/{id}/report", get(report))
 }
 
 fn error(status: StatusCode, code: &str) -> Response {
     (status, Json(json!({"error":code}))).into_response()
+}
+/// An error about one document of a package, so the composer can mark it.
+fn document_error(status: StatusCode, code: &str, document_id: Uuid) -> Response {
+    (
+        status,
+        Json(json!({"error":code,"document_id":document_id})),
+    )
+        .into_response()
 }
 fn db_error(error_value: sqlx::Error) -> Response {
     tracing::error!(error = %error_value, "Document signature database operation failed");
@@ -95,6 +115,19 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
     None
 }
 
+fn template_of(row: &PgRow) -> Option<String> {
+    row.get::<Option<String>, _>("generated_template_id")
+}
+
+/// The statute that excludes this document from electronic signing, if any.
+fn electronic_form_excluded(row: &PgRow) -> Option<&'static str> {
+    legal::electronic_form_excluded(template_of(row).as_deref(), &row.get::<String, _>("art"))
+}
+
+fn minimum_level(row: &PgRow) -> Level {
+    legal::minimum_level(template_of(row).as_deref(), &row.get::<String, _>("art"))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SignerPolicy {
     Flexible,
@@ -113,21 +146,51 @@ impl SignerPolicy {
         }
     }
 
+    /// The patient side is the client (or every legal representative) plus,
+    /// optionally, a minor patient who co-signs; a minor never signs alone.
     fn validate(self, signers: &[Signer]) -> Result<(), &'static str> {
+        let has_client = signers.iter().any(|signer| signer.role == "client");
+        let has_agency = signers.iter().any(|signer| signer.role == "agency");
+        if signers.iter().any(|signer| signer.role == "minor") && !has_client {
+            return Err("minor_needs_representative");
+        }
         match self {
             Self::Flexible => Ok(()),
-            Self::ClientOnly if signers.iter().all(|signer| signer.role == "client") => Ok(()),
-            Self::ClientOnly => Err("patient_signature_only"),
-            Self::AgencyOnly if signers.iter().all(|signer| signer.role == "agency") => Ok(()),
-            Self::AgencyOnly => Err("agency_signature_only"),
-            Self::BothParties
-                if signers.iter().any(|signer| signer.role == "client")
-                    && signers.iter().any(|signer| signer.role == "agency") =>
+            Self::ClientOnly
+                if has_client
+                    && signers
+                        .iter()
+                        .all(|signer| provider::is_patient_side(&signer.role)) =>
             {
                 Ok(())
             }
+            Self::ClientOnly => Err("patient_signature_only"),
+            Self::AgencyOnly if signers.iter().all(|signer| signer.role == "agency") => Ok(()),
+            Self::AgencyOnly => Err("agency_signature_only"),
+            Self::BothParties if has_client && has_agency => Ok(()),
             Self::BothParties => Err("both_contract_parties_required"),
         }
+    }
+
+    /// One merged PDF has one set of signers, so a package needs what its
+    /// strictest member needs. An internal agency-only document is never sent
+    /// together with documents for the patient side.
+    fn combine(policies: impl IntoIterator<Item = Self>) -> Result<Self, &'static str> {
+        let policies: Vec<Self> = policies.into_iter().collect();
+        if policies.contains(&Self::AgencyOnly) {
+            return if policies.iter().all(|policy| *policy == Self::AgencyOnly) {
+                Ok(Self::AgencyOnly)
+            } else {
+                Err("signature_policy_conflict")
+            };
+        }
+        Ok(if policies.contains(&Self::BothParties) {
+            Self::BothParties
+        } else if policies.contains(&Self::ClientOnly) {
+            Self::ClientOnly
+        } else {
+            Self::Flexible
+        })
     }
 }
 
@@ -179,40 +242,161 @@ fn signer_policy(row: &PgRow) -> SignerPolicy {
     )
 }
 
-fn public_request(row: &PgRow) -> Value {
-    json!({"id":row.get::<Uuid,_>("id"),"status":row.get::<String,_>("status"),
+fn request_level(row: &PgRow) -> Level {
+    row.try_get::<String, _>("level")
+        .ok()
+        .and_then(|level| Level::parse(&level))
+        .unwrap_or_default()
+}
+
+/// Documents of a request in bundle order: the source first, then the members.
+pub(super) struct BundleEntry {
+    pub(super) document_id: Uuid,
+    pub(super) position: i16,
+    pub(super) page_start: Option<i32>,
+    pub(super) page_count: Option<i32>,
+    pub(super) result_document_id: Option<Uuid>,
+}
+
+async fn bundle_entries<'e, E>(
+    executor: E,
+    request: &PgRow,
+) -> Result<Vec<BundleEntry>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let members = sqlx::query(
+        "SELECT document_id, position, page_start, page_count, result_document_id
+         FROM document_signature_members WHERE request_id=$1 ORDER BY position",
+    )
+    .bind(request.get::<Uuid, _>("id"))
+    .fetch_all(executor)
+    .await?;
+    let is_package = request.try_get::<bool, _>("is_package").unwrap_or(false);
+    let mut entries = vec![BundleEntry {
+        document_id: request.get("source_document_id"),
+        position: 0,
+        page_start: request
+            .get::<Option<i32>, _>("source_page_count")
+            .is_some()
+            .then_some(1),
+        page_count: request.get("source_page_count"),
+        result_document_id: if is_package || !members.is_empty() {
+            request.get("result_document_id")
+        } else {
+            None
+        },
+    }];
+    entries.extend(members.into_iter().map(|member| BundleEntry {
+        document_id: member.get("document_id"),
+        position: member.get("position"),
+        page_start: member.get("page_start"),
+        page_count: member.get("page_count"),
+        result_document_id: member.get("result_document_id"),
+    }));
+    Ok(entries)
+}
+
+/// Request details for the signature panel. Documents of a package that the
+/// viewer may not open are listed without their title.
+async fn public_request(
+    state: &AppState,
+    auth: &AuthUser,
+    row: &PgRow,
+    access: &mut HashMap<Uuid, bool>,
+) -> Result<Value, Response> {
+    let id: Uuid = row.get("id");
+    let entries = bundle_entries(&state.db, row).await.map_err(db_error)?;
+    let ids: Vec<Uuid> = entries.iter().map(|entry| entry.document_id).collect();
+    let documents = sqlx::query(
+        "SELECT id, auto_name, art, generated_template_id, version_number, is_medical
+         FROM documents WHERE id = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_error)?;
+    let mut members = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        let visible = match access.get(&entry.document_id) {
+            Some(visible) => *visible,
+            None => {
+                let visible = signature_document_access(state, auth, entry.document_id, false)
+                    .await
+                    .is_ok();
+                access.insert(entry.document_id, visible);
+                visible
+            }
+        };
+        let document = documents
+            .iter()
+            .find(|document| document.get::<Uuid, _>("id") == entry.document_id);
+        members.push(json!({
+            "document_id": entry.document_id,
+            "position": entry.position,
+            "page_start": entry.page_start,
+            "page_count": entry.page_count,
+            "result_document_id": entry.result_document_id,
+            "accessible": visible,
+            "title": document.filter(|_| visible).map(|d| d.get::<String, _>("auto_name")),
+            "template": document.filter(|_| visible).and_then(|d| d.get::<Option<String>, _>("generated_template_id")),
+            "version": document.filter(|_| visible).map(|d| d.get::<i32, _>("version_number")),
+        }));
+    }
+    let attachments = sqlx::query(
+        "SELECT a.document_id, a.stage, d.auto_name FROM document_signature_attachments a
+         JOIN documents d ON d.id = a.document_id WHERE a.request_id=$1 ORDER BY a.position",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_error)?;
+    let mut attachment_values = Vec::with_capacity(attachments.len());
+    for attachment in &attachments {
+        let document_id: Uuid = attachment.get("document_id");
+        let visible = match access.get(&document_id) {
+            Some(visible) => *visible,
+            None => {
+                let visible = signature_document_access(state, auth, document_id, false)
+                    .await
+                    .is_ok();
+                access.insert(document_id, visible);
+                visible
+            }
+        };
+        attachment_values.push(json!({
+            "document_id": document_id,
+            "stage": attachment.get::<String, _>("stage"),
+            "title": visible.then(|| attachment.get::<String, _>("auto_name")),
+        }));
+    }
+    let status: String = row.get("status");
+    let has_attachments = !attachments.is_empty();
+    Ok(json!({"id":id,"status":status,
         "source_document_id":row.get::<Uuid,_>("source_document_id"),
         "test_mode":row.get::<bool,_>("test_mode"),"signers":row.get::<Value,_>("signers"),
         "evidence":row.get::<Value,_>("evidence"),"result_document_id":row.get::<Option<Uuid>,_>("result_document_id"),
+        "is_package":row.get::<bool,_>("is_package") || entries.len() > 1,
+        "members":members,
+        "attachments":attachment_values,
+        "level":request_level(row).as_str(),
+        "language":row.get::<String,_>("language"),
+        "expires_at":row.get::<Option<DateTime<Utc>>,_>("expires_at").map(|value| value.to_rfc3339()),
+        "invitation_note":row.get::<Option<String>,_>("invitation_note"),
+        "signed_at":row.get::<Option<DateTime<Utc>>,_>("signed_at").map(|value| value.to_rfc3339()),
+        "delivered_to_signers_at":row.get::<Option<DateTime<Utc>>,_>("delivered_to_signers_at").map(|value| value.to_rfc3339()),
+        "delivery_channel":row.get::<Option<String>,_>("delivery_channel"),
         "has_report":row.get::<Option<String>,_>("report_storage_key").is_some(),
-        "can_withdraw":row.get::<String,_>("status") == "pending" || (row.get::<String,_>("status") == "submission_unknown" && row.get::<bool,_>("has_review_attachment") && row.get::<Option<Uuid>,_>("provider_request_id").is_some()),
+        "can_withdraw":status == "pending" || (status == "submission_unknown" && has_attachments && row.get::<Option<Uuid>,_>("provider_request_id").is_some()),
         "last_error":row.get::<Option<String>,_>("last_error"),
-        "can_abandon":closure::can_abandon(&row.get::<String,_>("status"), row.get("provider_request_id"), row.get::<Option<String>,_>("last_error").as_deref()),
-        "can_resolve_review":row.get::<String,_>("status") == "needs_review",
+        "can_abandon":closure::can_abandon(&status, row.get("provider_request_id"), row.get::<Option<String>,_>("last_error").as_deref()),
+        "can_resolve_review":status == "needs_review",
+        "can_record_delivery":status == "completed" && !row.get::<bool,_>("test_mode"),
         "closed_kind":row.get::<Option<String>,_>("closed_kind"),
         "close_reason":row.get::<Option<String>,_>("close_reason"),
         "closed_at":row.get::<Option<DateTime<Utc>>,_>("closed_at").map(|value| value.to_rfc3339()),
         "created_at":row.get::<DateTime<Utc>,_>("created_at").to_rfc3339(),
-        "updated_at":row.get::<DateTime<Utc>,_>("updated_at").to_rfc3339()})
-}
-
-fn invitation_title(document_id: Uuid, art: &str, version: i32) -> String {
-    // Recognizable document type/version without patient data in email subjects.
-    let label = match art {
-        "framework_contract" => "Rahmenvertrag",
-        "single_order" => "Einzelauftrag",
-        "order_cost_estimate" => "Kostenvoranschlag",
-        "confidentiality_release" => "Schweigepflichtsentbindung",
-        "privacy_consent" => "Datenschutzeinwilligung",
-        "medication_plan" => "Medikationsplan",
-        "medical_summary" => "Medizinische Zusammenfassung",
-        "signature_evidence" => "Signaturnachweis",
-        _ => "Dokument",
-    };
-    format!(
-        "GMED – {label} · v{version} · {}",
-        &document_id.to_string()[..8]
-    )
+        "updated_at":row.get::<DateTime<Utc>,_>("updated_at").to_rfc3339()}))
 }
 
 async fn list(
@@ -226,7 +410,7 @@ async fn list(
         .is_ok();
     let signer_policy = signer_policy(&source);
     // A signed version displays the history of its source as well.
-    let rows = sqlx::query("SELECT r.*, EXISTS(SELECT 1 FROM document_signature_attachments a WHERE a.request_id=r.id) AS has_review_attachment FROM document_signature_requests r WHERE source_document_id=$1 OR result_document_id=$1 OR EXISTS(SELECT 1 FROM document_signature_members m WHERE m.request_id=r.id AND (m.document_id=$1 OR m.result_document_id=$1)) ORDER BY created_at DESC LIMIT 30")
+    let rows = sqlx::query("SELECT r.* FROM document_signature_requests r WHERE source_document_id=$1 OR result_document_id=$1 OR EXISTS(SELECT 1 FROM document_signature_members m WHERE m.request_id=r.id AND (m.document_id=$1 OR m.result_document_id=$1)) ORDER BY created_at DESC LIMIT 30")
         .bind(id).fetch_all(&state.db).await.map_err(db_error)?;
     let provider = connection::current_provider(&state)
         .await
@@ -247,14 +431,25 @@ async fn list(
     } else {
         json!([])
     };
+    let mut access = HashMap::new();
+    access.insert(id, true);
+    let mut requests = Vec::with_capacity(rows.len());
+    for row in &rows {
+        requests.push(public_request(&state, &auth, row, &mut access).await?);
+    }
+    let minimum = minimum_level(&source);
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":auth.can(gmed_domain::access::capabilities::Capability::AdminSignatures),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
         "signer_policy":signer_policy.as_str(),
+        "minimum_level":minimum.as_str(),
         "suggested_signers":suggested_signers,
         "review_package":review_package,
         "signing_packages":signing_packages,
-        "ineligible_reason":eligibility(&source),"requests":rows.iter().map(public_request).collect::<Vec<_>>()})))
+        "scope":{"patient_id":source.get::<Option<Uuid>,_>("patient_id"),"lead_id":source.get::<Option<Uuid>,_>("lead_id")},
+        "electronic_form_excluded":electronic_form_excluded(&source),
+        "ineligible_reason":eligibility(&source).or_else(|| electronic_form_excluded(&source).map(|_| "electronic_form_excluded")),
+        "requests":requests})))
 }
 
 #[derive(Deserialize)]
@@ -264,186 +459,75 @@ struct CreateRequest {
     attachment_document_id: Option<Uuid>,
     #[serde(default)]
     signing_document_ids: Vec<Uuid>,
+    level: Option<Level>,
+    expires_at: Option<DateTime<Utc>>,
+    message: Option<String>,
+    language: Option<String>,
 }
 
+/// Reads a stored source PDF for sending.
 async fn source_bytes(row: &PgRow) -> Result<Vec<u8>, &'static str> {
-    let key = row
-        .get::<Option<String>, _>("storage_key")
-        .ok_or("source_unavailable")?;
+    current_source_bytes(row)
+        .await?
+        .ok_or("source_unavailable")
+        .and_then(|bytes| {
+            if bytes.len() > MAX_PDF || !bytes.starts_with(b"%PDF-") {
+                Err("pdf_required")
+            } else {
+                Ok(bytes)
+            }
+        })
+}
+
+/// The stored bytes of a source, `None` when the document has no usable
+/// stored file any more, and an error when storage could not be read; a read
+/// error is transient and must be retried, never treated as a changed source.
+async fn current_source_bytes(row: &PgRow) -> Result<Option<Vec<u8>>, &'static str> {
+    let Some(key) = row.get::<Option<String>, _>("storage_key") else {
+        return Ok(None);
+    };
     if key.starts_with("demo/") || key.contains("..") || key.contains('\\') || key.starts_with('/')
     {
-        return Err("source_unavailable");
+        return Ok(None);
     }
-    let bytes = documents::read_document_storage_bytes(
-        row.get("id"),
-        &key,
-        Some("application/pdf"),
-        None,
-        None,
-    )
-    .await
-    .map_err(|_| "source_unavailable")?;
-    if bytes.len() > MAX_PDF || !bytes.starts_with(b"%PDF-") {
-        return Err("pdf_required");
-    }
-    Ok(bytes)
+    documents::read_document_storage_bytes(row.get("id"), &key, Some("application/pdf"), None, None)
+        .await
+        .map(Some)
+        .map_err(|_| "signature_storage_read_error")
 }
 
+/// Legacy endpoint: the document itself plus its preset companions. The
+/// generic composer uses `POST /signature-packages`.
 async fn create(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(id): Path<Uuid>,
     Json(body): Json<CreateRequest>,
 ) -> Result<(StatusCode, Json<Value>), Response> {
-    let provider = connection::current_provider(&state)
-        .await
-        .map_err(|e| error(StatusCode::SERVICE_UNAVAILABLE, e))?
-        .ok_or_else(|| error(StatusCode::SERVICE_UNAVAILABLE, "signature_not_configured"))?;
     let source = signature_document_access(&state, &auth, id, true).await?;
-    if let Some(reason) = eligibility(&source) {
-        return Err(error(StatusCode::CONFLICT, reason));
-    }
-    let mut signers =
-        normalize_signers(body.signers).map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    signer_policy(&source)
-        .validate(&signers)
-        .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
-    let source_pdf = source_bytes(&source)
-        .await
-        .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    let signing_members =
-        package::prepare_signing_members(&state, &auth, &source, &body.signing_document_ids)
-            .await?;
-    let bytes = package::merge_signing_pdfs(
-        &source_pdf,
-        &signing_members
-            .iter()
-            .map(|member| member.bytes.as_slice())
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    package::assign_visual_positions(&source, &source_pdf, &signing_members, &mut signers)
-        .await
-        .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
-    let attachment = package::prepare(&state, &auth, &source, body.attachment_document_id).await?;
-    scan_upload_bytes(Some("source.pdf"), &bytes)
-        .await
-        .map_err(|_| error(StatusCode::UNPROCESSABLE_ENTITY, "signature_scan_failed"))?;
-    let request_id = Uuid::new_v4();
-    let source_hash = sha256(&bytes);
-    let primary_source_hash = sha256(&source_pdf);
-    let mut title = invitation_title(
-        id,
-        &source.get::<String, _>("art"),
-        source.get("version_number"),
+    let mut document_ids = vec![id];
+    document_ids.extend(
+        package::legacy_signing_order(&state, &auth, &source, &body.signing_document_ids).await?,
     );
-    if attachment.is_some() {
-        // Provider search only searches the title. Include the durable request
-        // ID so a timeout during package creation can be reconciled without POST.
-        title = format!("{title} · {request_id}");
-    }
-    // Hold the source row while committing the outbox; confirm it did not change during reading/scanning.
-    let mut tx = state.db.begin().await.map_err(db_error)?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(connection::CONFIG_LOCK)
-        .execute(&mut *tx)
-        .await
-        .map_err(db_error)?;
-    let saved = sqlx::query(
-        "SELECT enabled,provider_account FROM signature_provider_connection WHERE singleton=true",
+    let request_id = create::create_request(
+        &state,
+        &auth,
+        create::Plan {
+            document_ids,
+            signers: body.signers,
+            attachment_ids: body.attachment_document_id.into_iter().collect(),
+            level: body.level,
+            expires_at: body.expires_at,
+            note: body.message,
+            language: body.language,
+        },
     )
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(db_error)?;
-    if saved.is_some_and(|s| {
-        !s.get::<bool, _>("enabled")
-            || s.get::<Option<String>, _>("provider_account").as_deref() != Some(&provider.account)
-    }) {
-        return Err(error(StatusCode::CONFLICT, "signature_account_changed"));
-    }
-    let current = sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
-        .bind(id).fetch_one(&mut *tx).await.map_err(db_error)?;
-    if eligibility(&current).is_some() || context(&current) != context(&source) {
-        return Err(error(StatusCode::CONFLICT, "document_changed"));
-    }
-    // No document of this bundle may already be out for signature, whether as
-    // the source of another request or as a member of another bundle.
-    let bundle_document_ids: Vec<Uuid> = std::iter::once(id)
-        .chain(
-            signing_members
-                .iter()
-                .map(|member| member.row.get::<Uuid, _>("id")),
-        )
-        .collect();
-    let active_conflict: bool = sqlx::query_scalar(
-        "SELECT EXISTS(
-           SELECT 1 FROM document_signature_requests r
-           WHERE r.status IN ('submitting','submission_unknown','pending')
-             AND (r.source_document_id = ANY($1) OR EXISTS(
-               SELECT 1 FROM document_signature_members m
-               WHERE m.request_id=r.id AND m.document_id = ANY($1)
-             ))
-         )",
-    )
-    .bind(&bundle_document_ids)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(db_error)?;
-    if active_conflict {
-        return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
-    }
-    let inserted = sqlx::query("INSERT INTO document_signature_requests (id,source_document_id,requested_by,source_sha256,primary_source_sha256,source_context,signers,provider_account,test_mode,status,lease_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'submitting',now()+interval '5 minutes') ON CONFLICT DO NOTHING RETURNING id")
-        .bind(request_id).bind(id).bind(auth.user_id).bind(&source_hash).bind(&primary_source_hash).bind(context(&source))
-        .bind(json!(signers)).bind(&provider.account).bind(provider.test_mode)
-        .fetch_optional(&mut *tx).await.map_err(db_error)?;
-    if inserted.is_none() {
-        return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
-    }
-    if let Some(attachment) = &attachment {
-        package::persist(&mut tx, request_id, attachment).await?;
-    }
-    package::persist_signing_members(&mut tx, request_id, &signing_members).await?;
-    tx.commit().await.map_err(db_error)?;
-    state.audit_sender.try_send(audit::domain_event(
-        "document_signature_requested",
-        Some(auth.user_id),
-        "document",
-        Some(id),
-        json!({"request_id":request_id,"test_mode":provider.test_mode,"region":"DE"}),
-    ));
-    // Persist first and respond immediately; a browser disconnect cannot trigger a second invitation.
-    tokio::spawn(async move {
-        let is_package = attachment.is_some();
-        let initial_signers = if is_package { &[][..] } else { &signers[..] };
-        let result = provider
-            .create(request_id, &title, &source_hash, &bytes, initial_signers)
-            .await
-            .and_then(|v| provider.validate(&v, request_id, &source_hash, None, initial_signers));
-        let (remote, status, reason) = match result {
-            Ok(v) => (
-                Some(v.id),
-                if is_package {
-                    "submission_unknown"
-                } else {
-                    "pending"
-                },
-                None,
-            ),
-            Err(
-                reason @ ("provider_request_rejected"
-                | "provider_login_failed"
-                | "provider_rate_limited"),
-            ) => (None, "error", Some(reason)),
-            Err(reason) => (None, "submission_unknown", Some(reason)),
-        };
-        if let Err(e) = sqlx::query("UPDATE document_signature_requests SET provider_request_id=$2,status=$3,last_error=$4,lease_until=NULL,next_poll_at=now(),updated_at=now() WHERE id=$1 AND status='submitting'")
-            .bind(request_id).bind(remote).bind(status).bind(reason).execute(&state.db).await {
-            tracing::error!(error=%e,request_id=%request_id,"Could not persist signature submission outcome");
-        }
-    });
+    .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({"id":request_id}))))
 }
 
+/// A request is visible to whoever may open any document it covers; mutating
+/// it needs edit rights on at least one of them.
 async fn authorized_request(
     state: &AppState,
     auth: &AuthUser,
@@ -456,8 +540,17 @@ async fn authorized_request(
         .await
         .map_err(db_error)?
         .ok_or_else(|| error(StatusCode::NOT_FOUND, "signature_not_found"))?;
-    signature_document_access(state, auth, row.get("source_document_id"), write).await?;
-    Ok(row)
+    let entries = bundle_entries(&state.db, &row).await.map_err(db_error)?;
+    let mut denied = None;
+    for entry in entries {
+        match signature_document_access(state, auth, entry.document_id, write).await {
+            Ok(_) => return Ok(row),
+            Err(response) => {
+                denied.get_or_insert(response);
+            }
+        }
+    }
+    Err(denied.unwrap_or_else(|| error(StatusCode::FORBIDDEN, "signature_forbidden")))
 }
 
 async fn refresh(
@@ -497,10 +590,9 @@ async fn withdraw(
         .ok_or_else(|| error(StatusCode::CONFLICT, "submission_unknown"))?;
     if row.get::<String, _>("status") != "pending"
         && !(row.get::<String, _>("status") == "submission_unknown"
-            && package::row(&state, id)
+            && package::has_attachments(&state, id)
                 .await
-                .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?
-                .is_some())
+                .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e))?)
     {
         return Err(error(StatusCode::CONFLICT, "signature_not_pending"));
     }
@@ -508,23 +600,35 @@ async fn withdraw(
         .withdraw(remote)
         .await
         .map_err(|e| error(StatusCode::BAD_GATEWAY, e))?;
-    // Withdrawing a signing invitation is a legally relevant remote action.
-    state.audit_sender.try_send(audit::domain_event(
-        "document_signature_withdrawn",
-        Some(auth.user_id),
-        "document",
-        Some(row.get::<Uuid, _>("source_document_id")),
-        json!({
-            "request_id": id,
-            "previous_status": row.get::<String, _>("status"),
-        }),
-    ));
+    // Withdrawing a signing invitation is a legally relevant remote action:
+    // one audit row per document of the request, written together.
+    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let entries = bundle_entries(&mut *tx, &row).await.map_err(db_error)?;
+    for entry in &entries {
+        audit::write_in_transaction(
+            &mut tx,
+            &audit::domain_event(
+                "document_signature_withdrawn",
+                Some(auth.user_id),
+                "document",
+                Some(entry.document_id),
+                json!({
+                    "request_id": id,
+                    "position": entry.position,
+                    "previous_status": row.get::<String, _>("status"),
+                }),
+            ),
+        )
+        .await
+        .map_err(db_error)?;
+    }
     // Poll authoritative status: the last signer may have completed concurrently.
     sqlx::query("UPDATE document_signature_requests SET next_poll_at=now() WHERE id=$1")
         .bind(id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await
         .map_err(db_error)?;
+    tx.commit().await.map_err(db_error)?;
     tokio::spawn(async move {
         let _ = poll_one(&state, Some(id)).await;
     });
@@ -581,8 +685,30 @@ pub fn spawn_worker(state: AppState) {
                     }
                 }
             }
+            match retention::delete_archived_at_provider(&state).await {
+                Ok(0) => {}
+                Ok(deleted) => {
+                    tracing::info!(
+                        deleted,
+                        "Deleted archived signature requests at the provider"
+                    )
+                }
+                Err(code) => tracing::warn!(code, "Signature provider retention failed"),
+            }
         }
     });
+}
+
+/// Synchronises one request with the provider now. Integration tests drive
+/// the worker step by step with it.
+#[doc(hidden)]
+pub async fn poll_request_now(state: &AppState, id: Uuid) -> Result<bool, &'static str> {
+    sqlx::query("UPDATE document_signature_requests SET next_poll_at=now() WHERE id=$1")
+        .bind(id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| "signature_database_error")?;
+    poll_one(state, Some(id)).await
 }
 
 async fn poll_one(state: &AppState, id: Option<Uuid>) -> Result<bool, &'static str> {
@@ -607,6 +733,7 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
         .ok_or("signature_not_configured")?;
     let id: Uuid = row.get("id");
     let hash: String = row.get("source_sha256");
+    let level = request_level(row);
     let signers: Vec<Signer> =
         serde_json::from_value(row.get("signers")).map_err(|_| "signature_invalid_signers")?;
     let remote_id: Option<Uuid> = row.get("provider_request_id");
@@ -630,8 +757,8 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
             value["status_overall"].as_str(),
             Some("WITHDRAWN" | "DECLINED" | "EXPIRED" | "ERROR")
         )
-        && package::row(state, id).await?.is_some();
-    let verified = provider.validate(
+        && package::has_attachments(state, id).await?;
+    let verified = provider.validate_level(
         &value,
         id,
         &hash,
@@ -641,6 +768,7 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
         } else {
             &signers
         },
+        level,
     )?;
     sqlx::query("UPDATE document_signature_requests SET provider_request_id=$3,status='pending',evidence=$4 WHERE id=$1 AND lease_token=$2")
         .bind(id).bind(token).bind(verified.id).bind(&verified.evidence).execute(&state.db).await.map_err(|_|"signature_database_error")?;
@@ -666,18 +794,38 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
             _ => "error",
         };
         let previous: String = row.get("status");
+        let mut tx = state
+            .db
+            .begin()
+            .await
+            .map_err(|_| "signature_database_error")?;
         let updated = sqlx::query("UPDATE document_signature_requests SET status=$3,evidence=$4,last_error=NULL,lease_until=NULL,lease_token=NULL,next_poll_at=now()+interval '1 minute',updated_at=now() WHERE id=$1 AND lease_token=$2")
-            .bind(id).bind(token).bind(status).bind(verified.evidence).execute(&state.db).await.map_err(|_|"signature_database_error")?;
+            .bind(id).bind(token).bind(status).bind(verified.evidence).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
         // The provider decided (declined, withdrawn, expired, error): record the
-        // status change like the archive of a signed document.
-        if updated.rows_affected() > 0 && previous != status && status != "pending" {
-            state.audit_sender.try_send(audit::domain_event(
-                "document_signature_status_changed",
-                None,
-                "document",
-                Some(row.get::<Uuid, _>("source_document_id")),
-                json!({"request_id": id, "previous_status": previous, "status": status}),
-            ));
+        // status change for every document of the request, with the update.
+        let terminal = updated.rows_affected() > 0 && previous != status && status != "pending";
+        if terminal {
+            let entries = bundle_entries(&mut *tx, row)
+                .await
+                .map_err(|_| "signature_database_error")?;
+            for entry in &entries {
+                audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        "document_signature_status_changed",
+                        None,
+                        "document",
+                        Some(entry.document_id),
+                        json!({"request_id": id, "position": entry.position, "previous_status": previous, "status": status}),
+                    ),
+                )
+                .await
+                .map_err(|_| "signature_database_error")?;
+            }
+        }
+        tx.commit().await.map_err(|_| "signature_database_error")?;
+        if terminal {
+            closure::notify_terminal(state, row, status).await;
         }
     }
     Ok(())
@@ -691,30 +839,14 @@ async fn archive(
     pdf: &[u8],
     report: &[u8],
 ) -> Result<(), &'static str> {
-    let request_id: Uuid = row.get("id");
+    // The signed PDF is stored once, byte for byte as the provider returned it.
     let (_, pdf_key, _) = documents::store_document_blob(pdf, "signed.pdf")
         .await
         .map_err(|_| "signature_storage_error")?;
-    let mut member_pdf_keys = Vec::new();
-    for document_id in package::signing_member_ids(state, request_id).await? {
-        match documents::store_document_blob(pdf, "signed-package.pdf").await {
-            Ok((_, key, _)) => member_pdf_keys.push((document_id, key)),
-            Err(_) => {
-                documents::remove_document_blob(&pdf_key).await;
-                for (_, key) in &member_pdf_keys {
-                    documents::remove_document_blob(key).await;
-                }
-                return Err("signature_storage_error");
-            }
-        }
-    }
     let report_key = match documents::store_document_blob(report, "signature-report.pdf").await {
         Ok((_, key, _)) => key,
         Err(_) => {
             documents::remove_document_blob(&pdf_key).await;
-            for (_, key) in &member_pdf_keys {
-                documents::remove_document_blob(key).await;
-            }
             return Err("signature_storage_error");
         }
     };
@@ -727,19 +859,38 @@ async fn archive(
         report,
         &pdf_key,
         &report_key,
-        &member_pdf_keys,
     )
     .await;
     // A failed COMMIT can have succeeded on PostgreSQL. Keep blobs on any database
     // failure; a retry sees the durable row and cannot delete committed evidence.
-    if let Ok(false) = outcome {
-        documents::remove_document_blob(&pdf_key).await;
-        documents::remove_document_blob(&report_key).await;
-        for (_, key) in &member_pdf_keys {
-            documents::remove_document_blob(key).await;
+    match outcome {
+        Ok(ArchiveOutcome::Committed { status, result_id }) => {
+            closure::notify_archived(state, row, status, result_id).await;
+            Ok(())
         }
+        Ok(ArchiveOutcome::Skipped) => {
+            documents::remove_document_blob(&pdf_key).await;
+            documents::remove_document_blob(&report_key).await;
+            Ok(())
+        }
+        Ok(ArchiveOutcome::Retry(code)) => {
+            documents::remove_document_blob(&pdf_key).await;
+            documents::remove_document_blob(&report_key).await;
+            Err(code)
+        }
+        Err(code) => Err(code),
     }
-    outcome.map(|_| ())
+}
+
+enum ArchiveOutcome {
+    Committed {
+        status: &'static str,
+        result_id: Uuid,
+    },
+    /// Another worker archived the request already; nothing was written.
+    Skipped,
+    /// Rolled back before anything was written; retry later.
+    Retry(&'static str),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -752,8 +903,7 @@ async fn archive_transaction(
     report: &[u8],
     pdf_key: &str,
     report_key: &str,
-    member_pdf_keys: &[(Uuid, String)],
-) -> Result<bool, &'static str> {
+) -> Result<ArchiveOutcome, &'static str> {
     let id: Uuid = row.get("id");
     let source_id: Uuid = row.get("source_document_id");
     let mut tx = state
@@ -761,48 +911,60 @@ async fn archive_transaction(
         .begin()
         .await
         .map_err(|_| "signature_database_error")?;
-    let claim=sqlx::query("SELECT id FROM document_signature_requests WHERE id=$1 AND lease_token=$2 AND result_document_id IS NULL FOR UPDATE")
+    let claim=sqlx::query("SELECT * FROM document_signature_requests WHERE id=$1 AND lease_token=$2 AND result_document_id IS NULL FOR UPDATE")
         .bind(id).bind(token).fetch_optional(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    if claim.is_none() {
-        return Ok(false);
+    let Some(request) = claim else {
+        return Ok(ArchiveOutcome::Skipped);
     };
     let source=sqlx::query("SELECT *, NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id=d.id) AS is_latest_version FROM documents d WHERE id=$1 FOR UPDATE")
         .bind(source_id).fetch_one(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    let current = package::signing_sources_current_in_transaction(&mut tx, row, &source)
-        .await
-        .unwrap_or(false);
+    // A storage read error says nothing about the source: roll back and retry
+    // instead of parking a valid signature in review.
+    let current = match package::signing_sources_current_in_transaction(&mut tx, row, &source).await
+    {
+        Ok(current) => current,
+        Err(code) => {
+            drop(tx);
+            return Ok(ArchiveOutcome::Retry(code));
+        }
+    };
     let test_mode: bool = row.get("test_mode");
     let publish = current && !test_mode;
+    let entries = bundle_entries(&mut *tx, &request)
+        .await
+        .map_err(|_| "signature_database_error")?;
+    let is_package = entries.len() > 1;
     let result_id = Uuid::new_v4();
-    let prefix = if test_mode {
-        "TEST – "
-    } else if !current {
-        "Prüfung erforderlich – "
+    let signed_at = verified.signed_at.unwrap_or_else(Utc::now);
+    if is_package {
+        effects::insert_bundle_document(
+            &mut tx,
+            &request,
+            &entries,
+            result_id,
+            publish,
+            test_mode,
+            pdf.len() as i64,
+            pdf_key,
+            signed_at,
+        )
+        .await?;
+        sqlx::query(
+            "UPDATE document_signature_members SET result_document_id=$2 WHERE request_id=$1",
+        )
+        .bind(id)
+        .bind(result_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| "signature_database_error")?;
     } else {
-        ""
-    };
-    sqlx::query(r#"INSERT INTO documents (
-        id,patient_id,lead_id,order_id,appointment_id,auto_name,original_filename,
-        art,category,status,visibility,is_medical,mime_type,file_size,storage_key,
-        klinik,ursprung,notes,generated_template_id,generated_bindings,generated_manual_text,
-        document_direction,document_variant,document_language,access_category,document_date,
-        source_person,source_institution,addressee_person,addressee_institution,
-        financial_status,payment_due_date,payment_date,payment_method,
-        version_root_document_id,replaces_document_id,version_number,uploaded_by,signed_at,signed_by)
-      SELECT $2,patient_id,lead_id,order_id,appointment_id,$3||auto_name,'signed.pdf',
-        CASE WHEN $4 THEN art ELSE 'signature_evidence' END,category,'active',
-        CASE WHEN $4 THEN visibility ELSE 'internal' END,is_medical,'application/pdf',$5,$6,
-        klinik,'electronic_signature',notes,CASE WHEN $4 THEN generated_template_id ELSE NULL END,
-        generated_bindings,generated_manual_text,document_direction,document_variant,document_language,
-        access_category,document_date,source_person,source_institution,addressee_person,addressee_institution,
-        financial_status,payment_due_date,payment_date,payment_method,
-        CASE WHEN $4 THEN version_root_document_id ELSE $2 END,CASE WHEN $4 THEN id ELSE NULL END,
-        CASE WHEN $4 THEN version_number+1 ELSE 1 END,$7,CASE WHEN $4 THEN $8::timestamptz ELSE NULL END,NULL
-      FROM documents WHERE id=$1"#)
-        .bind(source_id).bind(result_id).bind(prefix).bind(publish).bind(pdf.len() as i64).bind(pdf_key).bind(row.get::<Uuid,_>("requested_by"))
-        .bind(verified.signed_at).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    for (member_source_id, member_pdf_key) in member_pdf_keys {
-        let member_result_id = Uuid::new_v4();
+        let prefix = if test_mode {
+            "TEST – "
+        } else if !current {
+            "Prüfung erforderlich – "
+        } else {
+            ""
+        };
         sqlx::query(r#"INSERT INTO documents (
             id,patient_id,lead_id,order_id,appointment_id,auto_name,original_filename,
             art,category,status,visibility,is_medical,mime_type,file_size,storage_key,
@@ -811,58 +973,63 @@ async fn archive_transaction(
             source_person,source_institution,addressee_person,addressee_institution,
             financial_status,payment_due_date,payment_date,payment_method,
             version_root_document_id,replaces_document_id,version_number,uploaded_by,signed_at,signed_by)
-          SELECT $2,patient_id,lead_id,order_id,appointment_id,$3||auto_name,'signed-package.pdf',
+          SELECT $2,patient_id,lead_id,order_id,appointment_id,$3||auto_name,'signed.pdf',
             CASE WHEN $4 THEN art ELSE 'signature_evidence' END,category,'active',
             CASE WHEN $4 THEN visibility ELSE 'internal' END,is_medical,'application/pdf',$5,$6,
-            klinik,'electronic_signature_package',notes,CASE WHEN $4 THEN generated_template_id ELSE NULL END,
+            klinik,'electronic_signature',notes,CASE WHEN $4 THEN generated_template_id ELSE NULL END,
             generated_bindings,generated_manual_text,document_direction,document_variant,document_language,
             access_category,document_date,source_person,source_institution,addressee_person,addressee_institution,
             financial_status,payment_due_date,payment_date,payment_method,
             CASE WHEN $4 THEN version_root_document_id ELSE $2 END,CASE WHEN $4 THEN id ELSE NULL END,
             CASE WHEN $4 THEN version_number+1 ELSE 1 END,$7,CASE WHEN $4 THEN $8::timestamptz ELSE NULL END,NULL
           FROM documents WHERE id=$1"#)
-            .bind(member_source_id).bind(member_result_id).bind(prefix).bind(publish)
-            .bind(pdf.len() as i64).bind(member_pdf_key).bind(row.get::<Uuid,_>("requested_by"))
+            .bind(source_id).bind(result_id).bind(prefix).bind(publish).bind(pdf.len() as i64).bind(pdf_key).bind(row.get::<Uuid,_>("requested_by"))
             .bind(verified.signed_at).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+        // Keep a verified live version in the provider cards that hold its source.
+        // Test and stale evidence remains separate from those operational documents.
         if publish {
             sqlx::query("INSERT INTO provider_document_links(provider_id,document_id,linked_by) SELECT provider_id,$2,linked_by FROM provider_document_links WHERE document_id=$1 ON CONFLICT DO NOTHING")
-                .bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+                .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
         }
+        // Preserve record-level restrictions on the newly archived version.
         sqlx::query("INSERT INTO staff_user_access_rules(user_id,granted_for_role,resource_type,scope_type,resource_id,capability,effect,reason,granted_by,valid_from,valid_until) SELECT user_id,granted_for_role,resource_type,scope_type,$2,capability,effect,reason,granted_by,valid_from,valid_until FROM staff_user_access_rules WHERE resource_type='document' AND resource_id=$1 AND revoked_at IS NULL")
-            .bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+            .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
         sqlx::query("INSERT INTO staff_access_profile_rules(profile_id,resource_type,scope_type,resource_id,capability,effect,created_by) SELECT profile_id,resource_type,scope_type,$2,capability,effect,created_by FROM staff_access_profile_rules WHERE resource_type='document' AND resource_id=$1")
-            .bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
-        sqlx::query("UPDATE document_signature_members SET result_document_id=$3 WHERE request_id=$1 AND document_id=$2")
-            .bind(id).bind(member_source_id).bind(member_result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    }
-    // Keep a verified live version in the provider cards that hold its source.
-    // Test and stale evidence remains separate from those operational documents.
-    if publish {
-        sqlx::query("INSERT INTO provider_document_links(provider_id,document_id,linked_by) SELECT provider_id,$2,linked_by FROM provider_document_links WHERE document_id=$1 ON CONFLICT DO NOTHING")
             .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
     }
-    // Preserve record-level restrictions on the newly archived version.
-    sqlx::query("INSERT INTO staff_user_access_rules(user_id,granted_for_role,resource_type,scope_type,resource_id,capability,effect,reason,granted_by,valid_from,valid_until) SELECT user_id,granted_for_role,resource_type,scope_type,$2,capability,effect,reason,granted_by,valid_from,valid_until FROM staff_user_access_rules WHERE resource_type='document' AND resource_id=$1 AND revoked_at IS NULL")
-        .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    sqlx::query("INSERT INTO staff_access_profile_rules(profile_id,resource_type,scope_type,resource_id,capability,effect,created_by) SELECT profile_id,resource_type,scope_type,$2,capability,effect,created_by FROM staff_access_profile_rules WHERE resource_type='document' AND resource_id=$1")
-        .bind(source_id).bind(result_id).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
     // No external shares are created by receiving a signature. Release remains explicit.
     let status = if current { "completed" } else { "needs_review" };
-    sqlx::query("UPDATE document_signature_requests SET status=$3,result_document_id=$4,report_storage_key=$5,report_sha256=$6,signed_sha256=$7,evidence=$8,last_error=$9,lease_until=NULL,lease_token=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2")
+    sqlx::query("UPDATE document_signature_requests SET status=$3,result_document_id=$4,report_storage_key=$5,report_sha256=$6,signed_sha256=$7,evidence=$8,last_error=$9,signed_at=$10,lease_until=NULL,lease_token=NULL,updated_at=now() WHERE id=$1 AND lease_token=$2")
         .bind(id).bind(token).bind(status).bind(result_id).bind(report_key).bind(sha256(report)).bind(sha256(pdf)).bind(&verified.evidence)
-        .bind(if current {None}else{Some("document_changed")}).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
-    tx.commit().await.map_err(|_| "signature_database_error")?;
-    state.audit_sender.try_send(audit::domain_event("document_signature_archived",None,"document",Some(result_id),json!({"request_id":id,"source_document_id":source_id,"test_mode":test_mode,"status":status,"sha256":sha256(pdf)})));
-    if !current {
-        closure::notify_staff(
-            state,
-            row.get::<Uuid, _>("requested_by"),
-            source_id,
-            "signature_review_required",
-            "Signed document needs review",
-            "The document was signed, but its source changed during signing. Accept or reject the signature in the document's signature panel.",
+        .bind(if current {None}else{Some("document_changed")}).bind(signed_at).execute(&mut *tx).await.map_err(|_|"signature_database_error")?;
+    audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "document_signature_archived",
+            None,
+            "document",
+            Some(result_id),
+            json!({"request_id":id,"source_document_id":source_id,
+                "document_ids":entries.iter().map(|entry| entry.document_id).collect::<Vec<_>>(),
+                "test_mode":test_mode,"status":status,"level":request_level(row).as_str(),"sha256":sha256(pdf)}),
+        ),
+    )
+    .await
+    .map_err(|_| "signature_database_error")?;
+    // Legal effects (contract signed, consents, order signatures) only for a
+    // live, verified and current signature. Test results and documents that
+    // changed during signing never create them; a review decision may later.
+    if publish {
+        effects::apply(
+            &mut tx,
+            &request,
+            &entries,
+            result_id,
+            signed_at,
+            &verified.evidence,
         )
-        .await;
+        .await?;
     }
-    Ok(true)
+    tx.commit().await.map_err(|_| "signature_database_error")?;
+    Ok(ArchiveOutcome::Committed { status, result_id })
 }

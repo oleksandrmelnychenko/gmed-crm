@@ -1139,6 +1139,24 @@ async fn list_patient_recipients(
            FROM document_signature_requests r
            JOIN documents d ON d.id = r.source_document_id
            WHERE d.patient_id = $1
+           UNION ALL
+           -- Every further document of a package went to the provider too.
+           SELECT 'signature_provider', 'Skribble (' || r.provider_account || ')', r.status,
+                  d.auto_name, r.created_at, NULL,
+                  (SELECT string_agg(s->>'email', ', ') FROM jsonb_array_elements(r.signers) s)
+           FROM document_signature_members m
+           JOIN document_signature_requests r ON r.id = m.request_id
+           JOIN documents d ON d.id = m.document_id
+           WHERE d.patient_id = $1
+           UNION ALL
+           -- Informational attachments are sent to the provider as well.
+           SELECT 'signature_provider', 'Skribble (' || r.provider_account || ')', r.status,
+                  d.auto_name, r.created_at, NULL,
+                  (SELECT string_agg(s->>'email', ', ') FROM jsonb_array_elements(r.signers) s)
+           FROM document_signature_attachments a
+           JOIN document_signature_requests r ON r.id = a.request_id
+           JOIN documents d ON d.id = a.document_id
+           WHERE d.patient_id = $1
            ORDER BY since DESC"#,
     )
     .bind(patient_id)
@@ -3124,6 +3142,10 @@ async fn anonymize_patient_record(
                  AND file_deleted_at IS NULL
                  AND lower(concat_ws(' ', category, art)) !~
                      '(invoice|rechnung|kosten|payment|financ|contract|vertrag|order|auftrag)'
+                 -- Signed PDFs and signature evidence are the legal originals
+                 -- of contracts and consents; they follow the retention of the
+                 -- underlying contract (Art. 17 Abs. 3 lit. b, e DSGVO).
+                 AND COALESCE(ursprung, '') NOT IN ('electronic_signature', 'electronic_signature_package')
                FOR UPDATE
            ) doomed
            WHERE documents.id = doomed.id

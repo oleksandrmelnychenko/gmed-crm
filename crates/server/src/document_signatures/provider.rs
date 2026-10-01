@@ -14,8 +14,66 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// Largest single source PDF read for signing.
 pub const MAX_PDF: usize = 25 * 1024 * 1024;
+/// Largest PDF sent to the provider. Signing adds signature dictionaries,
+/// appearance streams and validation data (LTV) to the document, so the source
+/// must stay well below the signed download limit.
+pub const MAX_SIGNING_BUNDLE: usize = 18 * 1024 * 1024;
+/// Largest signed PDF or report accepted back from the provider.
+pub const MAX_SIGNED_PDF: usize = 40 * 1024 * 1024;
 const MAX_JSON: usize = 2 * 1024 * 1024;
+
+/// Signature level (eIDAS). QES is the default and the only level that
+/// replaces the written form (§ 126a BGB); AES is allowed only where the
+/// document type permits it (see `legal::minimum_level`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Level {
+    #[serde(rename = "AES")]
+    Aes,
+    #[default]
+    #[serde(rename = "QES")]
+    Qes,
+}
+
+impl Level {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Aes => "AES",
+            Self::Qes => "QES",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "AES" => Some(Self::Aes),
+            "QES" => Some(Self::Qes),
+            _ => None,
+        }
+    }
+}
+
+/// Invitation languages the provider supports; anything else falls back to German.
+pub const LANGUAGES: [&str; 4] = ["de", "en", "fr", "it"];
+
+/// Per-request invitation options. The subject and the message stay generic:
+/// document types and page ranges only, never patient or health data.
+#[derive(Clone, Debug, Default)]
+pub struct InvitationOptions {
+    pub level: Level,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub message: Option<String>,
+    pub language: Option<String>,
+}
+
+impl InvitationOptions {
+    pub fn language(&self) -> &str {
+        self.language
+            .as_deref()
+            .filter(|language| LANGUAGES.contains(language))
+            .unwrap_or("de")
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -33,17 +91,33 @@ pub struct Signer {
 /// The client signs first; everyone else is invited only once the client has
 /// signed, so the agency receives an already signed package. A request for one
 /// side only keeps the provider's default and carries no sequence.
+#[cfg(test)]
 pub(super) fn signature_entries(signers: &[Signer]) -> Vec<Value> {
-    let ordered = signers.iter().any(|signer| signer.role == "client")
-        && signers.iter().any(|signer| signer.role != "client");
+    signature_entries_in(signers, "de")
+}
+
+/// Signers of the patient side: the client (or a legal representative) and an
+/// optional minor patient who co-signs.
+pub fn is_patient_side(role: &str) -> bool {
+    matches!(role, "client" | "minor")
+}
+
+pub(super) fn signature_entries_in(signers: &[Signer], language: &str) -> Vec<Value> {
+    let language = if LANGUAGES.contains(&language) {
+        language
+    } else {
+        "de"
+    };
+    let ordered = signers.iter().any(|signer| is_patient_side(&signer.role))
+        && signers.iter().any(|signer| !is_patient_side(&signer.role));
     signers
         .iter()
         .map(|signer| {
-            let mut entry = json!({"notify":true,"language":"de",
+            let mut entry = json!({"notify":true,"language":language,
                 "signer_identity_data":{"email_address":signer.email,
-                "first_name":signer.first_name,"last_name":signer.last_name,"language":"de"}});
+                "first_name":signer.first_name,"last_name":signer.last_name,"language":language}});
             if ordered {
-                entry["sequence"] = json!(if signer.role == "client" { 1 } else { 2 });
+                entry["sequence"] = json!(if is_patient_side(&signer.role) { 1 } else { 2 });
             }
             if !signer.positions.is_empty() {
                 entry["visual_signature"] = json!({"positions": signer.positions});
@@ -87,7 +161,10 @@ pub fn normalize_signers(mut signers: Vec<Signer>) -> Result<Vec<Signer>, &'stat
         if !emails.insert(signer.email.clone()) {
             return Err("duplicate_signer");
         }
-        if !matches!(signer.role.as_str(), "client" | "agency" | "other") {
+        if !matches!(
+            signer.role.as_str(),
+            "client" | "minor" | "agency" | "other"
+        ) {
             return Err("signer_role");
         }
     }
@@ -112,8 +189,10 @@ pub struct Provider {
 }
 
 impl Provider {
-    #[cfg(test)]
-    pub(super) fn with_test_endpoint(mut self, base: String) -> Self {
+    /// Points the provider at a local mock (tests only). Only loopback HTTP is
+    /// accepted, so it can never redirect real requests elsewhere.
+    #[doc(hidden)]
+    pub fn with_test_endpoint(mut self, base: String) -> Self {
         assert!(base.starts_with("http://127.0.0.1:"));
         self.base = base;
         self
@@ -155,7 +234,16 @@ impl Provider {
     }
 
     pub fn quality(&self) -> &'static str {
-        if self.test_mode { "DEMO" } else { "QES" }
+        self.quality_for(Level::Qes)
+    }
+
+    /// The provider quality for a level; the demo account only signs as DEMO.
+    pub fn quality_for(&self, level: Level) -> &'static str {
+        if self.test_mode {
+            "DEMO"
+        } else {
+            level.as_str()
+        }
     }
 
     pub fn username(&self) -> &str {
@@ -263,13 +351,46 @@ impl Provider {
         bytes: &[u8],
         signers: &[Signer],
     ) -> Result<Value, &'static str> {
+        self.create_with(
+            id,
+            title,
+            hash,
+            bytes,
+            signers,
+            &InvitationOptions::default(),
+        )
+        .await
+    }
+
+    pub async fn create_with(
+        &self,
+        id: Uuid,
+        title: &str,
+        hash: &str,
+        bytes: &[u8],
+        signers: &[Signer],
+        options: &InvitationOptions,
+    ) -> Result<Value, &'static str> {
         self.token().await.map_err(|_| "provider_login_failed")?;
         // Use GMED's selected identity and a document-specific guest invitation.
         // account_email would prefer an existing Skribble profile over these details.
-        let body = json!({"title":title,"content":STANDARD.encode(bytes),
-            "content_type":"application/pdf","legislation":"EIDAS","quality":self.quality(),
+        let mut body = json!({"title":title,"content":STANDARD.encode(bytes),
+            "content_type":"application/pdf","legislation":"EIDAS",
+            "quality":self.quality_for(options.level),
             "custom":custom(id,hash),"attach_on_success":[],
-            "signatures":signature_entries(signers)});
+            "signatures":signature_entries_in(signers, options.language())});
+        // `message` and `expiration_date` follow the Sign API v2 schema; both
+        // still need confirmation on the demo account before PROD use.
+        if let Some(message) = options
+            .message
+            .as_deref()
+            .filter(|message| !message.trim().is_empty())
+        {
+            body["message"] = json!(message);
+        }
+        if let Some(expires_at) = options.expires_at {
+            body["expiration_date"] = json!(expires_at.to_rfc3339());
+        }
         // Never retry POST: an HTTP timeout may have occurred after invitations were sent.
         let bytes = self
             .request(Method::POST, "/signature-requests", Some(body), MAX_JSON)
@@ -312,13 +433,21 @@ impl Provider {
         .await
     }
     pub async fn invite(&self, id: Uuid, signers: &[Signer]) -> Result<Value, &'static str> {
+        self.invite_in(id, signers, "de").await
+    }
+    pub async fn invite_in(
+        &self,
+        id: Uuid,
+        signers: &[Signer],
+        language: &str,
+    ) -> Result<Value, &'static str> {
         // The package was created without recipients. PUT the complete set only
         // after the informational attachment has been verified. Never retry PUT.
         let bytes = self
             .request(
                 Method::PUT,
                 "/signature-requests",
-                Some(json!({"id":id,"signatures":signature_entries(signers)})),
+                Some(json!({"id":id,"signatures":signature_entries_in(signers, language)})),
                 MAX_JSON,
             )
             .await?;
@@ -345,13 +474,28 @@ impl Provider {
         .await
         .map(|_| ())
     }
+    /// Deletes an archived request at the provider (GDPR data minimisation).
+    /// Used only by the retention job, which stays off until the endpoint has
+    /// been verified on the demo account.
+    pub async fn delete(&self, id: Uuid) -> Result<(), &'static str> {
+        self.request(
+            Method::DELETE,
+            &format!("/signature-requests/{id}"),
+            None,
+            MAX_JSON,
+        )
+        .await
+        .map(|_| ())
+    }
     pub async fn pdf(&self, id: Uuid, report: bool) -> Result<Vec<u8>, &'static str> {
         let path = if report {
             format!("/signature-requests/{id}/report")
         } else {
             format!("/documents/{id}/content")
         };
-        let bytes = self.request(Method::GET, &path, None, MAX_PDF).await?;
+        let bytes = self
+            .request(Method::GET, &path, None, MAX_SIGNED_PDF)
+            .await?;
         if !bytes.starts_with(b"%PDF-") {
             return Err("provider_invalid_pdf");
         }
@@ -367,6 +511,20 @@ impl Provider {
         remote_id: Option<Uuid>,
         signers: &[Signer],
     ) -> Result<VerifiedRequest, &'static str> {
+        self.validate_level(value, id, hash, remote_id, signers, Level::Qes)
+    }
+
+    /// Like `validate`, for the level the request was sent with.
+    pub fn validate_level(
+        &self,
+        value: &Value,
+        id: Uuid,
+        hash: &str,
+        remote_id: Option<Uuid>,
+        signers: &[Signer],
+        level: Level,
+    ) -> Result<VerifiedRequest, &'static str> {
+        let quality = self.quality_for(level);
         let provider_id = value["id"]
             .as_str()
             .and_then(|s| Uuid::parse_str(s).ok())
@@ -378,7 +536,7 @@ impl Provider {
         if remote_id.is_some_and(|id| id != provider_id)
             || value["custom"] != custom(id, hash)
             || value["owner"] != self.username
-            || value["quality"] != self.quality()
+            || value["quality"] != quality
             || (!self.test_mode && value["legislation"] != "EIDAS")
         {
             return Err("provider_request_mismatch");
@@ -421,7 +579,7 @@ impl Provider {
             }
             if status == "SIGNED" {
                 if recipient["status_code"] != "SIGNED"
-                    || recipient["signed_quality"] != self.quality()
+                    || recipient["signed_quality"] != quality
                     || (!self.test_mode && recipient["signed_legislation"] != "EIDAS")
                 {
                     return Err("provider_signature_incomplete");
@@ -447,7 +605,7 @@ impl Provider {
             status: status.to_string(),
             signed_at,
             evidence: json!({"provider":"skribble","region":"DE","request_id":provider_id,
-                "document_id":document_id,"quality":self.quality(),"signatures":evidence}),
+                "document_id":document_id,"quality":quality,"signatures":evidence}),
         })
     }
 }

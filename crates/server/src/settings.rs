@@ -149,6 +149,13 @@ pub async fn update_setting(
         "agency_tax_number" => validate_string_setting(value, 32, true, "Agency tax number")?,
         "agency_country_code" => validate_string_setting(value, 2, false, "Agency country code")?,
         "required_patient_documents" => validate_required_patient_documents_setting(value)?,
+        crate::document_signatures::retention::DELETION_ENABLED_SETTING => match value.trim() {
+            "true" => Value::Bool(true),
+            "false" => Value::Bool(false),
+            _ => {
+                return Err(UpdateError::InvalidValue("Must be true or false".into()));
+            }
+        },
         _ => validate_positive_integer_setting(key, value)?,
     };
 
@@ -245,6 +252,14 @@ fn validate_positive_integer_setting(key: &str, value: &str) -> Result<Value, Up
         "concierge_reminder_lead_hours" | "concierge_prep_lead_hours" if parsed > 336 => {
             return Err(UpdateError::InvalidValue(
                 "Concierge lead time cannot exceed 336 hours (14 days)".into(),
+            ));
+        }
+        crate::document_signatures::retention::DELETION_DAYS_SETTING
+            if parsed > crate::document_signatures::retention::MAX_DELETION_DAYS =>
+        {
+            return Err(UpdateError::InvalidValue(
+                "Signature requests are deleted at the provider at most 365 days after archiving"
+                    .into(),
             ));
         }
         crate::document_signatures::closure::STUCK_DAYS_SETTING

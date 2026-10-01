@@ -291,7 +291,7 @@ fn patient_contract_status(framework_status: &str) -> &str {
     }
 }
 
-async fn sync_patient_contract_status_tx(
+pub(crate) async fn sync_patient_contract_status_tx(
     tx: &mut Transaction<'_, Postgres>,
     patient_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
