@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FolderLock, Inbox, Plus, Search } from "lucide-react";
+import { FolderLock, Inbox, Search } from "lucide-react";
 
 import { AdminTableCard } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type { ColumnDef } from "@/components/data-table/types";
-import { Banner, StatusBadge, TabLoader } from "@/components/ui-shell";
+import { Banner, STATUS_TONE, StatusBadge, TabLoader } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
-import { SelectField } from "@/components/ui/select-field";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
+import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelEmployeeList, type PersonnelEmployeeRow } from "./api";
-import { EmployeeDialog } from "./employee-dialog";
 import {
   filterEmployees,
   formatEmploymentPeriod,
@@ -23,13 +23,7 @@ import {
 } from "./model";
 import { categoryLabel, errorMessage } from "./personnel-ui";
 
-export function EmployeesTab({
-  canManage,
-  onOpenIntake,
-}: {
-  canManage: boolean;
-  onOpenIntake: () => void;
-}) {
+export function EmployeesTab({ onOpenIntake }: { onOpenIntake: () => void }) {
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
@@ -38,7 +32,6 @@ export function EmployeesTab({
   const [error, setError] = useState("");
   const [status, setStatus] = useState<EmployeeStatusFilter>("active");
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -157,13 +150,16 @@ export function EmployeesTab({
       {data && data.pending_intake > 0 ? (
         <div
           role="status"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-800"
+          className={cn(
+            "flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-2.5 text-sm",
+            STATUS_TONE.info,
+          )}
         >
           <span className="flex items-center gap-2">
-            <Inbox className="size-4" />
+            <Inbox className="size-4 shrink-0" />
             {formatUiText(t.personnel_intake_banner, { count: data.pending_intake })}
           </span>
-          <Button type="button" size="sm" variant="outline" onClick={onOpenIntake}>
+          <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg bg-card" onClick={onOpenIntake}>
             {t.personnel_intake_open}
           </Button>
         </div>
@@ -179,6 +175,9 @@ export function EmployeesTab({
             defaultDensity="comfortable"
             defaultFrozenColumns={["name"]}
             dictionary={tr}
+            storageKey="personnel-employees"
+            mobilePrimaryColumnId="name"
+            mobileDetailColumnIds={["status", "personnel_number", "employment", "documents", "missing"]}
             onRowClick={(row) => staffGo(`/personnel/${row.id}`)}
             toolbarStart={
               <>
@@ -193,25 +192,18 @@ export function EmployeesTab({
                     />
                   </div>
                 </ToolbarField>
-                <ToolbarField label={t.personnel_status} className="w-40">
-                  <SelectField
+                <ToolbarField label={t.personnel_status} className="w-44">
+                  <NativeComboboxSelect
                     value={status}
                     aria-label={t.personnel_status}
-                    className="h-8 text-xs"
-                    onValueChange={(value) => setStatus(value as EmployeeStatusFilter)}
-                    options={[
-                      { value: "active", label: t.personnel_filter_active },
-                      { value: "former", label: t.personnel_filter_former },
-                      { value: "all", label: t.personnel_filter_all },
-                    ]}
-                  />
+                    className="h-8 rounded-md bg-field text-xs"
+                    onChange={(event) => setStatus(event.target.value as EmployeeStatusFilter)}
+                  >
+                    <option value="active">{t.personnel_filter_active}</option>
+                    <option value="former">{t.personnel_filter_former}</option>
+                    <option value="all">{t.personnel_filter_all}</option>
+                  </NativeComboboxSelect>
                 </ToolbarField>
-                {canManage ? (
-                  <Button type="button" size="sm" className="self-end" onClick={() => setCreating(true)}>
-                    <Plus />
-                    {t.personnel_employee_new}
-                  </Button>
-                ) : null}
               </>
             }
             emptyState={
@@ -222,13 +214,6 @@ export function EmployeesTab({
             }
           />
         </AdminTableCard>
-      ) : null}
-      {canManage ? (
-        <EmployeeDialog
-          open={creating}
-          onClose={() => setCreating(false)}
-          onSaved={(employee) => staffGo(`/personnel/${employee.id}`)}
-        />
       ) : null}
     </div>
   );

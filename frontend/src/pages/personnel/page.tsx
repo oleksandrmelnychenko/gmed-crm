@@ -1,21 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import {
+  FileArchive,
+  Grid3x3,
+  Inbox,
+  Plus,
+  Settings,
+  ShieldCheck,
+  UsersRound,
+  type LucideIcon,
+} from "lucide-react";
 
-import { Banner, PageHeader } from "@/components/ui-shell";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Banner, PageHeader, TabShell } from "@/components/ui-shell";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 
 import { personnelApi, type PersonnelCategory } from "./api";
 import { CompletenessTab } from "./completeness-tab";
+import { EmployeeDialog } from "./employee-dialog";
 import { EmployeesTab } from "./employees-tab";
 import { ExportTab } from "./export-tab";
-import { IntakeTab } from "./intake-tab";
+import { IntakeTab, IntakeUploadButton } from "./intake-tab";
 import { IntegrityTab } from "./integrity-tab";
 import { resolvePersonnelTab, type PersonnelTab } from "./model";
 import { errorMessage } from "./personnel-ui";
 import { SettingsTab } from "./settings-tab";
+
+const TAB_ICONS: Record<PersonnelTab, LucideIcon> = {
+  employees: UsersRound,
+  completeness: Grid3x3,
+  intake: Inbox,
+  export: FileArchive,
+  integrity: ShieldCheck,
+  settings: Settings,
+};
 
 /**
  * Personnel files (Personalakte): one append-only archive per employee for
@@ -25,9 +46,12 @@ import { SettingsTab } from "./settings-tab";
 export function PersonnelPage() {
   const { t } = useLang();
   const { user } = useAuth();
+  const { staffGo } = useStaffNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [categories, setCategories] = useState<PersonnelCategory[]>([]);
   const [categoriesError, setCategoriesError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [intakeVersion, setIntakeVersion] = useState(0);
 
   const can = useMemo(
     () => ({
@@ -77,50 +101,66 @@ export function PersonnelPage() {
     settings: t.personnel_tab_settings,
   };
 
+  const headerActions =
+    tab === "employees" && can.manage ? (
+      <Button type="button" className="h-9 gap-1.5 rounded-lg px-3.5" onClick={() => setCreating(true)}>
+        <Plus className="size-4" />
+        {t.personnel_employee_new}
+      </Button>
+    ) : tab === "intake" && can.upload ? (
+      <IntakeUploadButton onUploaded={() => setIntakeVersion((version) => version + 1)} />
+    ) : null;
+
   return (
     <div className="space-y-4">
-      <PageHeader title={t.nav_personnel} />
-      <p className="max-w-4xl text-sm text-muted-foreground">{t.personnel_page_intro}</p>
+      <PageHeader title={t.nav_personnel} description={t.personnel_page_intro} actions={headerActions} />
       {categoriesError ? <Banner tone="error">{categoriesError}</Banner> : null}
-      <Tabs value={tab} onValueChange={(value) => openTab(value as PersonnelTab)}>
-        <div className="max-w-full overflow-x-auto">
-          <TabsList>
-            {tabs.map((entry) => (
-              <TabsTrigger key={entry} value={entry}>
+
+      <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
+        <nav aria-label={t.nav_personnel} className="flex w-max min-w-full justify-center gap-1">
+          {tabs.map((entry) => {
+            const Icon = TAB_ICONS[entry];
+            const active = entry === tab;
+            return (
+              <Button
+                key={entry}
+                type="button"
+                size="sm"
+                variant={active ? "default" : "ghost"}
+                aria-current={active ? "page" : undefined}
+                className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8"
+                onClick={() => openTab(entry)}
+              >
+                <Icon className="size-4" aria-hidden />
                 {labels[entry]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-        <TabsContent value="employees" className="pt-2">
-          {tab === "employees" ? (
-            <EmployeesTab canManage={can.manage} onOpenIntake={() => openTab("intake")} />
-          ) : null}
-        </TabsContent>
-        <TabsContent value="completeness" className="pt-2">
-          {tab === "completeness" ? <CompletenessTab /> : null}
-        </TabsContent>
-        {can.upload ? (
-          <TabsContent value="intake" className="pt-2">
-            {tab === "intake" ? <IntakeTab categories={categories} /> : null}
-          </TabsContent>
+              </Button>
+            );
+          })}
+        </nav>
+      </div>
+
+      <TabShell className="mt-0">
+        {tab === "employees" ? (
+          <EmployeesTab onOpenIntake={() => openTab("intake")} />
         ) : null}
-        {can.export ? (
-          <TabsContent value="export" className="pt-2">
-            {tab === "export" ? <ExportTab /> : null}
-          </TabsContent>
+        {tab === "completeness" ? <CompletenessTab /> : null}
+        {tab === "intake" && can.upload ? (
+          <IntakeTab categories={categories} reloadKey={intakeVersion} />
         ) : null}
-        <TabsContent value="integrity" className="pt-2">
-          {tab === "integrity" ? <IntegrityTab canManage={can.manage} /> : null}
-        </TabsContent>
-        {can.retention ? (
-          <TabsContent value="settings" className="pt-2">
-            {tab === "settings" ? (
-              <SettingsTab categories={categories} onCategoriesChanged={loadCategories} />
-            ) : null}
-          </TabsContent>
+        {tab === "export" && can.export ? <ExportTab /> : null}
+        {tab === "integrity" ? <IntegrityTab canManage={can.manage} /> : null}
+        {tab === "settings" && can.retention ? (
+          <SettingsTab categories={categories} onCategoriesChanged={loadCategories} />
         ) : null}
-      </Tabs>
+      </TabShell>
+
+      {can.manage ? (
+        <EmployeeDialog
+          open={creating}
+          onClose={() => setCreating(false)}
+          onSaved={(employee) => staffGo(`/personnel/${employee.id}`)}
+        />
+      ) : null}
     </div>
   );
 }

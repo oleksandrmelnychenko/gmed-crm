@@ -1,19 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileCheck2, LoaderCircle, Lock, Upload } from "lucide-react";
+import { FileCheck2, Lock, Upload } from "lucide-react";
 
-import { Banner, Field } from "@/components/ui-shell";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { Field, textareaClass, tokens } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 import {
   personnelApi,
@@ -34,7 +28,7 @@ import {
   validatePersonnelFile,
   type ArchiveTarget,
 } from "./model";
-import { ArchiveName, PERSONNEL_TEXTAREA_CLASS, categoryLabel, errorMessage } from "./personnel-ui";
+import { ArchiveName, categoryLabel, errorMessage } from "./personnel-ui";
 
 type EmployeeChoice = { id: string; display_name: string; is_active: boolean };
 
@@ -253,170 +247,187 @@ export function ArchiveDialog({
   const dirty = Boolean(file || title || reason || (mode?.kind === "intake" && employeeId));
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={dirty}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{dialogTitle}</DialogTitle>
-          <DialogDescription>
-            {isCorrection ? t.personnel_correction_hint : t.personnel_upload_hint}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="grid gap-3">
-          {mode?.kind === "intake" ? (
-            <>
-              <p className="text-xs text-muted-foreground">
-                {t.personnel_intake_original_name}: <ArchiveName name={mode.item.original_file_name} />
-              </p>
-              <Field label={t.personnel_employee} required>
-                <SelectField
-                  value={employeeId}
-                  aria-label={t.personnel_employee}
-                  onValueChange={(value) => {
-                    setEmployeeId(value);
-                    setSupersedesId("");
-                  }}
-                  options={[
-                    { value: "", label: t.common_select_placeholder, disabled: true },
-                    ...mode.employees.map((employee) => ({
-                      value: employee.id,
-                      label: employee.is_active
-                        ? employee.display_name
-                        : `${employee.display_name} (${t.personnel_status_former})`,
-                    })),
-                  ]}
+    <Sheet open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={dirty}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        {open ? (
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <AdminSheetScaffold
+              title={dialogTitle}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={t.personnel_archive_action}
+                  submitting={busy}
+                  submitDisabled={!canSubmit}
+                  error={error || undefined}
+                  onCancel={onClose}
                 />
-              </Field>
-              {employeeId && correctionOptions.length > 0 ? (
-                <Field label={t.personnel_correction_of}>
-                  <SelectField
-                    value={supersedesId}
-                    aria-label={t.personnel_correction_of}
-                    onValueChange={setSupersedesId}
-                    options={[{ value: "", label: t.personnel_correction_none }, ...correctionOptions]}
-                  />
-                </Field>
-              ) : null}
-            </>
-          ) : null}
+              }
+            >
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  {isCorrection ? t.personnel_correction_hint : t.personnel_upload_hint}
+                </p>
 
-          {mode?.kind === "profile" ? (
-            <p className="text-xs text-muted-foreground">
-              {t.personnel_import_source}: <ArchiveName name={mode.document.original_file_name || mode.document.title} />
-            </p>
-          ) : null}
+                {mode?.kind === "intake" ? (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      {t.personnel_intake_original_name}: <ArchiveName name={mode.item.original_file_name} />
+                    </p>
+                    <Field label={t.personnel_employee} required>
+                      <SelectField
+                        value={employeeId}
+                        aria-label={t.personnel_employee}
+                        onValueChange={(value) => {
+                          setEmployeeId(value);
+                          setSupersedesId("");
+                        }}
+                        options={[
+                          { value: "", label: t.common_select_placeholder, disabled: true },
+                          ...mode.employees.map((employee) => ({
+                            value: employee.id,
+                            label: employee.is_active
+                              ? employee.display_name
+                              : `${employee.display_name} (${t.personnel_status_former})`,
+                          })),
+                        ]}
+                      />
+                    </Field>
+                    {employeeId && correctionOptions.length > 0 ? (
+                      <Field label={t.personnel_correction_of}>
+                        <SelectField
+                          value={supersedesId}
+                          aria-label={t.personnel_correction_of}
+                          onValueChange={setSupersedesId}
+                          options={[{ value: "", label: t.personnel_correction_none }, ...correctionOptions]}
+                        />
+                      </Field>
+                    ) : null}
+                  </>
+                ) : null}
 
-          {presetSupersedes ? (
-            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
-              <p className="font-medium text-foreground">{t.personnel_correction_of}</p>
-              <ArchiveName name={presetSupersedes.archive_file_name} />
-            </div>
-          ) : null}
+                {mode?.kind === "profile" ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t.personnel_import_source}:{" "}
+                    <ArchiveName name={mode.document.original_file_name || mode.document.title} />
+                  </p>
+                ) : null}
 
-          {isCorrection ? (
-            <Field label={t.personnel_correction_reason} required>
-              <textarea
-                className={PERSONNEL_TEXTAREA_CLASS}
-                value={reason}
-                maxLength={2000}
-                onChange={(event) => setReason(event.target.value)}
-              />
-            </Field>
-          ) : (
-            <>
-              <Field label={t.personnel_category} required>
-                <SelectField
-                  value={category}
-                  aria-label={t.personnel_category}
-                  onValueChange={setCategory}
-                  options={[
-                    { value: "", label: t.common_select_placeholder, disabled: true },
-                    ...categories.map((entry) => ({
-                      value: entry.code,
-                      label: categoryLabel(t, entry.code, entry.file_label),
-                    })),
-                  ]}
-                />
-              </Field>
-              {selectedCategory?.monthly ? (
-                <Field label={t.personnel_period_month} required>
-                  <SelectField
-                    value={period}
-                    aria-label={t.personnel_period_month}
-                    onValueChange={setPeriod}
-                    options={monthChoices}
-                  />
-                </Field>
-              ) : selectedCategory ? (
-                <Field label={t.personnel_document_date} htmlFor="personnel-document-date" required>
+                {presetSupersedes ? (
+                  <div className={cn("space-y-1 rounded-lg px-3 py-2 text-xs", tokens.surface.mutedCard)}>
+                    <p className={tokens.text.label}>{t.personnel_correction_of}</p>
+                    <ArchiveName name={presetSupersedes.archive_file_name} />
+                  </div>
+                ) : null}
+
+                {isCorrection ? (
+                  <Field label={t.personnel_correction_reason} htmlFor="personnel-correction-reason" required>
+                    <textarea
+                      id="personnel-correction-reason"
+                      className={cn(textareaClass, "min-h-24")}
+                      value={reason}
+                      maxLength={2000}
+                      onChange={(event) => setReason(event.target.value)}
+                    />
+                  </Field>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label={t.personnel_category} required>
+                      <SelectField
+                        value={category}
+                        aria-label={t.personnel_category}
+                        onValueChange={setCategory}
+                        options={[
+                          { value: "", label: t.common_select_placeholder, disabled: true },
+                          ...categories.map((entry) => ({
+                            value: entry.code,
+                            label: categoryLabel(t, entry.code, entry.file_label),
+                          })),
+                        ]}
+                      />
+                    </Field>
+                    {selectedCategory?.monthly ? (
+                      <Field label={t.personnel_period_month} required>
+                        <SelectField
+                          value={period}
+                          aria-label={t.personnel_period_month}
+                          onValueChange={setPeriod}
+                          options={monthChoices}
+                        />
+                      </Field>
+                    ) : selectedCategory ? (
+                      <Field label={t.personnel_document_date} htmlFor="personnel-document-date" required>
+                        <Input
+                          id="personnel-document-date"
+                          type="date"
+                          value={documentDate}
+                          onChange={(event) => setDocumentDate(event.target.value)}
+                        />
+                      </Field>
+                    ) : null}
+                  </div>
+                )}
+
+                <Field label={t.personnel_title_optional} htmlFor="personnel-document-title">
                   <Input
-                    id="personnel-document-date"
-                    type="date"
-                    value={documentDate}
-                    onChange={(event) => setDocumentDate(event.target.value)}
+                    id="personnel-document-title"
+                    value={title}
+                    maxLength={200}
+                    onChange={(event) => setTitle(event.target.value)}
                   />
                 </Field>
-              ) : null}
-            </>
-          )}
 
-          <Field label={t.personnel_title_optional} htmlFor="personnel-document-title">
-            <Input
-              id="personnel-document-title"
-              value={title}
-              maxLength={200}
-              onChange={(event) => setTitle(event.target.value)}
-            />
-          </Field>
+                {needsFile ? (
+                  <Field label={t.personnel_file} htmlFor="personnel-document-file" required>
+                    <label
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-3 text-sm transition-colors hover:bg-muted/40",
+                        tokens.surface.dashed,
+                      )}
+                    >
+                      <Upload className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 truncate">{file ? file.name : t.personnel_choose_file}</span>
+                      <input
+                        id="personnel-document-file"
+                        type="file"
+                        className="sr-only"
+                        accept={PERSONNEL_FILE_ACCEPT}
+                        onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+                      />
+                    </label>
+                    <p className="text-xs text-muted-foreground">{t.personnel_file_hint}</p>
+                    {fileError ? <p className="text-xs text-destructive">{fileError}</p> : null}
+                  </Field>
+                ) : null}
 
-          {needsFile ? (
-            <Field label={t.personnel_file} htmlFor="personnel-document-file" required>
-              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border px-3 py-3 text-sm hover:bg-muted/30">
-                <Upload className="size-4 text-muted-foreground" />
-                <span className="min-w-0 truncate">{file ? file.name : t.personnel_choose_file}</span>
-                <input
-                  id="personnel-document-file"
-                  type="file"
-                  className="sr-only"
-                  accept={PERSONNEL_FILE_ACCEPT}
-                  onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
-                />
-              </label>
-              <p className="text-xs text-muted-foreground">{t.personnel_file_hint}</p>
-              {fileError ? <p className="text-xs text-destructive">{fileError}</p> : null}
-            </Field>
-          ) : null}
-
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-900">
-            <p className="flex items-center gap-1.5 font-medium">
-              <FileCheck2 className="size-3.5" />
-              {t.personnel_will_be_archived_as}
-            </p>
-            {preview?.name ? (
-              <ArchiveName name={preview.name} className="text-emerald-950" />
-            ) : preview?.error ? (
-              <p className="text-destructive">{preview.error}</p>
-            ) : (
-              <p className="text-emerald-900/70">{t.personnel_archive_name_pending}</p>
-            )}
-            <p className="mt-1 flex items-center gap-1.5 text-emerald-900/80">
-              <Lock className="size-3" />
-              {t.personnel_immutable_hint}
-            </p>
-          </div>
-        </div>
-
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
-            {t.common_cancel}
-          </Button>
-          <Button type="button" onClick={() => void submit()} disabled={!canSubmit}>
-            {busy ? <LoaderCircle className="animate-spin" /> : null}
-            {t.personnel_archive_action}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+                <div className={cn("space-y-1 rounded-lg px-3 py-2.5 text-xs", tokens.surface.mutedCard)}>
+                  <p className={cn(tokens.text.label, "flex items-center gap-1.5")}>
+                    <FileCheck2 className="size-3.5" />
+                    {t.personnel_will_be_archived_as}
+                  </p>
+                  {preview?.name ? (
+                    <ArchiveName name={preview.name} className="text-sm" />
+                  ) : preview?.error ? (
+                    <p className="text-destructive">{preview.error}</p>
+                  ) : (
+                    <p className="text-muted-foreground">{t.personnel_archive_name_pending}</p>
+                  )}
+                  <p className="flex items-center gap-1.5 text-muted-foreground">
+                    <Lock className="size-3" />
+                    {t.personnel_immutable_hint}
+                  </p>
+                </div>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        ) : null}
+      </SheetContent>
+    </Sheet>
   );
 }

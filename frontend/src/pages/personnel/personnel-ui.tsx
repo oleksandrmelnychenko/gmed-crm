@@ -1,7 +1,8 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Download, ExternalLink, LoaderCircle } from "lucide-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { Download, Eye, FileWarning, LoaderCircle, type LucideIcon } from "lucide-react";
 
-import { Banner, checkboxClass, textareaClass } from "@/components/ui-shell";
+import type { ColumnDef } from "@/components/data-table/types";
+import { CountBadge, Field, textareaClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,23 +13,29 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { downloadBlob } from "@/lib/api";
-import { formatUiText, useLang, type Translations } from "@/lib/i18n";
+import { getLang, useLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { canPreviewInline } from "./model";
+import { localizePersonnelError } from "./server-errors";
 
-export const PERSONNEL_TEXTAREA_CLASS = textareaClass;
-export const PERSONNEL_CHECKBOX_CLASS = checkboxClass;
-
-/** Error text of a failed call. */
+/** Server message in the UI language (see `server-errors.ts`), or `fallback`. */
 export function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
+  return error instanceof Error && error.message
+    ? localizePersonnelError(error.message, getLang())
+    : fallback;
 }
 
 /** Translated category name; the archive label (e.g. "Stundenzettel") when unknown. */
 export function categoryLabel(t: Translations, code: string, fallback?: string): string {
   const tr = t as unknown as Record<string, string | undefined>;
   return tr[`personnel_category_${code}`] ?? fallback ?? code;
+}
+
+/** Short category name for narrow column headers (completeness matrix). */
+export function categoryShortLabel(t: Translations, code: string, fallback?: string): string {
+  const tr = t as unknown as Record<string, string | undefined>;
+  return tr[`personnel_category_short_${code}`] ?? categoryLabel(t, code, fallback);
 }
 
 export function sourceLabel(t: Translations, source: string): string {
@@ -43,29 +50,149 @@ export function ArchiveName({ name, className }: { name: string; className?: str
   );
 }
 
-type LoadedFile = { blob: Blob; contentType: string; filename: string | null };
+/** Muted one-line notice (the app's read-only banner look). */
+export function MutedNote({
+  icon: Icon,
+  children,
+  className,
+}: {
+  icon?: LucideIcon;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      role="note"
+      className={cn(
+        "flex items-start gap-2 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm text-muted-foreground",
+        className,
+      )}
+    >
+      {Icon ? <Icon aria-hidden className="mt-0.5 size-4 shrink-0" /> : null}
+      <span className="min-w-0">{children}</span>
+    </div>
+  );
+}
+
+/** Section title at the start of a table toolbar (like the providers' interaction history). */
+export function TableTitle({ children, count }: { children: ReactNode; count?: number }) {
+  return (
+    <>
+      <span className="flex shrink-0 items-center gap-2 self-center text-[13px] font-semibold tracking-tight text-foreground">
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
+        {children}
+        {count !== undefined ? <CountBadge>{count}</CountBadge> : null}
+      </span>
+      <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
+    </>
+  );
+}
 
 /**
- * Shows a stored file in a dialog through a blob URL (the API needs the bearer
- * token, so a plain link cannot open it). TIFF and unknown types are offered
- * as a download only.
+ * The eye-icon preview column of the app's document tables. Personnel files
+ * are not GMed documents, so the shared column (with its e-signature action)
+ * is not used here.
+ */
+export function previewColumn<T>({
+  label,
+  getTitle,
+  onPreview,
+}: {
+  label: string;
+  getTitle: (row: T) => string;
+  onPreview: (row: T) => void;
+}): ColumnDef<T> {
+  return {
+    id: "preview",
+    label,
+    accessor: () => "",
+    sortable: false,
+    required: true,
+    pinned: "left",
+    width: 56,
+    cellClassName: "flex items-center justify-center",
+    render: (row) => (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        title={label}
+        aria-label={`${label}: ${getTitle(row)}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onPreview(row);
+        }}
+      >
+        <Eye className="size-4" />
+      </Button>
+    ),
+  };
+}
+
+/** Icon-only row action of the app's tables (ghost, 3.5 icon, title + aria-label). */
+export function RowIconAction({
+  icon: Icon,
+  label,
+  onClick,
+  destructive = false,
+  disabled = false,
+  busy = false,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className={cn(
+        destructive && "size-7 shrink-0 rounded-md text-destructive hover:bg-destructive/10 hover:text-destructive",
+      )}
+      title={label}
+      aria-label={label}
+      disabled={disabled || busy}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Icon className="size-3.5" />}
+    </Button>
+  );
+}
+
+type LoadedFile = { blob: Blob; contentType: string; filename: string | null };
+
+/** Same rule as the documents pages: PDFs keep the viewer, everything else is fully sandboxed. */
+function previewSandbox(mimeType: string): string | undefined {
+  return mimeType.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf" ? undefined : "";
+}
+
+/**
+ * Shows a stored file in the app's document preview shell through a blob URL
+ * (the API needs the bearer token, so a plain link cannot open it). TIFF and
+ * unknown types are offered as a download only.
  */
 export function FilePreviewDialog({
   open,
-  title,
   fileName,
   mimeType,
   load,
   onClose,
-  footerNote,
+  note,
 }: {
   open: boolean;
-  title: ReactNode;
   fileName: string;
   mimeType: string;
   load: () => Promise<LoadedFile>;
   onClose: () => void;
-  footerNote?: ReactNode;
+  /** Shown after the MIME type, e.g. that the access is logged. */
+  note?: ReactNode;
 }) {
   const { t } = useLang();
   const [file, setFile] = useState<LoadedFile | null>(null);
@@ -107,53 +234,61 @@ export function FilePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} allowImplicitDismissal>
-      <DialogContent className="sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            <ArchiveName name={fileName} />
-          </DialogDescription>
-        </DialogHeader>
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        {loading ? (
-          <div className="flex h-48 items-center justify-center text-muted-foreground">
-            <LoaderCircle className="size-5 animate-spin" />
-          </div>
-        ) : null}
-        {url && mimeType === "application/pdf" ? (
-          <iframe title={fileName} src={url} className="h-[70vh] w-full rounded-lg border border-border" />
-        ) : null}
-        {url && mimeType !== "application/pdf" ? (
-          <div className="flex max-h-[70vh] justify-center overflow-auto rounded-lg border border-border bg-muted/20 p-2">
-            <img src={url} alt={fileName} className="max-w-full object-contain" />
-          </div>
-        ) : null}
-        {file && !url ? (
-          <p className="text-sm text-muted-foreground">{t.personnel_preview_unavailable}</p>
-        ) : null}
-        <DialogFooter>
-          {footerNote ? (
-            <p className="mr-auto self-center text-xs text-muted-foreground">{footerNote}</p>
-          ) : null}
-          {url ? (
+      <DialogContent className="flex h-[86vh] w-[94vw] max-w-none flex-col overflow-hidden rounded-xl p-0 duration-0 data-closed:animate-none data-open:animate-none sm:w-[78vw] sm:max-w-[1500px]">
+        <DialogHeader className="border-b border-border/70 px-5 py-4">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-4 pr-10">
+            <div className="min-w-0">
+              <DialogTitle className="truncate font-mono text-base" title={fileName}>
+                {fileName || t.personnel_preview}
+              </DialogTitle>
+              <DialogDescription className="truncate">
+                {[mimeType, note].filter(Boolean).map((part, index) => (
+                  <span key={index}>
+                    {index > 0 ? " · " : ""}
+                    {part}
+                  </span>
+                ))}
+              </DialogDescription>
+            </div>
             <Button
               type="button"
-              variant="outline"
-              onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 rounded-lg"
+              disabled={!file}
+              onClick={() => file && downloadBlob(file.blob, file.filename || fileName)}
             >
-              <ExternalLink />
-              {t.personnel_open_new_tab}
+              <Download className="size-3.5" />
+              {t.personnel_download}
             </Button>
+          </div>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 bg-slate-50 p-3">
+          {loading ? (
+            <div className="flex h-full min-h-80 items-center justify-center rounded-lg border border-border bg-white text-sm text-muted-foreground">
+              <LoaderCircle className="mr-2 size-4 animate-spin" />
+              {t.common_loading}
+            </div>
+          ) : error ? (
+            <div
+              role="alert"
+              className="flex h-full min-h-80 items-center justify-center rounded-lg border border-destructive/30 bg-white p-8 text-center text-sm text-destructive"
+            >
+              {error}
+            </div>
+          ) : url ? (
+            <iframe
+              title={fileName || t.personnel_preview}
+              src={url}
+              sandbox={previewSandbox(mimeType)}
+              className="h-full min-h-[560px] w-full rounded-lg border border-border bg-white"
+            />
+          ) : file ? (
+            <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg border border-border bg-white p-8 text-center">
+              <FileWarning className="mb-3 size-8 text-muted-foreground" />
+              <p className="max-w-md text-sm text-muted-foreground">{t.personnel_preview_unavailable}</p>
+            </div>
           ) : null}
-          <Button
-            type="button"
-            disabled={!file}
-            onClick={() => file && downloadBlob(file.blob, file.filename || fileName)}
-          >
-            <Download />
-            {t.personnel_download}
-          </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -181,6 +316,7 @@ export function ReasonDialog({
   onClose: () => void;
 }) {
   const { t } = useLang();
+  const reasonId = useId();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -192,8 +328,10 @@ export function ReasonDialog({
     }
   }, [open]);
 
+  const reasonValid = optional || Boolean(reason.trim());
+
   const submit = async () => {
-    if (!optional && !reason.trim()) {
+    if (!reasonValid) {
       setError(t.personnel_reason_required);
       return;
     }
@@ -211,43 +349,49 @@ export function ReasonDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}
         </DialogHeader>
-        <label className="space-y-1.5 text-sm">
-          <span className="font-medium">
-            {optional ? t.personnel_reason_optional : t.personnel_reason}
-          </span>
-          <textarea
-            className={PERSONNEL_TEXTAREA_CLASS}
-            value={reason}
-            maxLength={2000}
-            onChange={(event) => setReason(event.target.value)}
-          />
-        </label>
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
-            {t.common_cancel}
-          </Button>
-          <Button
-            type="button"
-            variant={destructive ? "destructive" : "default"}
-            onClick={() => void submit()}
-            disabled={busy}
+        <form
+          className="grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <Field
+            label={optional ? t.personnel_reason_optional : t.personnel_reason}
+            htmlFor={reasonId}
+            required={!optional}
           >
-            {busy ? <LoaderCircle className="animate-spin" /> : null}
-            {confirmLabel}
-          </Button>
-        </DialogFooter>
+            <textarea
+              id={reasonId}
+              className={cn(textareaClass, "min-h-24")}
+              value={reason}
+              maxLength={2000}
+              disabled={busy}
+              aria-invalid={Boolean(error) && !reasonValid}
+              onChange={(event) => setReason(event.target.value)}
+            />
+          </Field>
+          {error ? (
+            <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+              <p>{error}</p>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+              {t.common_cancel}
+            </Button>
+            <Button type="submit" variant={destructive ? "destructive" : "default"} disabled={busy || !reasonValid}>
+              {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
+              {confirmLabel}
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );
-}
-
-/** "{count} …" with the count filled in. */
-export function countText(template: string, count: number): string {
-  return formatUiText(template, { count });
 }

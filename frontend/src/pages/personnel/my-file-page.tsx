@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Eye, Lock } from "lucide-react";
+import { Download, Lock } from "lucide-react";
 
-import { Banner, PageHeader, TabLoader } from "@/components/ui-shell";
-import { Button } from "@/components/ui/button";
+import { Banner, EmptyCell, InfoRow, PageHeader, Section, TabLoader, TabShell } from "@/components/ui-shell";
 import { toast } from "@/components/ui/toast";
 import { ApiRequestError } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 
 import { personnelApi, type PersonnelCategory, type PersonnelDocument, type PersonnelOwnFile } from "./api";
-import { PersonnelDocumentsList } from "./documents-list";
+import { PersonnelDocumentsTable } from "./documents-list";
 import { formatEmploymentPeriod } from "./model";
-import { FilePreviewDialog, errorMessage } from "./personnel-ui";
+import { FilePreviewDialog, MutedNote, RowIconAction, errorMessage } from "./personnel-ui";
 
 /**
  * The signed-in employee's own personnel file (§ 83 BetrVG, Art. 15 DSGVO):
@@ -51,65 +50,54 @@ export function MyPersonnelFilePage() {
   const employee = file?.employee;
 
   return (
-    <div className="space-y-4">
+    <TabShell className="mt-0">
       <PageHeader title={t.nav_my_personnel_file} />
       {loading ? <TabLoader /> : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
-      {missing ? <p className="text-sm text-muted-foreground">{t.personnel_my_file_missing}</p> : null}
+      {missing ? <EmptyCell>{t.personnel_my_file_missing}</EmptyCell> : null}
       {employee ? (
         <>
-          <section className="rounded-lg border border-border bg-card p-4 text-sm">
-            <p className="font-medium text-foreground">{employee.display_name}</p>
-            <p className="text-xs text-muted-foreground">
-              {[
-                employee.personnel_number ? `${t.personnel_number} ${employee.personnel_number}` : "",
-                formatEmploymentPeriod(employee.employment_start, employee.employment_end, t.personnel_since),
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-          </section>
-          <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            <Lock className="mt-0.5 size-3.5 shrink-0" />
-            <span>{t.personnel_my_file_notice}</span>
-          </div>
-          <PersonnelDocumentsList
+          <Section title={employee.display_name}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <InfoRow label={t.personnel_number} value={<span className="font-mono">{employee.personnel_number || "—"}</span>} />
+              <InfoRow
+                label={t.personnel_employment_period}
+                value={formatEmploymentPeriod(employee.employment_start, employee.employment_end, t.personnel_since) || "—"}
+              />
+            </div>
+          </Section>
+          <MutedNote icon={Lock}>{t.personnel_my_file_notice}</MutedNote>
+          <PersonnelDocumentsTable
+            title={t.personnel_tab_documents}
             documents={file?.documents ?? []}
             categoryOrder={categoryOrder}
             showInternal={false}
+            onPreview={setPreviewing}
             emptyText={t.personnel_documents_empty}
-            actions={(document) => (
-              <>
-                <Button type="button" size="xs" variant="outline" onClick={() => setPreviewing(document)}>
-                  <Eye />
-                  {t.personnel_preview}
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="outline"
-                  onClick={() =>
-                    void personnelApi
-                      .downloadDocument(document)
-                      .catch((reason: unknown) => toast.error(errorMessage(reason, t.common_failed_load)))
-                  }
-                >
-                  <Download />
-                  {t.personnel_download}
-                </Button>
-              </>
+            storageKey="personnel-own-documents"
+            rowActionsWidth={40}
+            rowActions={(document) => (
+              <RowIconAction
+                icon={Download}
+                label={t.personnel_download}
+                onClick={() =>
+                  void personnelApi
+                    .downloadDocument(document)
+                    .catch((reason: unknown) => toast.error(errorMessage(reason, t.common_failed_load)))
+                }
+              />
             )}
           />
         </>
       ) : null}
       <FilePreviewDialog
         open={Boolean(previewing)}
-        title={t.personnel_preview}
         fileName={previewing?.archive_file_name ?? ""}
         mimeType={previewing?.mime_type ?? ""}
         load={() => personnelApi.documentFile(previewing?.id ?? "", true)}
         onClose={() => setPreviewing(null)}
+        note={t.personnel_access_logged}
       />
-    </div>
+    </TabShell>
   );
 }

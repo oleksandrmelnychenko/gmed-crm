@@ -1,18 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { LoaderCircle } from "lucide-react";
 
-import { Banner, Field } from "@/components/ui-shell";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { Field, textareaClass } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useLang } from "@/lib/i18n";
 
 import { personnelApi, type PersonnelEmployee, type PersonnelLinkableUser } from "./api";
@@ -23,9 +15,9 @@ import {
   employmentRangeValid,
   type EmployeeForm,
 } from "./model";
-import { PERSONNEL_TEXTAREA_CLASS, errorMessage } from "./personnel-ui";
+import { errorMessage } from "./personnel-ui";
 
-/** Creates a personnel file or edits its master data (never its documents). */
+/** Creates a personnel file or edits its master data (never its documents), in a right sheet. */
 export function EmployeeDialog({
   open,
   employee,
@@ -105,100 +97,113 @@ export function EmployeeDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={changed}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{employee ? t.personnel_employee_edit : t.personnel_employee_new}</DialogTitle>
-          <DialogDescription>{t.personnel_employee_dialog_hint}</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label={t.personnel_salutation} className="sm:col-span-2">
-            <SelectField
-              value={form.salutation}
-              aria-label={t.personnel_salutation}
-              onValueChange={(value) => update("salutation", value as EmployeeForm["salutation"])}
-              options={[
-                { value: "frau", label: t.personnel_salutation_frau },
-                { value: "herr", label: t.personnel_salutation_herr },
-                { value: "none", label: t.personnel_salutation_none },
-              ]}
-            />
-          </Field>
-          <Field label={t.personnel_first_name} htmlFor="personnel-first-name" required>
-            <Input
-              id="personnel-first-name"
-              value={form.first_name}
-              maxLength={100}
-              onChange={(event) => update("first_name", event.target.value)}
-            />
-          </Field>
-          <Field label={t.personnel_last_name} htmlFor="personnel-last-name" required>
-            <Input
-              id="personnel-last-name"
-              value={form.last_name}
-              maxLength={100}
-              onChange={(event) => update("last_name", event.target.value)}
-            />
-          </Field>
-          <p className="text-xs text-muted-foreground sm:col-span-2">{t.personnel_name_file_hint}</p>
-          <Field label={t.personnel_number} htmlFor="personnel-number">
-            <Input
-              id="personnel-number"
-              value={form.personnel_number}
-              maxLength={40}
-              onChange={(event) => update("personnel_number", event.target.value)}
-            />
-          </Field>
-          <div className="hidden sm:block" />
-          <Field label={t.personnel_employment_start} htmlFor="personnel-employment-start">
-            <Input
-              id="personnel-employment-start"
-              type="date"
-              value={form.employment_start}
-              onChange={(event) => update("employment_start", event.target.value)}
-            />
-          </Field>
-          <Field label={t.personnel_employment_end} htmlFor="personnel-employment-end">
-            <Input
-              id="personnel-employment-end"
-              type="date"
-              value={form.employment_end}
-              onChange={(event) => update("employment_end", event.target.value)}
-            />
-          </Field>
-          {!rangeValid ? (
-            <p className="text-xs text-destructive sm:col-span-2">{t.personnel_employment_range_invalid}</p>
-          ) : null}
-          <Field label={t.personnel_user_link} className="sm:col-span-2">
-            <SelectField
-              value={form.user_id}
-              aria-label={t.personnel_user_link}
-              onValueChange={(value) => update("user_id", value)}
-              options={userOptions}
-            />
-            <p className="text-xs text-muted-foreground">{t.personnel_user_link_hint}</p>
-          </Field>
-          <Field label={t.personnel_notes} htmlFor="personnel-notes" className="sm:col-span-2">
-            <textarea
-              id="personnel-notes"
-              className={PERSONNEL_TEXTAREA_CLASS}
-              value={form.notes}
-              maxLength={4000}
-              onChange={(event) => update("notes", event.target.value)}
-            />
-          </Field>
-        </div>
-        {error ? <Banner tone="error">{error}</Banner> : null}
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
-            {t.common_cancel}
-          </Button>
-          <Button type="button" onClick={() => void submit()} disabled={busy || !valid || !changed}>
-            {busy ? <LoaderCircle className="animate-spin" /> : null}
-            {employee ? t.common_save : t.common_create}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <Sheet open={open} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={changed}>
+      <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
+        {open ? (
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submit();
+            }}
+          >
+            <AdminSheetScaffold
+              title={employee ? t.personnel_employee_edit : t.personnel_employee_new}
+              footer={
+                <SheetFormFooter
+                  cancelLabel={t.common_cancel}
+                  submitLabel={employee ? t.common_save : t.common_create}
+                  submitting={busy}
+                  submitDisabled={!valid || !changed}
+                  error={error || undefined}
+                  onCancel={onClose}
+                />
+              }
+            >
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">{t.personnel_employee_dialog_hint}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label={t.personnel_salutation} className="sm:col-span-2">
+                    <SelectField
+                      value={form.salutation}
+                      aria-label={t.personnel_salutation}
+                      onValueChange={(value) => update("salutation", value as EmployeeForm["salutation"])}
+                      options={[
+                        { value: "frau", label: t.personnel_salutation_frau },
+                        { value: "herr", label: t.personnel_salutation_herr },
+                        { value: "none", label: t.personnel_salutation_none },
+                      ]}
+                    />
+                  </Field>
+                  <Field label={t.personnel_first_name} htmlFor="personnel-first-name" required>
+                    <Input
+                      id="personnel-first-name"
+                      value={form.first_name}
+                      maxLength={100}
+                      onChange={(event) => update("first_name", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={t.personnel_last_name} htmlFor="personnel-last-name" required>
+                    <Input
+                      id="personnel-last-name"
+                      value={form.last_name}
+                      maxLength={100}
+                      onChange={(event) => update("last_name", event.target.value)}
+                    />
+                  </Field>
+                  <p className="text-xs text-muted-foreground sm:col-span-2">{t.personnel_name_file_hint}</p>
+                  <Field label={t.personnel_number} htmlFor="personnel-number" className="sm:col-span-2 sm:max-w-[calc(50%-0.375rem)]">
+                    <Input
+                      id="personnel-number"
+                      value={form.personnel_number}
+                      maxLength={40}
+                      onChange={(event) => update("personnel_number", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={t.personnel_employment_start} htmlFor="personnel-employment-start">
+                    <Input
+                      id="personnel-employment-start"
+                      type="date"
+                      value={form.employment_start}
+                      onChange={(event) => update("employment_start", event.target.value)}
+                    />
+                  </Field>
+                  <Field label={t.personnel_employment_end} htmlFor="personnel-employment-end">
+                    <Input
+                      id="personnel-employment-end"
+                      type="date"
+                      value={form.employment_end}
+                      aria-invalid={!rangeValid}
+                      onChange={(event) => update("employment_end", event.target.value)}
+                    />
+                  </Field>
+                  {!rangeValid ? (
+                    <p className="text-xs text-destructive sm:col-span-2">{t.personnel_employment_range_invalid}</p>
+                  ) : null}
+                  <Field label={t.personnel_user_link} className="sm:col-span-2">
+                    <SelectField
+                      value={form.user_id}
+                      aria-label={t.personnel_user_link}
+                      onValueChange={(value) => update("user_id", value)}
+                      options={userOptions}
+                    />
+                    <p className="text-xs text-muted-foreground">{t.personnel_user_link_hint}</p>
+                  </Field>
+                  <Field label={t.personnel_notes} htmlFor="personnel-notes" className="sm:col-span-2">
+                    <textarea
+                      id="personnel-notes"
+                      className={textareaClass}
+                      value={form.notes}
+                      maxLength={4000}
+                      onChange={(event) => update("notes", event.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
+            </AdminSheetScaffold>
+          </form>
+        ) : null}
+      </SheetContent>
+    </Sheet>
   );
 }

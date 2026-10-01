@@ -2,10 +2,10 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { AdminToolbar } from "@/components/admin-page-patterns";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
-import { Banner, TabLoader } from "@/components/ui-shell";
-import { SelectField } from "@/components/ui/select-field";
-import { formatUiText, useLang } from "@/lib/i18n";
 import { StaffLink } from "@/components/staff-link";
+import { Banner, EmptyCell, TabLoader } from "@/components/ui-shell";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelCompleteness } from "./api";
@@ -20,9 +20,10 @@ import {
   monthOptions,
   type CompletenessCode,
 } from "./model";
-import { categoryLabel, errorMessage } from "./personnel-ui";
+import { categoryLabel, categoryShortLabel, errorMessage } from "./personnel-ui";
 
 const MONTHS_BACK = 120;
+const CELL_CLASS = "inline-flex items-center justify-center rounded border text-[11px] font-semibold";
 
 /**
  * Employees × months matrix of the expected monthly documents (timesheets,
@@ -66,24 +67,40 @@ export function CompletenessTab() {
 
   return (
     <div className="space-y-3">
-      <AdminToolbar className="items-end">
+      <AdminToolbar className="items-end border-border/70">
         <ToolbarField label={t.personnel_month_from} className="w-32">
-          <SelectField
+          <NativeComboboxSelect
             value={range.from}
             aria-label={t.personnel_month_from}
-            className="h-8 text-xs"
-            onValueChange={(from) => setRange((current) => ({ from, to: current.to < from ? from : current.to }))}
-            options={monthChoices}
-          />
+            className="h-8 rounded-md bg-field text-xs"
+            onChange={(event) => {
+              const from = event.target.value;
+              setRange((current) => ({ from, to: current.to < from ? from : current.to }));
+            }}
+          >
+            {monthChoices.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </NativeComboboxSelect>
         </ToolbarField>
         <ToolbarField label={t.personnel_month_to} className="w-32">
-          <SelectField
+          <NativeComboboxSelect
             value={range.to}
             aria-label={t.personnel_month_to}
-            className="h-8 text-xs"
-            onValueChange={(to) => setRange((current) => ({ from: current.from > to ? to : current.from, to }))}
-            options={monthChoices}
-          />
+            className="h-8 rounded-md bg-field text-xs"
+            onChange={(event) => {
+              const to = event.target.value;
+              setRange((current) => ({ from: current.from > to ? to : current.from, to }));
+            }}
+          >
+            {monthChoices.map((choice) => (
+              <option key={choice.value} value={choice.value}>
+                {choice.label}
+              </option>
+            ))}
+          </NativeComboboxSelect>
         </ToolbarField>
         {data ? (
           <p className="ml-auto self-center text-xs text-muted-foreground">
@@ -95,38 +112,29 @@ export function CompletenessTab() {
         ) : null}
       </AdminToolbar>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-muted-foreground">
         {COMPLETENESS_CODES.map((code) => (
           <span key={code} className="inline-flex items-center gap-1">
-            <span
-              className={cn(
-                "inline-flex size-5 items-center justify-center rounded border text-[11px] font-semibold",
-                completenessCellClass(code),
-              )}
-            >
+            <span aria-hidden className={cn(CELL_CLASS, "size-5", completenessCellClass(code))}>
               {completenessCellSymbol(code)}
             </span>
             {cellLabel(code)}
           </span>
         ))}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        {formatUiText(t.personnel_late_rule, { days: data?.late_days ?? 7 })}
+        <span>· {formatUiText(t.personnel_late_rule, { days: data?.late_days ?? 7 })}</span>
       </p>
 
       {error ? <Banner tone="error">{error}</Banner> : null}
       {loading && !data ? <TabLoader /> : null}
-      {data && data.employees.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">{t.personnel_employees_empty}</p>
-      ) : null}
+      {data && data.employees.length === 0 ? <EmptyCell>{t.personnel_employees_empty}</EmptyCell> : null}
       {data && data.employees.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
+        <div className="overflow-x-auto rounded-lg border border-border/70 bg-card shadow-sm">
           <table className="w-max min-w-full border-collapse text-xs">
             <thead>
-              <tr className="border-b border-border bg-muted/30">
+              <tr className="border-b border-border/70 bg-muted/40 text-muted-foreground">
                 <th
                   rowSpan={2}
-                  className="sticky left-0 z-10 min-w-48 bg-muted/30 px-3 py-2 text-left font-medium"
+                  className="sticky left-0 z-10 min-w-48 border-r border-border/70 bg-muted px-3 py-2 text-left font-medium"
                 >
                   {t.personnel_employee}
                 </th>
@@ -134,13 +142,13 @@ export function CompletenessTab() {
                   <th
                     key={month}
                     colSpan={data.categories.length}
-                    className="border-l border-border px-2 py-1.5 text-center font-medium"
+                    className="border-l border-border/70 px-2 py-1.5 text-center font-medium tabular-nums"
                   >
                     {formatMonth(month)}
                   </th>
                 ))}
               </tr>
-              <tr className="border-b border-border bg-muted/20">
+              <tr className="border-b border-border/70 bg-muted/40">
                 {data.months.map((month) => (
                   <Fragment key={month}>
                     {data.categories.map((category, index) => (
@@ -148,11 +156,11 @@ export function CompletenessTab() {
                         key={`${month}-${category.code}`}
                         className={cn(
                           "px-1 py-1 text-center text-[10px] font-normal text-muted-foreground",
-                          index === 0 && "border-l border-border",
+                          index === 0 && "border-l border-border/70",
                         )}
                         title={categoryLabel(t, category.code, category.file_label)}
                       >
-                        {categoryLabel(t, category.code, category.file_label).slice(0, 3)}
+                        {categoryShortLabel(t, category.code, category.file_label)}
                       </th>
                     ))}
                   </Fragment>
@@ -161,14 +169,17 @@ export function CompletenessTab() {
             </thead>
             <tbody>
               {data.employees.map((employee) => (
-                <tr key={employee.id} className="border-b border-border last:border-b-0">
+                <tr key={employee.id} className="border-b border-border/40 last:border-b-0 hover:bg-muted/20">
                   <th
                     scope="row"
-                    className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left font-normal"
+                    className="sticky left-0 z-10 border-r border-border/70 bg-card px-3 py-1.5 text-left font-normal"
                   >
                     <StaffLink
                       to={`/personnel/${employee.id}`}
-                      className={cn("hover:underline", !employee.is_active && "text-muted-foreground")}
+                      className={cn(
+                        "font-medium text-foreground hover:underline",
+                        !employee.is_active && "text-muted-foreground",
+                      )}
                     >
                       {employee.display_name}
                     </StaffLink>
@@ -181,13 +192,10 @@ export function CompletenessTab() {
                         return (
                           <td
                             key={`${month}-${category.code}`}
-                            className={cn("px-1 py-1 text-center", index === 0 && "border-l border-border")}
+                            className={cn("px-1 py-1 text-center", index === 0 && "border-l border-border/70")}
                           >
                             <span
-                              className={cn(
-                                "inline-flex size-6 items-center justify-center rounded border text-[11px] font-semibold",
-                                completenessCellClass(code),
-                              )}
+                              className={cn(CELL_CLASS, "size-6", completenessCellClass(code))}
                               title={`${categoryLabel(t, category.code, category.file_label)} ${formatMonth(month)}: ${cellLabel(code ?? "not_employed")}`}
                             >
                               {completenessCellSymbol(code)}

@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Eye, FileInput, Inbox, LoaderCircle, Trash2, Upload } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LoaderCircle, Trash2, Upload } from "lucide-react";
 
-import { Banner, TabLoader } from "@/components/ui-shell";
-import { toast } from "@/components/ui/toast";
+import { AdminTableCard } from "@/components/admin-page-patterns";
+import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import type { ColumnDef } from "@/components/data-table/types";
+import { Banner, EmptyCell, TabLoader } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { formatUiText, useLang } from "@/lib/i18n";
 
@@ -15,38 +18,23 @@ import {
 } from "./api";
 import { ArchiveDialog } from "./archive-dialog";
 import { PERSONNEL_FILE_ACCEPT, formatFileSize, validatePersonnelFile } from "./model";
-import { ArchiveName, FilePreviewDialog, ReasonDialog, errorMessage, sourceLabel } from "./personnel-ui";
+import {
+  FilePreviewDialog,
+  ReasonDialog,
+  RowIconAction,
+  errorMessage,
+  previewColumn,
+  sourceLabel,
+} from "./personnel-ui";
 
 /**
- * Scan intake of personnel documents: scans (`gmed-scan --personnel`) and
- * manual uploads (several files at once when a paper archive is digitised) wait here until they are filed into a
- * personnel file under a generated name, or discarded with a reason.
+ * Header action of the intake tab: uploads one or more files into the scan
+ * intake (several at once when a paper archive is digitised).
  */
-export function IntakeTab({ categories }: { categories: readonly PersonnelCategory[] }) {
+export function IntakeUploadButton({ onUploaded }: { onUploaded: () => void }) {
   const { t } = useLang();
-  const [items, setItems] = useState<PersonnelIntakeItem[]>([]);
-  const [employees, setEmployees] = useState<PersonnelEmployeeRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [previewItem, setPreviewItem] = useState<PersonnelIntakeItem | null>(null);
-  const [assignItem, setAssignItem] = useState<PersonnelIntakeItem | null>(null);
-  const [discardItem, setDiscardItem] = useState<PersonnelIntakeItem | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
-
-  const load = useCallback(() => {
-    setLoading(true);
-    setError("");
-    Promise.all([personnelApi.intake(), personnelApi.employees()])
-      .then(([queue, list]) => {
-        setItems(queue);
-        setEmployees(list.employees);
-      })
-      .catch((reason: unknown) => setError(errorMessage(reason, t.common_failed_load)))
-      .finally(() => setLoading(false));
-  }, [t.common_failed_load]);
-
-  useEffect(() => load(), [load]);
 
   const upload = async (files: readonly File[]) => {
     if (files.length === 0) return;
@@ -72,11 +60,72 @@ export function IntakeTab({ categories }: { categories: readonly PersonnelCatego
       toast.success(
         files.length === 1 ? t.personnel_intake_uploaded : formatUiText(t.personnel_intake_uploaded_many, { count: added }),
       );
-      load();
+      onUploaded();
     }
     setUploading(false);
     if (fileInput.current) fileInput.current.value = "";
   };
+
+  return (
+    <>
+      <Button
+        type="button"
+        className="h-9 gap-1.5 rounded-lg px-3.5"
+        disabled={uploading}
+        onClick={() => fileInput.current?.click()}
+      >
+        {uploading ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}
+        {t.personnel_intake_add}
+      </Button>
+      <input
+        ref={fileInput}
+        type="file"
+        className="sr-only"
+        multiple
+        accept={PERSONNEL_FILE_ACCEPT}
+        aria-label={t.personnel_intake_add}
+        onChange={(event) => void upload(Array.from(event.target.files ?? []))}
+      />
+    </>
+  );
+}
+
+/**
+ * Scan intake of personnel documents: scans (`gmed-scan --personnel`) and
+ * manual uploads wait here until they are filed into a personnel file under
+ * a generated name, or discarded with a reason.
+ */
+export function IntakeTab({
+  categories,
+  reloadKey,
+}: {
+  categories: readonly PersonnelCategory[];
+  /** Changes after an upload from the page header. */
+  reloadKey: number;
+}) {
+  const { t } = useLang();
+  const tr = t as unknown as Record<string, string>;
+  const [items, setItems] = useState<PersonnelIntakeItem[]>([]);
+  const [employees, setEmployees] = useState<PersonnelEmployeeRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [previewItem, setPreviewItem] = useState<PersonnelIntakeItem | null>(null);
+  const [assignItem, setAssignItem] = useState<PersonnelIntakeItem | null>(null);
+  const [discardItem, setDiscardItem] = useState<PersonnelIntakeItem | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError("");
+    Promise.all([personnelApi.intake(), personnelApi.employees()])
+      .then(([queue, list]) => {
+        setItems(queue);
+        setEmployees(list.employees);
+      })
+      .catch((reason: unknown) => setError(errorMessage(reason, t.common_failed_load)))
+      .finally(() => setLoading(false));
+  }, [t.common_failed_load]);
+
+  useEffect(() => load(), [load, reloadKey]);
 
   const assignMode = assignItem
     ? {
@@ -86,66 +135,122 @@ export function IntakeTab({ categories }: { categories: readonly PersonnelCatego
       }
     : null;
 
+  const columns = useMemo<ColumnDef<PersonnelIntakeItem>[]>(
+    () => [
+      previewColumn<PersonnelIntakeItem>({
+        label: t.personnel_preview,
+        getTitle: (item) => item.original_file_name,
+        onPreview: setPreviewItem,
+      }),
+      {
+        id: "file",
+        label: t.personnel_intake_original_name,
+        accessor: (item) => item.original_file_name,
+        filterType: "text",
+        sortable: true,
+        required: true,
+        width: 320,
+        render: (item) => (
+          <span className="truncate font-mono text-xs text-foreground" title={item.original_file_name}>
+            {item.original_file_name}
+          </span>
+        ),
+      },
+      {
+        id: "received_at",
+        label: t.personnel_received_at,
+        accessor: (item) => item.received_at,
+        filterType: "date",
+        sortable: true,
+        width: 160,
+        render: (item) => <span className="text-xs tabular-nums">{formatAppDateTime(item.received_at)}</span>,
+      },
+      {
+        id: "source",
+        label: t.personnel_source,
+        accessor: (item) => sourceLabel(t, item.source),
+        filterType: "enum",
+        filterOptions: ["upload", "scan"].map((source) => ({
+          value: sourceLabel(t, source),
+          label: sourceLabel(t, source),
+        })),
+        sortable: true,
+        width: 110,
+      },
+      {
+        id: "file_size",
+        label: t.personnel_file_size,
+        accessor: (item) => item.file_size,
+        filterType: "number",
+        sortable: true,
+        align: "right",
+        width: 90,
+        render: (item) => formatFileSize(item.file_size),
+      },
+      {
+        id: "uploaded_by",
+        label: t.personnel_uploaded_by,
+        accessor: (item) => item.uploaded_by_name ?? "",
+        filterType: "text",
+        sortable: true,
+        width: 180,
+        render: (item) => <span className="truncate text-xs">{item.uploaded_by_name || "—"}</span>,
+      },
+    ],
+    [t],
+  );
+
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="max-w-3xl text-sm text-muted-foreground">{t.personnel_intake_intro}</p>
-        <Button type="button" size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>
-          {uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}
-          {t.personnel_intake_add}
-        </Button>
-        <input
-          ref={fileInput}
-          type="file"
-          className="sr-only"
-          multiple
-          accept={PERSONNEL_FILE_ACCEPT}
-          aria-label={t.personnel_intake_add}
-          onChange={(event) => void upload(Array.from(event.target.files ?? []))}
-        />
-      </div>
       {error ? <Banner tone="error">{error}</Banner> : null}
-      {loading && items.length === 0 ? <TabLoader /> : null}
-      {!loading && items.length === 0 && !error ? (
-        <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-10 text-muted-foreground">
-          <Inbox className="size-5" />
-          <span className="text-sm">{t.personnel_intake_empty}</span>
-        </div>
-      ) : null}
-      {items.length > 0 ? (
-        <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-          {items.map((item) => (
-            <li key={item.id} className="flex flex-col gap-2 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between">
-              <div className="min-w-0 space-y-0.5">
-                <ArchiveName name={item.original_file_name} />
-                <p className="text-xs text-muted-foreground">
-                  {formatAppDateTime(item.received_at)} · {sourceLabel(t, item.source)} ·{" "}
-                  {formatFileSize(item.file_size)}
-                  {item.uploaded_by_name ? ` · ${item.uploaded_by_name}` : ""}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-1.5">
-                <Button type="button" size="sm" variant="outline" onClick={() => setPreviewItem(item)}>
-                  <Eye />
-                  {t.personnel_preview}
-                </Button>
-                <Button type="button" size="sm" onClick={() => setAssignItem(item)}>
-                  <FileInput />
+      <AdminTableCard title={t.personnel_tab_intake} count={loading && items.length === 0 ? undefined : items.length}>
+        <p className="px-1 text-xs text-muted-foreground">{t.personnel_intake_intro}</p>
+        {loading && items.length === 0 ? (
+          <TabLoader />
+        ) : (
+          <DataTableSurface
+            rows={items}
+            columns={columns}
+            rowId={(item) => item.id}
+            defaultDensity="comfortable"
+            defaultSort={[{ field: "received_at", dir: "desc" }]}
+            dictionary={tr}
+            storageKey="personnel-intake"
+            onRowClick={setPreviewItem}
+            rowAccent={() => "bg-amber-500"}
+            rowActions={(item) => (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-md px-2 text-xs"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setAssignItem(item);
+                  }}
+                >
                   {t.personnel_intake_assign}
                 </Button>
-                <Button type="button" size="sm" variant="destructive" onClick={() => setDiscardItem(item)}>
-                  <Trash2 />
-                  {t.personnel_intake_discard}
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+                <RowIconAction
+                  icon={Trash2}
+                  label={t.personnel_intake_discard}
+                  destructive
+                  onClick={() => setDiscardItem(item)}
+                />
+              </>
+            )}
+            rowActionsAlwaysVisible
+            rowActionsWidth={156}
+            mobilePrimaryColumnId="file"
+            mobileDetailColumnIds={["received_at", "source", "file_size", "uploaded_by"]}
+            emptyState={<EmptyCell>{t.personnel_intake_empty}</EmptyCell>}
+          />
+        )}
+      </AdminTableCard>
 
       <FilePreviewDialog
         open={Boolean(previewItem)}
-        title={t.personnel_preview}
         fileName={previewItem?.original_file_name ?? ""}
         mimeType={previewItem?.mime_type ?? ""}
         load={() => personnelApi.intakeFile(previewItem?.id ?? "")}

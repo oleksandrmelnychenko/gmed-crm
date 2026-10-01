@@ -410,7 +410,7 @@ describe("personnel file notifications", () => {
     );
     expect(localizedNotificationCopy(integrity, "de").body).toContain("Abweichungen im Archiv: 4");
     expect(localizedNotificationCopy(personnel("personnel_intake", "x", "y"), "ru").title).toBe(
-      "Личные дела: новый скан для разнесения",
+      "Личные дела: новый скан",
     );
   });
 });

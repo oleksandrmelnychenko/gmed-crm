@@ -3,6 +3,7 @@
  * completeness cells, filters, upload checks). No React, no API calls.
  */
 
+import { STATUS_TONE, type StatusTone } from "@/components/record-workspace/primitives/status-tones";
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 
 /** Where a new document goes: a fresh document or a correction of `supersedesId`. */
@@ -146,6 +147,36 @@ export function groupByCategory<T extends VersionedDocument>(
     .map(([category, entries]) => ({ category, groups: entries }));
 }
 
+/** One line of a documents table: the newest version, or an older one under it. */
+export type DocumentTableRow<T extends VersionedDocument> = {
+  document: T;
+  isCurrent: boolean;
+  /** Older versions shown indented under their newest version. */
+  isChild: boolean;
+  historyCount: number;
+};
+
+/**
+ * Table rows of a documents list: one row per document (its newest version)
+ * and, per root id, its older versions newest first for `expandRow`.
+ */
+export function documentTableRows<T extends VersionedDocument>(
+  documents: readonly T[],
+): { rows: DocumentTableRow<T>[]; history: Map<string, DocumentTableRow<T>[]> } {
+  const rows: DocumentTableRow<T>[] = [];
+  const history = new Map<string, DocumentTableRow<T>[]>();
+  for (const group of groupDocumentVersions(documents)) {
+    rows.push({ document: group.current, isCurrent: true, isChild: false, historyCount: group.history.length });
+    if (group.history.length > 0) {
+      history.set(
+        group.current.id,
+        group.history.map((document) => ({ document, isCurrent: false, isChild: true, historyCount: 0 })),
+      );
+    }
+  }
+  return { rows, history };
+}
+
 /** "05.2026" for a monthly document, "DD.MM.YYYY" otherwise. */
 export function formatDocumentPeriod(
   document: Pick<VersionedDocument, "period" | "document_date">,
@@ -244,8 +275,8 @@ export function canPreviewInline(mimeType: string): boolean {
 export function formatFileSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "";
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} MB`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,17 +406,22 @@ export const COMPLETENESS_CODES: readonly CompletenessCode[] = [
   "not_employed",
 ];
 
-const COMPLETENESS_CELL_CLASS: Record<CompletenessCode, string> = {
-  present: "border-emerald-200 bg-emerald-50 text-emerald-700",
-  late: "border-amber-200 bg-amber-50 text-amber-800",
-  missing: "border-rose-200 bg-rose-50 text-rose-700",
-  open: "border-sky-200 bg-sky-50 text-sky-700",
-  not_employed: "border-border/60 bg-muted/30 text-muted-foreground/60",
+const COMPLETENESS_CELL_TONE: Record<CompletenessCode, StatusTone> = {
+  present: "success",
+  late: "warning",
+  missing: "error",
+  open: "info",
+  not_employed: "neutral",
 };
 
-/** Cell colour of a completeness status; unknown codes look like "not employed". */
+/** Shared status tone of a completeness cell; unknown codes look like "not employed". */
+export function completenessCellTone(code: string | null | undefined): StatusTone {
+  return COMPLETENESS_CELL_TONE[(code ?? "") as CompletenessCode] ?? "neutral";
+}
+
+/** Cell colour of a completeness status (the app's `STATUS_TONE` classes). */
 export function completenessCellClass(code: string | null | undefined): string {
-  return COMPLETENESS_CELL_CLASS[(code ?? "") as CompletenessCode] ?? COMPLETENESS_CELL_CLASS.not_employed;
+  return STATUS_TONE[completenessCellTone(code)];
 }
 
 /** Short cell symbol, readable without colour. */
