@@ -12464,8 +12464,10 @@ pub(crate) async fn persist_document_file(
 
     // A collected lead document advances compliance 'pending' -> 'documents_sent'
     // (see docs/lead-status-strategy-ua.md). Non-fatal; signing the DSGVO form
-    // later advances it to 'signed'.
+    // later advances it to 'signed'. Medical files of the client are not
+    // compliance documents and leave the status alone.
     if let Some(lead_id) = input.lead_id
+        && !input.is_medical
         && let Err(error) = sqlx::query(
             r#"UPDATE leads
                SET compliance_status = 'documents_sent', updated_at = now()

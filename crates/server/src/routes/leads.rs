@@ -249,6 +249,8 @@ struct UpdateLeadRequest {
     trusted_contacts: Option<Vec<TrustedContactRequest>>,
     requested_specialties: Option<serde_json::Value>,
     wizard_state: Option<serde_json::Value>,
+    /// Whether the client has medical documents: `yes`, `no` or `none`.
+    has_medical_records: Option<String>,
     // Empty string explicitly clears the link; omission leaves it unchanged.
     referrer_patient_id: Option<String>,
 }
@@ -3075,6 +3077,7 @@ fn lead_update_medical_fields(body: &UpdateLeadRequest) -> Vec<&'static str> {
         ("primary_concern_text", body.primary_concern_text.is_some()),
         ("additional_concerns", body.additional_concerns.is_some()),
         ("selected_program", body.selected_program.is_some()),
+        ("has_medical_records", body.has_medical_records.is_some()),
         ("has_insurance", body.has_insurance.is_some()),
         (
             "insurance_covers_germany",
@@ -3340,6 +3343,15 @@ async fn update_lead(
             "Invalid compliance_status",
         );
     }
+    // The same values the public questionnaire stores (CHECK on the column).
+    if let Some(value) = body.has_medical_records.as_deref()
+        && !matches!(value, "yes" | "no" | "none")
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid has_medical_records",
+        );
+    }
 
     let legal_sex = body.legal_sex.as_deref().map(str::to_lowercase);
     if let Some(ref value) = legal_sex
@@ -3522,6 +3534,7 @@ async fn update_lead(
         && body.additional_concerns.is_none()
         && body.selected_program.is_none()
         && body.services.is_none()
+        && body.has_medical_records.is_none()
         && body.has_insurance.is_none()
         && body.insurance_covers_germany.is_none()
         && body.insurance_provider.is_none()
@@ -3715,7 +3728,8 @@ async fn update_lead(
                referrer_patient_id = CASE
                    WHEN $42 THEN $43
                    ELSE referrer_patient_id
-               END
+               END,
+               has_medical_records = COALESCE($44, has_medical_records)
            WHERE id = $1 AND qualification_status <> 'deleted'"#,
     )
     .bind(lead_id)
@@ -3765,6 +3779,7 @@ async fn update_lead(
     .bind(trusted_contacts.as_ref().map(Value::to_string))
     .bind(referrer_patient_id_supplied)
     .bind(referrer_patient_id)
+    .bind(body.has_medical_records.as_deref())
     .execute(&mut *tx)
     .await;
     match update_result {

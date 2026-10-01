@@ -3352,9 +3352,9 @@ export function LeadWizard({
   }, [leadId, patientReview.refresh]);
 
   // Files added from the patient card or the documents page while the wizard
-  // was open show up when the documents or commercial step is opened again.
+  // was open show up when the medical, documents or commercial step is opened again.
   useEffect(() => {
-    if (step !== "documents" && step !== "commercial") return;
+    if (step !== "medical" && step !== "documents" && step !== "commercial") return;
     void refreshDocumentsState().catch(() => {});
   }, [step, refreshDocumentsState]);
 
@@ -3692,11 +3692,24 @@ export function LeadWizard({
     });
     return grouped;
   }, [documents]);
+  // Medical files of the client: uploaded and listed in the medical step.
+  const medicalDocuments = useMemo(
+    () => documents.filter((item) => (
+      !item.file_deleted_at
+      && item.has_stored_file !== false
+      && item.is_medical
+      && !item.generated_template_id
+      && !wizardDocumentKind(item)
+    )),
+    [documents],
+  );
+  const hasMedicalRecords = lead?.has_medical_records === "yes" || medicalDocuments.length > 0;
   const supplementaryDocuments = useMemo(
     () => documents.filter((item) => (
       !item.file_deleted_at
       && item.has_stored_file !== false
       && !wizardDocumentKind(item)
+      && !(item.is_medical && !item.generated_template_id)
       && !["framework_contract", "single_order", "order_cost_estimate", "cost_estimate"].includes(item.generated_template_id ?? "")
     )),
     [documents],
@@ -4700,23 +4713,50 @@ export function LeadWizard({
     }
   }
 
-  async function upload(kind: "identity", file: File) {
-    if (!leadId) return;
-    if (file.size > MAX_DOCUMENT_FILE_SIZE) {
+  async function upload(kind: "identity" | "medical", files: File[]) {
+    if (!leadId || files.length === 0) return;
+    if (files.some((file) => file.size > MAX_DOCUMENT_FILE_SIZE)) {
       setError(tx("Размер файла не должен превышать 25 МБ", "Die Datei darf höchstens 25 MB groß sein"));
       return;
     }
     setBusy("upload-" + kind);
     setError("");
     try {
-      const form = new FormData();
-      form.set("lead_id", leadId);
-      form.set("file", file);
-      form.set("auto_name", "Identity document");
-      form.set("art", "identity");
-      form.set("category", "identity");
-      await uploadDocument(form);
+      for (const file of files) {
+        const form = new FormData();
+        form.set("lead_id", leadId);
+        form.set("file", file);
+        if (kind === "identity") {
+          form.set("auto_name", "Identity document");
+          form.set("art", "identity");
+          form.set("category", "identity");
+        } else {
+          form.set("auto_name", file.name);
+          form.set("art", "medical_report");
+          form.set("category", "medical_report");
+          form.set("is_medical", "true");
+        }
+        await uploadDocument(form);
+      }
+      // Uploaded medical files answer the "documents exist" question.
+      if (kind === "medical" && lead?.has_medical_records !== "yes") {
+        await updateLeadWizard(leadId, { has_medical_records: "yes" });
+      }
       await refreshDocumentsState();
+    } catch (nextError) {
+      showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setHasMedicalRecords(value: boolean) {
+    if (!leadId) return;
+    setBusy("medical-records");
+    setError("");
+    try {
+      await updateLeadWizard(leadId, { has_medical_records: value ? "yes" : "no" });
+      await refreshLeadState();
     } catch (nextError) {
       showWizardError(nextError);
     } finally {
@@ -6718,6 +6758,72 @@ ${serviceCommentLines.join("\n")}`
                   onCavesChange={(value) => saveClinicalDraftChange("caves", { ...draft, caves: value })}
                 />}
               </Suspense>
+              {leadId && !clinicalAccessDenied ? (
+                <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
+                  title={tx("Медицинские документы", "Medizinische Unterlagen")}
+                  accessory={hasMedicalRecords ? (
+                    <span className="inline-flex">
+                      <input
+                        id="lead-file-medical"
+                        type="file"
+                        multiple
+                        className="peer sr-only"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        disabled={isBusy}
+                        onChange={(event) => {
+                          const files = Array.from(event.currentTarget.files ?? []);
+                          event.currentTarget.value = "";
+                          void upload("medical", files);
+                        }}
+                      />
+                      <label
+                        htmlFor="lead-file-medical"
+                        className={cn(
+                          buttonVariants({ variant: "default", size: "sm" }),
+                          "h-8 rounded-lg peer-focus-visible:ring-2 peer-focus-visible:ring-ring",
+                          isBusy && "pointer-events-none opacity-50",
+                        )}
+                      >
+                        {busy === "upload-medical" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Upload aria-hidden="true" className="size-3.5" />}
+                        {busy === "upload-medical" ? tx("Загрузка…", "Wird hochgeladen…") : tx("Загрузить файлы", "Dateien hochladen")}
+                      </label>
+                    </span>
+                  ) : undefined}
+                >
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      name="has_medical_records"
+                      className="size-4 rounded border-border accent-orange-500"
+                      checked={hasMedicalRecords}
+                      // Uploaded files are the answer; it can change once they are removed.
+                      disabled={isBusy || medicalDocuments.length > 0}
+                      onChange={(event) => void setHasMedicalRecords(event.target.checked)}
+                    />
+                    {tx("У клиента есть медицинские документы", "Der Kunde hat medizinische Unterlagen")}
+                  </label>
+                  {hasMedicalRecords ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        {tx("PDF, JPG или PNG · до 25 МБ · можно выбрать несколько файлов", "PDF, JPG oder PNG · bis 25 MB · mehrere Dateien möglich")}
+                      </p>
+                      <WizardDocumentRows
+                        documents={medicalDocuments}
+                        emptyLabel={tx("Файлы не загружены", "Keine Dateien hochgeladen")}
+                        lang={lang}
+                        busy={busy}
+                        disabled={isBusy}
+                        tx={tx}
+                        onOpen={(document) => void openOrDownloadDocument(document)}
+                        onDownload={(document) => void downloadDocument(document)}
+                        onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                        onChanged={() => { void refreshDocumentsState(); }}
+                      />
+                    </>
+                  ) : null}
+                </Section>
+              ) : null}
             </section>
           ) : null}
 
@@ -7069,7 +7175,7 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         if (file) {
-                          void upload("identity", file);
+                          void upload("identity", [file]);
                           event.currentTarget.value = "";
                         }
                       }}

@@ -2824,6 +2824,40 @@ async fn deleted_lead_is_read_only_and_leaves_the_active_list() {
 }
 
 #[tokio::test]
+async fn staff_can_record_whether_the_client_has_medical_documents() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id = insert_status_lead(&app, &tag, "in_progress").await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "has_medical_records": "yes" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["has_medical_records"], "yes", "{detail}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "has_medical_records": "maybe" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+}
+
+#[tokio::test]
 async fn retention_sweep_counts_from_the_last_status_change() {
     let Some(app) = test_app().await else {
         return;
