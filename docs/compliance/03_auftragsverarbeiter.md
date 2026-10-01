@@ -7,7 +7,7 @@ Weitergabe nicht privilegiert.
 | Dienstleister | Rolle | Welche Daten | Sitz | AVV | Bemerkung |
 |---|---|---|---|---|---|
 | Hetzner Online GmbH | Auftragsverarbeiter (Hosting, Object Storage) | gesamter Bestand; Backups nur verschlüsselt | DE | [ ] | AVV im Kundenkonto abschließen; zertifiziert nach ISO 27001 |
-| Skribble AG | Auftragsverarbeiter (elektronische Signatur) | Name, E-Mail der Unterzeichner, Vertrags-PDF einschließlich Einwilligungen | CH | [ ] | Angemessenheitsbeschluss; zusätzlich § 203 StGB-Verpflichtung prüfen |
+| Skribble AG | Auftragsverarbeiter (elektronische Signatur) | Name, E-Mail der Unterzeichner, Vertrags-PDF einschließlich Einwilligungen (auch als Dokumentenpaket), Informationsanlagen | CH | [ ] | Angemessenheitsbeschluss; zusätzlich § 203 StGB-Verpflichtung prüfen; Datenminimierung: neutraler Betreff, Löschung nach Archivierung (Einstellung `signature_provider_deletion_enabled`, aus bis der Löschendpunkt auf dem Demo-Konto geprüft ist, empfohlen 30 Tage) |
 | DATEV eG | Auftragsverarbeiter bzw. Empfänger über den Steuerberater | Buchungsdaten, Debitoren | DE | [ ] | derzeit nur lesender Zugriff; Tokens verschlüsselt gespeichert |
 | Steuerberater | eigener Verantwortlicher (Berufsgeheimnisträger) | Rechnungsdaten | DE | entfällt | Rechtsgrundlage Art. 6 Abs. 1 lit. c |
 | Let's Encrypt (ISRG) | kein Personenbezug | Domain, Admin-E-Mail | US | entfällt | nur Zertifikatsausstellung |
