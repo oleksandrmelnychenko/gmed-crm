@@ -16,77 +16,18 @@ use uuid::Uuid;
 use super::{InvoicePdfLineItem, credit_notes, zugferd};
 use crate::money::CommercialRounding;
 
-/// Select list naming the recipient candidates. Needs `invoices i`,
-/// `patients p` and [`RECIPIENT_JOINS`].
+/// Select list naming the recipient: the frozen snapshot of a released
+/// invoice, else resolved live by `invoice_recipient_resolve` (the database
+/// function the release snapshot is taken with). Needs `invoices i`.
 pub(super) const RECIPIENT_COLUMNS: &str = r#"
-    p.title AS rcpt_patient_title, p.first_name AS rcpt_patient_first_name,
-    p.last_name AS rcpt_patient_last_name, p.email AS rcpt_patient_email,
-    p.address_street AS rcpt_patient_street, p.address_zip AS rcpt_patient_zip,
-    p.address_city AS rcpt_patient_city, p.address_country AS rcpt_patient_country,
-    p.residence_country AS rcpt_patient_residence_country,
-    i.payer_patient_relation_id AS rcpt_payer_relation_id,
-    i.payer_contact_name AS rcpt_payer_name, i.payer_contact_email AS rcpt_payer_email,
-    i.payer_address_street AS rcpt_payer_street, i.payer_address_zip AS rcpt_payer_zip,
-    i.payer_address_city AS rcpt_payer_city, i.payer_address_country AS rcpt_payer_country,
-    rcpt_relation.related_name AS rcpt_relation_name,
-    rcpt_relation_patient.id AS rcpt_relation_patient_id,
-    rcpt_relation_patient.title AS rcpt_relation_patient_title,
-    rcpt_relation_patient.first_name AS rcpt_relation_patient_first_name,
-    rcpt_relation_patient.last_name AS rcpt_relation_patient_last_name,
-    rcpt_relation_patient.email AS rcpt_relation_patient_email,
-    rcpt_relation_patient.address_street AS rcpt_relation_patient_street,
-    rcpt_relation_patient.address_zip AS rcpt_relation_patient_zip,
-    rcpt_relation_patient.address_city AS rcpt_relation_patient_city,
-    rcpt_relation_patient.address_country AS rcpt_relation_patient_country,
-    rcpt_relation_patient.residence_country AS rcpt_relation_patient_residence_country
+    COALESCE(i.recipient_snapshot, invoice_recipient_resolve(
+        i.patient_id, i.payer_patient_id, i.payer_patient_relation_id,
+        i.payer_contact_name, i.payer_contact_email,
+        i.payer_address_street, i.payer_address_zip, i.payer_address_city,
+        i.payer_address_country
+    )) AS rcpt_recipient,
+    i.recipient_snapshot IS NOT NULL AS rcpt_frozen
 "#;
-
-pub(super) const RECIPIENT_JOINS: &str = r#"
-    LEFT JOIN patient_relations rcpt_relation ON rcpt_relation.id = i.payer_patient_relation_id
-    LEFT JOIN patients rcpt_relation_patient
-           ON rcpt_relation_patient.id = rcpt_relation.related_patient_id
-"#;
-
-/// A person as stored on a patient record.
-#[derive(Clone, Debug, Default)]
-pub(super) struct RecipientParty {
-    pub title: Option<String>,
-    pub first_name: Option<String>,
-    pub last_name: Option<String>,
-    pub email: Option<String>,
-    pub street: Option<String>,
-    pub zip: Option<String>,
-    pub city: Option<String>,
-    pub country: Option<String>,
-    pub residence_country: Option<String>,
-}
-
-impl RecipientParty {
-    fn full_name(&self) -> Option<String> {
-        let name = [&self.title, &self.first_name, &self.last_name]
-            .into_iter()
-            .filter_map(|part| clean(part.as_deref()))
-            .collect::<Vec<_>>()
-            .join(" ");
-        (!name.is_empty()).then_some(name)
-    }
-}
-
-/// Everything the recipient is chosen from.
-#[derive(Clone, Debug, Default)]
-pub(super) struct RecipientSource {
-    pub patient: RecipientParty,
-    pub payer_relation_id: Option<Uuid>,
-    pub payer_contact_name: Option<String>,
-    pub payer_contact_email: Option<String>,
-    pub payer_street: Option<String>,
-    pub payer_zip: Option<String>,
-    pub payer_city: Option<String>,
-    pub payer_country: Option<String>,
-    pub relation_name: Option<String>,
-    /// The relation's own patient record, when the relative is a patient.
-    pub relation_patient: Option<RecipientParty>,
-}
 
 /// The party the invoice is addressed to.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -102,6 +43,13 @@ pub(super) struct InvoiceRecipient {
     pub email: Option<String>,
     /// The payer set on the invoice, not the patient.
     pub is_payer: bool,
+    /// `patient`, `relation`, `payer_patient` or `contact`.
+    pub kind: String,
+    /// Read from the snapshot taken at release.
+    pub frozen: bool,
+    /// The Leistungsempfänger (contracting party) when the invoice is
+    /// addressed to someone else, e.g. a Kostenübernehmer.
+    pub service_recipient_name: Option<String>,
 }
 
 fn clean(value: Option<&str>) -> Option<String> {
@@ -115,20 +63,49 @@ fn country_code(country: Option<&str>, residence_country: Option<&str>) -> Optio
     crate::routes::patients::patient_label_country_code(country, residence_country)
 }
 
+/// Which postal address parts a recipient lacks for § 14 Abs. 4 Nr. 1 UStG
+/// and the e-invoice buyer address (BG-8 with country code BT-55).
+pub(super) fn missing_address_parts(recipient: &InvoiceRecipient) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if recipient.name.trim().is_empty() {
+        missing.push("name");
+    }
+    if recipient.street.is_none() {
+        missing.push("street");
+    }
+    if recipient.zip.is_none() {
+        missing.push("zip");
+    }
+    if recipient.city.is_none() {
+        missing.push("city");
+    }
+    if recipient.country_code.is_none() {
+        missing.push("country");
+    }
+    missing
+}
+
 impl InvoiceRecipient {
-    fn from_party(party: &RecipientParty, name: String, is_payer: bool) -> Self {
+    /// Reads a recipient as built by `invoice_recipient_resolve` (and stored
+    /// in `recipient_snapshot`).
+    pub fn from_json(value: &Value, frozen: bool) -> Self {
+        let text = |key: &str| clean(value.get(key).and_then(Value::as_str));
+        let country = text("country");
         Self {
-            name,
-            street: clean(party.street.as_deref()),
-            zip: clean(party.zip.as_deref()),
-            city: clean(party.city.as_deref()),
-            country: clean(party.country.as_deref()),
-            country_code: country_code(
-                party.country.as_deref(),
-                party.residence_country.as_deref(),
-            ),
-            email: clean(party.email.as_deref()),
-            is_payer,
+            name: text("name").unwrap_or_default(),
+            street: text("street"),
+            zip: text("zip"),
+            city: text("city"),
+            country_code: country_code(country.as_deref(), text("residence_country").as_deref()),
+            country,
+            email: text("email"),
+            is_payer: value
+                .get("is_payer")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            kind: text("kind").unwrap_or_else(|| "patient".to_string()),
+            frozen,
+            service_recipient_name: text("service_recipient_name"),
         }
     }
 
@@ -157,6 +134,11 @@ impl InvoiceRecipient {
         self.street.is_some() && (self.zip.is_some() || self.city.is_some())
     }
 
+    /// Full postal address including a country an e-invoice can encode.
+    pub fn has_complete_address(&self) -> bool {
+        missing_address_parts(self).is_empty()
+    }
+
     pub fn to_json(&self) -> Value {
         json!({
             "name": self.name,
@@ -164,119 +146,96 @@ impl InvoiceRecipient {
             "zip": self.zip,
             "city": self.city,
             "country": self.country,
+            "email": self.email,
             "is_payer": self.is_payer,
+            "kind": self.kind,
+            "frozen": self.frozen,
+            "service_recipient_name": self.service_recipient_name,
             "has_postal_address": self.has_postal_address(),
+            "has_complete_address": self.has_complete_address(),
+            "missing_address_parts": missing_address_parts(self),
         })
     }
 }
 
-/// The payer when one is set, the patient otherwise. A payer address entered
-/// on the invoice wins; a relative who is a patient record brings that
-/// record's address. A payer is never given the patient's address.
-pub(super) fn resolve_invoice_recipient(source: &RecipientSource) -> InvoiceRecipient {
-    let contact_name = clean(source.payer_contact_name.as_deref());
-    let relation_patient_name = source
-        .relation_patient
-        .as_ref()
-        .and_then(RecipientParty::full_name);
-    let relation_name = clean(source.relation_name.as_deref());
-    let has_payer = contact_name.is_some() || source.payer_relation_id.is_some();
-    if !has_payer {
-        return InvoiceRecipient::from_party(
-            &source.patient,
-            source.patient.full_name().unwrap_or_default(),
-            false,
-        );
-    }
-
-    let name = contact_name
-        .or(relation_patient_name)
-        .or(relation_name)
-        .or_else(|| source.patient.full_name())
-        .unwrap_or_default();
-    let payer_address = RecipientParty {
-        email: source.payer_contact_email.clone(),
-        street: source.payer_street.clone(),
-        zip: source.payer_zip.clone(),
-        city: source.payer_city.clone(),
-        country: source.payer_country.clone(),
-        ..RecipientParty::default()
-    };
-    let has_own_address = [
-        &payer_address.street,
-        &payer_address.zip,
-        &payer_address.city,
-        &payer_address.country,
-    ]
-    .into_iter()
-    .any(|value| clean(value.as_deref()).is_some());
-    let mut recipient = match (&source.relation_patient, has_own_address) {
-        (Some(relative), false) => InvoiceRecipient::from_party(relative, name, true),
-        _ => InvoiceRecipient::from_party(&payer_address, name, true),
-    };
-    if let Some(email) = clean(source.payer_contact_email.as_deref()) {
-        recipient.email = Some(email);
-    } else if recipient.email.is_none() {
-        recipient.email = source
-            .relation_patient
-            .as_ref()
-            .and_then(|relative| clean(relative.email.as_deref()));
-    }
-    recipient
-}
-
-fn optional_text(row: &PgRow, column: &str) -> Option<String> {
-    row.try_get::<Option<String>, _>(column).unwrap_or_default()
-}
-
-/// Reads the recipient candidates selected with [`RECIPIENT_COLUMNS`].
-pub(super) fn recipient_source_from_row(row: &PgRow) -> RecipientSource {
-    let party = |prefix: &str| RecipientParty {
-        title: optional_text(row, &format!("{prefix}_title")),
-        first_name: optional_text(row, &format!("{prefix}_first_name")),
-        last_name: optional_text(row, &format!("{prefix}_last_name")),
-        email: optional_text(row, &format!("{prefix}_email")),
-        street: optional_text(row, &format!("{prefix}_street")),
-        zip: optional_text(row, &format!("{prefix}_zip")),
-        city: optional_text(row, &format!("{prefix}_city")),
-        country: optional_text(row, &format!("{prefix}_country")),
-        residence_country: optional_text(row, &format!("{prefix}_residence_country")),
-    };
-    let relation_patient = row
-        .try_get::<Option<Uuid>, _>("rcpt_relation_patient_id")
+/// Reads the recipient selected with [`RECIPIENT_COLUMNS`].
+pub(super) fn recipient_from_row(row: &PgRow) -> InvoiceRecipient {
+    let value = row
+        .try_get::<Option<Value>, _>("rcpt_recipient")
         .unwrap_or_default()
-        .map(|_| party("rcpt_relation_patient"));
-    RecipientSource {
-        patient: party("rcpt_patient"),
-        payer_relation_id: row
-            .try_get::<Option<Uuid>, _>("rcpt_payer_relation_id")
-            .unwrap_or_default(),
-        payer_contact_name: optional_text(row, "rcpt_payer_name"),
-        payer_contact_email: optional_text(row, "rcpt_payer_email"),
-        payer_street: optional_text(row, "rcpt_payer_street"),
-        payer_zip: optional_text(row, "rcpt_payer_zip"),
-        payer_city: optional_text(row, "rcpt_payer_city"),
-        payer_country: optional_text(row, "rcpt_payer_country"),
-        relation_name: optional_text(row, "rcpt_relation_name"),
-        relation_patient,
-    }
+        .unwrap_or(Value::Null);
+    let frozen = row.try_get::<bool, _>("rcpt_frozen").unwrap_or(false);
+    InvoiceRecipient::from_json(&value, frozen)
 }
 
-/// Loads and resolves the recipient of one invoice.
+/// The live recipient of an invoice as JSON (before release).
+pub(super) async fn resolve_live_recipient(
+    conn: &mut PgConnection,
+    invoice_id: Uuid,
+) -> Result<Value, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<Value>>(
+        r#"SELECT invoice_recipient_resolve(
+               i.patient_id, i.payer_patient_id, i.payer_patient_relation_id,
+               i.payer_contact_name, i.payer_contact_email,
+               i.payer_address_street, i.payer_address_zip, i.payer_address_city,
+               i.payer_address_country)
+           FROM invoices i WHERE i.id = $1"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(conn)
+    .await
+    .map(|value| value.flatten().unwrap_or(Value::Null))
+}
+
+/// Loads the recipient of one invoice: the frozen one of a released invoice,
+/// the live one of a draft (naming the contracting party when the invoice goes
+/// to someone else, as the release will).
 pub(super) async fn load_invoice_recipient(
     conn: &mut PgConnection,
     invoice_id: Uuid,
 ) -> Result<Option<InvoiceRecipient>, sqlx::Error> {
     let sql = format!(
-        "SELECT {RECIPIENT_COLUMNS} FROM invoices i JOIN patients p ON p.id = i.patient_id {RECIPIENT_JOINS} WHERE i.id = $1"
+        "SELECT {RECIPIENT_COLUMNS}, i.patient_id, i.order_id FROM invoices i WHERE i.id = $1"
     );
-    let row = sqlx::query(&sql)
+    let Some(row) = sqlx::query(&sql)
         .bind(invoice_id)
-        .fetch_optional(conn)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
+        return Ok(None);
+    };
+    let mut recipient = recipient_from_row(&row);
+    if !recipient.frozen && recipient.is_payer {
+        recipient.service_recipient_name = live_service_recipient_name(
+            conn,
+            &row.try_get::<Option<Value>, _>("rcpt_recipient")
+                .unwrap_or_default()
+                .unwrap_or(Value::Null),
+            row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+            row.try_get::<Option<Uuid>, _>("order_id")
+                .unwrap_or_default(),
+        )
         .await?;
-    Ok(row
-        .as_ref()
-        .map(|row| resolve_invoice_recipient(&recipient_source_from_row(row))))
+    }
+    Ok(Some(recipient))
+}
+
+/// The contracting party's name when it is not the invoice recipient.
+pub(super) async fn live_service_recipient_name(
+    conn: &mut PgConnection,
+    recipient: &Value,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+) -> Result<Option<String>, sqlx::Error> {
+    let party = crate::services::contracting_party::resolve(
+        conn,
+        patient_id,
+        order_id,
+        None,
+        crate::app_time::today(),
+    )
+    .await?;
+    Ok((!party.is_recipient(recipient)).then(|| party.debtor_name()))
 }
 
 /// First and last day the invoiced services were rendered (Leistungszeitraum).
@@ -583,93 +542,42 @@ pub(super) fn zero_rate_exemption_note(lines: &[InvoicePdfLineItem]) -> Option<&
 mod tests {
     use super::*;
 
-    fn party(first: &str, last: &str, street: Option<&str>) -> RecipientParty {
-        RecipientParty {
-            title: None,
-            first_name: Some(first.to_string()),
-            last_name: Some(last.to_string()),
-            email: Some(format!("{first}@example.test").to_lowercase()),
-            street: street.map(ToOwned::to_owned),
-            zip: street.map(|_| "80331".to_string()),
-            city: street.map(|_| "München".to_string()),
-            country: street.map(|_| "Deutschland".to_string()),
-            residence_country: None,
-        }
-    }
-
     #[test]
-    fn patient_is_the_recipient_without_a_payer() {
-        let source = RecipientSource {
-            patient: RecipientParty {
-                title: Some("Dr.".to_string()),
-                ..party("Anna", "Muster", Some("Hauptstraße 1"))
-            },
-            ..RecipientSource::default()
-        };
-        let recipient = resolve_invoice_recipient(&source);
-        assert_eq!(recipient.name, "Dr. Anna Muster");
-        assert!(!recipient.is_payer);
-        assert_eq!(
-            recipient.address_lines(),
-            vec!["Hauptstraße 1", "80331 München", "Deutschland"]
+    fn recipient_reads_the_resolved_json_and_names_missing_address_parts() {
+        let recipient = InvoiceRecipient::from_json(
+            &json!({
+                "kind": "relation",
+                "is_payer": true,
+                "name": "Max Muster",
+                "street": "Nebenweg 2",
+                "zip": "80331",
+                "city": "München",
+                "country": "Deutschland",
+                "email": "max@example.test",
+            }),
+            true,
         );
+        assert!(recipient.is_payer && recipient.frozen);
         assert_eq!(recipient.country_code.as_deref(), Some("DE"));
-        assert!(recipient.has_postal_address());
-    }
-
-    #[test]
-    fn contact_payer_never_inherits_the_patient_address() {
-        let source = RecipientSource {
-            patient: party("Anna", "Muster", Some("Hauptstraße 1")),
-            payer_contact_name: Some("Ivan Payer".to_string()),
-            ..RecipientSource::default()
-        };
-        let recipient = resolve_invoice_recipient(&source);
-        assert_eq!(recipient.name, "Ivan Payer");
-        assert!(recipient.is_payer);
-        assert!(recipient.address_lines().is_empty());
-        assert_eq!(recipient.country_code, None);
-        assert!(!recipient.has_postal_address());
-
-        let with_address = RecipientSource {
-            payer_street: Some("Kyivska 5".to_string()),
-            payer_zip: Some("01001".to_string()),
-            payer_city: Some("Kyiv".to_string()),
-            payer_country: Some("Ukraine".to_string()),
-            payer_contact_email: Some("ivan@example.test".to_string()),
-            ..source
-        };
-        let recipient = resolve_invoice_recipient(&with_address);
         assert_eq!(
             recipient.address_lines(),
-            vec!["Kyivska 5", "01001 Kyiv", "Ukraine"]
+            vec!["Nebenweg 2", "80331 München", "Deutschland"]
         );
-        assert_eq!(recipient.country_code.as_deref(), Some("UA"));
-        assert_eq!(recipient.email.as_deref(), Some("ivan@example.test"));
-    }
+        assert!(recipient.has_complete_address());
 
-    #[test]
-    fn relative_patient_payer_brings_their_own_record_address() {
-        let source = RecipientSource {
-            patient: party("Anna", "Muster", Some("Hauptstraße 1")),
-            payer_relation_id: Some(Uuid::new_v4()),
-            relation_name: Some("Father".to_string()),
-            relation_patient: Some(party("Otto", "Muster", Some("Nebenweg 2"))),
-            ..RecipientSource::default()
-        };
-        let recipient = resolve_invoice_recipient(&source);
-        assert_eq!(recipient.name, "Otto Muster");
-        assert_eq!(recipient.street.as_deref(), Some("Nebenweg 2"));
-        assert_eq!(recipient.email.as_deref(), Some("otto@example.test"));
-
-        // A relative without a patient record is named by the relation.
-        let free_relation = RecipientSource {
-            relation_patient: None,
-            ..source
-        };
-        let recipient = resolve_invoice_recipient(&free_relation);
-        assert_eq!(recipient.name, "Father");
-        assert!(recipient.address_lines().is_empty());
+        let contact = InvoiceRecipient::from_json(
+            &json!({ "kind": "contact", "is_payer": true, "name": "Ivan Payer", "street": " " }),
+            false,
+        );
+        assert_eq!(
+            missing_address_parts(&contact),
+            vec!["street", "zip", "city", "country"]
+        );
+        assert!(!contact.has_postal_address());
+        assert_eq!(
+            InvoiceRecipient::from_json(&Value::Null, false).kind,
+            "patient"
+        );
     }
 
     fn line(rate: &str, passthrough: bool, net: &str, vat: &str) -> InvoicePdfLineItem {

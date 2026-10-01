@@ -109,11 +109,24 @@ pub(crate) async fn apply_available_advances_tx(
              AND advance.invoice_type = 'advance'
              AND advance.status NOT IN ('draft', 'cancelled')
              AND advance.paid_amount > 0
+             -- § 14 Abs. 5 Satz 2 UStG: only advances billed to the same
+             -- recipient, unless billing confirmed the difference at release.
+             AND EXISTS (
+                 SELECT 1 FROM invoices target
+                 WHERE target.id = $3
+                   AND (
+                       COALESCE(target.recipient_snapshot -> 'confirmations'
+                                ? 'advance_recipient_mismatch', false)
+                       OR invoice_recipient_identity(advance.recipient_snapshot)
+                          IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+                   )
+             )
            ORDER BY advance.issued_at, advance.id
            FOR UPDATE OF advance"#,
     )
     .bind(order_id)
     .bind(patient_id)
+    .bind(target_invoice_id)
     .fetch_all(&mut **transaction)
     .await?;
     let available = advances

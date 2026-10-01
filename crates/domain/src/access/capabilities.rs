@@ -75,6 +75,9 @@ capabilities! {
     InvoicesCreate => "invoices.create",
     InvoicesFinance => "invoices.finance",
     InvoicesVisibility => "invoices.visibility",
+    // Who an order or draft invoice is addressed to and paid by (Zahler,
+    // Rechnungsempfänger). The recipient of a released invoice never changes.
+    InvoicesPayer => "invoices.payer",
     AccountingView => "accounting.view",
     // Company finance and price catalog
     CompanyFinanceView => "company_finance.view",
@@ -203,6 +206,7 @@ impl Capability {
                 | "manage_ceo"
                 | "finance"
                 | "visibility"
+                | "payer"
                 | "upload"
                 | "intake"
                 | "translate"
@@ -263,6 +267,7 @@ const PATIENT_MANAGER: &[Capability] = &[
     C::ContractsTerminate,
     C::InvoicesView,
     C::InvoicesCreate,
+    C::InvoicesPayer,
     C::DocumentsView,
     C::DocumentsUpload,
     C::DocumentsManage,
@@ -363,6 +368,7 @@ const BILLING: &[Capability] = &[
     C::InvoicesCreate,
     C::InvoicesFinance,
     C::InvoicesVisibility,
+    C::InvoicesPayer,
     C::AccountingView,
     C::CompanyFinanceView,
     C::CompanyFinanceEdit,
@@ -787,6 +793,7 @@ mod tests {
                     "invoices.create",
                     "invoices.finance",
                     "invoices.visibility",
+                    "invoices.payer",
                     "accounting.view",
                     "company_finance.view",
                     "company_finance.edit",
@@ -821,6 +828,7 @@ mod tests {
                     "contracts.terminate",
                     "invoices.view",
                     "invoices.create",
+                    "invoices.payer",
                     "documents.view",
                     "documents.upload",
                     "documents.manage",

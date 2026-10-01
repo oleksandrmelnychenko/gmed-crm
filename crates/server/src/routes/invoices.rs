@@ -38,6 +38,7 @@ mod credit_transfers;
 mod document;
 mod dunning_blocks;
 mod dunning_letters;
+pub(crate) mod payer;
 mod release;
 pub(crate) mod service_reversal;
 mod stored_documents;
@@ -164,7 +165,10 @@ pub fn router() -> Router<AppState> {
             "/invoices/{invoice_id}/visibility",
             post(update_invoice_visibility),
         )
-        .route("/invoices/{invoice_id}/payer", post(update_invoice_payer))
+        .route(
+            "/invoices/{invoice_id}/payer",
+            post(payer::update_invoice_payer),
+        )
         .route(
             "/invoices/{invoice_id}/prepayment-allocations",
             post(apply_invoice_prepayment),
@@ -291,6 +295,9 @@ struct UpdateInvoiceStatusRequest {
     /// document), or why an overdue invoice goes back to `sent` (the reason of
     /// the dunning block that keeps it there).
     reason: Option<String>,
+    /// Warnings about the recipient that billing confirmed for a release.
+    #[serde(flatten)]
+    confirmations: payer::ReleaseConfirmations,
 }
 
 #[derive(Deserialize)]
@@ -304,6 +311,8 @@ struct CreateInvoicePaymentRequest {
     /// A receipt above the open balance is recorded only when billing
     /// confirms it; the excess becomes the patient's credit balance.
     accept_overpayment: Option<bool>,
+    /// Remitter, when not the invoice recipient.
+    payer_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -444,20 +453,6 @@ struct UpdateInvoiceVisibilityRequest {
     line_items_visible_to_patient: Option<bool>,
     pdf_visible_to_patient: Option<bool>,
     visibility_note: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct UpdateInvoicePayerRequest {
-    payer_patient_relation_id: Option<Uuid>,
-    payer_contact_name: Option<String>,
-    payer_contact_email: Option<String>,
-    payer_contact_phone: Option<String>,
-    payer_contact_relationship: Option<String>,
-    payer_notes: Option<String>,
-    payer_address_street: Option<String>,
-    payer_address_zip: Option<String>,
-    payer_address_city: Option<String>,
-    payer_address_country: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -698,6 +693,23 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+/// An error with a machine-readable `error` code (mapped by the UI) and extra
+/// fields, e.g. which confirmation flag lets the request through.
+fn coded_err(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    extra: Value,
+) -> axum::response::Response {
+    let mut body = serde_json::json!({ "error": code, "message": message });
+    if let (Some(body), Some(extra)) = (body.as_object_mut(), extra.as_object()) {
+        for (key, value) in extra {
+            body.insert(key.clone(), value.clone());
+        }
+    }
+    (status, Json(body)).into_response()
 }
 
 fn can_read_invoices(role: Role) -> bool {
@@ -2739,6 +2751,10 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "patient_name") => "Пациент",
         ("en", "patient_name") => "Patient",
         (_, "patient_name") => "Patient",
+        ("uk", "service_recipient") => "Отримувач послуг (Leistungsempfänger)",
+        ("ru", "service_recipient") => "Получатель услуг (Leistungsempfänger)",
+        ("en", "service_recipient") => "Service recipient (Leistungsempfänger)",
+        (_, "service_recipient") => "Leistungsempfänger",
         ("uk", "order_number") => "Замовлення",
         ("ru", "order_number") => "Заказ",
         ("en", "order_number") => "Order",
@@ -4310,7 +4326,9 @@ async fn load_invoice_detail(
                   i.payer_contact_phone, i.payer_contact_relationship, i.payer_notes,
                   i.payer_address_street, i.payer_address_zip, i.payer_address_city,
                   i.payer_address_country,
-                  i.payer_updated_at,
+                  i.payer_updated_at, i.payer_patient_id, i.payer_role,
+                  NULLIF(trim(concat_ws(' ', payer_person.first_name, payer_person.last_name)), '') AS payer_patient_name,
+                  payer_person.patient_id AS payer_patient_pid,
                   o.order_number, i.currency, o.contract_id, q.quote_number,
                   p.first_name, p.last_name, p.patient_id AS patient_pid,
                   pr.relation_type AS payer_relation_type,
@@ -4322,6 +4340,7 @@ async fn load_invoice_detail(
            LEFT JOIN quotes q ON q.id = i.quote_id
            LEFT JOIN patient_relations pr ON pr.id = i.payer_patient_relation_id
            LEFT JOIN patients rp ON rp.id = pr.related_patient_id
+           LEFT JOIN patients payer_person ON payer_person.id = i.payer_patient_id
            WHERE i.id = $1"#,
     )
     .bind(invoice_id)
@@ -4589,6 +4608,24 @@ async fn load_invoice_detail(
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
     })?
     .map(|recipient| recipient.to_json());
+    // A draft shows what its release will check about the recipient (missing
+    // address, minor patient, recipient other than the contracting party).
+    let release_checks = if row
+        .try_get::<Option<DateTime<Utc>>, _>("released_at")
+        .unwrap_or_default()
+        .is_none()
+    {
+        match state.db.acquire().await {
+            Ok(mut conn) => payer::draft_release_checks(&mut conn, invoice_id, auth.user_id).await,
+            Err(error) => Err(error),
+        }
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice release checks");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?
+    } else {
+        Value::Null
+    };
     // The archived document of an issued invoice (GoBD), when stored.
     let stored_document = match state.db.acquire().await {
         Ok(mut conn) => stored_documents::load(&mut conn, invoice_id, None).await,
@@ -4631,11 +4668,14 @@ async fn load_invoice_detail(
                   relative.patient_id AS related_patient_pid,
                   NULLIF(btrim(concat_ws(' ', relative.first_name, relative.last_name)), '')
                       AS related_patient_name,
-                  COALESCE(btrim(relative.address_street), '') <> '' AS has_address
+                  (COALESCE(btrim(relation.address_street), '') <> ''
+                   OR COALESCE(btrim(relative.address_street), '') <> '') AS has_address,
+                  relation.is_default_payer
            FROM patient_relations relation
            LEFT JOIN patients relative ON relative.id = relation.related_patient_id
            WHERE relation.patient_id = $1
-           ORDER BY relation.is_emergency_contact DESC, relation.created_at, relation.id"#,
+           ORDER BY relation.is_default_payer DESC, relation.is_emergency_contact DESC,
+                    relation.created_at, relation.id"#,
     )
     .bind(patient_id)
     .fetch_all(&state.db)
@@ -4653,6 +4693,7 @@ async fn load_invoice_detail(
             "related_patient_pid": relation.try_get::<Option<String>, _>("related_patient_pid").unwrap_or_default(),
             "related_patient_name": relation.try_get::<Option<String>, _>("related_patient_name").unwrap_or_default(),
             "has_address": relation.try_get::<bool, _>("has_address").unwrap_or(false),
+            "is_default_payer": relation.try_get::<bool, _>("is_default_payer").unwrap_or(false),
         })
     })
     .collect::<Vec<_>>();
@@ -4662,6 +4703,7 @@ async fn load_invoice_detail(
         "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
         "quote_number": row.try_get::<Option<String>, _>("quote_number").unwrap_or_default(),
         "recipient": recipient,
+        "release_checks": release_checks,
         "stored_document": stored_document,
         "storno_document": storno_document,
         "dunning_block": dunning_block,
@@ -4712,6 +4754,10 @@ async fn load_invoice_detail(
         "visibility_note": row.try_get::<Option<String>, _>("visibility_note").unwrap_or_default(),
         "visibility_updated_at": row.try_get::<Option<DateTime<Utc>>, _>("visibility_updated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "payer": {
+            "patient_id": row.try_get::<Option<Uuid>, _>("payer_patient_id").unwrap_or_default(),
+            "patient_name": row.try_get::<Option<String>, _>("payer_patient_name").unwrap_or_default(),
+            "patient_pid": row.try_get::<Option<String>, _>("payer_patient_pid").unwrap_or_default(),
+            "role": row.try_get::<Option<String>, _>("payer_role").unwrap_or_default(),
             "patient_relation_id": row.try_get::<Option<Uuid>, _>("payer_patient_relation_id").unwrap_or_default(),
             "contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
             "contact_email": row.try_get::<Option<String>, _>("payer_contact_email").unwrap_or_default(),
@@ -4782,10 +4828,8 @@ async fn load_invoice_pdf_context_on(
            LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
-           {recipient_joins}
            WHERE i.id = $1"#,
         recipient_columns = document::RECIPIENT_COLUMNS,
-        recipient_joins = document::RECIPIENT_JOINS,
     );
     let Some(row) = sqlx::query(&sql)
         .bind(invoice_id)
@@ -4810,6 +4854,20 @@ async fn load_invoice_pdf_context_on(
     )
     .await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
+    // A draft previews the Leistungsempfänger line its release will freeze.
+    let mut recipient = document::recipient_from_row(&row);
+    if !recipient.frozen && recipient.is_payer {
+        recipient.service_recipient_name = document::live_service_recipient_name(
+            conn,
+            &row.try_get::<Option<Value>, _>("rcpt_recipient")
+                .unwrap_or_default()
+                .unwrap_or(Value::Null),
+            patient_id,
+            row.try_get::<Option<Uuid>, _>("order_id")
+                .unwrap_or_default(),
+        )
+        .await?;
+    }
     let setting = |key: &str| {
         row.try_get::<Option<String>, _>(key)
             .unwrap_or_default()
@@ -4876,7 +4934,7 @@ async fn load_invoice_pdf_context_on(
             .unwrap_or_default()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty()),
-        recipient: document::resolve_invoice_recipient(&document::recipient_source_from_row(&row)),
+        recipient,
         service_period,
         order_number: row
             .try_get::<Option<String>, _>("order_number")
@@ -5194,6 +5252,20 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     if let Some(period) = context.service_period {
         let (label, value) = format_invoice_pdf_service_period(language, period);
         meta_cells.push((label, value));
+    }
+    // Addressed to someone other than the contracting party (e.g. a
+    // Kostenübernehmer): the invoice still names the Leistungsempfänger.
+    if let Some(service_recipient) = context
+        .recipient
+        .service_recipient_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        meta_cells.push((
+            invoice_pdf_label(language, "service_recipient"),
+            service_recipient.to_string(),
+        ));
     }
     meta_cells.push((invoice_pdf_label(language, "patient_name"), patient_line));
     meta_cells.push((
@@ -5957,9 +6029,19 @@ async fn export_accounting_ledger(
         r#"SELECT ae.entry_date, ae.direction, ae.category, ae.description,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
                   i.invoice_number, ei.external_invoice_number, o.order_number,
-                  p.patient_id AS patient_pid, p.first_name, p.last_name
+                  p.patient_id AS patient_pid, p.first_name, p.last_name,
+                  rcpt.value ->> 'name' AS recipient_name,
+                  invoice_recipient_identity(rcpt.value) AS recipient_identity
            FROM accounting_entries ae
            LEFT JOIN invoices i ON i.id = ae.source_invoice_id
+           LEFT JOIN LATERAL (
+               SELECT COALESCE(i.recipient_snapshot, invoice_recipient_resolve(
+                   i.patient_id, i.payer_patient_id, i.payer_patient_relation_id,
+                   i.payer_contact_name, i.payer_contact_email,
+                   i.payer_address_street, i.payer_address_zip, i.payer_address_city,
+                   i.payer_address_country)) AS value
+               WHERE i.id IS NOT NULL
+           ) rcpt ON true
            LEFT JOIN external_invoices ei ON ei.id = ae.source_external_invoice_id
            LEFT JOIN orders o ON o.id = ae.order_id
            LEFT JOIN patients p ON p.id = ae.patient_id
@@ -5985,7 +6067,7 @@ async fn export_accounting_ledger(
     };
 
     let mut csv = String::from(
-        "entry_date,direction,category,description,invoice_number,external_invoice_number,order_number,patient_pid,patient_name,amount_net,amount_vat,amount_gross,currency\n",
+        "entry_date,direction,category,description,invoice_number,external_invoice_number,order_number,patient_pid,patient_name,amount_net,amount_vat,amount_gross,currency,recipient_name,recipient_id\n",
     );
 
     for row in rows {
@@ -6038,6 +6120,16 @@ async fn export_accounting_ledger(
             csv_escape(
                 &row.try_get::<String, _>("currency")
                     .unwrap_or_else(|_| "EUR".to_string()),
+            ),
+            csv_escape(
+                &row.try_get::<Option<String>, _>("recipient_name")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            ),
+            csv_escape(
+                &row.try_get::<Option<String>, _>("recipient_identity")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
             ),
         ]
         .join(",");
@@ -6093,6 +6185,9 @@ async fn list_invoices(
                   i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.payer_contact_name, i.payer_contact_relationship,
+                  rcpt.value ->> 'name' AS recipient_name,
+                  COALESCE((rcpt.value ->> 'is_payer')::boolean, false) AS recipient_is_payer,
+                  rcpt.value ->> 'kind' AS recipient_kind,
                   o.order_number, i.currency, q.quote_number, p.first_name, p.last_name, p.patient_id AS patient_pid,
                   block.reason AS dunning_block_reason, block.blocked_at AS dunning_blocked_at
            FROM invoices i
@@ -6101,12 +6196,20 @@ async fn list_invoices(
            LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
+           CROSS JOIN LATERAL (
+               SELECT COALESCE(i.recipient_snapshot, invoice_recipient_resolve(
+                   i.patient_id, i.payer_patient_id, i.payer_patient_relation_id,
+                   i.payer_contact_name, i.payer_contact_email,
+                   i.payer_address_street, i.payer_address_zip, i.payer_address_city,
+                   i.payer_address_country)) AS value
+           ) rcpt
            WHERE ($1::text IS NULL
                    OR de_normalize(concat_ws(' ',
                         i.invoice_number, o.order_number, i.currency, q.quote_number,
                         p.patient_id, p.first_name, p.last_name,
                         p.email, p.phone_primary, p.phone_secondary,
-                        i.payer_contact_name, i.payer_contact_email, i.payer_contact_phone
+                        i.payer_contact_name, i.payer_contact_email, i.payer_contact_phone,
+                        rcpt.value ->> 'name', rcpt.value ->> 'email'
                       )) LIKE de_normalize($1)
                    OR (length(regexp_replace($1, '\D', '', 'g')) >= 3
                        AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($1, '\D', '', 'g') || '%'))
@@ -6194,6 +6297,13 @@ async fn list_invoices(
                         "contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
                         "contact_relationship": row.try_get::<Option<String>, _>("payer_contact_relationship").unwrap_or_default(),
                     },
+                    // Rechnungsempfänger as printed: a relative, another
+                    // patient or a contact when a payer is set.
+                    "recipient": {
+                        "name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
+                        "is_payer": row.try_get::<bool, _>("recipient_is_payer").unwrap_or(false),
+                        "kind": row.try_get::<Option<String>, _>("recipient_kind").unwrap_or_default(),
+                    },
                     "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                     "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 }));
@@ -6263,78 +6373,6 @@ async fn list_invoices(
             tracing::error!(error = %e, "list invoices");
             err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to list invoices")
         }
-    }
-}
-
-#[derive(Default)]
-struct InheritedInvoicePayer {
-    payer_patient_relation_id: Option<Uuid>,
-    payer_contact_name: Option<String>,
-    payer_contact_email: Option<String>,
-    payer_contact_phone: Option<String>,
-    payer_contact_relationship: Option<String>,
-    payer_notes: Option<String>,
-}
-
-/// The payer a new invoice inherits from its order (#1/#7). When the order is a
-/// sub of a head group, the head's payer wins — e.g. the father who pays for the
-/// whole family — otherwise the order's own payer is used. The free-text contact
-/// always flows through; the patient-relation id is only carried over when it
-/// belongs to the invoice's own patient, since relations are patient-scoped.
-async fn inherited_invoice_payer(
-    db: &sqlx::PgPool,
-    order_id: Uuid,
-    invoice_patient_id: Uuid,
-) -> InheritedInvoicePayer {
-    let Ok(Some(row)) = sqlx::query(
-        r#"SELECT
-               COALESCE(h.payer_patient_relation_id, o.payer_patient_relation_id) AS rel_id,
-               COALESCE(h.payer_contact_name, o.payer_contact_name) AS name,
-               COALESCE(h.payer_contact_email, o.payer_contact_email) AS email,
-               COALESCE(h.payer_contact_phone, o.payer_contact_phone) AS phone,
-               COALESCE(h.payer_contact_relationship, o.payer_contact_relationship) AS relationship,
-               COALESCE(h.payer_notes, o.payer_notes) AS notes
-           FROM orders o
-           LEFT JOIN orders h ON h.id = o.head_order_id
-           WHERE o.id = $1"#,
-    )
-    .bind(order_id)
-    .fetch_optional(db)
-    .await
-    else {
-        return InheritedInvoicePayer::default();
-    };
-
-    let rel_id = match row.try_get::<Option<Uuid>, _>("rel_id").unwrap_or_default() {
-        Some(id) => {
-            let belongs = sqlx::query_scalar::<_, bool>(
-                "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
-            )
-            .bind(id)
-            .bind(invoice_patient_id)
-            .fetch_one(db)
-            .await
-            .unwrap_or(false);
-            belongs.then_some(id)
-        }
-        None => None,
-    };
-
-    InheritedInvoicePayer {
-        payer_patient_relation_id: rel_id,
-        payer_contact_name: row.try_get::<Option<String>, _>("name").unwrap_or_default(),
-        payer_contact_email: row
-            .try_get::<Option<String>, _>("email")
-            .unwrap_or_default(),
-        payer_contact_phone: row
-            .try_get::<Option<String>, _>("phone")
-            .unwrap_or_default(),
-        payer_contact_relationship: row
-            .try_get::<Option<String>, _>("relationship")
-            .unwrap_or_default(),
-        payer_notes: row
-            .try_get::<Option<String>, _>("notes")
-            .unwrap_or_default(),
     }
 }
 
@@ -6800,10 +6838,19 @@ async fn create_patient_billing_invoice(
 
     // Drafts carry no invoice number; it is assigned when the invoice is
     // released (see `release`).
-    let payer = match body.order_id {
-        Some(order_id) => inherited_invoice_payer(&state.db, order_id, patient_id).await,
-        None => InheritedInvoicePayer::default(),
-    };
+    // Invoices without an order inherit the patient's default payer (or a
+    // minor's legal representatives) as well.
+    let payer =
+        match payer::inherited_invoice_payer(&mut transaction, body.order_id, patient_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(%error, %patient_id, "load inherited invoice payer");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+        };
     let notes = body.notes.clone().or_else(|| {
         quote_context
             .as_ref()
@@ -6812,11 +6859,8 @@ async fn create_patient_billing_invoice(
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
                 quote_id, order_id, patient_id, invoice_type, status, currency,
-                due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
-                payer_patient_relation_id, payer_contact_name, payer_contact_email,
-                payer_contact_phone, payer_contact_relationship, payer_notes
-           ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12,
-                     $13, $14, $15, $16, $17, $18)
+                due_date, total_net, total_vat, total_gross, line_items, notes, created_by
+           ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING id"#,
     )
     .bind(body.quote_id)
@@ -6831,12 +6875,6 @@ async fn create_patient_billing_invoice(
     .bind(snapshot.line_items.clone())
     .bind(notes)
     .bind(auth.user_id)
-    .bind(payer.payer_patient_relation_id)
-    .bind(payer.payer_contact_name)
-    .bind(payer.payer_contact_email)
-    .bind(payer.payer_contact_phone)
-    .bind(payer.payer_contact_relationship)
-    .bind(payer.payer_notes)
     .fetch_one(&mut *transaction)
     .await
     {
@@ -6849,6 +6887,15 @@ async fn create_patient_billing_invoice(
             );
         }
     };
+    if let Err(error) =
+        payer::store_invoice_payer(&mut transaction, invoice_id, &payer.record, None).await
+    {
+        tracing::error!(%error, %invoice_id, "store inherited invoice payer");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create invoice",
+        );
+    }
 
     if let Some(context) = quote_context.as_ref() {
         for allocation in &snapshot.allocations {
@@ -6954,6 +7001,9 @@ async fn create_patient_billing_invoice(
             "quote_id": body.quote_id,
             "external_invoice_count": external_allocations.len(),
             "service_line_count": snapshot.allocations.len(),
+            "payer_source": payer.source,
+            "payer": payer.record.to_audit_json(),
+            "minor_without_payer": payer.minor_without_payer,
         }),
     )
     .await
@@ -7068,7 +7118,6 @@ async fn create_invoice_from_quote(
     // Drafts carry no invoice number; it is assigned when the invoice is
     // released (see `release`).
     let notes = body.notes.clone().or(ctx.notes.clone());
-    let payer = inherited_invoice_payer(&state.db, ctx.order_id, ctx.patient_id).await;
     let mut transaction = match state.db.begin().await {
         Ok(transaction) => transaction,
         Err(e) => {
@@ -7082,16 +7131,26 @@ async fn create_invoice_from_quote(
     if let Err(resp) = lock_invoiceable_quote_tx(&mut transaction, ctx.quote_id).await {
         return resp;
     }
+    let payer =
+        match payer::inherited_invoice_payer(&mut transaction, Some(ctx.order_id), ctx.patient_id)
+            .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(%error, quote_id = %quote_id, "load inherited invoice payer");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
+        };
 
     match sqlx::query(
         r#"INSERT INTO invoices (
                 quote_id, order_id, patient_id, invoice_type, status,
-                due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
-                payer_patient_relation_id, payer_contact_name, payer_contact_email,
-                payer_contact_phone, payer_contact_relationship, payer_notes
+                due_date, total_net, total_vat, total_gross, line_items, notes, created_by
            ) VALUES (
-                $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11,
-                $12, $13, $14, $15, $16, $17
+                $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11
            ) RETURNING id"#,
     )
     .bind(ctx.quote_id)
@@ -7105,17 +7164,20 @@ async fn create_invoice_from_quote(
     .bind(invoice_snapshot.line_items.clone())
     .bind(notes)
     .bind(auth.user_id)
-    .bind(payer.payer_patient_relation_id)
-    .bind(payer.payer_contact_name.clone())
-    .bind(payer.payer_contact_email.clone())
-    .bind(payer.payer_contact_phone.clone())
-    .bind(payer.payer_contact_relationship.clone())
-    .bind(payer.payer_notes.clone())
     .fetch_one(&mut *transaction)
     .await
     {
         Ok(row) => {
             let invoice_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
+            if let Err(error) =
+                payer::store_invoice_payer(&mut transaction, invoice_id, &payer.record, None).await
+            {
+                tracing::error!(%error, %invoice_id, "store inherited invoice payer");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create invoice",
+                );
+            }
 
             for allocation in &invoice_snapshot.allocations {
                 if let Err(e) = sqlx::query(
@@ -7929,6 +7991,13 @@ fn invoice_payment_row_payload(row: &sqlx::postgres::PgRow, staff_view: bool) ->
             serde_json::json!(row.try_get::<Option<String>, _>("note").unwrap_or_default()),
         );
         map.insert(
+            "payer_name".to_string(),
+            serde_json::json!(
+                row.try_get::<Option<String>, _>("payer_name")
+                    .unwrap_or_default()
+            ),
+        );
+        map.insert(
             "created_by".to_string(),
             serde_json::json!(row.try_get::<Uuid, _>("created_by").unwrap_or_default()),
         );
@@ -7958,7 +8027,7 @@ async fn load_invoice_payment_history(
     sqlx::query(
         r#"SELECT payment.id, payment.invoice_id, payment.transaction_type,
                   payment.reverses_transaction_id, payment.amount_gross,
-                  payment.payment_method, payment.payment_reference,
+                  payment.payment_method, payment.payment_reference, payment.payer_name,
                   payment.received_on, payment.note, payment.created_by,
                   payment.created_at, creator.name AS created_by_name,
                   creator.role AS created_by_role,
@@ -8633,11 +8702,23 @@ async fn create_invoice_payment(
         return payment_exceeds_balance(balance_due, overpayment_gross);
     }
 
+    // Who remitted the money when it was not the recipient (e.g. a grandparent
+    // paying the parents' invoice); informational, not a recipient change.
+    let payer_name = normalize_optional(body.payer_name.as_deref());
+    if payer_name
+        .as_ref()
+        .is_some_and(|name| name.chars().count() > 200)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payer name is too long (max 200)",
+        );
+    }
     let payment_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_payment_transactions (
                 invoice_id, transaction_type, request_id, amount_gross, payment_method,
-                payment_reference, received_on, note, created_by
-           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8)
+                payment_reference, received_on, note, created_by, payer_name
+           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -8648,6 +8729,7 @@ async fn create_invoice_payment(
     .bind(received_on)
     .bind(note.clone())
     .bind(auth.user_id)
+    .bind(payer_name.clone())
     .fetch_one(&mut *transaction)
     .await
     {
@@ -8721,6 +8803,7 @@ async fn create_invoice_payment(
             "overpayment_gross": decimal_to_string(overpayment_gross),
             "payment_method": payment_method,
             "payment_reference": payment_reference,
+            "payer_name": payer_name,
             "received_on": received_on.to_string(),
             "patient_id": patient_id,
         }),
@@ -11339,10 +11422,8 @@ async fn load_einvoice(
            FROM invoices i
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN orders o ON o.id = i.order_id
-           {recipient_joins}
            WHERE i.id = $1"#,
         recipient_columns = document::RECIPIENT_COLUMNS,
-        recipient_joins = document::RECIPIENT_JOINS,
     );
     let Some(row) = sqlx::query(&sql)
         .bind(invoice_id)
@@ -11353,7 +11434,7 @@ async fn load_einvoice(
     };
     // The buyer is the recipient printed on the invoice: the payer with the
     // payer's own address, or the patient.
-    let recipient = document::resolve_invoice_recipient(&document::recipient_source_from_row(&row));
+    let recipient = document::recipient_from_row(&row);
     let line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| json!([]));
@@ -11528,7 +11609,7 @@ async fn attach_zugferd_xml(
     };
     let missing = zugferd::missing_requirements(&invoice);
     if !missing.is_empty() {
-        tracing::info!(invoice_id = %context.invoice_id, ?missing, "invoice pdf served without zugferd xml");
+        tracing::warn!(invoice_id = %context.invoice_id, ?missing, "released invoice pdf served without zugferd xml");
         return pdf;
     }
     let xml = zugferd::build_cii_xml(&invoice);
@@ -12392,148 +12473,6 @@ async fn update_invoice_visibility(
     }
 }
 
-async fn update_invoice_payer(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(invoice_id): Path<Uuid>,
-    Json(body): Json<UpdateInvoicePayerRequest>,
-) -> axum::response::Response {
-    if !can_manage_invoice_visibility(auth.role) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
-    let row = match sqlx::query(
-        "SELECT patient_id, released_at IS NOT NULL AS released FROM invoices WHERE id = $1",
-    )
-    .bind(invoice_id)
-    .fetch_optional(&state.db)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payer context");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update invoice payer",
-            );
-        }
-    };
-
-    let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
-        return resp;
-    }
-    // The recipient is part of the issued document.
-    if row.try_get::<bool, _>("released").unwrap_or(false) {
-        return err(
-            StatusCode::CONFLICT,
-            "The payer of a released invoice cannot change; cancel the invoice and issue a new one",
-        );
-    }
-
-    if let Some(relation_id) = body.payer_patient_relation_id {
-        let relation_matches = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
-        )
-        .bind(relation_id)
-        .bind(patient_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-        if !relation_matches {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Payer relation does not belong to invoice patient",
-            );
-        }
-    }
-
-    let payer_contact_name = normalize_optional(body.payer_contact_name.as_deref());
-    let payer_contact_email = normalize_optional(body.payer_contact_email.as_deref());
-    let payer_contact_phone = normalize_optional(body.payer_contact_phone.as_deref());
-    let payer_contact_relationship = normalize_optional(body.payer_contact_relationship.as_deref());
-    let payer_notes = normalize_optional(body.payer_notes.as_deref());
-    let payer_address_street = normalize_optional(body.payer_address_street.as_deref());
-    let payer_address_zip = normalize_optional(body.payer_address_zip.as_deref());
-    let payer_address_city = normalize_optional(body.payer_address_city.as_deref());
-    let payer_address_country = normalize_optional(body.payer_address_country.as_deref());
-
-    match sqlx::query(
-        r#"UPDATE invoices
-           SET payer_patient_relation_id = $2,
-               payer_contact_name = $3,
-               payer_contact_email = $4,
-               payer_contact_phone = $5,
-               payer_contact_relationship = $6,
-               payer_notes = $7,
-               payer_updated_by = $8,
-               payer_updated_at = now(),
-               payer_address_street = $9,
-               payer_address_zip = $10,
-               payer_address_city = $11,
-               payer_address_country = $12
-           WHERE id = $1"#,
-    )
-    .bind(invoice_id)
-    .bind(body.payer_patient_relation_id)
-    .bind(payer_contact_name.clone())
-    .bind(payer_contact_email.clone())
-    .bind(payer_contact_phone.clone())
-    .bind(payer_contact_relationship.clone())
-    .bind(payer_notes.clone())
-    .bind(auth.user_id)
-    .bind(payer_address_street)
-    .bind(payer_address_zip)
-    .bind(payer_address_city)
-    .bind(payer_address_country)
-    .execute(&state.db)
-    .await
-    {
-        Ok(result) if result.rows_affected() > 0 => {
-            write_invoice_audit(
-                &state,
-                auth.user_id,
-                "payer_assigned",
-                invoice_id,
-                serde_json::json!({
-                    "patient_id": patient_id,
-                    "payer_patient_relation_id": body.payer_patient_relation_id,
-                    "payer_contact_name": payer_contact_name,
-                    "payer_contact_relationship": payer_contact_relationship,
-                }),
-            )
-            .await;
-
-            crate::realtime::publish_invoice_event(
-                &state,
-                Some(auth.user_id),
-                "invoice.payer_changed",
-                invoice_id,
-                serde_json::json!({
-                    "patient_id": patient_id,
-                    "payer_patient_relation_id": body.payer_patient_relation_id,
-                }),
-            )
-            .await;
-
-            match load_invoice_detail(&state, invoice_id, &auth).await {
-                Ok(Some(invoice)) => Json(invoice).into_response(),
-                Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
-                Err(resp) => resp,
-            }
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Invoice not found"),
-        Err(e) => {
-            tracing::error!(error = %e, invoice_id = %invoice_id, "update invoice payer");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to update invoice payer",
-            )
-        }
-    }
-}
-
 async fn update_invoice_status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -13030,6 +12969,25 @@ async fn update_invoice_status(
         );
     }
 
+    // The recipient is checked and frozen with the release (§ 14 Abs. 4
+    // UStG, GoBD): full postal address, minor patient, contracting party,
+    // advances of another recipient.
+    let release_recipient = if releasing {
+        match payer::release_recipient_snapshot(
+            &mut transaction,
+            invoice_id,
+            body.confirmations,
+            auth.user_id,
+        )
+        .await
+        {
+            Ok(snapshot) => Some(snapshot),
+            Err(block) => return block.into_response(invoice_id),
+        }
+    } else {
+        None
+    };
+
     // The number is taken last, right before the release is written, so the
     // counter row stays locked only briefly. Drafts numbered before numbers
     // moved to release keep theirs.
@@ -13064,7 +13022,8 @@ async fn update_invoice_status(
                END,
                invoice_number = COALESCE(invoice_number, $5),
                due_date = COALESCE($3, due_date),
-               notes = COALESCE($4, notes)
+               notes = COALESCE($4, notes),
+               recipient_snapshot = COALESCE(recipient_snapshot, $6)
            WHERE id = $1"#,
     )
     .bind(invoice_id)
@@ -13072,6 +13031,7 @@ async fn update_invoice_status(
     .bind(release_due_date.or(due_date))
     .bind(body.notes.clone())
     .bind(release_number.clone())
+    .bind(release_recipient.clone())
     .execute(&mut *transaction)
     .await
     {
@@ -13454,6 +13414,7 @@ mod tests {
                 country_code: Some("UA".to_string()),
                 email: None,
                 is_payer: false,
+                ..Default::default()
             },
             service_period: None,
             order_number: "ORD-UNIT-1".to_string(),
@@ -13634,6 +13595,7 @@ mod tests {
             country_code: Some("UA".to_string()),
             email: None,
             is_payer: true,
+            ..Default::default()
         };
         context.service_period = Some((
             NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(),

@@ -25,6 +25,7 @@
 | `invoices.create` | x |   | x |   |   |   | x |   |   |
 | `invoices.finance` | x |   |   |   |   |   | x |   |   |
 | `invoices.visibility` | x |   |   |   |   |   | x |   |   |
+| `invoices.payer` | x |   | x |   |   |   | x |   |   |
 | `accounting.view` | x | x |   |   |   |   | x |   |   |
 | `company_finance.view` | x | x |   |   |   |   | x |   |   |
 | `company_finance.edit` | x |   |   |   |   |   | x |   |   |

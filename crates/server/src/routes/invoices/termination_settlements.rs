@@ -60,9 +60,8 @@ use super::{
     CreateInvoiceLineSelection, InvoiceCreationSnapshot, MoneyInput,
     build_selected_invoice_snapshot, can_access_patient, can_create_invoices,
     can_manage_invoice_finance, can_read_invoices, compute_invoice_line_parts, decimal_to_string,
-    ensure_patient_access, err, inherited_invoice_payer, invoice_json_decimal,
-    load_allocated_quote_quantities, load_invoice_detail, load_quote_invoice_context,
-    write_invoice_audit_tx,
+    ensure_patient_access, err, invoice_json_decimal, load_allocated_quote_quantities,
+    load_invoice_detail, load_quote_invoice_context, payer, write_invoice_audit_tx,
 };
 use crate::audit;
 use crate::auth::middleware::AuthUser;
@@ -1698,15 +1697,16 @@ async fn create_termination_final_invoice(
     invoiced_service_ids.dedup();
 
     // The draft gets its invoice number when it is released.
-    let payer = inherited_invoice_payer(&state.db, order_id, patient_id).await;
+    let payer =
+        match payer::inherited_invoice_payer(&mut transaction, Some(order_id), patient_id).await {
+            Ok(value) => value,
+            Err(error) => return failed(error),
+        };
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
                 quote_id, order_id, patient_id, invoice_type, status,
-                total_net, total_vat, total_gross, line_items, notes, created_by,
-                payer_patient_relation_id, payer_contact_name, payer_contact_email,
-                payer_contact_phone, payer_contact_relationship, payer_notes
-           ) VALUES ($1, $2, $3, 'final', 'draft', $4, $5, $6, $7, $8, $9,
-                     $10, $11, $12, $13, $14, $15)
+                total_net, total_vat, total_gross, line_items, notes, created_by
+           ) VALUES ($1, $2, $3, 'final', 'draft', $4, $5, $6, $7, $8, $9)
            RETURNING id"#,
     )
     .bind(invoice_quote_id)
@@ -1718,12 +1718,6 @@ async fn create_termination_final_invoice(
     .bind(snapshot.line_items.clone())
     .bind(FINAL_INVOICE_NOTE)
     .bind(auth.user_id)
-    .bind(payer.payer_patient_relation_id)
-    .bind(payer.payer_contact_name)
-    .bind(payer.payer_contact_email)
-    .bind(payer.payer_contact_phone)
-    .bind(payer.payer_contact_relationship)
-    .bind(payer.payer_notes)
     .fetch_one(&mut *transaction)
     .await
     {
@@ -1741,6 +1735,11 @@ async fn create_termination_final_invoice(
         }
         Err(error) => return failed(error),
     };
+    if let Err(error) =
+        payer::store_invoice_payer(&mut transaction, invoice_id, &payer.record, None).await
+    {
+        return failed(error);
+    }
 
     if let Some(quote_id) = invoice_quote_id {
         for allocation in &snapshot.allocations {

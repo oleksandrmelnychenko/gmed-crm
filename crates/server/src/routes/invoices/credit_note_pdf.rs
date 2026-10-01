@@ -1581,6 +1581,7 @@ mod tests {
                 country_code: Some("DE".to_string()),
                 email: None,
                 is_payer: true,
+                ..Default::default()
             }),
         }
     }
