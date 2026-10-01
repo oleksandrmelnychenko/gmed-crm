@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import type { ClinicalDocumentImportDraft } from "../../src/pages/patients/data/clinical-document-import";
+import { pickerSection } from "./helpers";
 
 // Optional local corpus stays outside source control. The default is synthetic.
 const corpus = process.env.PARSER_CORPUS_DIR;
@@ -34,7 +35,8 @@ async function mount(page: Page, draft: ClinicalDocumentImportDraft, file?: stri
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url()).pathname;
     let body: unknown = [];
-    if (url.endsWith("/upload")) body = { id: record.document_id };
+    if (url.endsWith("/me")) body = { id: "tester", name: "Manager", email: "qa@example.test", role: "ceo" };
+    else if (url.endsWith("/upload")) body = { id: record.document_id };
     else if (url.endsWith("/download")) return route.fulfill({ contentType: "application/pdf", body: file ? fs.readFileSync(file) : "%PDF-1.4\n%%EOF" });
     else if (url.endsWith("/prepare")) {
       const payload = route.request().postDataJSON(); prepared.push(payload);
@@ -113,3 +115,90 @@ for (const key of corpus ? ["lab", "letter", "report"] : ["synthetic"]) {
     if (translated && chosen.target !== "lab_result") expect(selected.value).toBe(translated);
   });
 }
+
+const radiology: ClinicalDocumentImportDraft = {
+  document_type: "radiology_report", source_language: "de", parser_version: "test", warnings: [],
+  raw_text: "Rechtfertigende Indikation: PSA-Wert 12,4 ng/ml, bisher keine Stanzbiopsie.\fBeurteilung:\n1. Geringe BPH.",
+  candidates: [{
+    id: "dx-1", target: "diagnosis", value: "Geringe BPH.", selected: true, confidence: 0.88,
+    source: { page: 2, section: "Beurteilung", text: "Geringe BPH." },
+    normalized: { label: "Geringe BPH.", kind: "secondary", certainty: "bestaetigt", assertion: "confirmed", auto_select: true },
+  }],
+};
+
+test("constructor builds typed blocks from selected text and by hand, then orders and groups them", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1600, height: 1100 });
+  const prepared = await mount(page, radiology);
+  const dialog = page.getByRole("dialog", { name: "Assistent für den Import" });
+
+  // Block from selected document text: the laboratory value is split into fields.
+  await dialog.getByRole("tab", { name: "Volltext" }).click();
+  await dialog.getByRole("button", { name: /^Seite 1/ }).click();
+  const pageText = dialog.getByRole("textbox", { name: "Erkannter Text der Seite 1" });
+  await pageText.evaluate((element: HTMLTextAreaElement) => {
+    const start = element.value.indexOf("PSA-Wert");
+    element.focus();
+    element.setSelectionRange(start, element.value.indexOf(", bisher"));
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+  });
+  const actions = dialog.locator("[data-clinical-import-selection-actions]");
+  await expect(actions).toContainText("PSA-Wert 12");
+  await actions.getByRole("button", { name: "Laborwerte" }).click();
+  const labForm = dialog.locator('[data-clinical-import-constructor-form="lab_result"]');
+  await expect(labForm.getByLabel(/^Parameter\b/)).toHaveValue("PSA");
+  await expect(labForm.getByLabel(/^Wert\b/)).toHaveValue("12,4");
+  await expect(labForm.getByLabel("Einheit", { exact: true })).toHaveValue("ng/ml");
+  await labForm.getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
+  await expect(labForm.getByRole("alert")).toHaveText("Pflichtfelder ausfüllen.");
+  await labForm.getByRole("spinbutton", { name: pickerSection.day }).fill("20");
+  await labForm.getByRole("spinbutton", { name: pickerSection.month }).fill("02");
+  await labForm.getByRole("spinbutton", { name: pickerSection.year }).fill("2026");
+  await labForm.getByRole("spinbutton", { name: pickerSection.year }).press("Tab");
+  await labForm.getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
+  // The full text stays open for the next selection; the block is counted.
+  await expect(pageText).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: /^Laborwerte/ })).toContainText("1");
+  await dialog.getByRole("tab", { name: /^Alle/ }).click();
+  await expect(dialog.locator('[data-clinical-import-candidate-card] input[value="PSA"]')).toBeVisible();
+
+  // Block by hand from the toolbar of the overview.
+  await dialog.locator("[data-clinical-import-constructor-toolbar]").getByRole("button", { name: "Diagnosen" }).click();
+  const diagnosisForm = dialog.locator('[data-clinical-import-constructor-form="diagnosis"]');
+  await diagnosisForm.getByLabel(/^Diagnose \*$/).fill("Prostatakarzinom");
+  await diagnosisForm.getByLabel("ICD-10").fill("c61");
+  await diagnosisForm.getByLabel("Sicherheit").selectOption("verdacht");
+  await diagnosisForm.getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
+  const cards = dialog.locator("[data-clinical-import-candidate-card]");
+  await expect(cards).toHaveCount(3);
+
+  // Ordering within the type, then grouping by source page.
+  const diagnosisEditors = () => dialog
+    .locator("[data-clinical-import-candidate-card] textarea[data-clinical-import-candidate-editor]")
+    .evaluateAll((elements) => elements.map((element) => (element as HTMLTextAreaElement).value));
+  await expect.poll(diagnosisEditors).toEqual(["Geringe BPH.", "Prostatakarzinom"]);
+  await cards.nth(1).getByRole("button", { name: "Nach oben" }).click();
+  await expect.poll(diagnosisEditors).toEqual(["Prostatakarzinom", "Geringe BPH."]);
+  await dialog.getByRole("button", { name: "Nach Seiten" }).click();
+  await expect(dialog.locator("summary").filter({ hasText: "Seite 2" })).toBeVisible();
+  await expect(dialog.locator("summary").filter({ hasText: "Ohne Seite (manuell)" })).toBeVisible();
+
+  const confirm = page.getByRole("checkbox", { name: /Ich habe.*bestätige den Import/ });
+  if (await confirm.count()) await confirm.check();
+  const country = page.getByRole("combobox", { name: "Ursprungsland des Dokuments" });
+  if (await country.count()) {
+    await country.click();
+    await page.getByRole("option", { name: "Deutschland", exact: true }).click();
+  }
+  await page.getByRole("button", { name: "Prüfen und übernehmen", exact: true }).click();
+  await expect.poll(() => prepared.length).toBe(1);
+  const reviewed = prepared[0].reviewed_draft as ClinicalDocumentImportDraft;
+  const manualLab = reviewed.candidates.find((candidate) => candidate.target === "lab_result")!;
+  expect(manualLab.source).toMatchObject({ page: 1, text: "PSA-Wert 12,4 ng/ml" });
+  expect(manualLab.normalized).toMatchObject({ analyte_name: "PSA", numeric_result: 12.4, measured_on: "2026-02-20" });
+  const manualDiagnosis = reviewed.candidates.find((candidate) => candidate.value === "Prostatakarzinom")!;
+  expect(manualDiagnosis.normalized).toMatchObject({ certainty: "verdacht", icd_code: "C61" });
+  expect(reviewed.candidates.map((candidate) => candidate.id).indexOf(manualDiagnosis.id))
+    .toBeLessThan(reviewed.candidates.map((candidate) => candidate.id).indexOf("dx-1"));
+});

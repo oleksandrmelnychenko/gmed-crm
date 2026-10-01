@@ -154,6 +154,11 @@ const PATIENT_VITAL_NUMBER_FORMATTERS: Record<string, Intl.NumberFormat> = {
   '{"maximumFractionDigits":1}': new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }),
 };
 
+/** A YYYY-MM-DD date entered in the import constructor, or null. */
+function importedDate(value: unknown): string | null {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim()) ? value.trim() : null;
+}
+
 function formatVitalNumber(
   value: number | null | undefined,
   options: Intl.NumberFormatOptions = { maximumFractionDigits: 1 },
@@ -2750,7 +2755,7 @@ export function PatientClinicalTab({
         chronifizierung: null,
         icd_code: typeof item.normalized.icd_code === "string" ? item.normalized.icd_code : null,
         ops_code: null,
-        diagnosed_on: null,
+        diagnosed_on: importedDate(item.normalized.diagnosed_on),
         note: `Import: ${documentImport.document_name ?? documentImport.document_id}\n${importMarker(item.id)}`,
         red_flags: null,
         source_mode: "extern",
@@ -2847,7 +2852,7 @@ export function PatientClinicalTab({
           typeof item.normalized.title === "string" && item.normalized.title.trim()
             ? item.normalized.title.trim()
             : item.source.section,
-        performed_on: null,
+        performed_on: importedDate(item.normalized.performed_on),
         status: "final",
         result: item.value.trim(),
         note: `Import: ${documentImport.document_name ?? documentImport.document_id}\n${importMarker(item.id)}`,
@@ -2971,7 +2976,9 @@ export function PatientClinicalTab({
       );
     for (const item of importedRecommendations) {
       const saved = await createPatientRecommendation(patientId, {
-        title: lang === "de" ? "Empfehlung aus Dokument" : "Рекомендация из документа",
+        title: typeof item.normalized.title === "string" && item.normalized.title.trim()
+          ? item.normalized.title.trim()
+          : lang === "de" ? "Empfehlung aus Dokument" : "Рекомендация из документа",
         description: item.value.trim(),
         recommendation_type: "follow_up",
         priority: "normal",

@@ -3,6 +3,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { ClinicalDocumentImportSheet } from "../../../src/pages/patients/ui/sections/clinical-document-import-sheet";
+import { MemoryRouter } from "react-router-dom";
+import { AuthProvider } from "../../../src/lib/auth";
 import "../../../src/index.css";
 import type { PatientIdentityReference } from "../../../src/pages/patients/data/clinical-document-subject";
 
@@ -21,4 +23,6 @@ function Harness() {
 }
 
 window.__clinicalTestRoot ??= createRoot(document.getElementById("root")!);
-window.__clinicalTestRoot.render(<LocalizationProvider dateAdapter={AdapterDayjs}><Harness /></LocalizationProvider>);
+window.__clinicalTestRoot.render(
+  <MemoryRouter><AuthProvider><LocalizationProvider dateAdapter={AdapterDayjs}><Harness /></LocalizationProvider></AuthProvider></MemoryRouter>,
+);
