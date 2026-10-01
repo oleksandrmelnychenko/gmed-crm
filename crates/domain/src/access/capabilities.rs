@@ -146,6 +146,14 @@ capabilities! {
     DatevRead => "datev.read",
     // Security incidents
     IncidentsManage => "incidents.manage",
+    // Personnel files (Personalakte); the employee's own file is an
+    // ownership check, not a capability.
+    PersonnelView => "personnel.view",
+    PersonnelUpload => "personnel.upload",
+    PersonnelManage => "personnel.manage",
+    PersonnelHealthView => "personnel.health.view",
+    PersonnelExport => "personnel.export",
+    PersonnelRetention => "personnel.retention",
 }
 
 /// Returned when a wire name does not match any registered capability.
@@ -210,6 +218,7 @@ impl Capability {
                 | "registry"
                 | "convert"
                 | "admin"
+                | "retention"
         )
     }
 }
@@ -603,6 +612,29 @@ mod tests {
                 "{role:?}"
             );
         }
+    }
+
+    #[test]
+    fn only_ceo_keeps_personnel_files() {
+        let personnel: Vec<Capability> = Capability::ALL
+            .iter()
+            .copied()
+            .filter(|capability| capability.module() == "personnel")
+            .collect();
+        assert_eq!(personnel.len(), 6);
+        for role in STAFF_ROLES {
+            for capability in &personnel {
+                assert_eq!(
+                    role.can(*capability),
+                    *role == Role::Ceo,
+                    "{role:?} {capability}"
+                );
+            }
+        }
+        assert!(C::PersonnelUpload.is_write());
+        assert!(C::PersonnelRetention.is_write());
+        assert!(!C::PersonnelView.is_write());
+        assert!(!C::PersonnelHealthView.is_write());
     }
 
     #[test]

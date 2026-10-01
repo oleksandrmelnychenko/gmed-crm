@@ -49,6 +49,9 @@ describe("staff route access by capability", () => {
       "/admin/settings",
       "/admin/signatures",
       "/admin/datev",
+      "/personnel",
+      "/personnel/employee-1",
+      "/my-personnel-file",
     ];
     for (const path of paths) {
       expect(canAccessStaffRoute("ceo", path), path).toBe(true);
@@ -429,6 +432,30 @@ describe("staff route access by capability", () => {
     // Rules without a capability still fall back to their role list.
     expect(chatOnly).toContain("/notes");
     expect(chatOnly).toContain("/");
+  });
+
+  it("opens personnel files to personnel.view only (CEO)", () => {
+    for (const role of ALL_STAFF_ROLES) {
+      const allowed = role === "ceo";
+      expect(canAccessStaffRoute(role, "/personnel"), role).toBe(allowed);
+      expect(canAccessStaffRoute(role, "/personnel/employee-1"), role).toBe(allowed);
+      expect(nav(role).includes("/personnel"), role).toBe(allowed);
+    }
+    expect(canAccessStaffRoute("it_admin", "/personnel", ["personnel.view"])).toBe(true);
+    const ceo = nav("ceo");
+    expect(ceo.indexOf("/personnel")).toBe(ceo.indexOf("/admin/datev") + 1);
+  });
+
+  it("shows the own personnel file entry only with a linked file", () => {
+    for (const role of ALL_STAFF_ROLES) {
+      // The page itself answers "no file" (the server checks ownership).
+      expect(canAccessStaffRoute(role, "/my-personnel-file"), role).toBe(true);
+      expect(nav(role), role).not.toContain("/my-personnel-file");
+      const withFile = listStaffNavItems(role, null, { hasPersonnelFile: true }).map((item) => item.to);
+      expect(withFile, role).toContain("/my-personnel-file");
+      expect(withFile.indexOf("/my-personnel-file"), role).toBe(withFile.indexOf("/account") + 1);
+    }
+    expect(canAccessStaffRoute("patient", "/my-personnel-file")).toBe(false);
   });
 
   it("keeps the new-order route available to patient managers", () => {

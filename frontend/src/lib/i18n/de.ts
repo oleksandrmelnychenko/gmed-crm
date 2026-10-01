@@ -6,6 +6,7 @@ import { extractedUiDe } from "./catalogs/extracted-ui";
 import { financeBalancesDe } from "./catalogs/finance-balances";
 import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
+import { personnelDe } from "./catalogs/personnel";
 import { revenueDe } from "./catalogs/revenue";
 import { sharedCoreDe } from "./catalogs/shared";
 import { staffAccessDe } from "./catalogs/staff-access";
@@ -1806,6 +1807,7 @@ export const de = {
   ...financeBalancesDe,
   ...operationsDe,
   ...patientsPortalDe,
+  ...personnelDe,
   ...revenueDe,
   ...sharedCoreDe,
 } satisfies Translations;

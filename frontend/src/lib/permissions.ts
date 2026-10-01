@@ -85,6 +85,12 @@ export const ALL_CAPABILITIES = [
   "datev.admin",
   "datev.read",
   "incidents.manage",
+  "personnel.view",
+  "personnel.upload",
+  "personnel.manage",
+  "personnel.health.view",
+  "personnel.export",
+  "personnel.retention",
 ] as const;
 
 export type KnownCapability = (typeof ALL_CAPABILITIES)[number];

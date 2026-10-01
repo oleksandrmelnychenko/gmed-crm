@@ -236,6 +236,24 @@ const AdminDatevPage = lazy(() =>
   })),
 );
 
+const PersonnelPage = lazy(() =>
+  import("@/pages/personnel/page").then((module) => ({
+    default: module.PersonnelPage,
+  })),
+);
+
+const PersonnelEmployeePage = lazy(() =>
+  import("@/pages/personnel/employee-page").then((module) => ({
+    default: module.PersonnelEmployeePage,
+  })),
+);
+
+const MyPersonnelFilePage = lazy(() =>
+  import("@/pages/personnel/my-file-page").then((module) => ({
+    default: module.MyPersonnelFilePage,
+  })),
+);
+
 const AdminActivityPage = lazy(() =>
   import("@/pages/admin-activity").then((module) => ({
     default: module.AdminActivityPage,
@@ -431,6 +449,9 @@ function AppRoutes() {
             <Route path="admin/settings" element={<AdminSettingsPage />} />
             <Route path="admin/datev" element={<AdminDatevPage />} />
             <Route path="admin/signatures" element={<AdminSignaturesPage />} />
+            <Route path="personnel" element={<PersonnelPage />} />
+            <Route path="personnel/:employeeId" element={<PersonnelEmployeePage />} />
+            <Route path="my-personnel-file" element={<MyPersonnelFilePage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/security" element={<AdminSecurityPage />} />
             <Route path="admin/health" element={<AdminHealthPage />} />

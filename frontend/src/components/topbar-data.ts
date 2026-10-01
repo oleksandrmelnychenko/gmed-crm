@@ -3,7 +3,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
-import { uiText } from "@/lib/i18n";
+import { formatUiText, t as translationsFor, uiText } from "@/lib/i18n";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
 export interface Notification {
@@ -68,6 +68,8 @@ export function localizedNotificationCopy(
         .join(" — ") || null,
     };
   }
+  const personnelCopy = personnelNotificationCopy(item, lang);
+  if (personnelCopy) return personnelCopy;
   const digestCopy = complianceDigestNotificationCopy(item, lang);
   if (digestCopy) return digestCopy;
   const overdueSupplierCopy = externalInvoiceOverdueNotificationCopy(item, lang);
@@ -85,6 +87,51 @@ export function localizedNotificationCopy(
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+const PERSONNEL_NOTIFICATION_TABS: Record<string, string> = {
+  personnel_intake: "intake",
+  personnel_missing_documents: "completeness",
+  personnel_integrity_failed: "integrity",
+};
+
+// Personnel file notices (crates/server/src/routes/personnel/) are stored in
+// English; the counts and the month are read back from the stored text.
+export function personnelNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  const tr = translationsFor(lang);
+  const numbers = (item.body ?? "").match(/\d+/g) ?? [];
+  if (item.kind === "personnel_intake") {
+    return {
+      title: tr.personnel_notification_intake_title,
+      body: tr.personnel_notification_intake_body,
+    };
+  }
+  if (item.kind === "personnel_missing_documents") {
+    const month = /(\d{2}\.\d{4})/.exec(item.title)?.[1] ?? "";
+    return {
+      title: formatUiText(tr.personnel_notification_missing_title, { month }),
+      body:
+        numbers.length >= 2
+          ? formatUiText(tr.personnel_notification_missing_body, {
+              documents: numbers[0],
+              employees: numbers[1],
+            })
+          : item.body,
+    };
+  }
+  if (item.kind === "personnel_integrity_failed") {
+    return {
+      title: tr.personnel_notification_integrity_title,
+      body:
+        numbers.length >= 1
+          ? formatUiText(tr.personnel_notification_integrity_body, { count: numbers[0] })
+          : item.body,
+    };
+  }
+  return null;
 }
 
 type ComplianceDigestBody = {
@@ -598,6 +645,11 @@ export function notificationHrefForRole(item: Notification, role: string) {
   // incidents are all reachable from there).
   if (item.entity_type === "compliance_digest") {
     return role === "ceo" || role === "it_admin" ? "/admin/compliance" : null;
+  }
+  // Personnel file notices open the matching tab of the personnel files page.
+  if (item.entity_type === "personnel" || item.entity_type === "personnel_integrity_run") {
+    const tab = PERSONNEL_NOTIFICATION_TABS[item.kind];
+    return tab ? `/personnel?tab=${tab}` : "/personnel";
   }
   if (!item.entity_id) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;

@@ -360,3 +360,57 @@ it("keeps an error announcement on screen while it is active", () => {
   expect(isAnnouncementDismissible({ variant: "error" })).toBe(false);
   expect(isAnnouncementDismissible({ variant: "info" })).toBe(true);
 });
+
+describe("personnel file notifications", () => {
+  const personnel = (kind: string, title: string, body: string, entityType = "personnel") =>
+    ({
+      id: kind,
+      kind,
+      title,
+      body,
+      entity_type: entityType,
+      entity_id: entityType === "personnel" ? null : "run-1",
+      is_read: false,
+      created_at: "2026-10-01T06:00:00Z",
+    }) as Notification;
+
+  it("opens the matching tab of the personnel files page", () => {
+    expect(
+      notificationHrefForRole(personnel("personnel_intake", "Personnel file: new scan to file", ""), "ceo"),
+    ).toBe("/personnel?tab=intake");
+    expect(
+      notificationHrefForRole(personnel("personnel_missing_documents", "x", ""), "ceo"),
+    ).toBe("/personnel?tab=completeness");
+    expect(
+      notificationHrefForRole(
+        personnel("personnel_integrity_failed", "x", "", "personnel_integrity_run"),
+        "ceo",
+      ),
+    ).toBe("/personnel?tab=integrity");
+    expect(notificationHrefForRole(personnel("personnel_intake", "x", ""), "patient")).toBeNull();
+  });
+
+  it("words the stored English notices in German and Russian", () => {
+    const missing = personnel(
+      "personnel_missing_documents",
+      "Personnel files: documents missing for 09.2026",
+      "3 expected monthly documents for 2 employees have not been archived.",
+    );
+    const de = localizedNotificationCopy(missing, "de");
+    expect(de.title).toBe("Personalakten: Dokumente fehlen für 09.2026");
+    expect(de.body).toContain("3");
+    expect(de.body).toContain("2");
+    expect(localizedNotificationCopy(missing, "ru").title).toContain("09.2026");
+
+    const integrity = personnel(
+      "personnel_integrity_failed",
+      "Personnel files: integrity check failed",
+      "4 problems found in the personnel archive. Open Personnel files → Integrity.",
+      "personnel_integrity_run",
+    );
+    expect(localizedNotificationCopy(integrity, "de").body).toContain("Abweichungen im Archiv: 4");
+    expect(localizedNotificationCopy(personnel("personnel_intake", "x", "y"), "ru").title).toBe(
+      "Личные дела: новый скан для разнесения",
+    );
+  });
+});

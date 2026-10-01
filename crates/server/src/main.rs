@@ -99,6 +99,7 @@ async fn main() {
     spawn_expired_message_sweeper(app_state.clone());
     spawn_lead_purger(app_state.clone());
     spawn_patient_retention_sweeper(app_state.clone());
+    gmed_server::routes::personnel::integrity::spawn_scheduler(app_state.clone());
     spawn_audit_retention_purger(app_state.db.clone());
 
     let cors_origins = cfg

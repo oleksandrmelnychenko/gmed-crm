@@ -14,6 +14,8 @@ import {
   Fingerprint,
   FolderOpen,
   FolderKanban,
+  FolderLock,
+  IdCard,
   GraduationCap,
   HeartPulse,
   History,
@@ -118,6 +120,8 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   "admin/access": KeyRound,
   "admin/settings": Settings2,
   "admin/datev": Plug,
+  personnel: FolderLock,
+  "my-personnel-file": IdCard,
   "admin/signatures": FileSignature,
   "admin/activity": History,
   "admin/security": Fingerprint,
@@ -149,7 +153,11 @@ export function NavPanel() {
   const patientPortalNav = isPatientPortal ? listPatientPortalNavItems().map(toPatientNavItem) : [];
   const staffNavBySection =
     user && user.role !== "patient"
-      ? groupStaffNavItems(listStaffNavItems(user.role, user.capabilities))
+      ? groupStaffNavItems(
+          listStaffNavItems(user.role, user.capabilities, {
+            hasPersonnelFile: user.has_personnel_file,
+          }),
+        )
       : new Map<StaffNavSection, NavItem[]>();
   const closeOnCompactViewport = () => {
     if (

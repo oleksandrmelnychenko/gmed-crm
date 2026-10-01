@@ -23,6 +23,7 @@ bei einer Prüfung belegt werden kann. „Offen“ markiert bekannte Lücken.
 |---|---|
 | Protokollierung | Unveränderliches `audit_log` (DB-Trigger verhindert UPDATE/DELETE); Lesezugriffe auf Patienten, Dokument-Downloads, Einwilligungen, Betroffenenanfragen und Datenpannen als Fachereignisse, Aufbewahrung 365 Tage. |
 | Eingabekontrolle | Jede Änderung mit Benutzer, Zeit, altem und neuem Wert. |
+| Unveränderbarkeit der Personalakten | Archivierte Personaldokumente werden nie geändert (DB-Trigger verhindert UPDATE/DELETE); Korrekturen sind neue Versionen mit Begründung. Jedes Dokument ist mit SHA-256 in eine Hash-Kette je Beschäftigtem eingebunden; täglicher Anker über alle Kettenköpfe mit RFC-3161-Zeitstempel (nur der Hash verlässt das System); wöchentliche Prüfung aller Ketten und Dateien mit Benachrichtigung der Geschäftsführung (`routes/personnel/integrity.rs`). Archivzeitpunkt setzt die Datenbank. |
 | Schadsoftware | Pflicht-Scan aller Uploads mit ClamAV in PROD; der Server startet ohne Scanner nicht (`file_scan.rs`). |
 | Software-Lieferkette | PROD führt nur signierte Images aus (cosign), gebaut in CI mit `clippy -D warnings`, Tests und Format-Prüfung. |
 
