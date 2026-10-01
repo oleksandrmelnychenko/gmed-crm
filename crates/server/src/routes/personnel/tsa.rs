@@ -331,6 +331,42 @@ mod tests {
         assert_eq!(time.to_rfc3339(), "2026-10-01T12:00:00.250+00:00");
     }
 
+    /// Responses recorded from public TSAs on 2026-10-01 for the SHA-256 of
+    /// `GMED personnel anchor fixture`; `openssl ts -verify` accepts both.
+    #[test]
+    fn recorded_responses_of_public_tsas_are_accepted() {
+        let digest: [u8; 32] =
+            hex::decode("53361e5bab2f169bbba036dbe316274b21fa1e85fcc723586ef2f95d21f635a8")
+                .unwrap()
+                .try_into()
+                .unwrap();
+        let nonce = [0xC5, 0x02, 0x4B, 0xC5, 0xA7, 0xB6, 0xB8, 0xC2];
+        for (name, response, time) in [
+            (
+                "sectigo",
+                include_bytes!("testdata/sectigo.tsr").as_slice(),
+                "2026-10-01T17:17:15+00:00",
+            ),
+            (
+                "digicert",
+                include_bytes!("testdata/digicert.tsr").as_slice(),
+                "2026-10-01T17:17:16+00:00",
+            ),
+        ] {
+            let parsed = parse_response(response, &digest, &nonce)
+                .unwrap_or_else(|problem| panic!("{name}: {problem}"));
+            assert_eq!(parsed.to_rfc3339(), time, "{name}");
+            assert!(
+                parse_response(response, &[0x22; 32], &nonce).is_err(),
+                "{name}"
+            );
+            assert!(
+                parse_response(response, &digest, &[0x06; 8]).is_err(),
+                "{name}"
+            );
+        }
+    }
+
     #[test]
     fn wrong_digest_nonce_or_status_is_refused() {
         let digest = [0x11; 32];
