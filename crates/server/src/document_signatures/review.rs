@@ -7,7 +7,7 @@ pub(super) fn router() -> Router<AppState> {
 }
 
 pub(super) fn informational(template: Option<&str>) -> bool {
-    matches!(template, Some("privacy_information" | "cost_estimate"))
+    super::legal::informational(template)
 }
 
 async fn access(

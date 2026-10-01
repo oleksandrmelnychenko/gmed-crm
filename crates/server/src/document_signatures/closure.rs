@@ -14,12 +14,10 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
-use super::{db_error, error};
-use crate::{
-    audit, auth::middleware::AuthUser, routes::documents::signature_document_access,
-    state::AppState,
-};
+use super::{authorized_request, bundle_entries, connection, db_error, effects, error};
+use crate::{audit, auth::middleware::AuthUser, state::AppState};
 use gmed_domain::access::capabilities::Capability;
+use sqlx::postgres::PgRow;
 
 pub const STUCK_DAYS_SETTING: &str = "signature_stuck_request_days";
 pub const DEFAULT_STUCK_DAYS: i64 = 3;
@@ -93,6 +91,67 @@ pub(crate) async fn notify_staff(
         }
         Err(error) => tracing::warn!(%error, "notify signature staff"),
     }
+}
+
+/// The provider closed a request without a signature (declined, withdrawn,
+/// expired, error): staff must know, the documents are not signed.
+pub(crate) async fn notify_terminal(state: &AppState, row: &PgRow, status: &str) {
+    let (title, body) = match status {
+        "declined" => (
+            "Signature declined",
+            "A signer declined the signature request. The documents are not signed; contact the signer or send a new request.",
+        ),
+        "withdrawn" => (
+            "Signature request withdrawn",
+            "The signature request was withdrawn. The documents are not signed.",
+        ),
+        "expired" => (
+            "Signature request expired",
+            "The signature request expired before everyone signed. Send a new request if the documents are still needed.",
+        ),
+        _ => (
+            "Signature request failed",
+            "The signature provider reported an error. The documents are not signed; check the request and send it again if needed.",
+        ),
+    };
+    notify_staff(
+        state,
+        row.get("requested_by"),
+        row.get("source_document_id"),
+        if status == "error" {
+            "signature_request_failed"
+        } else {
+            "signature_request_closed"
+        },
+        title,
+        body,
+    )
+    .await;
+}
+
+/// The signed PDF and the report were archived.
+pub(crate) async fn notify_archived(state: &AppState, row: &PgRow, status: &str, result_id: Uuid) {
+    let test_mode: bool = row.get("test_mode");
+    let (kind, title, body) = if status == "needs_review" {
+        (
+            "signature_review_required",
+            "Signed document needs review",
+            "The document was signed, but its source changed during signing. Accept or reject the signature in the document's signature panel.",
+        )
+    } else if test_mode {
+        (
+            "signature_completed",
+            "Test signature completed",
+            "The test (DEMO) signature is archived as internal evidence. It has no legal effect.",
+        )
+    } else {
+        (
+            "signature_completed",
+            "Document signed",
+            "All signers have signed. The signed PDF and the signature report are archived; give the signers their signed copy.",
+        )
+    };
+    notify_staff(state, row.get("requested_by"), result_id, kind, title, body).await;
 }
 
 /// Closes requests that stayed untrackable longer than
@@ -195,8 +254,36 @@ pub(crate) fn can_abandon(
     }
 }
 
+/// One audit row per document of the request, in the closing transaction.
+async fn audit_documents(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &PgRow,
+    action: &str,
+    actor: Option<Uuid>,
+    context: Value,
+) -> Result<(), Response> {
+    let entries = bundle_entries(&mut **tx, request).await.map_err(db_error)?;
+    for entry in &entries {
+        let mut context = context.clone();
+        context["position"] = json!(entry.position);
+        context["document_ids"] = json!(entries.iter().map(|e| e.document_id).collect::<Vec<_>>());
+        audit::write_in_transaction(
+            tx,
+            &audit::domain_event(action, actor, "document", Some(entry.document_id), context),
+        )
+        .await
+        .map_err(db_error)?;
+    }
+    Ok(())
+}
+
 /// `POST /document-signature-requests/{id}/abandon` — CEO/PM with edit access
-/// to the document, or the signature administrator.
+/// to a document of the request, or the signature administrator.
+///
+/// When the provider knows the request, it is withdrawn there first, so that no
+/// invitation stays open after GMED gave the request up. A provider that does
+/// not know it any more needs no withdrawal; any other provider error keeps the
+/// request open so that staff can retry.
 pub(crate) async fn abandon(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -204,22 +291,46 @@ pub(crate) async fn abandon(
     Json(body): Json<ReasonRequest>,
 ) -> Result<Json<Value>, Response> {
     let reason = checked_reason(&body.reason)?;
-    let source_id: Uuid = sqlx::query_scalar(
-        "SELECT source_document_id FROM document_signature_requests WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(db_error)?
-    .ok_or_else(|| error(StatusCode::NOT_FOUND, "signature_not_found"))?;
-    if !auth.can(Capability::AdminSignatures) {
-        signature_document_access(&state, &auth, source_id, true).await?;
+    let request = if auth.can(Capability::AdminSignatures) {
+        sqlx::query("SELECT * FROM document_signature_requests WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(db_error)?
+            .ok_or_else(|| error(StatusCode::NOT_FOUND, "signature_not_found"))?
+    } else {
+        authorized_request(&state, &auth, id, true).await?
+    };
+    let source_id: Uuid = request.get("source_document_id");
+    if !can_abandon(
+        &request.get::<String, _>("status"),
+        request.get("provider_request_id"),
+        request.get::<Option<String>, _>("last_error").as_deref(),
+    ) {
+        return Err(error(StatusCode::CONFLICT, "signature_not_abandonable"));
+    }
+    let mut withdrawn_remotely = false;
+    if let Some(remote) = request.get::<Option<Uuid>, _>("provider_request_id") {
+        let provider = connection::current_provider(&state)
+            .await
+            .map_err(|e| error(StatusCode::SERVICE_UNAVAILABLE, e))?
+            .ok_or_else(|| error(StatusCode::SERVICE_UNAVAILABLE, "signature_not_configured"))?;
+        if request.get::<String, _>("provider_account") != provider.account {
+            return Err(error(StatusCode::CONFLICT, "signature_account_changed"));
+        }
+        match provider.withdraw(remote).await {
+            Ok(()) => withdrawn_remotely = true,
+            Err("provider_not_found") => {}
+            Err(code) => {
+                tracing::warn!(code, request_id = %id, "Withdrawing an abandoned signature request failed");
+                return Err(error(StatusCode::BAD_GATEWAY, "signature_withdraw_failed"));
+            }
+        }
     }
 
     let mut tx = state.db.begin().await.map_err(db_error)?;
     let row = sqlx::query(
-        r#"SELECT status, provider_request_id, last_error, requested_by,
-                  (lease_until IS NOT NULL AND lease_until > now()) AS leased
+        r#"SELECT *, (lease_until IS NOT NULL AND lease_until > now()) AS leased
            FROM document_signature_requests WHERE id = $1 FOR UPDATE"#,
     )
     .bind(id)
@@ -250,18 +361,15 @@ pub(crate) async fn abandon(
     .execute(&mut *tx)
     .await
     .map_err(db_error)?;
-    audit::write_in_transaction(
+    audit_documents(
         &mut tx,
-        &audit::domain_event(
-            "document_signature_abandoned",
-            Some(auth.user_id),
-            "document",
-            Some(source_id),
-            json!({ "request_id": id, "previous_status": status, "reason": reason }),
-        ),
+        &row,
+        "document_signature_abandoned",
+        Some(auth.user_id),
+        json!({ "request_id": id, "previous_status": status, "reason": reason,
+                "withdrawn_at_provider": withdrawn_remotely }),
     )
-    .await
-    .map_err(db_error)?;
+    .await?;
     tx.commit().await.map_err(db_error)?;
 
     let requested_by: Uuid = row.get("requested_by");
@@ -276,11 +384,15 @@ pub(crate) async fn abandon(
         )
         .await;
     }
-    Ok(Json(json!({ "ok": true, "status": "error" })))
+    Ok(Json(
+        json!({ "ok": true, "status": "error", "withdrawn_at_provider": withdrawn_remotely }),
+    ))
 }
 
 /// `POST /document-signature-requests/{id}/resolve-review` — CEO/PM with edit
-/// access to the document decide on a request signed while its source changed.
+/// access decide on a request signed while one of its documents changed.
+/// Accepting makes the archived result the signed document and applies the
+/// same effects as a regular completion; rejecting keeps it as evidence only.
 pub(crate) async fn resolve_review(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -298,15 +410,7 @@ pub(crate) async fn resolve_review(
             ));
         }
     };
-    let source_id: Uuid = sqlx::query_scalar(
-        "SELECT source_document_id FROM document_signature_requests WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(db_error)?
-    .ok_or_else(|| error(StatusCode::NOT_FOUND, "signature_not_found"))?;
-    signature_document_access(&state, &auth, source_id, true).await?;
+    authorized_request(&state, &auth, id, true).await?;
 
     let mut tx = state.db.begin().await.map_err(db_error)?;
     let updated = sqlx::query(
@@ -315,7 +419,7 @@ pub(crate) async fn resolve_review(
                last_error = CASE WHEN $2 = 'error' THEN 'signature_review_rejected' ELSE NULL END,
                updated_at = now()
            WHERE id = $1 AND status = 'needs_review'
-           RETURNING result_document_id, requested_by"#,
+           RETURNING *"#,
     )
     .bind(id)
     .bind(next_status)
@@ -326,26 +430,82 @@ pub(crate) async fn resolve_review(
     .await
     .map_err(db_error)?
     .ok_or_else(|| error(StatusCode::CONFLICT, "signature_not_in_review"))?;
-    audit::write_in_transaction(
+    if next_status == "completed" {
+        effects::promote(&mut tx, &updated)
+            .await
+            .map_err(|code| error(StatusCode::INTERNAL_SERVER_ERROR, code))?;
+    }
+    audit_documents(
         &mut tx,
-        &audit::domain_event(
-            "document_signature_review_resolved",
-            Some(auth.user_id),
-            "document",
-            Some(source_id),
-            json!({
-                "request_id": id,
-                "decision": body.decision,
-                "status": next_status,
-                "result_document_id": updated.get::<Option<Uuid>, _>("result_document_id"),
-                "reason": reason,
-            }),
-        ),
+        &updated,
+        "document_signature_review_resolved",
+        Some(auth.user_id),
+        json!({
+            "request_id": id,
+            "decision": body.decision,
+            "status": next_status,
+            "result_document_id": updated.get::<Option<Uuid>, _>("result_document_id"),
+            "reason": reason,
+        }),
     )
-    .await
-    .map_err(db_error)?;
+    .await?;
     tx.commit().await.map_err(db_error)?;
     Ok(Json(json!({ "ok": true, "status": next_status })))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeliveryRequest {
+    channel: String,
+}
+
+/// `POST /document-signature-requests/{id}/delivered` — staff record that the
+/// signers received the signed copy on a durable medium (§ 312f Abs. 2 BGB),
+/// e.g. Skribble's completion e-mail, an own e-mail, the patient portal, by
+/// hand or by post. Recorded once; the audit log keeps who and when.
+pub(crate) async fn record_delivery(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(id): Path<Uuid>,
+    Json(body): Json<DeliveryRequest>,
+) -> Result<Json<Value>, Response> {
+    if !matches!(
+        body.channel.as_str(),
+        "skribble" | "email" | "portal" | "in_person" | "post"
+    ) {
+        return Err(error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "signature_delivery_channel_invalid",
+        ));
+    }
+    authorized_request(&state, &auth, id, true).await?;
+    let mut tx = state.db.begin().await.map_err(db_error)?;
+    let updated = sqlx::query(
+        r#"UPDATE document_signature_requests
+           SET delivered_to_signers_at = now(), delivered_by = $2, delivery_channel = $3,
+               updated_at = now()
+           WHERE id = $1 AND status = 'completed' AND NOT test_mode
+             AND delivered_to_signers_at IS NULL
+           RETURNING *"#,
+    )
+    .bind(id)
+    .bind(auth.user_id)
+    .bind(&body.channel)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db_error)?
+    .ok_or_else(|| error(StatusCode::CONFLICT, "signature_delivery_not_recordable"))?;
+    audit_documents(
+        &mut tx,
+        &updated,
+        "document_signature_copy_delivered",
+        Some(auth.user_id),
+        json!({ "request_id": id, "channel": body.channel,
+                "result_document_id": updated.get::<Option<Uuid>, _>("result_document_id") }),
+    )
+    .await?;
+    tx.commit().await.map_err(db_error)?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 #[cfg(test)]

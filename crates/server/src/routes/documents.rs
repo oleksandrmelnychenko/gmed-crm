@@ -1739,6 +1739,235 @@ fn consent_type_for_compliance_kind(compliance_kind: &str) -> Option<&'static st
     }
 }
 
+/// Whether the document is out for signature, as the source or as a member of
+/// a package. Such a document may not get a new version, be regenerated or be
+/// archived until the request is finished or withdrawn.
+pub(crate) async fn document_in_active_signature_request<'e, E>(
+    executor: E,
+    document_id: Uuid,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_scalar(
+        r#"SELECT EXISTS(
+               SELECT 1 FROM document_signature_requests request
+               WHERE request.status IN ('submitting', 'submission_unknown', 'pending')
+                 AND (request.source_document_id = $1
+                      OR EXISTS(SELECT 1 FROM document_signature_members member
+                                WHERE member.request_id = request.id
+                                  AND member.document_id = $1))
+           )"#,
+    )
+    .bind(document_id)
+    .fetch_one(executor)
+    .await
+}
+
+fn signature_pending_response() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "signature_pending",
+            "message": "The document is out for electronic signature. Withdraw the signature request first.",
+        })),
+    )
+        .into_response()
+}
+
+async fn ensure_no_active_signature_request(
+    state: &AppState,
+    document_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    match document_in_active_signature_request(&state.db, document_id).await {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(signature_pending_response()),
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %document_id, "check active signature request");
+            Err(err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to check the signature status",
+            ))
+        }
+    }
+}
+
+fn is_signature_compliance_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "dsgvo"
+            | "confidentiality_release"
+            | "identity"
+            | "framework_contract"
+            | "enhanced_due_diligence"
+            | "other"
+    )
+}
+
+/// Which `legal_status` key a signed document satisfies, and the value to set.
+/// `other` and `enhanced_due_diligence` touch no compliance flag.
+fn legal_status_flag_for_compliance_kind(kind: &str) -> Option<(&'static str, Value)> {
+    match kind {
+        "dsgvo" => Some(("dsgvo_signed", Value::Bool(true))),
+        "confidentiality_release" => Some(("confidentiality_release_signed", Value::Bool(true))),
+        "identity" => Some(("identity_verified", Value::Bool(true))),
+        "framework_contract" => Some(("contract_status", Value::String("signed".to_string()))),
+        _ => None,
+    }
+}
+
+/// The compliance requirement a signed document of this type satisfies.
+pub(crate) fn compliance_kind_for_signed_document(
+    generated_template_id: Option<&str>,
+    art: &str,
+) -> Option<&'static str> {
+    [
+        "framework_contract",
+        "dsgvo",
+        "confidentiality_release",
+        "enhanced_due_diligence",
+    ]
+    .into_iter()
+    .find(|kind| document_satisfies_compliance_kind(kind, generated_template_id, art))
+}
+
+/// One signature to record on a document: by staff (`mark-signed`) or by a
+/// completed electronic signature.
+pub(crate) struct DocumentSignatureRecord<'a> {
+    pub(crate) document_id: Uuid,
+    pub(crate) patient_id: Option<Uuid>,
+    pub(crate) lead_id: Option<Uuid>,
+    pub(crate) compliance_kind: &'a str,
+    pub(crate) signed_at: chrono::DateTime<chrono::Utc>,
+    /// Staff member who recorded a manual signature; `None` for e-signatures,
+    /// whose signers are external and recorded in the request evidence.
+    pub(crate) signed_by: Option<Uuid>,
+    /// Staff member responsible for the consent record.
+    pub(crate) actor_id: Uuid,
+    /// Extra consent evidence (Art. 7 Abs. 1 DSGVO): who signed, level, request.
+    pub(crate) consent_context: Value,
+    pub(crate) converted_lead_is_error: bool,
+}
+
+pub(crate) enum DocumentSignatureRecordError {
+    ConvertedLead,
+    Database(sqlx::Error),
+}
+
+impl From<sqlx::Error> for DocumentSignatureRecordError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+/// Records a signed document as compliance evidence in the caller's
+/// transaction: the document's signature fields, the patient's `legal_status`
+/// flag, a consent record and the lead's compliance status. Returns whether a
+/// compliance flag changed.
+pub(crate) async fn record_document_signature_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &DocumentSignatureRecord<'_>,
+) -> Result<bool, DocumentSignatureRecordError> {
+    let kind = record.compliance_kind;
+    sqlx::query(
+        r#"UPDATE documents
+           SET signed_at = $2,
+               signed_by = $3,
+               compliance_kind = $4,
+               status = CASE WHEN status = 'draft' THEN 'active' ELSE status END,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(record.document_id)
+    .bind(record.signed_at)
+    .bind(record.signed_by)
+    .bind(kind)
+    .execute(&mut **tx)
+    .await?;
+
+    let mut compliance_updated = false;
+    if let (Some(pid), Some((key, value))) = (
+        record.patient_id,
+        legal_status_flag_for_compliance_kind(kind),
+    ) {
+        sqlx::query(
+            r#"UPDATE patients
+               SET legal_status = jsonb_set(COALESCE(legal_status, '{}'::jsonb), $2::text[], $3::jsonb, true),
+                   updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(pid)
+        .bind(vec![key.to_string()])
+        .bind(value.to_string())
+        .execute(&mut **tx)
+        .await?;
+        compliance_updated = true;
+    }
+    if let (Some(pid), Some(consent_type)) =
+        (record.patient_id, consent_type_for_compliance_kind(kind))
+    {
+        sqlx::query(
+            r#"WITH existing_evidence AS (
+                   SELECT EXISTS (
+                       SELECT 1
+                       FROM consent_records
+                       WHERE patient_id = $1
+                         AND consent_type = $2
+                         AND granted = true
+                         AND revoked_at IS NULL
+                         AND context->>'source_document_id' = $3::text
+                   ) AS found
+               ), closed AS (
+                   UPDATE consent_records
+                   SET revoked_at = GREATEST($4, COALESCE(granted_at, created_at))
+                   WHERE patient_id = $1
+                     AND consent_type = $2
+                     AND granted = true
+                     AND revoked_at IS NULL
+                     AND NOT (SELECT found FROM existing_evidence)
+                   RETURNING id
+               )
+               INSERT INTO consent_records (
+                   patient_id, user_id, consent_type, granted,
+                   granted_at, expires_at, context
+               )
+               SELECT $1, $5, $2, true, $4, $4 + INTERVAL '1 year',
+                      $7::jsonb || jsonb_build_object(
+                        'source_document_id', $3,
+                        'compliance_kind', $6
+                      )
+               WHERE NOT (SELECT found FROM existing_evidence)"#,
+        )
+        .bind(pid)
+        .bind(consent_type)
+        .bind(record.document_id)
+        .bind(record.signed_at)
+        .bind(record.actor_id)
+        .bind(kind)
+        .bind(&record.consent_context)
+        .execute(&mut **tx)
+        .await?;
+    }
+    if let Some(lead_id) = record.lead_id
+        && kind == "dsgvo"
+    {
+        let result = sqlx::query(
+            r#"UPDATE leads
+               SET compliance_status = 'signed', updated_at = now()
+               WHERE id = $1 AND converted_patient_id IS NULL"#,
+        )
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
+        if result.rows_affected() == 1 {
+            compliance_updated = true;
+        } else if record.converted_lead_is_error {
+            return Err(DocumentSignatureRecordError::ConvertedLead);
+        }
+    }
+    Ok(compliance_updated)
+}
+
 /// Record a document as the signed evidence for a compliance requirement, and
 /// atomically flip the matching flag on the linked patient's `legal_status`
 /// (#13). Replaces the previous two-step dance of "upload a scan" + "separately
@@ -1754,17 +1983,9 @@ async fn mark_document_signed(
     }
 
     let kind = body.compliance_kind.trim();
-    // Which `legal_status` key this signed document satisfies, and the value to
-    // set. `other` records the signature without touching any compliance flag.
-    let flag: Option<(&str, Value)> = match kind {
-        "dsgvo" => Some(("dsgvo_signed", Value::Bool(true))),
-        "confidentiality_release" => Some(("confidentiality_release_signed", Value::Bool(true))),
-        "identity" => Some(("identity_verified", Value::Bool(true))),
-        "framework_contract" => Some(("contract_status", Value::String("signed".to_string()))),
-        "enhanced_due_diligence" => None,
-        "other" => None,
-        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid compliance_kind"),
-    };
+    if !is_signature_compliance_kind(kind) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid compliance_kind");
+    }
 
     let signed_at: chrono::DateTime<chrono::Utc> = match body.signed_at.as_deref() {
         Some(value) if !value.trim().is_empty() => {
@@ -1846,32 +2067,40 @@ async fn mark_document_signed(
     let mut satisfies_compliance =
         document_satisfies_compliance_kind(kind, generated_template_id.as_deref(), &document_art);
     if !satisfies_compliance && document_art == "signature_evidence" {
-        let source_document = sqlx::query(
-            r#"SELECT source.generated_template_id, source.art
+        // Signature evidence covers its source and, for a package, every
+        // member document signed in the same bundle.
+        let source_documents = sqlx::query(
+            r#"SELECT signed.generated_template_id, signed.art
                FROM document_signature_requests request
-               JOIN documents source ON source.id = request.source_document_id
+               JOIN documents signed ON signed.id = request.source_document_id
                WHERE request.result_document_id = $1
                  AND request.status IN ('completed', 'needs_review')
-               ORDER BY request.updated_at DESC, request.id DESC
-               LIMIT 1"#,
+               UNION ALL
+               SELECT signed.generated_template_id, signed.art
+               FROM document_signature_requests request
+               JOIN document_signature_members member ON member.request_id = request.id
+               JOIN documents signed ON signed.id = member.document_id
+               WHERE (request.result_document_id = $1 OR member.result_document_id = $1)
+                 AND request.status IN ('completed', 'needs_review')"#,
         )
         .bind(document_id)
-        .fetch_optional(&state.db)
+        .fetch_all(&state.db)
         .await;
-        match source_document {
-            Ok(Some(source)) => {
-                let source_template_id = source
-                    .try_get::<Option<String>, _>("generated_template_id")
-                    .ok()
-                    .flatten();
-                let source_art = source.try_get::<String, _>("art").unwrap_or_default();
-                satisfies_compliance = document_satisfies_compliance_kind(
-                    kind,
-                    source_template_id.as_deref(),
-                    &source_art,
-                );
+        match source_documents {
+            Ok(sources) => {
+                satisfies_compliance = sources.iter().any(|source| {
+                    let source_template_id = source
+                        .try_get::<Option<String>, _>("generated_template_id")
+                        .ok()
+                        .flatten();
+                    let source_art = source.try_get::<String, _>("art").unwrap_or_default();
+                    document_satisfies_compliance_kind(
+                        kind,
+                        source_template_id.as_deref(),
+                        &source_art,
+                    )
+                });
             }
-            Ok(None) => {}
             Err(error) => {
                 tracing::error!(
                     error = %error,
@@ -1897,118 +2126,34 @@ async fn mark_document_signed(
         }
     };
 
-    if let Err(e) = sqlx::query(
-        r#"UPDATE documents
-           SET signed_at = $2,
-               signed_by = $3,
-               compliance_kind = $4,
-               status = CASE WHEN status = 'draft' THEN 'active' ELSE status END,
-               updated_at = now()
-           WHERE id = $1"#,
+    let compliance_updated = match record_document_signature_tx(
+        &mut tx,
+        &DocumentSignatureRecord {
+            document_id,
+            patient_id,
+            lead_id,
+            compliance_kind: kind,
+            signed_at,
+            signed_by: Some(auth.user_id),
+            actor_id: auth.user_id,
+            consent_context: json!({ "source": "document_signature" }),
+            converted_lead_is_error: true,
+        },
     )
-    .bind(document_id)
-    .bind(signed_at)
-    .bind(auth.user_id)
-    .bind(kind)
-    .execute(&mut *tx)
     .await
     {
-        tracing::error!(error = %e, "record document signature");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-
-    let mut compliance_updated = false;
-    if let (Some(pid), Some((key, value))) = (patient_id, flag) {
-        if let Err(e) = sqlx::query(
-            r#"UPDATE patients
-               SET legal_status = jsonb_set(COALESCE(legal_status, '{}'::jsonb), $2::text[], $3::jsonb, true),
-                   updated_at = now()
-               WHERE id = $1"#,
-        )
-        .bind(pid)
-        .bind(vec![key.to_string()])
-        .bind(value.to_string())
-        .execute(&mut *tx)
-        .await
-        {
-            tracing::error!(error = %e, "update patient legal_status from signed document");
+        Ok(updated) => updated,
+        Err(DocumentSignatureRecordError::ConvertedLead) => {
+            return err(
+                StatusCode::CONFLICT,
+                "Converted lead must use its patient context",
+            );
+        }
+        Err(DocumentSignatureRecordError::Database(e)) => {
+            tracing::error!(error = %e, document_id = %document_id, "record document signature");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
-        compliance_updated = true;
-    }
-    if let (Some(pid), Some(consent_type)) = (patient_id, consent_type_for_compliance_kind(kind))
-        && let Err(e) = sqlx::query(
-            r#"WITH existing_evidence AS (
-                   SELECT EXISTS (
-                       SELECT 1
-                       FROM consent_records
-                       WHERE patient_id = $1
-                         AND consent_type = $2
-                         AND granted = true
-                         AND revoked_at IS NULL
-                         AND context->>'source_document_id' = $3::text
-                   ) AS found
-               ), closed AS (
-                   UPDATE consent_records
-                   SET revoked_at = GREATEST($4, COALESCE(granted_at, created_at))
-                   WHERE patient_id = $1
-                     AND consent_type = $2
-                     AND granted = true
-                     AND revoked_at IS NULL
-                     AND NOT (SELECT found FROM existing_evidence)
-                   RETURNING id
-               )
-               INSERT INTO consent_records (
-                   patient_id, user_id, consent_type, granted,
-                   granted_at, expires_at, context
-               )
-               SELECT $1, $5, $2, true, $4, $4 + INTERVAL '1 year',
-                      jsonb_build_object(
-                        'source', 'document_signature',
-                        'source_document_id', $3,
-                        'compliance_kind', $6
-                      )
-               WHERE NOT (SELECT found FROM existing_evidence)"#,
-        )
-        .bind(pid)
-        .bind(consent_type)
-        .bind(document_id)
-        .bind(signed_at)
-        .bind(auth.user_id)
-        .bind(kind)
-        .execute(&mut *tx)
-        .await
-    {
-        tracing::error!(error = %e, patient_id = %pid, document_id = %document_id, "sync signed document consent");
-        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-    }
-    if let Some(lead_id) = lead_id
-        && kind == "dsgvo"
-    {
-        let result = sqlx::query(
-            r#"UPDATE leads
-               SET compliance_status = 'signed', updated_at = now()
-               WHERE id = $1 AND converted_patient_id IS NULL"#,
-        )
-        .bind(lead_id)
-        .execute(&mut *tx)
-        .await;
-        match result {
-            Ok(result) if result.rows_affected() == 1 => {
-                compliance_updated = true;
-            }
-            Ok(_) => {
-                return err(
-                    StatusCode::CONFLICT,
-                    "Converted lead must use its patient context",
-                );
-            }
-            Err(error) => {
-                tracing::error!(error = %error, lead_id = %lead_id, "update lead compliance from signed document");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
-            }
-        }
-    }
+    };
 
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, "commit mark-signed tx");
@@ -11193,6 +11338,7 @@ async fn load_replacement_document_version(
     template_category: &str,
     allow_legacy_generated_category: bool,
 ) -> Result<ReplacementDocumentVersion, axum::response::Response> {
+    ensure_no_active_signature_request(state, document_id).await?;
     let row = match sqlx::query(
         r#"SELECT d.id, d.patient_id, d.lead_id, d.order_id, d.appointment_id, d.art, d.category,
                   d.ursprung, d.generated_template_id,
@@ -12373,6 +12519,11 @@ pub(crate) async fn persist_document_file(
     data: &[u8],
     input: &NewStoredDocument<'_>,
 ) -> Result<(Uuid, i64, String, String), axum::response::Response> {
+    // A new version of a document that is out for signature would leave the
+    // signed bundle pointing at an outdated version.
+    if let Some(replaced) = input.replaces_document_id {
+        ensure_no_active_signature_request(state, replaced).await?;
+    }
     let document_id = input.document_id.unwrap_or_else(Uuid::new_v4);
     // Every stored document passes here (uploads, generated documents,
     // versions, translations, lead, interpreter and provider files), so a
@@ -25908,6 +26059,12 @@ async fn update_document(
     }
     if !matches!(status.as_str(), "draft" | "active" | "archived") {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid document status");
+    }
+    if status == "archived"
+        && current.try_get::<String, _>("status").unwrap_or_default() != "archived"
+        && let Err(response) = ensure_no_active_signature_request(&state, id).await
+    {
+        return response;
     }
     if parse_share_status(&visibility).is_none() {
         return err(

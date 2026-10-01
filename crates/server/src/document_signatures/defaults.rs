@@ -96,7 +96,7 @@ fn empty(role: &str) -> Signer {
     }
 }
 
-fn is_minor(date_of_birth: Option<NaiveDate>) -> bool {
+pub(super) fn is_minor(date_of_birth: Option<NaiveDate>) -> bool {
     let Some(date_of_birth) = date_of_birth else {
         return false;
     };
@@ -262,7 +262,9 @@ pub(super) async fn suggested(
                       FROM patients p WHERE p.id=$1 AND p.is_active=true"#)
                 .bind(id).fetch_optional(&state.db).await.map_err(db_error)?
         }
-        (None, Some(id)) if auth.require_any_role(&[Role::PatientManager, Role::Sales, Role::Concierge]).is_ok() => {
+        // Callers already passed the CEO/PM document check (Sales and Concierge
+        // never reach this point).
+        (None, Some(id)) if matches!(auth.role, Role::Ceo | Role::PatientManager) => {
             sqlx::query("SELECT first_name,last_name,email,date_of_birth AS birth_date,COALESCE(trusted_contacts,'[]'::jsonb) AS guardian_contacts FROM leads WHERE id=$1 AND qualification_status<>'archived'")
                 .bind(id).fetch_optional(&state.db).await.map_err(db_error)?
         }
