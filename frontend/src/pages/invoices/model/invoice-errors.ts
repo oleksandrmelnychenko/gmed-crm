@@ -92,7 +92,7 @@ const EXACT: Record<string, Pair> = {
     "Отменённый счёт нельзя вернуть в работу.",
   ],
   "payer name is too long (max 200)": [
-    "Der Name des Einzahlers ist zu lang (max. 200 Zeichen).",
+    "Der Name des Zahlers ist zu lang (max. 200 Zeichen).",
     "Имя плательщика слишком длинное (не более 200 символов).",
   ],
   "insufficient permissions": [
