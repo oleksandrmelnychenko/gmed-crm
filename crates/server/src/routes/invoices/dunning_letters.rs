@@ -88,10 +88,8 @@ pub(super) async fn load_dunning_letter_context(
            FROM invoice_dunning_events dunning
            JOIN invoices i ON i.id = dunning.invoice_id
            JOIN patients p ON p.id = i.patient_id
-           {recipient_joins}
            WHERE dunning.id = $1 AND dunning.invoice_id = $2"#,
         recipient_columns = document::RECIPIENT_COLUMNS,
-        recipient_joins = document::RECIPIENT_JOINS,
     );
     let Some(row) = sqlx::query(&sql)
         .bind(dunning_event_id)
@@ -172,7 +170,7 @@ pub(super) async fn load_dunning_letter_context(
             &row.try_get::<Vec<String>, _>("languages")
                 .unwrap_or_default(),
         ),
-        recipient: document::resolve_invoice_recipient(&document::recipient_source_from_row(&row)),
+        recipient: document::recipient_from_row(&row),
         agency: InvoicePdfAgency {
             name: setting("agency_name")
                 .unwrap_or_else(|| "GMED - Agentur für Patientenbetreuung".to_string()),
@@ -668,6 +666,7 @@ mod tests {
                 country_code: Some("UA".to_string()),
                 email: None,
                 is_payer: true,
+                ..Default::default()
             },
             agency: InvoicePdfAgency {
                 name: "GMED - Agentur für Patientenbetreuung".to_string(),

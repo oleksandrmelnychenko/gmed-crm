@@ -24,7 +24,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use super::{
-    InvoicePaymentContext, MoneyInput, can_manage_invoice_finance, decimal_to_string,
+    InvoicePaymentContext, MoneyInput, can_manage_invoice_finance, coded_err, decimal_to_string,
     ensure_patient_access, err, insert_invoice_payment_accounting_entries,
     insert_invoice_refund_accounting_entries, invoice_balance_due, load_invoice_detail,
     normalize_optional, parse_optional_date, recompute_invoice_settlement_status,
@@ -43,6 +43,10 @@ pub(crate) struct CreateCreditTransferRequest {
     amount_gross: MoneyInput,
     transferred_on: Option<String>,
     note: Option<String>,
+    /// Moves credit between invoices addressed to different recipients
+    /// (e.g. the patient and a paying parent) after billing confirmed it.
+    #[serde(default)]
+    confirm_recipient_mismatch: bool,
 }
 
 #[derive(Deserialize)]
@@ -381,6 +385,33 @@ pub(crate) async fn create_credit_transfer(
             "Credit transfers require released invoices",
         );
     }
+    // Credit belongs to whoever paid it: it moves between invoices of the same
+    // recipient, otherwise only with billing's explicit confirmation.
+    let same_recipient = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT invoice_recipient_identity(source.recipient_snapshot)
+                  IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+           FROM invoices source, invoices target
+           WHERE source.id = $1 AND target.id = $2"#,
+    )
+    .bind(invoice_id)
+    .bind(body.target_invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "compare credit transfer recipients");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if !same_recipient && !body.confirm_recipient_mismatch {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "credit_transfer_recipient_mismatch",
+            "The invoices are addressed to different recipients; confirm to move the credit anyway",
+            json!({ "confirm_field": "confirm_recipient_mismatch" }),
+        );
+    }
     if amount_gross > source.refundable_credit() {
         return err(
             StatusCode::CONFLICT,
@@ -549,6 +580,7 @@ pub(crate) async fn create_credit_transfer(
         "amount_gross": decimal_to_string(amount_gross),
         "currency": source.context.currency,
         "transferred_on": transferred_on.to_string(),
+        "recipient_mismatch_confirmed": !same_recipient,
         "patient_id": patient_id,
     });
     // Both legs are audited in the transfer's transaction.
