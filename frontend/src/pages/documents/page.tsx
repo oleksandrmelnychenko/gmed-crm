@@ -3242,10 +3242,10 @@ function StaffDocumentsPage({
         refresh();
       } else {
         setDeleteError(
-          nextError instanceof ApiRequestError && nextError.body?.error === "document_signature_file_protected"
+          nextError instanceof ApiRequestError && ["document_signature_file_protected", "document_delivery_protected"].includes(String(nextError.body?.error))
             ? lang === "de"
-              ? "Diese Datei gehört zu einer laufenden Signaturanfrage oder zu gespeicherten Signaturnachweisen und kann nicht gelöscht werden."
-              : "Этот файл относится к текущему запросу подписи или сохранённым доказательствам подписания и не может быть удалён."
+              ? "Diese Datei wurde bereits versendet oder unterschrieben (auch elektronisch) und kann nicht gelöscht werden."
+              : "Этот файл уже отправлялся или подписывался (в том числе электронно) и не может быть удалён."
             : nextError instanceof Error
               ? nextError.message
               : t.documents_failed_delete_file,
