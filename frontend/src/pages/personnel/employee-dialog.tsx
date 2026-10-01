@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
-import { Field, textareaClass } from "@/components/ui-shell";
+import { AdminSectionTitle, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { Field, textareaClass, tokens } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelEmployee, type PersonnelLinkableUser } from "./api";
 import {
@@ -120,10 +121,9 @@ export function EmployeeDialog({
                 />
               }
             >
-              <div className="space-y-4">
-                <p className="text-xs text-muted-foreground">{t.personnel_employee_dialog_hint}</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label={t.personnel_salutation} className="sm:col-span-2">
+              <FormSection title={t.personnel_section_person} hint={t.personnel_employee_dialog_hint}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t.personnel_salutation}>
                     <SelectField
                       value={form.salutation}
                       aria-label={t.personnel_salutation}
@@ -135,6 +135,7 @@ export function EmployeeDialog({
                       ]}
                     />
                   </Field>
+                  <div className="hidden sm:block" />
                   <Field label={t.personnel_first_name} htmlFor="personnel-first-name" required>
                     <Input
                       id="personnel-first-name"
@@ -151,8 +152,12 @@ export function EmployeeDialog({
                       onChange={(event) => update("last_name", event.target.value)}
                     />
                   </Field>
-                  <p className="text-xs text-muted-foreground sm:col-span-2">{t.personnel_name_file_hint}</p>
-                  <Field label={t.personnel_number} htmlFor="personnel-number" className="sm:col-span-2 sm:max-w-[calc(50%-0.375rem)]">
+                </div>
+                <p className="text-xs text-muted-foreground">{t.personnel_name_file_hint}</p>
+              </FormSection>
+              <FormSection title={t.personnel_section_employment}>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t.personnel_number} htmlFor="personnel-number">
                     <Input
                       id="personnel-number"
                       value={form.personnel_number}
@@ -177,33 +182,46 @@ export function EmployeeDialog({
                       onChange={(event) => update("employment_end", event.target.value)}
                     />
                   </Field>
-                  {!rangeValid ? (
-                    <p className="text-xs text-destructive sm:col-span-2">{t.personnel_employment_range_invalid}</p>
-                  ) : null}
-                  <Field label={t.personnel_user_link} className="sm:col-span-2">
-                    <SelectField
-                      value={form.user_id}
-                      aria-label={t.personnel_user_link}
-                      onValueChange={(value) => update("user_id", value)}
-                      options={userOptions}
-                    />
-                    <p className="text-xs text-muted-foreground">{t.personnel_user_link_hint}</p>
-                  </Field>
-                  <Field label={t.personnel_notes} htmlFor="personnel-notes" className="sm:col-span-2">
-                    <textarea
-                      id="personnel-notes"
-                      className={textareaClass}
-                      value={form.notes}
-                      maxLength={4000}
-                      onChange={(event) => update("notes", event.target.value)}
-                    />
-                  </Field>
                 </div>
-              </div>
+                {!rangeValid ? (
+                  <p className="text-xs text-destructive">{t.personnel_employment_range_invalid}</p>
+                ) : null}
+              </FormSection>
+              <FormSection title={t.personnel_user_link} hint={t.personnel_user_link_hint}>
+                <SelectField
+                  value={form.user_id}
+                  aria-label={t.personnel_user_link}
+                  onValueChange={(value) => update("user_id", value)}
+                  options={userOptions}
+                />
+              </FormSection>
+              <FormSection title={t.personnel_notes}>
+                <textarea
+                  id="personnel-notes"
+                  aria-label={t.personnel_notes}
+                  className={textareaClass}
+                  value={form.notes}
+                  maxLength={4000}
+                  onChange={(event) => update("notes", event.target.value)}
+                />
+              </FormSection>
             </AdminSheetScaffold>
           </form>
         ) : null}
       </SheetContent>
     </Sheet>
+  );
+}
+
+/** A titled soft card grouping related fields, as in the other admin sheets. */
+function FormSection({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+      <div className="space-y-1">
+        <AdminSectionTitle>{title}</AdminSectionTitle>
+        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      </div>
+      {children}
+    </section>
   );
 }
