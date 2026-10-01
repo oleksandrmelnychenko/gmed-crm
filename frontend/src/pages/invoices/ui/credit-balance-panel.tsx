@@ -19,7 +19,7 @@ import {
   type InvoiceCreditTransferTarget,
 } from "../model/overpayment";
 import { formatDate } from "../model/invoice-model";
-import { localizeInvoiceError } from "../model/invoice-errors";
+import { invoiceConfirmationField, localizeInvoiceError } from "../model/invoice-errors";
 
 function Field({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
   return (
@@ -94,13 +94,26 @@ export function CreditBalancePanel({
     setBusy(true);
     setError(null);
     try {
-      await createCreditTransfer(invoiceId, {
+      const payload = {
         request_id: requestId,
         target_invoice_id: target.invoice_id,
         amount_gross: amountGross,
         transferred_on: transferredOn,
         note: note.trim() || null,
-      });
+      };
+      try {
+        await createCreditTransfer(invoiceId, payload);
+      } catch (cause) {
+        // Credit moves between invoices of different recipients (e.g. the
+        // patient and a paying parent) only after billing confirms it.
+        if (
+          invoiceConfirmationField(cause) !== "confirm_recipient_mismatch" ||
+          !window.confirm(localizeInvoiceError(cause, lang, t.common_error))
+        ) {
+          throw cause;
+        }
+        await createCreditTransfer(invoiceId, { ...payload, confirm_recipient_mismatch: true });
+      }
       setRequestId(crypto.randomUUID());
       setNote("");
       onChanged();
