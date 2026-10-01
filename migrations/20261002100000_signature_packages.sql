@@ -99,12 +99,17 @@ CREATE INDEX IF NOT EXISTS document_signature_members_result
 -- The signed PDF is the legal original. Its bytes, storage key and hash may
 -- never change and the row may not be deleted. Metadata (classification,
 -- subject transfer on lead conversion, review promotion) stays editable.
+-- Test (DEMO) evidence has no legal value and stays erasable.
 CREATE OR REPLACE FUNCTION protect_signed_signature_documents()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF OLD.ursprung IN ('electronic_signature', 'electronic_signature_package') THEN
+    IF OLD.ursprung IN ('electronic_signature', 'electronic_signature_package')
+       AND NOT EXISTS (
+           SELECT 1 FROM document_signature_requests r
+           WHERE r.result_document_id = OLD.id AND r.test_mode
+       ) THEN
         IF TG_OP = 'DELETE' THEN
             RAISE EXCEPTION 'Signed signature documents cannot be deleted'
                 USING ERRCODE = 'P0001';

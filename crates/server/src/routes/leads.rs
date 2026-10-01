@@ -7542,6 +7542,17 @@ const LEAD_DOCUMENT_RETAINED_SQL: &str = r#"(
         AND lower(concat_ws(' ', category, art, generated_template_id, compliance_kind))
             ~ '(contract|vertrag|order|auftrag)'
     )
+    -- A live electronic signature result (signed PDF or bundle) is the legal
+    -- original of what was signed and is immutable (Art. 17 Abs. 3 lit. b, e
+    -- DSGVO); test (DEMO) evidence has no legal value and goes with the lead.
+    OR (
+        COALESCE(ursprung, '') IN ('electronic_signature', 'electronic_signature_package')
+        AND NOT EXISTS (
+            SELECT 1 FROM document_signature_requests signature_request
+            WHERE signature_request.result_document_id = documents.id
+              AND signature_request.test_mode
+        )
+    )
 )"#;
 
 /// Removes the documents a purged lead owns, and those of its prospect patient
