@@ -10,11 +10,20 @@ import {
   mergeOrdersIntoHead,
   orderGroupCandidates,
   searchOrders,
+  fetchPayerRelationChoices,
   setOrderPayer,
   ungroupOrder,
   type OrderGroup,
+  type PayerRelationChoice,
 } from "../data/order-api";
 import { formatCurrency } from "../model/order-model";
+import {
+  EMPTY_ORDER_PAYER,
+  isPlausiblePayerEmail,
+  orderPayerPayload,
+  orderPayerToForm,
+  type OrderPayerForm,
+} from "../model/order-payer";
 import type { OrderSummary } from "../model/types";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -101,20 +110,34 @@ export function OrderGroupPanel({
   const [candidates, setCandidates] = useState<OrderSummary[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [searching, setSearching] = useState(false);
-  const [payerName, setPayerName] = useState("");
-  const [payerEmail, setPayerEmail] = useState("");
-  const [payerPhone, setPayerPhone] = useState("");
-  const [payerRelationship, setPayerRelationship] = useState("");
-  const [payerNotes, setPayerNotes] = useState("");
+  const [payer, setPayer] = useState<OrderPayerForm>(EMPTY_ORDER_PAYER);
+  const [relationChoices, setRelationChoices] = useState<PayerRelationChoice[]>([]);
+  const updatePayer = (patch: Partial<OrderPayerForm>) =>
+    setPayer((current) => ({ ...current, ...patch }));
 
   function applyGroup(next: OrderGroup) {
     setGroup(next);
-    setPayerName(next.head.payer_contact_name ?? "");
-    setPayerEmail(next.head.payer_contact_email ?? "");
-    setPayerPhone(next.head.payer_contact_phone ?? "");
-    setPayerRelationship(next.head.payer_contact_relationship ?? "");
-    setPayerNotes(next.head.payer_notes ?? "");
+    setPayer(orderPayerToForm(next.head));
   }
+
+  const headPatientId = group?.head.patient_id ?? null;
+  useEffect(() => {
+    if (!headPatientId) {
+      setRelationChoices([]);
+      return;
+    }
+    let active = true;
+    fetchPayerRelationChoices(headPatientId)
+      .then((choices) => {
+        if (active) setRelationChoices(choices);
+      })
+      .catch(() => {
+        if (active) setRelationChoices([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [headPatientId]);
 
   useEffect(() => {
     let active = true;
@@ -363,55 +386,119 @@ export function OrderGroupPanel({
             <p className="text-xs font-medium text-foreground">
               {tx("Плательщик группы", "Zahler der Gruppe")}
             </p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {tx(
+                "Счета заказа и подзаказов семьи выставляются плательщику целиком: имя, e-mail и почтовый адрес для счёта.",
+                "Rechnungen des Auftrags und der Familien-Unteraufträge gehen an diesen Zahler – mit Name, E-Mail und Rechnungsanschrift.",
+              )}
+            </p>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <select
+                value={payer.relationId}
+                onChange={(event) => updatePayer({ relationId: event.target.value })}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                aria-label={tx("Родственник-плательщик", "Angehöriger als Zahler")}
+              >
+                <option value="">{tx("Родственник не выбран", "Kein Angehöriger gewählt")}</option>
+                {relationChoices.map((choice) => (
+                  <option key={choice.id} value={choice.id}>
+                    {choice.isDefaultPayer
+                      ? `${choice.name} · ${tx("платит по умолчанию", "zahlt standardmäßig")}`
+                      : choice.name}
+                  </option>
+                ))}
+              </select>
               <Input
-                value={payerName}
-                onChange={(event) => setPayerName(event.target.value)}
+                value={payer.patientPid}
+                onChange={(event) => updatePayer({ patientPid: event.target.value })}
+                placeholder={tx("Или пациент-плательщик (номер P-…)", "Oder Zahler ist Patient (Nr. P-…)")}
+                className="h-9"
+                disabled={Boolean(payer.relationId)}
+              />
+              <Input
+                value={payer.name}
+                onChange={(event) => updatePayer({ name: event.target.value })}
                 placeholder={tx("Имя плательщика (напр. отец)", "Name des Zahlers (z. B. Vater)")}
                 className="h-9"
               />
               <Input
-                value={payerRelationship}
-                onChange={(event) => setPayerRelationship(event.target.value)}
+                value={payer.relationship}
+                onChange={(event) => updatePayer({ relationship: event.target.value })}
                 placeholder={tx("Кем приходится", "Beziehung")}
                 className="h-9"
               />
               <Input
-                value={payerEmail}
-                onChange={(event) => setPayerEmail(event.target.value)}
-                placeholder={tx("E-mail", "E-Mail")}
+                value={payer.email}
+                onChange={(event) => updatePayer({ email: event.target.value })}
+                placeholder={tx("E-mail для счетов", "E-Mail für Rechnungen")}
                 className="h-9"
+                aria-invalid={!isPlausiblePayerEmail(payer.email)}
               />
               <Input
-                value={payerPhone}
-                onChange={(event) => setPayerPhone(event.target.value)}
+                value={payer.phone}
+                onChange={(event) => updatePayer({ phone: event.target.value })}
                 placeholder={tx("Телефон", "Telefon")}
                 className="h-9"
               />
               <Input
-                value={payerNotes}
-                onChange={(event) => setPayerNotes(event.target.value)}
+                value={payer.street}
+                onChange={(event) => updatePayer({ street: event.target.value })}
+                placeholder={tx("Улица и дом", "Straße und Hausnummer")}
+                className="h-9 sm:col-span-2"
+              />
+              <Input
+                value={payer.zip}
+                onChange={(event) => updatePayer({ zip: event.target.value })}
+                placeholder={tx("Индекс", "PLZ")}
+                className="h-9"
+              />
+              <Input
+                value={payer.city}
+                onChange={(event) => updatePayer({ city: event.target.value })}
+                placeholder={tx("Город", "Ort")}
+                className="h-9"
+              />
+              <Input
+                value={payer.country}
+                onChange={(event) => updatePayer({ country: event.target.value })}
+                placeholder={tx("Страна", "Land")}
+                className="h-9"
+              />
+              <select
+                value={payer.role}
+                onChange={(event) =>
+                  updatePayer({ role: event.target.value as OrderPayerForm["role"] })
+                }
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                aria-label={tx("Получатель счёта", "Rechnungsempfänger")}
+              >
+                <option value="">{tx("Проверить при выпуске счёта", "Bei Ausstellung prüfen")}</option>
+                <option value="contracting_party">
+                  {tx("Получатель счёта — сторона договора", "Rechnungsempfänger ist Vertragspartner")}
+                </option>
+                <option value="cost_bearer">
+                  {tx("Другой получатель счёта (сторонний плательщик)", "Abweichender Rechnungsempfänger (Kostenübernehmer)")}
+                </option>
+              </select>
+              <Input
+                value={payer.notes}
+                onChange={(event) => updatePayer({ notes: event.target.value })}
                 placeholder={tx("Заметки", "Notizen")}
                 className="h-9 sm:col-span-2"
               />
             </div>
+            {!isPlausiblePayerEmail(payer.email) ? (
+              <p className="mt-1 text-xs text-rose-600">
+                {tx("Проверьте e-mail плательщика", "E-Mail-Adresse des Zahlers prüfen")}
+              </p>
+            ) : null}
             <Button
               type="button"
               size="sm"
               className="mt-2 rounded-lg"
-              disabled={busy}
+              disabled={busy || !isPlausiblePayerEmail(payer.email)}
               onClick={() =>
-                void run(
-                  () =>
-                    setOrderPayer(group.head.id, {
-                      payer_contact_name: payerName.trim() || null,
-                      payer_contact_email: payerEmail.trim() || null,
-                      payer_contact_phone: payerPhone.trim() || null,
-                      payer_contact_relationship: payerRelationship.trim() || null,
-                      payer_notes: payerNotes.trim() || null,
-                    }),
-                  true,
-                )
+                void run(() => setOrderPayer(group.head.id, orderPayerPayload(payer)), true)
               }
             >
               {tx("Сохранить плательщика", "Zahler speichern")}

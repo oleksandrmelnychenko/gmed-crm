@@ -91,13 +91,113 @@ const EXACT: Record<string, Pair> = {
     "Stornierte Rechnungen können nicht reaktiviert werden.",
     "Отменённый счёт нельзя вернуть в работу.",
   ],
+  "payer name is too long (max 200)": [
+    "Der Name des Einzahlers ist zu lang (max. 200 Zeichen).",
+    "Имя плательщика слишком длинное (не более 200 символов).",
+  ],
   "insufficient permissions": [
     "Keine Berechtigung für diese Aktion.",
     "Недостаточно прав для этого действия.",
   ],
 };
 
+/** Machine-readable error codes of the payer and release checks. */
+const CODES: Record<string, Pair> = {
+  recipient_address_incomplete: [
+    "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land).",
+    "Для выпуска счёта нужны имя и полный адрес получателя счёта: улица, индекс, город и страна.",
+  ],
+  minor_patient_recipient: [
+    "Die Rechnung ist an einen minderjährigen Patienten adressiert. Bitte einen Zahler (z. B. einen Elternteil) hinterlegen oder die Ausstellung bestätigen.",
+    "Счёт адресован несовершеннолетнему пациенту. Укажите плательщика (например, родителя) или подтвердите выпуск.",
+  ],
+  recipient_not_contracting_party: [
+    "Der Rechnungsempfänger ist nicht der Vertragspartner. Zahler als abweichenden Rechnungsempfänger (Kostenübernehmer) kennzeichnen oder die Ausstellung bestätigen.",
+    "Получатель счёта не является стороной договора. Отметьте плательщика как стороннего получателя счёта (Kostenübernehmer) или подтвердите выпуск.",
+  ],
+  advance_recipient_mismatch: [
+    "Anzahlungsrechnungen dieses Auftrags gingen an einen anderen Rechnungsempfänger. Verrechnet werden nur Anzahlungen desselben Empfängers – bitte bestätigen.",
+    "Авансовые счета по этому заказу выставлены другому получателю. Зачитываются только авансы того же получателя — подтвердите выпуск.",
+  ],
+  credit_transfer_recipient_mismatch: [
+    "Die Rechnungen haben unterschiedliche Rechnungsempfänger. Guthaben nur nach Bestätigung umbuchen.",
+    "У счетов разные получатели. Перенести переплату можно только после подтверждения.",
+  ],
+  payer_email_invalid: [
+    "Die E-Mail-Adresse des Zahlers ist ungültig.",
+    "Некорректный e-mail плательщика.",
+  ],
+  payer_single_record: [
+    "Zahler ist entweder ein Angehöriger oder ein anderer Patient, nicht beides.",
+    "Плательщик — либо родственник, либо другой пациент, но не оба сразу.",
+  ],
+  payer_is_patient: [
+    "Der Patient kann nicht sein eigener Zahler sein. Zahler leeren, dann erhält der Patient die Rechnung.",
+    "Пациент не может быть собственным плательщиком. Очистите плательщика — тогда счёт получит пациент.",
+  ],
+  payer_relation_mismatch: [
+    "Dieser Angehörige gehört nicht zum Patienten.",
+    "Этот родственник не относится к пациенту.",
+  ],
+  payer_patient_not_found: [
+    "Kein Patient mit dieser Patientennummer.",
+    "Пациент с таким номером не найден.",
+  ],
+  payer_role_invalid: ["Ungültige Zahlerrolle.", "Недопустимая роль плательщика."],
+  payer_field_too_long: [
+    "Ein Feld des Zahlers ist zu lang.",
+    "Одно из полей плательщика слишком длинное.",
+  ],
+};
+
+/** Address parts named in `recipient_address_incomplete.missing`. */
+const ADDRESS_PARTS: Record<string, Pair> = {
+  name: ["Name", "имя"],
+  street: ["Straße", "улица"],
+  zip: ["PLZ", "индекс"],
+  city: ["Ort", "город"],
+  country: ["Land", "страна"],
+};
+
 const RELOAD_HINT = /reload( the [a-z ]+)? and try again\.?$/i;
+
+function errorBody(error: unknown): Record<string, unknown> | null {
+  if (error && typeof error === "object" && "body" in error) {
+    const body = (error as { body?: unknown }).body;
+    if (body && typeof body === "object") return body as Record<string, unknown>;
+  }
+  return null;
+}
+
+function errorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+  const code = errorBody(error)?.error;
+  return typeof code === "string" ? code : "";
+}
+
+/** Text of a release check shown on a draft (`release_checks.warnings`). */
+export function invoiceReleaseWarningText(
+  warning: { code: string; missing?: string[] },
+  lang: string,
+) {
+  return localizeInvoiceError(
+    { code: warning.code, body: { error: warning.code, missing: warning.missing } },
+    lang,
+    warning.code,
+  );
+}
+
+/**
+ * The flag a warning answer asks to be confirmed with (e.g.
+ * `confirm_minor_recipient`), or null for errors that cannot be confirmed.
+ */
+export function invoiceConfirmationField(error: unknown): string | null {
+  const field = errorBody(error)?.confirm_field;
+  return typeof field === "string" && /^confirm_[a-z_]+$/.test(field) ? field : null;
+}
 
 function errorMessage(error: unknown) {
   if (error instanceof Error) return error.message.trim();
@@ -109,6 +209,21 @@ function errorMessage(error: unknown) {
 }
 
 export function localizeInvoiceError(error: unknown, lang: string, fallback: string) {
+  const coded = CODES[errorCode(error)];
+  if (coded) {
+    const text = lang === "de" ? coded[0] : coded[1];
+    const missing = errorBody(error)?.missing;
+    if (Array.isArray(missing) && missing.length > 0) {
+      const parts = missing
+        .map((part) => ADDRESS_PARTS[String(part)])
+        .filter((pair): pair is Pair => Boolean(pair))
+        .map((pair) => (lang === "de" ? pair[0] : pair[1]));
+      if (parts.length > 0) {
+        return `${text} ${lang === "de" ? "Es fehlt" : "Не хватает"}: ${parts.join(", ")}.`;
+      }
+    }
+    return text;
+  }
   const message = errorMessage(error);
   if (!message) return fallback;
   const exact = EXACT[message.toLowerCase()];

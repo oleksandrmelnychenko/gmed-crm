@@ -97,6 +97,14 @@ export function PatientRelationsTab({
                 {l("patients_emergency")}
               </Badge>
             ) : null}
+            {relation.is_default_payer ? (
+              <Badge
+                variant="outline"
+                className="rounded-full border-emerald-200 bg-emerald-50 font-mono text-[10px] text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-200"
+              >
+                {lang === "de" ? "Zahler" : "Плательщик"}
+              </Badge>
+            ) : null}
           </div>
         ),
       },

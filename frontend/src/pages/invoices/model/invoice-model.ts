@@ -211,6 +211,7 @@ export function invoicesPermissions(actor?: Actor): InvoicesPermissions {
     canCreate: hasCapability(actor, "invoices.create"),
     canManage: hasCapability(actor, "invoices.finance"),
     canAccounting: hasCapability(actor, "accounting.view"),
+    canEditPayer: hasCapability(actor, "invoices.payer"),
   };
 }
 
@@ -467,6 +468,8 @@ export function invoiceToVisibilityForm(invoice: InvoiceItem): VisibilityForm {
 export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
   return {
     payerPatientRelationId: invoice.payer?.patient_relation_id ?? "",
+    payerPatientPid: invoice.payer?.patient_pid ?? "",
+    payerRole: invoice.payer?.role ?? "",
     contactName: invoice.payer?.contact_name ?? "",
     contactEmail: invoice.payer?.contact_email ?? "",
     contactPhone: invoice.payer?.contact_phone ?? "",
@@ -479,11 +482,20 @@ export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
   };
 }
 
-/** Body of POST /invoices/{id}/payer; blank fields clear the stored value. */
+/**
+ * Body of POST /invoices/{id}/payer (and /orders/{id}/payer); blank fields
+ * clear the stored value. A payer is a relative or another patient record
+ * (by patient number), never both: the relative wins when both are filled.
+ */
 export function payerFormToPayload(form: PayerForm) {
   const text = (value: string) => value.trim() || null;
+  const relationId = form.payerPatientRelationId || null;
+  const payerPid = relationId ? null : text(form.payerPatientPid);
+  const hasPayer = Boolean(relationId || payerPid || text(form.contactName));
   return {
-    payer_patient_relation_id: form.payerPatientRelationId || null,
+    payer_patient_relation_id: relationId,
+    payer_patient_pid: payerPid,
+    payer_role: hasPayer ? form.payerRole || null : null,
     payer_contact_name: text(form.contactName),
     payer_contact_email: text(form.contactEmail),
     payer_contact_phone: text(form.contactPhone),

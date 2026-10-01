@@ -1,4 +1,5 @@
 import { apiFetch, downloadApiFile } from "@/lib/api";
+import { getLang } from "@/lib/i18n";
 import type { RelationItem } from "../model/detail-tab-types";
 
 export const PATIENT_RELATIONS_UPDATED_EVENT = "gmed:patient-relations-updated";
@@ -12,15 +13,19 @@ export async function upsertPatientRelation(
   payload: Record<string, unknown>,
   relationId?: string | null,
 ): Promise<RelationItem> {
-  return apiFetch<RelationItem>(
-    relationId
-      ? `/patients/${patientId}/relations/${relationId}/update`
-      : `/patients/${patientId}/relations`,
-    {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }
-  );
+  try {
+    return await apiFetch<RelationItem>(
+      relationId
+        ? `/patients/${patientId}/relations/${relationId}/update`
+        : `/patients/${patientId}/relations`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+  } catch (error) {
+    throw relationMutationError(error);
+  }
 }
 
 export async function uploadPatientDocument(formData: FormData) {
@@ -46,10 +51,31 @@ export async function createPatientWorkflowChecklistItem(
   });
 }
 
+/**
+ * Released invoices are addressed to this relative (§ 14 UStG, GoBD): the
+ * relation can be edited but not deleted or linked to another person.
+ */
+export function relationMutationError(error: unknown): unknown {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  if (code !== "relation_used_by_released_invoice") return error;
+  return new Error(
+    getLang() === "de"
+      ? "An diese Person sind ausgestellte Rechnungen adressiert. Sie kann nicht gelöscht oder mit einer anderen Person verknüpft werden."
+      : "На этого человека выставлены выпущенные счета: его нельзя удалить или связать с другим пациентом.",
+  );
+}
+
 export async function deletePatientRelation(patientId: string, relationId: string) {
-  return apiFetch(`/patients/${patientId}/relations/${relationId}/delete`, {
-    method: "POST",
-  });
+  try {
+    return await apiFetch(`/patients/${patientId}/relations/${relationId}/delete`, {
+      method: "POST",
+    });
+  } catch (error) {
+    throw relationMutationError(error);
+  }
 }
 
 export type CreatedFrameworkContract = {

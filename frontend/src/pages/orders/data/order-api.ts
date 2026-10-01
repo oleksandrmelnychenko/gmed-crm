@@ -508,7 +508,36 @@ export type OrderGroupHead = {
   payer_contact_phone: string | null;
   payer_contact_relationship: string | null;
   payer_notes: string | null;
+  payer_patient_id: string | null;
+  payer_patient_name: string | null;
+  payer_patient_pid: string | null;
+  payer_address_street: string | null;
+  payer_address_zip: string | null;
+  payer_address_city: string | null;
+  payer_address_country: string | null;
+  payer_role: string | null;
 };
+
+/** A relative of the head patient that can pay for the order. */
+export type PayerRelationChoice = {
+  id: string;
+  name: string;
+  relationType: string;
+  isDefaultPayer: boolean;
+};
+
+export async function fetchPayerRelationChoices(patientId: string): Promise<PayerRelationChoice[]> {
+  const rows = await apiFetch<unknown[]>(`/patients/${patientId}/relations`);
+  return (Array.isArray(rows) ? rows : []).map((entry) => {
+    const row = asRecord(entry);
+    return {
+      id: stringValue(row.id),
+      name: stringValue(row.related_display_name) || stringValue(row.related_name),
+      relationType: stringValue(row.relation_type),
+      isDefaultPayer: row.is_default_payer === true,
+    };
+  });
+}
 
 export type OrderGroupSub = {
   id: string;
@@ -544,6 +573,14 @@ export function normalizeOrderGroup(value: unknown): OrderGroup {
       payer_contact_phone: nullableStringValue(head.payer_contact_phone),
       payer_contact_relationship: nullableStringValue(head.payer_contact_relationship),
       payer_notes: nullableStringValue(head.payer_notes),
+      payer_patient_id: nullableStringValue(head.payer_patient_id),
+      payer_patient_name: nullableStringValue(head.payer_patient_name),
+      payer_patient_pid: nullableStringValue(head.payer_patient_pid),
+      payer_address_street: nullableStringValue(head.payer_address_street),
+      payer_address_zip: nullableStringValue(head.payer_address_zip),
+      payer_address_city: nullableStringValue(head.payer_address_city),
+      payer_address_country: nullableStringValue(head.payer_address_country),
+      payer_role: nullableStringValue(head.payer_role),
     },
     subs: subs.map((entry) => {
       const sub = asRecord(entry);

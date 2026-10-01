@@ -15,6 +15,14 @@ export type RelationFormState = {
   isEmergencyContact: boolean;
   phone: string;
   notes: string;
+  /** Where invoices to this relative go (Rechnungsanschrift). */
+  email: string;
+  addressStreet: string;
+  addressZip: string;
+  addressCity: string;
+  addressCountry: string;
+  /** Receives the patient's invoices unless an order names another payer. */
+  isDefaultPayer: boolean;
 };
 
 export type DocumentUploadFormState = {
@@ -69,6 +77,12 @@ export function blankRelationForm(): RelationFormState {
     isEmergencyContact: false,
     phone: "",
     notes: "",
+    email: "",
+    addressStreet: "",
+    addressZip: "",
+    addressCity: "",
+    addressCountry: "",
+    isDefaultPayer: false,
   };
 }
 
@@ -80,6 +94,37 @@ export function relationToForm(relation: RelationItem): RelationFormState {
     isEmergencyContact: relation.is_emergency_contact,
     phone: relation.phone ?? "",
     notes: relation.notes ?? "",
+    email: relation.email ?? "",
+    addressStreet: relation.address_street ?? "",
+    addressZip: relation.address_zip ?? "",
+    addressCity: relation.address_city ?? "",
+    addressCountry: relation.address_country ?? "",
+    isDefaultPayer: relation.is_default_payer ?? false,
+  };
+}
+
+/**
+ * Relation payload for create/update. The billing fields are always sent
+ * (blank clears them) so the server never keeps stale invoice addresses.
+ */
+export function relationFormToPayload(
+  form: RelationFormState,
+  relatedName: string,
+): Record<string, unknown> {
+  const optional = (value: string) => value.trim() || null;
+  return {
+    related_patient_id: form.relatedPatientId || undefined,
+    related_name: relatedName.trim(),
+    relation_type: form.relationType,
+    is_emergency_contact: form.isEmergencyContact,
+    phone: optional(form.phone),
+    notes: optional(form.notes),
+    email: form.email.trim(),
+    address_street: form.addressStreet.trim(),
+    address_zip: form.addressZip.trim(),
+    address_city: form.addressCity.trim(),
+    address_country: form.addressCountry.trim(),
+    is_default_payer: form.isDefaultPayer,
   };
 }
 
