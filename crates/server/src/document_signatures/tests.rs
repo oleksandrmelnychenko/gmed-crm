@@ -5,6 +5,7 @@ use axum::{
     http::{Method, Request},
 };
 use gmed_domain::role::Role;
+use provider::normalize_signers;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::sync::{
     Arc, Mutex,
@@ -773,10 +774,12 @@ async fn postgres_end_to_end_archival_retry_acl_versions_and_demo() {
                 .oneshot(delete_file_request(source_id))
                 .await
                 .unwrap();
+            // A document that was sent to the provider is delivery evidence
+            // and stays, even when nobody signed it.
             assert_eq!(
                 deleted.status(),
-                StatusCode::OK,
-                "inactive source without signed evidence may be deleted"
+                StatusCode::CONFLICT,
+                "a document sent for signature is never deleted"
             );
             continue;
         }
@@ -1315,7 +1318,7 @@ async fn assert_signature_file_protected(app: &Router, pool: &sqlx::PgPool, id: 
     assert_eq!(deleted.status(), StatusCode::CONFLICT);
     let body: Value =
         serde_json::from_slice(&to_bytes(deleted.into_body(), 10000).await.unwrap()).unwrap();
-    assert_eq!(body["error"], "document_signature_file_protected");
+    assert_eq!(body["error"], "document_delivery_protected");
     let after = sqlx::query("SELECT id,storage_key,file_deleted_at FROM documents WHERE id=$1")
         .bind(id)
         .fetch_one(pool)
