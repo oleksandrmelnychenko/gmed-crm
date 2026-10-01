@@ -329,3 +329,25 @@ def test_wrapped_dose_and_form_still_continue_the_previous_drug() -> None:
         if item.target == "medication"
     ]
     assert values == ["Pantoprazol 40 mg Tabletten 1-0-0", "Ramipril 5 mg 1-0-0"]
+
+
+def test_radiology_examinations_carry_the_study_date() -> None:
+    examinations = [item for item in _prostate_letter_candidates().candidates if item.target == "examination"]
+
+    assert {item.normalized.get("performed_on") for item in examinations} == {"2026-03-02"}
+
+
+def test_recommendation_drops_requests_to_the_referring_doctor() -> None:
+    recommendation = next(
+        item
+        for item in parse_clinical_text(
+            "Befund:\nProstata vergrößert.\n\n"
+            "Procedere: Gezielte Stanzbiopsie empfohlen. Im Falle einer Stanzbiopsie\n"
+            "Histologiebefund bitte per Fax an 089 / 000000-1 oder per Mail an\n. Vielen Dank.\n"
+        ).candidates
+        if item.target == "recommendation"
+    )
+
+    assert recommendation.value == "Gezielte Stanzbiopsie empfohlen."
+    assert recommendation.normalized["description"] == "Gezielte Stanzbiopsie empfohlen."
+    assert "per Fax" in recommendation.source.text

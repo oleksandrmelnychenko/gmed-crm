@@ -256,7 +256,17 @@ def parse_clinical_text(text: str) -> ParseDraft:
                     and (study := _radiology_study_title(layout))
                 ):
                     candidate.normalized["title"] = f"{study} — {section.heading}"
-                candidates.append(candidate)
+                if (
+                    candidate.target == "examination"
+                    and document_type == "radiology_report"
+                    and role in {"finding", "impression"}
+                    and (study_date := _radiology_study_date(layout))
+                ):
+                    candidate.normalized["performed_on"] = study_date
+                if candidate.target == "recommendation":
+                    _drop_referrer_courtesy(candidate)
+                if candidate.value:
+                    candidates.append(candidate)
             if document_type == "radiology_report" and role == "impression":
                 candidates.extend(_radiology_diagnosis_candidates(section))
 
@@ -5128,6 +5138,52 @@ def _radiology_study_title(text: str) -> str | None:
             study = re.split(r"\s*[(:;]|,\s", study, maxsplit=1)[0].strip(" .")
             return study if 6 <= len(study) <= 120 else None
     return None
+
+
+RADIOLOGY_STUDY_DATE_RES = (
+    re.compile(r"\bS\s*_\s*DATE\s*(?P<date>\d{1,2}\.\d{1,2}\.\d{4})(?!\d)"),
+    re.compile(
+        r"\bam\s+(?P<date>\d{1,2}\.\d{1,2}\.\d{4})(?!\d)\s+(?:\w+\s+){0,3}?"
+        r"(?:nachfolgende|folgende)\s+Untersuchung",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _radiology_study_date(text: str) -> str | None:
+    """Date of the study ("bei dem wir am 02.03.2026 nachfolgende Untersuchungen ...")."""
+
+    compact = " ".join(text.split())
+    dates = {
+        normalized
+        for pattern in RADIOLOGY_STUDY_DATE_RES
+        for match in pattern.finditer(compact)
+        if (normalized := _normalize_german_date(match.group("date")))
+    }
+    return dates.pop() if len(dates) == 1 else None
+
+
+REFERRER_COURTESY_RE = re.compile(
+    r"\bbitte\s+per\s+(?:Fax|E-?Mail|Mail|Post)\b|^\W*Vielen\s+Dank\W*$|^\W*Mit\s+Dank\W*$",
+    re.IGNORECASE,
+)
+
+
+def _drop_referrer_courtesy(candidate: ClinicalCandidate) -> None:
+    """Remove requests to the referring doctor (fax/mail contact, thanks).
+
+    They address the colleague, not the patient's care, and carry the
+    practice's contact details into the patient record.
+    """
+
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(candidate.value.split()))
+    kept = [sentence for sentence in sentences if not REFERRER_COURTESY_RE.search(sentence)]
+    if len(kept) == len(sentences):
+        return
+    value = " ".join(kept).strip()
+    candidate.value = value
+    if "description" in candidate.normalized:
+        candidate.normalized["description"] = value
 
 
 SUSPICIOUS_THRESHOLD_RE = re.compile(
