@@ -2823,6 +2823,301 @@ async fn deleted_lead_is_read_only_and_leaves_the_active_list() {
     assert!(listed(&deleted), "the deleted filter finds it: {deleted}");
 }
 
+/// A document row with a stored file, as the upload would leave it.
+async fn insert_stored_document(
+    app: &TestApp,
+    lead_id: Option<Uuid>,
+    patient_id: Option<Uuid>,
+    name: &str,
+) -> (Uuid, std::path::PathBuf) {
+    let document_id = Uuid::new_v4();
+    let storage_key = format!("{document_id}_{name}.pdf");
+    std::fs::create_dir_all("uploads/documents").unwrap();
+    let path = std::path::Path::new("uploads/documents").join(&storage_key);
+    std::fs::write(&path, b"%PDF-1.4 synthetic").unwrap();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, lead_id, patient_id, auto_name, original_filename, art, category,
+                status, visibility, is_medical, mime_type, file_size, storage_key,
+                extracted_text, version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+                $1, $2, $3, $4, $5, 'medical_report', 'medical_report',
+                'active', 'internal', true, 'application/pdf', 18, $6,
+                'Synthetic finding text', $1, 1, $7
+           )"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(format!("Befund {name}"))
+    .bind(format!("{name}.pdf"))
+    .bind(&storage_key)
+    .bind(app.patient_manager_id)
+    .execute(&app.suite.pool)
+    .await
+    .unwrap();
+    (document_id, path)
+}
+
+async fn insert_unqualified_lead(app: &TestApp, tag: &str, age_days: i32) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, country, primary_language,
+                date_of_birth, legal_sex, qualification_status, intake_source,
+                intake_model, created_by, created_at, wizard_state
+           ) VALUES (
+                'Retention', $1, $2, '+4915100000000', 'DE', 'de',
+                DATE '1980-05-05', 'female', 'in_progress', 'staff_wizard',
+                'patient_first', $3, now() - make_interval(days => $4),
+                '{"referrer": "Dr. Beispiel", "passport_expiry": "2030-01-01"}'::jsonb
+           ) RETURNING id"#,
+    )
+    .bind(format!("Lead {tag}"))
+    .bind(format!("retention-{tag}@example.com"))
+    .bind(app.patient_manager_id)
+    .bind(age_days)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let ceo = app.auth_header("ceo");
+    let tag = Uuid::new_v4().simple().to_string();
+    // The rule started long ago, so only the age of a lead decides.
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+
+    // Due: a patient-first lead with a prospect, a clinical record, an open
+    // preparation order and documents on the lead and on the prospect.
+    let due = insert_unqualified_lead(&app, &format!("{tag}-due"), 15).await;
+    let (status, prospect) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{due}/prospect"),
+        &pm,
+        Some(json!({ "hauptanfragegrund": "Temporary concern" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{prospect}");
+    let prospect_id = Uuid::parse_str(prospect["patient_id"].as_str().unwrap()).unwrap();
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{prospect_id}/diagnoses"),
+        &ceo,
+        Some(json!({ "items": [{ "kind": "main", "label": "Temporary diagnosis" }] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (
+                order_number, source_lead_id, patient_id, needs_description,
+                phase, intake_state, created_by
+           ) VALUES ($1, $2, $3, 'Prepare the visit', 'discovery', 'draft', $4)
+           ON CONFLICT(source_lead_id) WHERE source_lead_id IS NOT NULL DO UPDATE
+             SET needs_description = EXCLUDED.needs_description
+           RETURNING id"#,
+    )
+    .bind(format!("A-RET-{tag}"))
+    .bind(due)
+    .bind(prospect_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let (lead_document, lead_file) =
+        insert_stored_document(&app, Some(due), None, &format!("lead-{tag}")).await;
+    let (prospect_document, prospect_file) =
+        insert_stored_document(&app, None, Some(prospect_id), &format!("prospect-{tag}")).await;
+
+    // Not due: signed consent, a qualified lead, a young lead, and one whose
+    // deadline is close.
+    let signed = insert_unqualified_lead(&app, &format!("{tag}-signed"), 15).await;
+    let qualified = insert_unqualified_lead(&app, &format!("{tag}-qualified"), 15).await;
+    let young = insert_unqualified_lead(&app, &format!("{tag}-young"), 2).await;
+    let soon = insert_unqualified_lead(&app, &format!("{tag}-soon"), 12).await;
+    sqlx::query("UPDATE leads SET compliance_status = 'signed' WHERE id = $1")
+        .bind(signed)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE leads SET qualification_status = 'qualified' WHERE id = $1")
+        .bind(qualified)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // Due, but an order of the lead has an invoice: left for a manual decision.
+    let invoiced = insert_unqualified_lead(&app, &format!("{tag}-invoiced"), 15).await;
+    let invoiced_order: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, source_lead_id, needs_description, created_by)
+           VALUES ($1, $2, 'Invoiced preparation', $3)
+           ON CONFLICT(source_lead_id) WHERE source_lead_id IS NOT NULL DO UPDATE
+             SET needs_description = EXCLUDED.needs_description
+           RETURNING id"#,
+    )
+    .bind(format!("A-RET-INV-{tag}"))
+    .bind(invoiced)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    seed_supplier_invoice(&app, invoiced_order, &format!("ret-{tag}")).await;
+
+    // The API shows the deadline: creation plus the window.
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{signed}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["retention_deadline_at"].is_null(), "{detail}");
+
+    let all = [due, signed, qualified, young, soon, invoiced];
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&all),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (report.purged, report.blocked, report.warned, report.errors),
+        (1, 1, 1, 0),
+        "{report:?}"
+    );
+
+    // The due lead is an anonymous tombstone.
+    let (status, first_name, wizard_state, email): (String, String, Value, Option<String>) =
+        sqlx::query_as(
+            "SELECT qualification_status, first_name, wizard_state, email FROM leads WHERE id = $1",
+        )
+        .bind(due)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        (status.as_str(), first_name.as_str()),
+        ("deleted", "Deleted")
+    );
+    assert_eq!(wizard_state, json!({}));
+    assert_eq!(email, None);
+    // Its documents, their files, the prospect and the clinical record are gone.
+    let documents_left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM documents WHERE id = ANY($1)")
+            .bind(vec![lead_document, prospect_document])
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(documents_left, 0);
+    assert!(!lead_file.exists(), "the lead's file is removed from disk");
+    assert!(
+        !prospect_file.exists(),
+        "the prospect's file is removed from disk"
+    );
+    let prospect_left: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(prospect_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(!prospect_left, "the prospect patient is deleted");
+    // The preparation order is cancelled and stays with the tombstone.
+    let (order_status, reason, order_patient): (String, Option<String>, Option<Uuid>) =
+        sqlx::query_as("SELECT status, cancellation_reason, patient_id FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(order_status, "cancelled");
+    assert_eq!(reason.as_deref(), Some("lead_deleted"));
+    assert_eq!(order_patient, None);
+    // Nothing names the lead any more, and the deletion is on record.
+    let notifications: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications WHERE entity_type = 'lead' AND entity_id = $1",
+    )
+    .bind(due)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(notifications, 0);
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE action = 'auto_purge_lead' AND entity_id = $1
+             AND context->>'reason' = 'unqualified_lead_retention'"#,
+    )
+    .bind(due)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // The others are untouched.
+    let statuses: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT id, qualification_status FROM leads WHERE id = ANY($1)")
+            .bind(vec![signed, qualified, young, soon, invoiced])
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    for (lead_id, status) in statuses {
+        assert_ne!(status, "deleted", "lead {lead_id} must stay");
+    }
+    // The close deadline was announced once, without the person's name.
+    let warnings: Vec<(String, Option<String>)> = sqlx::query_as(
+        r#"SELECT title, body FROM user_notifications
+           WHERE kind = 'lead_retention_warning' AND entity_id = $1"#,
+    )
+    .bind(soon)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(!warnings.is_empty(), "the creator is warned");
+    assert!(
+        warnings.iter().all(|(title, body)| !format!(
+            "{title} {}",
+            body.clone().unwrap_or_default()
+        )
+        .contains("Retention")),
+        "{warnings:?}"
+    );
+    let blocked: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE kind = 'lead_retention_blocked' AND entity_id = $1"#,
+    )
+    .bind(invoiced)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        blocked > 0,
+        "the blocked lead is reported for a manual decision"
+    );
+
+    // A second sweep neither warns nor reports again.
+    let again = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&all),
+    )
+    .await
+    .unwrap();
+    assert_eq!((again.purged, again.warned), (0, 0), "{again:?}");
+
+    // The young lead shows its deadline in the API.
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{young}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["retention_deadline_at"].is_string(), "{detail}");
+}
+
 #[tokio::test]
 async fn staff_can_record_whether_the_client_has_medical_documents() {
     let Some(app) = test_app().await else {

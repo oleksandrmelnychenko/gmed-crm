@@ -376,6 +376,24 @@ fn spawn_lead_purger(state: state::AppState) {
                     tracing::error!(error = %e, "Lead auto-purge sweep failed");
                 }
             }
+            // Leads that did not qualify within their window and have no
+            // signed consent (docs/engineering/03_lead-retention-policy_ua.md).
+            match gmed_server::routes::leads::auto_purge_unqualified_leads(&state).await {
+                Ok(report) if report.scanned > 0 || report.warned > 0 => {
+                    tracing::info!(
+                        scanned = report.scanned,
+                        purged = report.purged,
+                        blocked = report.blocked,
+                        warned = report.warned,
+                        errors = report.errors,
+                        "Unqualified lead sweep complete"
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(error = %e, "Unqualified lead sweep failed");
+                }
+            }
         }
     });
 }

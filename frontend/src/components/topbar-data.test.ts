@@ -414,3 +414,41 @@ describe("personnel file notifications", () => {
     );
   });
 });
+
+describe("lead retention notifications", () => {
+  const retention = (kind: string, title: string, body: string) =>
+    ({
+      id: kind,
+      kind,
+      title,
+      body,
+      entity_type: "lead",
+      entity_id: "lead-1",
+      is_read: false,
+      created_at: "2026-10-01T06:00:00Z",
+    }) as Notification;
+
+  it("announces the automatic deletion with the date in the app format", () => {
+    const warning = retention(
+      "lead_retention_warning",
+      "Lead will be deleted automatically",
+      "Not qualified and no signed consent; deletion on 2026-10-15.",
+    );
+    expect(localizedNotificationCopy(warning, "ru")).toEqual({
+      title: "Лид будет удалён автоматически",
+      body: "Не квалифицирован и нет подписанного согласия; удаление 15.10.2026. Все документы удаляются вместе с ним.",
+    });
+    expect(localizedNotificationCopy(warning, "de").body).toContain("Löschung am 15.10.2026");
+    expect(notificationHrefForRole(warning, "ceo")).toBe("/leads?lead=lead-1");
+  });
+
+  it("asks for a decision when a due lead cannot be deleted automatically", () => {
+    const blocked = retention(
+      "lead_retention_blocked",
+      "Lead is due for deletion and needs a decision",
+      "It has an order with an invoice or an order that could not be withdrawn.",
+    );
+    expect(localizedNotificationCopy(blocked, "ru").title).toBe("Срок хранения лида истёк — нужно решение");
+    expect(localizedNotificationCopy(blocked, "de").title).toBe("Lead ist zur Löschung fällig – Entscheidung nötig");
+  });
+});

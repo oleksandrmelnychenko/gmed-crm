@@ -17,6 +17,33 @@ export function daysInStatusLabel(days: number, lang: string): string {
   return lang === "de" ? `${days} T.` : `${days} дн`;
 }
 
+/**
+ * Whole days until the unqualified-lead rule deletes the lead (0 = today or
+ * overdue); null while the rule does not apply to it.
+ */
+export function daysUntilRetentionDeadline(
+  deadline?: string | null,
+  now: Date = new Date(),
+): number | null {
+  if (!deadline) return null;
+  const due = new Date(deadline);
+  if (Number.isNaN(due.getTime())) return null;
+  return Math.max(0, Math.ceil((due.getTime() - now.getTime()) / 86_400_000));
+}
+
+/** "Удаление через N дн" / "Löschung in N T." for the retention countdown. */
+export function retentionCountdownLabel(days: number, lang: string): string {
+  if (days <= 0) return lang === "de" ? "Löschung heute" : "Удаление сегодня";
+  return lang === "de" ? `Löschung in ${days} T.` : `Удаление через ${days} дн`;
+}
+
+/** What the countdown means, for a tooltip or a banner. */
+export function retentionCountdownHint(lang: string): string {
+  return lang === "de"
+    ? "Ein Lead, der nicht qualifiziert ist und keine unterschriebene DSGVO-Einwilligung hat, wird mit allen Dokumenten automatisch gelöscht."
+    : "Лид, который не квалифицирован и не имеет подписанного согласия DSGVO, автоматически удаляется вместе со всеми документами.";
+}
+
 export function leadStatusTone(status: string): StatusTone {
   switch (status) {
     case "new":

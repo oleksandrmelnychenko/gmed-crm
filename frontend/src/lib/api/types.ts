@@ -37,6 +37,8 @@ export interface Lead {
   qualification_status: string;
   /** ISO timestamp of the last status change — drives the "days in status" indicator. */
   status_changed_at?: string | null;
+  /** When the unqualified-lead rule deletes this lead; null while it does not apply. */
+  retention_deadline_at?: string | null;
   compliance_status?: string;
   /**
    * Mirrors the backend `LeadConversionReadiness::conversion_ready` flag on
