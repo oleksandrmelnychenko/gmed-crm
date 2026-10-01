@@ -7,6 +7,7 @@ import {
   AnamneseSection,
   copyNarrativeVersion,
   editNarrativeVersion,
+  narrativeSpecializationChecklist,
   selectedNarrativeSpecializations,
 } from "./anamnese-section";
 
@@ -105,6 +106,38 @@ describe("AnamneseSection", () => {
       assessment_text: null,
     });
     expect(selectedNarrativeSpecializations([], [cardiologyOption])[0].narrative_text).toBeNull();
+  });
+
+  it("opens a template with yes/no questions as a checklist instead of text", () => {
+    const template = "CVRF (ja/nein)\n- Nikotin (ja/nein + if ja: Pack Years (Number))";
+    const option = {
+      id: cardiology.id,
+      code: cardiology.code,
+      name_en: cardiology.name_en,
+      name_de: cardiology.name_de,
+      name_ru: cardiology.name_ru,
+      is_active: true,
+      sort_order: 1,
+      anamnesis_template: template,
+    };
+
+    const [added] = selectedNarrativeSpecializations([], [option]);
+    expect(added.narrative_text).toBeNull();
+    expect(added.checklist).toEqual({ version: 1, template, answers: {}, notes: "" });
+    expect(narrativeSpecializationChecklist(added, [option])).toEqual(added.checklist);
+
+    // A text saved before the template became a checklist stays as its free text.
+    const legacy = { ...cardiology, checklist: null };
+    expect(narrativeSpecializationChecklist(legacy, [option])).toEqual({
+      version: 1,
+      template,
+      answers: {},
+      notes: cardiology.narrative_text,
+    });
+    // Stored answers keep the template they were given against.
+    const stored = { ...cardiology, checklist: { version: 1 as const, template: "Alt (ja/nein)", answers: { "0": { value: "ja" as const } }, notes: "" } };
+    expect(narrativeSpecializationChecklist(stored, [option])?.template).toBe("Alt (ja/nein)");
+    expect(narrativeSpecializationChecklist(legacy, [])).toBeNull();
   });
 
   it("shows the family anamnesis of the active version", () => {

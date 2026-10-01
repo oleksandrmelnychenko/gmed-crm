@@ -15,7 +15,15 @@ import type {
 } from "@/pages/patients/data/patient-clinical";
 import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
+import {
+  composeChecklistText,
+  emptySpecializationChecklist,
+  isChecklistTemplate,
+  readSpecializationChecklist,
+  type SpecializationChecklist,
+} from "@/pages/patients/data/specialization-checklist";
 import { ClinicalSpecializationsField } from "./clinical-specializations-field";
+import { SpecializationChecklistForm } from "./specialization-checklist-form";
 import { ClinicalRecordSource } from "./clinical-record-source";
 
 type Bilingual = (ru: string, de: string) => string;
@@ -101,8 +109,9 @@ export function editNarrativeVersion(version: ClinicalNarrative): ClinicalNarrat
 
 /**
  * Specializations of the edited version after the selection changed. A newly
- * added one starts from its anamnesis template of the directory; texts that
- * were already entered stay as they are.
+ * added one starts from its anamnesis template of the directory: a template
+ * with yes/no questions opens as a checklist, any other as text. Texts and
+ * answers that were already entered stay as they are.
  */
 export function selectedNarrativeSpecializations(
   previous: ClinicalNarrativeSpecialization[],
@@ -111,14 +120,40 @@ export function selectedNarrativeSpecializations(
   const previousById = new Map(previous.map((item) => [item.id, item]));
   return selected.map((item) => {
     const existing = previousById.get(item.id);
+    if (existing) {
+      return {
+        ...item,
+        narrative_text: existing.narrative_text ?? null,
+        assessment_text: existing.assessment_text ?? null,
+        checklist: existing.checklist ?? null,
+      };
+    }
+    const template = item.anamnesis_template?.trim() || null;
+    const asChecklist = isChecklistTemplate(template);
     return {
       ...item,
-      narrative_text: existing
-        ? existing.narrative_text ?? null
-        : item.anamnesis_template?.trim() || null,
-      assessment_text: existing?.assessment_text ?? null,
+      narrative_text: asChecklist ? null : template,
+      assessment_text: null,
+      checklist: asChecklist && template ? emptySpecializationChecklist(template) : null,
     };
   });
+}
+
+/**
+ * The checklist shown for a specialization of the edited version: the stored
+ * one, or - for a text saved before its template became a checklist - an
+ * unanswered one that keeps that text as the free text below the questions.
+ */
+export function narrativeSpecializationChecklist(
+  item: ClinicalNarrativeSpecialization,
+  options: SpecializationItem[],
+): SpecializationChecklist | null {
+  const stored = readSpecializationChecklist(item.checklist);
+  if (stored) return stored;
+  const template = options.find((option) => option.id === item.id)?.anamnesis_template?.trim();
+  return template && isChecklistTemplate(template)
+    ? emptySpecializationChecklist(template, item.narrative_text ?? "")
+    : null;
 }
 
 /** First non-empty field, used as a one-line preview in the history list. */
@@ -218,6 +253,22 @@ export function AnamneseSection({
   function openEdit(version: ClinicalNarrative) {
     setEditingMode("edit");
     setEditing(editNarrativeVersion(version));
+  }
+
+  // The answers are stored together with the readable text composed from them.
+  function updateSpecializationChecklist(specializationId: string, next: SpecializationChecklist) {
+    setEditing((current) =>
+      current
+        ? {
+            ...current,
+            specializations: (current.specializations ?? []).map((item) =>
+              item.id === specializationId
+                ? { ...item, checklist: next, narrative_text: composeChecklistText(next) || null }
+                : item,
+            ),
+          }
+        : current,
+    );
   }
 
   function removeSpecialization(specializationId: string) {
@@ -695,7 +746,9 @@ export function AnamneseSection({
                 }
               />
             </div>
-            {(editing.specializations ?? []).map((specialization) => (
+            {(editing.specializations ?? []).map((specialization) => {
+              const checklist = narrativeSpecializationChecklist(specialization, specializations);
+              return (
               <div
                 key={specialization.id}
                 className="space-y-3 rounded-lg border border-border/60 bg-background p-3"
@@ -724,26 +777,45 @@ export function AnamneseSection({
                   </Button>
                 </div>
                 <div className="grid gap-3 md:grid-cols-2">
+                  {checklist ? (
+                    <div className="space-y-1 md:col-span-2">
+                      <span className="block text-[11px] font-medium text-muted-foreground">
+                        {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
+                      </span>
+                      <SpecializationChecklistForm
+                        checklist={checklist}
+                        tx={tx}
+                        onChange={(next) => updateSpecializationChecklist(specialization.id, next)}
+                      />
+                    </div>
+                  ) : null}
                   <label className="block">
                     <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                      {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
+                      {checklist
+                        ? tx("Дополнение свободным текстом", "Ergänzung als Freitext")
+                        : tx("Анамнез по специализации", "Fachspezifische Anamnese")}
                     </span>
                     <textarea
-                      value={specialization.narrative_text ?? ""}
-                      onChange={(event) =>
+                      value={checklist ? checklist.notes : specialization.narrative_text ?? ""}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        if (checklist) {
+                          updateSpecializationChecklist(specialization.id, { ...checklist, notes: value });
+                          return;
+                        }
                         setEditing((current) =>
                           current
                             ? {
                                 ...current,
                                 specializations: (current.specializations ?? []).map((item) =>
                                   item.id === specialization.id
-                                    ? { ...item, narrative_text: event.target.value || null }
+                                    ? { ...item, narrative_text: value || null }
                                     : item,
                                 ),
                               }
                             : current,
-                        )
-                      }
+                        );
+                      }}
                       className={cn(inputClass, "h-28 py-2")}
                     />
                   </label>
@@ -775,7 +847,8 @@ export function AnamneseSection({
                   </label>
                 </div>
               </div>
-            ))}
+              );
+            })}
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
                 Red flags

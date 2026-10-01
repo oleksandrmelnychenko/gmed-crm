@@ -1,0 +1,143 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  checklistBmi,
+  checklistGroupDeclined,
+  composeChecklistText,
+  emptySpecializationChecklist,
+  isChecklistTemplate,
+  parseChecklistTemplate,
+  readSpecializationChecklist,
+} from "./specialization-checklist";
+
+// The cardiology list exactly as the clinic wrote it, typos included.
+const CLINIC_TEMPLATE = `CVRF (ja/nein):
+-art. Hypertonie (ja/nein):
+-Diabetes mellitus (ja/nein):
+-Nikotin (ja/nein+if ja: Pack Years Note (Number)):
+-Dislipoproteinämie (ja/nein+if ja: Note):
+-Übergewicht (ja/nein+if ja: weigth in kg+hight in cm+BMI):
+-Ungesunde Ernährung (ja/nein+: if ja: note)
+-Positive Eigenanamnese (ja/nein+ if ja: Herzinfarkt/Schlaganfall/PAVK/Trombosen+if ja: Note)
+-Lp(a)-high (ja/nein+if ja: Note)
+-Positive Familienanamnese (Herzinfarkt/Schlaganfall/pAVK/Trombosen+if ja: Note)`;
+
+describe("parseChecklistTemplate", () => {
+  const items = parseChecklistTemplate(CLINIC_TEMPLATE);
+
+  it("reads every line of the clinic's notation as a yes/no question", () => {
+    expect(items.map((item) => item.label)).toEqual([
+      "CVRF",
+      "art. Hypertonie",
+      "Diabetes mellitus",
+      "Nikotin",
+      "Dislipoproteinämie",
+      "Übergewicht",
+      "Ungesunde Ernährung",
+      "Positive Eigenanamnese",
+      "Lp(a)-high",
+      "Positive Familienanamnese",
+    ]);
+    expect(items.every((item) => item.yesNo)).toBe(true);
+    expect(items.map((item) => item.child)).toEqual([false, ...Array(9).fill(true)]);
+  });
+
+  it("derives the follow-up fields: number, note, measurements with BMI and options", () => {
+    expect(items[1].fields).toEqual([]);
+    expect(items[3].fields).toEqual([{ key: "field1", kind: "number", label: "Pack Years", unit: "" }]);
+    expect(items[4].fields).toEqual([{ key: "note1", kind: "text", label: "", unit: "" }]);
+    expect(items[5].fields.map((field) => [field.kind, field.label, field.unit])).toEqual([
+      ["number", "weigth", "kg"],
+      ["number", "hight", "cm"],
+      ["bmi", "BMI", ""],
+    ]);
+    expect(items[6].fields.map((field) => field.kind)).toEqual(["text"]);
+    expect(items[7].options).toEqual(["Herzinfarkt", "Schlaganfall", "PAVK", "Trombosen"]);
+    expect(items[7].fields.map((field) => field.kind)).toEqual(["text"]);
+    // "if ja" without "ja/nein" still makes a question.
+    expect(items[9].options).toEqual(["Herzinfarkt", "Schlaganfall", "pAVK", "Trombosen"]);
+  });
+
+  it("keeps plain lines as headings and plain templates as text", () => {
+    const plain = "B-Symptomatik:\n- Fieber:\n- Gewichtsverlust:";
+    expect(isChecklistTemplate(plain)).toBe(false);
+    expect(parseChecklistTemplate(plain).map((item) => [item.label, item.yesNo])).toEqual([
+      ["B-Symptomatik", false],
+      ["Fieber", false],
+      ["Gewichtsverlust", false],
+    ]);
+    expect(isChecklistTemplate(CLINIC_TEMPLATE)).toBe(true);
+    expect(isChecklistTemplate(null)).toBe(false);
+    // A bracket that is part of the wording is not a question.
+    expect(parseChecklistTemplate("NYHA-Stadium (I-IV)")[0]).toMatchObject({ label: "NYHA-Stadium (I-IV)", yesNo: false });
+    expect(parseChecklistTemplate("Belastbarkeit (Note)")[0]).toMatchObject({ label: "Belastbarkeit", yesNo: false, fields: [{ kind: "text" }] });
+    expect(parseChecklistTemplate("Größe in cm (Number)")[0].fields).toEqual([{ key: "field0", kind: "number", label: "", unit: "" }]);
+  });
+});
+
+describe("composeChecklistText", () => {
+  const items = parseChecklistTemplate(CLINIC_TEMPLATE);
+
+  it("writes the answered questions as readable lines and appends the free text", () => {
+    const checklist = {
+      ...emptySpecializationChecklist(CLINIC_TEMPLATE, "Belastungsdyspnoe seit März."),
+      answers: {
+        "0": { value: "ja" as const },
+        "1": { value: "ja" as const },
+        "2": { value: "nein" as const },
+        "3": { value: "ja" as const, fields: { field1: "20" } },
+        "5": { value: "ja" as const, fields: { field1: "92", field2: "178" } },
+        "7": { value: "ja" as const, options: ["Herzinfarkt", "PAVK"], fields: { note2: "2019 Stent" } },
+        // Details of a "nein" answer are not printed.
+        "8": { value: "nein" as const, fields: { note1: "früher erhöht" } },
+      },
+    };
+
+    expect(composeChecklistText(checklist)).toBe(
+      [
+        "CVRF: ja",
+        "- art. Hypertonie: ja",
+        "- Diabetes mellitus: nein",
+        "- Nikotin: ja (Pack Years: 20)",
+        "- Übergewicht: ja (weigth: 92 kg; hight: 178 cm; BMI: 29,0)",
+        "- Positive Eigenanamnese: ja (Herzinfarkt, PAVK; 2019 Stent)",
+        "- Lp(a)-high: nein",
+        "",
+        "Belastungsdyspnoe seit März.",
+      ].join("\n"),
+    );
+    expect(checklistBmi(items[5], checklist.answers["5"])).toBe("29,0");
+    expect(checklistBmi(items[5], { fields: { field1: "92" } })).toBe("");
+  });
+
+  it("leaves out the questions of a group that was answered with nein", () => {
+    const answers = { "0": { value: "nein" as const }, "1": { value: "ja" as const } };
+    expect(checklistGroupDeclined(items, items[1], answers)).toBe(true);
+    expect(checklistGroupDeclined(items, items[0], answers)).toBe(false);
+    expect(composeChecklistText({ ...emptySpecializationChecklist(CLINIC_TEMPLATE), answers })).toBe("CVRF: nein");
+  });
+
+  it("prints a heading only above answered questions", () => {
+    const template = "Risikofaktoren:\n- Nikotin (ja/nein)\nMedikation:\n- Antikoagulation (ja/nein + if ja: Note)";
+    const checklist = {
+      ...emptySpecializationChecklist(template),
+      answers: { "3": { value: "ja" as const, fields: { note1: "Apixaban" } } },
+    };
+    expect(composeChecklistText(checklist)).toBe("Medikation:\n- Antikoagulation: ja (Apixaban)");
+    expect(composeChecklistText(emptySpecializationChecklist(template))).toBe("");
+  });
+});
+
+describe("readSpecializationChecklist", () => {
+  it("accepts the stored shape and ignores anything else", () => {
+    expect(readSpecializationChecklist({ version: 1, template: "A (ja/nein)", answers: { "0": { value: "ja" } } })).toEqual({
+      version: 1,
+      template: "A (ja/nein)",
+      answers: { "0": { value: "ja" } },
+      notes: "",
+    });
+    expect(readSpecializationChecklist(null)).toBeNull();
+    expect(readSpecializationChecklist({ template: 1, answers: {} })).toBeNull();
+    expect(readSpecializationChecklist("text")).toBeNull();
+  });
+});
