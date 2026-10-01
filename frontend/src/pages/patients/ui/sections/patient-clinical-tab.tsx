@@ -2951,6 +2951,7 @@ export function PatientClinicalTab({
           anamnese_vorgeschichte: null,
           anamnese_vegetative: null,
           anamnese_sozial: null,
+          anamnese_familie: null,
           beurteilung: null,
           red_flags: null,
           specialization_ids: [],

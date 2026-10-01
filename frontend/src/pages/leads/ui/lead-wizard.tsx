@@ -1046,6 +1046,9 @@ function clinicalRowsFromLead(lead: LeadDetail) {
         anamnese_sozial: narrativeRow
           ? nullableString(narrativeRow, "anamnese_sozial")
           : null,
+        anamnese_familie: narrativeRow
+          ? nullableString(narrativeRow, "anamnese_familie")
+          : null,
         beurteilung: narrativeRow ? nullableString(narrativeRow, "beurteilung") : null,
         anamnese_at: narrativeRow
           ? nullableString(narrativeRow, "anamnese_at", "anamneseAt")
@@ -1322,6 +1325,7 @@ const NARRATIVE_FIELDS = [
   "anamnese_vorgeschichte",
   "anamnese_vegetative",
   "anamnese_sozial",
+  "anamnese_familie",
   "beurteilung",
 ] as const;
 
@@ -3989,6 +3993,7 @@ export function LeadWizard({
         narrative.anamnese_vorgeschichte,
         narrative.anamnese_vegetative,
         narrative.anamnese_sozial,
+        narrative.anamnese_familie,
         narrative.beurteilung,
       ].some((field) => field?.trim()));
       if (narrative && (narrative.id || hasNarrativeContent)

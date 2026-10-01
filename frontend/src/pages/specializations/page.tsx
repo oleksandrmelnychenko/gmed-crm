@@ -73,6 +73,7 @@ type SpecializationDraft = {
   nameEs: string;
   sortOrder: string;
   isActive: boolean;
+  anamnesisTemplate: string;
 };
 
 type DescriptionDraft = {
@@ -582,7 +583,11 @@ export function SpecializationsPage() {
                     {selectedSpecialization.name_en || "-"} · ES:{" "}
                     {selectedSpecialization.name_es || "-"} ·{" "}
                     {tx("Порядок отображения", "Anzeigereihenfolge")}:{" "}
-                    {selectedSpecialization.sort_order}
+                    {selectedSpecialization.sort_order} ·{" "}
+                    {tx("Шаблон анамнеза", "Anamnese-Vorlage")}:{" "}
+                    {selectedSpecialization.anamnesis_template?.trim()
+                      ? tx("задан", "hinterlegt")
+                      : tx("нет", "keine")}
                   </p>
                 </div>
                 {canManage ? (
@@ -836,6 +841,7 @@ function specializationDraft(item?: SpecializationItem): SpecializationDraft {
     nameEs: item?.name_es ?? "",
     sortOrder: String(item?.sort_order ?? 1000),
     isActive: item?.is_active ?? true,
+    anamnesisTemplate: item?.anamnesis_template ?? "",
   };
 }
 
@@ -886,6 +892,7 @@ function SpecializationSheet({
         name_es: nameEs,
         sort_order: Number.parseInt(draft.sortOrder, 10) || 1000,
         is_active: draft.isActive,
+        anamnesis_template: draft.anamnesisTemplate.trim() || null,
       });
     } catch (nextError) {
       setError(genericError(nextError, tx));
@@ -993,6 +1000,28 @@ function SpecializationSheet({
                 />
                 {tx("Активна", "Aktiv")}
               </label>
+              <div className="sm:col-span-2">
+                <FormField label={tx("Шаблон анамнеза", "Anamnese-Vorlage")}>
+                  <textarea
+                    value={draft.anamnesisTemplate}
+                    maxLength={4000}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        anamnesisTemplate: event.target.value,
+                      }))
+                    }
+                    className={cn(textareaClass, "min-h-40 resize-y bg-card")}
+                    placeholder={"B-Symptomatik:\n- Fieber:\n- Gewichtsverlust:\n- Nachtschweiß:"}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {tx(
+                      "Подставляется в поле «Анамнез по специализации», когда специализацию добавляют в анамнез пациента.",
+                      "Wird in das Feld „Fachspezifische Anamnese“ eingesetzt, sobald die Spezialisierung zur Anamnese eines Patienten hinzugefügt wird.",
+                    )}
+                  </p>
+                </FormField>
+              </div>
             </div>
           </AdminSheetScaffold>
         </form>

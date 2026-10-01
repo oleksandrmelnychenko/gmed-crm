@@ -366,6 +366,18 @@ struct UpsertSpecializationRequest {
     name_es: Option<String>,
     sort_order: Option<i32>,
     is_active: Option<bool>,
+    /// Absent keeps the current template; an explicit null or blank clears it.
+    #[serde(default, deserialize_with = "deserialize_explicit_nullable_string")]
+    anamnesis_template: Option<Option<String>>,
+}
+
+fn deserialize_explicit_nullable_string<'de, D>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
 }
 
 #[derive(Deserialize)]
@@ -2125,8 +2137,9 @@ async fn create_specialization(
 
     let row = match sqlx::query(
         r#"INSERT INTO medical_specializations (
-                code, name_en, name_de, name_ru, name_es, sort_order, is_active
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                code, name_en, name_de, name_ru, name_es, sort_order, is_active,
+                anamnesis_template
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (code) DO UPDATE
            SET name_en = EXCLUDED.name_en,
                name_de = EXCLUDED.name_de,
@@ -2134,6 +2147,7 @@ async fn create_specialization(
                name_es = EXCLUDED.name_es,
                sort_order = EXCLUDED.sort_order,
                is_active = EXCLUDED.is_active,
+               anamnesis_template = EXCLUDED.anamnesis_template,
                deleted_at = NULL,
                updated_at = now()
            WHERE medical_specializations.deleted_at IS NOT NULL
@@ -2146,6 +2160,7 @@ async fn create_specialization(
     .bind(&specialization.name_es)
     .bind(specialization.sort_order)
     .bind(specialization.is_active)
+    .bind(specialization.anamnesis_template.clone().flatten())
     .fetch_optional(&state.db)
     .await
     {
@@ -2209,6 +2224,7 @@ async fn update_specialization(
                name_es = $5,
                sort_order = $6,
                is_active = $7,
+               anamnesis_template = CASE WHEN $8 THEN $9 ELSE anamnesis_template END,
                updated_at = now()
            WHERE id = $1 AND deleted_at IS NULL"#,
     )
@@ -2219,6 +2235,8 @@ async fn update_specialization(
     .bind(&specialization.name_es)
     .bind(specialization.sort_order)
     .bind(specialization.is_active)
+    .bind(specialization.anamnesis_template.is_some())
+    .bind(specialization.anamnesis_template.clone().flatten())
     .execute(&state.db)
     .await
     {
@@ -6155,6 +6173,8 @@ struct SpecializationPayload {
     name_es: Option<String>,
     sort_order: i32,
     is_active: bool,
+    /// `None` leaves the stored template untouched.
+    anamnesis_template: Option<Option<String>>,
 }
 
 struct SpecializationWorkTypeDescriptionPayload {
@@ -6648,6 +6668,9 @@ fn normalize_provider_staff_role_payload(
     })
 }
 
+/// Matches the `medical_specializations_anamnesis_template_bounds` constraint.
+const SPECIALIZATION_ANAMNESIS_TEMPLATE_MAX_CHARS: usize = 4000;
+
 fn normalize_specialization_payload(
     body: UpsertSpecializationRequest,
     allow_code: bool,
@@ -6680,6 +6703,22 @@ fn normalize_specialization_payload(
         return Err("Specialization code is too long");
     }
 
+    // The template is a multi-line text: only its line endings and outer
+    // whitespace are normalized.
+    let anamnesis_template = body.anamnesis_template.map(|value| {
+        value
+            .map(|text| text.replace("\r\n", "\n").replace('\r', "\n"))
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty())
+    });
+    if anamnesis_template
+        .as_ref()
+        .and_then(Option::as_ref)
+        .is_some_and(|value| value.chars().count() > SPECIALIZATION_ANAMNESIS_TEMPLATE_MAX_CHARS)
+    {
+        return Err("Specialization anamnesis template is too long");
+    }
+
     Ok(SpecializationPayload {
         code,
         name_en,
@@ -6688,6 +6727,7 @@ fn normalize_specialization_payload(
         name_es,
         sort_order: body.sort_order.unwrap_or(1000),
         is_active: body.is_active.unwrap_or(true),
+        anamnesis_template,
     })
 }
 
@@ -7676,6 +7716,7 @@ async fn load_specializations_json(
                   ms.name_es,
                   ms.is_active,
                   ms.sort_order,
+                  ms.anamnesis_template,
                   ms.created_at,
                   ms.updated_at,
                   COUNT(DISTINCT wt.id) AS work_type_count
@@ -7716,6 +7757,7 @@ async fn load_specializations_json(
                 "name_es": row.try_get::<Option<String>, _>("name_es").unwrap_or_default(),
                 "is_active": row.try_get::<bool, _>("is_active").unwrap_or(true),
                 "sort_order": row.try_get::<i32, _>("sort_order").unwrap_or_default(),
+                "anamnesis_template": row.try_get::<Option<String>, _>("anamnesis_template").unwrap_or_default(),
                 "work_type_count": row.try_get::<i64, _>("work_type_count").unwrap_or_default(),
                 "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
                 "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),

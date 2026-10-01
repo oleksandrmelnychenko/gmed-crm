@@ -637,6 +637,7 @@ export function clinicalNarrativePayload(
       trimOrNull(intake.anamneseHistory) ?? existing?.anamnese_vorgeschichte ?? null,
     anamnese_vegetative: existing?.anamnese_vegetative ?? null,
     anamnese_sozial: existing?.anamnese_sozial ?? null,
+    anamnese_familie: existing?.anamnese_familie ?? null,
     beurteilung: existing?.beurteilung ?? null,
     anamnese_at: existing?.anamnese_at ?? new Date().toISOString(),
     is_active: true,

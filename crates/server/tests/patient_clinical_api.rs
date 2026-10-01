@@ -4732,6 +4732,7 @@ async fn patient_clinical_narrative_upserts() {
         Some(json!({
             "anamnese_aktuelle": "Fieber und Husten seit zwei Tagen.",
             "anamnese_sozial": "Lebt allein, mobil mit Gehstock.",
+            "anamnese_familie": "Vater: Myokardinfarkt mit 58 Jahren.",
             "beurteilung": "Verdacht auf ambulant erworbene Pneumonie.",
             "red_flags": "Nächtliche Dyspnoe",
             "specializations": [
@@ -4767,6 +4768,10 @@ async fn patient_clinical_narrative_upserts() {
     assert_eq!(
         body["narrative"]["anamnese_sozial"],
         "Lebt allein, mobil mit Gehstock."
+    );
+    assert_eq!(
+        body["narrative"]["anamnese_familie"],
+        "Vater: Myokardinfarkt mit 58 Jahren."
     );
     assert_eq!(
         body["narrative"]["beurteilung"],

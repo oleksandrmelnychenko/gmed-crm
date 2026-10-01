@@ -228,6 +228,8 @@ export type ClinicalNarrative = {
   anamnese_vorgeschichte: string | null;
   anamnese_vegetative: string | null;
   anamnese_sozial: string | null;
+  /** Family anamnesis (Familienanamnese). */
+  anamnese_familie?: string | null;
   beurteilung: string | null;
   red_flags?: string | null;
   source_document_id?: string | null;
@@ -492,6 +494,7 @@ export function patientNarrativePayload(narrative: ClinicalNarrative): JsonPaylo
     anamnese_vorgeschichte: narrative.anamnese_vorgeschichte,
     anamnese_vegetative: narrative.anamnese_vegetative,
     anamnese_sozial: narrative.anamnese_sozial,
+    anamnese_familie: narrative.anamnese_familie ?? null,
     beurteilung: narrative.beurteilung,
     red_flags: narrative.red_flags ?? null,
     specialization_ids: specializationIds,
@@ -603,6 +606,7 @@ export function blankNarrative(): ClinicalNarrative {
     anamnese_vorgeschichte: null,
     anamnese_vegetative: null,
     anamnese_sozial: null,
+    anamnese_familie: null,
     beurteilung: null,
     anamnese_at: new Date().toISOString(),
     is_active: true,

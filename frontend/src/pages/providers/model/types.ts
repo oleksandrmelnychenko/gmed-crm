@@ -19,6 +19,8 @@ export type SpecializationItem = {
   name_es?: string | null;
   is_active: boolean;
   sort_order: number;
+  /** Text an anamnesis of this specialization starts from; maintained in the directory. */
+  anamnesis_template?: string | null;
   work_type_count?: number;
   created_at?: string;
   updated_at?: string;
