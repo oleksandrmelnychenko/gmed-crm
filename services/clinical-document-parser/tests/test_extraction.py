@@ -82,6 +82,131 @@ class ExtractionLimitsTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "page limit"):
                     extract_text(b"%PDF-too-many", "application/pdf", existing_text)
 
+    def test_existing_text_is_still_reused_unless_the_source_file_is_preferred(self) -> None:
+        existing_text = "Diagnosen\n" + ("Hypertonie " * 12)
+        native_pages = [FakeNativePage("Befund\n" + ("Unauffaellig " * 12))]
+
+        with mocked_pdf_modules(native_pages, [], Mock()):
+            result = extract_document(b"%PDF-cached", "application/pdf", existing_text)
+
+        self.assertEqual(result.text, existing_text.strip())
+        self.assertEqual(result.metadata.pages[0].source, "existing")
+        self.assertEqual(
+            result.metadata.pages[0].route_reason, "existing_text_passed_quality_checks"
+        )
+
+    def test_preferred_source_pdf_keeps_page_boundaries_despite_existing_text(self) -> None:
+        # The upload-time text of the backend is one block without form feeds.
+        existing_text = "Befund Seite eins Radiologie am Musterplatz Beurteilung Seite zwei " * 4
+        page_one = "Befund:\n" + ("Prostata vergroessert " * 8)
+        page_two = "Beurteilung:\n" + ("Geringe BPH " * 8)
+        rendered_pages = [FakeRenderedPage(), FakeRenderedPage()]
+        ocr = Mock(return_value="unused")
+
+        with mocked_pdf_modules(
+            [FakeNativePage(page_one), FakeNativePage(page_two)], rendered_pages, ocr
+        ):
+            result = extract_document(
+                b"%PDF-native",
+                "application/pdf",
+                existing_text,
+                prefer_source_file=True,
+            )
+
+        self.assertEqual(result.text, f"{page_one.strip()}\n\f\n{page_two.strip()}")
+        self.assertEqual([page.page_number for page in result.metadata.pages], [1, 2])
+        self.assertEqual({page.source for page in result.metadata.pages}, {"native"})
+        ocr.assert_not_called()
+
+    def test_preferred_source_scan_is_ocred_instead_of_reusing_existing_text(self) -> None:
+        existing_text = "Diagnosen\n" + ("Hypertonie " * 12)
+        rendered_page = FakeRenderedPage()
+        ocr = Mock(return_value="Befund\n" + ("Unauffaellig " * 12))
+
+        with mocked_pdf_modules([FakeNativePage("")], [rendered_page], ocr):
+            result = extract_document(
+                b"%PDF-scan",
+                "application/pdf",
+                existing_text,
+                prefer_source_file=True,
+            )
+
+        self.assertTrue(result.text.startswith("Befund"))
+        self.assertTrue(result.metadata.used_ocr)
+        self.assertEqual(result.metadata.pages[0].page_number, 1)
+        rendered_page.render.assert_called_once()
+
+    def test_existing_text_stands_in_when_the_preferred_source_cannot_be_read(self) -> None:
+        existing_text = "Diagnosen\n" + ("Hypertonie " * 12)
+        rendered_page = FakeRenderedPage(size=(10_000, 10_000))
+
+        with (
+            patch("app.extraction.MAX_IMAGE_PIXELS", 1_000_000),
+            mocked_pdf_modules([FakeNativePage("")], [rendered_page], Mock()),
+            self.assertLogs("gmed.clinical_document_parser.extraction", "WARNING") as logs,
+        ):
+            result = extract_document(
+                b"%PDF-huge-page",
+                "application/pdf",
+                existing_text,
+                prefer_source_file=True,
+            )
+
+        self.assertEqual(result.text, existing_text.strip())
+        self.assertEqual(result.metadata.pages[0].source, "existing")
+        self.assertEqual(
+            result.metadata.pages[0].route_reason,
+            "source_extraction_failed_existing_text_used",
+        )
+        # The exception message may quote the document; only its type is logged.
+        self.assertIn("_ImagePixelLimitExceeded", logs.output[0])
+        self.assertNotIn("pixel limit", logs.output[0])
+
+    def test_existing_text_stands_in_when_the_preferred_source_has_no_usable_text(self) -> None:
+        existing_text = "Diagnosen\n" + ("Hypertonie " * 12)
+        rendered_page = FakeRenderedPage()
+
+        with mocked_pdf_modules([FakeNativePage("")], [rendered_page], Mock(return_value="")):
+            result = extract_document(
+                b"%PDF-blank-scan",
+                "application/pdf",
+                existing_text,
+                prefer_source_file=True,
+            )
+
+        self.assertEqual(result.text, existing_text.strip())
+        self.assertEqual(
+            result.metadata.pages[0].route_reason,
+            "source_text_unusable_existing_text_used",
+        )
+
+    def test_preferred_source_still_enforces_the_pdf_page_limit(self) -> None:
+        existing_text = "Diagnosen\n" + ("Hypertonie " * 12)
+        native_pages = [FakeNativePage(""), FakeNativePage("")]
+
+        with patch("app.extraction.MAX_PDF_PAGES", 1):
+            with mocked_pdf_modules(native_pages, [], Mock()):
+                with self.assertRaisesRegex(ValueError, "page limit"):
+                    extract_document(
+                        b"%PDF-too-many",
+                        "application/pdf",
+                        existing_text,
+                        prefer_source_file=True,
+                    )
+
+    def test_preferred_source_does_not_change_plain_text_documents(self) -> None:
+        existing_text = "Diagnosen\n" + ("Hypertonie " * 12)
+
+        result = extract_document(
+            b"<html><body>Diagnosen</body></html>",
+            "text/html",
+            existing_text,
+            prefer_source_file=True,
+        )
+
+        self.assertEqual(result.text, existing_text.strip())
+        self.assertEqual(result.metadata.pages[0].source, "existing")
+
     def test_oversized_native_pdf_text_does_not_retry_with_ocr(self) -> None:
         rendered_page = FakeRenderedPage()
         with patch("app.extraction.MAX_EXTRACTED_TEXT_CHARS", 20):

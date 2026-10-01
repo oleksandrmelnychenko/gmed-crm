@@ -200,12 +200,19 @@ def extract_document(
     existing_text: str | None = None,
     *,
     prefer_ocr_for_scan_pdf: bool = False,
+    prefer_source_file: bool = False,
 ) -> ExtractionResult:
     """Extract text plus routing and confidence metadata.
 
     Existing callers can continue using :func:`extract_text`. The richer API
     intentionally contains only aggregate OCR evidence and character offsets,
     not another copy of the medical text.
+
+    ``existing_text`` is text another workflow already extracted from the same
+    file. It has no page boundaries, column layout or OCR confidence. With
+    ``prefer_source_file`` a PDF or image is therefore read from the file
+    itself, and the existing text only stands in when that reading fails or
+    finds no usable text.
     """
 
     if len(data) > MAX_FILE_BYTES:
@@ -213,6 +220,7 @@ def extract_document(
     mime = (mime_type or "").lower()
     is_pdf = "pdf" in mime or data.startswith(b"%PDF")
 
+    existing: tuple[str, _TextQuality] | None = None
     if existing_text:
         # Form-feed characters carry PDF page boundaries. ``str.strip()``
         # treats them as whitespace and used to collapse empty leading/trailing
@@ -220,23 +228,65 @@ def extract_document(
         candidate = existing_text.strip(" \t\r\n")
         quality = _assess_text_quality(candidate)
         if quality.reliable:
-            page_count = _validate_pdf_page_count(data) if is_pdf else 1
-            text = _checked_extracted_text(candidate)
-            return _make_result(
-                text,
-                page_count,
-                (
-                    PageExtractionMetadata(
-                        page_number=None if is_pdf and page_count != 1 else 1,
-                        source="existing",
-                        route_reason="existing_text_passed_quality_checks",
-                        native_quality=quality.score,
-                        native_char_count=quality.char_count,
-                        word_count=quality.word_count,
-                    ),
-                ),
-            )
+            existing = (candidate, quality)
 
+    if existing is None:
+        return _extract_from_file(data, mime, is_pdf, prefer_ocr_for_scan_pdf)
+    if not (prefer_source_file and (is_pdf or mime.startswith("image/"))):
+        return _existing_text_result(
+            data, is_pdf, *existing, "existing_text_passed_quality_checks"
+        )
+
+    try:
+        result = _extract_from_file(data, mime, is_pdf, prefer_ocr_for_scan_pdf)
+    except _PdfPageLimitExceeded:
+        raise
+    except Exception as exc:
+        # Only the exception type is logged: its message may quote the document.
+        LOGGER.warning(
+            "source file extraction failed (%s); using existing document text",
+            type(exc).__name__,
+        )
+        return _existing_text_result(
+            data, is_pdf, *existing, "source_extraction_failed_existing_text_used"
+        )
+    if not _assess_text_quality(result.text).reliable:
+        return _existing_text_result(
+            data, is_pdf, *existing, "source_text_unusable_existing_text_used"
+        )
+    return result
+
+
+def _existing_text_result(
+    data: bytes,
+    is_pdf: bool,
+    text: str,
+    quality: _TextQuality,
+    route_reason: str,
+) -> ExtractionResult:
+    page_count = _validate_pdf_page_count(data) if is_pdf else 1
+    return _make_result(
+        _checked_extracted_text(text),
+        page_count,
+        (
+            PageExtractionMetadata(
+                page_number=None if is_pdf and page_count != 1 else 1,
+                source="existing",
+                route_reason=route_reason,
+                native_quality=quality.score,
+                native_char_count=quality.char_count,
+                word_count=quality.word_count,
+            ),
+        ),
+    )
+
+
+def _extract_from_file(
+    data: bytes,
+    mime: str,
+    is_pdf: bool,
+    prefer_ocr_for_scan_pdf: bool,
+) -> ExtractionResult:
     if is_pdf:
         return _extract_pdf(data, prefer_ocr_for_scan_pdf=prefer_ocr_for_scan_pdf)
     if mime.startswith("image/"):
