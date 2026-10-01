@@ -2935,24 +2935,17 @@ async fn apply_processing_restriction(
     }))
 }
 
-async fn anonymize_patient_record(
-    state: &AppState,
+/// Replaces everything that identifies a patient with the neutral label
+/// `anon` and records `legal_status_patch` on the file. The single definition
+/// of "anonymise a patient row": the Art. 17 erasure and the purge of a lead's
+/// prospect that cannot be deleted both use it.
+pub(crate) async fn anonymize_patient_identity(
+    executor: impl sqlx::PgExecutor<'_>,
     patient_id: Uuid,
-    request_id: Uuid,
-    actor_id: Uuid,
-    manual_override: bool,
-) -> Result<Value, axum::response::Response> {
-    let anon = format!("ANON-{}", &patient_id.to_string()[..8]);
-    let anonymized_at = Utc::now();
-    let mut tx = state.db.begin().await.map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_id, "begin patient erasure transaction");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to anonymize patient",
-        )
-    })?;
-
-    let update = sqlx::query(
+    anon: &str,
+    legal_status_patch: Value,
+) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    sqlx::query(
         r#"UPDATE patients
            SET patient_id = $2,
                title = NULL,
@@ -2996,15 +2989,41 @@ async fn anonymize_patient_record(
            WHERE id = $1"#,
     )
     .bind(patient_id)
-    .bind(&anon)
-    .bind(json!({
-        "processing_restricted": false,
-        "anonymized_at": anonymized_at.to_rfc3339(),
-        "anonymized_request_id": request_id.to_string(),
-        "anonymized_by": actor_id.to_string(),
-        "privacy_request_status": "completed",
-    }))
-    .execute(&mut *tx)
+    .bind(anon)
+    .bind(legal_status_patch)
+    .execute(executor)
+    .await
+}
+
+async fn anonymize_patient_record(
+    state: &AppState,
+    patient_id: Uuid,
+    request_id: Uuid,
+    actor_id: Uuid,
+    manual_override: bool,
+) -> Result<Value, axum::response::Response> {
+    let anon = format!("ANON-{}", &patient_id.to_string()[..8]);
+    let anonymized_at = Utc::now();
+    let mut tx = state.db.begin().await.map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "begin patient erasure transaction");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    })?;
+
+    let update = anonymize_patient_identity(
+        &mut *tx,
+        patient_id,
+        &anon,
+        json!({
+            "processing_restricted": false,
+            "anonymized_at": anonymized_at.to_rfc3339(),
+            "anonymized_request_id": request_id.to_string(),
+            "anonymized_by": actor_id.to_string(),
+            "privacy_request_status": "completed",
+        }),
+    )
     .await;
 
     if let Err(e) = update {

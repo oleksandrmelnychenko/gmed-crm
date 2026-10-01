@@ -68,6 +68,8 @@ export function localizedNotificationCopy(
         .join(" — ") || null,
     };
   }
+  const leadRetentionCopy = leadRetentionNotificationCopy(item, lang);
+  if (leadRetentionCopy) return leadRetentionCopy;
   const personnelCopy = personnelNotificationCopy(item, lang);
   if (personnelCopy) return personnelCopy;
   const digestCopy = complianceDigestNotificationCopy(item, lang);
@@ -87,6 +89,39 @@ export function localizedNotificationCopy(
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
   return { title: item.title, body: item.body };
+}
+
+// Unqualified-lead deletion notices (crates/server/src/routes/leads.rs) are
+// stored in English; the deletion date is read back from the stored text.
+export function leadRetentionNotificationCopy(
+  item: Notification,
+  lang: "ru" | "de",
+): Pick<Notification, "title" | "body"> | null {
+  if (item.kind === "lead_retention_warning") {
+    const isoDate = /(\d{4}-\d{2}-\d{2})/.exec(item.body ?? "")?.[1];
+    const date = isoDate ? formatAppDate(`${isoDate}T12:00:00Z`) : "";
+    return lang === "de"
+      ? {
+          title: "Lead wird automatisch gelöscht",
+          body: `Nicht qualifiziert und ohne unterschriebene Einwilligung${date ? `; Löschung am ${date}` : ""}. Alle Dokumente werden mitgelöscht.`,
+        }
+      : {
+          title: "Лид будет удалён автоматически",
+          body: `Не квалифицирован и нет подписанного согласия${date ? `; удаление ${date}` : ""}. Все документы удаляются вместе с ним.`,
+        };
+  }
+  if (item.kind === "lead_retention_blocked") {
+    return lang === "de"
+      ? {
+          title: "Lead ist zur Löschung fällig – Entscheidung nötig",
+          body: "Es gibt einen Auftrag mit Rechnung oder einen Auftrag, der nicht zurückgezogen werden konnte.",
+        }
+      : {
+          title: "Срок хранения лида истёк — нужно решение",
+          body: "У лида есть заказ со счётом или заказ, который не удалось отозвать.",
+        };
+  }
+  return null;
 }
 
 const PERSONNEL_NOTIFICATION_TABS: Record<string, string> = {

@@ -481,3 +481,22 @@ test("document review shows that consents of this request are still missing", as
   await wizard.getByRole("button", {name: "Отметить согласия", exact: true}).first().click();
   await expect(page.locator("#lead-wizard-privacy-consent")).toBeFocused();
 });
+
+test("a lead without consent shows when it will be deleted automatically", async ({page}) => {
+  const {wizard} = await mount(page, "ru", undefined, false, false, true);
+  const countdown = wizard.locator("[data-lead-retention-countdown]");
+  await expect(wizard.locator('input[name="first_name"]')).toHaveValue("Anna");
+  await expect(countdown).toHaveCount(0);
+
+  const lead = await page.evaluate(
+    id => fetch(`/api/v1/leads/${id}`, {headers: {Authorization: "Bearer repeat-intake-test-token"}}).then(response => response.json()),
+    leadId,
+  );
+  const deadline = new Date(Date.now() + 2 * 86_400_000 - 60_000).toISOString();
+  await page.route(`**/api/v1/leads/${leadId}`, route =>
+    route.fulfill({contentType: "application/json", body: JSON.stringify({...lead, retention_deadline_at: deadline})}),
+  );
+  await wizard.getByRole("button", {name: "Обновить", exact: true}).click();
+  await expect(countdown).toContainText("Удаление через 2 дн.");
+  await expect(countdown).toContainText("автоматически удаляется вместе со всеми документами");
+});

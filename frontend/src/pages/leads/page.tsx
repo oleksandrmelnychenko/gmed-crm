@@ -83,10 +83,13 @@ import {
   complianceTone,
   daysInStatus,
   daysInStatusLabel,
+  daysUntilRetentionDeadline,
   failedOutcomeTone,
   leadRowAccent,
   leadSourceTone,
   leadStatusTone,
+  retentionCountdownHint,
+  retentionCountdownLabel,
 } from "./appearance/status-appearance";
 import {
   convertLead,
@@ -763,6 +766,31 @@ function useLeadsPageContent() {
           return days != null ? (
             <span className="whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
               {daysInStatusLabel(days, lang)}
+            </span>
+          ) : (
+            <span className="text-xs text-foreground">—</span>
+          );
+        },
+      },
+      {
+        id: "retention_deadline",
+        label: lang === "de" ? "Automatische Löschung" : "Автоудаление",
+        accessor: (row) => daysUntilRetentionDeadline(row.retention_deadline_at) ?? Number.MAX_SAFE_INTEGER,
+        filterType: "number",
+        group: "qualification",
+        sortable: true,
+        width: 170,
+        render: (row) => {
+          const days = daysUntilRetentionDeadline(row.retention_deadline_at);
+          return days != null ? (
+            <span
+              title={retentionCountdownHint(lang)}
+              className={cn(
+                "whitespace-nowrap text-xs font-medium tabular-nums",
+                days <= 3 ? "text-destructive" : "text-amber-700",
+              )}
+            >
+              {retentionCountdownLabel(days, lang)}
             </span>
           ) : (
             <span className="text-xs text-foreground">—</span>
@@ -1514,6 +1542,15 @@ function useLeadsPageContent() {
                       <span className="text-[11px] tabular-nums text-muted-foreground">
                         · {daysInStatusLabel(daysInStatus(detail.status_changed_at)!, lang)}
                       </span>
+                    ) : null}
+                    {daysUntilRetentionDeadline(detail.retention_deadline_at) != null ? (
+                      <StatusBadge
+                        tone={daysUntilRetentionDeadline(detail.retention_deadline_at)! <= 3 ? "error" : "warning"}
+                      >
+                        <span title={retentionCountdownHint(lang)}>
+                          {retentionCountdownLabel(daysUntilRetentionDeadline(detail.retention_deadline_at)!, lang)}
+                        </span>
+                      </StatusBadge>
                     ) : null}
                     {detail.submitted_at ? (
                       <Badge variant="outline" className="rounded-full">

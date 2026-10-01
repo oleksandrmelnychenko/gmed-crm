@@ -128,6 +128,11 @@ import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
 import { canSignWizardDocument } from "../model/wizard-document-signing";
+import {
+  daysUntilRetentionDeadline,
+  retentionCountdownHint,
+  retentionCountdownLabel,
+} from "../appearance/status-appearance";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import {
   createOrder,
@@ -2669,6 +2674,7 @@ export function LeadWizard({
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
+  const retentionDays = daysUntilRetentionDeadline(lead?.retention_deadline_at);
   // A repeat intake (lead opened for an existing patient) keeps its patient
   // review even when reopened from the leads registry, so the patient's valid
   // documents and contracts are reused instead of recreated. A first intake
@@ -5983,8 +5989,25 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </header>
 
+        {retentionDays != null ? (
+          <div
+            role="status"
+            data-lead-retention-countdown
+            className={cn(
+              "shrink-0 border-b px-4 py-2 text-xs sm:px-5",
+              retentionDays <= 3
+                ? "border-destructive/30 bg-destructive/10 text-destructive"
+                : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
+            )}
+          >
+            <span className="font-semibold">{retentionCountdownLabel(retentionDays, lang)}.</span>{" "}
+            {retentionCountdownHint(lang)}
+          </div>
+        ) : null}
+
         <nav
           ref={stepNavRef}
+
           className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >

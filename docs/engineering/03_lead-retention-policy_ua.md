@@ -14,15 +14,45 @@ Process map клінік-flow-у також чітко це фіксує: дві
 
 | Стан | Тривалість | Дія |
 |---|---|---|
-| `new`, `in_progress`, `qualified` | unlimited | PII зберігається доки sales активно працює з lead-ом. |
+| `new`, `in_progress`, `not_qualified`, `archived` **без підписаної згоди DSGVO** (`compliance_status <> 'signed'`) | `unqualified_lead_retention_days` (14 днів) від створення lead-а | **Автоматично видаляється разом з усіма документами** (розділ «Некваліфікований lead без згоди»). |
+| `qualified`, а також будь-який lead з підписаною згодою | unlimited | PII зберігається доки sales активно працює з lead-ом. |
 | `not_qualified`, `archived` (без `failed_outcome_status = 'delete_anonymized'`) | до `cleanup_archived_leads_days` днів після `failed_processed_at` (або `updated_at`, якщо першого немає) | Lead активно існує. Sales може відкрити, переглянути, додати нотатку. |
-| `archived` + застарілий понад retention window | — | **Автоматично анонімізується** фоновим sweeper-ом. |
+| `archived` + застарілий понад retention window | — | **Автоматично анонімізується** фоновим sweeper-ом; документи, вкладення і prospect-пацієнт видаляються так само, як у 14-денному правилі. |
 | `archived` + `failed_outcome_status = 'delete_anonymized'` | immutable | Lead у post-purge стані. Імʼя = `'Deleted Lead'`, всі PII поля NULL або sentinel values. |
 | `converted` | unlimited | Lead конвертовано у пацієнта — retention перенесено на рівень `patients` (є окремий DSGVO flow у [`admin_compliance.rs`](../../crates/server/src/routes/admin_compliance.rs)). |
 
 Параметр `cleanup_archived_leads_days` зберігається у `system_settings` і за замовчуванням дорівнює **180 днів**. IT-admin може переглянути/змінити його через `/admin/settings` UI. Зміна значення набуває чинності на наступному циклі sweeper-а (≤24 години).
 
+## Некваліфікований lead без згоди (14 днів)
+
+Рішення власника від 2026-10-01: lead, який за 14 днів не кваліфікувався і не має підписаної згоди DSGVO, не має правової підстави для зберігання — особливо його медичних файлів (Art. 9 DSGVO). Тому він видаляється автоматично.
+
+**Кого стосується** (`UNQUALIFIED_LEAD_SUBJECT_SQL`):
+
+- `qualification_status` ∈ `new`, `in_progress`, `not_qualified`, `archived`;
+- `compliance_status <> 'signed'` — підписана згода зупиняє правило;
+- lead не конвертовано (`converted_patient_id IS NULL`) і ще не анонімізовано.
+
+**Строк**: `GREATEST(created_at, unqualified_lead_retention_effective_at) + unqualified_lead_retention_days`. Момент `effective_at` записує міграція під час першого розгортання, тож lead-и, що існували до ввімкнення правила, отримують повні 14 днів, а не зникають першої ж ночі. `unqualified_lead_retention_days = 0` вимикає правило.
+
+**Що видаляється** (`purge_lead_and_prospect_in_tx`, одна транзакція):
+
+1. відкритий підготовчий order lead-а відкликається (як при ручному видаленні);
+2. документи lead-а і його prospect-пацієнта — рядки `documents` і файли у сховищі; рахунки та підписані договори лишаються (§ 147 AO, § 257 HGB);
+3. `lead_attachments`, сповіщення про lead, значення custom-полів, непідписаний рамковий договір;
+4. prospect-пацієнт — видаляється повністю; якщо на нього посилаються записи, які не можна видалити, анонімізується тим самим кодом, що й Art. 17 (`anonymize_patient_identity`);
+5. сам рядок `leads` лишається порожньою міткою (`first_name = 'Deleted'`, без PII, `wizard_state = {}`) — для статистики кількості звернень.
+
+**Що блокує автоматичне видалення**: order lead-а має рахунок (вихідний або рахунок постачальника) або order не вдалося відкликати. Такий lead не чіпається, а PM і CEO отримують сповіщення `lead_retention_blocked` (не частіше ніж раз на 7 днів) — рішення приймає людина.
+
+**Попередження**: за 3 дні до строку автор lead-а (для lead-ів із сайту — PM і CEO) отримує сповіщення `lead_retention_warning`; позначка `leads.retention_warning_sent_at` гарантує одне попередження. API повертає `retention_deadline_at` у списку і в картці; UI показує «Удаление через N дн» у колонці «Автоудаление», у шапці картки і банером у wizard-і.
+
+**Audit**: подія `auto_purge_lead` з `reason = "unqualified_lead_retention"`, `retention_days`, `gdpr_article = "5(1)(e)"`, `failed_from_status`.
+
+**Тести**: модуль `unqualified_lead_retention_tests` (межі строку) і інтеграційний `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns` у [`crates/server/tests/leads_api.rs`](../../crates/server/tests/leads_api.rs).
+
 ## Архітектура
+
 
 Три компоненти, три місця в коді:
 
@@ -30,9 +60,10 @@ Process map клінік-flow-у також чітко це фіксує: дві
 
 [`routes/leads.rs::anonymize_lead_pii`](../../crates/server/src/routes/leads.rs) — приватний helper, який виконує один великий `UPDATE leads SET first_name = 'Deleted', …` blob з NULL-ами на 40+ PII полях. Цей blob — і є визначення того, що означає "анонімізувати lead" у межах нашої БД.
 
-Викликається з двох місць:
+Викликається з трьох місць:
 - Manually via [`resolve_failed_lead`](../../crates/server/src/routes/leads.rs) handler з resolution `"delete"`. PM чи CEO явно натискає кнопку.
 - Automatically via [`auto_purge_stale_archived`](../../crates/server/src/routes/leads.rs) у фоні, кожні 24 години.
+- Automatically via [`auto_purge_unqualified_leads`](../../crates/server/src/routes/leads.rs) у тому самому фоновому циклі (14-денне правило).
 
 Таким чином manual і automated paths **не можуть розійтися** — якщо хтось додає нове PII поле у схему `leads`, він мусить додати його і в `anonymize_lead_pii`, і обидва шляхи отримують fix одночасно. Це має бути частиною PR checklist.
 
@@ -84,9 +115,9 @@ WHERE action = 'auto_purge_lead'
 
 2. **Не зачіпає Converted leads.** Якщо lead став пацієнтом, його retention — це retention пацієнта, і воно керується через `admin_compliance.rs` DSGVO workflow (Art. 15/17 — на запит), не через цей sweeper.
 
-3. **Не керує документами пацієнта/інших таблиць.** `patients`, `cases`, `documents`, `invoices` мають власні retention вимоги (Handelsgesetzbuch вимагає 10 років для financial records, медичні картки — 10-30 років залежно від типу). Це окремі policies, не тут.
+3. **Не керує документами конвертованого пацієнта/інших таблиць.** Документи некваліфікованого lead-а і його prospect-пацієнта видаляються разом з lead-ом (див. вище), але `patients`, `cases`, `documents`, `invoices` справжнього пацієнта мають власні retention вимоги (Handelsgesetzbuch вимагає 10 років для financial records, медичні картки — 10-30 років залежно від типу). Це окремі policies, не тут.
 
-4. **Не enforceує "soft archive after N days of inactivity".** Зараз активний lead (`new`, `in_progress`) може сидіти роками, якщо sales не закриє його явно. Це окрема proposal — автоматично транзитити неактивні leads у `archived` через, наприклад, 90 днів mowing. **Не реалізовано.** Якщо буде потрібно — додавай у наступний migration as `lead_inactive_auto_archive_days` setting з аналогічним sweeper-ом.
+4. **Не обмежує lead з підписаною згодою або у статусі `qualified`.** Такий lead може лишатися активним без строку, доки sales не закриє його явно; після закриття діє 180-денне правило.
 
 ## Testability
 
@@ -107,9 +138,9 @@ WHERE action = 'auto_purge_lead'
 
 ### Integration test (needs live DB)
 
-Не написано у першій ітерації. TODO: seed lead у `archived` з `failed_processed_at = now() - 200 days`, викликати `auto_purge_stale_archived(&state)`, перевірити що поля NULL, `audit_log` має рядок `auto_purge_lead`, а lead-attachment видалено.
+14-денне правило покрите тестом `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns`: lead з документом, вкладенням і prospect-пацієнтом після sweep-у лишається порожньою міткою, файли й рядки видалено; lead з підписаною згодою і свіжий lead не зачеплені.
 
-Залишається в беклозі як `T-xxx Lead auto-purge integration test`.
+Для 180-денного правила окремого інтеграційного тесту немає; воно використовує той самий `purge_lead_and_prospect_in_tx`.
 
 ## Як налаштувати retention для конкретного deployment
 
@@ -158,6 +189,7 @@ ORDER BY 1;"
 - Код: [`crates/server/src/routes/leads.rs`](../../crates/server/src/routes/leads.rs) (функції `anonymize_lead_pii`, `auto_purge_stale_archived`, `should_auto_purge`, модуль `auto_purge_tests`)
 - Spawner: [`crates/server/src/main.rs`](../../crates/server/src/main.rs) (`spawn_lead_purger`)
 - Seed налаштування: [`migrations/20260408000012_security_compliance.sql`](../../migrations/20260408000012_security_compliance.sql) (`cleanup_archived_leads_days = 180`)
+- 14-денне правило: [`migrations/20261001203000_unqualified_lead_retention.sql`](../../migrations/20261001203000_unqualified_lead_retention.sql) (`unqualified_lead_retention_days = 14`, `unqualified_lead_retention_effective_at`)
 - Audit policy: [`docs/engineering/02_audit-migration-policy_ua.md`](02_audit-migration-policy_ua.md)
 - Process map (Datenlöschung gates): [`docs/Process Mapping (Kundenjourney allg.)(in Bearbeitung).pdf`](../Process%20Mapping%20(Kundenjourney%20allg.)(in%20Bearbeitung).pdf)
 - GDPR Art. 5(1)(e), Art. 17 — нормативна основа

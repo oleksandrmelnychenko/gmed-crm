@@ -395,6 +395,7 @@ async fn list_leads(
     }
 
     let include_archived = query.include_archived.unwrap_or(false);
+    let retention = load_unqualified_lead_retention(&state.db).await;
     let search_pattern = format!("%{}%", query.search.unwrap_or_default());
     let source_pattern = format!("%{}%", query.source.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
@@ -526,6 +527,8 @@ async fn list_leads(
                         .unwrap_or_default()
                         .map(|value| value.to_rfc3339()),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
+                    // When the unqualified-lead rule deletes this lead; null while it does not apply.
+                    "retention_deadline_at": lead_retention_deadline_json(retention.as_ref(), &r),
                     "qualification_ready": qualification_ready,
                     "conversion_ready": conversion_ready,
                     // Phase 1 classification: a brand-new lead or an existing customer.
@@ -2995,6 +2998,13 @@ async fn get_lead(
     obj.insert("readiness".into(), readiness.payload);
     obj.insert("failed_outcome".into(), failed_outcome_payload(&row));
     obj.insert("lifecycle".into(), lifecycle);
+    obj.insert(
+        "retention_deadline_at".into(),
+        lead_retention_deadline_json(
+            load_unqualified_lead_retention(&state.db).await.as_ref(),
+            &row,
+        ),
+    );
 
     let lead = Value::Object(obj);
     if lead_service_grid_only(&auth) {
@@ -6566,7 +6576,7 @@ async fn resolve_failed_lead(
                 audit::write_in_transaction(&mut tx, &lead_audit).await?;
                 crate::routes::workflow_lifecycle::insert_event(&mut tx, lifecycle).await?;
             }
-            Ok::<_, sqlx::Error>((result, None))
+            Ok::<_, sqlx::Error>((result, Vec::new()))
         }
         .await
     } else {
@@ -6583,9 +6593,10 @@ async fn resolve_failed_lead(
             },
         )
         .await
+        .map(|purged| (purged.result, purged.removed_blobs))
     };
     let update_result = match update_result {
-        Ok((result, _)) if result.rows_affected() > 0 => {
+        Ok((result, removed_blobs)) if result.rows_affected() > 0 => {
             if let Err(e) = tx.commit().await {
                 tracing::error!(error = %e, lead_id = %lead_id, "commit failed-lead resolution");
                 return err(
@@ -6593,11 +6604,9 @@ async fn resolve_failed_lead(
                     "Failed to resolve failed lead",
                 );
             }
-            if resolution != "archive" {
-                let _ = sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
-                    .bind(lead_id)
-                    .execute(&state.db)
-                    .await;
+            // The files of the purged documents go only after the commit.
+            for storage_key in &removed_blobs {
+                crate::routes::documents::remove_document_blob(storage_key).await;
             }
             crate::routes::orders::publish_withdrawn_lead_orders(
                 &state,
@@ -7344,7 +7353,11 @@ pub(crate) async fn anonymize_lead_pii(
                remote_ip = NULL,
                user_agent = NULL,
                notes = NULL,
-               wizard_state = wizard_state - 'clinical_draft' - 'referrer_patient_id' - 'referrer_patient_label',
+               -- The wizard draft repeats what the columns above held (referrer,
+               -- passport expiry, AML answers, the commercial draft): none of it
+               -- is needed on a deleted lead.
+               wizard_state = '{}'::jsonb,
+               requested_specialties = '[]'::jsonb,
                qualification_status = 'deleted',
                status_changed_at = now(),
                failed_outcome_status = 'delete_anonymized',
@@ -7376,13 +7389,24 @@ struct LeadPurge<'a> {
     lifecycle: crate::routes::workflow_lifecycle::RecordEvent<'a>,
 }
 
-/// Anonymise the lead and, in the same transaction, hard-delete its prospect
-/// patient when that patient is still `prospective` and the lead never
-/// converted. A prospect has no independent retention basis (GDPR Art.
-/// 5(1)(e)); the CASCADE removes its clinical record and funnel case. Active
-/// or attached patients are never touched — the guard is in the WHERE clause.
-/// When the lead is anonymised, its audit row, the audit row of a deleted
-/// prospect and the lead history entry commit in the same transaction.
+/// What a lead purge did, for the caller to finish after its commit.
+struct LeadPurgeOutcome {
+    result: sqlx::postgres::PgQueryResult,
+    /// The prospect patient that was deleted with the lead.
+    purged_prospect: Option<Uuid>,
+    /// Stored files of the removed documents. They are deleted from disk only
+    /// after the commit, so a failed purge keeps them.
+    removed_blobs: Vec<String>,
+}
+
+/// Anonymise the lead and, in the same transaction, remove what it owns: its
+/// documents and attachments, and its prospect patient when that patient is
+/// still `prospective` and the lead never converted. A prospect has no
+/// independent retention basis (GDPR Art. 5(1)(e)); the CASCADE removes its
+/// clinical record and funnel case. Active or attached patients are never
+/// touched — the guard is in the WHERE clause. When the lead is anonymised,
+/// its audit row, the audit row of the prospect and the lead history entry
+/// commit in the same transaction.
 async fn purge_lead_and_prospect(
     pool: &gmed_db::DbPool,
     purge: LeadPurge<'_>,
@@ -7390,15 +7414,19 @@ async fn purge_lead_and_prospect(
     let mut tx = pool.begin().await?;
     let purged = purge_lead_and_prospect_in_tx(&mut tx, purge).await?;
     tx.commit().await?;
-    Ok(purged)
+    for storage_key in &purged.removed_blobs {
+        crate::routes::documents::remove_document_blob(storage_key).await;
+    }
+    Ok((purged.result, purged.purged_prospect))
 }
 
 /// [`purge_lead_and_prospect`] inside the caller's transaction, so the
-/// failed-lead workflow withdraws the lead's order in the same commit.
+/// failed-lead workflow withdraws the lead's order in the same commit. The
+/// caller removes [`LeadPurgeOutcome::removed_blobs`] after its commit.
 async fn purge_lead_and_prospect_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     purge: LeadPurge<'_>,
-) -> Result<(sqlx::postgres::PgQueryResult, Option<Uuid>), sqlx::Error> {
+) -> Result<LeadPurgeOutcome, sqlx::Error> {
     let LeadPurge {
         lead_id,
         failed_from_status,
@@ -7420,23 +7448,20 @@ async fn purge_lead_and_prospect_in_tx(
     .bind(lead_id)
     .fetch_optional(&mut **tx)
     .await?;
-    let purged_prospect = if let Some(patient_id) = purge_candidate {
-        // The audit trigger permits this only while the locked patient is still
-        // prospective and its source lead is unconverted. Delete explicitly so
-        // the subsequent patient cascade never collides with audit immutability.
-        sqlx::query("DELETE FROM patient_clinical_versions WHERE patient_id = $1")
-            .bind(patient_id)
-            .execute(&mut **tx)
-            .await?;
-        sqlx::query_scalar(
-            "DELETE FROM patients WHERE id = $1 AND lifecycle_status = 'prospective' RETURNING id",
-        )
-        .bind(patient_id)
-        .fetch_optional(&mut **tx)
-        .await?
-    } else {
-        None
+    // Invoices and signed contracts cascade from `patients`: a prospect that
+    // carries accounting records is left alone (§ 257 HGB, § 147 AO).
+    let purge_candidate = match purge_candidate {
+        Some(patient_id) if prospect_has_accounting_records(tx, patient_id).await? => None,
+        other => other,
     };
+
+    let removed_blobs = purge_lead_documents_in_tx(tx, lead_id, purge_candidate).await?;
+    purge_lead_side_records_in_tx(tx, lead_id).await?;
+    let prospect = match purge_candidate {
+        Some(patient_id) => Some(purge_prospect_patient_in_tx(tx, lead_id, patient_id).await?),
+        None => None,
+    };
+
     let result = anonymize_lead_pii(
         &mut **tx,
         lead_id,
@@ -7448,11 +7473,15 @@ async fn purge_lead_and_prospect_in_tx(
     .await?;
     if result.rows_affected() > 0 {
         audit::write_in_transaction(tx, &lead_audit).await?;
-        if let Some(prospect_id) = purged_prospect {
+        if let Some(prospect) = prospect {
+            let (action, prospect_id) = match prospect {
+                ProspectPurge::Deleted(id) => ("purge_prospect_patient", id),
+                ProspectPurge::Anonymized(id) => ("anonymize_prospect_patient", id),
+            };
             audit::write_in_transaction(
                 tx,
                 &audit::domain_event(
-                    "purge_prospect_patient",
+                    action,
                     processed_by,
                     "patient",
                     Some(prospect_id),
@@ -7467,7 +7496,237 @@ async fn purge_lead_and_prospect_in_tx(
         }
         crate::routes::workflow_lifecycle::insert_event(tx, lifecycle).await?;
     }
-    Ok((result, purged_prospect))
+    Ok(LeadPurgeOutcome {
+        result,
+        purged_prospect: match prospect {
+            Some(ProspectPurge::Deleted(id)) => Some(id),
+            _ => None,
+        },
+        removed_blobs,
+    })
+}
+
+/// How the prospect patient of a purged lead was removed.
+#[derive(Clone, Copy)]
+enum ProspectPurge {
+    Deleted(Uuid),
+    /// Something still refers to the patient (an appointment, a task, a
+    /// document with signature history), so the row stays without any identity.
+    Anonymized(Uuid),
+}
+
+async fn prospect_has_accounting_records(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT EXISTS (SELECT 1 FROM invoices WHERE patient_id = $1)
+               OR EXISTS (SELECT 1 FROM external_invoices WHERE patient_id = $1)
+               OR EXISTS (
+                   SELECT 1 FROM framework_contracts
+                   WHERE patient_id = $1 AND status = 'signed'
+               )"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// A commercial document that was signed, or an invoice, stays with its file:
+/// commercial and tax law oblige the agency to keep it (§ 257 HGB, § 147 AO;
+/// Art. 17 Abs. 3 lit. b DSGVO). Drafts of contracts and estimates do not.
+const LEAD_DOCUMENT_RETAINED_SQL: &str = r#"(
+    lower(concat_ws(' ', category, art, generated_template_id)) ~ '(invoice|rechnung)'
+    OR (
+        signed_at IS NOT NULL
+        AND lower(concat_ws(' ', category, art, generated_template_id, compliance_kind))
+            ~ '(contract|vertrag|order|auftrag)'
+    )
+)"#;
+
+/// Removes the documents a purged lead owns, and those of its prospect patient
+/// when that patient goes with it. A row nothing else refers to is deleted; a
+/// document with signature or review history keeps an empty row without file,
+/// name or text. Returns the stored files to remove after the commit.
+async fn purge_lead_documents_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    prospect_patient_id: Option<Uuid>,
+) -> Result<Vec<String>, sqlx::Error> {
+    // Newest version first: a version chain is deleted from its tip.
+    let documents: Vec<(Uuid, Option<String>)> = sqlx::query_as(&format!(
+        r#"SELECT id, storage_key
+           FROM documents
+           WHERE (lead_id = $1 OR ($2::uuid IS NOT NULL AND patient_id = $2))
+             AND NOT {LEAD_DOCUMENT_RETAINED_SQL}
+           ORDER BY version_number DESC, created_at DESC
+           FOR UPDATE"#
+    ))
+    .bind(lead_id)
+    .bind(prospect_patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    let mut removed_blobs = Vec::new();
+    for (document_id, storage_key) in documents {
+        if let Some(storage_key) = storage_key.filter(|key| !key.trim().is_empty()) {
+            removed_blobs.push(storage_key);
+        }
+        let mut savepoint = sqlx::Connection::begin(&mut **tx).await?;
+        let deleted = async {
+            // The draft of a clinical import repeats the text of the document.
+            sqlx::query("DELETE FROM clinical_document_imports WHERE document_id = $1")
+                .bind(document_id)
+                .execute(&mut *savepoint)
+                .await?;
+            sqlx::query("DELETE FROM documents WHERE id = $1")
+                .bind(document_id)
+                .execute(&mut *savepoint)
+                .await
+        }
+        .await;
+        match deleted {
+            Ok(_) => savepoint.commit().await?,
+            Err(sqlx::Error::Database(_)) => {
+                savepoint.rollback().await?;
+                sqlx::query(
+                    r#"UPDATE documents
+                       SET status = 'archived',
+                           visibility = 'internal',
+                           storage_key = NULL,
+                           auto_name = 'Deleted document',
+                           original_filename = NULL,
+                           notes = NULL,
+                           extracted_text = NULL,
+                           source_person = NULL,
+                           source_institution = NULL,
+                           addressee_person = NULL,
+                           addressee_institution = NULL,
+                           generated_bindings = NULL,
+                           generated_manual_text = NULL,
+                           file_deleted_at = COALESCE(file_deleted_at, now()),
+                           file_delete_reason = COALESCE(file_delete_reason, 'lead_purge')
+                       WHERE id = $1"#,
+                )
+                .bind(document_id)
+                .execute(&mut **tx)
+                .await?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(removed_blobs)
+}
+
+/// Copies of the lead outside its row: the questionnaire attachments, the
+/// notifications that name it, its custom field values and a contract draft.
+async fn purge_lead_side_records_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM lead_attachments WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM user_notifications WHERE entity_type = 'lead' AND entity_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        r#"DELETE FROM custom_field_values
+           WHERE entity_id = $1
+             AND field_id IN (SELECT id FROM custom_fields WHERE entity_type = 'lead')"#,
+    )
+    .bind(lead_id)
+    .execute(&mut **tx)
+    .await?;
+    // A framework contract that was never signed is a draft; a signed one, or
+    // one an order refers to, stays.
+    sqlx::query(
+        r#"DELETE FROM framework_contracts fc
+           WHERE fc.lead_id = $1
+             AND fc.status <> 'signed'
+             AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.contract_id = fc.id)"#,
+    )
+    .bind(lead_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Deletes the prospect patient of a purged lead with its clinical record. A
+/// cancelled preparation order keeps only its link to the lead. When anything
+/// else still refers to the patient, the row is anonymised instead.
+async fn purge_prospect_patient_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    patient_id: Uuid,
+) -> Result<ProspectPurge, sqlx::Error> {
+    let mut savepoint = sqlx::Connection::begin(&mut **tx).await?;
+    let deleted = async {
+        sqlx::query(
+            r#"UPDATE order_leistungen SET patient_id = NULL
+               WHERE patient_id = $1
+                 AND order_id IN (SELECT id FROM orders WHERE source_lead_id = $2)"#,
+        )
+        .bind(patient_id)
+        .bind(lead_id)
+        .execute(&mut *savepoint)
+        .await?;
+        sqlx::query(
+            "UPDATE orders SET patient_id = NULL WHERE patient_id = $1 AND source_lead_id = $2",
+        )
+        .bind(patient_id)
+        .bind(lead_id)
+        .execute(&mut *savepoint)
+        .await?;
+        // The audit trigger permits this only while the locked patient is still
+        // prospective and its source lead is unconverted. Delete explicitly so
+        // the subsequent patient cascade never collides with audit immutability.
+        sqlx::query("DELETE FROM patient_clinical_versions WHERE patient_id = $1")
+            .bind(patient_id)
+            .execute(&mut *savepoint)
+            .await?;
+        sqlx::query_scalar::<_, Uuid>(
+            "DELETE FROM patients WHERE id = $1 AND lifecycle_status = 'prospective' RETURNING id",
+        )
+        .bind(patient_id)
+        .fetch_optional(&mut *savepoint)
+        .await
+    }
+    .await;
+    match deleted {
+        Ok(Some(id)) => {
+            savepoint.commit().await?;
+            return Ok(ProspectPurge::Deleted(id));
+        }
+        Ok(None) | Err(sqlx::Error::Database(_)) => savepoint.rollback().await?,
+        Err(error) => return Err(error),
+    }
+    // The drafts of clinical imports repeat the text of the patient's documents.
+    let mut savepoint = sqlx::Connection::begin(&mut **tx).await?;
+    match sqlx::query("DELETE FROM clinical_document_imports WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut *savepoint)
+        .await
+    {
+        Ok(_) => savepoint.commit().await?,
+        Err(sqlx::Error::Database(_)) => savepoint.rollback().await?,
+        Err(error) => return Err(error),
+    }
+    let anon = format!("ANON-{}", &patient_id.to_string()[..8]);
+    crate::routes::admin_compliance::anonymize_patient_identity(
+        &mut **tx,
+        patient_id,
+        &anon,
+        json!({
+            "anonymized_at": chrono::Utc::now().to_rfc3339(),
+            "anonymized_reason": "lead_purge",
+            "source_lead_id": lead_id.to_string(),
+        }),
+    )
+    .await?;
+    Ok(ProspectPurge::Anonymized(patient_id))
 }
 
 /// Load the retention window from `system_settings`. Falls back to
@@ -7617,6 +7876,528 @@ pub async fn auto_purge_stale_archived(
     }
 
     Ok(report)
+}
+
+// ── Unqualified leads ──────────────────────────────────────────────────
+//
+// A lead that is not qualified within the retention window after its creation
+// and has no signed DSGVO consent is purged with everything it owns (owner
+// decision 2026-10-01): without consent there is no basis to keep its data
+// and medical files. The lead row stays as an anonymised tombstone. See
+// docs/engineering/03_lead-retention-policy_ua.md.
+
+/// Window of the unqualified-lead rule when the setting cannot be read.
+pub const DEFAULT_UNQUALIFIED_LEAD_RETENTION_DAYS: i64 = 14;
+
+/// The responsible user is warned this many days before the deadline.
+pub const UNQUALIFIED_LEAD_WARNING_DAYS: i64 = 3;
+
+const UNQUALIFIED_LEAD_PURGE_REASON: &str = "auto_purge_unqualified_retention";
+
+/// The unqualified-lead rule as configured in `system_settings`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnqualifiedLeadRetention {
+    pub days: i64,
+    /// Start of the rule in this environment. Leads that existed before count
+    /// their window from it, so the rollout deletes nothing at once.
+    pub effective_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl UnqualifiedLeadRetention {
+    /// When the lead is purged, or `None` while the rule does not apply to
+    /// it. Mirrors [`UNQUALIFIED_LEAD_SUBJECT_SQL`] and the deadline
+    /// expression of the sweep; edit them together.
+    pub fn deadline(
+        &self,
+        qualification_status: &str,
+        compliance_status: &str,
+        created_at: chrono::DateTime<chrono::Utc>,
+    ) -> Option<chrono::DateTime<chrono::Utc>> {
+        let unqualified = matches!(
+            qualification_status,
+            "new" | "in_progress" | "not_qualified" | "archived"
+        );
+        (unqualified && compliance_status != "signed")
+            .then(|| created_at.max(self.effective_at) + chrono::Duration::days(self.days))
+    }
+}
+
+/// Which leads the rule covers (alias `l`; `$4` is the anonymisation sentinel).
+const UNQUALIFIED_LEAD_SUBJECT_SQL: &str = r#"
+    l.qualification_status IN ('new', 'in_progress', 'not_qualified', 'archived')
+    AND l.compliance_status <> 'signed'
+    AND l.converted_patient_id IS NULL
+    AND COALESCE(l.failed_outcome_status, 'none') <> 'delete_anonymized'
+    AND l.first_name <> $4"#;
+
+/// Deadline of a lead (`$1` days, `$2` start of the rule).
+const UNQUALIFIED_LEAD_DEADLINE_SQL: &str =
+    "GREATEST(l.created_at, $2) + make_interval(days => $1::int)";
+
+/// The rule from `system_settings`, or `None` when it is switched off (window
+/// of 0 days) or was never started in this environment.
+pub async fn load_unqualified_lead_retention(
+    pool: &gmed_db::DbPool,
+) -> Option<UnqualifiedLeadRetention> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        r#"SELECT key, value::TEXT FROM system_settings
+           WHERE key IN (
+               'unqualified_lead_retention_days',
+               'unqualified_lead_retention_effective_at'
+           )"#,
+    )
+    .fetch_all(pool)
+    .await
+    .ok()?;
+    let setting = |key: &str| {
+        rows.iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.trim_matches('"').to_string())
+    };
+    let effective_at =
+        chrono::DateTime::parse_from_rfc3339(&setting("unqualified_lead_retention_effective_at")?)
+            .ok()?
+            .with_timezone(&chrono::Utc);
+    let days = setting("unqualified_lead_retention_days")
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_UNQUALIFIED_LEAD_RETENTION_DAYS);
+    (days > 0).then_some(UnqualifiedLeadRetention { days, effective_at })
+}
+
+/// The deadline of a lead row for the API (`retention_deadline_at`): RFC 3339,
+/// or null while the rule does not apply to the lead.
+fn lead_retention_deadline_json(
+    policy: Option<&UnqualifiedLeadRetention>,
+    row: &sqlx::postgres::PgRow,
+) -> Value {
+    let deadline = policy.and_then(|policy| {
+        policy.deadline(
+            &row.try_get::<String, _>("qualification_status").ok()?,
+            &row.try_get::<String, _>("compliance_status").ok()?,
+            row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                .ok()?,
+        )
+    });
+    json!(deadline.map(|value| value.to_rfc3339()))
+}
+
+/// Summary of one sweep of the unqualified-lead rule.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct UnqualifiedLeadPurgeReport {
+    pub scanned: u64,
+    pub purged: u64,
+    /// Left for a manual decision: an order of the lead has an invoice or
+    /// could not be withdrawn.
+    pub blocked: u64,
+    pub warned: u64,
+    pub errors: u64,
+}
+
+enum UnqualifiedLeadPurge {
+    Purged,
+    /// The lead changed between the scan and its lock and is no longer due.
+    Skipped,
+    Blocked,
+}
+
+/// Run one sweep of the unqualified-lead rule: warn about deadlines that are
+/// close, then purge every lead whose deadline has passed.
+pub async fn auto_purge_unqualified_leads(
+    state: &crate::state::AppState,
+) -> Result<UnqualifiedLeadPurgeReport, sqlx::Error> {
+    let Some(policy) = load_unqualified_lead_retention(&state.db).await else {
+        return Ok(UnqualifiedLeadPurgeReport::default());
+    };
+    purge_unqualified_leads(state, policy, chrono::Utc::now(), None).await
+}
+
+/// [`auto_purge_unqualified_leads`] with an explicit rule and clock. `only`
+/// narrows the sweep to the given leads; the scheduler passes `None`.
+#[doc(hidden)]
+pub async fn purge_unqualified_leads(
+    state: &crate::state::AppState,
+    policy: UnqualifiedLeadRetention,
+    now: chrono::DateTime<chrono::Utc>,
+    only: Option<&[Uuid]>,
+) -> Result<UnqualifiedLeadPurgeReport, sqlx::Error> {
+    let mut report = UnqualifiedLeadPurgeReport {
+        warned: warn_about_unqualified_lead_deadlines(state, policy, now, only).await?,
+        ..Default::default()
+    };
+    let candidates: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"SELECT l.id FROM leads l
+           WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
+             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
+             AND ($5::uuid[] IS NULL OR l.id = ANY($5))
+           ORDER BY l.created_at, l.id"#
+    ))
+    .bind(policy.days as i32)
+    .bind(policy.effective_at)
+    .bind(now)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(only)
+    .fetch_all(&state.db)
+    .await?;
+    report.scanned = candidates.len() as u64;
+
+    for lead_id in candidates {
+        match purge_unqualified_lead(state, policy, now, lead_id).await {
+            Ok(UnqualifiedLeadPurge::Purged) => report.purged += 1,
+            Ok(UnqualifiedLeadPurge::Skipped) => {}
+            Ok(UnqualifiedLeadPurge::Blocked) => {
+                report.blocked += 1;
+                if let Err(error) = notify_unqualified_lead_purge_blocked(state, lead_id).await {
+                    tracing::warn!(lead_id = %lead_id, error = %error, "notify blocked lead purge");
+                }
+            }
+            Err(error) => {
+                tracing::error!(lead_id = %lead_id, error = %error, "Unqualified lead purge failed");
+                report.errors += 1;
+            }
+        }
+    }
+    Ok(report)
+}
+
+async fn purge_unqualified_lead(
+    state: &crate::state::AppState,
+    policy: UnqualifiedLeadRetention,
+    now: chrono::DateTime<chrono::Utc>,
+    lead_id: Uuid,
+) -> Result<UnqualifiedLeadPurge, sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    // Lock the lead and decide again: it may have been qualified, signed or
+    // deleted since the scan.
+    let lead = sqlx::query(&format!(
+        r#"SELECT l.qualification_status, l.created_by,
+                  (SELECT o.created_by FROM orders o
+                   WHERE o.source_lead_id = l.id
+                   ORDER BY o.created_at, o.id LIMIT 1) AS order_created_by
+           FROM leads l
+           WHERE l.id = $5
+             AND {UNQUALIFIED_LEAD_SUBJECT_SQL}
+             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3
+           FOR UPDATE OF l"#
+    ))
+    .bind(policy.days as i32)
+    .bind(policy.effective_at)
+    .bind(now)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(lead_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some(lead) = lead else {
+        return Ok(UnqualifiedLeadPurge::Skipped);
+    };
+    let from_status: String = lead.try_get("qualification_status")?;
+
+    // An invoice keeps the lead for accounting (§ 257 HGB, § 147 AO): it is
+    // never deleted automatically.
+    let invoiced: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+                   SELECT 1 FROM invoices i JOIN orders o ON o.id = i.order_id
+                   WHERE o.source_lead_id = $1 AND i.status <> 'cancelled'
+               ) OR EXISTS (
+                   SELECT 1 FROM external_invoices e JOIN orders o ON o.id = e.order_id
+                   WHERE o.source_lead_id = $1 AND e.status <> 'cancelled'
+               )"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if invoiced {
+        return Ok(UnqualifiedLeadPurge::Blocked);
+    }
+
+    // The open preparation order is withdrawn like in the manual deletion. The
+    // cancellation needs a user: the one who created the lead, or its order.
+    let actor: Option<Uuid> = lead
+        .try_get::<Option<Uuid>, _>("created_by")?
+        .or(lead.try_get::<Option<Uuid>, _>("order_created_by")?);
+    let has_open_order: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM orders
+               WHERE source_lead_id = $1
+                 AND status IN ('active', 'paused')
+                 AND (patient_id IS NULL OR intake_state = 'draft')
+           )"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let withdrawn = if has_open_order {
+        let Some(actor) = actor else {
+            return Ok(UnqualifiedLeadPurge::Blocked);
+        };
+        match crate::routes::orders::withdraw_lead_orders_in_tx(
+            &mut tx,
+            lead_id,
+            actor,
+            crate::routes::orders::LEAD_DELETED_CANCELLATION_REASON,
+            UNQUALIFIED_LEAD_PURGE_REASON,
+        )
+        .await
+        {
+            Ok(withdrawn) => withdrawn,
+            Err(response) => {
+                tracing::warn!(
+                    lead_id = %lead_id,
+                    status = %response.status(),
+                    "Unqualified lead purge: the lead's order could not be withdrawn"
+                );
+                return Ok(UnqualifiedLeadPurge::Blocked);
+            }
+        }
+    } else {
+        Vec::new()
+    };
+
+    let purged = purge_lead_and_prospect_in_tx(
+        &mut tx,
+        LeadPurge {
+            lead_id,
+            failed_from_status: Some(from_status.clone()),
+            reason: UNQUALIFIED_LEAD_PURGE_REASON,
+            note: Some("Auto-purged: not qualified within unqualified_lead_retention_days"),
+            processed_by: None,
+            lead_audit: audit::domain_event(
+                "auto_purge_lead",
+                None,
+                "lead",
+                Some(lead_id),
+                json!({
+                    "reason": "unqualified_lead_retention",
+                    "retention_days": policy.days,
+                    "gdpr_article": "5(1)(e)",
+                    "failed_from_status": from_status.clone(),
+                }),
+            ),
+            lifecycle: crate::routes::workflow_lifecycle::RecordEvent {
+                entity_type: "lead",
+                entity_id: lead_id,
+                from_stage: Some(from_status.as_str()),
+                to_stage: "deleted",
+                transition_kind: "deleted",
+                changed_by: None,
+                note: Some(UNQUALIFIED_LEAD_PURGE_REASON),
+                metadata: json!({
+                    "resolution": "delete_anonymized",
+                    "trigger": "unqualified_lead_retention",
+                    "retention_days": policy.days,
+                }),
+            },
+        },
+    )
+    .await?;
+    if purged.result.rows_affected() == 0 {
+        return Ok(UnqualifiedLeadPurge::Skipped);
+    }
+    tx.commit().await?;
+
+    for storage_key in &purged.removed_blobs {
+        crate::routes::documents::remove_document_blob(storage_key).await;
+    }
+    if let Some(actor) = actor
+        && !withdrawn.is_empty()
+    {
+        crate::routes::orders::publish_withdrawn_lead_orders(state, actor, &withdrawn).await;
+    }
+    crate::realtime::publish_lead_event(
+        state,
+        None,
+        "lead.failed_resolved",
+        lead_id,
+        json!({
+            "resolution": "delete_anonymized",
+            "reason": UNQUALIFIED_LEAD_PURGE_REASON,
+            "failed_from_status": from_status,
+        }),
+    )
+    .await;
+    Ok(UnqualifiedLeadPurge::Purged)
+}
+
+/// Staff who hear about the retention of a lead: its creator, or every
+/// patient manager and CEO when the lead came from the website.
+async fn unqualified_lead_recipients(
+    pool: &gmed_db::DbPool,
+    created_by: Option<Uuid>,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT id FROM users
+           WHERE is_active = true
+             AND (id = $1 OR ($1::uuid IS NULL AND role IN ('patient_manager', 'ceo')))
+           ORDER BY created_at"#,
+    )
+    .bind(created_by)
+    .fetch_all(pool)
+    .await
+}
+
+/// Stores a notification about a lead without naming the person: the row
+/// outlives nothing it should not, and the lead purge deletes it anyway.
+async fn notify_about_lead_retention(
+    state: &crate::state::AppState,
+    recipients: &[Uuid],
+    kind: &str,
+    title: &str,
+    body: &str,
+    lead_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    for recipient in recipients {
+        let notification_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+               VALUES ($1, $2, $3, $4, 'lead', $5)
+               RETURNING id"#,
+        )
+        .bind(recipient)
+        .bind(kind)
+        .bind(title)
+        .bind(body)
+        .bind(lead_id)
+        .fetch_one(&state.db)
+        .await?;
+        crate::realtime::publish_notification_event(
+            state,
+            *recipient,
+            "notification.created",
+            Some(notification_id),
+            json!({ "entity_type": "lead", "entity_id": lead_id }),
+        )
+        .await;
+    }
+    Ok(())
+}
+
+/// Warn once, [`UNQUALIFIED_LEAD_WARNING_DAYS`] before the deadline. Returns
+/// the number of leads warned about.
+async fn warn_about_unqualified_lead_deadlines(
+    state: &crate::state::AppState,
+    policy: UnqualifiedLeadRetention,
+    now: chrono::DateTime<chrono::Utc>,
+    only: Option<&[Uuid]>,
+) -> Result<u64, sqlx::Error> {
+    let due_soon = sqlx::query(&format!(
+        r#"UPDATE leads AS l
+           SET retention_warning_sent_at = $3
+           WHERE {UNQUALIFIED_LEAD_SUBJECT_SQL}
+             AND l.retention_warning_sent_at IS NULL
+             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} > $3
+             AND {UNQUALIFIED_LEAD_DEADLINE_SQL} <= $3 + make_interval(days => $6::int)
+             AND ($5::uuid[] IS NULL OR l.id = ANY($5))
+           RETURNING l.id, l.created_by, {UNQUALIFIED_LEAD_DEADLINE_SQL} AS deadline"#
+    ))
+    .bind(policy.days as i32)
+    .bind(policy.effective_at)
+    .bind(now)
+    .bind(ANONYMIZED_FIRST_NAME)
+    .bind(only)
+    .bind(UNQUALIFIED_LEAD_WARNING_DAYS as i32)
+    .fetch_all(&state.db)
+    .await?;
+
+    for row in &due_soon {
+        let lead_id: Uuid = row.try_get("id")?;
+        let deadline: chrono::DateTime<chrono::Utc> = row.try_get("deadline")?;
+        let recipients = unqualified_lead_recipients(&state.db, row.try_get("created_by")?).await?;
+        // The frontend shows these facts in RU/DE (topbar-data.ts).
+        notify_about_lead_retention(
+            state,
+            &recipients,
+            "lead_retention_warning",
+            "Lead will be deleted automatically",
+            &format!(
+                "Not qualified and no signed consent; deletion on {}.",
+                deadline.format("%Y-%m-%d")
+            ),
+            lead_id,
+        )
+        .await?;
+    }
+    Ok(due_soon.len() as u64)
+}
+
+/// A due lead that cannot be deleted automatically needs a manual decision.
+/// Repeated at most once a week per lead.
+async fn notify_unqualified_lead_purge_blocked(
+    state: &crate::state::AppState,
+    lead_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let already_told: bool = sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM user_notifications
+               WHERE kind = 'lead_retention_blocked'
+                 AND entity_type = 'lead'
+                 AND entity_id = $1
+                 AND created_at > now() - interval '7 days'
+           )"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&state.db)
+    .await?;
+    if already_told {
+        return Ok(());
+    }
+    let recipients = unqualified_lead_recipients(&state.db, None).await?;
+    notify_about_lead_retention(
+        state,
+        &recipients,
+        "lead_retention_blocked",
+        "Lead is due for deletion and needs a decision",
+        "It has an order with an invoice or an order that could not be withdrawn.",
+        lead_id,
+    )
+    .await
+}
+
+#[cfg(test)]
+mod unqualified_lead_retention_tests {
+    use super::*;
+
+    fn at(day: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339("2026-10-01T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc)
+            + chrono::Duration::days(day)
+    }
+
+    #[test]
+    fn deadline_counts_from_creation_or_from_the_start_of_the_rule() {
+        let policy = UnqualifiedLeadRetention {
+            days: 14,
+            effective_at: at(0),
+        };
+        // Created after the rule started: creation plus the window.
+        assert_eq!(
+            policy.deadline("in_progress", "pending", at(3)),
+            Some(at(17))
+        );
+        // An older lead counts from the start of the rule, not from its creation.
+        assert_eq!(
+            policy.deadline("new", "documents_sent", at(-40)),
+            Some(at(14))
+        );
+        assert_eq!(
+            policy.deadline("archived", "rejected", at(-40)),
+            Some(at(14))
+        );
+        assert_eq!(
+            policy.deadline("not_qualified", "pending", at(1)),
+            Some(at(15))
+        );
+    }
+
+    #[test]
+    fn rule_spares_qualified_converted_deleted_leads_and_signed_consent() {
+        let policy = UnqualifiedLeadRetention {
+            days: 14,
+            effective_at: at(0),
+        };
+        for status in ["qualified", "converted", "deleted"] {
+            assert_eq!(policy.deadline(status, "pending", at(1)), None, "{status}");
+        }
+        assert_eq!(policy.deadline("in_progress", "signed", at(1)), None);
+    }
 }
 
 #[cfg(test)]
