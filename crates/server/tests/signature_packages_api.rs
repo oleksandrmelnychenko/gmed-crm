@@ -855,16 +855,49 @@ async fn package_is_signed_once_and_members_link_to_the_canonical_bundle() {
         .await
         .expect("metadata stays editable");
     // Test (DEMO) evidence has no legal value and stays erasable.
-    let demo_result = Uuid::new_v4();
+    let (demo_request, demo_result) = (Uuid::new_v4(), Uuid::new_v4());
     sqlx::query("INSERT INTO documents(id,patient_id,auto_name,art,mime_type,storage_key,version_root_document_id,uploaded_by,ursprung) VALUES ($1,$2,'TEST – Evidence','signature_evidence','application/pdf','demo-key',$1,$3,'electronic_signature')")
         .bind(demo_result).bind(patient).bind(env.admin_id).execute(&env.pool).await.unwrap();
     sqlx::query("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256) VALUES ($1,$2,$3,'h','{}','[]','demo',true,'completed',$4,'r','r','s')")
-        .bind(Uuid::new_v4()).bind(contract).bind(env.admin_id).bind(demo_result).execute(&env.pool).await.unwrap();
+        .bind(demo_request).bind(contract).bind(env.admin_id).bind(demo_result).execute(&env.pool).await.unwrap();
     sqlx::query("UPDATE documents SET storage_key=NULL, file_deleted_at=now() WHERE id=$1")
         .bind(demo_result)
         .execute(&env.pool)
         .await
         .expect("test evidence can be erased");
+    // Before this change every member of a package got its own signed copy,
+    // linked only through its member row. Test copies of that kind stay
+    // erasable; live ones are protected like any signed original.
+    let mut old_copies = Vec::new();
+    for (request, member) in [(demo_request, release), (id, release)] {
+        let copy = Uuid::new_v4();
+        sqlx::query("INSERT INTO documents(id,patient_id,auto_name,art,mime_type,storage_key,version_root_document_id,uploaded_by,ursprung) VALUES ($1,$2,'Old member copy','signature_evidence','application/pdf','old-copy-key',$1,$3,'electronic_signature_package')")
+            .bind(copy).bind(patient).bind(env.admin_id).execute(&env.pool).await.unwrap();
+        if request == demo_request {
+            sqlx::query("INSERT INTO document_signature_members(request_id,document_id,position,sha256,source_context,result_document_id) VALUES ($1,$2,1,$3,'{}',$4)")
+                .bind(request).bind(member).bind("0".repeat(64)).bind(copy).execute(&env.pool).await.unwrap();
+        } else {
+            sqlx::query("UPDATE document_signature_members SET result_document_id=$3 WHERE request_id=$1 AND document_id=$2")
+                .bind(request).bind(member).bind(copy).execute(&env.pool).await.unwrap();
+        }
+        old_copies.push(copy);
+    }
+    let erase = "UPDATE documents SET storage_key=NULL, file_deleted_at=now() WHERE id=$1";
+    sqlx::query(erase)
+        .bind(old_copies[0])
+        .execute(&env.pool)
+        .await
+        .expect("an old test-mode member copy can be erased");
+    assert!(
+        sqlx::query(erase)
+            .bind(old_copies[1])
+            .execute(&env.pool)
+            .await
+            .is_err(),
+        "an old live member copy is a signed original"
+    );
+    sqlx::query("UPDATE document_signature_members SET result_document_id=$3 WHERE request_id=$1 AND document_id=$2")
+        .bind(id).bind(release).bind(result).execute(&env.pool).await.unwrap();
 
     // § 312f BGB: staff record how the signers got their copy.
     let (status, body) = call(
@@ -1312,6 +1345,112 @@ async fn package_validation_matrix_and_rbac() {
     )
     .await;
     assert_eq!(status, StatusCode::ACCEPTED, "{value}");
+}
+
+/// A document generated before the generators recorded their signature places
+/// has its frames found in the PDF itself; inside a package they move to the
+/// pages the document takes in the merged bundle.
+#[tokio::test]
+async fn frames_of_older_generated_documents_are_found_and_follow_the_bundle_pages() {
+    let Some(env) = env().await else { return };
+    let lead: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, last_name, email, phone, date_of_birth, legal_sex,
+                primary_language, country, street_address, city, zip_code, created_by
+           ) VALUES ('Anna', 'Altbestand', $1, '+49 30 987654', DATE '1988-04-12', 'female',
+                     'de', 'DE', 'Musterstr. 1', 'Berlin', '10115', $2) RETURNING id"#,
+    )
+    .bind(format!("alt-{}@example.org", Uuid::new_v4().simple()))
+    .bind(env.admin_id)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let mut generated = Vec::new();
+    for template in [
+        "confidentiality_release",
+        "privacy_consents",
+        "privacy_information",
+    ] {
+        let (status, body) = call(
+            &env.app,
+            "POST",
+            "/api/v1/documents/generate",
+            &env.ceo,
+            Some(json!({"template_id": template, "lead_id": lead, "language": "de"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{template}: {body}");
+        generated.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+    let (release, consents, information) = (generated[0], generated[1], generated[2]);
+    let recorded: i64 = sqlx::query_scalar(
+        "SELECT jsonb_array_length(generated_bindings->'_signature_anchors')::bigint FROM documents WHERE id=$1",
+    )
+    .bind(consents)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert!(recorded > 0, "the generator records its signature places");
+    // As generated before the frames were recorded.
+    sqlx::query(
+        "UPDATE documents SET generated_bindings = generated_bindings - '_signature_anchors' WHERE id=$1",
+    )
+    .bind(consents)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+
+    let (status, candidates) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/signature-packages/candidates?document_id={release}"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{candidates}");
+    let old = candidates["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|document| document["id"] == consents.to_string())
+        .unwrap();
+    assert_eq!(
+        old["has_frames"], true,
+        "no warning: the frames are found in the PDF"
+    );
+    assert_eq!(old["frame_roles"], json!(["client"]));
+
+    let id = send_package(
+        &env,
+        json!({"document_ids":[release, consents],"attachment_ids":[information],
+            "signers":[signer("Anna", "anna@example.org", "client")]}),
+    )
+    .await;
+    until_pending(&env, id).await;
+    let request = sqlx::query(
+        "SELECT signers, source_page_count FROM document_signature_requests WHERE id=$1",
+    )
+    .bind(id)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let release_pages = i64::from(request.get::<i32, _>("source_page_count"));
+    let pages: Vec<i64> = request.get::<Value, _>("signers")[0]["positions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|frame| frame["page"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert!(
+        pages.iter().any(|page| *page < release_pages),
+        "recorded frame of the first document: {pages:?}"
+    );
+    assert_eq!(
+        pages.iter().filter(|page| **page >= release_pages).count() as i64,
+        recorded,
+        "every detected frame of the older document, on its bundle pages: {pages:?}"
+    );
 }
 
 #[tokio::test]

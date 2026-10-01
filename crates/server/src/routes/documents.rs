@@ -28852,6 +28852,9 @@ mod tests {
             .map(|anchor| anchor.role.as_str())
             .collect::<Vec<_>>();
         assert_eq!(roles, vec!["guardian_1", "agency", "guardian_2"]);
+        // Each parent's rule is found as a frame of its own, never one shared
+        // `client` frame.
+        assert_signature_frames_detected(&generated);
         let text = normalized_pdf_pages(&generated.bytes).join(" ");
         assert!(text.contains("Erika Muster"));
         assert!(text.contains("Max Muster"));
@@ -29638,6 +29641,16 @@ mod tests {
         assert!(coverage_text.contains(&format!("*{MIXED_VAT_NOTE}.")));
         assert!(!coverage_text.contains("zzgl. MwSt. 19 %"));
         assert!(coverage_text.contains("MWSt. 19%: 212,80 EUR"));
+        // The Kostenübernehmer signs in a frame of its own, which is also found
+        // in a declaration generated before the frames were recorded.
+        let coverage_pdf = super::build_cost_coverage_pdf(&coverage, "DOC-VAT-COVERAGE").unwrap();
+        let roles = coverage_pdf
+            .signature_anchors
+            .iter()
+            .map(|anchor| anchor.role.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(roles, ["payer", "agency"]);
+        assert_signature_frames_detected(&coverage_pdf);
     }
 
     #[test]

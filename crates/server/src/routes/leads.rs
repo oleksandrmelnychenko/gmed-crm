@@ -7552,6 +7552,13 @@ const LEAD_DOCUMENT_RETAINED_SQL: &str = r#"(
             WHERE signature_request.result_document_id = documents.id
               AND signature_request.test_mode
         )
+        AND NOT EXISTS (
+            SELECT 1 FROM document_signature_members signature_member
+            JOIN document_signature_requests signature_request
+              ON signature_request.id = signature_member.request_id
+            WHERE signature_member.result_document_id = documents.id
+              AND signature_request.test_mode
+        )
     )
 )"#;
 
