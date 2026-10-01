@@ -132,18 +132,47 @@ test("constructor builds typed blocks from selected text and by hand, then order
   const prepared = await mount(page, radiology);
   const dialog = page.getByRole("dialog", { name: "Assistent für den Import" });
 
-  // Block from selected document text: the laboratory value is split into fields.
+  // Selects a fragment of a recognized page text; an empty fragment collapses the selection.
+  const selectPageText = (pageNumber: number, fragment: string) => dialog
+    .getByRole("textbox", { name: `Erkannter Text der Seite ${pageNumber}` })
+    .evaluate((element: HTMLTextAreaElement, text) => {
+      const start = element.value.indexOf(text);
+      element.focus();
+      element.setSelectionRange(start, start + text.length);
+      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+    }, fragment);
   await dialog.getByRole("tab", { name: "Volltext" }).click();
   await dialog.getByRole("button", { name: /^Seite 1/ }).click();
   const pageText = dialog.getByRole("textbox", { name: "Erkannter Text der Seite 1" });
-  await pageText.evaluate((element: HTMLTextAreaElement) => {
-    const start = element.value.indexOf("PSA-Wert");
-    element.focus();
-    element.setSelectionRange(start, element.value.indexOf(", bisher"));
-    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-  });
   const actions = dialog.locator("[data-clinical-import-selection-actions]");
+
+  // A block opened from a selection sits beside the document and takes
+  // further text from another page; clearing the selection withdraws the offer.
+  await selectPageText(1, "bisher keine Stanzbiopsie");
+  await expect(actions).toContainText("Block aus Auswahl erstellen als");
+  await selectPageText(1, "");
+  await expect(actions).toContainText("Text unten markieren oder Block hinzufügen");
+  await expect(actions).not.toContainText("Stanzbiopsie");
+  await selectPageText(1, "bisher keine Stanzbiopsie");
+  await actions.getByRole("button", { name: "Anamnese" }).click();
+  const anamnesisForm = dialog
+    .locator("[data-clinical-import-source-constructor]")
+    .locator('[data-clinical-import-constructor-form="anamnesis"]');
+  await expect(anamnesisForm.locator("textarea")).toHaveValue("bisher keine Stanzbiopsie");
+  await expect(actions.getByRole("button", { name: /Auswahl zum offenen Block/ })).toHaveCount(0);
+  await dialog.getByRole("button", { name: /^Seite 2/ }).click();
+  await selectPageText(2, "Geringe BPH");
+  await actions.getByRole("button", { name: "Auswahl zum offenen Block „Anamnese“ hinzufügen" }).click();
+  await expect(anamnesisForm.locator("textarea")).toHaveValue("bisher keine Stanzbiopsie\nGeringe BPH");
+  await expect(anamnesisForm).toContainText("Aus Seite 1");
+  await expect(actions).not.toContainText("Geringe BPH");
+  await anamnesisForm.getByRole("button", { name: "Abbrechen" }).last().click();
+  await expect(anamnesisForm).toHaveCount(0);
+  await dialog.getByRole("button", { name: /^Seite 1/ }).click();
+
+  // Block from selected document text: the laboratory value is split into fields.
+  await selectPageText(1, "PSA-Wert 12,4 ng/ml");
   await expect(actions).toContainText("PSA-Wert 12");
   // The selection belongs to page 1 and is not offered on page 2.
   await dialog.getByRole("button", { name: /^Seite 2/ }).click();
@@ -189,14 +218,25 @@ test("constructor builds typed blocks from selected text and by hand, then order
   await vitalForm.getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
   await expect(cards).toHaveCount(4);
 
-  // A hand-made block can be removed again; a recognized one cannot.
+  // A hand-made block can be removed again.
   await dialog.locator("[data-clinical-import-constructor-toolbar]").getByRole("button", { name: "Empfehlungen" }).click();
   await dialog.locator('[data-clinical-import-constructor-form="recommendation"]').getByLabel(/^Empfehlung \*$/).fill("Versehentlich angelegt");
   await dialog.locator('[data-clinical-import-constructor-form="recommendation"]').getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
   await expect(cards).toHaveCount(5);
   await cards.last().getByRole("button", { name: "Block entfernen" }).click();
   await expect(cards).toHaveCount(4);
-  await expect(cards.first().getByRole("button", { name: "Block entfernen" })).toHaveCount(0);
+  // So can a recognized one, and the last removal can be undone in place.
+  const removedBlocks = dialog.locator("[data-clinical-import-removed-blocks]");
+  await expect(removedBlocks).toContainText("Entfernte Blöcke: 1");
+  await expect(cards.first()).toHaveAttribute("data-clinical-import-candidate-id", "dx-1");
+  await cards.first().getByRole("button", { name: "Block entfernen" }).click();
+  await expect(cards).toHaveCount(3);
+  await expect(dialog.locator('[data-clinical-import-candidate-id="dx-1"]')).toHaveCount(0);
+  await expect(removedBlocks).toContainText("Entfernte Blöcke: 2");
+  await removedBlocks.getByRole("button", { name: "Letzten wiederherstellen" }).click();
+  await expect(cards).toHaveCount(4);
+  await expect(cards.first()).toHaveAttribute("data-clinical-import-candidate-id", "dx-1");
+  await expect(removedBlocks).toContainText("Entfernte Blöcke: 1");
 
   // Record fields of a recognized block are visible and editable in its card.
   const recognized = dialog.locator('[data-clinical-import-candidate-id="dx-1"]');

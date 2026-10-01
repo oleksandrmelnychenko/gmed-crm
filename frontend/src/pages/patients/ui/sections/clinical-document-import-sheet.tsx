@@ -100,7 +100,9 @@ import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { ClinicalDocumentTranslationPanel } from "./clinical-document-translation";
 import { applyGermanCandidateDraft, germanCandidateDraft } from "../../data/clinical-document-translation";
 import {
+  appendSelectionToConstructorFields,
   buildConstructorCandidate,
+  constructorAcceptsMoreText,
   groupCandidatesByPage,
   moveCandidate,
   prefillConstructorFields,
@@ -993,6 +995,11 @@ export function ClinicalDocumentImportSheet({
   // Text currently selected in the recognized page text; a new constructor
   // block starts from it and keeps it as source evidence.
   const [sourceSelection, setSourceSelection] = useState({ text: "", page: 0 });
+  // Blocks the reviewer removed from the draft, kept so a removal can be undone.
+  const [removedBlocks, setRemovedBlocks] = useState<{
+    importId: string;
+    items: { candidate: ClinicalDocumentImportCandidate; index: number }[];
+  }>({ importId: "", items: [] });
   const [constructorDraft, setConstructorDraft] = useState<{
     key: string;
     target: ClinicalDocumentImportTarget;
@@ -1896,6 +1903,58 @@ export function ClinicalDocumentImportSheet({
     toast.success(tx("Блок добавлен в черновик", "Block zum Entwurf hinzugefügt"));
   }
 
+  // Text selected after the form was opened (for example on another page)
+  // joins the main text of the open block and its source evidence.
+  const selectionToAppend =
+    constructorDraft?.anchor === "source"
+    && constructorAcceptsMoreText(constructorDraft.target)
+    && pageSelection
+    && !constructorDraft.sourceText.includes(pageSelection)
+      ? pageSelection
+      : "";
+
+  function appendSelectionToConstructor() {
+    if (!selectionToAppend) return;
+    const page = selectedSourcePage?.pageNumber ?? null;
+    setConstructorDraft((current) =>
+      current
+        ? {
+            ...current,
+            fields: appendSelectionToConstructorFields(current.target, current.fields, selectionToAppend),
+            sourcePage: current.sourcePage ?? page,
+            sourceText: [current.sourceText.trim(), selectionToAppend].filter(Boolean).join("\n"),
+          }
+        : current,
+    );
+    setSourceSelection({ text: "", page: 0 });
+  }
+
+  // Blocks removed in this review, newest last; a list of another import is ignored.
+  const removedCandidates =
+    documentImport?.status === "review_required" && removedBlocks.importId === documentImport.id
+      ? removedBlocks.items
+      : [];
+
+  function removeCandidate(candidate: ClinicalDocumentImportCandidate) {
+    const importId = documentImport?.id;
+    const index = candidates.findIndex((item) => item.id === candidate.id);
+    if (!importId || index < 0 || snapshotReadOnly) return;
+    setCandidates((current) => current.filter((item) => item.id !== candidate.id));
+    setActiveCandidateId((activeId) => (activeId === candidate.id ? null : activeId));
+    setRemovedBlocks({ importId, items: [...removedCandidates, { candidate, index }] });
+  }
+
+  function restoreRemovedCandidate() {
+    const last = removedCandidates.at(-1);
+    if (!last || !documentImport) return;
+    setCandidates((current) =>
+      current.some((item) => item.id === last.candidate.id)
+        ? current
+        : [...current.slice(0, last.index), last.candidate, ...current.slice(last.index)],
+    );
+    setRemovedBlocks({ importId: documentImport.id, items: removedCandidates.slice(0, -1) });
+  }
+
   function renderConstructorForm(anchor: "source" | ClinicalDocumentImportTarget) {
     if (!constructorDraft || constructorDraft.anchor !== anchor) return null;
     return (
@@ -1903,7 +1962,10 @@ export function ClinicalDocumentImportSheet({
         key={constructorDraft.key}
         target={constructorDraft.target}
         targetLabel={targetLabels[constructorDraft.target][lang === "de" ? "de" : "ru"]}
-        initialFields={constructorDraft.fields}
+        fields={constructorDraft.fields}
+        onFieldsChange={(fields) =>
+          setConstructorDraft((current) => (current ? { ...current, fields } : current))
+        }
         sourceText={constructorDraft.sourceText}
         sourcePage={constructorDraft.sourcePage}
         lang={lang}
@@ -2291,8 +2353,8 @@ export function ClinicalDocumentImportSheet({
                                         ))}
                                       </span>
                                     ) : null}
-                                    {/* Only hand-made blocks can be removed; recognized ones stay visible for review. */}
-                                    {!snapshotReadOnly && candidate.id.startsWith("manual:") ? (
+                                    {/* A removed block leaves the reviewed draft; the parser draft keeps it. */}
+                                    {!snapshotReadOnly ? (
                                       <Button
                                         type="button"
                                         size="icon"
@@ -2304,8 +2366,7 @@ export function ClinicalDocumentImportSheet({
                                         aria-label={tx("Удалить блок", "Block entfernen")}
                                         onClick={(event) => {
                                           event.stopPropagation();
-                                          setCandidates((current) => current.filter((item) => item.id !== candidate.id));
-                                          setActiveCandidateId((activeId) => (activeId === candidate.id ? null : activeId));
+                                          removeCandidate(candidate);
                                         }}
                                       >
                                         <Trash2 className="size-3.5" />
@@ -3168,7 +3229,21 @@ export function ClinicalDocumentImportSheet({
                             «{pageSelection}»
                           </p>
                         ) : null}
-                        {renderConstructorForm("source")}
+                        {/* The open block sits beside the document, so more text can be selected here. */}
+                        {selectionToAppend && constructorDraft ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-8 gap-1.5 text-xs"
+                            onClick={appendSelectionToConstructor}
+                          >
+                            <Plus aria-hidden="true" className="size-3.5" />
+                            {tx(
+                              `Добавить выделенное в открытый блок «${targetLabels[constructorDraft.target].ru}»`,
+                              `Auswahl zum offenen Block „${targetLabels[constructorDraft.target].de}“ hinzufügen`,
+                            )}
+                          </Button>
+                        ) : null}
                       </div>
                     ) : null}
 
@@ -3183,7 +3258,12 @@ export function ClinicalDocumentImportSheet({
                           const fragment = field.value
                             .slice(field.selectionStart, field.selectionEnd)
                             .trim();
-                          if (fragment) setSourceSelection({ text: fragment, page: selectedSourcePage.pageNumber });
+                          // A collapsed selection (a click into the text) withdraws the offer.
+                          setSourceSelection((current) =>
+                            fragment
+                              ? { text: fragment, page: selectedSourcePage.pageNumber }
+                              : current.text ? { text: "", page: 0 } : current,
+                          );
                         }}
                         aria-label={tx(
                           `Распознанный текст страницы ${selectedSourcePage.pageNumber}`,
@@ -3270,6 +3350,30 @@ export function ClinicalDocumentImportSheet({
                         </button>
                       ))}
                     </div>
+                  </div>
+                ) : null}
+
+                {activeTab !== "source" && removedCandidates.length > 0 ? (
+                  <div
+                    data-clinical-import-removed-blocks
+                    className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground"
+                  >
+                    <span>
+                      {tx(
+                        `Удалено блоков: ${removedCandidates.length}. В карту пациента они не попадут.`,
+                        `Entfernte Blöcke: ${removedCandidates.length}. Sie werden nicht in die Akte übernommen.`,
+                      )}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 gap-1.5 bg-white text-xs"
+                      onClick={restoreRemovedCandidate}
+                    >
+                      <RotateCcw aria-hidden="true" className="size-3.5" />
+                      {tx("Вернуть последний", "Letzten wiederherstellen")}
+                    </Button>
                   </div>
                 ) : null}
 
@@ -3374,6 +3478,16 @@ export function ClinicalDocumentImportSheet({
           </section>
 
           <aside className="flex min-h-0 flex-col bg-white">
+          {/* A block built from the recognized text opens beside it, above the
+              original, so the text stays free for further selections. */}
+          {reviewReady && constructorDraft?.anchor === "source" ? (
+            <div
+              data-clinical-import-source-constructor
+              className="max-h-[70%] shrink-0 overflow-y-auto border-b border-border/70 p-3"
+            >
+              {renderConstructorForm("source")}
+            </div>
+          ) : null}
           {activeCandidate ? (
             <div className="shrink-0 border-b border-border/70 bg-white px-4 py-3">
               <p className="max-h-56 overflow-y-auto whitespace-pre-wrap pr-2 text-xs leading-5 text-foreground">

@@ -130,6 +130,24 @@ export function prefillConstructorFields(
   return fields;
 }
 
+/** Whether further selected text can be added to the main text of an open form. */
+export function constructorAcceptsMoreText(target: ClinicalDocumentImportTarget): boolean {
+  return constructorFieldSpecs[target].some((spec) => spec.primary && spec.kind === "textarea");
+}
+
+/** Adds further selected document text (for example from another page) as a new line of the main text. */
+export function appendSelectionToConstructorFields(
+  target: ClinicalDocumentImportTarget,
+  fields: ConstructorFields,
+  selection: string,
+): ConstructorFields {
+  const text = selection.trim();
+  const primary = constructorFieldSpecs[target].find((spec) => spec.primary && spec.kind === "textarea");
+  if (!text || !primary) return fields;
+  const current = fields[primary.key]?.trimEnd() ?? "";
+  return { ...fields, [primary.key]: current ? `${current}\n${text}` : text };
+}
+
 export function missingConstructorFields(
   target: ClinicalDocumentImportTarget,
   fields: ConstructorFields,
