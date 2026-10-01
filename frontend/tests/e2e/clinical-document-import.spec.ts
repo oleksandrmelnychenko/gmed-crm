@@ -145,6 +145,11 @@ test("constructor builds typed blocks from selected text and by hand, then order
   });
   const actions = dialog.locator("[data-clinical-import-selection-actions]");
   await expect(actions).toContainText("PSA-Wert 12");
+  // The selection belongs to page 1 and is not offered on page 2.
+  await dialog.getByRole("button", { name: /^Seite 2/ }).click();
+  await expect(actions).not.toContainText("PSA-Wert");
+  await dialog.getByRole("button", { name: /^Seite 1/ }).click();
+  await expect(actions).toContainText("PSA-Wert 12");
   await actions.getByRole("button", { name: "Laborwerte" }).click();
   const labForm = dialog.locator('[data-clinical-import-constructor-form="lab_result"]');
   await expect(labForm.getByLabel(/^Parameter\b/)).toHaveValue("PSA");
@@ -173,6 +178,17 @@ test("constructor builds typed blocks from selected text and by hand, then order
   const cards = dialog.locator("[data-clinical-import-candidate-card]");
   await expect(cards).toHaveCount(3);
 
+  // Vitals without a note still get a value (the import rejects empty ones).
+  await dialog.locator("[data-clinical-import-constructor-toolbar]").getByRole("button", { name: "Vitalwerte" }).click();
+  const vitalForm = dialog.locator('[data-clinical-import-constructor-form="vital"]');
+  await vitalForm.getByRole("spinbutton", { name: pickerSection.day }).fill("02");
+  await vitalForm.getByRole("spinbutton", { name: pickerSection.month }).fill("03");
+  await vitalForm.getByRole("spinbutton", { name: pickerSection.year }).fill("2026");
+  await vitalForm.getByRole("spinbutton", { name: pickerSection.year }).press("Tab");
+  await vitalForm.getByLabel("Gewicht, kg").fill("80");
+  await vitalForm.getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
+  await expect(cards).toHaveCount(4);
+
   // Ordering within the type, then grouping by source page.
   const diagnosisEditors = () => dialog
     .locator("[data-clinical-import-candidate-card] textarea[data-clinical-import-candidate-editor]")
@@ -183,6 +199,7 @@ test("constructor builds typed blocks from selected text and by hand, then order
   await dialog.getByRole("button", { name: "Nach Seiten" }).click();
   await expect(dialog.locator("summary").filter({ hasText: "Seite 2" })).toBeVisible();
   await expect(dialog.locator("summary").filter({ hasText: "Ohne Seite (manuell)" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Nach oben" })).toHaveCount(0);
 
   const confirm = page.getByRole("checkbox", { name: /Ich habe.*bestätige den Import/ });
   if (await confirm.count()) await confirm.check();
@@ -199,6 +216,9 @@ test("constructor builds typed blocks from selected text and by hand, then order
   expect(manualLab.normalized).toMatchObject({ analyte_name: "PSA", numeric_result: 12.4, measured_on: "2026-02-20" });
   const manualDiagnosis = reviewed.candidates.find((candidate) => candidate.value === "Prostatakarzinom")!;
   expect(manualDiagnosis.normalized).toMatchObject({ certainty: "verdacht", icd_code: "C61" });
+  const manualVital = reviewed.candidates.find((candidate) => candidate.target === "vital")!;
+  expect(manualVital.value).toBe("Gewicht, kg: 80");
+  expect(manualVital.normalized).toMatchObject({ measured_at: "2026-03-02", weight_kg: 80 });
   expect(reviewed.candidates.map((candidate) => candidate.id).indexOf(manualDiagnosis.id))
     .toBeLessThan(reviewed.candidates.map((candidate) => candidate.id).indexOf("dx-1"));
 });

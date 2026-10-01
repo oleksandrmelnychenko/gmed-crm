@@ -988,7 +988,7 @@ export function ClinicalDocumentImportSheet({
   const [activeTab, setActiveTab] = useState<BuilderTab>("all");
   // Text currently selected in the recognized page text; a new constructor
   // block starts from it and keeps it as source evidence.
-  const [sourceSelection, setSourceSelection] = useState("");
+  const [sourceSelection, setSourceSelection] = useState({ text: "", page: 0 });
   const [constructorDraft, setConstructorDraft] = useState<{
     key: string;
     target: ClinicalDocumentImportTarget;
@@ -1071,7 +1071,7 @@ export function ClinicalDocumentImportSheet({
       setSourceCountry("");
       setPatientIdentityConfirmed(false);
       setActiveTab("all");
-      setSourceSelection("");
+      setSourceSelection({ text: "", page: 0 });
       setConstructorDraft(null);
       setActiveCandidateId(null);
       setSourcePageNumber(1);
@@ -1393,6 +1393,8 @@ export function ClinicalDocumentImportSheet({
   const selectedSourcePage = sourcePages.find(
     (page) => page.pageNumber === sourcePageNumber,
   ) ?? sourcePages[0] ?? null;
+  // A selection belongs to the page it was made on; another page shows none.
+  const pageSelection = sourceSelection.page === selectedSourcePage?.pageNumber ? sourceSelection.text : "";
   useEffect(() => {
     if (sourcePages.length === 0) return;
     if (!sourcePages.some((page) => page.pageNumber === sourcePageNumber)) {
@@ -1856,7 +1858,7 @@ export function ClinicalDocumentImportSheet({
     fromSelection: boolean,
   ) {
     if (snapshotReadOnly) return;
-    const sourceText = fromSelection ? sourceSelection : "";
+    const sourceText = fromSelection ? pageSelection : "";
     setConstructorDraft({
       key: crypto.randomUUID(),
       target,
@@ -1886,7 +1888,7 @@ export function ClinicalDocumentImportSheet({
       current === "source" || current === "all" || current === candidate.target ? current : candidate.target,
     );
     setConstructorDraft(null);
-    setSourceSelection("");
+    setSourceSelection({ text: "", page: 0 });
     toast.success(tx("Блок добавлен в черновик", "Block zum Entwurf hinzugefügt"));
   }
 
@@ -2258,7 +2260,8 @@ export function ClinicalDocumentImportSheet({
                                       {candidate.source.page ? ` · S. ${candidate.source.page}` : ""}
                                       <ChevronRight className="size-3" />
                                     </button>
-                                    {!snapshotReadOnly ? (
+                                    {/* Blocks move within their type, which the page view does not show. */}
+                                    {!snapshotReadOnly && !(activeTab === "all" && candidateGrouping === "page") ? (
                                       <span className="ml-auto inline-flex items-center gap-0.5">
                                         {([-1, 1] as const).map((direction) => (
                                           <Button
@@ -3109,7 +3112,7 @@ export function ClinicalDocumentImportSheet({
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-semibold">
-                            {sourceSelection
+                            {pageSelection
                               ? tx("Создать блок из выделенного как", "Block aus Auswahl erstellen als")
                               : tx("Выделите текст ниже или добавьте блок", "Text unten markieren oder Block hinzufügen")}
                           </span>
@@ -3122,7 +3125,7 @@ export function ClinicalDocumentImportSheet({
                                 size="sm"
                                 variant={constructorDraft?.anchor === "source" && constructorDraft.target === target ? "default" : "outline"}
                                 className="h-8 gap-1.5 rounded-full text-xs"
-                                onClick={() => openConstructor(target, "source", Boolean(sourceSelection))}
+                                onClick={() => openConstructor(target, "source", Boolean(pageSelection))}
                               >
                                 <TargetIcon aria-hidden="true" className="size-3.5" />
                                 {targetLabels[target][lang === "de" ? "de" : "ru"]}
@@ -3130,9 +3133,9 @@ export function ClinicalDocumentImportSheet({
                             );
                           })}
                         </div>
-                        {sourceSelection ? (
+                        {pageSelection ? (
                           <p className="line-clamp-2 rounded-md bg-orange-50 px-2.5 py-1.5 text-[11px] leading-4 text-orange-950">
-                            «{sourceSelection}»
+                            «{pageSelection}»
                           </p>
                         ) : null}
                         {renderConstructorForm("source")}
@@ -3150,7 +3153,7 @@ export function ClinicalDocumentImportSheet({
                           const fragment = field.value
                             .slice(field.selectionStart, field.selectionEnd)
                             .trim();
-                          if (fragment) setSourceSelection(fragment);
+                          if (fragment) setSourceSelection({ text: fragment, page: selectedSourcePage.pageNumber });
                         }}
                         aria-label={tx(
                           `Распознанный текст страницы ${selectedSourcePage.pageNumber}`,

@@ -114,7 +114,8 @@ export function prefillConstructorFields(
     fields.kind = "secondary";
   }
   if (!text) return fields;
-  if (target === "lab_result") {
+  // A single laboratory value is short; longer selections stay as one text.
+  if (target === "lab_result" && text.length <= 160) {
     const match = LAB_SELECTION_RE.exec(text.replace(/\s+/g, " "));
     if (match?.groups) {
       fields.analyte_name = match.groups.analyte.trim();
@@ -234,7 +235,12 @@ export function buildConstructorCandidate(
       break;
     }
     case "vital": {
-      value = field("notes");
+      // The import requires a non-empty value; without a note it summarizes
+      // the entered measurements.
+      value = field("notes") || VITAL_FIELDS
+        .filter(([key]) => field(key))
+        .map(([key, label]) => `${label.de}: ${field(key)}`)
+        .join(", ");
       normalized = {
         measured_at: field("measured_at"),
         units: {},

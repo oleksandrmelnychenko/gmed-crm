@@ -46,6 +46,11 @@ describe("prefillConstructorFields", () => {
     });
   });
 
+  it("keeps a long selection as one text instead of parsing it as a value", () => {
+    const paragraph = `PSA-Wert 12,4 ng/ml ${"und weitere Angaben ".repeat(10)}`;
+    expect(prefillConstructorFields("lab_result", paragraph)).toEqual({ analyte_name: paragraph.trim() });
+  });
+
   it("puts any other selection into the primary field of the type", () => {
     expect(prefillConstructorFields("lab_result", "kein Laborwert")).toEqual({ analyte_name: "kein Laborwert" });
     expect(prefillConstructorFields("examination", "Prostata vergrößert")).toEqual({ result: "Prostata vergrößert" });
@@ -115,6 +120,8 @@ describe("buildConstructorCandidate", () => {
     );
 
     expect(built.normalized).toMatchObject({ bp_systolic: 130, bp_diastolic: 80, temperature_c: 36.8, heart_rate: null });
+    // The import rejects a candidate with an empty value.
+    expect(built.value).toBe("RR systolisch: 130, RR diastolisch: 80, Temperatur, °C: 36,8");
   });
 });
 
