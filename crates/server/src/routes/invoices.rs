@@ -38,7 +38,7 @@ mod credit_transfers;
 mod document;
 mod dunning_blocks;
 mod dunning_letters;
-pub(crate) mod payer;
+pub mod payer;
 mod release;
 pub(crate) mod service_reversal;
 mod stored_documents;

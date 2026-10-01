@@ -70,8 +70,10 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
         r#"INSERT INTO patients (
-                patient_id, first_name, last_name, birth_date, gender, created_by
-           ) VALUES ($1, 'Payment', 'Journal', '1990-01-01', 'diverse', $2)
+                patient_id, first_name, last_name, birth_date, gender, created_by,
+                address_street, address_zip, address_city, address_country
+           ) VALUES ($1, 'Payment', 'Journal', '1990-01-01', 'diverse', $2,
+                'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))

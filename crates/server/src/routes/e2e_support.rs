@@ -462,12 +462,12 @@ async fn create_patient(
         r#"INSERT INTO patients (
                 id, patient_id, title, first_name, last_name, birth_date, gender,
                 nationality, residence_country, languages, phone_primary, email,
-                address_city, address_country, insurance_type, insurance_provider,
-                is_active, created_by
+                address_street, address_zip, address_city, address_country,
+                insurance_type, insurance_provider, is_active, created_by
            ) VALUES (
                 $1, $2, NULL, $3, $4, $5, $6,
                 'German', 'Germany', $7, $8, $9,
-                'Berlin', 'Germany', 'private', 'AOK',
+                'Teststraße 1', '10115', 'Berlin', 'Germany', 'private', 'AOK',
                 true, $10
            )"#,
     )
