@@ -221,6 +221,12 @@ type InvoicePortalVisibility = {
 };
 
 type InvoicePayer = {
+  /** Another patient record pays (e.g. a parent who is a patient too). */
+  patient_id?: string | null;
+  patient_name?: string | null;
+  patient_pid?: string | null;
+  /** `contracting_party`, or `cost_bearer` for a deliberately different recipient. */
+  role?: PayerRole | null;
   patient_relation_id?: string | null;
   contact_name?: string | null;
   contact_email?: string | null;
@@ -246,6 +252,39 @@ export type InvoiceRecipient = {
   country?: string | null;
   is_payer: boolean;
   has_postal_address: boolean;
+  /** Street, postcode, city and a country the e-invoice can encode. */
+  has_complete_address?: boolean;
+  missing_address_parts?: string[];
+  email?: string | null;
+  kind?: "patient" | "relation" | "payer_patient" | "contact" | string;
+  /** Frozen at release (§ 14 UStG, GoBD): later documents use this recipient. */
+  frozen?: boolean;
+  /** Leistungsempfänger printed when the invoice goes to someone else. */
+  service_recipient_name?: string | null;
+};
+
+export type PayerRole = "contracting_party" | "cost_bearer";
+
+/** A warning the release of a draft will raise about its recipient. */
+export type InvoiceReleaseWarning = {
+  code:
+    | "recipient_address_incomplete"
+    | "minor_patient_recipient"
+    | "recipient_not_contracting_party"
+    | "advance_recipient_mismatch"
+    | string;
+  missing?: string[];
+  advance_invoice_numbers?: (string | null)[];
+};
+
+export type InvoiceReleaseChecks = {
+  warnings: InvoiceReleaseWarning[];
+  contracting_party?: {
+    kind: string;
+    debtor_name: string;
+    patient_is_minor: boolean;
+  } | null;
+  recipient_is_contracting_party?: boolean;
 };
 
 /** The archived PDF of an issued invoice (GoBD): rendered once, served unchanged. */
@@ -265,6 +304,8 @@ export type PayerRelationOption = {
   related_patient_pid?: string | null;
   related_patient_name?: string | null;
   has_address: boolean;
+  /** Receives the patient's invoices unless an order names another payer. */
+  is_default_payer?: boolean;
 };
 
 export type InvoiceItem = {
@@ -316,6 +357,8 @@ export type InvoiceItem = {
   visibility_note?: string | null;
   payer?: InvoicePayer;
   recipient?: InvoiceRecipient | null;
+  /** Drafts: what the release will check about the recipient. */
+  release_checks?: InvoiceReleaseChecks | null;
   stored_document?: InvoiceStoredDocument | null;
   payer_relation_options?: PayerRelationOption[];
   created_at: string;
@@ -476,6 +519,9 @@ export type VisibilityForm = {
 
 export type PayerForm = {
   payerPatientRelationId: string;
+  /** Patient number of a payer who is another patient record. */
+  payerPatientPid: string;
+  payerRole: PayerRole | "";
   contactName: string;
   contactEmail: string;
   contactPhone: string;
@@ -492,4 +538,6 @@ export type InvoicesPermissions = {
   canCreate: boolean;
   canManage: boolean;
   canAccounting: boolean;
+  /** Set the payer of a draft invoice (`invoices.payer`). */
+  canEditPayer: boolean;
 };

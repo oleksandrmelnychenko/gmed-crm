@@ -53,6 +53,13 @@ export type RelationItem = {
   is_emergency_contact: boolean;
   phone?: string | null;
   notes?: string | null;
+  email?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  address_city?: string | null;
+  address_country?: string | null;
+  /** Receives the patient's invoices unless an order names another payer. */
+  is_default_payer?: boolean;
   created_at: string;
 };
 

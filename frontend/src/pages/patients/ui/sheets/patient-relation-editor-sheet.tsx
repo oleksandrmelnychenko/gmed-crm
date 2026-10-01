@@ -31,6 +31,7 @@ import {
 import type { RelationItem } from "../../model/detail-tab-types";
 import {
   blankRelationForm,
+  relationFormToPayload,
   relationToForm,
   type RelationFormState,
 } from "../../model/sheet-forms";
@@ -62,10 +63,6 @@ type PatientRelationEditorSheetProps = {
   onError: (message: string) => void;
 };
 
-function toOptional(value: string) {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
-}
 
 type RelationEditorState = {
   form: RelationFormState;
@@ -144,7 +141,8 @@ function PatientRelationEditorSheet({
   onSaved,
   onError,
 }: PatientRelationEditorSheetProps) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
+  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const l = (key: string) => t.uiText[key] ?? key;
   const [relationState, dispatchRelationState] = useReducer(
     relationEditorReducer,
@@ -219,14 +217,7 @@ function PatientRelationEditorSheet({
         const selectedPatientName = selectedRelatedPatient
           ? formatRelatedPatientName(selectedRelatedPatient)
           : null;
-        const payload = {
-          related_patient_id: form.relatedPatientId || undefined,
-          related_name: (selectedPatientName ?? form.relatedName).trim(),
-          relation_type: form.relationType,
-          is_emergency_contact: form.isEmergencyContact,
-          phone: toOptional(form.phone),
-          notes: toOptional(form.notes),
-        };
+        const payload = relationFormToPayload(form, selectedPatientName ?? form.relatedName);
         await upsertPatientRelation(patientId, payload, editingRelation?.id);
         toast.success(dictionary.common_active);
         onOpenChange(false);
@@ -408,6 +399,94 @@ function PatientRelationEditorSheet({
             {t.patient_relation_emergency_contact}
           </label>
         </div>
+      </FormSection>
+
+      <FormSection title={tx("Счета и плательщик", "Rechnungen und Zahler")}>
+        <p className="text-xs leading-5 text-muted-foreground">
+          {tx(
+            "Если этот человек оплачивает лечение, счёт выставляется на его имя и адрес. Для выпуска счёта нужны улица, индекс, город и страна.",
+            "Zahlt diese Person die Behandlung, geht die Rechnung an ihren Namen und ihre Anschrift. Für die Ausstellung werden Straße, PLZ, Ort und Land benötigt.",
+          )}
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FormField label={tx("E-mail для счетов", "E-Mail für Rechnungen")} htmlFor="relation-email">
+            <Input
+              id="relation-email"
+              type="email"
+              value={form.email}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, email: event.target.value },
+                }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField label={tx("Улица и дом", "Straße und Hausnummer")} htmlFor="relation-street">
+            <Input
+              id="relation-street"
+              value={form.addressStreet}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, addressStreet: event.target.value },
+                }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField label={tx("Индекс", "PLZ")} htmlFor="relation-zip">
+            <Input
+              id="relation-zip"
+              value={form.addressZip}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, addressZip: event.target.value },
+                }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField label={tx("Город", "Ort")} htmlFor="relation-city">
+            <Input
+              id="relation-city"
+              value={form.addressCity}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, addressCity: event.target.value },
+                }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+          <FormField label={tx("Страна", "Land")} htmlFor="relation-country">
+            <Input
+              id="relation-country"
+              value={form.addressCountry}
+              onChange={(event) =>
+                dispatchRelationState((current) => ({
+                  form: { ...current.form, addressCountry: event.target.value },
+                }))
+              }
+              className={inputClass}
+            />
+          </FormField>
+        </div>
+        <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground">
+          <input
+            type="checkbox"
+            className={checkboxClass}
+            checked={form.isDefaultPayer}
+            onChange={(event) =>
+              dispatchRelationState((current) => ({
+                form: { ...current.form, isDefaultPayer: event.target.checked },
+              }))
+            }
+          />
+          {tx(
+            "Оплачивает счета пациента по умолчанию",
+            "Zahlt die Rechnungen des Patienten standardmäßig",
+          )}
+        </label>
       </FormSection>
 
       <FormSection title={l("patients_additional")}>

@@ -167,6 +167,8 @@ describe("invoice payer and recipient", () => {
     expect(
       payerFormToPayload({
         payerPatientRelationId: "",
+        payerPatientPid: "",
+        payerRole: "",
         contactName: "  Ivan Payer ",
         contactEmail: "",
         contactPhone: " ",
@@ -179,6 +181,8 @@ describe("invoice payer and recipient", () => {
       }),
     ).toEqual({
       payer_patient_relation_id: null,
+      payer_patient_pid: null,
+      payer_role: null,
       payer_contact_name: "Ivan Payer",
       payer_contact_email: null,
       payer_contact_phone: null,
@@ -188,6 +192,46 @@ describe("invoice payer and recipient", () => {
       payer_address_city: "Kyiv",
       payer_address_country: null,
       payer_notes: null,
+    });
+  });
+
+  it("sends one payer record: a relative wins over a patient number, the role only with a payer", () => {
+    const base = {
+      payerPatientRelationId: "",
+      payerPatientPid: "",
+      payerRole: "" as const,
+      contactName: "",
+      contactEmail: "",
+      contactPhone: "",
+      contactRelationship: "",
+      addressStreet: "",
+      addressZip: "",
+      addressCity: "",
+      addressCountry: "",
+      notes: "",
+    };
+    expect(
+      payerFormToPayload({
+        ...base,
+        payerPatientRelationId: "rel-1",
+        payerPatientPid: "P-20260101-0001",
+        payerRole: "cost_bearer",
+      }),
+    ).toMatchObject({
+      payer_patient_relation_id: "rel-1",
+      payer_patient_pid: null,
+      payer_role: "cost_bearer",
+    });
+    expect(
+      payerFormToPayload({ ...base, payerPatientPid: " P-20260101-0001 ", payerRole: "contracting_party" }),
+    ).toMatchObject({
+      payer_patient_relation_id: null,
+      payer_patient_pid: "P-20260101-0001",
+      payer_role: "contracting_party",
+    });
+    // Without a payer the patient receives the invoice; a stale role is dropped.
+    expect(payerFormToPayload({ ...base, payerRole: "cost_bearer" })).toMatchObject({
+      payer_role: null,
     });
   });
 

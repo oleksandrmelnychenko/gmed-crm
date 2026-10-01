@@ -169,7 +169,11 @@ import {
   nextDunningLevel,
   dunningLetterFileName,
 } from "./model/invoice-model";
-import { localizeInvoiceError } from "./model/invoice-errors";
+import {
+  invoiceConfirmationField,
+  invoiceReleaseWarningText,
+  localizeInvoiceError,
+} from "./model/invoice-errors";
 import { DunningBlockPanel, StornoDocumentCard } from "./ui/invoice-corrections-panel";
 import type {
   AccountingEntry,
@@ -441,6 +445,8 @@ function createInvoiceUiState(seed: InvoiceCreateSeed): InvoiceUiState {
     visibilityDialogOpen: false,
     payerForm: {
       payerPatientRelationId: "",
+      payerPatientPid: "",
+      payerRole: "",
       contactName: "",
       contactEmail: "",
       contactPhone: "",
@@ -504,6 +510,12 @@ function useStaffInvoicesPageContent() {
   const access = invoicesPermissions(user);
   const locale = lang === "de" ? "de-DE" : "ru-RU";
   const [accountingCurrency, setAccountingCurrency] = useState("EUR");
+  // A release warning waiting for billing's confirmation.
+  const [statusConfirmation, setStatusConfirmation] = useState<{
+    field: string;
+    message: string;
+    confirmed: Record<string, boolean>;
+  } | null>(null);
   const formatMoney = (value: unknown, currency = "EUR") => formatCurrency(value, locale, currency);
   const text = {
     accessDenied: t.invoices_workspace_access_denied,
@@ -642,6 +654,27 @@ function useStaffInvoicesPageContent() {
       lang === "de"
         ? "Der Zahler steht auf der ausgestellten Rechnung. Für einen anderen Zahler die Rechnung stornieren und neu ausstellen."
         : "Плательщик указан в выпущенном счёте. Чтобы сменить плательщика, отмените счёт и выпустите новый.",
+    payerRole: lang === "de" ? "Rechnungsempfänger" : "Получатель счёта",
+    payerRoleContractingParty:
+      lang === "de" ? "Rechnungsempfänger ist Vertragspartner" : "Получатель счёта — сторона договора",
+    payerRoleCostBearer:
+      lang === "de"
+        ? "Abweichender Rechnungsempfänger (Kostenübernehmer)"
+        : "Другой получатель счёта (сторонний плательщик)",
+    payerRoleUnset: lang === "de" ? "Bei Ausstellung prüfen" : "Проверить при выпуске",
+    payerRoleHint:
+      lang === "de"
+        ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an einen Kostenübernehmer, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger."
+        : "Счёт называет получателя услуг. Если счёт выставлен стороннему плательщику, в нём дополнительно указывается сторона договора как получатель услуг.",
+    payerPatientPid: lang === "de" ? "Zahler ist Patient (Patientennummer)" : "Плательщик — пациент (номер пациента)",
+    payerPatient: lang === "de" ? "Zahler (Patient)" : "Плательщик (пациент)",
+    serviceRecipient: lang === "de" ? "Leistungsempfänger" : "Получатель услуг",
+    recipientFrozen:
+      lang === "de"
+        ? "Mit der Ausstellung festgeschrieben"
+        : "Зафиксирован при выпуске счёта",
+    releaseChecks: lang === "de" ? "Vor der Ausstellung prüfen" : "Проверить перед выпуском",
+    confirmAndRelease: lang === "de" ? "Bestätigen und fortfahren" : "Подтвердить и продолжить",
     paymentEntry: lang === "de" ? "Zahlungseingang" : "Поступление",
     paymentAmount: lang === "de" ? "Eingang brutto" : "Сумма брутто",
     paymentMethod: lang === "de" ? "Zahlungsart" : "Способ оплаты",
@@ -904,8 +937,11 @@ function useStaffInvoicesPageContent() {
     setInvoiceUiField("statusBusy", value);
   const setStatusError = (value: SetStateAction<string | null>) =>
     setInvoiceUiField("statusError", value);
-  const setStatusDialogOpen = (value: SetStateAction<boolean>) =>
+  const setStatusDialogOpen = (value: SetStateAction<boolean>) => {
+    // A pending confirmation belongs to the attempt in the open dialog.
+    setStatusConfirmation(null);
     setInvoiceUiField("statusDialogOpen", value);
+  };
   const setVisibilityForm = (value: SetStateAction<VisibilityForm>) =>
     setInvoiceUiField("visibilityForm", value);
   const setVisibilityBusy = (value: SetStateAction<boolean>) =>
@@ -1138,6 +1174,24 @@ function useStaffInvoicesPageContent() {
         render: (row) => (
           <span className="font-mono text-xs text-foreground">{row.patient_name}</span>
         ),
+      },
+      {
+        // Rechnungsempfänger when a payer (relative, another patient or a
+        // contact) receives the invoice instead of the patient.
+        id: "recipient_name",
+        label: text.payerRole,
+        accessor: (row) => (row.recipient?.is_payer ? row.recipient.name : ""),
+        filterType: "text",
+        group: "identity",
+        sortable: true,
+        searchable: true,
+        width: 200,
+        render: (row) =>
+          row.recipient?.is_payer ? (
+            <span className="text-xs text-foreground">{row.recipient.name}</span>
+          ) : (
+            <span className="text-xs text-muted-foreground">{t.invoices_patient}</span>
+          ),
       },
       {
         id: "patient_pid",
@@ -1988,22 +2042,36 @@ function useStaffInvoicesPageContent() {
     paymentCorrectionDirty: editingPaymentId !== "" && paymentCorrectionDirty,
   });
 
-  async function handleSaveStatus() {
+  async function handleSaveStatus(confirmed: Record<string, boolean> = {}) {
     if (!statusDirty || statusBusy || statusFormProblem) return;
     if (!selectedInvoiceId) return;
     setStatusBusy(true);
+    setStatusConfirmation(null);
     try {
       await updateInvoiceStatus(selectedInvoiceId, {
         status: statusForm.status,
         due_date: statusForm.dueDate || null,
         notes: statusForm.notes.trim() || null,
         reason: statusForm.reason.trim() || null,
+        ...confirmed,
       });
       setStatusError(null);
       setReloadToken((current) => current + 1);
       setStatusDialogOpen(false);
     } catch (error) {
-      setStatusError(localizeInvoiceError(error, lang, t.common_error));
+      // A release warning billing may confirm (minor patient, recipient other
+      // than the contracting party, advances of another recipient).
+      const field = invoiceConfirmationField(error);
+      if (field && !confirmed[field]) {
+        setStatusError(null);
+        setStatusConfirmation({
+          field,
+          message: localizeInvoiceError(error, lang, t.common_error),
+          confirmed,
+        });
+      } else {
+        setStatusError(localizeInvoiceError(error, lang, t.common_error));
+      }
     } finally {
       setStatusBusy(false);
     }
@@ -3703,13 +3771,13 @@ function useStaffInvoicesPageContent() {
                         onClick={() => setPayerDialogOpen(true)}
                         // The payer is printed on the issued invoice; the server
                         // refuses changes after release (cancel and reissue).
-                        disabled={!access.canManage || isInvoiceReleased(detail)}
+                        disabled={!access.canEditPayer || isInvoiceReleased(detail)}
                         aria-label={t.common_edit}
                         title={isInvoiceReleased(detail) ? text.payerLockedAfterRelease : undefined}
                       >
                         <Pencil className="size-3.5" />
                       </Button>
-                      {isInvoiceReleased(detail) && access.canManage ? (
+                      {isInvoiceReleased(detail) && access.canEditPayer ? (
                         <p className="mt-2 text-xs text-muted-foreground">{text.payerLockedAfterRelease}</p>
                       ) : null}
                       <div className="mt-5 grid gap-1.5 md:grid-cols-2">
@@ -3717,8 +3785,19 @@ function useStaffInvoicesPageContent() {
                           label={t.revenue_invoices_contact_name}
                           value={
                             detail.payer?.contact_name ??
+                            detail.payer?.patient_name ??
                             detail.payer?.relation_patient_name ??
                             t.common_not_set
+                          }
+                        />
+                        <MiniMetric
+                          label={text.payerRole}
+                          value={
+                            detail.payer?.role === "cost_bearer"
+                              ? text.payerRoleCostBearer
+                              : detail.payer?.role === "contracting_party"
+                                ? text.payerRoleContractingParty
+                                : t.common_not_set
                           }
                         />
                         <MiniMetric
@@ -3749,11 +3828,34 @@ function useStaffInvoicesPageContent() {
                           {invoiceRecipientAddressLines(detail.recipient).map((line) => (
                             <p key={line}>{line}</p>
                           ))}
+                          {detail.recipient.service_recipient_name ? (
+                            <p className="text-xs text-muted-foreground">
+                              {text.serviceRecipient}: {detail.recipient.service_recipient_name}
+                            </p>
+                          ) : null}
+                          {detail.recipient.frozen ? (
+                            <p className="text-xs text-muted-foreground">{text.recipientFrozen}</p>
+                          ) : null}
                           {!detail.recipient.has_postal_address ? (
                             <StatusBadge tone="warning">
                               {t.revenue_invoices_recipient_address_missing}
                             </StatusBadge>
                           ) : null}
+                        </div>
+                      ) : null}
+                      {detail.release_checks?.warnings?.length ? (
+                        <div className="mt-4 space-y-1.5" data-testid="invoice-release-checks">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {text.releaseChecks}
+                          </p>
+                          {detail.release_checks.warnings.map((warning) => (
+                            <p
+                              key={warning.code}
+                              className="rounded-md bg-amber-50 px-2.5 py-1.5 text-xs leading-5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+                            >
+                              {invoiceReleaseWarningText(warning, lang)}
+                            </p>
+                          ))}
                         </div>
                       ) : null}
                     </section>
@@ -4303,6 +4405,30 @@ function useStaffInvoicesPageContent() {
             </DialogHeader>
             <div className="space-y-4 rounded-xl p-4">
               {statusError ? <ShellBanner tone="error">{statusError}</ShellBanner> : null}
+              {statusConfirmation ? (
+                <div
+                  role="alert"
+                  className="space-y-3 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100"
+                  data-testid="invoice-release-confirmation"
+                >
+                  <p>{statusConfirmation.message}</p>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={statusBusy}
+                      onClick={() =>
+                        void handleSaveStatus({
+                          ...statusConfirmation.confirmed,
+                          [statusConfirmation.field]: true,
+                        })
+                      }
+                    >
+                      {text.confirmAndRelease}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               <div className="grid gap-4 lg:grid-cols-2">
                 <Field label={t.users_status}>
                   <NativeComboboxSelect
@@ -4529,7 +4655,7 @@ function useStaffInvoicesPageContent() {
                       }))
                     }
                     className={selectClassName}
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   >
                     <option value="">{t.revenue_invoices_payer_relation_none}</option>
                     {(detail?.payer_relation_options ?? []).map((option) => (
@@ -4538,6 +4664,38 @@ function useStaffInvoicesPageContent() {
                       </option>
                     ))}
                   </NativeComboboxSelect>
+                </Field>
+                <Field label={text.payerPatientPid}>
+                  <Input
+                    className={shellInputClassName}
+                    value={payerForm.payerPatientPid}
+                    placeholder="P-…"
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        payerPatientPid: event.target.value,
+                      }))
+                    }
+                    disabled={!access.canEditPayer || payerBusy || Boolean(payerForm.payerPatientRelationId)}
+                  />
+                </Field>
+                <Field label={text.payerRole} className="sm:col-span-2">
+                  <NativeComboboxSelect
+                    value={payerForm.payerRole}
+                    onChange={(event) =>
+                      setPayerForm((current) => ({
+                        ...current,
+                        payerRole: event.target.value as PayerForm["payerRole"],
+                      }))
+                    }
+                    className={selectClassName}
+                    disabled={!access.canEditPayer || payerBusy}
+                  >
+                    <option value="">{text.payerRoleUnset}</option>
+                    <option value="contracting_party">{text.payerRoleContractingParty}</option>
+                    <option value="cost_bearer">{text.payerRoleCostBearer}</option>
+                  </NativeComboboxSelect>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.payerRoleHint}</p>
                 </Field>
                 <Field label={t.revenue_invoices_contact_name}>
                   <Input
@@ -4549,7 +4707,7 @@ function useStaffInvoicesPageContent() {
                         contactName: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_email}>
@@ -4562,7 +4720,7 @@ function useStaffInvoicesPageContent() {
                         contactEmail: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_phone}>
@@ -4575,7 +4733,7 @@ function useStaffInvoicesPageContent() {
                         contactPhone: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_relationship}>
@@ -4588,7 +4746,7 @@ function useStaffInvoicesPageContent() {
                         contactRelationship: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <p className="text-xs text-muted-foreground sm:col-span-2">
@@ -4604,7 +4762,7 @@ function useStaffInvoicesPageContent() {
                         addressStreet: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_payer_address_zip}>
@@ -4617,7 +4775,7 @@ function useStaffInvoicesPageContent() {
                         addressZip: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_payer_address_city}>
@@ -4630,7 +4788,7 @@ function useStaffInvoicesPageContent() {
                         addressCity: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_payer_address_country}>
@@ -4643,7 +4801,7 @@ function useStaffInvoicesPageContent() {
                         addressCountry: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
                 <Field label={t.revenue_invoices_payer_notes} className="sm:col-span-2">
@@ -4656,14 +4814,14 @@ function useStaffInvoicesPageContent() {
                         notes: event.target.value,
                       }))
                     }
-                    disabled={!access.canManage || payerBusy}
+                    disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
               </div>
               <div className="flex justify-end">
                 <Button
                   type="button"
-                  disabled={payerBusy || !access.canManage || !payerDirty}
+                  disabled={payerBusy || !access.canEditPayer || !payerDirty}
                   onClick={() => void handleSavePayer()}
                 >
                   {payerBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
