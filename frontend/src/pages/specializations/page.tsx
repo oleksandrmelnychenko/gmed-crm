@@ -838,6 +838,16 @@ export function SpecializationsPage() {
   );
 }
 
+// The same general questions the migration gave every existing specialization.
+const DEFAULT_ANAMNESIS_TEMPLATE = [
+  "Aktuelle Beschwerden im Fachgebiet (ja/nein + if ja: Note)",
+  "Voruntersuchungen im Fachgebiet (ja/nein + if ja: Note)",
+  "Vorbehandlungen im Fachgebiet (ja/nein + if ja: Note)",
+  "Operationen im Fachgebiet (ja/nein + if ja: Note)",
+  "Medikamente im Fachgebiet (ja/nein + if ja: Note)",
+  "Familiäre Belastung im Fachgebiet (ja/nein + if ja: Note)",
+].join("\n");
+
 function specializationDraft(item?: SpecializationItem): SpecializationDraft {
   return {
     nameDe: item?.name_de ?? "",
@@ -846,7 +856,8 @@ function specializationDraft(item?: SpecializationItem): SpecializationDraft {
     nameEs: item?.name_es ?? "",
     sortOrder: String(item?.sort_order ?? 1000),
     isActive: item?.is_active ?? true,
-    anamnesisTemplate: item?.anamnesis_template ?? "",
+    // A new specialization starts with the general questions as real text.
+    anamnesisTemplate: item ? item.anamnesis_template ?? "" : DEFAULT_ANAMNESIS_TEMPLATE,
   };
 }
 
@@ -1019,7 +1030,6 @@ function SpecializationSheet({
                       }))
                     }
                     className={cn(textareaClass, "min-h-40 resize-y bg-card")}
-                    placeholder={"CVRF (ja/nein)\n- Nikotin (ja/nein + if ja: Pack Years (Number))\n- Übergewicht (ja/nein + if ja: Gewicht in kg + Größe in cm + BMI)"}
                   />
                   <p className="text-xs text-muted-foreground">
                     {tx(
