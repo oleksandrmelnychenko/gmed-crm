@@ -109,6 +109,13 @@ BEGIN
        AND NOT EXISTS (
            SELECT 1 FROM document_signature_requests r
            WHERE r.result_document_id = OLD.id AND r.test_mode
+       )
+       -- Before this migration every member of a package got its own signed
+       -- copy, linked only through its member row.
+       AND NOT EXISTS (
+           SELECT 1 FROM document_signature_members m
+           JOIN document_signature_requests r ON r.id = m.request_id
+           WHERE m.result_document_id = OLD.id AND r.test_mode
        ) THEN
         IF TG_OP = 'DELETE' THEN
             RAISE EXCEPTION 'Signed signature documents cannot be deleted'

@@ -282,6 +282,9 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
     };
 
     let mut anchors: Vec<SignatureAnchor> = Vec::new();
+    // Whether the anchor at the same index sits on a captioned signature rule.
+    let mut rule_captions: Vec<bool> = Vec::new();
+    let mut guardians = 0;
     for (page_index, page) in collector.pages.iter().enumerate() {
         let lines = lines(page);
         for (line_index, line) in lines.iter().enumerate() {
@@ -290,7 +293,7 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                     continue;
                 };
                 let after_keyword = at + KEYWORD.len();
-                let (role, x, y, width, height) = if let Some((holder, start, length)) =
+                let (role, x, y, width, height, on_rule) = if let Some((holder, start, length)) =
                     underline_after(&lines, line_index, after_keyword)
                 {
                     let underline = &lines[holder];
@@ -314,6 +317,7 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                             FRAME_MAX_WIDTH_MM * PT_PER_MM,
                         ),
                         UNDERLINE_FRAME_HEIGHT_MM * PT_PER_MM,
+                        false,
                     )
                 } else {
                     // A caption under a signature rule.
@@ -332,10 +336,14 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                     };
                     let caption = &line.text[after_keyword..];
                     let end = caption.find(KEYWORD).unwrap_or(caption.len());
-                    let role = if caption[..end].contains("Stempel")
-                        || caption[..end].contains("Auftragnehmer")
-                    {
+                    let named = &caption[..end];
+                    let role = if named.contains("Stempel") || named.contains("Auftragnehmer") {
                         "agency"
+                    } else if named.contains("Kosten") {
+                        // The Kostenübernehmer of a cost coverage declaration.
+                        "payer"
+                    } else if named.contains("Vertreter") {
+                        REPRESENTATIVE
                     } else {
                         "client"
                     };
@@ -345,6 +353,7 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                         rule.y + 0.5 * PT_PER_MM,
                         rule.width.min(FRAME_MAX_WIDTH_MM * PT_PER_MM),
                         RULE_FRAME_HEIGHT_MM * PT_PER_MM,
+                        true,
                     )
                 };
                 let anchor = SignatureAnchor {
@@ -361,10 +370,47 @@ pub(crate) fn detect_signature_anchors(pdf: &[u8]) -> Vec<SignatureAnchor> {
                         && (known.y_mm - anchor.y_mm).abs() < 1.0
                 });
                 if !duplicate {
+                    rule_captions.push(on_rule);
                     anchors.push(anchor);
                 }
             }
         }
+        number_representatives(&mut anchors, &rule_captions, page_index, &mut guardians);
     }
     anchors
+}
+
+/// Placeholder role of a rule captioned for a legal representative.
+const REPRESENTATIVE: &str = "representative";
+
+/// Several people sign for the client side of a contract when the parents are
+/// the party or represent the child: each has a rule of its own. They are
+/// numbered in reading order (`guardian_1`, `guardian_2`, …), as the
+/// generators record them, so every signer gets a frame of its own. A single
+/// `Auftraggeber` rule on a page stays the `client` frame.
+fn number_representatives(
+    anchors: &mut [SignatureAnchor],
+    rule_captions: &[bool],
+    page: usize,
+    guardians: &mut usize,
+) {
+    let mut party: Vec<usize> = (0..anchors.len())
+        .filter(|index| {
+            rule_captions[*index]
+                && anchors[*index].page == page
+                && matches!(anchors[*index].role.as_str(), "client" | REPRESENTATIVE)
+        })
+        .collect();
+    let several = party.len() > 1;
+    party.retain(|index| several || anchors[*index].role == REPRESENTATIVE);
+    party.sort_by(|a, b| {
+        let (a, b) = (&anchors[*a], &anchors[*b]);
+        // Rows from the top of the page, then left to right.
+        (b.y_mm.round() as i64, a.x_mm.round() as i64)
+            .cmp(&(a.y_mm.round() as i64, b.x_mm.round() as i64))
+    });
+    for index in party {
+        *guardians += 1;
+        anchors[index].role = format!("guardian_{guardians}");
+    }
 }
