@@ -854,6 +854,17 @@ async fn package_is_signed_once_and_members_link_to_the_canonical_bundle() {
         .execute(&env.pool)
         .await
         .expect("metadata stays editable");
+    // Test (DEMO) evidence has no legal value and stays erasable.
+    let demo_result = Uuid::new_v4();
+    sqlx::query("INSERT INTO documents(id,patient_id,auto_name,art,mime_type,storage_key,version_root_document_id,uploaded_by,ursprung) VALUES ($1,$2,'TEST – Evidence','signature_evidence','application/pdf','demo-key',$1,$3,'electronic_signature')")
+        .bind(demo_result).bind(patient).bind(env.admin_id).execute(&env.pool).await.unwrap();
+    sqlx::query("INSERT INTO document_signature_requests(id,source_document_id,requested_by,source_sha256,source_context,signers,provider_account,test_mode,status,result_document_id,report_storage_key,report_sha256,signed_sha256) VALUES ($1,$2,$3,'h','{}','[]','demo',true,'completed',$4,'r','r','s')")
+        .bind(Uuid::new_v4()).bind(contract).bind(env.admin_id).bind(demo_result).execute(&env.pool).await.unwrap();
+    sqlx::query("UPDATE documents SET storage_key=NULL, file_deleted_at=now() WHERE id=$1")
+        .bind(demo_result)
+        .execute(&env.pool)
+        .await
+        .expect("test evidence can be erased");
 
     // § 312f BGB: staff record how the signers got their copy.
     let (status, body) = call(
