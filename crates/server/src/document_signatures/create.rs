@@ -605,7 +605,7 @@ pub(super) async fn candidates(
             };
             (
                 preset,
-                defaults::suggested(&state, &auth, row, SignerPolicy::BothParties).await?,
+                defaults::suggested(&state, &auth, row, SignerPolicy::ClientPayerAndAgency).await?,
                 legal::suggested_language(&scope_languages(&state, row).await?),
             )
         }

@@ -1239,6 +1239,22 @@ mod visual_position_tests {
     }
 
     #[test]
+    fn the_payer_signs_in_its_own_frame() {
+        let documents = vec![(
+            vec![
+                anchor("payer", 0, 25.0, 40.0),
+                anchor("agency", 0, 110.0, 40.0),
+            ],
+            1,
+        )];
+        let positions = visual_positions(&documents, vec!["payer".into(), "agency".into()]);
+        assert_eq!(positions[0][0]["x"], mm_to_pdf_points(25.0));
+        assert_eq!(positions[1][0]["x"], mm_to_pdf_points(110.0));
+        // A client signer never takes the payer frame.
+        assert!(visual_positions(&documents, vec!["client".into()])[0].is_empty());
+    }
+
+    #[test]
     fn anchors_outside_the_document_are_dropped() {
         let documents = vec![(vec![anchor("client", 4, 25.0, 40.0)], 2)];
         assert!(visual_positions(&documents, vec!["client".into()])[0].is_empty());

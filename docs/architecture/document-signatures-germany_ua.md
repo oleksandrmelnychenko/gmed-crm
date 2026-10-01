@@ -353,8 +353,15 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
   що два підписанти ніколи не отримують одне поле: перший клієнт — поле
   `client`, далі `guardian_N`; агентство — поле `agency`. Документ без полів
   показує попередження; тоді Skribble сам розміщує підпис.
-- Точка інтеграції «сторона договору» (`contracting_party`, робота з
-  платниками): `defaults::contracting_party_signers`, поки повертає `None`.
+- Kostenübernahmeerklärung (`cost_coverage_declaration`) підписують платник
+  (роль `payer`, власне поле підпису `payer`, підписує першим) і GMED
+  (`SignerPolicy::PayerAndAgency`, мінімум QES). У пакеті з договором чи
+  згодою потрібні клієнт, платник і GMED (`ClientPayerAndAgency`). Платника
+  пропонує замовлення (`invoice_recipient_resolve`, гілка платника); доказом
+  згоди пацієнта платник не вважається.
+- Сторона договору (`contracting_party`, гілка платника): договір, який
+  укладають батьки від свого імені, має поля `guardian_1`/`guardian_2` без поля
+  `client`; кожен записаний законний представник підписує своє поле.
 - Опитувальник бере й `submission_unknown` (індекс `document_signature_poll`).
 - Кнопку підпису бачать лише CEO і Patient Manager (IT Admin налаштовує
   підключення в адмініструванні).

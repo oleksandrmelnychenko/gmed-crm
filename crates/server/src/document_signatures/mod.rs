@@ -134,6 +134,10 @@ enum SignerPolicy {
     ClientOnly,
     AgencyOnly,
     BothParties,
+    /// Kostenübernahmeerklärung: the payer (Kostenübernehmer) and GMED.
+    PayerAndAgency,
+    /// A package with a contract or consent and a cost coverage declaration.
+    ClientPayerAndAgency,
 }
 
 impl SignerPolicy {
@@ -143,15 +147,18 @@ impl SignerPolicy {
             Self::ClientOnly => "client_only",
             Self::AgencyOnly => "agency_only",
             Self::BothParties => "both_parties",
+            Self::PayerAndAgency => "payer_and_agency",
+            Self::ClientPayerAndAgency => "client_payer_and_agency",
         }
     }
 
     /// The patient side is the client (or every legal representative) plus,
     /// optionally, a minor patient who co-signs; a minor never signs alone.
+    /// The payer signs only a cost coverage declaration.
     fn validate(self, signers: &[Signer]) -> Result<(), &'static str> {
-        let has_client = signers.iter().any(|signer| signer.role == "client");
-        let has_agency = signers.iter().any(|signer| signer.role == "agency");
-        if signers.iter().any(|signer| signer.role == "minor") && !has_client {
+        let has = |role: &str| signers.iter().any(|signer| signer.role == role);
+        let (has_client, has_agency, has_payer) = (has("client"), has("agency"), has("payer"));
+        if has("minor") && !has_client {
             return Err("minor_needs_representative");
         }
         match self {
@@ -169,6 +176,10 @@ impl SignerPolicy {
             Self::AgencyOnly => Err("agency_signature_only"),
             Self::BothParties if has_client && has_agency => Ok(()),
             Self::BothParties => Err("both_contract_parties_required"),
+            Self::PayerAndAgency if has_payer && has_agency => Ok(()),
+            Self::PayerAndAgency => Err("payer_and_agency_required"),
+            Self::ClientPayerAndAgency if has_client && has_payer && has_agency => Ok(()),
+            Self::ClientPayerAndAgency => Err("client_payer_and_agency_required"),
         }
     }
 
@@ -184,12 +195,21 @@ impl SignerPolicy {
                 Err("signature_policy_conflict")
             };
         }
-        Ok(if policies.contains(&Self::BothParties) {
-            Self::BothParties
-        } else if policies.contains(&Self::ClientOnly) {
-            Self::ClientOnly
-        } else {
-            Self::Flexible
+        let needs_payer = policies
+            .iter()
+            .any(|policy| matches!(policy, Self::PayerAndAgency | Self::ClientPayerAndAgency));
+        let needs_client = policies.iter().any(|policy| {
+            matches!(
+                policy,
+                Self::ClientOnly | Self::BothParties | Self::ClientPayerAndAgency
+            )
+        });
+        Ok(match (needs_payer, needs_client) {
+            (true, true) => Self::ClientPayerAndAgency,
+            (true, false) => Self::PayerAndAgency,
+            _ if policies.contains(&Self::BothParties) => Self::BothParties,
+            _ if policies.contains(&Self::ClientOnly) => Self::ClientOnly,
+            _ => Self::Flexible,
         })
     }
 }
@@ -204,6 +224,11 @@ fn signer_policy_for_parts(
         Some("framework_contract" | "single_order")
     ) {
         return SignerPolicy::BothParties;
+    }
+    if generated_template_id == Some("cost_coverage_declaration")
+        || (generated_template_id.is_none() && art == "cost_coverage_declaration")
+    {
+        return SignerPolicy::PayerAndAgency;
     }
     if matches!(generated_template_id, Some("enhanced_due_diligence"))
         || matches!(compliance_kind, Some("enhanced_due_diligence"))
