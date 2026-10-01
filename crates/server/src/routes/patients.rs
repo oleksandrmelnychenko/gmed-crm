@@ -12352,7 +12352,8 @@ async fn get_patient_clinical(
                               'is_active', ms.is_active,
                               'sort_order', ms.sort_order,
                               'narrative_text', pns.narrative_text,
-                              'assessment_text', pns.assessment_text
+                              'assessment_text', pns.assessment_text,
+                              'checklist', pns.checklist
                           ) ORDER BY pns.sort_order
                       ) AS specializations
                FROM patient_narrative_specializations pns
@@ -12540,7 +12541,8 @@ impl PatientClinicalSection {
                                    (SELECT jsonb_agg(jsonb_build_object(
                                        'specialization_id', s.specialization_id,
                                        'narrative_text', s.narrative_text,
-                                       'assessment_text', s.assessment_text
+                                       'assessment_text', s.assessment_text,
+                                       'checklist', s.checklist
                                    ) ORDER BY s.sort_order)
                                     FROM patient_narrative_specializations s
                                     WHERE s.narrative_id = t.id),
@@ -13663,7 +13665,14 @@ struct PatientNarrativeSpecializationInput {
     narrative_text: Option<String>,
     #[serde(default)]
     assessment_text: Option<String>,
+    /// Answers of the specialization's checklist; `narrative_text` is the
+    /// readable text the client composed from them.
+    #[serde(default)]
+    checklist: Option<Value>,
 }
+
+/// Upper bound of one stored checklist (template snapshot plus answers).
+const NARRATIVE_SPECIALIZATION_CHECKLIST_MAX_BYTES: usize = 64 * 1024;
 
 async fn save_patient_narrative(
     State(state): State<AppState>,
@@ -13777,6 +13786,18 @@ async fn save_patient_narrative(
             Ok(ids) => ids,
             Err(resp) => return resp,
         };
+    if specialization_payload.iter().any(|item| {
+        item.checklist.as_ref().is_some_and(|checklist| {
+            !checklist.is_null()
+                && (!checklist.is_object()
+                    || checklist.to_string().len() > NARRATIVE_SPECIALIZATION_CHECKLIST_MAX_BYTES)
+        })
+    }) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Specialization checklist must be a JSON object of at most 64 KB",
+        );
+    }
     let specialization_text = specialization_payload
         .into_iter()
         .filter_map(|item| {
@@ -13789,6 +13810,9 @@ async fn save_patient_narrative(
                 (
                     clinical_opt_text(item.narrative_text),
                     clinical_opt_text(item.assessment_text),
+                    item.checklist
+                        .filter(Value::is_object)
+                        .map(|checklist| checklist.to_string()),
                 ),
             ))
         })
@@ -13906,18 +13930,28 @@ async fn save_patient_narrative(
                 .and_then(|values| values.1.clone())
         })
         .collect::<Vec<Option<String>>>();
+    let specialization_checklists = specialization_ids
+        .iter()
+        .map(|id| {
+            specialization_text
+                .get(id)
+                .and_then(|values| values.2.clone())
+        })
+        .collect::<Vec<Option<String>>>();
     if !specialization_ids.is_empty()
         && let Err(e) = sqlx::query(
             r#"INSERT INTO patient_narrative_specializations
-                   (narrative_id, specialization_id, narrative_text, assessment_text, sort_order)
-               SELECT $1, specialization_id, narrative_text, assessment_text, ordinality::integer - 1
-               FROM UNNEST($2::uuid[], $3::text[], $4::text[]) WITH ORDINALITY
-                    AS selected(specialization_id, narrative_text, assessment_text, ordinality)"#,
+                   (narrative_id, specialization_id, narrative_text, assessment_text, checklist, sort_order)
+               SELECT $1, specialization_id, narrative_text, assessment_text, checklist::jsonb,
+                      ordinality::integer - 1
+               FROM UNNEST($2::uuid[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY
+                    AS selected(specialization_id, narrative_text, assessment_text, checklist, ordinality)"#,
         )
         .bind(saved_id)
         .bind(&specialization_ids)
         .bind(&specialization_narratives)
         .bind(&specialization_assessments)
+        .bind(&specialization_checklists)
         .execute(&mut *tx)
         .await
     {
@@ -13936,7 +13970,8 @@ async fn save_patient_narrative(
                   COALESCE(jsonb_agg(jsonb_build_object(
                       'id', ms.id, 'code', ms.code, 'name_en', ms.name_en, 'name_de', ms.name_de,
                       'name_ru', ms.name_ru, 'is_active', ms.is_active, 'sort_order', ms.sort_order,
-                      'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text
+                      'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text,
+                      'checklist', pns.checklist
                   ) ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
            LEFT JOIN documents d ON d.id = n.source_document_id
@@ -14037,7 +14072,8 @@ async fn list_patient_narrative_history(
                   COALESCE(jsonb_agg(jsonb_build_object(
                       'id', ms.id, 'code', ms.code, 'name_en', ms.name_en, 'name_de', ms.name_de,
                       'name_ru', ms.name_ru, 'is_active', ms.is_active, 'sort_order', ms.sort_order,
-                      'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text
+                      'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text,
+                      'checklist', pns.checklist
                   ) ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
            LEFT JOIN documents d ON d.id = n.source_document_id
@@ -14138,7 +14174,8 @@ async fn delete_patient_narrative(
                   COALESCE(jsonb_agg(jsonb_build_object(
                       'id', ms.id, 'code', ms.code, 'name_en', ms.name_en, 'name_de', ms.name_de,
                       'name_ru', ms.name_ru, 'is_active', ms.is_active, 'sort_order', ms.sort_order,
-                      'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text
+                      'narrative_text', pns.narrative_text, 'assessment_text', pns.assessment_text,
+                      'checklist', pns.checklist
                   ) ORDER BY pns.sort_order) FILTER (WHERE ms.id IS NOT NULL), '[]'::jsonb) AS specializations
            FROM patient_clinical_narrative n
            LEFT JOIN documents d ON d.id = n.source_document_id
@@ -14185,7 +14222,8 @@ async fn delete_patient_narrative(
                                       'name_de', ms.name_de, 'name_ru', ms.name_ru,
                                       'is_active', ms.is_active, 'sort_order', ms.sort_order,
                                       'narrative_text', pns.narrative_text,
-                                      'assessment_text', pns.assessment_text
+                                      'assessment_text', pns.assessment_text,
+                                      'checklist', pns.checklist
                                   ) ORDER BY pns.sort_order)
                                    FROM patient_narrative_specializations pns
                                    JOIN medical_specializations ms ON ms.id = pns.specialization_id

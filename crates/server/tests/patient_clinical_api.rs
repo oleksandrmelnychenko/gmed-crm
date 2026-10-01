@@ -4739,7 +4739,13 @@ async fn patient_clinical_narrative_upserts() {
                 {
                     "specialization_id": narrative_specialization_ids[0],
                     "narrative_text": "Belastungsdyspnoe seit drei Tagen.",
-                    "assessment_text": "Zeitnahe kardiologische Abklärung."
+                    "assessment_text": "Zeitnahe kardiologische Abklärung.",
+                    "checklist": {
+                        "version": 1,
+                        "template": "Nikotin (ja/nein + if ja: Pack Years (Number))",
+                        "answers": { "0": { "value": "ja", "fields": { "field1": "20" } } },
+                        "notes": ""
+                    }
                 },
                 {
                     "specialization_id": narrative_specialization_ids[1],
@@ -4794,6 +4800,12 @@ async fn patient_clinical_narrative_upserts() {
         body["narrative"]["specializations"][0]["assessment_text"],
         "Zeitnahe kardiologische Abklärung."
     );
+    // The checklist answers come back as stored; a specialization without one has null.
+    assert_eq!(
+        body["narrative"]["specializations"][0]["checklist"]["answers"]["0"]["fields"]["field1"],
+        "20"
+    );
+    assert!(body["narrative"]["specializations"][1]["checklist"].is_null());
     assert!(
         !body["narrative"]
             .as_object()

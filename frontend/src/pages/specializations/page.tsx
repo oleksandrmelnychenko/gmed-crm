@@ -33,6 +33,11 @@ import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import {
+  emptySpecializationChecklist,
+  isChecklistTemplate,
+} from "@/pages/patients/data/specialization-checklist";
+import { SpecializationChecklistForm } from "@/pages/patients/ui/sections/specialization-checklist-form";
 import { cachedNumberFormat } from "@/lib/intl-cache";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
@@ -864,6 +869,8 @@ function SpecializationSheet({
   const initialDraft = useMemo(() => specializationDraft(item), [item]);
   const [draft, setDraft] = useState(initialDraft);
   const [error, setError] = useState("");
+  // Answers of the template preview; they are only there to try the checklist out.
+  const [previewChecklist, setPreviewChecklist] = useState(() => emptySpecializationChecklist(""));
   const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1012,14 +1019,26 @@ function SpecializationSheet({
                       }))
                     }
                     className={cn(textareaClass, "min-h-40 resize-y bg-card")}
-                    placeholder={"B-Symptomatik:\n- Fieber:\n- Gewichtsverlust:\n- Nachtschweiß:"}
+                    placeholder={"CVRF (ja/nein)\n- Nikotin (ja/nein + if ja: Pack Years (Number))\n- Übergewicht (ja/nein + if ja: Gewicht in kg + Größe in cm + BMI)"}
                   />
                   <p className="text-xs text-muted-foreground">
                     {tx(
-                      "Подставляется в поле «Анамнез по специализации», когда специализацию добавляют в анамнез пациента.",
-                      "Wird in das Feld „Fachspezifische Anamnese“ eingesetzt, sobald die Spezialisierung zur Anamnese eines Patienten hinzugefügt wird.",
+                      "Подставляется в «Анамнез по специализации», когда специализацию добавляют в анамнез. Строка со скобкой (ja/nein) становится вопросом «да/нет»; после «+ if ja:» через «+» перечисляются уточнения: Note — заметка, «… (Number)» — число, «Gewicht in kg» — число с единицей, BMI — расчёт по весу и росту, «A/B/C» — варианты. Строка с дефисом относится к группе над ней.",
+                      "Wird in „Fachspezifische Anamnese“ eingesetzt, sobald die Spezialisierung zur Anamnese hinzugefügt wird. Eine Zeile mit der Klammer (ja/nein) wird zur Ja/Nein-Frage; nach „+ if ja:“ folgen mit „+“ getrennt die Zusatzangaben: Note – Notiz, „… (Number)“ – Zahl, „Gewicht in kg“ – Zahl mit Einheit, BMI – Berechnung aus Gewicht und Größe, „A/B/C“ – Auswahl. Eine Zeile mit Spiegelstrich gehört zur Gruppe darüber.",
                     )}
                   </p>
+                  {isChecklistTemplate(draft.anamnesisTemplate) ? (
+                    <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/20 p-3">
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {tx("Так чек-лист выглядит в анамнезе", "So erscheint die Checkliste in der Anamnese")}
+                      </p>
+                      <SpecializationChecklistForm
+                        checklist={{ ...previewChecklist, template: draft.anamnesisTemplate }}
+                        tx={tx}
+                        onChange={setPreviewChecklist}
+                      />
+                    </div>
+                  ) : null}
                 </FormField>
               </div>
             </div>

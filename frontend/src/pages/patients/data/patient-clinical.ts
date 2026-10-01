@@ -250,6 +250,8 @@ export type ClinicalNarrativeSpecialization =
   import("@/pages/providers/model/types").SpecializationItem & {
     narrative_text: string | null;
     assessment_text: string | null;
+    /** Answers of the specialization's checklist; `narrative_text` is composed from them. */
+    checklist?: import("./specialization-checklist").SpecializationChecklist | null;
   };
 
 export type ClinicalVerlaufEntry = ClinicalAttribution & {
@@ -504,6 +506,7 @@ export function patientNarrativePayload(narrative: ClinicalNarrative): JsonPaylo
         specialization_id: specializationId,
         narrative_text: item?.narrative_text ?? null,
         assessment_text: item?.assessment_text ?? null,
+        checklist: item?.checklist ?? null,
       };
     }),
     anamnese_at: narrative.anamnese_at ?? null,
