@@ -4057,6 +4057,13 @@ def _medication_candidates(
                 structured=structured,
                 active_context=_medication_active_context(section, structured),
             )
+            if not structured and _looks_like_prose_without_dose(value):
+                # A trailing note of the section ("Weitere Hinweise folgen.")
+                # is kept for review but never proposed as a drug by default.
+                normalized["auto_select"] = False
+                reasons = normalized.setdefault("review_reasons", [])
+                if "medication_row_without_dose_or_schedule" not in reasons:
+                    reasons.append("medication_row_without_dose_or_schedule")
             signals = ["recognized_heading"]
             if structured:
                 signals.append("structured_medication_row")
@@ -4191,9 +4198,24 @@ def _repair_wrapped_example_brand(value: str) -> str:
     return f"{match.group('prefix')}{second} {match.group('tail').strip()}"
 
 
+MEDICATION_DOSE_FIRST_RE = re.compile(
+    r"^\d[\d.,]*\s*(?i:I\.\s?E\.|IE|mg|µg|mcg|g|ml|Hub)\s+"
+    r"(?P<name>[A-ZÄÖÜ][a-zäöüß][\wÄÖÜäöüß®+./-]+)"
+)
+
+
 def _starts_new_medication_line(current: str, following: str) -> bool:
     if following.startswith((",", ";", ")")):
         return False
+    # "20000 IE Dekristol" after a complete row is the next drug written dose
+    # first; a bare wrapped dose ("40 mg") or form ("40 mg Tabletten") is not.
+    dose_first = MEDICATION_DOSE_FIRST_RE.match(following)
+    if (
+        dose_first
+        and _has_medication_dose_pattern(current)
+        and not any(pattern.match(dose_first.group("name")) for pattern, _, _ in MEDICATION_FORM_PATTERNS)
+    ):
+        return True
     if re.match(r"^(?:\d|[½¼¾]|mg\b|g\b|µg\b|mcg\b|ml\b)", following, re.IGNORECASE):
         return False
     if re.match(
@@ -4709,6 +4731,16 @@ def _split_medication_items(value: str) -> list[str]:
         r"(?:\s+\([^)]{1,80}\))?(?:\s+(?:\d|[A-ZÄÖÜ])|\s*$))"
     )
     return [item.strip(" ,") for item in boundary.split(cleaned) if item.strip(" ,")]
+
+
+def _looks_like_prose_without_dose(value: str) -> bool:
+    compact = " ".join(value.split())
+    return (
+        compact.endswith(".")
+        and len(compact.split()) >= 3
+        and not re.search(r"\d", compact)
+        and not _has_medication_dose_pattern(compact)
+    )
 
 
 def _has_medication_dose_pattern(value: str) -> bool:

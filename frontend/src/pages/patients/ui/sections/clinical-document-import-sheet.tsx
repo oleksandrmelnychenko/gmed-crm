@@ -268,6 +268,10 @@ const reviewReasonLabels: Record<string, { ru: string; de: string }> = {
     ru: "Проверьте статус и даты приёма",
     de: "Status und Einnahmedaten prüfen",
   },
+  medication_row_without_dose_or_schedule: {
+    ru: "Нет дозы и схемы приёма — возможно, это примечание, а не препарат",
+    de: "Weder Dosis noch Schema — eventuell ein Hinweis statt eines Medikaments",
+  },
   medication_active_status_requires_confirmation: {
     ru: "Подтвердите, что медикамент активен",
     de: "Bestätigen Sie, dass die Medikation aktiv ist",

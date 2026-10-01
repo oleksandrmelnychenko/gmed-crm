@@ -301,3 +301,31 @@ def test_indication_does_not_label_free_psa_as_total_psa() -> None:
 
     labs = [item.normalized["result_text"] for item in draft.candidates if item.target == "lab_result"]
     assert labs == ["8,0"]
+
+
+def test_medication_written_dose_first_starts_a_new_drug() -> None:
+    rows = [
+        item
+        for item in parse_clinical_text(
+            "Entlassungsbrief\n\nMedikation:\nPantoprazol 40 mg 1-0-0\n20000 IE Dekristol\n"
+            "Ramipril 5 mg 1-0-0\n\nWeitere Hinweise folgen.\n\n\n"
+        ).candidates
+        if item.target == "medication"
+    ]
+    assert [item.value for item in rows[:3]] == [
+        "Pantoprazol 40 mg 1-0-0",
+        "20000 IE Dekristol",
+        "Ramipril 5 mg 1-0-0",
+    ]
+    note = next(item for item in rows if item.value == "Weitere Hinweise folgen.")
+    assert note.selected is False
+    assert "medication_row_without_dose_or_schedule" in note.normalized["review_reasons"]
+
+
+def test_wrapped_dose_and_form_still_continue_the_previous_drug() -> None:
+    values = [
+        item.value
+        for item in parse_clinical_text("Medikation:\nPantoprazol\n40 mg Tabletten 1-0-0\nRamipril 5 mg 1-0-0\n").candidates
+        if item.target == "medication"
+    ]
+    assert values == ["Pantoprazol 40 mg Tabletten 1-0-0", "Ramipril 5 mg 1-0-0"]
