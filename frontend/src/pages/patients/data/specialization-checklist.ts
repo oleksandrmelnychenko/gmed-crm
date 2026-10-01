@@ -45,8 +45,10 @@ export type SpecializationChecklist = {
   notes: string;
 };
 
-const SPEC_RE = /ja\s*\/\s*nein|\b(?:if|wenn|falls)\s+ja\b/i;
-const NOTE_RE = /^(?:note|notes|notiz|notizen|bemerkung|kommentar|text|freitext)$/i;
+// The clinic also writes "ja nein" without the slash and "note text" for a note.
+const YES_NO_RE = /^ja\s*[/\s]\s*nein$/i;
+const SPEC_RE = /\bja\s*[/\s]\s*nein\b|\b(?:if|wenn|falls)\s+ja\b/i;
+const NOTE_RE = /^(?:note|notes|note\s+text|notiz|notizen|bemerkung|kommentar|text|freitext)$/i;
 const NUMBER_MARK_RE = /\(\s*(?:number|zahl|nummer)\s*\)/i;
 const UNIT_RE = /^(.*?)\s+in\s+([A-Za-zµ%/²]{1,8})$/;
 
@@ -120,7 +122,7 @@ export function parseChecklistTemplate(template: string | null | undefined): Che
             .replace(/^[\s:]+/, "")
             .replace(/^(?:if|wenn|falls)\s+ja\s*:?\s*/i, "")
             .replace(/[\s:]+$/, "");
-          if (!token || /^ja\s*\/\s*nein$/i.test(token)) return;
+          if (!token || YES_NO_RE.test(token)) return;
           const alternatives = splitTopLevel(token, "/").map((value) => value.trim()).filter(Boolean);
           if (alternatives.length > 1 && !NUMBER_MARK_RE.test(token)) {
             item.options.push(...alternatives);
@@ -138,6 +140,16 @@ export function parseChecklistTemplate(template: string | null | undefined): Che
 /** A template is a checklist once it asks at least one question. */
 export function isChecklistTemplate(template: string | null | undefined): boolean {
   return parseChecklistTemplate(template).some((item) => item.yesNo || item.fields.length > 0);
+}
+
+/**
+ * Whether a text is only the notation of a checklist, typed by hand before
+ * checklists existed, with nothing answered yet: every line is a question or
+ * a heading. Such a text is a template, not something said about the patient.
+ */
+export function isUnansweredChecklistNotation(text: string | null | undefined): boolean {
+  const lines = (text ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && isChecklistTemplate(text) && lines.every((line) => /[):]$/.test(line));
 }
 
 export function emptySpecializationChecklist(template: string, notes = ""): SpecializationChecklist {
