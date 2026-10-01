@@ -224,7 +224,14 @@ async fn order_payer_signer(state: &AppState, source: &PgRow) -> Result<Option<S
             .fetch_one(&mut *conn)
             .await
             .map_err(db_error)?;
-    Ok(recipient.as_ref().and_then(contact_signer))
+    // The Kostenübernehmer has its own role and signature frame (`payer`).
+    Ok(recipient
+        .as_ref()
+        .and_then(contact_signer)
+        .map(|signer| Signer {
+            role: "payer".into(),
+            ..signer
+        }))
 }
 
 // Called only after checking this document's send permissions. Document access
@@ -285,19 +292,24 @@ pub(super) async fn suggested(
             client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
         }
     }
-    // The Kostenübernehmer signs the cost coverage declaration. Only for
-    // roles that may read the patient's payer data (same as above).
+    // The Kostenübernehmer signs the cost coverage declaration, in its own
+    // `payer` role. Only for roles that may read the patient's payer data
+    // (same as above).
+    let mut payer = None;
     if let Some(id) = patient_id
         && matches!(auth.role, Role::Ceo | Role::PatientManager)
         && patients::has_patient_access(state, auth, id).await?
-        && let Some(payer) = order_payer_signer(state, source).await?
     {
-        clients = vec![payer];
+        payer = order_payer_signer(state, source).await?;
     }
-    let mut signers = if policy == SignerPolicy::AgencyOnly {
-        Vec::new()
-    } else {
-        clients
+    let mut signers = match policy {
+        SignerPolicy::AgencyOnly => Vec::new(),
+        SignerPolicy::PayerAndAgency => vec![payer.unwrap_or_else(|| empty("payer"))],
+        SignerPolicy::ClientPayerAndAgency => {
+            clients.extend(payer);
+            clients
+        }
+        _ => clients,
     };
     if policy == SignerPolicy::ClientOnly {
         return Ok(signers);

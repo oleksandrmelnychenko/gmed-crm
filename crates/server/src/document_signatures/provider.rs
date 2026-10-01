@@ -102,14 +102,20 @@ pub fn is_patient_side(role: &str) -> bool {
     matches!(role, "client" | "minor")
 }
 
+/// Signers who sign before GMED: the patient side and the payer
+/// (Kostenübernehmer) of a cost coverage declaration.
+pub fn signs_first(role: &str) -> bool {
+    is_patient_side(role) || role == "payer"
+}
+
 pub(super) fn signature_entries_in(signers: &[Signer], language: &str) -> Vec<Value> {
     let language = if LANGUAGES.contains(&language) {
         language
     } else {
         "de"
     };
-    let ordered = signers.iter().any(|signer| is_patient_side(&signer.role))
-        && signers.iter().any(|signer| !is_patient_side(&signer.role));
+    let ordered = signers.iter().any(|signer| signs_first(&signer.role))
+        && signers.iter().any(|signer| !signs_first(&signer.role));
     signers
         .iter()
         .map(|signer| {
@@ -117,7 +123,7 @@ pub(super) fn signature_entries_in(signers: &[Signer], language: &str) -> Vec<Va
                 "signer_identity_data":{"email_address":signer.email,
                 "first_name":signer.first_name,"last_name":signer.last_name,"language":language}});
             if ordered {
-                entry["sequence"] = json!(if is_patient_side(&signer.role) { 1 } else { 2 });
+                entry["sequence"] = json!(if signs_first(&signer.role) { 1 } else { 2 });
             }
             if !signer.positions.is_empty() {
                 entry["visual_signature"] = json!({"positions": signer.positions});
@@ -163,7 +169,7 @@ pub fn normalize_signers(mut signers: Vec<Signer>) -> Result<Vec<Signer>, &'stat
         }
         if !matches!(
             signer.role.as_str(),
-            "client" | "minor" | "agency" | "other"
+            "client" | "minor" | "payer" | "agency" | "other"
         ) {
             return Err("signer_role");
         }

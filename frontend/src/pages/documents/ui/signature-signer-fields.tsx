@@ -10,7 +10,9 @@ export function rolesForPolicy(policy: SignerPolicy = "flexible"): SignerRole[] 
   if (policy === "agency_only") return ["agency"];
   if (policy === "client_only") return ["client", "minor"];
   if (policy === "both_parties") return ["client", "minor", "agency"];
-  return ["client", "minor", "agency", "other"];
+  if (policy === "payer_and_agency") return ["payer", "agency"];
+  if (policy === "client_payer_and_agency") return ["client", "minor", "payer", "agency"];
+  return ["client", "minor", "payer", "agency", "other"];
 }
 
 export function SignatureSignerFields({ signer, index, disabled, agencyOnly, embedded, policy, onChange, onRemove }: {
@@ -22,6 +24,7 @@ export function SignatureSignerFields({ signer, index, disabled, agencyOnly, emb
   const labels: Record<SignerRole, string> = {
     client: tx("Пациент / законный представитель", "Patient/in / gesetzliche Vertretung"),
     minor: tx("Несовершеннолетний пациент (с ~14 лет, по желанию)", "Minderjährige/r Patient/in (ab ca. 14 J., optional)"),
+    payer: tx("Плательщик (принимает расходы)", "Kostenübernehmer"),
     agency: tx("Представитель агентства", "Agenturvertretung"),
     other: tx("Другая сторона", "Weitere Partei"),
   };

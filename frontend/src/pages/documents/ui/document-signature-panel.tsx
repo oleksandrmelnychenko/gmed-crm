@@ -24,21 +24,26 @@ const initialSigners = (policy: SignerPolicy | "conflict" = "flexible") =>
     ? [emptySigner("client")]
     : policy === "agency_only"
       ? [emptySigner("agency")]
+    : policy === "payer_and_agency"
+      ? [emptySigner("payer"), emptySigner("agency")]
+    : policy === "client_payer_and_agency"
+      ? [emptySigner("client"), emptySigner("payer"), emptySigner("agency")]
     : [emptySigner("client"), emptySigner("agency")];
 
 /** Suggested signers that fit a policy: every recorded legal representative
- * of a minor, the patient or the agency representatives. */
+ * of a minor, the patient, the Kostenübernehmer or the agency representatives. */
 export function signersForPolicy(suggested: Signer[] | undefined, policy: SignerPolicy | "conflict" = "flexible") {
   const list = suggested ?? [];
   const patientSide = list.filter(signer => signer.role === "client");
   const agencySide = list.filter(signer => signer.role === "agency");
+  const payers = list.filter(signer => signer.role === "payer");
+  const others = list.filter(signer => !["client", "agency", "payer"].includes(signer.role));
+  const orEmpty = (signers: Signer[], role: SignerRole) => signers.length ? signers : [emptySigner(role)];
   if (policy === "client_only") return patientSide.length > 0 ? patientSide : initialSigners("client_only");
   if (policy === "agency_only") return agencySide.length > 0 ? agencySide : initialSigners("agency_only");
-  if (policy === "both_parties") return [
-    ...(patientSide.length ? patientSide : [emptySigner("client")]),
-    ...list.filter(signer => signer.role !== "client" && signer.role !== "agency"),
-    ...(agencySide.length ? agencySide : [emptySigner("agency")]),
-  ];
+  if (policy === "payer_and_agency") return [...orEmpty(payers, "payer"), ...orEmpty(agencySide, "agency")];
+  if (policy === "client_payer_and_agency") return [...orEmpty(patientSide, "client"), ...orEmpty(payers, "payer"), ...orEmpty(agencySide, "agency")];
+  if (policy === "both_parties") return [...orEmpty(patientSide, "client"), ...others, ...orEmpty(agencySide, "agency")];
   return list.length > 0 ? list : initialSigners(policy);
 }
 
@@ -84,6 +89,7 @@ const deliveryChannels: Record<DeliveryChannel, [string, string]> = {
 const roleLabels: Record<SignerRole, [string, string]> = {
   client: ["Пациент / законный представитель", "Patient/in / gesetzliche Vertretung"],
   minor: ["Несовершеннолетний пациент (по желанию)", "Minderjährige/r Patient/in (optional)"],
+  payer: ["Плательщик (принимает расходы)", "Kostenübernehmer"],
   agency: ["Представитель GMED", "GMED-Vertretung"],
   other: ["Другая сторона", "Weitere Partei"],
 };
@@ -450,6 +456,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                   <AdminSectionTitle>{policy === "client_only" ? tx("Подпись пациента", "Unterschrift der Patientenseite") : policy === "agency_only" ? tx("Подпись GMED", "GMED-Unterschrift") : tx("Подписанты", "Unterzeichnende Personen")}</AdminSectionTitle>
                   <Badge variant="outline" className="rounded-full text-[10px]" aria-label={`${tx("Выбрано подписантов", "Ausgewählte Personen")}: ${selectedSigners.length} / ${signers.length}`}>{selectedSigners.length} / {signers.length}</Badge>
                 </div>
+                {policy === "payer_and_agency" || policy === "client_payer_and_agency" ? <p className="text-xs leading-5 text-muted-foreground">{tx("Заявление о принятии расходов подписывает плательщик в своём поле подписи, затем GMED.", "Die Kostenübernahmeerklärung unterschreibt der Kostenübernehmer in seinem eigenen Unterschriftsfeld, danach GMED.")}</p> : null}
                 {policy === "both_parties" && isPackage ? <p className="text-xs leading-5 text-muted-foreground">{tx("Сторона пациента получит одно приглашение со всеми документами и подпишет первой; GMED получит пакет после неё.", "Die Patientenseite erhält eine Einladung mit allen Dokumenten und unterschreibt zuerst; GMED erhält das Paket danach.")}</p> : null}
                 {signers.map((signer, index) => {
                   const selected = !excludedSigners.includes(index);
@@ -477,8 +484,9 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                   </div>;
                 })}
                 {signers.length < 6 ? <div className="flex flex-wrap gap-2">
-                  {policy !== "agency_only" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("client")}><Plus className="size-4" />{tx("Законный представитель / сторона пациента", "Gesetzliche Vertretung / Patientenseite")}</Button> : null}
-                  {policy !== "agency_only" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("minor")}><Plus className="size-4" />{tx("Несовершеннолетний пациент (с ~14 лет)", "Minderjährige/r Patient/in (ab ca. 14 J.)")}</Button> : null}
+                  {policy !== "agency_only" && policy !== "payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("client")}><Plus className="size-4" />{tx("Законный представитель / сторона пациента", "Gesetzliche Vertretung / Patientenseite")}</Button> : null}
+                  {policy !== "agency_only" && policy !== "payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("minor")}><Plus className="size-4" />{tx("Несовершеннолетний пациент (с ~14 лет)", "Minderjährige/r Patient/in (ab ca. 14 J.)")}</Button> : null}
+                  {policy === "payer_and_agency" || policy === "client_payer_and_agency" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("payer")}><Plus className="size-4" />{tx("Плательщик", "Kostenübernehmer")}</Button> : null}
                   {policy !== "client_only" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("agency")}><Plus className="size-4" />{tx("Представитель GMED", "GMED-Vertretung")}</Button> : null}
                   {policy === "flexible" ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => addSigner("other")}><Plus className="size-4" />{tx("Добавить подписанта", "Person hinzufügen")}</Button> : null}
                 </div> : null}

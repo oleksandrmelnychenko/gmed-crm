@@ -81,6 +81,59 @@ fn contracts_still_require_both_signing_parties() {
 }
 
 #[test]
+fn cost_coverage_is_signed_by_the_payer_and_gmed() {
+    assert_eq!(
+        signer_policy_for_parts(Some("cost_coverage_declaration"), None, "x"),
+        SignerPolicy::PayerAndAgency
+    );
+    let both = signers();
+    let payer = Signer {
+        email: "payer@example.org".into(),
+        role: "payer".into(),
+        ..both[0].clone()
+    };
+    let (client, agency) = (both[0].clone(), both[1].clone());
+    assert_eq!(
+        SignerPolicy::PayerAndAgency.validate(&[payer.clone(), agency.clone()]),
+        Ok(())
+    );
+    assert_eq!(
+        SignerPolicy::PayerAndAgency.validate(&both),
+        Err("payer_and_agency_required")
+    );
+    assert_eq!(
+        SignerPolicy::combine([SignerPolicy::BothParties, SignerPolicy::PayerAndAgency]),
+        Ok(SignerPolicy::ClientPayerAndAgency)
+    );
+    assert_eq!(
+        SignerPolicy::combine([SignerPolicy::Flexible, SignerPolicy::PayerAndAgency]),
+        Ok(SignerPolicy::PayerAndAgency)
+    );
+    assert_eq!(
+        SignerPolicy::combine([SignerPolicy::ClientOnly, SignerPolicy::PayerAndAgency]),
+        Ok(SignerPolicy::ClientPayerAndAgency)
+    );
+    assert!(
+        SignerPolicy::ClientPayerAndAgency
+            .validate(&[client.clone(), payer.clone(), agency.clone()])
+            .is_ok()
+    );
+    assert_eq!(
+        SignerPolicy::ClientPayerAndAgency.validate(&both),
+        Err("client_payer_and_agency_required")
+    );
+    // A consent is never signed by the payer.
+    assert_eq!(
+        SignerPolicy::ClientOnly.validate(&[client, payer.clone()]),
+        Err("patient_signature_only")
+    );
+    // The payer signs before GMED, like the client.
+    let entries = provider::signature_entries(&[agency, payer]);
+    assert_eq!(entries[0]["sequence"], 2);
+    assert_eq!(entries[1]["sequence"], 1);
+}
+
+#[test]
 fn enhanced_due_diligence_requires_only_gmed_signature() {
     assert_eq!(
         signer_policy_for_parts(Some("enhanced_due_diligence"), None, "document"),

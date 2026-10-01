@@ -2,13 +2,14 @@ import { apiFetch, apiFetchFile } from "@/lib/api";
 
 // `minor`: a minor patient who co-signs next to the legal representatives
 // (optional, from about 14 years and capable of understanding; never required).
-export type SignerRole = "client" | "minor" | "agency" | "other";
+// `payer`: the Kostenübernehmer of a cost coverage declaration.
+export type SignerRole = "client" | "minor" | "payer" | "agency" | "other";
 // `positions` are the signature frames the server sent to Skribble for this
 // signer; it fills them itself and ignores any the client sends.
 export type Signer = { first_name: string; last_name: string; email: string; role: SignerRole; positions?: unknown[] };
 export type SignatureStatus = "submitting" | "submission_unknown" | "pending" | "completed" | "needs_review" | "declined" | "withdrawn" | "expired" | "error";
 export type SignatureLevel = "AES" | "QES";
-export type SignerPolicy = "flexible" | "client_only" | "agency_only" | "both_parties";
+export type SignerPolicy = "flexible" | "client_only" | "agency_only" | "both_parties" | "payer_and_agency" | "client_payer_and_agency";
 export type DeliveryChannel = "skribble" | "email" | "portal" | "in_person" | "post";
 /** One document of a request, in bundle order; the source has position 0. */
 export type SignatureRequestMember = {
@@ -133,7 +134,7 @@ export function validSigners(signers: Signer[]) {
     return namesValid && email.length <= 254 && parts.length === 2 && parts[0].length > 0
       && parts[1].includes(".") && !parts[1].startsWith(".") && !parts[1].endsWith(".")
       && Array.from(email).every(c => c.charCodeAt(0) > 32 && c.charCodeAt(0) < 127)
-      && ["client", "minor", "agency", "other"].includes(s.role);
+      && ["client", "minor", "payer", "agency", "other"].includes(s.role);
   })
     && new Set(signers.map(s => s.email.trim().toLowerCase())).size === signers.length;
 }
@@ -143,6 +144,9 @@ const isPatientSide = (role: SignerRole) => role === "client" || role === "minor
 /** The package needs what its strictest document needs (mirrors the server). */
 export function combinedSignerPolicy(policies: SignerPolicy[]): SignerPolicy | "conflict" {
   if (policies.includes("agency_only")) return policies.every(policy => policy === "agency_only") ? "agency_only" : "conflict";
+  const needsPayer = policies.some(policy => policy === "payer_and_agency" || policy === "client_payer_and_agency");
+  const needsClient = policies.some(policy => policy === "client_only" || policy === "both_parties" || policy === "client_payer_and_agency");
+  if (needsPayer) return needsClient ? "client_payer_and_agency" : "payer_and_agency";
   if (policies.includes("both_parties")) return "both_parties";
   if (policies.includes("client_only")) return "client_only";
   return "flexible";
@@ -151,12 +155,14 @@ export function combinedSignerPolicy(policies: SignerPolicy[]): SignerPolicy | "
 /** Server rule per policy; `null` when the signers fit. */
 export function signerPolicyError(policy: SignerPolicy | "conflict", signers: Signer[]): string | null {
   if (policy === "conflict") return "signature_policy_conflict";
-  const hasClient = signers.some(signer => signer.role === "client");
-  const hasAgency = signers.some(signer => signer.role === "agency");
-  if (signers.some(signer => signer.role === "minor") && !hasClient) return "minor_needs_representative";
+  const has = (role: SignerRole) => signers.some(signer => signer.role === role);
+  const [hasClient, hasAgency, hasPayer] = [has("client"), has("agency"), has("payer")];
+  if (has("minor") && !hasClient) return "minor_needs_representative";
   if (policy === "client_only" && !(hasClient && signers.every(signer => isPatientSide(signer.role)))) return "patient_signature_only";
   if (policy === "agency_only" && !signers.every(signer => signer.role === "agency")) return "agency_signature_only";
   if (policy === "both_parties" && !(hasClient && hasAgency)) return "both_contract_parties_required";
+  if (policy === "payer_and_agency" && !(hasPayer && hasAgency)) return "payer_and_agency_required";
+  if (policy === "client_payer_and_agency" && !(hasClient && hasPayer && hasAgency)) return "client_payer_and_agency_required";
   return null;
 }
 
@@ -210,6 +216,10 @@ export function signatureErrorText(code: string | null | undefined, tx: (ru: str
       return tx("Этот внутренний AML/PEP-документ подписывает только представитель GMED.", "Dieses interne AML/PeP-Dokument wird nur von der GMED-Vertretung unterzeichnet.");
     case "signature_policy_conflict":
       return tx("Внутренний документ GMED нельзя отправлять в одном пакете с документами для пациента.", "Ein internes GMED-Dokument kann nicht im selben Paket wie Dokumente für die Patientenseite versendet werden.");
+    case "payer_and_agency_required":
+      return tx("Заявление о принятии расходов подписывают плательщик и представитель GMED.", "Die Kostenübernahmeerklärung unterschreiben der Kostenübernehmer und die GMED-Vertretung.");
+    case "client_payer_and_agency_required":
+      return tx("Этот пакет подписывают клиент, плательщик и представитель GMED.", "Dieses Paket unterschreiben Kunde, Kostenübernehmer und GMED-Vertretung.");
     case "minor_needs_representative":
       return tx("Несовершеннолетний подписывает только вместе с законным представителем.", "Minderjährige unterschreiben nur zusammen mit der gesetzlichen Vertretung.");
     case "signature_already_pending":

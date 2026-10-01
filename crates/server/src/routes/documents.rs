@@ -18169,7 +18169,8 @@ fn build_cost_coverage_pdf(
             date: context.payer_sign_date,
             name: &context.payer.name,
             role: "Kostenübernehmer",
-            anchor: None,
+            // The payer signs electronically in its own frame, never the patient's.
+            anchor: Some("payer"),
         },
         AdminSignatureParty {
             place: context.agency_sign_place.as_deref(),

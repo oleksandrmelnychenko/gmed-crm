@@ -1198,6 +1198,45 @@ async fn package_validation_matrix_and_rbac() {
     let (_, value) = post(json!({"document_ids":[surety],"signers":both_parties()})).await;
     assert_eq!(value["statute"], "§ 766 S. 2 BGB");
 
+    // The Kostenübernehmer signs the cost coverage declaration in its own frame.
+    let coverage = upload(
+        &env,
+        patient,
+        Doc::new("cost_coverage_declaration", 1)
+            .anchors(json!([anchor("payer", 0), anchor("agency", 0)])),
+    )
+    .await;
+    let (status, value) = post(json!({"document_ids":[coverage],"signers":both_parties()})).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(value["error"], "payer_and_agency_required");
+    let (status, value) = post(json!({"document_ids":[coverage],"level":"AES","signers":[
+        signer("Paul", "payer@example.org", "payer"), signer("Max", "max@example.org", "agency")]}))
+    .await;
+    assert_eq!(value["error"], "signature_level_too_low", "{status}");
+    let id = send_package(
+        &env,
+        json!({"document_ids":[coverage],"signers":[
+            signer("Paul", "payer@example.org", "payer"), signer("Max", "max@example.org", "agency")]}),
+    )
+    .await;
+    until_pending(&env, id).await;
+    let payload = env.mock.payload(id);
+    let payer_entry = payload["signatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["signer_identity_data"]["email_address"] == "payer@example.org")
+        .unwrap()
+        .clone();
+    assert_eq!(payer_entry["sequence"], 1);
+    assert_eq!(
+        payer_entry["visual_signature"]["positions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
     // Total size: the merged PDF may not exceed 18 MB.
     let big_a = upload_bytes(
         &env,
