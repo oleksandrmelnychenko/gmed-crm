@@ -96,10 +96,14 @@ async fn seed_user(pool: &PgPool, tag: &str, role: &str) -> Uuid {
 
 async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     sqlx::query_scalar(
+        // A full postal address: an invoice is released only with one
+        // (§ 14 Abs. 4 Nr. 1 UStG).
         r#"INSERT INTO patients (
-                patient_id, first_name, last_name, birth_date, gender, created_by
+                patient_id, first_name, last_name, birth_date, gender, created_by,
+                address_street, address_zip, address_city, address_country
            ) VALUES (
-                $1, $2, $3, '1990-01-01', 'diverse', $4
+                $1, $2, $3, '1990-01-01', 'diverse', $4,
+                'Teststraße 1', '10115', 'Berlin', 'Deutschland'
            ) RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -587,7 +591,12 @@ async fn invoice_inherits_head_order_payer_with_patient_scoped_relation() {
                payer_patient_relation_id = $2,
                payer_contact_name = 'Vater zahlt für die Familie',
                payer_contact_relationship = 'Vater',
-               payer_contact_email = 'vater@example.com'
+               payer_contact_email = 'vater@example.com',
+               payer_address_street = 'Familienweg 1',
+               payer_address_zip = '80331',
+               payer_address_city = 'München',
+               payer_address_country = 'Deutschland',
+               payer_role = 'cost_bearer'
            WHERE id = $1"#,
     )
     .bind(head)
@@ -4577,6 +4586,9 @@ async fn invoice_recipient_is_the_payer_in_pdf_and_einvoice() {
         Some(json!({
             "payer_patient_relation_id": relation_id,
             "payer_contact_name": null,
+            // The brother pays for the adult patient: a deliberate
+            // Kostenübernehmer, so the release asks nothing.
+            "payer_role": "cost_bearer",
             "payer_address_street": "Kyivska 5",
             "payer_address_zip": "01001",
             "payer_address_city": "Kyiv",

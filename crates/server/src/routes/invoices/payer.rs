@@ -42,7 +42,7 @@ pub(crate) const PAYER_ROLE_COST_BEARER: &str = "cost_bearer";
 
 /// One payer as stored on an order or invoice.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct PayerRecord {
+pub struct PayerRecord {
     pub payer_patient_id: Option<Uuid>,
     pub payer_patient_relation_id: Option<Uuid>,
     pub contact_name: Option<String>,
@@ -388,7 +388,7 @@ pub(crate) async fn adapt_payer_to_patient(
 
 /// The payer a new invoice starts with, and where it came from.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct InheritedPayer {
+pub struct InheritedPayer {
     pub record: PayerRecord,
     /// `head_order`, `order`, `default_payer`, `contracting_party` or `none`.
     pub source: &'static str,
@@ -398,7 +398,7 @@ pub(crate) struct InheritedPayer {
 }
 
 /// The payer a new invoice inherits (see the module documentation).
-pub(crate) async fn inherited_invoice_payer(
+pub async fn inherited_invoice_payer(
     conn: &mut PgConnection,
     order_id: Option<Uuid>,
     patient_id: Uuid,

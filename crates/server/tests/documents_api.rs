@@ -9381,3 +9381,174 @@ async fn medical_classification_repair_closes_non_medical_exposure_and_keeps_rel
         "{body}"
     );
 }
+
+/// Order documents take the payer of the same order (with its full address)
+/// and never the payer of another order of the patient.
+#[tokio::test]
+async fn order_documents_name_the_payer_of_the_same_order_with_address() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-payer");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(
+        &pool,
+        patient_id,
+        contract_id,
+        admin_id,
+        &format!("{tag}-a"),
+    )
+    .await;
+    let other_order = seed_order_with_contract(
+        &pool,
+        patient_id,
+        contract_id,
+        admin_id,
+        &format!("{tag}-b"),
+    )
+    .await;
+    // A payer on another order of the same patient must not leak.
+    sqlx::query("UPDATE orders SET payer_contact_name = 'Fremder Zahler' WHERE id = $1")
+        .bind(other_order)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let generate = |order: Uuid| {
+        json!({
+            "template_id": "cost_coverage_declaration",
+            "patient_id": patient_id,
+            "order_id": order,
+            "language": "de",
+            "bindings": {},
+        })
+    };
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(order_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let document_id = body["id"].as_str().unwrap().to_string();
+    let (_, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    let text = extract_pdf_text(&bytes);
+    assert!(!text.contains("Fremder Zahler"), "{text}");
+
+    sqlx::query(
+        r#"UPDATE orders SET payer_contact_name = 'Justus Geldgeber',
+               payer_address_street = 'Zahlerweg 7', payer_address_zip = '50667',
+               payer_address_city = 'Köln', payer_address_country = 'Deutschland'
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(order_id)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let document_id = body["id"].as_str().unwrap().to_string();
+    let (_, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    let text = extract_pdf_text(&bytes);
+    assert!(text.contains("Justus Geldgeber"), "{text}");
+    assert!(text.contains("Zahlerweg 7"), "{text}");
+    assert!(!text.contains("Fremder Zahler"), "{text}");
+}
+
+/// A minor's single order names both parents as the contracting party in
+/// their own name for the child and gives each a signature frame.
+#[tokio::test]
+async fn minor_single_order_names_both_parents_and_their_signature_frames() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-minor");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query("UPDATE patients SET birth_date = '2016-03-04' WHERE id = $1")
+        .bind(patient_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for name in ["Erika Muster", "Max Muster"] {
+        sqlx::query(
+            r#"INSERT INTO patient_relations (patient_id, related_name, relation_type,
+                                              address_street, address_zip, address_city)
+               VALUES ($1, $2, 'parent', 'Nebenweg 2', '80331', 'München')"#,
+        )
+        .bind(patient_id)
+        .bind(name)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "single_order",
+            "patient_id": patient_id,
+            "order_id": order_id,
+            "language": "de",
+            "bindings": {},
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let document_id = body["id"].as_str().unwrap().to_string();
+    let (_, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    let roles = detail["generated_bindings"]["_signature_anchors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|anchor| anchor["role"].as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roles,
+        vec!["guardian_1", "agency", "guardian_2"],
+        "{detail}"
+    );
+    let (_, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    let text = extract_pdf_text(&bytes);
+    assert!(text.contains("Erika Muster"), "{text}");
+    assert!(text.contains("Max Muster"), "{text}");
+    assert!(text.contains("zugunsten des Patienten"), "{text}");
+}

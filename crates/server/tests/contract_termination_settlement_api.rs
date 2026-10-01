@@ -151,8 +151,9 @@ async fn contract_termination_stops_open_orders_and_settles_what_accrued() {
     let tag = Uuid::new_v4().simple().to_string();
 
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Termination', 'Settlement', '1985-05-05', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Termination', 'Settlement', '1985-05-05', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -665,8 +666,9 @@ async fn terminating_a_contract_without_activity_closes_the_empty_settlement() {
     let admin_id = context.admin_id;
     let tag = Uuid::new_v4().simple().to_string();
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Empty', 'Settlement', '1985-05-05', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Empty', 'Settlement', '1985-05-05', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -741,8 +743,9 @@ async fn contract_termination_cancels_upcoming_appointments_and_pending_amendmen
     let admin_id = context.admin_id;
     let tag = Uuid::new_v4().simple().to_string();
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Scheduled', 'Work', '1980-03-03', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Scheduled', 'Work', '1980-03-03', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -859,8 +862,9 @@ async fn contract_termination_leaves_completed_orders_untouched() {
     let admin_id = context.admin_id;
     let tag = Uuid::new_v4().simple().to_string();
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Completed', 'Order', '1985-05-05', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Completed', 'Order', '1985-05-05', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -1031,8 +1035,9 @@ async fn contract_termination_detaches_unconfirmed_drafts_without_settling_them(
     let admin_id = context.admin_id;
     let tag = Uuid::new_v4().simple().to_string();
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Draft', 'Detach', '1985-05-05', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Draft', 'Detach', '1985-05-05', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -1205,8 +1210,9 @@ async fn termination_settlement_matches_legacy_invoice_lines_and_the_patient_bal
     let admin_id = context.admin_id;
     let tag = Uuid::new_v4().simple().to_string();
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Legacy', 'Settlement', '1979-02-03', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Legacy', 'Settlement', '1979-02-03', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
@@ -1500,8 +1506,9 @@ async fn termination_credits_services_invoiced_in_advance_but_not_delivered() {
     let admin_id = context.admin_id;
     let tag = Uuid::new_v4().simple().to_string();
     let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
-           VALUES ($1, 'Advance', 'Hotel', '1979-02-03', 'diverse', $2)
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                               address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Advance', 'Hotel', '1979-02-03', 'diverse', $2, 'Teststraße 1', '10115', 'Berlin', 'Deutschland')
            RETURNING id"#,
     )
     .bind(format!("PT-{tag}"))
