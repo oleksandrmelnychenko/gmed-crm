@@ -779,17 +779,20 @@ mod tests {
 /// Fill each signer's Skribble visual-signature frames from the anchors the
 /// document generators recorded, translated to pages of the merged bundle
 /// (source first, then the members in bundle order).
-pub(super) fn assign_visual_positions(
+pub(super) async fn assign_visual_positions(
     source: &PgRow,
     source_pdf: &[u8],
     members: &[PreparedSigningMember],
     signers: &mut [Signer],
 ) -> Result<(), &'static str> {
     let mut documents = Vec::with_capacity(members.len() + 1);
-    documents.push((signature_anchors_of(source), pdf_page_count(source_pdf)?));
+    documents.push((
+        signature_anchors_of(source, source_pdf).await,
+        pdf_page_count(source_pdf)?,
+    ));
     for member in members {
         documents.push((
-            signature_anchors_of(&member.row),
+            signature_anchors_of(&member.row, &member.bytes).await,
             pdf_page_count(&member.bytes)?,
         ));
     }
@@ -804,13 +807,29 @@ fn signers_roles_snapshot(signers: &[Signer]) -> Vec<String> {
     signers.iter().map(|signer| signer.role.clone()).collect()
 }
 
-fn signature_anchors_of(row: &PgRow) -> Vec<SignatureAnchor> {
-    row.try_get::<Option<Value>, _>("generated_bindings")
+/// The anchors recorded with the document. A generated document from before
+/// the generators recorded them has none; its signature lines are then found
+/// in the PDF itself, so its signers do not have to place the signature by hand.
+async fn signature_anchors_of(row: &PgRow, pdf: &[u8]) -> Vec<SignatureAnchor> {
+    let recorded: Vec<SignatureAnchor> = row
+        .try_get::<Option<Value>, _>("generated_bindings")
         .ok()
         .flatten()
         .and_then(|bindings| {
             serde_json::from_value(bindings.get(SIGNATURE_ANCHORS_BINDING_KEY)?.clone()).ok()
         })
+        .unwrap_or_default();
+    let generated = row
+        .try_get::<Option<String>, _>("generated_template_id")
+        .ok()
+        .flatten()
+        .is_some();
+    if !recorded.is_empty() || !generated {
+        return recorded;
+    }
+    let pdf = pdf.to_vec();
+    tokio::task::spawn_blocking(move || super::frames::detect_signature_anchors(&pdf))
+        .await
         .unwrap_or_default()
 }
 

@@ -27493,6 +27493,93 @@ mod tests {
             .join(" ")
     }
 
+    /// The signature places found in the PDF text are the ones the generator
+    /// recorded, so a document without a record gets the same frames.
+    fn assert_signature_frames_detected(generated: &super::GeneratedPdf) {
+        let recorded = &generated.signature_anchors;
+        let detected =
+            crate::document_signatures::frames::detect_signature_anchors(&generated.bytes);
+        assert!(!recorded.is_empty(), "no signature anchors recorded");
+        assert_eq!(
+            detected.len(),
+            recorded.len(),
+            "detected {detected:?}, recorded {recorded:?}"
+        );
+        for anchor in recorded {
+            assert!(
+                detected.iter().any(|found| {
+                    found.role == anchor.role
+                        && found.page == anchor.page
+                        && (found.y_mm - anchor.y_mm).abs() < 1.5
+                        && (found.x_mm - anchor.x_mm).abs() < 6.0
+                }),
+                "no frame detected for {anchor:?} in {detected:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn signature_frames_are_found_in_documents_generated_without_anchors() {
+        let (document, regular, bold) = new_admin_pdf().unwrap();
+        let mut layout = TreatmentPlanPdfLayout::new("Old consent".to_string(), regular, bold);
+        // The wording of consents generated before the frames were recorded.
+        super::admin_block(
+            &mut layout,
+            "Mit meiner Unterschrift bestätige ich die Angaben. Die Unterschrift beider Personensorgeberechtigten ist erforderlich.",
+            0.0,
+            6.0,
+        );
+        super::admin_block(
+            &mut layout,
+            "Ort, Datum: _________________   Unterschrift: ____________________ (Personensorgeberechtigte/r 1)",
+            4.0,
+            2.0,
+        );
+        super::admin_block(
+            &mut layout,
+            "Ort, Datum: _________________   Unterschrift: ____________________ (Personensorgeberechtigte/r 2)",
+            0.0,
+            2.0,
+        );
+        layout.text_block(
+            "Datum: 01.08.2026     Bearbeiter/in: Bearbeiter Beispiel     Unterschrift: ____________________",
+            10.0,
+            false,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            6.0,
+            1.0,
+        );
+        let bytes = finalize_admin_pdf(document, layout);
+
+        let detected = crate::document_signatures::frames::detect_signature_anchors(&bytes);
+        let roles = detected
+            .iter()
+            .map(|anchor| anchor.role.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            roles,
+            ["guardian_1", "guardian_2", "agency"],
+            "{detected:?}"
+        );
+        assert!(detected[0].y_mm > detected[1].y_mm && detected[1].y_mm > detected[2].y_mm);
+        // The guardians sign on the underline in the right half; the wrapped EDD
+        // underline starts a line of its own.
+        assert!(
+            detected[..2].iter().all(|anchor| anchor.x_mm > 90.0),
+            "{detected:?}"
+        );
+        for anchor in &detected {
+            assert_eq!(anchor.page, 0);
+            assert!((30.0..=60.0).contains(&anchor.width_mm), "{anchor:?}");
+            assert!(anchor.x_mm >= super::PDF_LEFT_MARGIN_MM - 0.5, "{anchor:?}");
+            assert!(
+                anchor.x_mm + anchor.width_mm <= PDF_PAGE_WIDTH_MM,
+                "{anchor:?}"
+            );
+        }
+    }
+
     fn normalized_pdf_pages(bytes: &[u8]) -> Vec<String> {
         pdf_extract::extract_text_from_mem_by_pages(bytes)
             .unwrap()
@@ -27804,6 +27891,7 @@ mod tests {
         };
 
         let bytes = build_consent_pdf(&context).unwrap();
+        assert_signature_frames_detected(&bytes);
         let text = assert_legal_pdf_chrome(&bytes, &context.document_reference);
         assert!(text.contains("Alex Beispiel, geb. am 03.02.1989"));
         assert!(text.contains("Maria Beispiel, geb. am 05.04.1990"));
@@ -27926,6 +28014,7 @@ mod tests {
             "SE-20260716-UNITTEST0001",
         )
         .unwrap();
+        assert_signature_frames_detected(&release);
         let release_text = assert_legal_pdf_chrome(&release, "SE-20260716-UNITTEST0001");
         assert!(release_text.contains("Schweigepflichtentbindung"));
         assert!(release_text.contains("203 StGB"));
@@ -27945,6 +28034,7 @@ mod tests {
             "EW-20260716-UNITTEST0001",
         )
         .unwrap();
+        assert_signature_frames_detected(&consent);
         let consent_text = assert_legal_pdf_chrome(&consent, "EW-20260716-UNITTEST0001");
         assert!(consent_text.contains("Anlage 1"));
         assert!(consent_text.contains("Einverständniserklärung zur Datenübermittlung"));
@@ -28047,6 +28137,7 @@ mod tests {
             "AML-20260801-UNITTEST0001",
         )
         .unwrap();
+        assert_signature_frames_detected(&bytes);
         let text = assert_legal_pdf_chrome(&bytes, "AML-20260801-UNITTEST0001");
 
         assert!(text.contains("Durchführung verstärkter Sorgfaltspflichten"));
@@ -28102,6 +28193,7 @@ mod tests {
         };
 
         let bytes = build_framework_contract_pdf(&context, "DOC-FRAMEWORK-FALLBACK").unwrap();
+        assert_signature_frames_detected(&bytes);
         let pages = normalized_pdf_pages(&bytes);
         assert!(
             pages.len() >= 2,
@@ -28424,6 +28516,7 @@ mod tests {
         };
 
         let bytes = build_single_order_pdf(&context, "DOC-ORDER-FALLBACK").unwrap();
+        assert_signature_frames_detected(&bytes);
         let pages = normalized_pdf_pages(&bytes);
         assert!(pages.len() >= 2, "single order must have a second page");
         assert!(pages[0].contains("Auftragsnummer: EA-2026-0017"));
@@ -28485,6 +28578,7 @@ mod tests {
         context.total_gross = Some("2.785,81 EUR".to_string());
 
         let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-FALLBACK").unwrap();
+        assert_signature_frames_detected(&estimate_bytes);
         let estimate_text = assert_legal_pdf_chrome(&estimate_bytes, "KV-2026-0042");
         assert!(!estimate_text.contains("DOC-QUOTE-FALLBACK"));
         assert!(estimate_text.contains("Anlage 1 zum Einzelauftrag"));
