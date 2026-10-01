@@ -100,7 +100,8 @@ export function ClinicalImportCandidateDetails({
 export function ClinicalImportConstructorForm({
   target,
   targetLabel,
-  initialFields,
+  fields,
+  onFieldsChange,
   sourceText,
   sourcePage,
   lang,
@@ -109,7 +110,9 @@ export function ClinicalImportConstructorForm({
 }: {
   target: ClinicalDocumentImportTarget;
   targetLabel: string;
-  initialFields: ConstructorFields;
+  /** Owned by the sheet, which also adds text selected later in the document. */
+  fields: ConstructorFields;
+  onFieldsChange: (fields: ConstructorFields) => void;
   sourceText: string;
   sourcePage: number | null;
   lang: string;
@@ -118,7 +121,6 @@ export function ClinicalImportConstructorForm({
 }) {
   const de = lang === "de";
   const tx = (ru: string, german: string) => (de ? german : ru);
-  const [fields, setFields] = useState<ConstructorFields>(initialFields);
   const [showMissing, setShowMissing] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   // Opened from the toolbar, the form can sit below the visible list.
@@ -171,7 +173,7 @@ export function ClinicalImportConstructorForm({
           const invalid = showMissing && missing.includes(spec.key);
           const label = spec.label[de ? "de" : "ru"];
           const placeholder = spec.placeholder?.[de ? "de" : "ru"];
-          const update = (next: string) => setFields((current) => ({ ...current, [spec.key]: next }));
+          const update = (next: string) => onFieldsChange({ ...fields, [spec.key]: next });
           return (
             <label key={spec.key} className={cn("space-y-1", wide(spec.kind) && "sm:col-span-2")}>
               <span className="text-xs font-medium">
@@ -184,7 +186,8 @@ export function ClinicalImportConstructorForm({
                   value={value}
                   aria-invalid={invalid}
                   placeholder={placeholder}
-                  className={cn(controlClass, "min-h-24 resize-y py-2 leading-6")}
+                  // Tall enough to read a pasted finding; grows with its text.
+                  className={cn(controlClass, "min-h-48 max-h-[45vh] resize-y py-2 leading-6 [field-sizing:content]")}
                   onChange={(event) => update(event.target.value)}
                 />
               ) : spec.kind === "select" ? (

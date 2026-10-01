@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { ClinicalDocumentImportCandidate } from "./clinical-document-import";
 import { labResultImportPayload } from "./clinical-document-import-payloads";
 import {
+  appendSelectionToConstructorFields,
   buildConstructorCandidate,
+  constructorAcceptsMoreText,
   groupCandidatesByPage,
   missingConstructorFields,
   moveCandidate,
@@ -58,6 +60,28 @@ describe("prefillConstructorFields", () => {
       label: "V. a. Prostatakarzinom",
       certainty: "verdacht",
     });
+  });
+});
+
+describe("appendSelectionToConstructorFields", () => {
+  it("adds text selected later as a new line of the main text", () => {
+    const fields = { result: "Befund Seite 1", title: "MRT" };
+    expect(appendSelectionToConstructorFields("examination", fields, "  Befund Seite 2 ")).toEqual({
+      result: "Befund Seite 1\nBefund Seite 2",
+      title: "MRT",
+    });
+    expect(appendSelectionToConstructorFields("diagnosis", {}, "Prostatakarzinom")).toEqual({
+      label: "Prostatakarzinom",
+    });
+  });
+
+  it("leaves forms without a free-text main field and empty selections unchanged", () => {
+    const lab = { analyte_name: "PSA" };
+    expect(appendSelectionToConstructorFields("lab_result", lab, "12,4 ng/ml")).toBe(lab);
+    expect(constructorAcceptsMoreText("lab_result")).toBe(false);
+    expect(constructorAcceptsMoreText("recommendation")).toBe(true);
+    const diagnosis = { label: "BPH" };
+    expect(appendSelectionToConstructorFields("diagnosis", diagnosis, "   ")).toBe(diagnosis);
   });
 });
 
