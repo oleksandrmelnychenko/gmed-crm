@@ -106,7 +106,7 @@ import {
   prefillConstructorFields,
   type ConstructorFields,
 } from "../../data/clinical-import-constructor";
-import { ClinicalImportConstructorForm } from "./clinical-import-constructor-form";
+import { ClinicalImportCandidateDetails, ClinicalImportConstructorForm } from "./clinical-import-constructor-form";
 
 type ApplyResult = Record<string, number>;
 type BuilderTab = "all" | "source" | ClinicalDocumentImportTarget;
@@ -2230,6 +2230,12 @@ export function ClinicalDocumentImportSheet({
                                       onClick={(event) => event.stopPropagation()}
                                     />
                                   )}
+                                  <ClinicalImportCandidateDetails
+                                    candidate={candidate}
+                                    lang={lang}
+                                    disabled={snapshotReadOnly || !candidate.selected}
+                                    onChange={(normalized) => patchCandidate(candidate.id, { normalized })}
+                                  />
                                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                     <Badge
                                       variant="outline"

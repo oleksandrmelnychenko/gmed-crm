@@ -198,6 +198,12 @@ test("constructor builds typed blocks from selected text and by hand, then order
   await expect(cards).toHaveCount(4);
   await expect(cards.first().getByRole("button", { name: "Block entfernen" })).toHaveCount(0);
 
+  // Record fields of a recognized block are visible and editable in its card.
+  const recognized = dialog.locator('[data-clinical-import-candidate-id="dx-1"]');
+  await expect(recognized.getByLabel("Sicherheit")).toHaveValue("bestaetigt");
+  await recognized.getByLabel("Sicherheit").selectOption("verdacht");
+  await recognized.getByLabel("ICD-10").fill("n40");
+
   // Ordering within the type, then grouping by source page.
   const diagnosisEditors = () => dialog
     .locator("[data-clinical-import-candidate-card] textarea[data-clinical-import-candidate-editor]")
@@ -225,6 +231,11 @@ test("constructor builds typed blocks from selected text and by hand, then order
   expect(manualLab.normalized).toMatchObject({ analyte_name: "PSA", numeric_result: 12.4, measured_on: "2026-02-20" });
   const manualDiagnosis = reviewed.candidates.find((candidate) => candidate.value === "Prostatakarzinom")!;
   expect(manualDiagnosis.normalized).toMatchObject({ certainty: "verdacht", icd_code: "C61" });
+  expect(reviewed.candidates.find((candidate) => candidate.id === "dx-1")!.normalized).toMatchObject({
+    certainty: "verdacht",
+    assertion: "suspected",
+    icd_code: "N40",
+  });
   const manualVital = reviewed.candidates.find((candidate) => candidate.target === "vital")!;
   expect(manualVital.value).toBe("Gewicht, kg: 80");
   expect(manualVital.normalized).toMatchObject({ measured_at: "2026-03-02", weight_kg: 80 });

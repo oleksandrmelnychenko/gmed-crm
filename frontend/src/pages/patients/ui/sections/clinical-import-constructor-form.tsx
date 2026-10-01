@@ -4,7 +4,10 @@ import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { ClinicalDocumentImportTarget } from "../../data/clinical-document-import";
+import type {
+  ClinicalDocumentImportCandidate,
+  ClinicalDocumentImportTarget,
+} from "../../data/clinical-document-import";
 import {
   constructorFieldSpecs,
   missingConstructorFields,
@@ -13,6 +16,86 @@ import {
 
 const controlClass =
   "w-full rounded-lg border border-border bg-white px-3 text-sm outline-none focus:border-orange-300 focus:ring-2 focus:ring-orange-100 aria-[invalid=true]:border-destructive";
+
+const DETAIL_FIELDS: Partial<Record<ClinicalDocumentImportTarget, string[]>> = {
+  examination: ["title", "performed_on"],
+  diagnosis: ["certainty", "kind", "icd_code", "diagnosed_on"],
+};
+
+/**
+ * The fields of a review block that become part of the record besides its
+ * text (examination title and date, diagnosis certainty, kind, ICD and date),
+ * so recognized blocks can be checked and corrected before the import.
+ */
+export function ClinicalImportCandidateDetails({
+  candidate,
+  lang,
+  disabled,
+  onChange,
+}: {
+  candidate: ClinicalDocumentImportCandidate;
+  lang: string;
+  disabled: boolean;
+  onChange: (normalized: Record<string, unknown>) => void;
+}) {
+  const keys = DETAIL_FIELDS[candidate.target];
+  if (!keys) return null;
+  const de = lang === "de";
+  const specs = constructorFieldSpecs[candidate.target].filter((spec) => keys.includes(spec.key));
+  const value = (key: string) => {
+    const raw = candidate.normalized[key];
+    if (key === "certainty") return raw === "verdacht" ? "verdacht" : "bestaetigt";
+    if (key === "kind") return raw === "main" ? "main" : "secondary";
+    return typeof raw === "string" ? raw : "";
+  };
+  const update = (key: string, next: string) => {
+    const patch: Record<string, unknown> = { [key]: next.trim() ? next : null };
+    if (key === "certainty") {
+      patch.certainty = next;
+      patch.assertion = next === "verdacht" ? "suspected" : "confirmed";
+    }
+    if (key === "kind") patch.kind = next;
+    if (key === "icd_code") patch.icd_code = next.trim() ? next.trim().toUpperCase() : null;
+    onChange({ ...candidate.normalized, ...patch });
+  };
+  return (
+    <div
+      data-clinical-import-candidate-details
+      className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4"
+      onClick={(event) => event.stopPropagation()}
+    >
+      {specs.map((spec) => (
+        <label key={spec.key} className={cn("space-y-1", candidate.target === "examination" && spec.key === "title" && "sm:col-span-2 xl:col-span-3")}>
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            {spec.label[de ? "de" : "ru"]}
+          </span>
+          {spec.kind === "select" ? (
+            <select
+              value={value(spec.key)}
+              disabled={disabled}
+              className={cn(controlClass, "h-9 disabled:opacity-100")}
+              onChange={(event) => update(spec.key, event.target.value)}
+            >
+              {spec.options?.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label[de ? "de" : "ru"]}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <Input
+              type={spec.kind === "date" ? "date" : "text"}
+              value={value(spec.key)}
+              disabled={disabled}
+              className={cn(controlClass, "h-9")}
+              onChange={(event) => update(spec.key, event.target.value)}
+            />
+          )}
+        </label>
+      ))}
+    </div>
+  );
+}
 
 export function ClinicalImportConstructorForm({
   target,
