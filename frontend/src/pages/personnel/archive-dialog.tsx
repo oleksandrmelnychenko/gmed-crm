@@ -28,7 +28,7 @@ import {
   validatePersonnelFile,
   type ArchiveTarget,
 } from "./model";
-import { ArchiveName, categoryLabel, errorMessage } from "./personnel-ui";
+import { ArchiveName, FormSection, categoryLabel, errorMessage } from "./personnel-ui";
 
 type EmployeeChoice = { id: string; display_name: string; is_active: boolean };
 
@@ -270,48 +270,47 @@ export function ArchiveDialog({
                 />
               }
             >
-              <div className="space-y-4">
-                <p className="text-xs text-muted-foreground">
-                  {isCorrection ? t.personnel_correction_hint : t.personnel_upload_hint}
-                </p>
-
-                {mode?.kind === "intake" ? (
-                  <>
-                    <p className="text-xs text-muted-foreground">
-                      {t.personnel_intake_original_name}: <ArchiveName name={mode.item.original_file_name} />
-                    </p>
-                    <Field label={t.personnel_employee} required>
+              {mode?.kind === "intake" ? (
+                <FormSection title={t.personnel_employee}>
+                  <p className="text-xs text-muted-foreground">
+                    {t.personnel_intake_original_name}: <ArchiveName name={mode.item.original_file_name} />
+                  </p>
+                  <Field label={t.personnel_employee} required>
+                    <SelectField
+                      value={employeeId}
+                      aria-label={t.personnel_employee}
+                      onValueChange={(value) => {
+                        setEmployeeId(value);
+                        setSupersedesId("");
+                      }}
+                      options={[
+                        { value: "", label: t.common_select_placeholder, disabled: true },
+                        ...mode.employees.map((employee) => ({
+                          value: employee.id,
+                          label: employee.is_active
+                            ? employee.display_name
+                            : `${employee.display_name} (${t.personnel_status_former})`,
+                        })),
+                      ]}
+                    />
+                  </Field>
+                  {employeeId && correctionOptions.length > 0 ? (
+                    <Field label={t.personnel_correction_of}>
                       <SelectField
-                        value={employeeId}
-                        aria-label={t.personnel_employee}
-                        onValueChange={(value) => {
-                          setEmployeeId(value);
-                          setSupersedesId("");
-                        }}
-                        options={[
-                          { value: "", label: t.common_select_placeholder, disabled: true },
-                          ...mode.employees.map((employee) => ({
-                            value: employee.id,
-                            label: employee.is_active
-                              ? employee.display_name
-                              : `${employee.display_name} (${t.personnel_status_former})`,
-                          })),
-                        ]}
+                        value={supersedesId}
+                        aria-label={t.personnel_correction_of}
+                        onValueChange={setSupersedesId}
+                        options={[{ value: "", label: t.personnel_correction_none }, ...correctionOptions]}
                       />
                     </Field>
-                    {employeeId && correctionOptions.length > 0 ? (
-                      <Field label={t.personnel_correction_of}>
-                        <SelectField
-                          value={supersedesId}
-                          aria-label={t.personnel_correction_of}
-                          onValueChange={setSupersedesId}
-                          options={[{ value: "", label: t.personnel_correction_none }, ...correctionOptions]}
-                        />
-                      </Field>
-                    ) : null}
-                  </>
-                ) : null}
+                  ) : null}
+                </FormSection>
+              ) : null}
 
+              <FormSection
+                title={t.personnel_section_document}
+                hint={isCorrection ? t.personnel_correction_hint : t.personnel_upload_hint}
+              >
                 {mode?.kind === "profile" ? (
                   <p className="text-xs text-muted-foreground">
                     {t.personnel_import_source}:{" "}
@@ -337,7 +336,7 @@ export function ArchiveDialog({
                     />
                   </Field>
                 ) : (
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={t.personnel_category} required>
                       <SelectField
                         value={category}
@@ -382,35 +381,40 @@ export function ArchiveDialog({
                     onChange={(event) => setTitle(event.target.value)}
                   />
                 </Field>
+              </FormSection>
 
-                {needsFile ? (
-                  <Field label={t.personnel_file} htmlFor="personnel-document-file" required>
-                    <label
-                      className={cn(
-                        "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-3 text-sm transition-colors hover:bg-muted/40",
-                        tokens.surface.dashed,
-                      )}
-                    >
-                      <Upload className="size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 truncate">{file ? file.name : t.personnel_choose_file}</span>
-                      <input
-                        id="personnel-document-file"
-                        type="file"
-                        className="sr-only"
-                        accept={PERSONNEL_FILE_ACCEPT}
-                        onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
-                      />
-                    </label>
-                    <p className="text-xs text-muted-foreground">{t.personnel_file_hint}</p>
-                    {fileError ? <p className="text-xs text-destructive">{fileError}</p> : null}
-                  </Field>
-                ) : null}
+              {needsFile ? (
+                <FormSection title={t.personnel_file} hint={t.personnel_file_hint}>
+                  <label
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-3 text-sm transition-colors hover:bg-muted/40",
+                      tokens.surface.dashed,
+                    )}
+                  >
+                    <Upload className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 truncate">{file ? file.name : t.personnel_choose_file}</span>
+                    <input
+                      id="personnel-document-file"
+                      type="file"
+                      aria-label={t.personnel_file}
+                      className="sr-only"
+                      accept={PERSONNEL_FILE_ACCEPT}
+                      onChange={(event) => chooseFile(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                  {fileError ? <p className="text-xs text-destructive">{fileError}</p> : null}
+                </FormSection>
+              ) : null}
 
-                <div className={cn("space-y-1 rounded-lg px-3 py-2.5 text-xs", tokens.surface.mutedCard)}>
-                  <p className={cn(tokens.text.label, "flex items-center gap-1.5")}>
+              <FormSection
+                title={
+                  <span className="inline-flex items-center gap-1.5">
                     <FileCheck2 className="size-3.5" />
                     {t.personnel_will_be_archived_as}
-                  </p>
+                  </span>
+                }
+              >
+                <div className="space-y-1 text-xs">
                   {preview?.name ? (
                     <ArchiveName name={preview.name} className="text-sm" />
                   ) : preview?.error ? (
@@ -423,7 +427,7 @@ export function ArchiveDialog({
                     {t.personnel_immutable_hint}
                   </p>
                 </div>
-              </div>
+              </FormSection>
             </AdminSheetScaffold>
           </form>
         ) : null}

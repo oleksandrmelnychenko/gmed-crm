@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { AdminSectionTitle, AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
-import { Field, textareaClass, tokens } from "@/components/ui-shell";
+import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
+import { Field, textareaClass } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
 import { SelectField } from "@/components/ui/select-field";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useLang } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelEmployee, type PersonnelLinkableUser } from "./api";
 import {
@@ -16,7 +15,7 @@ import {
   employmentRangeValid,
   type EmployeeForm,
 } from "./model";
-import { errorMessage } from "./personnel-ui";
+import { FormSection, errorMessage } from "./personnel-ui";
 
 /** Creates a personnel file or edits its master data (never its documents), in a right sheet. */
 export function EmployeeDialog({
@@ -210,18 +209,5 @@ export function EmployeeDialog({
         ) : null}
       </SheetContent>
     </Sheet>
-  );
-}
-
-/** A titled soft card grouping related fields, as in the other admin sheets. */
-function FormSection({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children: ReactNode }) {
-  return (
-    <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
-      <div className="space-y-1">
-        <AdminSectionTitle>{title}</AdminSectionTitle>
-        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
-      </div>
-      {children}
-    </section>
   );
 }

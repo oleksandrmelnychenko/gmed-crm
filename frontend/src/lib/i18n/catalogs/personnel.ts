@@ -21,6 +21,7 @@ export interface PersonnelTranslations {
   personnel_employee_dialog_hint: string;
   personnel_section_person: string;
   personnel_section_employment: string;
+  personnel_section_document: string;
   personnel_salutation: string;
   personnel_salutation_frau: string;
   personnel_salutation_herr: string;
@@ -282,6 +283,7 @@ export const personnelRu: PersonnelTranslations = {
   personnel_employee_dialog_hint: "Имя и фамилия входят в имена архивных файлов. Уже сохранённые файлы при изменении не переименовываются.",
   personnel_section_person: "Личные данные",
   personnel_section_employment: "Трудовые отношения",
+  personnel_section_document: "Документ",
   personnel_salutation: "Обращение",
   personnel_salutation_frau: "Frau",
   personnel_salutation_herr: "Herr",
@@ -543,6 +545,7 @@ export const personnelDe: PersonnelTranslations = {
   personnel_employee_dialog_hint: "Stammdaten der Akte. Vor- und Nachname gehen in die Archiv-Dateinamen ein; bereits archivierte Dateien werden nicht umbenannt.",
   personnel_section_person: "Person",
   personnel_section_employment: "Beschäftigung",
+  personnel_section_document: "Dokument",
   personnel_salutation: "Anrede",
   personnel_salutation_frau: "Frau",
   personnel_salutation_herr: "Herr",
