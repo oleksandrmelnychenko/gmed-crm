@@ -196,6 +196,8 @@ def parse_clinical_text(text: str) -> ParseDraft:
 
     for section in sections:
         role = _section_role(section.heading)
+        if role == "indication":
+            candidates.extend(_indication_tumor_marker_candidates(section))
         if section.target == "diagnosis":
             candidates.extend(
                 _diagnosis_candidates(
@@ -247,6 +249,13 @@ def parse_clinical_text(text: str) -> ParseDraft:
         else:
             candidate = _section_candidate(section)
             if candidate:
+                if (
+                    candidate.target == "examination"
+                    and document_type == "radiology_report"
+                    and role in {"finding", "impression"}
+                    and (study := _radiology_study_title(layout))
+                ):
+                    candidate.normalized["title"] = f"{study} — {section.heading}"
                 candidates.append(candidate)
             if document_type == "radiology_report" and role == "impression":
                 candidates.extend(_radiology_diagnosis_candidates(section))
@@ -428,6 +437,18 @@ def _extract_document_subject(text: str) -> DocumentSubject | None:
                 else:
                     evidence.append((page_number, line))
                     invalid_birth_date = True
+
+            # Radiology information systems print a machine field dump on the
+            # letter ("PAT_N<name>PAT_ID<id>...PB_DATE<birth date>"). The name
+            # run is often split by the text layer, so only the identifier and
+            # the birth date are taken from it.
+            if re.search(r"PAT\s*_\s*N", line) and "PB_DATE" in line.replace(" ", ""):
+                ris_id = re.search(r"PAT\s*_\s*I\s*D\s*(?P<value>\d{2,20})(?!\d)", line)
+                if ris_id:
+                    add("patient_identifier", ris_id.group("value"), 0.97, page_number, line)
+                ris_birth = re.search(r"PB\s*_\s*DATE\s*(?P<date>\d{1,2}\.\d{1,2}\.\d{4})(?!\d)", line)
+                if ris_birth and (birth_date := _normalize_german_date(ris_birth.group("date"))):
+                    add("birth_date", birth_date, 0.97, page_number, line)
 
             identifier = re.match(
                 r"^(?:Patienten(?:nummer|-?ID)|Patient(?:en)?-?Nr\.?|Pat\.?-?Nr\.?|Patient\s+ID|MRN)\s*:\s*"
@@ -2248,6 +2269,37 @@ def _narrative_laboratory_candidates(
     return candidates
 
 
+INDICATION_TUMOR_MARKER_RE = re.compile(
+    r"\b(?P<analyte>PSA|CEA|AFP|CA\s?19-9|CA\s?125|CA\s?15-3)(?:-Wert)?\s*(?:von|:|=)?\s*"
+    r"(?P<comparator><=|>=|<|>)?\s*(?P<number>\d+(?:[.,]\d+)?)\s*"
+    r"(?P<unit>ng/ml|µg/l|ug/l|U/ml|kU/l)\b",
+    re.IGNORECASE,
+)
+
+
+def _indication_tumor_marker_candidates(section: Section) -> list[ClinicalCandidate]:
+    """Tumor markers quoted in a referral indication ("PSA-Wert 12 ng/ml").
+
+    The measurement date is not part of the indication, so the value is only
+    proposed for review and never auto-selected.
+    """
+
+    text = " ".join(section.text.split())
+    return [
+        _lab_candidate(
+            analyte=re.sub(r"\s+", " ", match.group("analyte")).upper(),
+            result_text=f"{match.group('comparator') or ''}{match.group('number')}",
+            unit=match.group("unit"),
+            reference_text=None,
+            measured_on=None,
+            panel=section.heading,
+            page_number=section.page or 1,
+            source_text=text,
+        )
+        for match in INDICATION_TUMOR_MARKER_RE.finditer(text)
+    ]
+
+
 def _history_laboratory_candidates(
     text: str,
 ) -> tuple[list[ClinicalCandidate], str, list[str]]:
@@ -3174,6 +3226,13 @@ def _match_contextual_ocr_heading(
     return "anamnesis", "Anamnese", ""
 
 
+IMAGING_TECHNIQUE_HEADING_RE = re.compile(
+    r"^(?:Schichtführung(?:\s+und\s+Sequenzen)?|Sequenzen|Untersuchungstechnik|Technik|"
+    r"Untersuchungsprotokoll)\s*:",
+    re.IGNORECASE,
+)
+
+
 def _split_sections(text: str, *, preserve_paragraphs: bool = False) -> list[Section]:
     aliases = _alias_map()
     pages = text.split("\f")
@@ -3199,6 +3258,13 @@ def _split_sections(text: str, *, preserve_paragraphs: bool = False) -> list[Sec
                 skip_rest_of_page = True
                 continue
             if _is_repeated_page_noise(line, line_index, len(lines)):
+                continue
+            if IMAGING_TECHNIQUE_HEADING_RE.match(line):
+                # Acquisition protocol: it ends the preceding section (usually
+                # the indication) and is not a clinical fact of the patient.
+                if current and current.text.strip():
+                    sections.append(current)
+                current = None
                 continue
 
             heading = _match_heading(line, aliases)
@@ -3242,6 +3308,14 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
         return True
     if re.fullmatch(r"(?:seite|page)\s+\d+(?:\s*(?:/|von|of)\s*\d+)?", normalized):
         return True
+    # Continuation-page header of a letter: "2. Seite zum Arztbrief ... vom <date>".
+    if re.match(r"^\d{1,2}\.\s*seite\s+(?:zum|des)\s+(?:arztbrief|befund)", normalized):
+        return True
+    # Patient-portal and download hints are practice boilerplate, never findings.
+    if re.search(r"patienten-?portal|befundabfrage", normalized):
+        return True
+    if _is_practice_footer_line(line, normalized):
+        return True
     if any(
         token in normalized
         for token in (
@@ -3269,6 +3343,29 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
     return False
 
 
+PRACTICE_CONTACT_RE = re.compile(r"@|\b(?:tel|fax|telefon|telefax)\b\.?", re.IGNORECASE)
+PRACTICE_ADDRESS_RE = re.compile(
+    r"\b\d{5}\s+[A-ZÄÖÜ][a-zäöüß]+.*?(?:stra(?:ß|ss)e|str\.|platz|ring|weg|allee)"
+    r"|(?:stra(?:ß|ss)e|str\.|platz|ring|weg|allee)\s+\d+[a-z]?,?\s+\d{5}\s+[A-ZÄÖÜ]",
+    re.IGNORECASE,
+)
+
+
+def _is_practice_footer_line(line: str, normalized: str) -> bool:
+    """Multi-column practice letterhead/footer rows (sites, addresses, contacts).
+
+    Native PDF text keeps the column gaps of such rows. A row needs those gaps
+    plus a contact or address, so prose that mentions a fax number survives.
+    A lone postal-code line is the wrapped tail of the same footer.
+    """
+
+    if re.fullmatch(r"\d{5}\s+[A-ZÄÖÜ][\wäöüß .-]{1,40}", line):
+        return True
+    if len(re.findall(r"\S {3,}(?=\S)", line)) < 2:
+        return False
+    return bool(PRACTICE_CONTACT_RE.search(normalized) or PRACTICE_ADDRESS_RE.search(line))
+
+
 def _is_signoff_line(line: str) -> bool:
     if re.match(r"^Should (?:questions|uncertainties)\b", line.strip(), re.I):
         return True
@@ -3294,6 +3391,7 @@ def _section_role(heading: str) -> str:
     if key in {
         "klinischeangaben",
         "indikation",
+        "rechtfertigendeindikation",
         "fragestellung",
         "vorstellungsgrund",
         "untersuchungsanlass",
@@ -4937,16 +5035,12 @@ def _oncology_assessment_candidates(
 
 def _radiology_diagnosis_candidates(section: Section) -> list[ClinicalCandidate]:
     rows: list[ClinicalCandidate] = []
-    for statement in _split_clinical_statements(section.text):
-        value = _strip_row_prefix(statement)
-        if (
-            not value
-            or len(value) < 3
-            or _is_negative_assessment(value)
-            or _is_non_diagnostic_assessment(value)
-        ):
+    for value in _radiology_impression_statements(section.text):
+        if len(value) < 3 or _is_non_diagnostic_assessment(value):
             continue
-        semantics = _diagnosis_semantics(value)
+        # A reference threshold such as "(suspekt > 0,15)" qualifies a measured
+        # value; it does not make the statement a suspected diagnosis.
+        semantics = _diagnosis_semantics(SUSPICIOUS_THRESHOLD_RE.sub("", value))
         if semantics.target != "diagnosis":
             continue
         rows.append(
@@ -4975,6 +5069,69 @@ def _radiology_diagnosis_candidates(section: Section) -> list[ClinicalCandidate]
             )
         )
     return rows
+
+
+RADIOLOGY_STUDY_INTRO_RE = re.compile(
+    r"\b(?:nachfolgende|folgende)\s+Untersuchung(?:en)?\s+(?:durchf[üu]hrten|durchgef[üu]hrt|vorgenommen)",
+    re.IGNORECASE,
+)
+
+
+def _radiology_study_title(text: str) -> str | None:
+    """Name of the study a radiology letter reports on ("... MRT der Prostata")."""
+
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if not RADIOLOGY_STUDY_INTRO_RE.search(line):
+            continue
+        for following in lines[index + 1 : index + 4]:
+            study = " ".join(following.split())
+            if not study:
+                continue
+            study = re.split(r"\s*[(:;]|,\s", study, maxsplit=1)[0].strip(" .")
+            return study if 6 <= len(study) <= 120 else None
+    return None
+
+
+SUSPICIOUS_THRESHOLD_RE = re.compile(
+    r"\(\s*(?:suspekt|auffällig|pathologisch)\s*(?:[<>]=?|ab|über|unter)\s*[\d.,]+[^)]*\)",
+    re.IGNORECASE,
+)
+NUMBERED_ITEM_START_RE = re.compile(r"^\s*\d{1,2}[.)]\s+(?=\S)")
+
+
+def _radiology_impression_statements(text: str) -> list[str]:
+    """Statements of an impression, one numbered item at a time.
+
+    Joining a numbered list before sentence splitting left the next item's
+    number ("2.") glued to the previous statement. A statement that is
+    negative only in a trailing clause (``...; keine akute Frakturgefahr``)
+    keeps its positive leading clauses instead of being dropped entirely.
+    """
+
+    items: list[list[str]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        if NUMBERED_ITEM_START_RE.match(line) or not items:
+            items.append([line])
+        else:
+            items[-1].append(line)
+    statements: list[str] = []
+    for item in items:
+        for statement in _split_clinical_statements("\n".join(item)):
+            value = re.sub(r"\s+\d{1,2}[.)]$", "", _strip_row_prefix(statement)).strip()
+            if not value:
+                continue
+            if not _is_negative_assessment(value):
+                statements.append(value)
+                continue
+            for clause in _split_diagnosis_assertion_clauses(value):
+                # Lower-case fragments are qualifiers of the preceding clause
+                # ("soweit in der MRT fassbar"), not standalone statements.
+                if clause[:1].isupper() and not _is_negative_assessment(clause):
+                    statements.append(clause)
+    return statements
 
 
 def _split_clinical_statements(text: str) -> list[str]:

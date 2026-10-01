@@ -27,3 +27,4 @@ __pycache__/
 /frontend/pnpm-lock.yaml
 /.vs
 /.idea
+*.egg-info/
