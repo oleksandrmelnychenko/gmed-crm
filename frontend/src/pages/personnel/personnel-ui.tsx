@@ -2,7 +2,8 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { Download, Eye, FileWarning, LoaderCircle, type LucideIcon } from "lucide-react";
 
 import type { ColumnDef } from "@/components/data-table/types";
-import { CountBadge, Field, textareaClass } from "@/components/ui-shell";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { CountBadge, Field, textareaClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -393,5 +394,18 @@ export function ReasonDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** A titled soft card grouping related fields, as in the other admin sheets. */
+export function FormSection({ title, hint, children }: { title: ReactNode; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
+      <div className="space-y-1">
+        <AdminSectionTitle>{title}</AdminSectionTitle>
+        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
+      </div>
+      {children}
+    </section>
   );
 }
