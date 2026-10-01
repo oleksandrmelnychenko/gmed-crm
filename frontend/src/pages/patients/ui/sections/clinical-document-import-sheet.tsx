@@ -2285,6 +2285,26 @@ export function ClinicalDocumentImportSheet({
                                         ))}
                                       </span>
                                     ) : null}
+                                    {/* Only hand-made blocks can be removed; recognized ones stay visible for review. */}
+                                    {!snapshotReadOnly && candidate.id.startsWith("manual:") ? (
+                                      <Button
+                                        type="button"
+                                        size="icon"
+                                        variant="ghost"
+                                        className={cn(
+                                          "size-7 text-muted-foreground hover:text-destructive",
+                                          activeTab === "all" && candidateGrouping === "page" && "ml-auto",
+                                        )}
+                                        aria-label={tx("Удалить блок", "Block entfernen")}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setCandidates((current) => current.filter((item) => item.id !== candidate.id));
+                                          setActiveCandidateId((activeId) => (activeId === candidate.id ? null : activeId));
+                                        }}
+                                      >
+                                        <Trash2 className="size-3.5" />
+                                      </Button>
+                                    ) : null}
                                   </div>
                                   {reviewReasons.length > 0 ? (
                                     <div className="mt-2 space-y-1">

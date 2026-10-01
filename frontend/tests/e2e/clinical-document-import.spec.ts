@@ -189,6 +189,15 @@ test("constructor builds typed blocks from selected text and by hand, then order
   await vitalForm.getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
   await expect(cards).toHaveCount(4);
 
+  // A hand-made block can be removed again; a recognized one cannot.
+  await dialog.locator("[data-clinical-import-constructor-toolbar]").getByRole("button", { name: "Empfehlungen" }).click();
+  await dialog.locator('[data-clinical-import-constructor-form="recommendation"]').getByLabel(/^Empfehlung \*$/).fill("Versehentlich angelegt");
+  await dialog.locator('[data-clinical-import-constructor-form="recommendation"]').getByRole("button", { name: "Zum Entwurf hinzufügen" }).click();
+  await expect(cards).toHaveCount(5);
+  await cards.last().getByRole("button", { name: "Block entfernen" }).click();
+  await expect(cards).toHaveCount(4);
+  await expect(cards.first().getByRole("button", { name: "Block entfernen" })).toHaveCount(0);
+
   // Ordering within the type, then grouping by source page.
   const diagnosisEditors = () => dialog
     .locator("[data-clinical-import-candidate-card] textarea[data-clinical-import-candidate-editor]")
