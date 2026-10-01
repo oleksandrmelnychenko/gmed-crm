@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSignaturePending, validSigners, type Signer } from "./document-signature-api";
+import { isSignaturePending, signatureFrameCoverage, validSigners, type Signer } from "./document-signature-api";
 
 const signer: Signer = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
 describe("document signing", () => {
@@ -13,6 +13,13 @@ describe("document signing", () => {
   it("keeps uncertain submissions pending so the client cannot send twice", () => {
     for (const status of ["submitting", "submission_unknown", "pending"] as const) expect(isSignaturePending(status)).toBe(true);
     for (const status of ["completed", "needs_review", "declined", "withdrawn", "expired", "error"] as const) expect(isSignaturePending(status)).toBe(false);
+  });
+  it("tells whether signers sign in prepared frames or place the signature themselves", () => {
+    const framed = { ...signer, positions: [{ page: "0", x: 71, y: 120, width: 170, height: 30 }] };
+    const agency: Signer = { ...signer, email: "agency@example.org", role: "agency" };
+    expect(signatureFrameCoverage([framed, { ...agency, positions: [{}] }])).toBe("all");
+    expect(signatureFrameCoverage([framed, agency])).toBe("some");
+    expect(signatureFrameCoverage([signer, { ...agency, positions: [] }])).toBe("none");
   });
   it("matches the server's UTF-8 name limits and ASCII email requirements", () => {
     expect(validSigners([{ ...signer, first_name: "Ö".repeat(60) }])).toBe(true);

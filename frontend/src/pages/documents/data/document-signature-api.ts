@@ -1,6 +1,8 @@
 import { apiFetch, apiFetchFile } from "@/lib/api";
 
-export type Signer = { first_name: string; last_name: string; email: string; role: "client" | "agency" | "other" };
+// `positions` are the signature frames the server sent to Skribble for this
+// signer; it fills them itself and ignores any the client sends.
+export type Signer = { first_name: string; last_name: string; email: string; role: "client" | "agency" | "other"; positions?: unknown[] };
 export type SignatureStatus = "submitting" | "submission_unknown" | "pending" | "completed" | "needs_review" | "declined" | "withdrawn" | "expired" | "error";
 export type SignatureRequest = {
   id: string; status: SignatureStatus; test_mode: boolean; signers: Signer[];
@@ -28,7 +30,12 @@ export type SignatureState = {
   signing_packages?: SigningPackage[];
 };
 export const isSignaturePending = (status: SignatureStatus) => ["submitting", "submission_unknown", "pending"].includes(status);
-export const fetchSignatureState = (id: string) => apiFetch<SignatureState>(`/documents/${id}/signature-requests`, { forceFresh: true });
+/** Whether the signers of a sent request sign in frames placed in the document, or have to place their signature themselves. */
+export const signatureFrameCoverage = (signers: Signer[]): "all" | "some" | "none" => {
+  const framed = signers.filter((signer) => (signer.positions?.length ?? 0) > 0).length;
+  return framed === 0 ? "none" : framed === signers.length ? "all" : "some";
+};
+export const fetchSignatureState =(id: string) => apiFetch<SignatureState>(`/documents/${id}/signature-requests`, { forceFresh: true });
 // Every PDF of a package is malware-scanned before anything is sent, and a
 // standalone scanner start takes several seconds. Aborting at the default
 // timeout cancelled a request that would have succeeded moments later.

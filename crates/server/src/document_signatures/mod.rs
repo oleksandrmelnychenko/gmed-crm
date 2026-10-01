@@ -2,6 +2,7 @@
 pub mod closure;
 pub mod connection;
 mod defaults;
+pub(crate) mod frames;
 pub(crate) mod package;
 pub mod provider;
 mod review;
@@ -322,6 +323,7 @@ async fn create(
     )
     .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     package::assign_visual_positions(&source, &source_pdf, &signing_members, &mut signers)
+        .await
         .map_err(|e| error(StatusCode::UNPROCESSABLE_ENTITY, e))?;
     let attachment = package::prepare(&state, &auth, &source, body.attachment_document_id).await?;
     scan_upload_bytes(Some("source.pdf"), &bytes)

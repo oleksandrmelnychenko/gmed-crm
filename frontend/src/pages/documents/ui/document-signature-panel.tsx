@@ -10,7 +10,7 @@ import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
-import { abandonSignatureRequest, createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, resolveSignatureReview, signatureAction, signatureReasonValid, validSigners, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
+import { abandonSignatureRequest, createSignatureRequest, downloadSignatureReport, fetchSignatureState, isSignaturePending, resolveSignatureReview, signatureFrameCoverage, signatureAction, signatureReasonValid, validSigners, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer } from "../data/document-signature-api";
 
 const emptySigner = (role: Signer["role"]): Signer => ({ first_name: "", last_name: "", email: "", role });
 const initialSigners = (policy: SignatureState["signer_policy"] = "flexible") =>
@@ -271,6 +271,14 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                 return <div key={signer.email} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="break-words font-medium text-foreground">{signer.first_name} {signer.last_name} · {signer.email}</span><span className={signed ? "shrink-0 text-emerald-700" : "shrink-0 text-muted-foreground"}>{signed ? tx("Подписано", "Unterzeichnet") : request.status === "pending" ? tx("Ожидает подписи", "Unterschrift ausstehend") : tx("Подпись не подтверждена", "Unterschrift nicht bestätigt")}</span></div>;
               })}
               {request.status === "pending" && !request.last_error ? <p className="text-xs leading-5 text-muted-foreground">{tx("Приглашение отправлено на E-Mail. После подписания PDF появится здесь автоматически.", "Die Einladung wurde per E-Mail versendet. Nach der Unterschrift erscheint die PDF hier automatisch.")}</p> : null}
+              {request.status === "pending" && !request.last_error ? (() => {
+                const frames = signatureFrameCoverage(request.signers);
+                return <p data-signature-frames={frames} className={frames === "all" ? "text-xs leading-5 text-muted-foreground" : "text-xs leading-5 text-amber-700"}>{frames === "all"
+                  ? tx("Места подписи размечены в документе: подписанту достаточно нажать «Подписать».", "Die Unterschriftsfelder sind im Dokument gesetzt: Zum Unterzeichnen genügt ein Klick.")
+                  : frames === "some"
+                    ? tx("Места подписи размечены не для всех подписантов: остальные разместят подпись в документе сами.", "Die Unterschriftsfelder sind nicht für alle Personen gesetzt: Die übrigen platzieren ihre Unterschrift selbst.")
+                    : tx("Места подписи в документе не размечены: подписант разместит подпись сам.", "Im Dokument sind keine Unterschriftsfelder gesetzt: Die Person platziert ihre Unterschrift selbst.")}</p>;
+              })() : null}
               {request.status === "submission_unknown" && request.last_error === "provider_signers_mismatch" ? <p role="alert" className="text-xs leading-5 text-amber-700">{tx("Не удалось сопоставить подписантов в ответе Skribble. Требуется проверка подключения; повторное приглашение не отправляйте.", "Die Personen in der Skribble-Antwort konnten nicht zugeordnet werden. Die Verbindung muss geprüft werden; senden Sie keine zweite Einladung.")}</p> : null}
               {request.status === "error" && request.last_error === "provider_rate_limited" ? <p role="alert" className="text-xs leading-5 text-amber-700">{tx("Skribble временно ограничил число запросов. Приглашения не отправлены. Повторите отправку позже.", "Skribble hat die Anzahl der Anfragen vorübergehend begrenzt. Es wurden keine Einladungen versendet. Versuchen Sie den Versand später erneut.")}</p> : null}
               {request.last_error && request.status === "pending" ? <p className="text-xs leading-5 text-muted-foreground">{tx("Синхронизация повторится автоматически. Подписывать заново не нужно.", "Die Synchronisierung wird automatisch wiederholt. Erneutes Signieren ist nicht nötig.")}</p> : null}

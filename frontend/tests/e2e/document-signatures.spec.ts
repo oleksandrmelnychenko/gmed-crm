@@ -1107,6 +1107,24 @@ test("an old signed PDF does not hide a newer pending request", async ({ page })
   expect(fixture.submissions).toHaveLength(0);
 });
 
+test("a pending request says whether the signature frames are placed in the document", async ({ page }) => {
+  await prepare(page);
+  const signer = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+  let positions: unknown[] = [{ page: "0", x: 71, y: 120, width: 170, height: 30 }];
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null,
+    requests: [{ id: "framed", status: "pending", test_mode: true, signers: [{ ...signer, positions }], evidence: {}, has_report: false, result_document_id: null, last_error: null, created_at: "2026-09-06T11:15:29Z" }],
+  } }));
+  const open = async () => {
+    await page.goto(`/documents/${documentId}`);
+    await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+    return page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  };
+  await expect((await open()).locator('[data-signature-frames="all"]')).toContainText("Zum Unterzeichnen genügt ein Klick");
+  positions = [];
+  await expect((await open()).locator('[data-signature-frames="none"]')).toContainText("platziert ihre Unterschrift selbst");
+});
+
 test("a signed copy opens its actual source, while a new request previews the selected copy", async ({ page }) => {
   const fixture = await prepare(page);
   const originalId = "ea3a0c15-792b-4a3a-9a7e-006300000077";
