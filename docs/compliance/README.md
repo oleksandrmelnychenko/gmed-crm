@@ -14,6 +14,7 @@ Implementation Guidance (NIS2).
 | [04_loeschkonzept.md](04_loeschkonzept.md) | Art. 5, 17 DSGVO | Löschfristen und wie das System sie umsetzt |
 | [05_dsfa_vorpruefung.md](05_dsfa_vorpruefung.md) | Art. 35 DSGVO | Vorprüfung und Gerüst der Datenschutz-Folgenabschätzung |
 | [06_verfahrensdokumentation_personalakten.md](06_verfahrensdokumentation_personalakten.md) | § 8 BVV, GoBD | Verfahrensdokumentation der digitalen Personalakten |
+| [07_anfrage_steuerberater_personalakten.md](07_anfrage_steuerberater_personalakten.md) | § 8 BVV | Entwurf der Anfrage an den Steuerberater: Kategorien, Fristen, Dateinamen |
 
 ## Was nur die Organisation liefern kann
 

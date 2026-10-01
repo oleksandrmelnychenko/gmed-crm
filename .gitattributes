@@ -31,3 +31,4 @@
 *.ico binary
 *.wasm binary
 *.sh text eol=lf
+*.tsr binary
