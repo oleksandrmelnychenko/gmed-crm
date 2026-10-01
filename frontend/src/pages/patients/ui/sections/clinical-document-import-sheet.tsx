@@ -1966,8 +1966,6 @@ export function ClinicalDocumentImportSheet({
         onFieldsChange={(fields) =>
           setConstructorDraft((current) => (current ? { ...current, fields } : current))
         }
-        sourceText={constructorDraft.sourceText}
-        sourcePage={constructorDraft.sourcePage}
         lang={lang}
         onSubmit={addConstructorCandidate}
         onCancel={() => setConstructorDraft(null)}
@@ -3224,11 +3222,6 @@ export function ClinicalDocumentImportSheet({
                             );
                           })}
                         </div>
-                        {pageSelection ? (
-                          <p className="line-clamp-2 rounded-md bg-orange-50 px-2.5 py-1.5 text-[11px] leading-4 text-orange-950">
-                            «{pageSelection}»
-                          </p>
-                        ) : null}
                         {/* The open block sits beside the document, so more text can be selected here. */}
                         {selectionToAppend && constructorDraft ? (
                           <Button

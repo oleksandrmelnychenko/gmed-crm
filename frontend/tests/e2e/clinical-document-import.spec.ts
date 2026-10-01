@@ -153,7 +153,6 @@ test("constructor builds typed blocks from selected text and by hand, then order
   await expect(actions).toContainText("Block aus Auswahl erstellen als");
   await selectPageText(1, "");
   await expect(actions).toContainText("Text unten markieren oder Block hinzufügen");
-  await expect(actions).not.toContainText("Stanzbiopsie");
   await selectPageText(1, "bisher keine Stanzbiopsie");
   await actions.getByRole("button", { name: "Anamnese" }).click();
   const anamnesisForm = dialog
@@ -165,20 +164,22 @@ test("constructor builds typed blocks from selected text and by hand, then order
   await selectPageText(2, "Geringe BPH");
   await actions.getByRole("button", { name: "Auswahl zum offenen Block „Anamnese“ hinzufügen" }).click();
   await expect(anamnesisForm.locator("textarea")).toHaveValue("bisher keine Stanzbiopsie\nGeringe BPH");
-  await expect(anamnesisForm).toContainText("Aus Seite 1");
+  // The document text is not repeated in the panel or in the form.
+  await expect(anamnesisForm).not.toContainText("Aus Seite");
   await expect(actions).not.toContainText("Geringe BPH");
+  await expect(actions).toContainText("Text unten markieren oder Block hinzufügen");
   await anamnesisForm.getByRole("button", { name: "Abbrechen" }).last().click();
   await expect(anamnesisForm).toHaveCount(0);
   await dialog.getByRole("button", { name: /^Seite 1/ }).click();
 
   // Block from selected document text: the laboratory value is split into fields.
   await selectPageText(1, "PSA-Wert 12,4 ng/ml");
-  await expect(actions).toContainText("PSA-Wert 12");
+  await expect(actions).toContainText("Block aus Auswahl erstellen als");
   // The selection belongs to page 1 and is not offered on page 2.
   await dialog.getByRole("button", { name: /^Seite 2/ }).click();
-  await expect(actions).not.toContainText("PSA-Wert");
+  await expect(actions).toContainText("Text unten markieren oder Block hinzufügen");
   await dialog.getByRole("button", { name: /^Seite 1/ }).click();
-  await expect(actions).toContainText("PSA-Wert 12");
+  await expect(actions).toContainText("Block aus Auswahl erstellen als");
   await actions.getByRole("button", { name: "Laborwerte" }).click();
   const labForm = dialog.locator('[data-clinical-import-constructor-form="lab_result"]');
   await expect(labForm.getByLabel(/^Parameter\b/)).toHaveValue("PSA");

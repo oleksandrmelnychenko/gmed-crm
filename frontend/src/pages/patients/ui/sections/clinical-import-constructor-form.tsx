@@ -102,8 +102,6 @@ export function ClinicalImportConstructorForm({
   targetLabel,
   fields,
   onFieldsChange,
-  sourceText,
-  sourcePage,
   lang,
   onSubmit,
   onCancel,
@@ -113,8 +111,6 @@ export function ClinicalImportConstructorForm({
   /** Owned by the sheet, which also adds text selected later in the document. */
   fields: ConstructorFields;
   onFieldsChange: (fields: ConstructorFields) => void;
-  sourceText: string;
-  sourcePage: number | null;
   lang: string;
   onSubmit: (fields: ConstructorFields) => void;
   onCancel: () => void;
@@ -153,15 +149,7 @@ export function ClinicalImportConstructorForm({
       }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h5 className="text-sm font-semibold">{tx(`Новый блок: ${targetLabel}`, `Neuer Block: ${targetLabel}`)}</h5>
-          {sourceText.trim() ? (
-            <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-              {sourcePage ? tx(`Из страницы ${sourcePage}: `, `Aus Seite ${sourcePage}: `) : tx("Из документа: ", "Aus dem Dokument: ")}
-              «{sourceText.trim()}»
-            </p>
-          ) : null}
-        </div>
+        <h5 className="min-w-0 text-sm font-semibold">{tx(`Новый блок: ${targetLabel}`, `Neuer Block: ${targetLabel}`)}</h5>
         <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0" onClick={onCancel} aria-label={tx("Отмена", "Abbrechen")}>
           <X className="size-4" />
         </Button>
