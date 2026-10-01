@@ -495,10 +495,22 @@ async function readApiErrorBody(res: Response): Promise<ApiErrorBody | null> {
   return null;
 }
 
+// Server codes that every screen shows the same way, in the user's language.
+const LOCALIZED_API_ERRORS: Record<string, string> = {
+  // A document out for electronic signature cannot get a new version or be archived.
+  signature_pending: "api_signature_pending",
+};
+
+function apiErrorMessage(body: ApiErrorBody | null, res: Response) {
+  const localized = body?.error ? LOCALIZED_API_ERRORS[body.error] : undefined;
+  if (localized) return uiText(localized);
+  return body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
+}
+
 async function readApiJsonResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await readApiErrorBody(res);
-    const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
+    const message = apiErrorMessage(body, res);
     if (res.status === 403 && body?.error === "password_change_required") {
       dispatchPasswordChangeRequired();
     }
@@ -704,7 +716,7 @@ export async function apiFetchFile(path: string, init: ApiFileFetchInit = {}) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => null) as ApiErrorBody | null;
-    const message = body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
+    const message = apiErrorMessage(body, res);
     if (res.status === 429) {
       throw new ApiRequestError(
         message || uiText("api_rate_limited"),

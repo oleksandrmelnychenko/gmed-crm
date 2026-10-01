@@ -9,13 +9,16 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import type { DocumentItem } from "../model/types";
-import { DocumentSignaturePanel } from "./document-signature-panel";
+import { DocumentSignaturePanel, type PackagePreviewSelection } from "./document-signature-panel";
 import { SignatureDocumentPreview, type SignaturePreviewSource } from "./signature-document-preview";
 import { refreshSignatureSummaries, useSignatureSummary } from "../data/use-signature-summary";
 import type { SignatureRequest, SignatureState } from "../data/document-signature-api";
 import { signaturePresentation } from "./signature-status";
 
 type DocumentScope = { patientId?: string | null; orderId?: string | null; leadId?: string | null };
+// Sending needs document access as CEO or Patient Manager on the server. IT
+// administrators configure the provider in the admin area instead.
+export const SIGNING_ROLES: string[] = ["ceo", "patient_manager"];
 type Props = {
   title: string;
   iconOnly?: boolean;
@@ -32,9 +35,9 @@ export function DocumentSignatureAction({ documentId, scope, title, iconOnly, di
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const changed = useRef(false);
-  const summary = useSignatureSummary(user && ["ceo", "patient_manager", "it_admin"].includes(user.role) ? user.id : undefined, documentId);
+  const summary = useSignatureSummary(user && SIGNING_ROLES.includes(user.role) ? user.id : undefined, documentId);
   const presentation = signaturePresentation(summary, lang, signed);
-  if (!user || !["ceo", "patient_manager", "it_admin"].includes(user.role)) return null;
+  if (!user || !SIGNING_ROLES.includes(user.role)) return null;
   if (!documentId && !scope?.patientId && !scope?.orderId && !scope?.leadId) return null;
   const label = lang === "de" ? "Elektronische Unterschrift" : "Электронная подпись";
 
@@ -80,7 +83,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const [error, setError] = useState(false);
   const [relatedPreview, setRelatedPreview] = useState<{ id: string; kind: "signing" | "review" } | null>(null);
   const [previewedDocuments, setPreviewedDocuments] = useState<string[]>([]);
-  const [packageSelection, setPackageSelection] = useState<{ signingDocumentIds: string[]; attachmentId: string }>({ signingDocumentIds: [], attachmentId: "" });
+  const [packageSelection, setPackageSelection] = useState<PackagePreviewSelection>({ documents: [], attachments: [] });
   const handlePreviewReady = useCallback((id: string) => {
     if (id) setPreviewedDocuments(current => current.includes(id) ? current : [...current, id]);
   }, []);
@@ -123,19 +126,12 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const selectedTitle = documentId ? title : documents.find(row => row.id === selectedId)?.auto_name ?? title;
   // While a request is being composed, the preview shows every PDF that will be
   // sent, in sending order, so nothing leaves without having been on screen.
-  const signingMembers = (signatureState?.signing_packages ?? []).flatMap(pkg => {
-    const member = pkg.documents.find(row => packageSelection.signingDocumentIds.includes(row.id));
-    return member ? [{ id: member.id, title: member.title, kind: "signing" as const }] : [];
-  });
-  const reviewAttachment = signatureState?.review_package?.documents.find(row => row.id === packageSelection.attachmentId);
-  const packageDocuments: SignaturePreviewSource[] = !relatedPreview && previewId === selectedId && (!availableResult || composingNew) && (signingMembers.length > 0 || reviewAttachment)
-    ? [
-        { id: selectedId, title: selectedTitle, kind: "signing" },
-        ...signingMembers,
-        ...(reviewAttachment ? [{ id: reviewAttachment.id, title: reviewAttachment.title, kind: "review" as const }] : []),
-      ]
+  const signingMembers = packageSelection.documents.filter(row => row.id !== selectedId).map(row => ({ id: row.id, title: row.title, kind: "signing" as const }));
+  const reviewAttachments = packageSelection.attachments.map(row => ({ id: row.id, title: row.title, kind: "review" as const }));
+  const packageDocuments: SignaturePreviewSource[] = !relatedPreview && previewId === selectedId && (!availableResult || composingNew) && (signingMembers.length > 0 || reviewAttachments.length > 0)
+    ? [{ id: selectedId, title: selectedTitle, kind: "signing" }, ...signingMembers, ...reviewAttachments]
     : [];
-  const hasPackage = Boolean(signatureState?.signing_packages?.length || signatureState?.review_package);
+  const hasPackage = signingMembers.length > 0 || reviewAttachments.length > 0;
   return <div className="grid min-h-0 overflow-y-auto lg:grid-cols-[minmax(0,1.1fr)_minmax(26rem,0.9fr)] lg:overflow-hidden">
     <section aria-label={tx("Документ для подписи", "Dokument zur Unterschrift")} className="flex min-h-[28rem] min-w-0 flex-col border-b border-border/70 bg-muted/15 lg:min-h-0 lg:border-r lg:border-b-0">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-card px-4 py-3">
@@ -156,7 +152,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;
               if (nextId === selectedId) return;
-              const selectDocument = () => { onDirtyChange(false); setRelatedPreview(null); setPreviewedDocuments([]); setPackageSelection({ signingDocumentIds: [], attachmentId: "" }); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
+              const selectDocument = () => { onDirtyChange(false); setRelatedPreview(null); setPreviewedDocuments([]); setPackageSelection({ documents: [], attachments: [] }); setSignatureState(null); setResultPreview(null); setShowOriginal(false); setComposingNew(false); setSelectedId(nextId); };
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>

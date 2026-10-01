@@ -68,20 +68,19 @@ const documentId = "ea3a0c15-792b-4a3a-9a7e-006300000001";
 for (const lang of ["ru", "de"] as const) {
   for (const template of ["privacy_information", "cost_estimate"] as const) {
     test(`signing package previews a separate non-signing ${template} attachment in ${lang}`, async ({ page }) => {
-      await prepare(page);
+      const fixture = await prepare(page);
       await page.addInitScript(value => localStorage.setItem("gmed_lang", value), lang);
       const attachment = "ea3a0c15-792b-4a3a-9a7e-006300000002";
       const signers = [{ first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" }];
-      const sent: unknown[] = [];
-      await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => {
-        if (route.request().method() === "POST") {
-          sent.push(route.request().postDataJSON());
-          return route.fulfill({ status: 202, json: { id: "package-fixture" } });
-        }
-        return route.fulfill({ json: { enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: false, ineligible_reason: null, suggested_signers: signers,
-          review_package: { template, documents: [{ id: attachment, title: "Information PDF", version: 2 }] },
-          requests: sent.length ? [{ id: "package-fixture", status: "submission_unknown", signers, test_mode: false, evidence: {}, created_at: document.created_at }] : [] } });
-      });
+      const sent = fixture.packageSubmissions;
+      // The document requires its informational companion as a read-only attachment.
+      await page.route("**/api/v1/signature-packages/candidates?*", route => route.fulfill({ json: {
+        ...candidatesFor(documentId, { companion: template }),
+        attachments: [{ id: attachment, title: "Information PDF", template, art: template, version: 2, order_id: null, size: 1000 }],
+      } }));
+      await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+        enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: false, ineligible_reason: null, suggested_signers: signers,
+        requests: sent.length ? [{ id: "package-fixture", status: "submission_unknown", signers, test_mode: false, evidence: {}, created_at: document.created_at }] : [] } }));
       await page.goto(`/documents/${documentId}`);
       await page.getByRole("button", { name: lang === "ru" ? "Электронная подпись: vertrag.pdf" : "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: lang === "ru" ? "Электронная подпись" : "Elektronische Unterschrift", exact: true });
@@ -97,23 +96,82 @@ for (const lang of ["ru", "de"] as const) {
       // Sending needs the explicit confirmation that every PDF of the package was checked.
       await expect(send).toBeDisabled();
       // Reviewing the attachment opens it on its own, with a way back to the whole package.
-      await dialog.getByRole("button", { name: lang === "ru" ? "Проверить приложение" : "Anlage prüfen", exact: true }).click();
+      await dialog.getByRole("region", { name: lang === "ru" ? "Приложения для ознакомления" : "Anlagen zur Kenntnisnahme", exact: true })
+        .getByRole("button", { name: lang === "ru" ? "Проверить" : "Prüfen", exact: true }).click();
       await expect(dialog.getByRole("img", { name: `${pageLabel} 1`, exact: true })).toBeVisible();
       await expect(dialog.getByRole("button", { name: lang === "ru" ? "Ко всему пакету" : "Zum gesamten Paket", exact: true })).toBeVisible();
       await dialog.getByRole("checkbox").last().check();
       await expect(send).toBeEnabled();
       await send.click();
       await expect.poll(() => sent.length).toBe(1);
-      expect(sent[0]).toEqual({ signers, attachment_document_id: attachment });
+      expect(sent[0]).toEqual({ document_ids: [documentId], signers, attachment_ids: [attachment], level: "QES", language: "de" });
       await expect(dialog.getByRole("button", { name: sendLabel, exact: true })).toHaveCount(0);
     });
   }
 }
+test("package composer adds a document of the same patient, previews both and lists the package", async ({ page }) => {
+  const fixture = await prepare(page);
+  const secondId = "ea3a0c15-792b-4a3a-9a7e-006300000005";
+  const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
+  const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
+  await page.route("**/api/v1/signature-packages/candidates?*", route => route.fulfill({ json: {
+    ...candidatesFor(documentId),
+    documents: [
+      candidatesFor(documentId).documents[0],
+      { ...candidatesFor(secondId).documents[0], title: "Einwilligung Datenschutz", template: "privacy_consents", signer_policy: "client_only", minimum_level: "AES", has_frames: false, frame_roles: [] },
+    ],
+  } }));
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, route => route.fulfill({ json: {
+    enabled: true, region: "DE", test_mode: false, can_send: true, can_configure: false, ineligible_reason: null, suggested_signers: [client, agency],
+    requests: fixture.packageSubmissions.length ? [{ id: "package-fixture", status: "pending", test_mode: false, signers: [client], evidence: {}, has_report: false,
+      result_document_id: null, last_error: null, created_at: document.created_at, is_package: true, level: "QES",
+      members: [
+        { document_id: documentId, position: 0, page_start: 1, page_count: 1, result_document_id: null, accessible: true, title: "Rahmenvertrag – Testperson", template: null, version: 1 },
+        { document_id: secondId, position: 1, page_start: 2, page_count: 1, result_document_id: null, accessible: true, title: "Einwilligung Datenschutz", template: "privacy_consents", version: 1 },
+      ] }] : [] } }));
+  await page.goto(`/documents/${documentId}`);
+  await page.getByRole("button", { name: "Elektronische Unterschrift: vertrag.pdf", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true });
+  await dialog.getByRole("combobox", { name: "Dokument dieser Person hinzufügen", exact: true }).click();
+  await page.getByRole("option", { name: /Einwilligung Datenschutz/ }).click();
+  // Both PDFs are previewed as one package before anything can be sent.
+  await expect(dialog.getByRole("img", { name: /^Einwilligung Datenschutz\. PDF, Seite \d+$/ }).first()).toBeAttached();
+  await expect(dialog.getByText("Kein Unterschriftsfeld – Skribble platziert die Signatur selbst.", { exact: true })).toBeVisible();
+  // A consent makes it a patient-side package: the agency suggestion leaves.
+  await expect(dialog.getByText("Max Muster", { exact: true })).toHaveCount(0);
+  await dialog.getByRole("checkbox", { name: /Ich habe alle PDFs des Pakets/ }).check();
+  const send = dialog.getByRole("button", { name: "Paket zur Unterschrift senden", exact: true });
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect.poll(() => fixture.packageSubmissions.length).toBe(1);
+  expect(fixture.packageSubmissions[0]).toEqual({ document_ids: [documentId, secondId], signers: [client], attachment_ids: [], level: "QES", language: "de" });
+  await expect(dialog.getByText("Paket aus 2 Dokumenten – eine signierte PDF", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("1. Rahmenvertrag – Testperson · v1 · S. 1 · dieses Dokument", { exact: true })).toBeVisible();
+});
+
 const document = { id: documentId, auto_name: "Rahmenvertrag – Testperson", original_filename: "vertrag.pdf", art: "framework_contract", category: "administrative", status: "active", visibility: "internal", is_medical: false, mime_type: "application/pdf", has_stored_file: true, file_size: 1000, version_root_document_id: documentId, version_number: 1, version_count: 1, is_latest_version: true, patient_id: null, order_id: null, appointment_id: null, klinik: null, ursprung: null, notes: null, generated_template_id: "framework_contract", data_sensitivity: "internal", created_at: "2026-09-05T10:00:00Z", updated_at: "2026-09-05T10:00:00Z" };
+
+/** Candidate list of the package composer: the opened document alone. */
+function candidatesFor(id: string, patch: Record<string, unknown> = {}) {
+  return {
+    scope: { patient_id: null, lead_id: null },
+    documents: [{ id, title: document.auto_name, template: null, art: document.art, version: 1, order_id: null, size: 1000,
+      signer_policy: "flexible", minimum_level: "QES", frame_roles: ["client", "agency"], has_frames: true, companion: null,
+      is_medical: false, pending_elsewhere: false, electronic_form_excluded: null, ineligible_reason: null, ...patch }],
+    attachments: [], preset_document_ids: [], suggested_signers: [], suggested_language: "de", languages: ["de", "en", "fr", "it"],
+    limits: { max_documents: 10, max_bundle_bytes: 18 * 1024 * 1024, max_expiry_days: 180, max_message_chars: 500 },
+  };
+}
+
+/** The earlier per-document request shape, so recipient assertions stay readable. */
+function legacySubmission(body: { signers: unknown[]; attachment_ids?: string[] }) {
+  return { signers: body.signers, ...(body.attachment_ids?.length ? { attachment_document_id: body.attachment_ids[0] } : {}) };
+}
 
 async function prepare(page: Page, enabled = true) {
   await page.routeWebSocket("**/api/**", socket => socket.close());
   const submissions: unknown[] = [];
+  const packageSubmissions: Record<string, unknown>[] = [];
   const connections: unknown[] = [];
   let defaults: unknown[] = [];
   const defaultSaves: unknown[] = [];
@@ -155,6 +213,15 @@ async function prepare(page: Page, enabled = true) {
       }
       body = { configured, region: "DE", mode: connectionMode, username: connectionUsername, source: "database" };
     }
+    if (path === "/signature-packages/candidates") {
+      body = candidatesFor(new URL(route.request().url()).searchParams.get("document_id") ?? documentId);
+    }
+    if (path === "/signature-packages" && route.request().method() === "POST") {
+      const sent = route.request().postDataJSON();
+      packageSubmissions.push(sent); submissions.push(legacySubmission(sent)); status = "submission_unknown";
+      await route.fulfill({ status: 202, json: { id: "signature-fixture" } });
+      return;
+    }
     if (path === `/documents/${documentId}/signature-requests`) {
       if (route.request().method() === "POST") {
         submissions.push(route.request().postDataJSON()); status = "submission_unknown"; body = { id: "signature-fixture" };
@@ -163,7 +230,7 @@ async function prepare(page: Page, enabled = true) {
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
   });
-  return { submissions, connections, defaultSaves, setStatus: (next: string) => { status = next; }, complete: () => { status = "completed"; } };
+  return { submissions, packageSubmissions, connections, defaultSaves, setStatus: (next: string) => { status = next; }, complete: () => { status = "completed"; } };
 }
 
 for (const lang of ["ru", "de"] as const) {
@@ -369,9 +436,9 @@ test("contract picker uses its patient context and resets recipients when the PD
   await expect(pdf).toHaveAttribute("data-document-id", secondId);
   await expect(dialog.getByLabel("PDF zur Unterschrift", { exact: true }).getByText("1 / 2", { exact: true })).toBeVisible();
   await send.click();
-  await expect.poll(() => submissions.length).toBe(1);
-  expect(submissions).toEqual([{ path: `/api/v1/documents/${secondId}/signature-requests`, body: { signers } }]);
-  expect(fixture.submissions).toHaveLength(0);
+  await expect.poll(() => fixture.packageSubmissions.length).toBe(1);
+  expect(fixture.packageSubmissions).toEqual([{ document_ids: [secondId], signers, attachment_ids: [], level: "QES", language: "de" }]);
+  expect(submissions).toEqual([]);
 });
 
 test("connection protects edits, allows undo and closes cleanly after saving", async ({ page }) => {
@@ -514,15 +581,16 @@ test("uncertain creation stays disabled through failed reconciliation, then allo
   let failReads = false;
   let postAttempts = 0;
   const requestPath = `**/api/v1/documents/${documentId}/signature-requests`;
+  await page.route("**/api/v1/signature-packages", async route => {
+    postAttempts++;
+    // The server may have accepted a request before its response was lost.
+    fixture.submissions.push(legacySubmission(route.request().postDataJSON()));
+    fixture.setStatus("pending");
+    failReads = true;
+    await route.fulfill({ status: 504, json: { error: "gateway_timeout" } });
+  });
   await page.route(requestPath, async route => {
-    if (route.request().method() === "POST") {
-      postAttempts++;
-      // The server may have accepted a request before its response was lost.
-      fixture.submissions.push(route.request().postDataJSON());
-      fixture.setStatus("pending");
-      failReads = true;
-      await route.fulfill({ status: 504, json: { error: "gateway_timeout" } });
-    } else if (failReads) await route.fulfill({ status: 503, json: { error: "temporarily_unavailable" } });
+    if (failReads) await route.fulfill({ status: 503, json: { error: "temporarily_unavailable" } });
     else await route.fallback();
   });
   const actions: string[] = [];
@@ -1190,15 +1258,15 @@ test("contract recipient validation retains the selection and permits correcting
   const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
   const agency = { first_name: "Max", last_name: "Muster", email: "max@example.org", role: "agency" };
   const rejected: unknown[] = [];
-  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
-    if (route.request().method() === "POST") {
-      const body = route.request().postDataJSON();
-      if (body.signers.length === 1) {
-        rejected.push(body);
-        return route.fulfill({ status: 422, json: { error: "both_contract_parties_required" } });
-      }
-      return route.fallback();
+  await page.route("**/api/v1/signature-packages", async route => {
+    const body = route.request().postDataJSON();
+    if (body.signers.length === 1) {
+      rejected.push(legacySubmission(body));
+      return route.fulfill({ status: 422, json: { error: "both_contract_parties_required" } });
     }
+    return route.fallback();
+  });
+  await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
     if (fixture.submissions.length) return route.fallback();
     await route.fulfill({ json: { enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, requests: [], suggested_signers: [client, agency] } });
   });
@@ -1229,11 +1297,11 @@ test("a rate-limited creation explains the refusal and permits an explicit retry
   await prepare(page);
   const client = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
   let attempts = 0;
+  await page.route("**/api/v1/signature-packages", async route => {
+    attempts++;
+    return route.fulfill({ status: 202, json: { id: `attempt-${attempts}` } });
+  });
   await page.route(`**/api/v1/documents/${documentId}/signature-requests`, async route => {
-    if (route.request().method() === "POST") {
-      attempts++;
-      return route.fulfill({ status: 202, json: { id: `attempt-${attempts}` } });
-    }
     return route.fulfill({ json: {
       enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true,
       ineligible_reason: null, suggested_signers: [client],
@@ -1275,8 +1343,8 @@ for (const lang of ["ru", "de"] as const) {
     await dialog.getByRole("textbox").fill("Fixture cleanup");
     await dialog.getByRole("button", { name: lang === "de" ? "Datei endgültig löschen" : "Удалить файл окончательно", exact: true }).click();
     await expect(dialog.getByText(lang === "de"
-      ? "Diese Datei gehört zu einer laufenden Signaturanfrage oder zu gespeicherten Signaturnachweisen und kann nicht gelöscht werden."
-      : "Этот файл относится к текущему запросу подписи или сохранённым доказательствам подписания и не может быть удалён.", { exact: true })).toBeVisible();
+      ? "Diese Datei wurde bereits versendet oder unterschrieben (auch elektronisch) und kann nicht gelöscht werden."
+      : "Этот файл уже отправлялся или подписывался (в том числе электронно) и не может быть удалён.", { exact: true })).toBeVisible();
     await expect(dialog).toBeVisible();
     expect(deleteAttempts).toBe(1);
   });
