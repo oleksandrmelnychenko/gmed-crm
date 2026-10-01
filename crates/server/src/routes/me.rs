@@ -54,6 +54,8 @@ async fn get_me(
     .await
     {
         Ok(Some(u)) => {
+            let has_personnel_file =
+                crate::routes::personnel::has_own_file(&state, auth.user_id).await;
             let password_reset_required: bool =
                 u.try_get("password_reset_required").unwrap_or(false);
             let password_changed_at: Option<chrono::DateTime<Utc>> =
@@ -76,6 +78,7 @@ async fn get_me(
                     .ok()
                     .flatten(),
                 "password_change_required": password_change_required,
+                "has_personnel_file": has_personnel_file,
             }))
             .into_response()
         }

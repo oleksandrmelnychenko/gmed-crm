@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Local;
 use clap::{Parser, Subcommand};
 
-use gmed_scan::api::{ApiError, Gmed, LoginPrompt};
+use gmed_scan::api::{ApiError, Destination, Gmed, LoginPrompt, set_default_destination};
 use gmed_scan::config::{Paths, Session};
 use gmed_scan::discovery::{self, FoundScanner};
 use gmed_scan::escl::{ColorMode, Paper, ScanRequest, Scanner, Source};
@@ -23,6 +23,11 @@ use gmed_scan::{scan, watch};
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+    /// File into the personnel-file intake (Personalakten: timesheets,
+    /// payslips, contracts) instead of the document intake queue. The CEO
+    /// assigns each scan to an employee in GMED.
+    #[arg(long, global = true, env = "GMED_SCAN_PERSONNEL")]
+    personnel: bool,
 }
 
 #[derive(Subcommand)]
@@ -139,6 +144,11 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    set_default_destination(if cli.personnel {
+        Destination::Personnel
+    } else {
+        Destination::Documents
+    });
     let paths = Paths::resolve()?;
     let Some(command) = cli.command else {
         return station(paths);
@@ -216,8 +226,9 @@ fn run(cli: Cli) -> Result<()> {
             };
             if !once {
                 println!(
-                    "Watching {} - finished scans go to the GMED intake queue. Stop with Ctrl+C.",
-                    folder.display()
+                    "Watching {} - finished scans go to {}. Stop with Ctrl+C.",
+                    folder.display(),
+                    gmed.destination().label()
                 );
             }
             let summary = watch::run(&gmed, &options, |line| {
@@ -487,10 +498,16 @@ fn scan_and_file(
         });
         match watch::upload_file(gmed, path, title, Some(notes)) {
             Ok(uploaded) => {
-                println!(
-                    "Filed into the GMED intake queue as draft document {}.",
-                    uploaded.id
-                );
+                match gmed.destination() {
+                    Destination::Documents => println!(
+                        "Filed into the GMED intake queue as draft document {}.",
+                        uploaded.id
+                    ),
+                    Destination::Personnel => println!(
+                        "Filed into the GMED personnel-file intake ({}).",
+                        uploaded.id
+                    ),
+                }
                 if !options.keep
                     && let Err(error) = std::fs::remove_file(path)
                 {
@@ -708,11 +725,17 @@ fn upload_waiting(gmed: &Gmed, paths: &Paths, files: &[PathBuf]) {
 }
 
 fn station(paths: Paths) -> Result<()> {
-    println!(
-        "GMED Scan {} - every scan goes to the GMED intake queue as a draft.",
-        env!("CARGO_PKG_VERSION")
-    );
     let gmed = Gmed::new(paths.clone())?;
+    match gmed.destination() {
+        Destination::Documents => println!(
+            "GMED Scan {} - every scan goes to the GMED intake queue as a draft.",
+            env!("CARGO_PKG_VERSION")
+        ),
+        Destination::Personnel => println!(
+            "GMED Scan {} - PERSONNEL FILES: every scan goes to the personnel-file intake.",
+            env!("CARGO_PKG_VERSION")
+        ),
+    }
     ensure_station_session(&paths, &gmed, true)?;
     let mut target = match paths.load_config()?.scanner {
         Some(target) => target,

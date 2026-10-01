@@ -10,6 +10,12 @@ und gibt sie an Leistungserbringer weiter. Nach Art. 35 Abs. 3 lit. b DSGVO und 
 Liste der deutschen Aufsichtsbehörden ist von einem hohen Risiko auszugehen. Die
 Ausnahme für den einzelnen Arzt (Erwägungsgrund 91) greift nicht.
 
+Die Personalakten (Verarbeitung 9) enthalten mit Arbeitsunfähigkeitsbescheinigungen
+ebenfalls Gesundheitsdaten, aber nur der eigenen Beschäftigten, in geringem Umfang und
+mit Zugriff ausschließlich der Geschäftsführung und der jeweiligen beschäftigten Person.
+Sie werden in der DSFA als eigener Datenfluss geführt (Archiv, Zeitstempel nur mit
+Hashwerten, Export an Steuerberater und Prüfdienst); [vom DSB zu bestätigen].
+
 ## Stufe 2 – Gerüst
 
 ### 1. Systematische Beschreibung

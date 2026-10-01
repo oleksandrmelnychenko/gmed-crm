@@ -6,6 +6,7 @@ import { extractedUiRu } from "./catalogs/extracted-ui";
 import { financeBalancesRu } from "./catalogs/finance-balances";
 import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
+import { personnelRu } from "./catalogs/personnel";
 import { revenueRu } from "./catalogs/revenue";
 import { sharedCoreRu } from "./catalogs/shared";
 import { staffAccessRu } from "./catalogs/staff-access";
@@ -1797,6 +1798,7 @@ export const ru = {
   ...financeBalancesRu,
   ...operationsRu,
   ...patientsPortalRu,
+  ...personnelRu,
   ...revenueRu,
   ...sharedCoreRu,
 } satisfies Translations;

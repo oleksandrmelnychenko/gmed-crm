@@ -1,10 +1,10 @@
 //! GMED API client: sign-in (password plus authenticator code or admin
 //! approval), refresh-token rotation and uploads into the document intake
-//! queue.
+//! queue or the personnel-file intake.
 
 use std::fmt;
 use std::io::Cursor;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -187,6 +187,36 @@ impl Profile {
     }
 }
 
+/// Which GMED intake receives the uploads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Destination {
+    /// The document intake queue (`documents/upload`, `manual_intake`).
+    #[default]
+    Documents,
+    /// The personnel-file intake (`personnel/intake`): payroll and HR papers
+    /// that the CEO files into an employee's Personalakte. The scan account
+    /// can submit but not read them back.
+    Personnel,
+}
+
+impl Destination {
+    /// How the destination is named in messages.
+    pub fn label(self) -> &'static str {
+        match self {
+            Destination::Documents => "the GMED intake queue",
+            Destination::Personnel => "the GMED personnel-file intake",
+        }
+    }
+}
+
+static DEFAULT_DESTINATION: OnceLock<Destination> = OnceLock::new();
+
+/// Sets the destination every [`Gmed`] client of this process uses (the
+/// `--personnel` switch). Only the first call counts.
+pub fn set_default_destination(destination: Destination) {
+    let _ = DEFAULT_DESTINATION.set(destination);
+}
+
 pub struct IntakeUpload {
     pub file_name: String,
     pub mime: String,
@@ -204,6 +234,7 @@ pub struct UploadedDocument {
 pub struct Gmed {
     http: Client,
     paths: Paths,
+    destination: Destination,
 }
 
 fn user_agent() -> String {
@@ -222,7 +253,21 @@ impl Gmed {
             .timeout(Duration::from_secs(180))
             .build()
             .context("create the GMED HTTP client")?;
-        Ok(Self { http, paths })
+        Ok(Self {
+            http,
+            paths,
+            destination: DEFAULT_DESTINATION.get().copied().unwrap_or_default(),
+        })
+    }
+
+    /// The same client filing into another intake.
+    pub fn with_destination(mut self, destination: Destination) -> Self {
+        self.destination = destination;
+        self
+    }
+
+    pub fn destination(&self) -> Destination {
+        self.destination
     }
 
     pub fn paths(&self) -> &Paths {
@@ -380,16 +425,30 @@ impl Gmed {
 
     /// File a document into the intake queue: status `draft`, no patient,
     /// origin `manual_intake`; staff link and classify it during review.
+    /// With [`Destination::Personnel`] the file goes to the personnel-file
+    /// intake instead (title and notes are not sent there).
     pub fn upload_intake(&self, upload: IntakeUpload) -> Result<UploadedDocument> {
         if upload.bytes.len() > MAX_UPLOAD_BYTES {
             return Err(too_large(&upload.file_name, upload.bytes.len() as u64).into());
         }
         let length = upload.bytes.len() as u64;
         let bytes = SharedBytes(Arc::new(upload.bytes));
+        let destination = self.destination;
         let response = self.authorized(|http, base, token| {
             let file = multipart::Part::reader_with_length(Cursor::new(bytes.clone()), length)
                 .file_name(upload.file_name.clone())
                 .mime_str(&upload.mime)?;
+            if destination == Destination::Personnel {
+                let form = multipart::Form::new()
+                    .part("file", file)
+                    .text("source", "scan");
+                return http
+                    .post(base.join("personnel/intake")?)
+                    .bearer_auth(token)
+                    .multipart(form)
+                    .send()
+                    .map_err(Into::into);
+            }
             let mut form = multipart::Form::new()
                 .part("file", file)
                 .text("manual_intake", "true");
@@ -717,6 +776,46 @@ mod tests {
             stored.refresh_token, "refresh-new",
             "the rotated token is persisted"
         );
+    }
+
+    #[test]
+    fn personnel_destination_uploads_into_the_personnel_intake() {
+        let server = MockServer::start(|request| match request.path.as_str() {
+            "/api/v1/personnel/intake" => {
+                let body = String::from_utf8_lossy(&request.body);
+                assert!(body.contains("name=\"source\"\r\n\r\nscan"), "{body}");
+                assert!(body.contains("filename=\"Scan_1.pdf\""), "{body}");
+                assert!(
+                    !body.contains("manual_intake") && !body.contains("notes"),
+                    "personnel scans carry no document-intake fields: {body}"
+                );
+                MockReply::json(json!({ "id": "intake-1", "status": "pending" })).with_status(201)
+            }
+            _ => MockReply::status(404),
+        });
+        let paths = Paths::at(temp_dir("personnel-upload"));
+        paths
+            .save_session(&Session {
+                server: server.url(),
+                email: "ceo@example.test".into(),
+                access_token: "access".into(),
+                refresh_token: "refresh".into(),
+                access_expires_at: Utc::now().timestamp() + 600,
+            })
+            .unwrap();
+        let gmed = Gmed::new(paths)
+            .unwrap()
+            .with_destination(Destination::Personnel);
+        assert_eq!(gmed.destination(), Destination::Personnel);
+        let upload = IntakeUpload {
+            file_name: "Scan_1.pdf".into(),
+            mime: "application/pdf".into(),
+            bytes: b"%PDF-1.7 payslip".to_vec(),
+            title: Some("ignored".into()),
+            notes: Some("ignored".into()),
+        };
+        assert_eq!(gmed.upload_intake(upload).unwrap().id, "intake-1");
+        assert_eq!(server.requests().len(), 1);
     }
 
     #[test]

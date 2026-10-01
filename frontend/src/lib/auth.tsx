@@ -32,6 +32,8 @@ export interface User {
   preferred_language?: Lang | null;
   /// Set after an admin-forced reset or password expiry: only /account/password-required is usable.
   password_change_required?: boolean;
+  /** The user is linked to an employee record: "my personnel file" is available. */
+  has_personnel_file?: boolean;
 }
 
 interface AuthContextValue {

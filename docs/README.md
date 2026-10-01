@@ -54,6 +54,7 @@
 - `engineering/04_medication-ai-worker-runbook_ua.md`
 - `engineering/05_scan-station_ua.md` - станція сканування: агент `gmed-scan` для мережевих сканерів
 - `engineering/06_time-zone-policy_ua.md` - система працює лише за часом Europe/Berlin: сервер, база даних і фронтенд
+- `personnel-files-plan-2026-09-30_ua.md` - план цифрових особових справ співробітників (Personalakte / Entgeltunterlagen) до 01.01.2027: незмінний архів, назви файлів, права, експорт для перевірки
 
 ### Testing
 

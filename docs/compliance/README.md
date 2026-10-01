@@ -13,6 +13,7 @@ Implementation Guidance (NIS2).
 | [03_auftragsverarbeiter.md](03_auftragsverarbeiter.md) | Art. 28, 44 ff. DSGVO | Dienstleister, AVV-Status, Drittlandbezug |
 | [04_loeschkonzept.md](04_loeschkonzept.md) | Art. 5, 17 DSGVO | Löschfristen und wie das System sie umsetzt |
 | [05_dsfa_vorpruefung.md](05_dsfa_vorpruefung.md) | Art. 35 DSGVO | Vorprüfung und Gerüst der Datenschutz-Folgenabschätzung |
+| [06_verfahrensdokumentation_personalakten.md](06_verfahrensdokumentation_personalakten.md) | § 8 BVV, GoBD | Verfahrensdokumentation der digitalen Personalakten |
 
 ## Was nur die Organisation liefern kann
 

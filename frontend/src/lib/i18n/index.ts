@@ -9,6 +9,7 @@ import type { ExtractedUiTranslations } from "./catalogs/extracted-ui";
 import type { FinanceBalancesTranslations } from "./catalogs/finance-balances";
 import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
+import type { PersonnelTranslations } from "./catalogs/personnel";
 import type { RevenueTranslations } from "./catalogs/revenue";
 import type { SharedCoreTranslations } from "./catalogs/shared";
 import type { StaffAccessTranslations } from "./catalogs/staff-access";
@@ -22,6 +23,7 @@ export interface Translations
     FinanceBalancesTranslations,
     OperationsTranslations,
     PatientsPortalTranslations,
+    PersonnelTranslations,
     RevenueTranslations,
     StaffAccessTranslations {
   app_name: string;

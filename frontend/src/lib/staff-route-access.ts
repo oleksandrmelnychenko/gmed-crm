@@ -186,7 +186,18 @@ type RouteRule = {
     section: StaffNavSection;
     labelKey: string;
     after?: string;
+    /** Shown only when the signed-in user has this property (see `StaffNavContext`). */
+    requires?: keyof StaffNavContext;
   };
+};
+
+/**
+ * Per-user facts from `/me` that decide whether a nav entry is shown beyond
+ * role and capabilities (a linked personnel file). They only hide or show the
+ * entry; the server checks ownership.
+ */
+export type StaffNavContext = {
+  hasPersonnelFile?: boolean;
 };
 
 export type StaffNavSection =
@@ -277,6 +288,20 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     roles: ALL_STAFF_ROLES,
     nav: { section: "security", labelKey: "nav_account" },
   },
+  // Own personnel file: every staff user may open the page (the server answers
+  // 404 without a linked file); the nav entry needs a linked file.
+  {
+    id: "my-personnel-file",
+    match: "exact",
+    path: "/my-personnel-file",
+    roles: ALL_STAFF_ROLES,
+    nav: {
+      section: "security",
+      labelKey: "nav_my_personnel_file",
+      after: "account",
+      requires: "hasPersonnelFile",
+    },
+  },
   // Alias of the two-factor section on /account; kept for old links, no nav item.
   {
     id: "security/two-factor",
@@ -362,6 +387,15 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     roles: ROLES_ADMIN,
     capability: ["datev.admin", "datev.read"],
     nav: { section: "accounting", labelKey: "nav_datev", after: "finance-catalog" },
+  },
+  // Personnel files (§ 8 BVV), see docs/personnel-files-plan-2026-09-30_ua.md.
+  {
+    id: "personnel",
+    match: "prefix",
+    path: "/personnel",
+    roles: ["ceo"],
+    capability: "personnel.view",
+    nav: { section: "accounting", labelKey: "nav_personnel", after: "admin/datev" },
   },
   { id: "admin", match: "prefix", path: "/admin", roles: ROLES_ADMIN },
   {
@@ -702,6 +736,7 @@ export function staffHrefIfAllowed(
 export function listStaffNavItems(
   role: string,
   capabilities?: readonly string[] | null,
+  context: StaffNavContext = {},
 ): StaffNavItem[] {
   if (role === "patient") {
     return [];
@@ -712,6 +747,9 @@ export function listStaffNavItems(
   const items: StaffNavItem[] = [];
   for (const rule of STAFF_ROUTE_RULES) {
     if (!rule.nav || !ruleAllows(rule, role, capabilities)) {
+      continue;
+    }
+    if (rule.nav.requires && !context[rule.nav.requires]) {
       continue;
     }
     items.push({

@@ -132,7 +132,9 @@ export function CommandPalette() {
 
   const navItems = useMemo(() => {
     if (!user || user.role === "patient") return [];
-    return listStaffNavItems(user.role, user.capabilities).map((item) => ({
+    return listStaffNavItems(user.role, user.capabilities, {
+      hasPersonnelFile: user.has_personnel_file,
+    }).map((item) => ({
       id: item.id,
       to: item.to,
       label: tr[item.labelKey] ?? item.labelKey,

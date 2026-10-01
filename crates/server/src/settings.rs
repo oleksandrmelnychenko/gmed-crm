@@ -80,11 +80,16 @@ pub async fn load_from_db(pool: &PgPool) -> Result<TokenSettings, sqlx::Error> {
     })
 }
 
+/// Settings owned by the personnel file module.
+pub const PERSONNEL_SETTING_PREFIX: &str = "personnel_";
+
 /// List all settings as key-value pairs (for admin UI).
 pub async fn list_all(pool: &PgPool) -> Result<Vec<SettingRow>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT key, value::TEXT AS value_text, description, updated_at
-           FROM system_settings ORDER BY key"#,
+           FROM system_settings
+           WHERE key NOT LIKE 'personnel\_%'
+           ORDER BY key"#,
     )
     .fetch_all(pool)
     .await?;
@@ -108,6 +113,11 @@ pub async fn update_setting(
     value: &str,
     user_id: uuid::Uuid,
 ) -> Result<(), UpdateError> {
+    // Personnel file settings (deletion switch, TSA) belong to the CEO and are
+    // changed through `/personnel/settings`, not the IT admin settings page.
+    if key.starts_with(PERSONNEL_SETTING_PREFIX) {
+        return Err(UpdateError::NotFound);
+    }
     let json_value = match key {
         "agency_name" => validate_string_setting(value, 160, false, "Agency name")?,
         "agency_care_of" => validate_string_setting(value, 160, true, "Agency care-of")?,

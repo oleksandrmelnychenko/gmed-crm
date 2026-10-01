@@ -83,6 +83,20 @@ gmed-scan watch ~/Documents/GMED-Scans --after-upload delete
 
 Для Epson Scan 2 у полі «Ordner» варто вибрати окрему теку (наприклад `GMED-Scans`), а не загальну «Dokumente»: `watch` відправляє **всі** PDF/JPEG/PNG/TIFF у теці.
 
+## Режим особових справ (`--personnel`)
+
+Кадрові папери (табелі, розрахункові листки, договори, лікарняні) сканують у чергу особових справ, а не в загальну чергу документів:
+
+```bash
+gmed-scan --personnel station
+gmed-scan --personnel scan --duplex
+gmed-scan --personnel watch ~/Documents/GMED-Personal --after-upload delete
+```
+
+- Перемикач `--personnel` (або змінна `GMED_SCAN_PERSONNEL=true`, наприклад в окремому ярлику) діє для `station`, `scan`, `upload` і `watch`. Файли йдуть на `POST /api/v1/personnel/intake` з `source=scan`; назва, нотатки й сканер туди не передаються.
+- Обліковий запис станції (CEO або Patient manager) може лише здати скан. Переглядати чергу, розподіляти скани по працівниках і категоріях може тільки CEO у розділі «Особові справи → Черга сканів». Там файл отримує архівну назву за правилами (`Stundenzettel_2026_05_Mustermann_Gabriele.pdf`), а час надходження скану зберігається як `received_at` для перевірки своєчасності.
+- Для `watch` використовуйте окрему теку (`GMED-Personal`), щоб кадрові й медичні скани не змішувались.
+
 ## Безпека
 
 - Сесія лежить у теці користувача: `%APPDATA%\gmed-scan` (Windows), `~/Library/Application Support/gmed-scan` (macOS), `~/.config/gmed-scan` (Linux); інше місце задає `GMED_SCAN_HOME`. На Unix файл має права `0600`.

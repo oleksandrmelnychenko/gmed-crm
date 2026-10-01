@@ -79,3 +79,9 @@
 | `datev.admin` | x |   |   |   |   |   |   |   | x |
 | `datev.read` | x |   |   |   |   |   | x |   |   |
 | `incidents.manage` | x |   |   |   |   |   |   |   | x |
+| `personnel.view` | x |   |   |   |   |   |   |   |   |
+| `personnel.upload` | x |   |   |   |   |   |   |   |   |
+| `personnel.manage` | x |   |   |   |   |   |   |   |   |
+| `personnel.health.view` | x |   |   |   |   |   |   |   |   |
+| `personnel.export` | x |   |   |   |   |   |   |   |   |
+| `personnel.retention` | x |   |   |   |   |   |   |   |   |

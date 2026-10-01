@@ -50,6 +50,7 @@ pub mod patient_financials;
 pub mod patient_next_actions;
 pub mod patient_recommendations;
 pub mod patients;
+pub mod personnel;
 pub mod projects;
 pub mod provider_documents;
 pub mod provider_people;
@@ -131,6 +132,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(notifications::router())
         .merge(custom_fields::router())
         .merge(documents::router())
+        .merge(personnel::router())
         .merge(crate::document_signatures::router())
         .merge(feedback::router())
         .merge(announcements::router())
