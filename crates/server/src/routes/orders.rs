@@ -13,7 +13,8 @@ use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::{self, CommercialRounding};
-use crate::routes::invoices::service_reversal;
+use crate::routes::invoices::{payer, service_reversal};
+use crate::services::contracting_party;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -130,6 +131,10 @@ pub fn router() -> Router<AppState> {
         .route("/orders/{order_id}/ungroup", post(ungroup_order))
         .route("/orders/{order_id}/merge", post(merge_orders))
         .route("/orders/{order_id}/payer", post(set_order_payer))
+        .route(
+            "/orders/{order_id}/contracting-party",
+            get(get_order_contracting_party).post(set_order_contracting_party),
+        )
         .route(
             "/orders/{order_id}/commercial-basis",
             post(update_order_commercial_basis),
@@ -12064,16 +12069,6 @@ struct MergeOrdersRequest {
     source_order_ids: Vec<Uuid>,
 }
 
-#[derive(Deserialize)]
-struct SetOrderPayerRequest {
-    payer_patient_relation_id: Option<Uuid>,
-    payer_contact_name: Option<String>,
-    payer_contact_email: Option<String>,
-    payer_contact_phone: Option<String>,
-    payer_contact_relationship: Option<String>,
-    payer_notes: Option<String>,
-}
-
 /// Build the head read-model (#1/#3/#4): the head order, its sub-orders, the
 /// distinct patients covered across the group (orders + their appointments), and
 /// the rolled-up estimated total.
@@ -12085,7 +12080,14 @@ async fn order_group_payload(
         "SELECT id, order_number, patient_id, order_role, status,
                 COALESCE(order_service_total_gross(id), total_estimated) AS total_estimated, currency,
                 payer_patient_relation_id, payer_contact_name, payer_contact_email,
-                payer_contact_phone, payer_contact_relationship, payer_notes
+                payer_contact_phone, payer_contact_relationship, payer_notes,
+                payer_patient_id, payer_address_street, payer_address_zip,
+                payer_address_city, payer_address_country, payer_role,
+                (SELECT NULLIF(btrim(concat_ws(' ', person.first_name, person.last_name)), '')
+                   FROM patients person WHERE person.id = orders.payer_patient_id)
+                    AS payer_patient_name,
+                (SELECT person.patient_id FROM patients person
+                  WHERE person.id = orders.payer_patient_id) AS payer_patient_pid
          FROM orders WHERE id = $1",
     )
     .bind(head_id)
@@ -12196,6 +12198,30 @@ async fn order_group_payload(
                 .unwrap_or_default(),
             "payer_notes": head
                 .try_get::<Option<String>, _>("payer_notes")
+                .unwrap_or_default(),
+            "payer_patient_id": head
+                .try_get::<Option<Uuid>, _>("payer_patient_id")
+                .unwrap_or_default(),
+            "payer_patient_name": head
+                .try_get::<Option<String>, _>("payer_patient_name")
+                .unwrap_or_default(),
+            "payer_patient_pid": head
+                .try_get::<Option<String>, _>("payer_patient_pid")
+                .unwrap_or_default(),
+            "payer_address_street": head
+                .try_get::<Option<String>, _>("payer_address_street")
+                .unwrap_or_default(),
+            "payer_address_zip": head
+                .try_get::<Option<String>, _>("payer_address_zip")
+                .unwrap_or_default(),
+            "payer_address_city": head
+                .try_get::<Option<String>, _>("payer_address_city")
+                .unwrap_or_default(),
+            "payer_address_country": head
+                .try_get::<Option<String>, _>("payer_address_country")
+                .unwrap_or_default(),
+            "payer_role": head
+                .try_get::<Option<String>, _>("payer_role")
                 .unwrap_or_default(),
         },
         "subs": subs,
@@ -12603,103 +12629,351 @@ async fn ungroup_order(
     Json(serde_json::json!({ "ok": true, "head_order_id": head_id })).into_response()
 }
 
-/// Set (or clear) who pays for an order — e.g. the father via a patient relation,
-/// or a free-text contact — mirroring the payer already carried on invoices (#7).
+/// Set (or clear) who pays for an order — a relative, another patient record
+/// or a free-text contact with its own address — and whether that payer is
+/// the contracting party or a different invoice recipient (Kostenübernehmer).
+/// New invoices of the order (and of its sub-orders, for a head order)
+/// inherit it as a whole. The audit row (old and new payer) commits with the
+/// change.
 async fn set_order_payer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
-    Json(body): Json<SetOrderPayerRequest>,
+    Json(mut body): Json<payer::PayerInput>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+    const FAILED: &str = "Failed to set payer";
+    if let Err(e) = auth.require_capability(Capability::InvoicesPayer) {
         return e;
+    }
+    if let Err(error) = body.resolve_patient_pid(&state.db).await {
+        return payer::payer_pid_error(error);
     }
     let order_patient_id =
         match ensure_order_access(&state, &auth, order_id, "Order not found").await {
             Ok(patient_id) => patient_id,
             Err(resp) => return resp,
         };
-
-    if let Some(relation_id) = body.payer_patient_relation_id {
-        let Some(order_patient_id) = order_patient_id else {
-            return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required");
-        };
-        let relation_matches = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE id = $1 AND patient_id = $2)",
-        )
-        .bind(relation_id)
-        .bind(order_patient_id)
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false);
-        if !relation_matches {
-            return err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "Payer relation does not belong to order patient",
-            );
-        }
+    let record = match payer::payer_from_input(&body, order_patient_id) {
+        Ok(record) => record,
+        Err((code, message)) => return coded_err(StatusCode::UNPROCESSABLE_ENTITY, code, message),
+    };
+    if record.payer_patient_relation_id.is_some() && order_patient_id.is_none() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required");
     }
 
-    let payer_contact_name = normalize_optional_text(body.payer_contact_name);
-    let payer_contact_email = normalize_optional_text(body.payer_contact_email);
-    let payer_contact_phone = normalize_optional_text(body.payer_contact_phone);
-    let payer_contact_relationship = normalize_optional_text(body.payer_contact_relationship);
-    let payer_notes = normalize_optional_text(body.payer_notes);
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %order_id, "begin order payer transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Some(patient_id) = order_patient_id {
+        match payer::validate_payer_links(&mut transaction, &record, patient_id).await {
+            Ok(None) => {}
+            Ok(Some((code, message))) => {
+                return coded_err(StatusCode::UNPROCESSABLE_ENTITY, code, message);
+            }
+            Err(error) => {
+                tracing::error!(%error, %order_id, "validate order payer");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+            }
+        }
+    }
+    let previous = match sqlx::query(&format!(
+        "SELECT {} FROM orders o WHERE o.id = $1 FOR UPDATE",
+        payer::payer_columns("o", "")
+    ))
+    .bind(order_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => payer::PayerRecord::from_row(&row, ""),
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "lock order payer");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
 
-    let result = sqlx::query(
+    if let Err(error) = sqlx::query(
         "UPDATE orders SET
-            payer_patient_relation_id = $2,
-            payer_contact_name = $3,
-            payer_contact_email = $4,
-            payer_contact_phone = $5,
-            payer_contact_relationship = $6,
-            payer_notes = $7,
-            payer_updated_by = $8,
+            payer_patient_id = $2,
+            payer_patient_relation_id = $3,
+            payer_contact_name = $4,
+            payer_contact_email = $5,
+            payer_contact_phone = $6,
+            payer_contact_relationship = $7,
+            payer_notes = $8,
+            payer_address_street = $9,
+            payer_address_zip = $10,
+            payer_address_city = $11,
+            payer_address_country = $12,
+            payer_role = $13,
+            payer_updated_by = $14,
             payer_updated_at = now(),
             updated_at = now()
          WHERE id = $1",
     )
     .bind(order_id)
-    .bind(body.payer_patient_relation_id)
-    .bind(payer_contact_name.as_deref())
-    .bind(payer_contact_email.as_deref())
-    .bind(payer_contact_phone.as_deref())
-    .bind(payer_contact_relationship.as_deref())
-    .bind(payer_notes.as_deref())
+    .bind(record.payer_patient_id)
+    .bind(record.payer_patient_relation_id)
+    .bind(&record.contact_name)
+    .bind(&record.contact_email)
+    .bind(&record.contact_phone)
+    .bind(&record.contact_relationship)
+    .bind(&record.notes)
+    .bind(&record.address_street)
+    .bind(&record.address_zip)
+    .bind(&record.address_city)
+    .bind(&record.address_country)
+    .bind(&record.payer_role)
     .bind(auth.user_id)
-    .execute(&state.db)
-    .await;
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(%error, %order_id, "set order payer");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    let mut event = audit::domain_diff_event(
+        "set_order_payer",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        previous.to_audit_json(),
+        record.to_audit_json(),
+    );
+    event.context = serde_json::json!({ "patient_id": order_patient_id });
+    if let Err(error) = audit::write_in_transaction(&mut transaction, &event).await {
+        tracing::error!(%error, %order_id, "audit order payer");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %order_id, "commit order payer");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
 
-    match result {
-        Ok(r) if r.rows_affected() > 0 => {
-            state.audit_sender.try_send(audit::domain_event(
-                "set_order_payer",
-                Some(auth.user_id),
-                "order",
-                Some(order_id),
-                serde_json::json!({
-                    "payer_patient_relation_id": body.payer_patient_relation_id,
-                    "payer_contact_name": payer_contact_name.clone(),
-                }),
-            ));
-            Json(serde_json::json!({
-                "ok": true,
-                "order_id": order_id,
-                "payer_patient_relation_id": body.payer_patient_relation_id,
-                "payer_contact_name": payer_contact_name,
-                "payer_contact_email": payer_contact_email,
-                "payer_contact_phone": payer_contact_phone,
-                "payer_contact_relationship": payer_contact_relationship,
-                "payer_notes": payer_notes,
-            }))
-            .into_response()
-        }
-        Ok(_) => err(StatusCode::NOT_FOUND, "Order not found"),
-        Err(e) => {
-            tracing::error!(error = %e, "set order payer");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to set payer")
+    Json(serde_json::json!({
+        "ok": true,
+        "order_id": order_id,
+        "payer_patient_id": record.payer_patient_id,
+        "payer_patient_relation_id": record.payer_patient_relation_id,
+        "payer_contact_name": record.contact_name,
+        "payer_contact_email": record.contact_email,
+        "payer_contact_phone": record.contact_phone,
+        "payer_contact_relationship": record.contact_relationship,
+        "payer_notes": record.notes,
+        "payer_address_street": record.address_street,
+        "payer_address_zip": record.address_zip,
+        "payer_address_city": record.address_city,
+        "payer_address_country": record.address_country,
+        "payer_role": record.payer_role,
+    }))
+    .into_response()
+}
+
+#[derive(Deserialize)]
+struct SetContractingPartyRequest {
+    /// `patient`, `patient_represented`, `legal_representatives`, or null to
+    /// derive it (framework contract, else the patient's age).
+    contracting_party: Option<String>,
+    /// The representatives (patient relations); empty means every recorded
+    /// parent or guardian.
+    #[serde(default)]
+    contracting_relation_ids: Vec<Uuid>,
+}
+
+/// Validates a contracting party choice for a patient.
+async fn validate_contracting_party(
+    conn: &mut sqlx::PgConnection,
+    patient_id: Uuid,
+    body: &SetContractingPartyRequest,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    if let Some(kind) = body.contracting_party.as_deref()
+        && !contracting_party::is_valid_party_kind(kind)
+    {
+        return Ok(Some("contracting_party_invalid"));
+    }
+    if body.contracting_relation_ids.len() > 4 {
+        return Ok(Some("contracting_relations_too_many"));
+    }
+    if !body.contracting_relation_ids.is_empty() {
+        let found = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM patient_relations WHERE patient_id = $1 AND id = ANY($2)",
+        )
+        .bind(patient_id)
+        .bind(&body.contracting_relation_ids)
+        .fetch_one(conn)
+        .await?;
+        if found != body.contracting_relation_ids.len() as i64 {
+            return Ok(Some("contracting_relation_mismatch"));
         }
     }
+    Ok(None)
+}
+
+/// `POST /orders/{id}/contracting-party`: who concludes the order — the
+/// patient, a minor represented by the guardians, or the guardians in their
+/// own name (default for minors). Used by the order documents and by the
+/// invoice release check (recipient = contracting party).
+async fn set_order_contracting_party(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<SetContractingPartyRequest>,
+) -> axum::response::Response {
+    const FAILED: &str = "Failed to set contracting party";
+    if let Err(e) = auth.require_capability(Capability::ContractsEdit) {
+        return e;
+    }
+    let patient_id = match ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required"),
+        Err(resp) => return resp,
+    };
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %order_id, "begin contracting party transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    match validate_contracting_party(&mut transaction, patient_id, &body).await {
+        Ok(None) => {}
+        Ok(Some(code)) => {
+            return coded_err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                code,
+                "Invalid contracting party",
+            );
+        }
+        Err(error) => {
+            tracing::error!(%error, %order_id, "validate contracting party");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    }
+    let previous = match sqlx::query(
+        "SELECT contracting_party, contracting_relation_ids FROM orders WHERE id = $1 FOR UPDATE",
+    )
+    .bind(order_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => serde_json::json!({
+            "contracting_party": row.try_get::<Option<String>, _>("contracting_party").unwrap_or_default(),
+            "contracting_relation_ids": row.try_get::<Vec<Uuid>, _>("contracting_relation_ids").unwrap_or_default(),
+        }),
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "lock contracting party");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Err(error) = sqlx::query(
+        "UPDATE orders SET contracting_party = $2, contracting_relation_ids = $3, updated_at = now() WHERE id = $1",
+    )
+    .bind(order_id)
+    .bind(&body.contracting_party)
+    .bind(&body.contracting_relation_ids)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(%error, %order_id, "set contracting party");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    let event = audit::domain_diff_event(
+        "set_order_contracting_party",
+        Some(auth.user_id),
+        "order",
+        Some(order_id),
+        previous,
+        serde_json::json!({
+            "contracting_party": body.contracting_party,
+            "contracting_relation_ids": body.contracting_relation_ids,
+        }),
+    );
+    if let Err(error) = audit::write_in_transaction(&mut transaction, &event).await {
+        tracing::error!(%error, %order_id, "audit contracting party");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    let party = match contracting_party::resolve(
+        &mut transaction,
+        patient_id,
+        Some(order_id),
+        None,
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(party) => party,
+        Err(error) => {
+            tracing::error!(%error, %order_id, "resolve contracting party");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %order_id, "commit contracting party");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    Json(serde_json::json!({ "order_id": order_id, "contracting_party": party.to_json() }))
+        .into_response()
+}
+
+/// `GET /orders/{id}/contracting-party`: the resolved party (stored or
+/// derived) with its representatives.
+async fn get_order_contracting_party(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    let patient_id = match ensure_order_access(&state, &auth, order_id, "Order not found").await {
+        Ok(Some(patient_id)) => patient_id,
+        Ok(None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "patient_required"),
+        Err(resp) => return resp,
+    };
+    if let Err(e) = auth.require_capability(Capability::ContractsView) {
+        return e;
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, %order_id, "acquire contracting party connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load contracting party",
+            );
+        }
+    };
+    match contracting_party::resolve(
+        &mut conn,
+        patient_id,
+        Some(order_id),
+        None,
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(party) => Json(serde_json::json!({
+            "order_id": order_id,
+            "contracting_party": party.to_json(),
+        }))
+        .into_response(),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "resolve contracting party");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load contracting party",
+            )
+        }
+    }
+}
+
+fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({ "error": code, "message": message })),
+    )
+        .into_response()
 }
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
