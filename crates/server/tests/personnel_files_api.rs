@@ -995,6 +995,20 @@ async fn completeness_retention_and_export() {
     )
     .unwrap();
     assert!(report.contains("unveraendert"), "{report}");
+    let mut manifest = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("Manifest.sha256").unwrap(),
+        &mut manifest,
+    )
+    .unwrap();
+    for covered in [
+        "  Index.csv",
+        "  Pruefbericht.txt",
+        "  LIESMICH.txt",
+        "Stundenzettel_2026_01_Strauss_Joerg.pdf",
+    ] {
+        assert!(manifest.contains(covered), "{covered} in {manifest}");
+    }
 }
 
 #[tokio::test]

@@ -31,7 +31,8 @@ use crate::{
     file_scan::{FileScanOutcome, scan_upload_bytes},
     file_sniff::validate_upload_magic_bytes,
     routes::documents::{
-        MAX_FILE_SIZE, read_document_storage_bytes, remove_document_blob, store_document_blob,
+        MAX_FILE_SIZE, read_document_storage_bytes, remove_document_blob,
+        remove_document_blob_checked, store_document_blob,
     },
     state::AppState,
 };
@@ -285,6 +286,7 @@ pub(crate) async fn archive(
     let taken = taken_names(state, employee.id).await?;
     let name = unique_archive_name(employee, target, extension, &taken)?;
     let document_id = Uuid::new_v4();
+    let late = late_days(state).await;
 
     let mut tx = state
         .db
@@ -393,6 +395,13 @@ pub(crate) async fn archive(
     )
     .await
     .map_err(|error| internal(error, "record archive"))?;
+    // Read the response inside the transaction: once it commits, the caller
+    // must not treat a failure as a rollback and remove the blob.
+    let row = sqlx::query(&document_select("d.id = $1"))
+        .bind(document_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|error| internal(error, "reload personnel document"))?;
     tx.commit()
         .await
         .map_err(|error| internal(error, "commit archive"))?;
@@ -404,12 +413,6 @@ pub(crate) async fn archive(
         Some(document_id),
         json!({ "employee_id": employee.id, "category": target.category.code }),
     );
-    let late = late_days(state).await;
-    let row = sqlx::query(&document_select("d.id = $1"))
-        .bind(document_id)
-        .fetch_one(&state.db)
-        .await
-        .map_err(|error| internal(error, "reload personnel document"))?;
     Ok(document_json(&row, late))
 }
 
@@ -1028,10 +1031,19 @@ pub(crate) async fn delete_document(
     {
         return internal(error, "record personnel delete");
     }
+    // The file goes first: a deletion is recorded only once the data is gone.
+    // If the commit then fails, the row stays live without its file; the
+    // integrity check reports it and the deletion can simply be repeated.
+    if let Err(error) = remove_document_blob_checked(&storage_key).await {
+        tracing::error!(%error, %document_id, "remove personnel document blob");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The stored file could not be removed; nothing was deleted, try again",
+        );
+    }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit personnel delete");
     }
-    remove_document_blob(&storage_key).await;
     audit_event(
         &state,
         "personnel_document_deleted",
