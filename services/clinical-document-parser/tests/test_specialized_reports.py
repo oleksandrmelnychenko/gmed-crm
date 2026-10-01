@@ -209,6 +209,55 @@ def test_radiology_letter_keeps_practice_footer_and_page_headers_out_of_blocks()
     assert recommendation.value.endswith("PSMA PET-CT zum Staging wurde bereits\nvereinbart.")
 
 
+def test_radiology_letter_review_text_has_no_trailing_practice_footer() -> None:
+    draft = _prostate_letter_candidates()
+    pages = draft.raw_text.split("\f")
+
+    assert len(pages) == 4
+    for token in ("Musterplatz", "info@", "Tel:", "Probehausen"):
+        assert token not in draft.raw_text, token
+    assert pages[0].rstrip().endswith("Volumen 40 ml.")
+    # The letterhead row inside the page and the content of later pages stay.
+    assert "MVZ Musterstraße" in pages[0]
+    assert "Seite zum Arztbrief" in pages[1]
+    assert "Mit freundlichen kollegialen Grüßen" in pages[3]
+
+
+def test_review_text_keeps_an_address_row_that_does_not_end_the_page() -> None:
+    draft = parse_clinical_text(
+        "Praxis Beispiel      Musterstraße 1, 80000 München      Tel: 089/000000-0\n\n"
+        "Befund:\nProstata vergrößert.\n"
+    )
+
+    assert "Musterstraße 1" in draft.raw_text
+    assert draft.raw_text.rstrip().endswith("Prostata vergrößert.")
+
+
+def test_radiology_rads_category_is_not_proposed_as_a_diagnosis() -> None:
+    draft = _prostate_letter_candidates()
+    diagnoses = [item.value for item in draft.candidates if item.target == "diagnosis"]
+
+    assert not any("PI-RADS" in value for value in diagnoses), diagnoses
+    impression = next(
+        item for item in draft.candidates if item.normalized.get("section_role") == "impression"
+    )
+    assert "Insgesamt PI-RADS 5" in impression.value
+
+    # A finding that merely carries its category remains a diagnosis.
+    finding = parse_clinical_text(
+        PROSTATE_MRI_LETTER.replace(
+            "Insgesamt PI-RADS 5; nach der Klassifikation somit sehr hohe Wahrscheinlichkeit für das\n"
+            "Vorliegen eines klinisch relevanten Prostatakarzinoms.",
+            "4. Herdbefund der peripheren Zone links, PI-RADS 4.",
+        )
+    )
+    assert any(
+        item.value.startswith("Herdbefund der peripheren Zone links")
+        for item in finding.candidates
+        if item.target == "diagnosis"
+    )
+
+
 def test_radiology_letter_numbered_impression_keeps_every_item() -> None:
     diagnoses = [item for item in _prostate_letter_candidates().candidates if item.target == "diagnosis"]
     values = [item.value for item in diagnoses]

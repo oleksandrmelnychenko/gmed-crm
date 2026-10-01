@@ -291,7 +291,7 @@ def parse_clinical_text(text: str) -> ParseDraft:
         document_type=document_type,
         source_language=language,
         parser_version=PARSER_VERSION,
-        raw_text=clean,
+        raw_text=_normalize_text(_without_trailing_practice_footers(layout)),
         subject=_extract_document_subject(layout),
         candidates=candidates,
         warnings=list(dict.fromkeys(warnings)),
@@ -3329,9 +3329,7 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
     # The wrapped tail of a footer column: postal code and town alone on one
     # of the last lines of a page. A town name starts with a capital followed
     # by lower case, so dose lines such as "20000 IE Dekristol" never match.
-    if line_index >= line_count - 4 and re.fullmatch(
-        r"\d{5}\s+[A-ZÄÖÜ][a-zäöüß]{2,}(?:[ -][A-Za-zÄÖÜäöüß]+){0,3}", line
-    ):
+    if line_index >= line_count - 4 and FOOTER_WRAPPED_TOWN_RE.fullmatch(line):
         return True
     if any(
         token in normalized
@@ -3360,6 +3358,8 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
     return False
 
 
+# The wrapped tail of a footer column: postal code and town alone on a line.
+FOOTER_WRAPPED_TOWN_RE = re.compile(r"\d{5}\s+[A-ZÄÖÜ][a-zäöüß]{2,}(?:[ -][A-Za-zÄÖÜäöüß]+){0,3}")
 PRACTICE_CONTACT_RE = re.compile(r"@|\b(?:tel|fax|telefon|telefax)\b\.?", re.IGNORECASE)
 # A complete address: street with house number, then postal code and town.
 PRACTICE_ADDRESS_RE = re.compile(
@@ -3379,6 +3379,32 @@ def _is_practice_footer_line(line: str, normalized: str) -> bool:
     if len(re.findall(r"\S {3,}(?=\S)", line)) < 2:
         return False
     return bool(PRACTICE_CONTACT_RE.search(normalized) or PRACTICE_ADDRESS_RE.search(line))
+
+
+def _without_trailing_practice_footers(text: str) -> str:
+    """Drop the practice footer that closes a page from the text shown for review.
+
+    Sites, addresses and contact channels of the practice are page furniture,
+    not document content. Only the block that ends a page is removed, so an
+    address row inside the letter stays readable.
+    """
+
+    pages: list[str] = []
+    for page in text.split("\f"):
+        lines = page.split("\n")
+        cut = len(lines)
+        for index in range(len(lines) - 1, -1, -1):
+            line = lines[index].strip()
+            if not line or FOOTER_WRAPPED_TOWN_RE.fullmatch(line):
+                continue
+            if not _is_practice_footer_line(line, " ".join(line.casefold().split())):
+                break
+            cut = index
+        if cut < len(lines):
+            # The line break before the form feed belongs to the page envelope.
+            page = "\n".join(lines[:cut]).rstrip(" \t\n") + ("\n" if page.endswith("\n") else "")
+        pages.append(page)
+    return "\f".join(pages)
 
 
 def _is_signoff_line(line: str) -> bool:
@@ -5080,10 +5106,21 @@ def _oncology_assessment_candidates(
     return candidates, warnings
 
 
+RADS_CATEGORY_STATEMENT_RE = re.compile(
+    r"^(?:(?:Insgesamt|Zusammenfassend|Gesamt(?:beurteilung|einstufung|kategorie)?|Kategorie|Overall)"
+    r"\b[\s:,]*)?(?:ACR[\s-]*)?(?:PI|BI|LI|TI|O|C|CAD|NI|Lung)[\s-]?RADS\b",
+    re.IGNORECASE,
+)
+
+
 def _radiology_diagnosis_candidates(section: Section) -> list[ClinicalCandidate]:
     rows: list[ClinicalCandidate] = []
     for value in _radiology_impression_statements(section.text):
         if len(value) < 3 or _is_non_diagnostic_assessment(value):
+            continue
+        # A RADS category grades the study ("sehr hohe Wahrscheinlichkeit
+        # für ..."). It stays in the impression block; it is not a diagnosis.
+        if RADS_CATEGORY_STATEMENT_RE.match(value):
             continue
         # A reference threshold such as "(suspekt > 0,15)" qualifies a measured
         # value; it does not make the statement a suspected diagnosis.

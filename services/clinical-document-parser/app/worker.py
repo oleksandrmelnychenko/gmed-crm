@@ -893,10 +893,15 @@ def run() -> None:
                     raise ValueError("Document exceeds the parser size limit")
                 data = open_blob(path.read_bytes())
                 extraction_started = time.monotonic()
+                # The upload-time text of the backend has no page boundaries,
+                # column layout or OCR confidence, so a first import would see
+                # a weaker text than a rescan of the same file. It only stands
+                # in when the file itself cannot be read.
                 extraction = extract_document(
                     data,
                     job.get("mime_type"),
                     job.get("extracted_text"),
+                    prefer_source_file=True,
                 )
                 log_extraction_metrics(
                     extraction.metadata, time.monotonic() - extraction_started

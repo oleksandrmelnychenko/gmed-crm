@@ -33,6 +33,14 @@ models for Latin text and falls back to local Tesseract for failures and
 Cyrillic pages. Set `PARSER_OCR_ENGINE=tesseract` to disable PaddleOCR. No
 document content leaves the host.
 
+A clinical import always reads the PDF or image itself. The text the backend
+extracts at upload (`documents.extracted_text`) has no page boundaries, column
+layout or OCR confidence, so it only stands in when the file cannot be read or
+yields no usable text (`source_extraction_failed_existing_text_used`,
+`source_text_unusable_existing_text_used`). A first import and a rescan
+therefore see the same text. The practice footer that closes a page (sites,
+addresses, contact channels) is left out of the review text and of the blocks.
+
 English clinical headings, diagnosis assertions (including suspected, negated,
 rule-out and historical statements), labelled subject identity and medication
 tables are supported. English candidates remain unselected for explicit review.
