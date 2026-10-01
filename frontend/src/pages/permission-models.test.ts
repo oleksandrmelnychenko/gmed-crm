@@ -257,6 +257,7 @@ describe("invoices model", () => {
         canCreate: has("invoices.create"),
         canManage: has("invoices.finance"),
         canAccounting: has("accounting.view"),
+        canEditPayer: has("invoices.payer"),
       });
     });
   });

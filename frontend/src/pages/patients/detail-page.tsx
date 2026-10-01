@@ -52,6 +52,10 @@ import {
   validateContractStatusForm,
   type ContractFormValidationMessages,
 } from "@/pages/contracts/model/contracts-model";
+import {
+  invoiceConfirmationField,
+  localizeInvoiceError,
+} from "@/pages/invoices/model/invoice-errors";
 import { canPickInvoiceStatus } from "@/pages/invoices/model/invoice-model";
 
 import {
@@ -1800,16 +1804,30 @@ function usePatientDetailPageContent() {
     setTabActionError("");
     try {
       // Payments go through the invoice payment journal, never through the
-      // status change: `paid`/`partially_paid` are derived from it.
-      await updateInvoiceStatus(invoiceManageId, {
-        status: invoiceStatusForm.status,
-        due_date: toOptional(invoiceStatusForm.dueDate),
-        notes: toOptional(invoiceStatusForm.notes),
-      });
+      // status change: `paid`/`partially_paid` are derived from it. Release
+      // warnings about the recipient are confirmed one by one.
+      const confirmed: Record<string, boolean> = {};
+      for (;;) {
+        try {
+          await updateInvoiceStatus(invoiceManageId, {
+            status: invoiceStatusForm.status,
+            due_date: toOptional(invoiceStatusForm.dueDate),
+            notes: toOptional(invoiceStatusForm.notes),
+            ...confirmed,
+          });
+          break;
+        } catch (error) {
+          const field = invoiceConfirmationField(error);
+          if (!field || confirmed[field] || !window.confirm(localizeInvoiceError(error, lang, t.common_failed_update))) {
+            throw error;
+          }
+          confirmed[field] = true;
+        }
+      }
       toast.success(t.common_active);
       reload();
     } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_update);
+      setTabActionError(localizeInvoiceError(error, lang, t.common_failed_update));
     } finally {
       setInvoiceBusy(false);
     }
