@@ -1314,6 +1314,14 @@ struct UpsertRelationRequest {
     is_emergency_contact: Option<bool>,
     phone: Option<String>,
     notes: Option<String>,
+    /// Where invoices to this relative go (Rechnungsempfänger).
+    email: Option<String>,
+    address_street: Option<String>,
+    address_zip: Option<String>,
+    address_city: Option<String>,
+    address_country: Option<String>,
+    /// Receives the patient's invoices unless an order names another payer.
+    is_default_payer: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -2087,6 +2095,28 @@ fn validate_relation_payload_fields(body: &UpsertRelationRequest) -> Result<(), 
         "spouse" | "parent" | "child" | "sibling" | "relative" | "guardian" | "caregiver"
         | "friend" | "other" => {}
         _ => return Err("Invalid relation type"),
+    }
+
+    if body
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|email| !crate::routes::invoices::payer::is_plausible_email(email))
+    {
+        return Err("Invalid relation e-mail address");
+    }
+    if [
+        &body.address_street,
+        &body.address_zip,
+        &body.address_city,
+        &body.address_country,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.trim().chars().count() > 200)
+    {
+        return Err("Relation address field is too long (max 200)");
     }
 
     Ok(())
@@ -8493,6 +8523,8 @@ async fn list_relations(
     let rows = sqlx::query(
         r#"SELECT pr.id, pr.patient_id, pr.related_patient_id, pr.related_name, pr.relation_type,
                   pr.is_emergency_contact, pr.phone, pr.notes, pr.created_at,
+                  pr.email, pr.address_street, pr.address_zip, pr.address_city,
+                  pr.address_country, pr.is_default_payer,
                   rp.patient_id AS related_patient_pid,
                   rp.first_name AS related_first_name,
                   rp.last_name AS related_last_name
@@ -8541,12 +8573,105 @@ fn relation_opt_text(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Billing fields of a relation as sent: `None` keeps the stored value on an
+/// update (older clients do not send them), an empty string clears it.
+struct RelationBillingFields {
+    email: (bool, Option<String>),
+    street: (bool, Option<String>),
+    zip: (bool, Option<String>),
+    city: (bool, Option<String>),
+    country: (bool, Option<String>),
+}
+
+impl RelationBillingFields {
+    fn from_request(body: &UpsertRelationRequest) -> Self {
+        let field = |value: &Option<String>| (value.is_some(), relation_opt_text(value.as_deref()));
+        Self {
+            email: (
+                body.email.is_some(),
+                relation_opt_text(body.email.as_deref()).map(|email| email.to_lowercase()),
+            ),
+            street: field(&body.address_street),
+            zip: field(&body.address_zip),
+            city: field(&body.address_city),
+            country: field(&body.address_country),
+        }
+    }
+}
+
+const RELATION_RETURNING: &str = r#"id, patient_id, related_patient_id, related_name, relation_type,
+                          is_emergency_contact, phone, notes, created_at, email,
+                          address_street, address_zip, address_city, address_country,
+                          is_default_payer"#;
+
+const RELATION_SELECT_FROM_UPSERTED: &str = r#"SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
+                  u.is_emergency_contact, u.phone, u.notes, u.created_at,
+                  u.email, u.address_street, u.address_zip, u.address_city,
+                  u.address_country, u.is_default_payer,
+                  rp.patient_id AS related_patient_pid,
+                  rp.first_name AS related_first_name,
+                  rp.last_name AS related_last_name
+           FROM upserted u
+           LEFT JOIN patients rp ON rp.id = u.related_patient_id"#;
+
+fn relation_write_failed(error: sqlx::Error, context: &str) -> axum::response::Response {
+    tracing::error!(%error, "{context}");
+    err(StatusCode::INTERNAL_SERVER_ERROR, context)
+}
+
+/// Only one relation of a patient receives the invoices by default.
+async fn clear_other_default_payers(
+    conn: &mut sqlx::PgConnection,
+    patient_id: Uuid,
+    keep_relation_id: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"UPDATE patient_relations SET is_default_payer = false
+           WHERE patient_id = $1 AND is_default_payer
+             AND ($2::uuid IS NULL OR id <> $2)"#,
+    )
+    .bind(patient_id)
+    .bind(keep_relation_id)
+    .execute(conn)
+    .await
+    .map(|_| ())
+}
+
+/// Released invoices addressed to this relation: their recipient is frozen
+/// (§ 14 UStG, GoBD), so the relation cannot be deleted or point to another
+/// person.
+async fn relation_released_invoice_count(
+    conn: &mut sqlx::PgConnection,
+    relation_id: Uuid,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar::<_, i64>(
+        r#"SELECT COUNT(*) FROM invoices
+           WHERE payer_patient_relation_id = $1 AND released_at IS NOT NULL"#,
+    )
+    .bind(relation_id)
+    .fetch_one(conn)
+    .await
+}
+
+fn relation_in_use_response(count: i64) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(serde_json::json!({
+            "error": "relation_used_by_released_invoice",
+            "message": "Released invoices are addressed to this relative; it cannot be deleted or linked to another person",
+            "released_invoice_count": count,
+        })),
+    )
+        .into_response()
+}
+
 async fn create_relation(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
     Json(body): Json<UpsertRelationRequest>,
 ) -> Result<(StatusCode, Json<Value>), axum::response::Response> {
+    const FAILED: &str = "Failed to create patient relation";
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
     ensure_patient_editable(&state, &auth, patient_uuid).await?;
     validate_relation_request(&body, patient_uuid)?;
@@ -8557,24 +8682,30 @@ async fn create_relation(
 
     let phone = relation_opt_text(body.phone.as_deref());
     let notes = relation_opt_text(body.notes.as_deref());
+    let billing = RelationBillingFields::from_request(&body);
+    let is_default_payer = body.is_default_payer.unwrap_or(false);
 
-    let row = sqlx::query(
+    let mut transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    if is_default_payer {
+        clear_other_default_payers(&mut transaction, patient_uuid, None)
+            .await
+            .map_err(|error| relation_write_failed(error, FAILED))?;
+    }
+    let row = sqlx::query(&format!(
         r#"WITH upserted AS (
                 INSERT INTO patient_relations (
                     patient_id, related_patient_id, related_name, relation_type,
-                    is_emergency_contact, phone, notes
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-                RETURNING id, patient_id, related_patient_id, related_name, relation_type,
-                          is_emergency_contact, phone, notes, created_at
+                    is_emergency_contact, phone, notes, email, address_street,
+                    address_zip, address_city, address_country, is_default_payer
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                RETURNING {RELATION_RETURNING}
            )
-           SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
-                  u.is_emergency_contact, u.phone, u.notes, u.created_at,
-                  rp.patient_id AS related_patient_pid,
-                  rp.first_name AS related_first_name,
-                  rp.last_name AS related_last_name
-           FROM upserted u
-           LEFT JOIN patients rp ON rp.id = u.related_patient_id"#,
-    )
+           {RELATION_SELECT_FROM_UPSERTED}"#
+    ))
     .bind(patient_uuid)
     .bind(body.related_patient_id)
     .bind(body.related_name.trim())
@@ -8582,15 +8713,19 @@ async fn create_relation(
     .bind(body.is_emergency_contact.unwrap_or(false))
     .bind(phone)
     .bind(notes)
-    .fetch_one(&state.db)
+    .bind(billing.email.1)
+    .bind(billing.street.1)
+    .bind(billing.zip.1)
+    .bind(billing.city.1)
+    .bind(billing.country.1)
+    .bind(is_default_payer)
+    .fetch_one(&mut *transaction)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to create patient relation");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create patient relation",
-        )
-    })?;
+    .map_err(|error| relation_write_failed(error, FAILED))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
 
     state.audit_sender.try_send(audit::domain_event(
         "create_patient_relation",
@@ -8601,6 +8736,7 @@ async fn create_relation(
             "relation_id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "relation_type": body.relation_type,
             "related_patient_id": body.related_patient_id,
+            "is_default_payer": is_default_payer,
         }),
     ));
 
@@ -8613,6 +8749,7 @@ async fn update_relation(
     Path((patient_uuid, relation_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpsertRelationRequest>,
 ) -> Result<Json<Value>, axum::response::Response> {
+    const FAILED: &str = "Failed to update patient relation";
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
     ensure_patient_editable(&state, &auth, patient_uuid).await?;
     validate_relation_request(&body, patient_uuid)?;
@@ -8623,8 +8760,61 @@ async fn update_relation(
 
     let phone = relation_opt_text(body.phone.as_deref());
     let notes = relation_opt_text(body.notes.as_deref());
+    let billing = RelationBillingFields::from_request(&body);
 
-    let updated = sqlx::query(
+    let mut transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    let current = sqlx::query(
+        r#"SELECT related_patient_id, email, address_street, address_zip, address_city,
+                  address_country, is_default_payer
+           FROM patient_relations WHERE patient_id = $1 AND id = $2 FOR UPDATE"#,
+    )
+    .bind(patient_uuid)
+    .bind(relation_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|error| relation_write_failed(error, FAILED))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Patient relation not found"))?;
+    let current_related = current
+        .try_get::<Option<Uuid>, _>("related_patient_id")
+        .unwrap_or_default();
+    if current_related != body.related_patient_id {
+        let count = relation_released_invoice_count(&mut transaction, relation_id)
+            .await
+            .map_err(|error| relation_write_failed(error, FAILED))?;
+        if count > 0 {
+            return Err(relation_in_use_response(count));
+        }
+    }
+    let is_default_payer = body.is_default_payer.unwrap_or_else(|| {
+        current
+            .try_get::<bool, _>("is_default_payer")
+            .unwrap_or(false)
+    });
+    if is_default_payer {
+        clear_other_default_payers(&mut transaction, patient_uuid, Some(relation_id))
+            .await
+            .map_err(|error| relation_write_failed(error, FAILED))?;
+    }
+    let keep = |(given, value): (bool, Option<String>), column: &str| {
+        if given {
+            value
+        } else {
+            current
+                .try_get::<Option<String>, _>(column)
+                .unwrap_or_default()
+        }
+    };
+    let email = keep(billing.email, "email");
+    let street = keep(billing.street, "address_street");
+    let zip = keep(billing.zip, "address_zip");
+    let city = keep(billing.city, "address_city");
+    let country = keep(billing.country, "address_country");
+
+    let row = sqlx::query(&format!(
         r#"WITH upserted AS (
                 UPDATE patient_relations
                 SET related_patient_id = $3,
@@ -8632,20 +8822,19 @@ async fn update_relation(
                     relation_type = $5,
                     is_emergency_contact = $6,
                     phone = $7,
-                    notes = $8
+                    notes = $8,
+                    email = $9,
+                    address_street = $10,
+                    address_zip = $11,
+                    address_city = $12,
+                    address_country = $13,
+                    is_default_payer = $14
                 WHERE patient_id = $1
                   AND id = $2
-                RETURNING id, patient_id, related_patient_id, related_name, relation_type,
-                          is_emergency_contact, phone, notes, created_at
+                RETURNING {RELATION_RETURNING}
            )
-           SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
-                  u.is_emergency_contact, u.phone, u.notes, u.created_at,
-                  rp.patient_id AS related_patient_pid,
-                  rp.first_name AS related_first_name,
-                  rp.last_name AS related_last_name
-           FROM upserted u
-           LEFT JOIN patients rp ON rp.id = u.related_patient_id"#,
-    )
+           {RELATION_SELECT_FROM_UPSERTED}"#
+    ))
     .bind(patient_uuid)
     .bind(relation_id)
     .bind(body.related_patient_id)
@@ -8654,19 +8843,19 @@ async fn update_relation(
     .bind(body.is_emergency_contact.unwrap_or(false))
     .bind(phone)
     .bind(notes)
-    .fetch_optional(&state.db)
+    .bind(email)
+    .bind(street)
+    .bind(zip)
+    .bind(city)
+    .bind(country)
+    .bind(is_default_payer)
+    .fetch_one(&mut *transaction)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_uuid, relation_id = %relation_id, "Failed to update patient relation");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to update patient relation",
-        )
-    })?;
-
-    let Some(row) = updated else {
-        return Err(err(StatusCode::NOT_FOUND, "Patient relation not found"));
-    };
+    .map_err(|error| relation_write_failed(error, FAILED))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
 
     state.audit_sender.try_send(audit::domain_event(
         "update_patient_relation",
@@ -8677,6 +8866,7 @@ async fn update_relation(
             "relation_id": relation_id,
             "relation_type": body.relation_type,
             "related_patient_id": body.related_patient_id,
+            "is_default_payer": is_default_payer,
         }),
     ));
 
@@ -8688,25 +8878,42 @@ async fn delete_relation(
     Extension(auth): Extension<AuthUser>,
     Path((patient_uuid, relation_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<Value>, axum::response::Response> {
+    const FAILED: &str = "Failed to delete patient relation";
     auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
     ensure_patient_editable(&state, &auth, patient_uuid).await?;
 
-    let result = sqlx::query("DELETE FROM patient_relations WHERE patient_id = $1 AND id = $2")
-        .bind(patient_uuid)
-        .bind(relation_id)
-    .execute(&state.db)
+    let mut transaction = state
+        .db
+        .begin()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    let exists = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM patient_relations WHERE patient_id = $1 AND id = $2 FOR UPDATE",
+    )
+    .bind(patient_uuid)
+    .bind(relation_id)
+    .fetch_optional(&mut *transaction)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_uuid, relation_id = %relation_id, "Failed to delete patient relation");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to delete patient relation",
-        )
-    })?;
-
-    if result.rows_affected() == 0 {
+    .map_err(|error| relation_write_failed(error, FAILED))?;
+    if exists.is_none() {
         return Err(err(StatusCode::NOT_FOUND, "Patient relation not found"));
     }
+    let count = relation_released_invoice_count(&mut transaction, relation_id)
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    if count > 0 {
+        return Err(relation_in_use_response(count));
+    }
+    sqlx::query("DELETE FROM patient_relations WHERE patient_id = $1 AND id = $2")
+        .bind(patient_uuid)
+        .bind(relation_id)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
+    transaction
+        .commit()
+        .await
+        .map_err(|error| relation_write_failed(error, FAILED))?;
 
     state.audit_sender.try_send(audit::domain_event(
         "delete_patient_relation",
@@ -10195,6 +10402,12 @@ fn build_relation_json(row: sqlx::postgres::PgRow, linked_patient_visible: bool)
         "is_emergency_contact": row.try_get::<bool, _>("is_emergency_contact").unwrap_or(false),
         "phone": row.try_get::<Option<String>, _>("phone").unwrap_or_default(),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        "email": row.try_get::<Option<String>, _>("email").unwrap_or_default(),
+        "address_street": row.try_get::<Option<String>, _>("address_street").unwrap_or_default(),
+        "address_zip": row.try_get::<Option<String>, _>("address_zip").unwrap_or_default(),
+        "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
+        "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
+        "is_default_payer": row.try_get::<bool, _>("is_default_payer").unwrap_or(false),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
 }

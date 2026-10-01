@@ -57,6 +57,21 @@ struct PatientFinancialQuery {
     package_id: Option<Uuid>,
     include_pass_through: Option<bool>,
     currency: Option<String>,
+    /// Account statement of one invoice recipient (`patient`,
+    /// `person:<uuid>`, `relation:<uuid>` or `name:<name>`, as listed in
+    /// `available_recipients`): the invoices a paying parent owes.
+    payer: Option<String>,
+}
+
+/// The recipient of `invoice`: frozen for released invoices, live for drafts.
+const INVOICE_RECIPIENT_VALUE: &str = r#"COALESCE(invoice.recipient_snapshot, invoice_recipient_resolve(
+        invoice.patient_id, invoice.payer_patient_id, invoice.payer_patient_relation_id,
+        invoice.payer_contact_name, invoice.payer_contact_email,
+        invoice.payer_address_street, invoice.payer_address_zip, invoice.payer_address_city,
+        invoice.payer_address_country))"#;
+
+fn recipient_sql(sql: &str) -> String {
+    sql.replace("{INVOICE_RECIPIENT_VALUE}", INVOICE_RECIPIENT_VALUE)
 }
 
 #[derive(Deserialize)]
@@ -847,7 +862,42 @@ async fn load_patient_account_statement(
         available_currencies.sort();
     }
 
-    let invoice_rows = sqlx::query(
+    // The portal statement is the patient's own; the recipient filter is for
+    // staff (a parent's statement over the children's invoices).
+    let recipient_filter = query
+        .payer
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !portal_scope)
+        .map(ToOwned::to_owned);
+    let available_recipients = if portal_scope {
+        Vec::new()
+    } else {
+        sqlx::query(&recipient_sql(
+            r#"SELECT DISTINCT ON (invoice_recipient_identity(rcpt.value))
+                      invoice_recipient_identity(rcpt.value) AS identity,
+                      rcpt.value ->> 'name' AS name,
+                      COALESCE((rcpt.value ->> 'is_payer')::boolean, false) AS is_payer
+               FROM invoices invoice
+               CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
+               WHERE invoice.patient_id = $1 AND invoice.status <> 'cancelled'
+               ORDER BY invoice_recipient_identity(rcpt.value), invoice.created_at DESC"#,
+        ))
+        .bind(patient_id)
+        .fetch_all(&state.db)
+        .await?
+        .into_iter()
+        .map(|row| {
+            serde_json::json!({
+                "identity": row.try_get::<Option<String>, _>("identity").unwrap_or_default(),
+                "name": row.try_get::<Option<String>, _>("name").unwrap_or_default(),
+                "is_payer": row.try_get::<bool, _>("is_payer").unwrap_or(false),
+            })
+        })
+        .collect::<Vec<_>>()
+    };
+
+    let invoice_rows = sqlx::query(&recipient_sql(
         r#"SELECT invoice.id, invoice.order_id, invoice.invoice_number,
                   invoice.invoice_type, invoice.status, invoice.issued_at,
                   invoice.due_date, invoice.total_gross,
@@ -886,11 +936,15 @@ async fn load_patient_account_statement(
                       WHERE allocation.advance_invoice_id = invoice.id
                         AND ($3::date IS NULL OR allocation.created_at::date <= $3)
                         AND (allocation.released_at IS NULL OR allocation.released_at::date > $3)
-                  ), 0) AS allocated_from_advance
+                  ), 0) AS allocated_from_advance,
+                  rcpt.value ->> 'name' AS recipient_name,
+                  invoice_recipient_identity(rcpt.value) AS recipient_identity
            FROM invoices invoice
            LEFT JOIN orders ON orders.id = invoice.order_id
+           CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
            WHERE invoice.patient_id = $1
              AND invoice.status <> 'cancelled'
+             AND ($8::text IS NULL OR invoice_recipient_identity(rcpt.value) = $8)
              AND ($2::date IS NULL OR invoice.issued_at::date >= $2)
              AND ($3::date IS NULL OR invoice.issued_at::date <= $3)
              AND ($4::uuid IS NULL OR invoice.order_id = $4)
@@ -921,7 +975,7 @@ async fn load_patient_account_statement(
              )
              AND invoice.currency = $7
            ORDER BY invoice.issued_at DESC, invoice.created_at DESC"#,
-    )
+    ))
     .bind(patient_id)
     .bind(from)
     .bind(to)
@@ -929,6 +983,7 @@ async fn load_patient_account_statement(
     .bind(query.package_id)
     .bind(portal_scope)
     .bind(&currency)
+    .bind(&recipient_filter)
     .fetch_all(&state.db)
     .await?;
 
@@ -1039,6 +1094,8 @@ async fn load_patient_account_statement(
             "status": status,
             "payment_state": payment_state,
             "paid_by": "patient",
+            "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
+            "recipient_identity": row.try_get::<Option<String>, _>("recipient_identity").unwrap_or_default(),
             "amounts_visible": amounts_visible,
             "amount_gross": if amounts_visible { serde_json::json!(decimal_to_string(total_gross)) } else { Value::Null },
             "credited_amount": if amounts_visible { serde_json::json!(decimal_to_string(credited)) } else { Value::Null },
@@ -1080,17 +1137,20 @@ async fn load_patient_account_statement(
         }
     }
 
-    let credit_rows = sqlx::query(
+    let credit_rows = sqlx::query(&recipient_sql(
         r#"SELECT credit.id, credit.transaction_type, credit.document_number,
                   credit.reason, credit.amount_gross, credit.issued_on,
                   credit.portal_visible, invoice.id AS invoice_id,
                   invoice.order_id, invoice.invoice_number,
-                  invoice.hide_amounts_from_patient, orders.order_number
+                  invoice.hide_amounts_from_patient, orders.order_number,
+                  rcpt.value ->> 'name' AS recipient_name
            FROM invoice_credit_note_transactions credit
            JOIN invoices invoice ON invoice.id = credit.invoice_id
            LEFT JOIN orders ON orders.id = invoice.order_id
+           CROSS JOIN LATERAL (SELECT {INVOICE_RECIPIENT_VALUE} AS value) rcpt
            WHERE invoice.patient_id = $1
              AND invoice.status <> 'cancelled'
+             AND ($8::text IS NULL OR invoice_recipient_identity(rcpt.value) = $8)
              AND ($2::date IS NULL OR credit.issued_on >= $2)
              AND ($3::date IS NULL OR credit.issued_on <= $3)
              AND ($4::uuid IS NULL OR invoice.order_id = $4)
@@ -1110,7 +1170,7 @@ async fn load_patient_account_statement(
                     )
              )
            ORDER BY credit.issued_on DESC, credit.created_at DESC"#,
-    )
+    ))
     .bind(patient_id)
     .bind(from)
     .bind(to)
@@ -1118,6 +1178,7 @@ async fn load_patient_account_statement(
     .bind(query.package_id)
     .bind(&currency)
     .bind(portal_scope)
+    .bind(&recipient_filter)
     .fetch_all(&state.db)
     .await?;
 
@@ -1157,7 +1218,10 @@ async fn load_patient_account_statement(
 
     let mut external_receivable = Decimal::ZERO;
     let external_item_count: u64;
-    if portal_scope {
+    if recipient_filter.is_some() {
+        // Supplier costs and unbilled services have no invoice recipient yet.
+        external_item_count = 0;
+    } else if portal_scope {
         external_item_count = sqlx::query_scalar::<_, i64>(
             r#"SELECT COUNT(*)
                FROM external_invoices external
@@ -1426,6 +1490,11 @@ async fn load_patient_account_statement(
         "currency": currency,
         "available_currencies": available_currencies,
         "scope": if portal_scope { "patient_portal" } else { "staff" },
+        "recipient_filter": recipient_filter,
+        "available_recipients": available_recipients,
+        // Movements below are the patient's whole settlement ledger; the
+        // recipient filter narrows invoices and credit notes only.
+        "movements_scope": "patient",
         "amounts_complete": !portal_scope || (hidden_amount_count == 0 && external_item_count == 0),
         "summary": {
             "invoiced_gross": decimal_to_string(invoiced_gross),
@@ -1512,6 +1581,7 @@ async fn get_my_account_statement(
         package_id: None,
         include_pass_through: None,
         currency: query.currency,
+        payer: None,
     };
     match load_patient_account_statement(&state, patient_id, &portal_query, true).await {
         Ok(statement) => Json(statement).into_response(),
@@ -2723,15 +2793,21 @@ async fn export_patient_financial_ledger(
     };
     let margin_allowed = can_read_profit_margin(auth.role);
 
-    let rows = match sqlx::query(
+    let rows = match sqlx::query(&recipient_sql(
         r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
-                  i.invoice_number, ei.external_invoice_number, o.order_number
+                  invoice.invoice_number, ei.external_invoice_number, o.order_number,
+                  rcpt.value ->> 'name' AS recipient_name,
+                  invoice_recipient_identity(rcpt.value) AS recipient_identity
            FROM accounting_entries ae
-           LEFT JOIN invoices i ON i.id = ae.source_invoice_id
+           LEFT JOIN invoices invoice ON invoice.id = ae.source_invoice_id
+           LEFT JOIN LATERAL (
+               SELECT {INVOICE_RECIPIENT_VALUE} AS value WHERE invoice.id IS NOT NULL
+           ) rcpt ON true
            LEFT JOIN external_invoices ei ON ei.id = ae.source_external_invoice_id
            LEFT JOIN orders o ON o.id = ae.order_id
            WHERE ae.patient_id = $1
+             AND ($6::text IS NULL OR invoice_recipient_identity(rcpt.value) = $6)
              AND ($2::date IS NULL OR ae.entry_date >= $2)
              AND ($3::date IS NULL OR ae.entry_date <= $3)
              AND ($4::uuid IS NULL OR ae.order_id = $4)
@@ -2754,12 +2830,19 @@ async fn export_patient_financial_ledger(
                       )
              ))
            ORDER BY ae.entry_date DESC, ae.created_at DESC"#,
-    )
+    ))
     .bind(patient_id)
     .bind(from)
     .bind(to)
     .bind(query.order_id)
     .bind(query.package_id)
+    .bind(
+        query
+            .payer
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    )
     .fetch_all(&state.db)
     .await
     {
@@ -2774,7 +2857,7 @@ async fn export_patient_financial_ledger(
     };
 
     let mut csv = String::from(
-        "entry_date,direction,category,description,order_number,invoice_number,external_invoice_number,amount_net,amount_vat,amount_gross,currency\n",
+        "entry_date,direction,category,description,order_number,invoice_number,external_invoice_number,amount_net,amount_vat,amount_gross,currency,recipient_name,recipient_id\n",
     );
     for row in rows {
         let direction = row.try_get::<String, _>("direction").unwrap_or_default();
@@ -2811,6 +2894,12 @@ async fn export_patient_financial_ledger(
             ),
             row.try_get::<String, _>("currency")
                 .unwrap_or_else(|_| "EUR".to_string()),
+            row.try_get::<Option<String>, _>("recipient_name")
+                .unwrap_or_default()
+                .unwrap_or_default(),
+            row.try_get::<Option<String>, _>("recipient_identity")
+                .unwrap_or_default()
+                .unwrap_or_default(),
         ];
         csv.push_str(
             &fields

@@ -56,6 +56,10 @@ pub fn router() -> Router<AppState> {
             post(update_framework_contract_status),
         )
         .route(
+            "/framework-contracts/{contract_id}/contracting-party",
+            post(set_framework_contract_party),
+        )
+        .route(
             "/framework-contracts/{contract_id}/terminate",
             post(terminate_framework_contract),
         )
@@ -2567,6 +2571,156 @@ async fn get_framework_contract(
         Ok(None) => err(StatusCode::NOT_FOUND, "Framework contract not found"),
         Err(resp) => resp,
     }
+}
+
+#[derive(Deserialize)]
+struct SetFrameworkContractPartyRequest {
+    contracting_party: Option<String>,
+    #[serde(default)]
+    contracting_relation_ids: Vec<Uuid>,
+}
+
+/// `POST /framework-contracts/{id}/contracting-party`: the Auftraggeber of the
+/// framework contract — the patient, a minor represented by the guardians
+/// (§ 1629 BGB), or the guardians in their own name for the benefit of the
+/// child (§ 328 BGB, default for minors). Orders without their own choice
+/// follow it. `null` derives it from the patient's age.
+async fn set_framework_contract_party(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(contract_id): Path<Uuid>,
+    Json(body): Json<SetFrameworkContractPartyRequest>,
+) -> axum::response::Response {
+    const FAILED: &str = "Failed to set contracting party";
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    if let Some(kind) = body.contracting_party.as_deref()
+        && !crate::services::contracting_party::is_valid_party_kind(kind)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Invalid contracting party",
+        );
+    }
+    if body.contracting_relation_ids.len() > 4 {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Too many legal representatives",
+        );
+    }
+    let subject = match load_contract_subject(&state, contract_id).await {
+        Ok(Some(subject)) => subject,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
+    }
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %contract_id, "begin contracting party transaction");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    let current = match sqlx::query(
+        r#"SELECT patient_id, status, contracting_party, contracting_relation_ids
+           FROM framework_contracts WHERE id = $1 FOR UPDATE"#,
+    )
+    .bind(contract_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Framework contract not found"),
+        Err(error) => {
+            tracing::error!(%error, %contract_id, "lock framework contract party");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    let patient_id = current.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    if current.try_get::<String, _>("status").unwrap_or_default() == "terminated" {
+        return err(
+            StatusCode::CONFLICT,
+            "A terminated framework contract cannot be changed",
+        );
+    }
+    if !body.contracting_relation_ids.is_empty() {
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM patient_relations WHERE patient_id = $1 AND id = ANY($2)",
+        )
+        .bind(patient_id)
+        .bind(&body.contracting_relation_ids)
+        .fetch_one(&mut *transaction)
+        .await
+        {
+            Ok(found) if found == body.contracting_relation_ids.len() as i64 => {}
+            Ok(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Legal representatives must be relations of the patient",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %contract_id, "validate contracting relations");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+            }
+        }
+    }
+    if let Err(error) = sqlx::query(
+        r#"UPDATE framework_contracts
+           SET contracting_party = $2, contracting_relation_ids = $3
+           WHERE id = $1"#,
+    )
+    .bind(contract_id)
+    .bind(&body.contracting_party)
+    .bind(&body.contracting_relation_ids)
+    .execute(&mut *transaction)
+    .await
+    {
+        tracing::error!(%error, %contract_id, "set framework contract party");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    let event = audit::domain_diff_event(
+        "set_framework_contract_party",
+        Some(auth.user_id),
+        "framework_contract",
+        Some(contract_id),
+        json!({
+            "contracting_party": current.try_get::<Option<String>, _>("contracting_party").unwrap_or_default(),
+            "contracting_relation_ids": current.try_get::<Vec<Uuid>, _>("contracting_relation_ids").unwrap_or_default(),
+        }),
+        json!({
+            "contracting_party": body.contracting_party,
+            "contracting_relation_ids": body.contracting_relation_ids,
+        }),
+    );
+    if let Err(error) = audit::write_in_transaction(&mut transaction, &event).await {
+        tracing::error!(%error, %contract_id, "audit framework contract party");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    let party = match crate::services::contracting_party::resolve(
+        &mut transaction,
+        patient_id,
+        None,
+        Some(contract_id),
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(party) => party,
+        Err(error) => {
+            tracing::error!(%error, %contract_id, "resolve framework contract party");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %contract_id, "commit framework contract party");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    Json(json!({ "contract_id": contract_id, "contracting_party": party.to_json() }))
+        .into_response()
 }
 
 async fn update_framework_contract_status(
