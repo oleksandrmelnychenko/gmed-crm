@@ -14,6 +14,14 @@ describe("record-workspace", () => {
     expect(toneForStatus("cancelled")).toBe("error");
   });
 
+  it("maps check and time-stamp statuses", () => {
+    expect(toneForStatus("passed")).toBe("success");
+    expect(toneForStatus("stamped")).toBe("success");
+    expect(toneForStatus("running")).toBe("info");
+    expect(toneForStatus("failed")).toBe("error");
+    expect(toneForStatus("disabled")).toBe("neutral");
+  });
+
   it("renders extracted recipes without changing behavior", () => {
     const html = renderToStaticMarkup(
       <TabShell>

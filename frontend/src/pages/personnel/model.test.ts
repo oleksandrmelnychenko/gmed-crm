@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { STATUS_TONE } from "@/components/record-workspace/primitives/status-tones";
 import { personnelDe, personnelRu } from "@/lib/i18n/catalogs/personnel";
 
 import {
@@ -10,7 +11,10 @@ import {
   canOfferDeletion,
   completenessCellClass,
   completenessCellSymbol,
+  completenessCellTone,
   countCompleteness,
+  documentTableRows,
+  formatFileSize,
   defaultMonthRange,
   employeeRequestBody,
   employmentRangeValid,
@@ -214,10 +218,12 @@ describe("employees", () => {
 
 describe("completeness and journal", () => {
   it("maps every cell status to a colour and a symbol", () => {
-    expect(completenessCellClass("present")).toContain("emerald");
-    expect(completenessCellClass("late")).toContain("amber");
-    expect(completenessCellClass("missing")).toContain("rose");
-    expect(completenessCellClass("open")).toContain("sky");
+    expect(completenessCellTone("present")).toBe("success");
+    expect(completenessCellTone("late")).toBe("warning");
+    expect(completenessCellTone("missing")).toBe("error");
+    expect(completenessCellTone("open")).toBe("info");
+    expect(completenessCellTone("not_employed")).toBe("neutral");
+    expect(completenessCellClass("present")).toBe(STATUS_TONE.success);
     expect(completenessCellClass("whatever")).toBe(completenessCellClass("not_employed"));
     expect(completenessCellSymbol("missing")).toBe("✗");
     expect(completenessCellSymbol(undefined)).toBe("–");
@@ -263,7 +269,7 @@ describe("translations", () => {
         "zeugnis",
         "schriftverkehr",
         "sonstiges",
-      ].map((code) => `personnel_category_${code}`),
+      ].flatMap((code) => [`personnel_category_${code}`, `personnel_category_short_${code}`]),
     ];
     for (const catalog of [personnelRu, personnelDe]) {
       const labels = catalog as unknown as Record<string, string | undefined>;
@@ -271,5 +277,40 @@ describe("translations", () => {
         expect(labels[key], key).toBeTruthy();
       }
     }
+  });
+});
+
+describe("documents table", () => {
+  const doc = (id: string, root: string, version: number, period: string, archived = "2026-06-01T10:00:00Z") => ({
+    id,
+    category: "stundenzettel",
+    version_root_id: root,
+    version_number: version,
+    period,
+    document_date: null,
+    archived_at: archived,
+  });
+
+  it("lists the newest version per document and keeps older ones for expansion", () => {
+    const { rows, history } = documentTableRows([
+      doc("a1", "a", 1, "2026-05"),
+      doc("a2", "a", 2, "2026-05", "2026-06-03T10:00:00Z"),
+      doc("b1", "b", 1, "2026-04"),
+    ]);
+    expect(rows.map((row) => [row.document.id, row.isCurrent, row.historyCount])).toEqual([
+      ["a2", true, 1],
+      ["b1", true, 0],
+    ]);
+    expect(history.get("a2")?.map((row) => [row.document.id, row.isChild, row.isCurrent])).toEqual([
+      ["a1", true, false],
+    ]);
+    expect(history.has("b1")).toBe(false);
+  });
+
+  it("formats file sizes like the rest of the app", () => {
+    expect(formatFileSize(512)).toBe("512 B");
+    expect(formatFileSize(1536)).toBe("1.5 KB");
+    expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
+    expect(formatFileSize(-1)).toBe("");
   });
 });

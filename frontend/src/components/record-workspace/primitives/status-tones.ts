@@ -17,6 +17,8 @@ const STATUS_TONE_MAP: Record<string, StatusTone> = {
   closed: "success",
   approved: "success",
   ready: "success",
+  passed: "success",
+  stamped: "success",
   in_progress: "warning",
   partially_paid: "warning",
   pending: "warning",
@@ -24,14 +26,17 @@ const STATUS_TONE_MAP: Record<string, StatusTone> = {
   planned: "info",
   confirmed: "info",
   open: "info",
+  running: "info",
   draft: "neutral",
   expired: "neutral",
   archived: "neutral",
+  disabled: "neutral",
   cancelled: "error",
   terminated: "error",
   overdue: "error",
   rejected: "error",
   revoked: "error",
+  failed: "error",
 };
 
 export function toneForStatus(status: string | null | undefined): StatusTone {
