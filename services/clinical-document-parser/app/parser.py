@@ -2270,7 +2270,7 @@ def _narrative_laboratory_candidates(
 
 
 INDICATION_TUMOR_MARKER_RE = re.compile(
-    r"\b(?P<analyte>PSA|CEA|AFP|CA\s?19-9|CA\s?125|CA\s?15-3)(?:-Wert)?\s*(?:von|:|=)?\s*"
+    r"(?<!freies )(?<!freie )\b(?P<analyte>PSA|CEA|AFP|CA\s?19-9|CA\s?125|CA\s?15-3)(?:-Wert)?\s*(?:von|:|=)?\s*"
     r"(?P<comparator><=|>=|<|>)?\s*(?P<number>\d+(?:[.,]\d+)?)\s*"
     r"(?P<unit>ng/ml|µg/l|ug/l|U/ml|kU/l)\b",
     re.IGNORECASE,
@@ -3227,7 +3227,7 @@ def _match_contextual_ocr_heading(
 
 
 IMAGING_TECHNIQUE_HEADING_RE = re.compile(
-    r"^(?:Schichtführung(?:\s+und\s+Sequenzen)?|Sequenzen|Untersuchungstechnik|Technik|"
+    r"^(?:Schichtführung(?:\s+und\s+Sequenzen)?|Sequenzen|Untersuchungstechnik|"
     r"Untersuchungsprotokoll)\s*:",
     re.IGNORECASE,
 )
@@ -3316,6 +3316,13 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
         return True
     if _is_practice_footer_line(line, normalized):
         return True
+    # The wrapped tail of a footer column: postal code and town alone on one
+    # of the last lines of a page. A town name starts with a capital followed
+    # by lower case, so dose lines such as "20000 IE Dekristol" never match.
+    if line_index >= line_count - 4 and re.fullmatch(
+        r"\d{5}\s+[A-ZÄÖÜ][a-zäöüß]{2,}(?:[ -][A-Za-zÄÖÜäöüß]+){0,3}", line
+    ):
+        return True
     if any(
         token in normalized
         for token in (
@@ -3344,9 +3351,9 @@ def _is_repeated_page_noise(line: str, line_index: int, line_count: int) -> bool
 
 
 PRACTICE_CONTACT_RE = re.compile(r"@|\b(?:tel|fax|telefon|telefax)\b\.?", re.IGNORECASE)
+# A complete address: street with house number, then postal code and town.
 PRACTICE_ADDRESS_RE = re.compile(
-    r"\b\d{5}\s+[A-ZÄÖÜ][a-zäöüß]+.*?(?:stra(?:ß|ss)e|str\.|platz|ring|weg|allee)"
-    r"|(?:stra(?:ß|ss)e|str\.|platz|ring|weg|allee)\s+\d+[a-z]?,?\s+\d{5}\s+[A-ZÄÖÜ]",
+    r"(?:stra(?:ß|ss)e|str\.|platz|ring|weg|allee)\s+\d+[a-z]?\s*,?\s+\d{5}\s+[A-ZÄÖÜ][a-zäöüß]",
     re.IGNORECASE,
 )
 
@@ -3355,12 +3362,10 @@ def _is_practice_footer_line(line: str, normalized: str) -> bool:
     """Multi-column practice letterhead/footer rows (sites, addresses, contacts).
 
     Native PDF text keeps the column gaps of such rows. A row needs those gaps
-    plus a contact or address, so prose that mentions a fax number survives.
-    A lone postal-code line is the wrapped tail of the same footer.
+    plus an e-mail/phone/fax contact or a complete street address, so prose
+    that mentions a fax number and multi-column table rows survive.
     """
 
-    if re.fullmatch(r"\d{5}\s+[A-ZÄÖÜ][\wäöüß .-]{1,40}", line):
-        return True
     if len(re.findall(r"\S {3,}(?=\S)", line)) < 2:
         return False
     return bool(PRACTICE_CONTACT_RE.search(normalized) or PRACTICE_ADDRESS_RE.search(line))

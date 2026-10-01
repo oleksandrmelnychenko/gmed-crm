@@ -259,3 +259,45 @@ def test_radiology_letter_reads_ris_header_birth_date_and_identifier() -> None:
     # The text layer splits the surname ("Muster mann"); a guessed name would
     # be false identity evidence, so only the reliable fields are used.
     assert subject.last_name is None
+
+
+def test_footer_rules_keep_dose_lines_and_multi_column_table_rows() -> None:
+    medications = [
+        item.value
+        for item in parse_clinical_text(
+            "Entlassungsbrief\n\nMedikation:\nPantoprazol 40 mg 1-0-0\n20000 IE Dekristol\n"
+            "Ramipril 5 mg 1-0-0\n\nWeitere Hinweise folgen.\n\n\n"
+        ).candidates
+        if item.target == "medication"
+    ]
+    assert any("Dekristol" in value for value in medications), medications
+
+    finding = next(
+        item
+        for item in parse_clinical_text(
+            "Befund:\nLeukozyten      10500 Zellen/µl     geringgradig erhöht\n"
+            "Ferritin        12000 Ng     Ringversuch bestanden\n"
+        ).candidates
+        if item.target == "examination"
+    )
+    assert "geringgradig erhöht" in finding.value
+    assert "Ringversuch" in finding.value
+
+
+def test_surgical_technique_section_is_not_treated_as_imaging_protocol() -> None:
+    draft = parse_clinical_text(
+        "Befund:\nGallenblase entzündlich verändert.\n"
+        "Technik: Laparoskopische Cholezystektomie, Bergung im Bergebeutel.\n"
+    )
+
+    finding = next(item for item in draft.candidates if item.target == "examination")
+    assert "Laparoskopische Cholezystektomie" in finding.value
+
+
+def test_indication_does_not_label_free_psa_as_total_psa() -> None:
+    draft = parse_clinical_text(
+        "Indikation: Gesamt-PSA 8,0 ng/ml, freies PSA 1,2 ng/ml.\n\nBefund:\nProstata unauffällig.\n"
+    )
+
+    labs = [item.normalized["result_text"] for item in draft.candidates if item.target == "lab_result"]
+    assert labs == ["8,0"]
