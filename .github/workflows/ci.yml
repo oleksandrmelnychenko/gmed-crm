@@ -104,6 +104,11 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/chat-secure.spec.ts
 
+      # Mocked API; it went unnoticed broken for weeks while it ran nowhere.
+      - name: Clinical document import browser gate
+        working-directory: frontend
+        run: npx playwright test tests/e2e/clinical-document-import.spec.ts
+
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 30
