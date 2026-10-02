@@ -38,6 +38,7 @@ mod credit_transfers;
 mod document;
 mod dunning_blocks;
 mod dunning_letters;
+pub(crate) mod line_comments;
 pub mod payer;
 mod release;
 pub(crate) mod service_reversal;
@@ -170,6 +171,10 @@ pub fn router() -> Router<AppState> {
             post(payer::update_invoice_payer),
         )
         .route(
+            "/invoices/{invoice_id}/line-comments",
+            post(line_comments::update_invoice_line_comments),
+        )
+        .route(
             "/invoices/{invoice_id}/prepayment-allocations",
             post(apply_invoice_prepayment),
         )
@@ -260,6 +265,8 @@ struct CreatePatientBillingInvoiceRequest {
 struct CreateInvoiceLineSelection {
     line_index: usize,
     quantity: MoneyInput,
+    /// Remark printed under the position, see [`line_comments`].
+    comment: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -596,6 +603,8 @@ pub struct AutoDunningRunSummary {
 #[derive(Clone)]
 struct InvoicePdfLineItem {
     description: String,
+    /// Remark printed under the description, see [`line_comments`].
+    comment: Option<String>,
     quantity: String,
     unit_price: String,
     vat_rate: String,
@@ -2544,7 +2553,12 @@ impl InvoicePdfLayout {
                 } else {
                     (*text).to_string()
                 };
-                wrap_invoice_text(&text, font_size_pt, (width_mm - 4.0).max(12.0))
+                // A line break in a cell starts a new wrapped paragraph.
+                text.lines()
+                    .flat_map(|paragraph| {
+                        wrap_invoice_text(paragraph, font_size_pt, (width_mm - 4.0).max(12.0))
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
         let line_count = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
@@ -2980,6 +2994,7 @@ fn parse_invoice_pdf_line_items(line_items: &Value) -> Vec<InvoicePdfLineItem> {
             let line_gross_value = invoice_json_decimal(item, "line_gross").unwrap_or(gross);
             InvoicePdfLineItem {
                 description: invoice_pdf_value_to_string(item.get("description")),
+                comment: line_comments::line_comment(item),
                 quantity: invoice_pdf_value_to_string(item.get("quantity")),
                 unit_price: invoice_pdf_value_to_string(item.get("unit_price")),
                 vat_rate: invoice_pdf_value_to_string(item.get("vat_rate")),
@@ -3629,6 +3644,7 @@ async fn build_selected_invoice_snapshot(
         load_allocated_quote_quantities(state, ctx.quote_id).await?
     };
     let mut requested = BTreeMap::<usize, Decimal>::new();
+    let mut requested_comments = BTreeMap::<usize, String>::new();
     if let Some(items) = requested_items {
         if items.is_empty() {
             return Err(err(
@@ -3661,6 +3677,13 @@ async fn build_selected_invoice_snapshot(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "Invoice line was selected more than once",
                 ));
+            }
+            match line_comments::normalize_line_comment(item.comment.as_deref()) {
+                Ok(Some(comment)) => {
+                    requested_comments.insert(item.line_index, comment);
+                }
+                Ok(None) => {}
+                Err(message) => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, message)),
             }
         }
     }
@@ -3779,6 +3802,9 @@ async fn build_selected_invoice_snapshot(
                 "quoted_quantity".to_string(),
                 Value::String(decimal_to_string(quoted_quantity)),
             );
+        }
+        if let Some(comment) = requested_comments.remove(&line_index) {
+            line_comments::set_line_comment(&mut selected_item, Some(comment));
         }
 
         total_net = (total_net + line_net).round_cents();
@@ -5354,6 +5380,11 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
             if item.is_cost_passthrough {
                 description.push_str(" · ");
                 description.push_str(invoice_pdf_label(language, "cost_passthrough"));
+            }
+            // The remark starts its own line inside the description cell.
+            if let Some(comment) = &item.comment {
+                description.push('\n');
+                description.push_str(comment);
             }
             let quantity = if item.quantity.trim().is_empty() {
                 "1".to_string()
@@ -11499,6 +11530,7 @@ async fn load_einvoice(
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string(),
+                note: line_comments::line_comment(line),
                 quantity,
                 unit_net,
                 line_net: decimal(line.get("line_net")).unwrap_or(quantity * unit_net),
@@ -13424,6 +13456,7 @@ mod tests {
                 "description": "Медицинская консультация",
                 "quantity": "1", "unit_price": "145.00", "vat_rate": "0",
                 "is_cost_passthrough": false, "line_gross": "145.00",
+                "comment": "За 2 и 3 квартал 2026",
                 "notes": "Подробное описание услуги, которое не должно попадать в счёт."
             }])),
             agency: InvoicePdfAgency {
@@ -13522,6 +13555,8 @@ mod tests {
         assert!(extracted_text.contains("PT-INV-UNIT"));
         assert!(extracted_text.contains("Макс Мюллер"));
         assert!(extracted_text.contains("Оплатить после получения счёта."));
+        // The remark on the position is printed; the internal service note is not.
+        assert!(extracted_text.contains("За 2 и 3 квартал 2026"));
         assert!(!extracted_text.contains("Подробное описание услуги"));
         assert!(extracted_text.contains("GMED - Agentur für Patientenbetreuung Heorhii Hudiiev"));
         assert!(extracted_text.contains("contact@gmed-health.com"));

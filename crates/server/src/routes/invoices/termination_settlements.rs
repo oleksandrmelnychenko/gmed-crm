@@ -1590,6 +1590,7 @@ async fn create_termination_final_invoice(
             selections.push(CreateInvoiceLineSelection {
                 line_index,
                 quantity: MoneyInput::String(decimal_to_string(quantity)),
+                comment: None,
             });
         }
         if !selections.is_empty() {

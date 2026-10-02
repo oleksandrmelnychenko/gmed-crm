@@ -585,6 +585,7 @@ mod tests {
         let vat = Decimal::from_str_exact(vat).unwrap();
         InvoicePdfLineItem {
             description: "Line".to_string(),
+            comment: None,
             quantity: "1".to_string(),
             unit_price: net.to_string(),
             vat_rate: rate.to_string(),
