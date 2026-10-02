@@ -10,6 +10,7 @@ import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
+  INVOICE_LINE_COMMENT_MAX_LENGTH,
   INVOICE_TYPES,
   calculateInvoiceSelectionTotals,
   createInvoiceLineSelection,
@@ -55,7 +56,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
 
   useEffect(() => {
     if (!open || optionsBusy || optionsError || !selectedQuote || isQuoteAvailableForInvoice(selectedQuote, form.invoiceType)) return;
-    onFormChange((current) => ({ ...current, quoteId: "", selectedLineIndexes: [], lineQuantities: {} }));
+    onFormChange((current) => ({ ...current, quoteId: "", selectedLineIndexes: [], lineQuantities: {}, lineComments: {} }));
   }, [open, optionsBusy, optionsError, selectedQuote, form.invoiceType, onFormChange]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -104,6 +105,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
   const quantityLabel = de ? "Menge" : "Количество";
   const availableLabel = de ? "Verfügbar" : "Доступно";
   const descriptionLabel = de ? "Leistungsbeschreibung" : "Описание услуги";
+  const commentLabel = de ? "Anmerkung auf der Rechnung" : "Примечание в счёте";
+  const commentPlaceholder = de ? "z. B. 2. und 3. Quartal 2026" : "например: за 2 и 3 квартал 2026";
   const availableCount = lines.filter((line) => invoiceLineQuantityAvailable(line, form.invoiceType) > 0).length;
   const selectableQuotes = quotes.filter((quote) => isQuoteAvailableForInvoice(quote, form.invoiceType));
 
@@ -133,6 +136,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                       onFormChange((current) => ({
                         ...current, quoteId: quote?.id ?? "",
                         ...createInvoiceLineSelection(quote?.line_items ?? [], current.invoiceType),
+                        // Remarks belong to the positions of the previous quote.
+                        lineComments: {},
                       }));
                     }}
                     className={cn(selectClass, "w-full min-w-0")}
@@ -284,6 +289,16 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                                 <p className="whitespace-nowrap font-mono text-sm font-medium tabular-nums">{money(totals.lineGrossByIndex[index] ?? 0)}</p>
                               </div>
                             </div>
+                            {selected ? (
+                              <label className="col-start-2 block min-w-0 space-y-1 text-xs text-muted-foreground sm:col-span-3">
+                                <span>{commentLabel}</span>
+                                <Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={busy}
+                                  aria-label={`${commentLabel}: ${name}`} placeholder={commentPlaceholder}
+                                  value={form.lineComments[String(index)] ?? ""}
+                                  className={cn(inputClass, "h-8 w-full min-w-0")}
+                                  onChange={(event) => onFormChange((current) => ({ ...current, lineComments: { ...current.lineComments, [String(index)]: event.target.value } }))} />
+                              </label>
+                            ) : null}
                             {available <= 0 ? <p className="col-start-2 text-xs text-muted-foreground sm:col-span-3">{de ? "Bereits vollständig abgerechnet" : "Уже выставлено полностью"}</p> : null}
                             {invalid ? <p role="alert" className="col-start-2 text-xs text-destructive sm:col-span-3">{de ? `Menge muss größer als 0 und höchstens ${available} sein.` : `Количество должно быть больше 0 и не больше ${available}.`}</p> : null}
                           </div>

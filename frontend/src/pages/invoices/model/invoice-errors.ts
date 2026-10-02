@@ -19,6 +19,14 @@ const EXACT: Record<string, Pair> = {
     "Der Zahler einer ausgestellten Rechnung kann nicht geändert werden. Rechnung stornieren und neu ausstellen.",
     "Плательщика выпущенного счёта изменить нельзя. Отмените счёт и выпустите новый.",
   ],
+  "the positions of a released invoice cannot change; cancel the invoice and issue a new one": [
+    "Die Positionen einer ausgestellten Rechnung können nicht geändert werden. Rechnung stornieren und neu ausstellen.",
+    "Позиции выпущенного счёта изменить нельзя. Отмените счёт и выпустите новый.",
+  ],
+  "invoice line comment is too long": [
+    "Die Anmerkung zur Position ist zu lang (max. 300 Zeichen).",
+    "Примечание к позиции слишком длинное (не более 300 символов).",
+  ],
   "the due date of a released invoice cannot change; a payment reminder sets a new deadline": [
     "Das Fälligkeitsdatum einer ausgestellten Rechnung ist fest. Eine neue Frist setzt die Zahlungserinnerung.",
     "Срок оплаты выпущенного счёта изменить нельзя. Новый срок задаёт напоминание об оплате.",

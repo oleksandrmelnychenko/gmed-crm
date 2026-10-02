@@ -72,6 +72,10 @@ const INVOICE_CREATION_ERRORS: Record<string, LocalizedText> = {
   "Invalid invoice line quantity": CHECK_SELECTION,
   "Invoice line quantity must be greater than zero": CHECK_SELECTION,
   "Invoice line was selected more than once": CHECK_SELECTION,
+  "Invoice line comment is too long": {
+    de: "Die Anmerkung zur Position ist zu lang (max. 300 Zeichen).",
+    ru: "Примечание к позиции слишком длинное (не более 300 символов).",
+  },
   "Invalid invoice type": {
     de: "Wählen Sie einen gültigen Rechnungstyp.",
     ru: "Выберите допустимый тип счёта.",

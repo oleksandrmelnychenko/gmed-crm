@@ -23,7 +23,7 @@ async function prepare(page: Page, lang = "ru") {
   ];
   const order = { id: orderId, order_number: "A-TEST-1", patient_id: patientId, patient_name: "Anna Beispiel", patient_pid: "P-TEST-1", process_gates: { billing_release_status: "granted", billing_release_note: null, package_coverage_status: "not_covered" }, leistungen: lines.map(line => ({ id: line.source_order_leistung_id, status: "approved" })) };
   const invoice = { ...quote, id: invoiceId, invoice_number: "INV-TEST-1", quote_id: quoteId, invoice_type: "final", status: "draft", issued_at: "2026-09-07T10:00:00Z", created_at: "2026-09-07T10:00:00Z", updated_at: "2026-09-07T10:00:00Z", total_net: "1200", total_vat: "228", total_gross: "1428", paid_amount: "0", balance_due: "1428", due_date: null, paid_at: null, notes: null, available_prepayments: [], prepayment_allocations: [] };
-  const fixture = { quote, quotes, order, invoice, postError: "", quotesError: false, writes: [] as unknown[], pdfReads: 0, errors: [] as string[] };
+  const fixture = { quote, quotes, order, invoice, postError: "", quotesError: false, writes: [] as unknown[], commentWrites: [] as unknown[], pdfReads: 0, errors: [] as string[] };
   page.on("pageerror", error => fixture.errors.push(error.message));
   await page.addInitScript(language => {
     localStorage.setItem("gmed_access_token", "invoice-test-token");
@@ -36,6 +36,12 @@ async function prepare(page: Page, lang = "ru") {
     if (path === `/quotes/${quoteId}/invoices` && route.request().method() === "POST") {
       fixture.writes.push(route.request().postDataJSON());
       return route.fulfill(fixture.postError ? { status: 422, json: { error: fixture.postError } } : { json: invoice });
+    }
+    if (path === `/invoices/${invoiceId}/line-comments` && route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { comments: { line_index: number; comment: string | null }[] };
+      fixture.commentWrites.push(body);
+      for (const { line_index, comment } of body.comments) Object.assign(invoice.line_items[line_index], { comment });
+      return route.fulfill({ json: invoice });
     }
     if (path === `/invoices/${invoiceId}/pdf`) { fixture.pdfReads++; return route.fulfill({ contentType: "application/pdf", body: previewPdf }); }
     if (path === "/quotes" && fixture.quotesError) return route.fulfill({ status: 500, json: { error: "Quotes unavailable" } });
@@ -134,6 +140,38 @@ test("allows an approved interim selection while other services remain unapprove
   await chooseComboboxOption(page, dialog.getByRole("combobox", { name: "Тип счёта", exact: true }), "Промежуточный");
   await dialog.getByRole("checkbox", { name: "Позиция: Service 1", exact: true }).uncheck();
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
+});
+
+test("a position remark is sent with the invoice and can be changed on the draft", async ({ page }) => {
+  const fixture = await prepare(page);
+  const dialog = await openCreate(page);
+  await chooseComboboxOption(page, dialog.getByRole("combobox", { name: "Тип счёта", exact: true }), "Промежуточный");
+  // Only a selected position has a remark field.
+  await dialog.getByRole("checkbox", { name: "Позиция: Service 2", exact: true }).uncheck();
+  await expect(dialog.getByRole("textbox", { name: "Примечание в счёте: Service 2", exact: true })).toHaveCount(0);
+  await dialog.getByRole("textbox", { name: "Примечание в счёте: Service 1", exact: true }).fill("  за 2 и 3 квартал 2026 ");
+  await page.screenshot({ path: "../artifacts/design-qa/invoice-create-remark-ru.png", animations: "disabled" });
+  await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const [write] = fixture.writes as { line_items: unknown[] }[];
+  expect(write.line_items.slice(0, 2)).toEqual([
+    { line_index: 0, quantity: 1, comment: "за 2 и 3 квартал 2026" },
+    { line_index: 2, quantity: 1 },
+  ]);
+
+  // The new draft opens; a remark is saved when Enter is pressed in its field.
+  const sheet = page.getByRole("dialog");
+  const remark = sheet.getByRole("textbox", { name: "Примечание к позиции: Service 1", exact: true }).filter({ visible: true });
+  await remark.scrollIntoViewIfNeeded();
+  await remark.fill("счёт клиники № 4711");
+  await remark.press("Enter");
+  await expect.poll(() => fixture.commentWrites).toEqual([
+    { comments: [{ line_index: 0, comment: "счёт клиники № 4711" }] },
+  ]);
+  await expect(remark).toHaveValue("счёт клиники № 4711");
+  await remark.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "../artifacts/design-qa/invoice-lines-remark-ru.png", animations: "disabled" });
+  expect(fixture.errors).toEqual([]);
 });
 
 test("hides paid and rejected quotes but keeps a paid advance available for settlement", async ({ page }) => {

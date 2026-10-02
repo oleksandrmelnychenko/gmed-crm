@@ -1247,6 +1247,7 @@ function InvoiceLineCard({ line, currency }: { line: PortalInvoiceLineItem; curr
         </div>
         <CountBadge>{formatPortalCurrency(line.line_gross, currency)}</CountBadge>
       </div>
+      {line.comment ? <p className="mt-3 break-words text-sm text-foreground">{line.comment}</p> : null}
       {line.notes ? <p className={cn("mt-3", tokens.text.muted)}>{line.notes}</p> : null}
     </article>
   );

@@ -5,6 +5,7 @@ import {
   blankCreateForm,
   createInvoiceLineSelection,
   invoiceLineQuantityAvailable,
+  invoiceLineSelectionPayload,
   isInvoiceSelectionValid,
   isQuoteAvailableForInvoice,
   isQuoteClosedForInvoicing,
@@ -409,6 +410,17 @@ describe("invoice creation selection", () => {
     expect(isInvoiceSelectionValid([line(), line()], {
       ...blankCreateForm("quote"), selectedLineIndexes: [0], lineQuantities: { "0": "2" },
     })).toBe(false);
+  });
+
+  it("sends a remark only for the selected positions that have one", () => {
+    expect(invoiceLineSelectionPayload({
+      selectedLineIndexes: [0, 2],
+      lineQuantities: { "0": "2", "1": "1", "2": "1" },
+      lineComments: { "0": "  2. und 3. Quartal 2026 ", "1": "not selected", "2": "   " },
+    })).toEqual([
+      { line_index: 0, quantity: 2, comment: "2. und 3. Quartal 2026" },
+      { line_index: 2, quantity: 1 },
+    ]);
   });
 
   it("rejects unavailable, duplicate and nonexistent selections", () => {

@@ -79,6 +79,7 @@ import { creditNoteSelectionPayload, previewCreditNote } from "./model/credit-no
 import { CREDIT_TRANSFER_METHOD, paymentOverpayment } from "./model/overpayment";
 import { CreditBalancePanel } from "./ui/credit-balance-panel";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
+import { InvoiceLineComment } from "./ui/invoice-line-comment";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
 import { dunningBlockReason, dunningErrorKey } from "./model/invoice-dunning";
@@ -128,6 +129,7 @@ import {
   reverseInvoicePayment,
   reverseInvoiceCreditNote,
   reverseInvoiceRefund,
+  updateInvoiceLineComments,
   updateInvoicePayer,
   updateInvoiceStatus,
   updateInvoiceVisibility,
@@ -147,6 +149,7 @@ import {
   buildSearchParams,
   createInvoiceLineSelection,
   effectiveAdvanceBasis,
+  invoiceLineSelectionPayload,
   isInvoiceSelectionValid,
   formatCurrency,
   formatDate,
@@ -1807,10 +1810,7 @@ function useStaffInvoicesPageContent() {
     setCreateBusy(true);
     setCreateError(null);
     try {
-      const selectedLines = createForm.selectedLineIndexes.map((lineIndex) => ({
-        line_index: lineIndex,
-        quantity: Number(createForm.lineQuantities[String(lineIndex)] || 0),
-      }));
+      const selectedLines = invoiceLineSelectionPayload(createForm);
       const created = await createInvoice(createForm.quoteId, prepaymentAdvance
         ? {
             invoice_type: "advance",
@@ -2028,6 +2028,10 @@ function useStaffInvoicesPageContent() {
     : null;
   const visibilityDirty = Boolean(detail && hasFormChanges(visibilityForm, invoiceToVisibilityForm(detail)));
   const payerDirty = Boolean(detail && hasFormChanges(payerForm, invoiceToPayerForm(detail)));
+  // The positions are fixed with the release; until then their remarks can be typed.
+  const lineCommentsEditable = Boolean(
+    detail && access.canCreate && detail.status === "draft" && !isInvoiceReleased(detail),
+  );
   // The detail sheet's inline forms are prefilled and re-prefilled after every
   // save, so compare with those prefills instead of tracking edited fields.
   const detailHasUnsavedInput = invoiceDetailHasUnsavedInput({
@@ -2113,6 +2117,20 @@ function useStaffInvoicesPageContent() {
     } finally {
       setPayerBusy(false);
     }
+  }
+
+  // Rejects with a localized message; the field of the position shows it.
+  async function handleSaveLineComment(lineIndex: number, comment: string) {
+    if (!selectedInvoiceId) return;
+    try {
+      await updateInvoiceLineComments(selectedInvoiceId, [
+        { line_index: lineIndex, comment: comment || null },
+      ]);
+    } catch (error) {
+      throw new Error(localizeInvoiceError(error, lang, t.common_error));
+    }
+    clearApiCache();
+    setReloadToken((current) => current + 1);
   }
 
   async function handleCreateDunning() {
@@ -4025,7 +4043,13 @@ function useStaffInvoicesPageContent() {
                 ) : (
                   <DataTableSurface
                     rows={detail.line_items.map((line, index) => ({ line, index }))}
-                    rowHeightOverrides={{ comfortable: 72 }}
+                    rowHeightOverrides={{
+                      comfortable: lineCommentsEditable
+                        ? 108
+                        : detail.line_items.some((line) => line.comment?.trim())
+                          ? 104
+                          : 72,
+                    }}
                     mobilePrimaryColumnId="description"
                     mobileDetailColumnIds={["vat_source", "vat_rate", "net", "vat", "gross"]}
                     columns={
@@ -4076,6 +4100,13 @@ function useStaffInvoicesPageContent() {
                                     {t.orders_cost_pass_through_badge}
                                   </span>
                                 ) : null}
+                                <InvoiceLineComment
+                                  comment={row.line.comment}
+                                  editable={lineCommentsEditable}
+                                  label={`${lang === "de" ? "Anmerkung zur Position" : "Примечание к позиции"}: ${lineDescription}`}
+                                  placeholder={lang === "de" ? "Anmerkung auf der Rechnung" : "Примечание в счёте"}
+                                  onSave={(comment) => handleSaveLineComment(row.index, comment)}
+                                />
                               </div>
                             );
                           },

@@ -253,7 +253,25 @@ export function blankCreateForm(quoteId = ""): CreateForm {
     notes: "",
     selectedLineIndexes: [],
     lineQuantities: {},
+    lineComments: {},
   };
+}
+
+/** Longest remark a position can carry; the server refuses longer ones. */
+export const INVOICE_LINE_COMMENT_MAX_LENGTH = 300;
+
+/** The selected positions as the API takes them; a remark is sent only when one was typed. */
+export function invoiceLineSelectionPayload(
+  form: Pick<CreateForm, "selectedLineIndexes" | "lineQuantities" | "lineComments">,
+) {
+  return form.selectedLineIndexes.map((lineIndex) => {
+    const comment = (form.lineComments[String(lineIndex)] ?? "").trim();
+    return {
+      line_index: lineIndex,
+      quantity: Number(form.lineQuantities[String(lineIndex)] || 0),
+      ...(comment ? { comment } : {}),
+    };
+  });
 }
 
 export function invoiceLineQuantityAvailable(
