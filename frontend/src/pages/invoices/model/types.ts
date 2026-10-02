@@ -63,7 +63,10 @@ export type InvoiceLineItem = {
   line_vat: string;
   line_gross: string;
   external_document_id?: string | null;
+  /** Internal service description from the quote; never printed on the invoice. */
   notes?: string | null;
+  /** Remark printed under the position on the invoice, e.g. the billed quarter. */
+  comment?: string | null;
   source_order_leistung_id?: string | null;
   quote_line_index?: number;
   quoted_quantity?: string;
@@ -494,6 +497,8 @@ export type CreateForm = {
   notes: string;
   selectedLineIndexes: number[];
   lineQuantities: Record<string, string>;
+  /** Remarks typed for selected positions, by quote line index. */
+  lineComments: Record<string, string>;
 };
 
 export type StatusForm = {

@@ -175,6 +175,14 @@ export function updateInvoicePayer(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/payer`, payload);
 }
 
+/** Sets or clears the remarks of positions of a draft invoice. */
+export function updateInvoiceLineComments(
+  invoiceId: string,
+  comments: { line_index: number; comment: string | null }[],
+) {
+  return postJson<InvoiceItem>(`/invoices/${invoiceId}/line-comments`, { comments });
+}
+
 export function applyInvoicePrepayment(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(
     `/invoices/${invoiceId}/prepayment-allocations`,

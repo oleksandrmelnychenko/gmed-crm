@@ -22,6 +22,16 @@ describe("localizeInvoiceError", () => {
     expect(localizeInvoiceError(error, "ru", "Ошибка")).toContain("Отмените счёт");
   });
 
+  it("explains why the positions of a released invoice are locked and how long a remark may be", () => {
+    const locked = new Error(
+      "The positions of a released invoice cannot change; cancel the invoice and issue a new one",
+    );
+    expect(localizeInvoiceError(locked, "ru", "Ошибка")).toContain("Позиции выпущенного счёта");
+    expect(localizeInvoiceError(locked, "de", "Fehler")).toContain("Positionen einer ausgestellten Rechnung");
+    const tooLong = new Error("Invoice line comment is too long");
+    expect(localizeInvoiceError(tooLong, "ru", "Ошибка")).toContain("300");
+  });
+
   it("maps release checks by code and names the missing address parts", () => {
     const incomplete = {
       code: "recipient_address_incomplete",

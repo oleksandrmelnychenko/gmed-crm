@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "@/lib/api";
-import { createInvoice, mergeQuoteOptions } from "./invoice-api";
+import { createInvoice, mergeQuoteOptions, updateInvoiceLineComments } from "./invoice-api";
 import type { QuoteOption } from "../model/types";
 
 vi.mock("@/lib/api", () => ({ apiFetch: vi.fn(), apiFetchFile: vi.fn() }));
@@ -14,6 +14,15 @@ describe("invoice creation", () => {
     request.mockResolvedValueOnce({ id: "invoice-1" });
     await expect(createInvoice("quote-1", payload)).resolves.toEqual({ id: "invoice-1" });
     expect(request).toHaveBeenCalledExactlyOnceWith("/quotes/quote-1/invoices", { method: "POST", body: JSON.stringify(payload) });
+  });
+});
+
+describe("invoice line remarks", () => {
+  it("posts the remarks of a draft, null clearing one", async () => {
+    request.mockResolvedValueOnce({ id: "invoice-1" });
+    const comments = [{ line_index: 0, comment: "2. und 3. Quartal 2026" }, { line_index: 1, comment: null }];
+    await expect(updateInvoiceLineComments("invoice-1", comments)).resolves.toEqual({ id: "invoice-1" });
+    expect(request).toHaveBeenCalledExactlyOnceWith("/invoices/invoice-1/line-comments", { method: "POST", body: JSON.stringify({ comments }) });
   });
 });
 

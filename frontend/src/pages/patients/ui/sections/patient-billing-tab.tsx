@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import {
   invoiceCreationErrorMessage,
 } from "@/pages/invoices/model/billing-release";
-import { isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
+import { INVOICE_LINE_COMMENT_MAX_LENGTH, isQuoteClosedForInvoicing } from "@/pages/invoices/model/invoice-model";
 import type { InvoiceLineItem, InvoiceType, QuoteOption } from "@/pages/invoices/model/types";
 import { PatientTerminationSettlements } from "@/pages/invoices/termination-settlement/ui";
 
@@ -97,6 +97,8 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
   const [dueDate, setDueDate] = useState("");
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
   const [selectedLines, setSelectedLines] = useState<number[]>([]);
+  // Remarks printed under the selected positions, by quote line index.
+  const [lineComments, setLineComments] = useState<Record<number, string>>({});
   const [requestId, setRequestId] = useState(() => crypto.randomUUID());
   const [revision, setRevision] = useState(0);
   const [busy, setBusy] = useState(true);
@@ -117,6 +119,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Summe des Entwurfs", choose: "Mindestens eine Leistung oder einen Kostenbeleg auswählen.", patientPaid: "Patient selbst", gmedPaid: "GMed", unpaid: "Unbezahlt",
     ready: "Nicht berechnet", reserved: "Im Entwurf / berechnet", afterPayment: "Nach Zahlung", notRequired: "Nicht erforderlich",
     orderService: "Über die Auftragsleistung",
+    comment: "Anmerkung auf der Rechnung", commentHint: "z. B. 2. und 3. Quartal 2026",
   } : {
     title: "Выставление пациенту", subtitle: "Соберите услуги и оплаченные GMed внешние расходы в одном счёте.",
     order: "Заказ (необязательно)", noOrder: "Без заказа", currency: "Валюта", quote: "Предложение с услугами", noQuote: "Только расходы — без предложения", type: "Тип счёта",
@@ -130,6 +133,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     total: "Сумма черновика", choose: "Выберите хотя бы одну услугу или расход.", patientPaid: "Сам пациент", gmedPaid: "GMed", unpaid: "Не оплачен",
     ready: "Не выставлено", reserved: "В черновике / выставлено", afterPayment: "После оплаты", notRequired: "Не требуется",
     orderService: "Через услугу заказа",
+    comment: "Примечание в счёте", commentHint: "например: за 2 и 3 квартал 2026",
   };
 
   useEffect(() => {
@@ -194,6 +198,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
     const next = orderQuotes.find(item => item.id === nextId) ?? null;
     setQuoteId(next?.id ?? "");
     setSelectedLines(next ? next.line_items.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0) : []);
+    setLineComments({});
     setCreated(null);
   }
 
@@ -212,7 +217,10 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
           currency: activeCurrency,
           invoice_type: invoiceType,
           due_date: dueDate || null,
-          line_items: quote ? selectedLines.map(line_index => ({ line_index, quantity: String(availableQuantity(serviceLines[line_index])) })) : null,
+          line_items: quote ? selectedLines.map(line_index => {
+            const comment = (lineComments[line_index] ?? "").trim();
+            return { line_index, quantity: String(availableQuantity(serviceLines[line_index])), ...(comment ? { comment } : {}) };
+          }) : null,
           external_invoice_ids: selectedExpenses,
         }),
       });
@@ -221,6 +229,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       setSelectedExpenses([]);
       setQuoteId("");
       setSelectedLines([]);
+      setLineComments({});
       setRevision(value => value + 1);
     } catch (saveError) {
       setError(invoiceCreationErrorMessage(saveError, lang, copy.saveFailed));
@@ -259,7 +268,7 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
       <p className="border-b border-border/60 bg-muted/20 px-4 py-2.5 text-xs leading-5 text-muted-foreground">{copy.late}</p>
       <form className="space-y-4 p-4" onSubmit={submit}>
         <div className="grid gap-3 lg:grid-cols-5">
-          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
+          <Field label={copy.order}><NativeComboboxSelect value={orderId || "__none__"} disabled={busy || saving} onChange={event => { const nextOrderId = event.target.value === "__none__" ? "" : event.target.value; const nextOrder = workspace?.orders.find(item => item.id === nextOrderId); setOrderId(nextOrderId); if (nextOrder) setBillingCurrency(nextOrder.currency); setQuoteId(""); setSelectedLines([]); setLineComments({}); setSelectedExpenses([]); setCreated(null); }}><option value="__none__">{copy.noOrder}</option>{workspace?.orders.map(item => <option key={item.id} value={item.id}>{item.order_number} · {item.cancellation_reason === "contract_terminated" ? (de ? "gekündigt" : "расторгнут") : item.status} · {item.currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.currency}><NativeComboboxSelect value={activeCurrency} disabled={Boolean(order) || busy || saving} onChange={event => { setBillingCurrency(event.target.value); setSelectedExpenses([]); setCreated(null); }}>{currencyOptions.map(currency => <option key={currency} value={currency}>{currency}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.quote}><NativeComboboxSelect value={quoteId || "__empty__"} disabled={!order || busy || saving} onChange={event => selectQuote(event.target.value === "__empty__" ? "" : event.target.value)}><option value="__empty__">{copy.noQuote}</option>{orderQuotes.map(item => <option key={item.id} value={item.id}>{item.quote_number}</option>)}</NativeComboboxSelect></Field>
           <Field label={copy.type}><NativeComboboxSelect value={invoiceType} disabled={saving} onChange={event => { const value = event.target.value as InvoiceType; setInvoiceType(value); if (value === "final") setSelectedLines(serviceLines.map((line, index) => availableQuantity(line) > 0 ? index : -1).filter(index => index >= 0)); }}><option value="interim">{copy.interim}</option><option value="final">{copy.final}</option></NativeComboboxSelect></Field>
@@ -275,11 +284,13 @@ export function PatientBillingTab({ patientId }: { patientId: string }) {
               const available = availableQuantity(line);
               if (available <= 0) return null;
               const checked = selectedLines.includes(index);
-              return <label key={`${quote.id}-${index}`} className={cn("grid cursor-pointer grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3", !checked && "bg-muted/15")}>
+              return <div key={`${quote.id}-${index}`} className={cn(!checked && "bg-muted/15")}><label className="grid cursor-pointer grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-3 px-4 py-3">
                 <input className={checkboxClass} type="checkbox" checked={checked} disabled={saving || invoiceType === "final"} onChange={event => setSelectedLines(current => event.target.checked ? [...current, index] : current.filter(value => value !== index))} />
                 <span className="min-w-0"><span className="block text-sm font-medium">{line.description}</span><span className="mt-1 block text-xs text-muted-foreground">{available} × {formatMoneyAmount(line.unit_price, activeCurrency)} · {de ? "MwSt." : "НДС"} {line.vat_rate}%</span></span>
                 <span className="whitespace-nowrap font-mono text-sm font-semibold tabular-nums">{formatMoneyAmount(String(available * Number(line.line_gross || 0) / Math.max(Number(line.quantity || 1), 1)), activeCurrency)}</span>
-              </label>;
+              </label>
+                {checked ? <label className="block space-y-1 px-4 pb-3 pl-[2.75rem] text-xs text-muted-foreground"><span>{copy.comment}</span><Input type="text" maxLength={INVOICE_LINE_COMMENT_MAX_LENGTH} disabled={saving} aria-label={`${copy.comment}: ${line.description}`} placeholder={copy.commentHint} value={lineComments[index] ?? ""} onChange={event => setLineComments(current => ({ ...current, [index]: event.target.value }))} /></label> : null}
+              </div>;
             })}
           </div>}
         </section>

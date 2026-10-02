@@ -99,6 +99,8 @@ export type PortalInvoiceLineItem = {
   line_vat: string;
   line_gross: string;
   notes?: string | null;
+  /** Remark printed under the position on the invoice. */
+  comment?: string | null;
 };
 
 type InvoicePortalVisibility = {
