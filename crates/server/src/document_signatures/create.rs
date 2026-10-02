@@ -437,7 +437,6 @@ pub(super) async fn create_request(
 
     let options = InvitationOptions {
         level,
-        expires_at: plan.expires_at,
         message: Some(message),
         language: Some(language),
     };

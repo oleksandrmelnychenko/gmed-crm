@@ -57,11 +57,12 @@ impl Level {
 pub const LANGUAGES: [&str; 4] = ["de", "en", "fr", "it"];
 
 /// Per-request invitation options. The subject and the message stay generic:
-/// document types and page ranges only, never patient or health data.
+/// document types and page ranges only, never patient or health data. The
+/// deadline of a request is not among them: the provider's `expires_at` is an
+/// opt-in feature there (403 when it is off), so the worker enforces it.
 #[derive(Clone, Debug, Default)]
 pub struct InvitationOptions {
     pub level: Level,
-    pub expires_at: Option<DateTime<Utc>>,
     pub message: Option<String>,
     pub language: Option<String>,
 }
@@ -385,17 +386,12 @@ impl Provider {
             "quality":self.quality_for(options.level),
             "custom":custom(id,hash),"attach_on_success":[],
             "signatures":signature_entries_in(signers, options.language())});
-        // `message` and `expiration_date` follow the Sign API v2 schema; both
-        // still need confirmation on the demo account before PROD use.
         if let Some(message) = options
             .message
             .as_deref()
             .filter(|message| !message.trim().is_empty())
         {
             body["message"] = json!(message);
-        }
-        if let Some(expires_at) = options.expires_at {
-            body["expiration_date"] = json!(expires_at.to_rfc3339());
         }
         // Never retry POST: an HTTP timeout may have occurred after invitations were sent.
         let bytes = self

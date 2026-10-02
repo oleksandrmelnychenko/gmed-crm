@@ -1136,6 +1136,50 @@ async fn withdrawal_creates_no_consent_and_staff_are_notified() {
 }
 
 #[tokio::test]
+async fn request_past_its_deadline_is_withdrawn_at_the_provider_and_closed_as_expired() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "1970-01-01").await;
+    let release = upload(&env, patient, Doc::new("confidentiality_release", 1)).await;
+    let information = upload(&env, patient, Doc::new("privacy_information", 1)).await;
+    let expires_at = (chrono::Utc::now() + chrono::Duration::days(3)).to_rfc3339();
+    let id = send_package(&env, json!({"document_ids":[release],"attachment_ids":[information],"signers":[signer("Erika", "erika@example.org", "client")],"expires_at":expires_at})).await;
+    until_pending(&env, id).await;
+    // The provider's own expiry is an opt-in feature there: it is not asked for.
+    let payload = env.mock.payloads.lock().unwrap().last().cloned().unwrap();
+    assert!(payload.get("expires_at").is_none(), "{payload}");
+    assert!(payload.get("expiration_date").is_none(), "{payload}");
+
+    // Before the deadline the request stays open.
+    poll_request_now(&env.state, id).await.unwrap();
+    assert_eq!(status_of(&env.pool, id).await, "pending");
+    assert!(env.mock.withdrawals.lock().unwrap().is_empty());
+
+    sqlx::query(
+        "UPDATE document_signature_requests SET expires_at=now()-interval '1 minute' WHERE id=$1",
+    )
+    .bind(id)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    poll_request_now(&env.state, id).await.unwrap();
+    assert_eq!(status_of(&env.pool, id).await, "expired");
+    assert_eq!(env.mock.withdrawals.lock().unwrap().len(), 1);
+    assert_eq!(count(&env.pool, "SELECT count(*) FROM audit_log WHERE action='document_signature_status_changed' AND context->>'status'='expired' AND context->>'request_id'=$1::text", id).await, 1);
+    assert_eq!(notified(&env, "signature_request_closed", release).await, 1);
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM documents WHERE patient_id=$1 AND signed_at IS NOT NULL",
+            patient
+        )
+        .await,
+        0
+    );
+    // Closed for good: the worker does not pick it up again.
+    assert!(!poll_request_now(&env.state, id).await.unwrap());
+}
+
+#[tokio::test]
 async fn package_validation_matrix_and_rbac() {
     let Some(env) = env().await else { return };
     let patient = seed_patient(&env.pool, env.admin_id, "1985-07-07").await;
