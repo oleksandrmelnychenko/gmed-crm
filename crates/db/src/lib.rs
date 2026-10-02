@@ -10,19 +10,30 @@ pub type DbPool = sqlx::PgPool;
 /// server's UTC day. Stored `timestamptz` values are unaffected.
 pub const SESSION_TIME_ZONE: &str = "Europe/Berlin";
 
-/// Applies the GMed session settings to connection options.
-pub fn with_session_settings(options: PgConnectOptions) -> PgConnectOptions {
-    options.options([("TimeZone", SESSION_TIME_ZONE)])
+/// Pool options that apply the GMed session settings to every connection.
+///
+/// The zone is set after connecting: sqlx sends `TimeZone=UTC` in the startup
+/// packet and PostgreSQL applies it after the `options` string, so a
+/// `-c TimeZone=…` connect option never takes effect.
+pub fn pool_options() -> PgPoolOptions {
+    PgPoolOptions::new().after_connect(|connection, _meta| {
+        Box::pin(async move {
+            sqlx::query("SELECT set_config('TimeZone', $1, false)")
+                .bind(SESSION_TIME_ZONE)
+                .execute(&mut *connection)
+                .await?;
+            Ok(())
+        })
+    })
 }
 
 pub async fn create_pool(database_url: &str) -> Result<DbPool, sqlx::Error> {
-    let options = with_session_settings(PgConnectOptions::from_str(database_url)?);
-    PgPoolOptions::new()
+    pool_options()
         .max_connections(20)
         .min_connections(2)
         .acquire_timeout(Duration::from_secs(5))
         .idle_timeout(Duration::from_secs(600))
-        .connect_with(options)
+        .connect_with(PgConnectOptions::from_str(database_url)?)
         .await
 }
 

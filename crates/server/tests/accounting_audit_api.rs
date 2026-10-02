@@ -24,9 +24,9 @@ async fn test_context() -> Option<(axum::Router, PgPool, Uuid)> {
         url.contains("@127.0.0.1:55497/accounting_audit_20260907")
             || url.contains("@gmed-accounting-integrity-pg/accounting_audit_20260907")
     );
-    let pool = sqlx::postgres::PgPoolOptions::new()
+    let pool = gmed_db::pool_options()
         .max_connections(4)
-        .connect_with(gmed_db::with_session_settings(url.parse().unwrap()))
+        .connect_with(url.parse().unwrap())
         .await
         .expect("Audit database must be available");
     let admin = seed_user(&pool, &unique_tag("audit-ceo"), "ceo").await;
