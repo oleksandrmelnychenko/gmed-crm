@@ -38,6 +38,8 @@ pub(super) struct EInvoiceParty {
 #[derive(Debug, Clone)]
 pub(super) struct EInvoiceLine {
     pub name: String,
+    /// Invoice line note (BT-127): the remark on the position.
+    pub note: Option<String>,
     pub quantity: Decimal,
     pub unit_net: Decimal,
     pub line_net: Decimal,
@@ -340,10 +342,18 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
 
     for (index, line) in invoice.lines.iter().enumerate() {
         let (category, _) = line_tax(line);
+        let note = text(&line.note)
+            .map(|note| {
+                format!(
+                    "<ram:IncludedNote><ram:Content>{}</ram:Content></ram:IncludedNote>",
+                    escape(note)
+                )
+            })
+            .unwrap_or_default();
         xml.push_str(&format!(
             concat!(
                 "<ram:IncludedSupplyChainTradeLineItem>",
-                "<ram:AssociatedDocumentLineDocument><ram:LineID>{id}</ram:LineID></ram:AssociatedDocumentLineDocument>",
+                "<ram:AssociatedDocumentLineDocument><ram:LineID>{id}</ram:LineID>{note}</ram:AssociatedDocumentLineDocument>",
                 "<ram:SpecifiedTradeProduct><ram:Name>{name}</ram:Name></ram:SpecifiedTradeProduct>",
                 "<ram:SpecifiedLineTradeAgreement><ram:NetPriceProductTradePrice><ram:ChargeAmount>{price}</ram:ChargeAmount></ram:NetPriceProductTradePrice></ram:SpecifiedLineTradeAgreement>",
                 "<ram:SpecifiedLineTradeDelivery><ram:BilledQuantity unitCode=\"C62\">{quantity}</ram:BilledQuantity></ram:SpecifiedLineTradeDelivery>",
@@ -354,6 +364,7 @@ pub(super) fn build_cii_xml(invoice: &EInvoice) -> String {
                 "</ram:IncludedSupplyChainTradeLineItem>",
             ),
             id = index + 1,
+            note = note,
             name = escape(line.name.trim()),
             price = plain(line.unit_net),
             quantity = plain(line.quantity),
@@ -738,6 +749,7 @@ mod tests {
                     line_net: dec("100"),
                     vat_rate: dec("19"),
                     is_cost_passthrough: false,
+                    note: Some("2. & 3. Quartal 2026".to_string()),
                 },
                 EInvoiceLine {
                     name: "Klinikrechnung".to_string(),
@@ -746,6 +758,7 @@ mod tests {
                     line_net: dec("200"),
                     vat_rate: dec("0"),
                     is_cost_passthrough: true,
+                    note: None,
                 },
             ],
             total_gross: dec("319"),
@@ -780,6 +793,16 @@ mod tests {
         assert!(!xml.contains("<ram:ExemptionReasonCode>"));
         assert!(xml.contains("<ram:IBANID>DE02120300000000202051</ram:IBANID>"));
         assert!(xml.contains("Danke &amp; bis bald &lt;GMed&gt;"));
+        // The remark on a position is the invoice line note (BT-127); a line
+        // without one carries no empty element.
+        assert!(xml.contains(concat!(
+            "<ram:AssociatedDocumentLineDocument><ram:LineID>1</ram:LineID>",
+            "<ram:IncludedNote><ram:Content>2. &amp; 3. Quartal 2026</ram:Content></ram:IncludedNote>",
+            "</ram:AssociatedDocumentLineDocument>"
+        )));
+        assert!(xml.contains(
+            "<ram:AssociatedDocumentLineDocument><ram:LineID>2</ram:LineID></ram:AssociatedDocumentLineDocument>"
+        ));
         assert!(xml.contains(r#"<udt:DateTimeString format="102">20260917</udt:DateTimeString>"#));
     }
 
@@ -805,6 +828,7 @@ mod tests {
             line_net: dec("237.50"),
             vat_rate: dec("19"),
             is_cost_passthrough: false,
+            note: None,
         }];
         invoice.total_gross = dec("282.63");
         invoice.prepaid_amount = Decimal::ZERO;
@@ -935,6 +959,7 @@ mod tests {
                 line_net: dec("145"),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                note: None,
             },
             EInvoiceLine {
                 name: "Klinikanzahlung".to_string(),
@@ -943,6 +968,7 @@ mod tests {
                 line_net: dec("1000"),
                 vat_rate: dec("0"),
                 is_cost_passthrough: true,
+                note: None,
             },
         ];
         invoice.total_gross = dec("1145");
@@ -975,6 +1001,7 @@ mod tests {
                 line_net: dec("1310"),
                 vat_rate: dec("19"),
                 is_cost_passthrough: false,
+                note: None,
             },
             EInvoiceLine {
                 name: "Organisation der Behandlung".to_string(),
@@ -983,6 +1010,7 @@ mod tests {
                 line_net: dec("2050"),
                 vat_rate: dec("0"),
                 is_cost_passthrough: false,
+                note: None,
             },
         ];
         invoice.total_gross = dec("3608.90");
