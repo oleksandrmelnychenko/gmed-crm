@@ -6,7 +6,7 @@ use std::{process::Command, thread, time::Duration};
 use axum::Extension;
 use axum::extract::ConnectInfo;
 use sqlx::PgPool;
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::PgConnectOptions;
 use uuid::Uuid;
 
 use gmed_server::settings::{SettingsCache, TokenSettings};
@@ -251,10 +251,10 @@ async fn connect_pool(
     database_name: &str,
     max_connections: u32,
 ) -> Result<PgPool, sqlx::Error> {
-    let connect_options = PgConnectOptions::from_str(database_url)
-        .map(|options| gmed_db::with_session_settings(options.database(database_name)));
+    let connect_options =
+        PgConnectOptions::from_str(database_url).map(|options| options.database(database_name));
 
-    PgPoolOptions::new()
+    gmed_db::pool_options()
         .max_connections(max_connections)
         .min_connections(0)
         .connect_with(connect_options?)

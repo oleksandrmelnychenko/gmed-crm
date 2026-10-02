@@ -12,7 +12,7 @@
 
 ## Сервер
 
-- `gmed_db::SESSION_TIME_ZONE` — кожне з'єднання з PostgreSQL працює з `TimeZone=Europe/Berlin`. Через це `CURRENT_DATE`, `timestamptz::date`, `date_trunc` і неявне порівняння `date + time` з `now()` дають берлінський результат. Тестові пули підключаються через `gmed_db::with_session_settings`, щоб поводитися так само, як production.
+- `gmed_db::SESSION_TIME_ZONE` — кожне з'єднання з PostgreSQL працює з `TimeZone=Europe/Berlin`. Через це `CURRENT_DATE`, `timestamptz::date`, `date_trunc` і неявне порівняння `date + time` з `now()` дають берлінський результат. Пояс задає `gmed_db::pool_options()` командою `set_config('TimeZone', …)` після підключення: `sqlx` сам надсилає `TimeZone=UTC` у стартовому пакеті, і PostgreSQL застосовує його після рядка `options`, тому `-c TimeZone=…` у параметрах підключення не діє. Тестові пули теж створюються через `gmed_db::pool_options()`, щоб поводитися так само, як production.
 - `gmed_server::app_time`:
   - `today()` — поточна дата в Німеччині (замість `Utc::now().date_naive()`);
   - `date_of(instant)` — берлінська дата моменту часу (замість `instant.date_naive()`);

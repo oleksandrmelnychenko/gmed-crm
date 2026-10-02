@@ -2141,7 +2141,7 @@ async fn assert_interpreter_sees_only_documents_opened_to_him(link: InterpreterP
     let doctor_id = seed_doctor(&pool, provider_id, &tag).await;
     // Visits of the patient on separate days from today on, so a booking
     // link stays inside the access window.
-    let today = chrono::Utc::now().date_naive();
+    let today = gmed_server::app_time::today();
     let day = |offset: u64| {
         (today + chrono::Days::new(offset))
             .format("%Y-%m-%d")
