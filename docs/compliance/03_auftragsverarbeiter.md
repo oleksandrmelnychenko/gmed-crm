@@ -11,6 +11,7 @@ Weitergabe nicht privilegiert.
 | DATEV eG | Auftragsverarbeiter bzw. Empfänger über den Steuerberater | Buchungsdaten, Debitoren | DE | [ ] | derzeit nur lesender Zugriff; Tokens verschlüsselt gespeichert |
 | Steuerberater | eigener Verantwortlicher (Berufsgeheimnisträger) | Rechnungsdaten | DE | entfällt | Rechtsgrundlage Art. 6 Abs. 1 lit. c |
 | Let's Encrypt (ISRG) | kein Personenbezug | Domain, Admin-E-Mail | US | entfällt | nur Zertifikatsausstellung |
+| Sectigo Limited | kein Personenbezug | SHA-256-Hashwert des täglichen Ankers der Personalakten | GB | entfällt | Zeitstempeldienst RFC 3161 (`https://timestamp.sectigo.com`), seit 02.10.2026; keine Dokumente, keine Namen |
 | OpenAI | **gesperrt** | — | US | — | nur nach dokumentierter Freigabe (`GMED_MEDICATION_AI_DATA_TRANSFER_APPROVED`), SCC und DSFA; Standard ist aus |
 | BfArM, G-BA | kein Personenbezug | nur Abruf öffentlicher Arzneimitteldaten | DE | entfällt | — |
 
