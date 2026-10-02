@@ -811,13 +811,22 @@ async fn sync_claim(state: &AppState, row: &PgRow, token: Uuid) -> Result<(), &'
             .map_err(|_| "signature_scan_failed")?;
         archive(state, row, token, &verified, &pdf, &report).await?;
     } else {
-        let status = match verified.status.as_str() {
+        let mut status = match verified.status.as_str() {
             "OPEN" => "pending",
             "DECLINED" => "declined",
             "WITHDRAWN" => "withdrawn",
             "EXPIRED" => "expired",
             _ => "error",
         };
+        // The deadline is enforced here, not by the provider: a request still
+        // open after `expires_at` is withdrawn there and closed as expired. A
+        // failed withdrawal (the last signer may just have signed) is retried
+        // with the next poll, which then sees the provider's final status.
+        let deadline: Option<DateTime<Utc>> = row.get("expires_at");
+        if status == "pending" && deadline.is_some_and(|deadline| deadline <= Utc::now()) {
+            provider.withdraw(verified.id).await?;
+            status = "expired";
+        }
         let previous: String = row.get("status");
         let mut tx = state
             .db
