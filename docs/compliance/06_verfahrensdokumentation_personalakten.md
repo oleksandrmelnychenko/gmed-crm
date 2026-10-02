@@ -59,7 +59,7 @@ Fristen und Kategorien bestätigt der Steuerberater.
 |---|---|
 | Unveränderbarkeit | Tabelle `personnel_documents`: Trigger `personnel_documents_immutable` verweigert jede Änderung von Inhalt, Name, Zeitpunkten und Urheber sowie jedes DELETE. Änderbar sind nur Legal Hold und – nach Fristablauf – die Löschmarkierung (Datei entfernt, Datensatz mit Prüfsumme bleibt). |
 | Nachvollziehbarkeit jeder Änderung | Hash-Kette je beschäftigter Person: `chain_hash` = SHA-256 über vorherigen Hash, ID, Person, Position, SHA-256 der Datei, Kategorie, Archivname und Archivzeitpunkt, gebildet von der Datenbank beim Einfügen (`personnel_chain_hash`). Jede nachträgliche Änderung, Entfernung oder Umordnung bricht die Kette. |
-| Nachweis des Zeitpunkts | Täglicher Anker: SHA-256 über alle Kettenköpfe, mit RFC-3161-Zeitstempel eines externen Zeitstempeldienstes (Vorschlag: Sectigo, `https://timestamp.sectigo.com`, nicht qualifiziert, kostenfrei; [Entscheidung der Geschäftsführung]). An den Dienst geht nur der Hashwert. Der Anker erkennt auch das Entfernen der jüngsten Dokumente einer Kette. |
+| Nachweis des Zeitpunkts | Täglicher Anker: SHA-256 über alle Kettenköpfe, mit RFC-3161-Zeitstempel eines externen Zeitstempeldienstes (Sectigo, `https://timestamp.sectigo.com`, nicht qualifiziert, kostenfrei; Entscheidung der Geschäftsführung vom 02.10.2026). An den Dienst geht nur der Hashwert. Der Anker erkennt auch das Entfernen der jüngsten Dokumente einer Kette. |
 | Prüfung | Wöchentlich automatisch und jederzeit auf Anforderung: Neuberechnung aller Kettenglieder, Abgleich jeder Datei mit ihrem SHA-256, Abgleich mit allen Ankern. Abweichungen: Benachrichtigung der Geschäftsführung, Eintrag im Journal der Akte. |
 | Protokoll | Append-only Journal `personnel_document_events` (Anlage, Archivierung, Versionen, Abrufe, Exporte, Legal Hold, Löschungen, Prüffehler), aufbewahrt so lange wie die Akte. |
 | Vertraulichkeit | Dateien AES-256-GCM-verschlüsselt (Schlüsselrotation), Zugriff nur Geschäftsführung bzw. die betroffene Person; IT-Administration ohne Zugriff auf Inhalte und ohne Zugriff auf die Einstellungen des Moduls. |
@@ -75,13 +75,14 @@ Fristen und Kategorien bestätigt der Steuerberater.
   in denen noch eine unbeschädigte Sicherung vorliegt. Eine zusätzliche Langzeitsicherung
   ist deshalb nicht vorgesehen. [Freigabe durch die Geschäftsführung.]
 - Zeitstempeldienst: Ausfälle werden bis zu zehnmal wiederholt; der Status je Tag ist
-  in der Integritätsübersicht sichtbar. Die Adresse trägt die Geschäftsführung unter
-  Personalakten → Einstellungen ein; Anker aus der Zeit davor werden nachträglich
-  gestempelt (der Zeitstempel belegt dann den späteren Zeitpunkt).
+  in der Integritätsübersicht sichtbar. Die Adresse des Dienstes ist voreingestellt
+  (Migration `20261002120000_personnel_tsa_sectigo.sql`); die Geschäftsführung kann sie
+  unter Personalakten → Einstellungen ändern. Anker aus der Zeit davor werden
+  nachträglich gestempelt (der Zeitstempel belegt dann den späteren Zeitpunkt).
 - Prüfung eines Zeitstempels außerhalb des Systems (Datei `<Datum>.tsr` und Ankerhash
   aus `<Datum>.txt` im Export):
   `openssl ts -verify -digest <Ankerhash> -in <Datum>.tsr -CAfile tsa/sectigo-timestamping-root-r46.pem -partial_chain`.
-  Das Wurzelzertifikat des vorgeschlagenen Dienstes liegt unter
+  Das Wurzelzertifikat des Dienstes liegt unter
   [tsa/sectigo-timestamping-root-r46.pem](tsa/sectigo-timestamping-root-r46.pem)
   (SHA-256-Fingerabdruck
   `B5:3A:C1:5C:C1:AF:B6:E2:AC:06:82:8F:55:5B:B3:BF:5B:AD:8B:2B:AC:17:33:CE:4C:B7:AA:FE:72:93:56:DE`,
@@ -94,10 +95,10 @@ Fristen und Kategorien bestätigt der Steuerberater.
 - Bestätigung der Kategorien, Fristen und des Namensschemas (`_` als Trenner) durch
   den Steuerberater ([Anfrage](07_anfrage_steuerberater_personalakten.md)); danach
   Freischaltung der Löschung.
-- Entscheidung über den Zeitstempeldienst und Eintrag der Adresse in den Einstellungen.
-  Geprüft am 01.10.2026: Antworten von Sectigo und DigiCert werden vom System
-  angenommen und von `openssl ts -verify` bestätigt. Ein qualifizierter Dienst nach
-  eIDAS (kostenpflichtig, Vertrag nötig) kann später ohne Programmänderung eingetragen
-  werden; ob er nötig ist, entscheidet die Geschäftsführung mit dem Steuerberater.
+- Zeitstempeldienst: entschieden am 02.10.2026 (Sectigo). Geprüft am 01.10.2026:
+  Antworten von Sectigo und DigiCert werden vom System angenommen und von
+  `openssl ts -verify` bestätigt. Ein qualifizierter Dienst nach eIDAS
+  (kostenpflichtig, Vertrag nötig) kann später ohne Programmänderung eingetragen
+  werden; ob er nötig ist, klärt die Geschäftsführung mit dem Steuerberater.
 - Angaben in eckigen Klammern (Firma, Verantwortliche, Vertretung) ergänzen.
 - Freigabe dieser Dokumentation durch Geschäftsführung und DSB.

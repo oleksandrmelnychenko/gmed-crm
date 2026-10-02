@@ -401,6 +401,15 @@ async fn ceo_archives_documents_under_generated_names_and_nothing_can_change_the
     assert_eq!(run["status"], "passed", "{run}");
     assert!(run["documents_checked"].as_i64().unwrap() >= 3);
 
+    // The time-stamping authority is preset; the test never calls it.
+    let (status, settings) = send(&ctx.app, "GET", "/api/v1/personnel/settings", &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["tsa_url"], "https://timestamp.sectigo.com");
+    sqlx::query("UPDATE system_settings SET value = '\"\"' WHERE key = 'personnel_tsa_url'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
     // An anchor without a TSA is recorded as such.
     let (status, anchor) = send(
         &ctx.app,
