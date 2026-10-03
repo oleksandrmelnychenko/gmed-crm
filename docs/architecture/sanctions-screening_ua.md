@@ -2,7 +2,7 @@
 
 Рішення власника від 2026-10-03. Код: `crates/server/src/sanctions/`,
 `crates/server/src/routes/sanctions.rs`, міграція
-`migrations/20261003120000_sanctions_screening.sql`, фронтенд
+`migrations/20261004110000_sanctions_screening.sql`, фронтенд
 `frontend/src/pages/sanctions/`.
 
 ## Коротко
