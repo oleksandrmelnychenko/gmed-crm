@@ -4379,6 +4379,7 @@ function StaffDocumentsPage({
                       bindings={generateForm.bindings}
                       lang={lang}
                       templateId={selectedTemplate?.id ?? ""}
+                      patientId={generateForm.patientId}
                       useOrderServices={documentTemplateUsesOrderServices(
                         selectedTemplate?.id ?? "",
                         generateForm.orderId,

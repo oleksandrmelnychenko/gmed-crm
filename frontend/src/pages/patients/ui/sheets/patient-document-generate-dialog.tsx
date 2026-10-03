@@ -584,6 +584,7 @@ export function PatientDocumentGenerateDialog({
                 bindings={form.bindings}
                 lang={lang}
                 templateId={selectedTemplate.id}
+                patientId={patientId}
                 useOrderServices={documentTemplateUsesOrderServices(selectedTemplate.id, form.orderId)}
                 onChange={(key, value) => {
                   setValidationError("");

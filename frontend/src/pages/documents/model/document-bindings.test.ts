@@ -287,6 +287,40 @@ describe("document template binding payloads", () => {
     });
   });
 
+  it("carries the uploaded proofs of the origin of assets through the AML form", () => {
+    const evidence = [
+      { documentId: "11111111-1111-4111-8111-111111111111", filename: "Kontoauszug.pdf" },
+      { documentId: "22222222-2222-4222-8222-222222222222", filename: "Kaufvertrag.pdf" },
+    ];
+    const payload = buildBindingsPayload("enhanced_due_diligence", {
+      riskTier: "pep",
+      assetOrigin: "Verkauf einer Immobilie",
+      assetOriginEvidence: JSON.stringify(evidence),
+    }) as { aml_enhanced_due_diligence: Record<string, unknown> };
+    expect(payload.aml_enhanced_due_diligence.assetOriginEvidence).toEqual(evidence);
+    // Nothing attached: the key is left out.
+    expect(
+      buildBindingsPayload("enhanced_due_diligence", { riskTier: "pep", assetOriginEvidence: "" }),
+    ).toEqual({ aml_enhanced_due_diligence: expect.not.objectContaining({ assetOriginEvidence: expect.anything() }) });
+
+    // The server adds the upload date; a new version starts from the same files.
+    const hydrated = hydrateDocumentBindings(
+      "enhanced_due_diligence",
+      {
+        aml_enhanced_due_diligence: {
+          riskTier: "pep",
+          assetOriginEvidence: evidence.map((item) => ({ ...item, uploadedOn: "2026-10-03" })),
+        },
+      },
+      null,
+    );
+    expect(JSON.parse(hydrated.assetOriginEvidence)).toEqual(evidence);
+    expect(
+      hydrateDocumentBindings("enhanced_due_diligence", { aml_enhanced_due_diligence: { riskTier: "pep" } }, null)
+        .assetOriginEvidence,
+    ).toBeUndefined();
+  });
+
   it("validates common, country-risk, and PEP AML requirements in RU and DE", () => {
     const base = {
       ...enhancedDueDiligenceBindingDefaults(),

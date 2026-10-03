@@ -351,6 +351,7 @@ export function DocumentTemplateBindingFields({
   bindings,
   lang,
   templateId,
+  patientId,
   useOrderServices = false,
   onChange,
 }: {
@@ -358,6 +359,8 @@ export function DocumentTemplateBindingFields({
   bindings: DocumentBindingForm;
   lang: "de" | "ru";
   templateId: string;
+  /** The patient the document is generated for (uploads of the due-diligence form). */
+  patientId?: string | null;
   useOrderServices?: boolean;
   onChange: (key: string, value: string) => void;
 }) {
@@ -366,6 +369,7 @@ export function DocumentTemplateBindingFields({
       <EnhancedDueDiligenceBindingFields
         bindings={bindings}
         lang={lang}
+        patientId={patientId}
         onChange={onChange}
       />
     );

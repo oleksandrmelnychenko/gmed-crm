@@ -2619,6 +2619,10 @@ struct AmlEnhancedDueDiligenceBindings {
     individual_review: bool,
     risk_reason: Option<String>,
     asset_origin: Option<String>,
+    /// Uploaded proofs of the origin of the assets (§ 15 Abs. 4 Nr. 2 GwG),
+    /// kept as documents of the same patient or lead (§ 8 GwG).
+    #[serde(default)]
+    asset_origin_evidence: Vec<AmlAssetOriginEvidence>,
     pep_contract_partner: bool,
     pep_beneficial_owner: bool,
     pep_office_function: Option<String>,
@@ -2642,6 +2646,99 @@ struct AmlEnhancedDueDiligenceBindings {
     additional_measures: Option<String>,
     reviewer_name: Option<String>,
     review_date: Option<NaiveDate>,
+}
+
+/// One uploaded proof of where the assets come from, named in the
+/// due-diligence form. The file name and the upload date are read from the
+/// stored document when the form is generated, not taken from the request.
+#[derive(Deserialize, Serialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AmlAssetOriginEvidence {
+    document_id: Uuid,
+    #[serde(default)]
+    filename: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    uploaded_on: Option<NaiveDate>,
+}
+
+/// Document type of an uploaded proof of the origin of assets.
+const AML_ASSET_ORIGIN_EVIDENCE_ART: &str = "aml_asset_origin_evidence";
+const MAX_AML_ASSET_ORIGIN_EVIDENCE: usize = 20;
+
+/// Checks the proofs named in the due-diligence form: each must be a stored,
+/// non-deleted proof of the same patient or lead. Replaces the caller's file
+/// names with the stored ones and adds the upload dates.
+async fn resolve_aml_asset_origin_evidence(
+    state: &AppState,
+    evidence: &mut Vec<AmlAssetOriginEvidence>,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+) -> Result<(), axum::response::Response> {
+    if evidence.is_empty() {
+        return Ok(());
+    }
+    let mut ids: Vec<Uuid> = Vec::with_capacity(evidence.len());
+    for item in evidence.iter() {
+        if !ids.contains(&item.document_id) {
+            ids.push(item.document_id);
+        }
+    }
+    if ids.len() > MAX_AML_ASSET_ORIGIN_EVIDENCE {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Too many asset origin evidence documents",
+        ));
+    }
+    let rows = sqlx::query(
+        r#"SELECT id,
+                  COALESCE(NULLIF(BTRIM(original_filename), ''), auto_name) AS filename,
+                  created_at
+           FROM documents
+           WHERE id = ANY($1)
+             AND art = $4
+             AND file_deleted_at IS NULL
+             AND (($2::uuid IS NOT NULL AND patient_id = $2)
+               OR ($3::uuid IS NOT NULL AND lead_id = $3))"#,
+    )
+    .bind(&ids)
+    .bind(patient_id)
+    .bind(lead_id)
+    .bind(AML_ASSET_ORIGIN_EVIDENCE_ART)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, ?patient_id, ?lead_id, "load asset origin evidence");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load asset origin evidence",
+        )
+    })?;
+    let mut resolved = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(row) = rows
+            .iter()
+            .find(|row| row.try_get::<Uuid, _>("id").ok() == Some(id))
+        else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Asset origin evidence document not found",
+            ));
+        };
+        resolved.push(AmlAssetOriginEvidence {
+            document_id: id,
+            filename: row
+                .try_get::<Option<String>, _>("filename")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            uploaded_on: row
+                .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                .ok()
+                .map(|created_at| crate::app_time::local(created_at).date_naive()),
+        });
+    }
+    *evidence = resolved;
+    Ok(())
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -14088,6 +14185,18 @@ async fn generate_document(
             }
         }
     }
+    if template.id == "enhanced_due_diligence"
+        && let Some(aml) = bindings.aml_enhanced_due_diligence.as_mut()
+        && let Err(response) = resolve_aml_asset_origin_evidence(
+            &state,
+            &mut aml.asset_origin_evidence,
+            patient_id,
+            lead_id,
+        )
+        .await
+    {
+        return response;
+    }
     let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     if let Some(context) = intake_context.as_ref().or(repeat_context.as_ref()) {
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] =
@@ -19283,6 +19392,23 @@ fn aml_labeled_value(layout: &mut TreatmentPlanPdfLayout, label: &str, value: Op
     );
 }
 
+/// "2. Kontoauszug.pdf (hochgeladen am 03.10.2026)".
+fn aml_asset_origin_evidence_line(number: usize, evidence: &AmlAssetOriginEvidence) -> String {
+    let filename = evidence.filename.trim();
+    let filename = if filename.is_empty() {
+        "Dokument"
+    } else {
+        filename
+    };
+    match evidence.uploaded_on {
+        Some(date) => format!(
+            "{number}. {filename} (hochgeladen am {})",
+            date.format("%d.%m.%Y")
+        ),
+        None => format!("{number}. {filename}"),
+    }
+}
+
 fn build_enhanced_due_diligence_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
@@ -19370,6 +19496,28 @@ fn build_enhanced_due_diligence_pdf(
         "Herkunft der eingesetzten Vermögenswerte",
         aml.asset_origin.as_deref(),
     );
+    if !aml.asset_origin_evidence.is_empty() {
+        layout.text_block(
+            "Nachweise zur Herkunft der Vermögenswerte (in der Akte abgelegt)",
+            9.0,
+            true,
+            4.0,
+            TreatmentPlanPdfColor::Muted,
+            1.0,
+            0.3,
+        );
+        for (position, evidence) in aml.asset_origin_evidence.iter().enumerate() {
+            layout.text_block(
+                &aml_asset_origin_evidence_line(position + 1, evidence),
+                10.5,
+                false,
+                4.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                0.5,
+            );
+        }
+    }
 
     fc_subhead(&mut layout, "Politisch exponierte Person (PeP)");
     aml_checkbox_line(
@@ -28709,6 +28857,19 @@ mod tests {
             triggered_countries: vec!["IR".to_string()],
             internal_risk_analysis: true,
             risk_reason: Some("Wohnsitz in einem Hochrisikoland".to_string()),
+            asset_origin: Some("Verkauf einer Immobilie".to_string()),
+            asset_origin_evidence: vec![
+                super::AmlAssetOriginEvidence {
+                    document_id: Uuid::new_v4(),
+                    filename: "Kaufvertrag.pdf".to_string(),
+                    uploaded_on: NaiveDate::from_ymd_opt(2026, 7, 30),
+                },
+                super::AmlAssetOriginEvidence {
+                    document_id: Uuid::new_v4(),
+                    filename: " ".to_string(),
+                    uploaded_on: None,
+                },
+            ],
             high_risk_country_resident: true,
             affected_third_country: Some("Iran".to_string()),
             additional_contract_partner_info: Some("Identität geprüft".to_string()),
@@ -28739,6 +28900,10 @@ mod tests {
         assert!(text.contains("A-20260801-0001"));
         assert!(text.contains("Iran"));
         assert!(text.contains("Prüfung jeder Zahlung"));
+        // The uploaded proofs of the origin of the assets are listed by name.
+        assert!(text.contains("Nachweise zur Herkunft der Vermögenswerte"));
+        assert!(text.contains("1. Kaufvertrag.pdf (hochgeladen am 30.07.2026)"));
+        assert!(text.contains("2. Dokument"));
     }
 
     fn parents_as_party() -> super::ContractingDoc {
