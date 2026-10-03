@@ -1729,6 +1729,7 @@ fn document_satisfies_compliance_kind(
         }
         "framework_contract" => matches_document_kind(&["framework_contract"]),
         "enhanced_due_diligence" => matches_document_kind(&["enhanced_due_diligence"]),
+        "cost_coverage_declaration" => matches_document_kind(&["cost_coverage_declaration"]),
         "other" => true,
         _ => false,
     }
@@ -1804,6 +1805,7 @@ fn is_signature_compliance_kind(kind: &str) -> bool {
             | "identity"
             | "framework_contract"
             | "enhanced_due_diligence"
+            | "cost_coverage_declaration"
             | "other"
     )
 }
@@ -1830,6 +1832,7 @@ pub(crate) fn compliance_kind_for_signed_document(
         "dsgvo",
         "confidentiality_release",
         "enhanced_due_diligence",
+        "cost_coverage_declaration",
     ]
     .into_iter()
     .find(|kind| document_satisfies_compliance_kind(kind, generated_template_id, art))
@@ -2129,6 +2132,15 @@ async fn mark_document_signed(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    // A lead's framework contract counts as signed by both parties: GMED
+    // signs only after the client and the payer (lead_payer.rs).
+    if kind == "framework_contract"
+        && lead_id.is_some()
+        && let Err(response) =
+            crate::routes::lead_payer::check_contract_agency_signature(&mut tx, None, lead_id).await
+    {
+        return response;
+    }
 
     let compliance_updated = match record_document_signature_tx(
         &mut tx,
@@ -4113,6 +4125,7 @@ fn is_lead_allowed_document_template(template_id: &str) -> bool {
             | "enhanced_due_diligence"
             | "consent_data_release_child"
             | "consent_data_release_single"
+            | "cost_coverage_declaration"
     )
 }
 
@@ -15181,7 +15194,30 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
+            let mut payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
+            // A lead's Kostenübernahmeerklärung names the third-party payer of
+            // its payer declaration and records which version it names.
+            match crate::routes::lead_payer::cost_assumption_payer(&state.db, lead_id, order_id)
+                .await
+            {
+                Ok(Some(declared)) => {
+                    if payer.name.trim().is_empty() {
+                        payer.name = declared.name;
+                        payer.street = declared.street;
+                        payer.zip = declared.zip;
+                        payer.city = declared.city;
+                        payer.country = declared.country;
+                    }
+                    payer.birth_date = payer.birth_date.or(declared.date_of_birth);
+                    payer.email = payer.email.or(declared.email);
+                    payer.phone = payer.phone.or(declared.phone);
+                    generated_bindings_snapshot.get_or_insert_with(|| json!({}))
+                        [crate::routes::lead_payer::PAYER_IDENTITY_BINDING_KEY] =
+                        json!(declared.identity_version);
+                }
+                Ok(None) => {}
+                Err(response) => return response,
+            }
             let payer_sign_place = bindings
                 .payer_sign_place
                 .clone()
@@ -17199,10 +17235,12 @@ fn build_single_order_pdf(
             .birth_date
             .map(|value| format!(", geb. am {}", value.format("%d.%m.%Y")))
             .unwrap_or_default();
+        // LAWYER REVIEW (2026-10-03): Schuldbeitritt — the patient stays
+        // liable next to the payer (no releasing assumption of debt).
         admin_block(
             &mut layout,
             &format!(
-                "Die im Rahmen dieses Einzelauftrags gemäß Rahmendienstleistungsvertrag vom {} anfallenden Kosten werden nicht vom Auftraggeber, sondern vollständig von einer dritten Person – {}{} – (nachfolgend „Kostenübernehmer“) übernommen. Der Kostenübernehmer verpflichtet sich, sämtliche Zahlungsverpflichtungen, die aus diesem Einzelauftrag entstehen, vollständig zu tragen.",
+                "Die im Rahmen dieses Einzelauftrags gemäß Rahmendienstleistungsvertrag vom {} anfallenden Kosten übernimmt eine dritte Person – {}{} – (nachfolgend „Kostenübernehmer“) in voller Höhe. Der Kostenübernehmer tritt den Zahlungsverpflichtungen des Auftraggebers aus diesem Einzelauftrag durch eine gesonderte Kostenübernahmeerklärung als Gesamtschuldner bei (Schuldbeitritt).",
                 fmt_de_date(context.contract_date),
                 payer.name_with_salutation(),
                 payer_birth
@@ -17213,7 +17251,7 @@ fn build_single_order_pdf(
         admin_block(
             &mut layout,
             &format!(
-                "Alle Vertragspflichten des Auftraggebers gemäß § 2 des Rahmendienstleistungsvertrages vom {}, soweit sie diesen Einzelauftrag betreffen, gehen mit Unterzeichnung der Kostenübernahmeerklärung durch den Kostenübernehmer auf diesen über.",
+                "Der Auftraggeber bleibt neben dem Kostenübernehmer zur Zahlung verpflichtet; eine befreiende Schuldübernahme findet nicht statt. Seine übrigen Pflichten gemäß § 2 des Rahmendienstleistungsvertrages vom {} bleiben unberührt.",
                 fmt_de_date(context.contract_date)
             ),
             0.0,
@@ -17649,6 +17687,18 @@ fn build_order_cost_estimate_pdf(
     Ok(finalize_generated_pdf(document, layout))
 }
 
+/// " Nr. A-… vom 01.10.2026": the order a Kostenübernahmeerklärung refers to,
+/// after "Einzelauftrag(s)".
+fn cost_coverage_order_suffix(context: &GeneratedCostCoverageContext) -> String {
+    let number = context.order_number.trim();
+    let number = if number.is_empty() {
+        String::new()
+    } else {
+        format!(" Nr. {number}")
+    };
+    format!("{number} vom {}", fmt_de_date(context.order_date))
+}
+
 fn cost_coverage_summary_lines(context: &GeneratedCostCoverageContext) -> Vec<String> {
     let mut lines = vec![
         format!("Auftraggeber: {}", context.patient.name_with_title()),
@@ -17952,11 +18002,14 @@ fn build_cost_coverage_pdf(
         0.0,
         3.0,
     );
+    // LAWYER REVIEW (2026-10-03): the declaration is a Schuldbeitritt, not a
+    // Bürgschaft (§ 766 BGB) and not a releasing Schuldübernahme; it names the
+    // order by number and the patient. See docs/architecture/lead-payer-declaration_ua.md.
+    let order_suffix = cost_coverage_order_suffix(context);
     admin_block(
         &mut layout,
         &format!(
-            "bezüglich des {ordinal}. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
-            fmt_de_date(context.order_date),
+            "bezüglich des {ordinal}. Einzelauftrags{order_suffix} zwischen dem Auftragnehmer und dem Auftraggeber – {} – im Rahmen des bestehenden Rahmendienstleistungsvertrags vom {}.",
             if context.contracting.parents_contract() {
                 context.contracting.debtor_name(&context.patient)
             } else {
@@ -17989,31 +18042,64 @@ fn build_cost_coverage_pdf(
         3.0,
     );
 
-    admin_heading(&mut layout, "1. Übernahme der Kosten");
-    admin_block(
-        &mut layout,
-        "Der Kostenübernehmer erklärt sich ausdrücklich bereit, sämtliche im Zusammenhang mit dem genannten Einzelauftrag entstehenden Kosten gegenüber dem Auftragnehmer zu übernehmen. Dies umfasst insbesondere alle Vergütungen, Auslagen, Spesen sowie sonstige vertraglich vereinbarte Leistungen.",
-        0.0,
-        2.0,
-    );
-
-    admin_heading(&mut layout, "2. Übernahme der Vertragspflichten");
+    let debtor = context.contracting.debtor_name(&context.patient);
+    admin_heading(&mut layout, "1. Übernahme sämtlicher Kosten");
     admin_block(
         &mut layout,
         &format!(
-            "Der Kostenübernehmer übernimmt im Umfang dieses Einzelauftrags sämtliche Pflichten \
-             des Auftraggebers gemäß § 2 des Rahmendienstleistungsvertrages vom {} und des \
-             {ordinal}. Einzelauftrags vom {} zwischen dem Auftragnehmer und dem Auftraggeber, \
-             einschließlich etwaiger Mitwirkungs- oder Informationspflichten, soweit diese in \
-             Zusammenhang mit der Durchführung der beauftragten Dienstleistung stehen.",
-            fmt_de_date(context.contract_date),
-            fmt_de_date(context.order_date)
+            "Der Kostenübernehmer verpflichtet sich gegenüber dem Auftragnehmer, sämtliche Kosten, \
+             die aus dem {ordinal}. Einzelauftrag{order_suffix} (Auftraggeber: {debtor}) im Rahmen des \
+             Rahmendienstleistungsvertrags vom {} entstehen, in voller Höhe zu tragen. Dies umfasst \
+             insbesondere alle Vergütungen, Auslagen, Spesen sowie sonstige vertraglich vereinbarte \
+             Leistungen aus diesem Einzelauftrag.",
+            fmt_de_date(context.contract_date)
         ),
         0.0,
         2.0,
     );
 
-    admin_heading(&mut layout, "3. Vergütungsvereinbarung");
+    admin_heading(
+        &mut layout,
+        "2. Schuldbeitritt und gesamtschuldnerische Haftung",
+    );
+    admin_block(
+        &mut layout,
+        "Der Kostenübernehmer tritt den Zahlungsverpflichtungen des Auftraggebers aus diesem \
+         Einzelauftrag als weiterer Schuldner bei (Schuldbeitritt). Kostenübernehmer und \
+         Auftraggeber haften dem Auftragnehmer als Gesamtschuldner (§ 421 BGB); der \
+         Auftragnehmer kann die Zahlung nach seiner Wahl von jedem von ihnen ganz oder teilweise \
+         verlangen. Die Zahlungspflicht des Auftraggebers bleibt unverändert bestehen; eine \
+         befreiende Schuldübernahme ist nicht vereinbart.",
+        0.0,
+        2.0,
+    );
+
+    admin_heading(&mut layout, "3. Keine Bürgschaft");
+    admin_block(
+        &mut layout,
+        "Diese Erklärung begründet eine eigene, unmittelbare Zahlungspflicht des \
+         Kostenübernehmers. Sie ist keine Bürgschaft im Sinne der §§ 765 ff. BGB; der \
+         Kostenübernehmer kann den Auftragnehmer nicht auf eine vorherige Inanspruchnahme des \
+         Auftraggebers verweisen.",
+        0.0,
+        2.0,
+    );
+
+    admin_heading(&mut layout, "4. Stellung des Auftraggebers");
+    admin_block(
+        &mut layout,
+        &format!(
+            "Der Kostenübernehmer wird nicht Vertragspartei des Einzelauftrags. Die übrigen Rechte \
+             und Pflichten des Auftraggebers aus § 2 des Rahmendienstleistungsvertrages vom {} und \
+             aus dem Einzelauftrag, insbesondere seine Mitwirkungs- und Informationspflichten, \
+             bleiben unberührt.",
+            fmt_de_date(context.contract_date)
+        ),
+        0.0,
+        2.0,
+    );
+
+    admin_heading(&mut layout, "5. Vergütungsvereinbarung");
     admin_block(
         &mut layout,
         "Für diese Auftragserfüllung wird folgende Vergütung vereinbart:",
@@ -18111,19 +18197,19 @@ fn build_cost_coverage_pdf(
 
     for (heading, body) in [
         (
-            "4. Rechtsverbindlichkeit",
-            "Diese Erklärung wird mit ihrer Unterzeichnung rechtsverbindlich. Der Einzelauftrag entfaltet seine Rechtswirkung gegenüber dem Auftragnehmer erst mit Zugang dieser Kostenübernahmeerklärung.",
+            "6. Rechtsverbindlichkeit",
+            "Diese Erklärung wird mit ihrer Unterzeichnung durch den Kostenübernehmer rechtsverbindlich. Der Auftragnehmer bestätigt den Einzelauftrag erst, nachdem ihm der vom Auftraggeber unterzeichnete Einzelauftrag und diese unterzeichnete Kostenübernahmeerklärung vorliegen; der Einzelauftrag entfaltet seine Rechtswirkung gegenüber dem Auftragnehmer erst mit Zugang dieser Kostenübernahmeerklärung.",
         ),
         (
-            "5. Anwendbares Recht",
+            "7. Anwendbares Recht",
             "Auf diesen Vertrag ist ausschließlich das deutsche Recht anzuwenden.",
         ),
         (
-            "6. Erfüllungsort",
+            "8. Erfüllungsort",
             "Erfüllungsort für sämtliche Leistungen ist München.",
         ),
         (
-            "7. Gerichtsstand",
+            "9. Gerichtsstand",
             "Ausschließlicher Gerichtsstand für alle aus dem Vertragsverhältnis entstehenden Streitigkeiten ist München, Deutschland.",
         ),
     ] {
@@ -18131,7 +18217,36 @@ fn build_cost_coverage_pdf(
         admin_block(&mut layout, body, 0.0, 1.0);
     }
 
-    admin_heading(&mut layout, "8. Salvatorische Klausel");
+    // LAWYER REVIEW (2026-10-03): Art. 14 DSGVO information for a payer whose
+    // data come from the patient side, and the payer's consent.
+    admin_heading(
+        &mut layout,
+        "10. Datenschutz: Information nach Art. 14 DSGVO und Einverständnis",
+    );
+    for paragraph in [
+        "Der Auftragnehmer (Verantwortlicher, Kontaktdaten siehe oben) hat die personenbezogenen \
+         Daten des Kostenübernehmers – Name, Geburtsdatum, Anschrift, Staatsangehörigkeiten, \
+         Kontaktdaten, Beziehung zum Auftraggeber und Angaben zur Herkunft der Mittel – vom \
+         Auftraggeber oder dessen Vertretern erhalten.",
+        "Er verarbeitet diese Daten zur Durchführung und Abrechnung des genannten Einzelauftrags \
+         (Art. 6 Abs. 1 lit. b DSGVO) sowie zur Erfüllung gesetzlicher Pflichten, insbesondere der \
+         Sorgfaltspflichten nach dem Geldwäschegesetz einschließlich des Abgleichs mit \
+         Sanktionslisten und der handels- und steuerrechtlichen Aufbewahrungspflichten (Art. 6 \
+         Abs. 1 lit. c DSGVO). Empfänger sind, soweit erforderlich, die mit der Leistung befassten \
+         Leistungserbringer, die steuerliche Beratung sowie Dienstleister, die der Auftragnehmer \
+         als Auftragsverarbeiter einsetzt.",
+        "Die Daten werden gelöscht, sobald sie für diese Zwecke nicht mehr erforderlich sind und \
+         keine gesetzlichen Aufbewahrungsfristen (insbesondere § 8 Abs. 4 GwG, § 147 AO, § 257 \
+         HGB) entgegenstehen. Der Kostenübernehmer hat das Recht auf Auskunft, Berichtigung, \
+         Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht auf Beschwerde \
+         bei einer Datenschutz-Aufsichtsbehörde.",
+        "Mit seiner Unterschrift bestätigt der Kostenübernehmer, diese Information erhalten zu \
+         haben, und erklärt sich mit der beschriebenen Verarbeitung seiner Daten einverstanden.",
+    ] {
+        admin_block(&mut layout, paragraph, 0.0, 1.0);
+    }
+
+    admin_heading(&mut layout, "11. Salvatorische Klausel");
     admin_block(
         &mut layout,
         "Sollten einzelne Bestimmungen dieser Erklärung ganz oder teilweise unwirksam sein oder \
@@ -18144,7 +18259,7 @@ fn build_cost_coverage_pdf(
 
     admin_heading(
         &mut layout,
-        "9. Bestandteile der Kostenübernahmeerklärung und Rangfolge",
+        "12. Bestandteile der Kostenübernahmeerklärung und Rangfolge",
     );
     let quote_label = context
         .quote_number

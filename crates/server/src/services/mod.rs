@@ -1,6 +1,7 @@
 pub mod assignment_eligibility;
 pub mod bfarm_rote_hand;
 pub mod bmp_import;
+pub mod citizenships;
 pub mod compliance_digest;
 pub mod concierge_service_tasks;
 pub mod contracting_party;

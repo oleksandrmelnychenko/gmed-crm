@@ -181,6 +181,8 @@ struct CreateLeadRequest {
     source: Option<String>,
     country: Option<String>,
     notes: Option<String>,
+    /// ISO 3166-1 alpha-2 codes; a person may hold several.
+    citizenships: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -253,6 +255,9 @@ struct UpdateLeadRequest {
     has_medical_records: Option<String>,
     // Empty string explicitly clears the link; omission leaves it unchanged.
     referrer_patient_id: Option<String>,
+    /// ISO 3166-1 alpha-2 codes; replaces the list. The first one is kept as
+    /// `wizard_state.registration_country` for older readers.
+    citizenships: Option<Vec<String>>,
 }
 
 fn normalized_contact_text(value: Option<&str>) -> Option<String> {
@@ -434,7 +439,7 @@ async fn list_leads(
     let contact_search_only = concierge_grid_only || !lead_medical_visible(&auth);
 
     match sqlx::query(
-        r#"SELECT id, first_name, last_name, email, phone, source, country,
+        r#"SELECT id, first_name, last_name, email, phone, source, country, citizenships,
                   intake_source, flow, qualification_status, compliance_status,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
@@ -540,6 +545,7 @@ async fn list_leads(
                     "phone": r.try_get::<Option<String>, _>("phone").unwrap_or_default(),
                     "source": r.try_get::<Option<String>, _>("source").unwrap_or_default(),
                     "country": r.try_get::<Option<String>, _>("country").unwrap_or_default(),
+                    "citizenships": r.try_get::<Vec<String>, _>("citizenships").unwrap_or_default(),
                     "intake_source": r.try_get::<Option<String>, _>("intake_source").unwrap_or_default(),
                     "flow": r.try_get::<Option<String>, _>("flow").unwrap_or_default(),
                     "lead_type": lead_type_from_origin(
@@ -1286,6 +1292,9 @@ struct LeadConversionReadinessInput {
     debt_attention_reason: Option<String>,
     /// Existing customer (2B): a package-covered order needs no separate Kostenvoranschlag.
     package_covered: bool,
+    /// "Кто платит": the payer declaration and, for a third-party payer, the
+    /// signed Kostenübernahmeerklärung (see `lead_payer.rs`).
+    payer: super::lead_payer::PayerReadiness,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -1336,7 +1345,8 @@ fn evaluate_lead_conversion_readiness(
         && input.confidentiality_release_signed
         && (!input.enhanced_due_diligence_required
             || (input.enhanced_due_diligence_document_generated
-                && input.enhanced_due_diligence_document_signed));
+                && input.enhanced_due_diligence_document_signed))
+        && input.payer.ready_for_conversion();
     // The VKS lists the selected medical work types, never the agency's services.
     let cost_estimate_ready = !input.cost_estimate_catalog_available
         || (input.cost_estimate_work_types_selected && input.cost_estimate_document_generated);
@@ -1351,7 +1361,7 @@ fn evaluate_lead_conversion_readiness(
         && (input.package_covered || input.quote_accepted)
         && (input.package_covered || cost_estimate_ready);
 
-    let checks = vec![
+    let mut checks = vec![
         json!({
             "key": "lead_qualified",
             "label": "Lead qualified",
@@ -1601,6 +1611,7 @@ fn evaluate_lead_conversion_readiness(
     {
         conversion_reasons.push("Enhanced due diligence document is not signed".to_string());
     }
+    input.payer.extend(&mut checks, &mut conversion_reasons);
     if !input.contract_signed {
         if input.contract_terminated {
             conversion_reasons
@@ -1740,6 +1751,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         debt_attention: false,
         debt_attention_reason: None,
         package_covered: false,
+        payer: Default::default(),
     }
 }
 
@@ -2011,6 +2023,22 @@ async fn load_lead_conversion_readiness(
 
     let Some(row) = row else { return Ok(None) };
     let mut input = lead_conversion_readiness_input(&row);
+    input.payer = super::lead_payer::load_payer_readiness(&state.db, lead_id)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, lead_id = %lead_id, "load lead payer readiness");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load lead readiness",
+            )
+        })?;
+    // Every citizenship and a third-party payer's residence and citizenships
+    // count for the AML country risk, not only the first citizenship.
+    input.enhanced_due_diligence_required |= input
+        .payer
+        .aml_countries
+        .iter()
+        .any(|code| is_enhanced_due_diligence_country(code));
     apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
     Ok(Some(evaluate_lead_conversion_readiness(&input)))
 }
@@ -2442,6 +2470,12 @@ async fn create_lead(
         },
         None => json!([]),
     };
+    let citizenships = match crate::services::citizenships::normalize_citizenships(
+        body.citizenships.as_deref().unwrap_or_default(),
+    ) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
     if let Err(response) = validate_lead_contact_identity(
         &state,
         &LeadContactIdentity {
@@ -2550,6 +2584,13 @@ async fn create_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     };
+    if !citizenships.is_empty()
+        && let Err(error) =
+            super::lead_payer::set_lead_citizenships(&mut tx, id, &citizenships).await
+    {
+        tracing::error!(%error, lead = %id, "store lead citizenships");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+    }
     if let Err(error) = tx.commit().await {
         tracing::error!(%error, lead = %id, "commit lead creation");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
@@ -2626,7 +2667,7 @@ async fn get_lead(
                   date_of_birth, legal_sex,
                   email, email_consent, phone, primary_phone_type, phones,
                   whatsapp_consent, whatsapp_number,
-                  source, country, street_address, city, state, zip_code,
+                  source, country, citizenships, street_address, city, state, zip_code,
                   primary_language, needs_interpreter,
                   location, location_detailed, wants_membership, selected_program,
                   can_travel, has_medical_records, records_in_accepted_language,
@@ -2785,6 +2826,13 @@ async fn get_lead(
     obj.insert("whatsapp_number".into(), s_opt(&row, "whatsapp_number"));
     obj.insert("source".into(), s_opt(&row, "source"));
     obj.insert("country".into(), s_opt(&row, "country"));
+    obj.insert(
+        "citizenships".into(),
+        json!(
+            row.try_get::<Vec<String>, _>("citizenships")
+                .unwrap_or_default()
+        ),
+    );
     obj.insert("street_address".into(), s_opt(&row, "street_address"));
     obj.insert("city".into(), s_opt(&row, "city"));
     obj.insert("state".into(), s_opt(&row, "state"));
@@ -3608,6 +3656,15 @@ async fn update_lead(
             "wizard_state must be a JSON object",
         );
     }
+    let citizenships = match body
+        .citizenships
+        .as_deref()
+        .map(crate::services::citizenships::normalize_citizenships)
+        .transpose()
+    {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
 
     let referrer_patient_id_supplied = body.referrer_patient_id.is_some();
     let referrer_patient_id = match body.referrer_patient_id.as_deref() {
@@ -3683,6 +3740,7 @@ async fn update_lead(
         && body.requested_specialties.is_none()
         && body.wizard_state.is_none()
         && body.referrer_patient_id.is_none()
+        && body.citizenships.is_none()
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "No lead changes supplied");
     }
@@ -3957,6 +4015,18 @@ async fn update_lead(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
     }
+    let previous_citizenships = match citizenships.as_deref() {
+        Some(codes) => {
+            match super::lead_payer::set_lead_citizenships(&mut tx, lead_id, codes).await {
+                Ok(previous) => Some(previous),
+                Err(error) => {
+                    tracing::error!(%error, lead_id = %lead_id, "update lead citizenships");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+        None => None,
+    };
     if let Some(email) = portal_email.as_deref() {
         match crate::routes::lead_portal_account::sync_email_in_tx(&mut tx, lead_id, email).await {
             Ok(_) => {}
@@ -3983,6 +4053,12 @@ async fn update_lead(
     });
     if compliance_changed {
         audit_context["previous_compliance_status"] = json!(current_compliance_status);
+    }
+    if let Some(previous) = previous_citizenships
+        && citizenships.as_ref() != Some(&previous)
+    {
+        audit_context["citizenships"] = json!(citizenships);
+        audit_context["previous_citizenships"] = json!(previous);
     }
     if let Err(e) = audit::write_in_transaction(
         &mut tx,
@@ -5383,6 +5459,12 @@ async fn create_prospect_patient(
         tracing::error!(error = %error, lead_id = %lead_id, "store prospect pointer");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    if let Err(error) =
+        super::lead_payer::carry_over_to_patient(&mut tx, lead_id, patient_id, false).await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, "copy prospect citizenships");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     let (case_uuid, case_code) = match ensure_prospect_case(
         &mut tx,
@@ -6097,6 +6179,12 @@ async fn convert_lead(
             (inserted, pid)
         }
     };
+    if let Err(error) =
+        super::lead_payer::carry_over_to_patient(&mut tx, lead_id, patient_id, true).await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "carry over citizenships and payer declaration");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     for contact in &contacts {
         if let Err(error) = sqlx::query(
@@ -7473,10 +7561,17 @@ pub(crate) async fn anonymize_lead_pii(
     note: Option<&str>,
     processed_by: Option<Uuid>,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    // The payer declaration of an unconverted lead goes with it (a converted
+    // one belongs to the patient record and is kept, § 8 Abs. 4 GwG).
     sqlx::query(
-        r#"UPDATE leads
+        r#"WITH removed_payer AS (
+               DELETE FROM lead_payer_declarations
+               WHERE lead_id = $1 AND patient_id IS NULL
+           )
+           UPDATE leads
            SET first_name = 'Deleted',
                middle_name = NULL,
+               citizenships = '{}'::text[],
                last_name = 'Lead',
                suffix = NULL,
                date_of_birth = NULL,
@@ -8797,7 +8892,31 @@ mod lead_conversion_readiness_tests {
             debt_attention: false,
             debt_attention_reason: None,
             package_covered: false,
+            payer: crate::routes::lead_payer::PayerReadiness::ready(),
         }
+    }
+
+    #[test]
+    fn missing_payer_declaration_blocks_conversion_on_the_documents_step() {
+        let mut input = ready_input();
+        input.payer = crate::routes::lead_payer::PayerReadiness::default();
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(!readiness.conversion_ready);
+        assert!(readiness.qualification_ready);
+        assert!(
+            readiness
+                .conversion_reasons
+                .contains(&"Payer declaration is missing".to_string()),
+            "{:?}",
+            readiness.conversion_reasons
+        );
+        let documents = readiness.payload["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|step| step["key"] == "documents")
+            .unwrap();
+        assert_eq!(documents["ready"], false);
     }
 
     #[test]

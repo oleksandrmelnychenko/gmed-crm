@@ -1,5 +1,7 @@
 import type { PatientLegalStatus } from "./legal-status";
 import { normalizePatientLegalStatus } from "./legal-status";
+import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
+import { nationalityCountryCode } from "./nationalities";
 
 import {
   patientContactsToForm,
@@ -49,6 +51,8 @@ export type PatientEditFormState = {
   email: string;
   contacts: PatientContactFormState[];
   nationality: string;
+  /** ISO codes; several citizenships. Saved with `nationality` = the first one. */
+  citizenships: string[];
   residenceCountry: string;
   languages: string;
   functionalLabels: string;
@@ -155,6 +159,9 @@ export function patientToEditForm(detail: PatientDetail): PatientEditFormState {
     email: detail.email ?? "",
     contacts: patientContactsToForm(detail),
     nationality: detail.nationality ?? "",
+    citizenships: detail.citizenships?.length
+      ? normalizeCitizenships(detail.citizenships)
+      : normalizeCitizenships([nationalityCountryCode(detail.nationality)]),
     residenceCountry: detail.residence_country ?? "",
     languages: detail.languages?.join(", ") ?? "",
     functionalLabels: detail.functional_labels?.join(", ") ?? "",

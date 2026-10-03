@@ -2372,6 +2372,15 @@ async fn create_framework_contract(
         }
     };
 
+    // A lead's contract cannot be created as already signed by GMED before
+    // the client and the payer (see lead_payer.rs).
+    if status == "signed"
+        && let Some(lead_id) = subject.lead_id()
+        && let Err(response) =
+            super::lead_payer::check_contract_agency_signature(&mut tx, None, Some(lead_id)).await
+    {
+        return response;
+    }
     let contract_number = gen_contract_number(seq);
     let signed_at = if status == "signed" && signed_at.is_none() {
         Some(Utc::now())
@@ -2839,6 +2848,15 @@ async fn update_framework_contract_status(
                 "The contract is signed and {running_orders} order(s) run under it; it cannot go back to draft or sent"
             ),
         );
+    }
+    // A lead's contract: GMED countersigns only after the client and the payer.
+    if body.status == "signed"
+        && previous_status != "signed"
+        && let Err(response) =
+            super::lead_payer::check_contract_agency_signature(&mut tx, Some(contract_id), None)
+                .await
+    {
+        return response;
     }
 
     match sqlx::query(
