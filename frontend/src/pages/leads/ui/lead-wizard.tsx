@@ -2396,8 +2396,8 @@ function validateMasterDraft(
     // A new lead gets a patient login, the address is its user name
     // (owner decision 2026-10-03).
     errors.email = tx(
-      "Укажите электронную почту — это логин пациента в портале",
-      "E-Mail-Adresse angeben – sie ist der Login des Patienten im Portal",
+      "Обязательное поле — это логин пациента в портале",
+      "Pflichtfeld – Login des Patienten im Portal",
     );
     if (phone && !isValidPhoneNumber(phone)) {
       errors.phone = tx(
