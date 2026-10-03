@@ -151,6 +151,20 @@ import type {
   LeadGateForm,
   LeadListItem,
 } from "./model/types";
+import {
+  canIssueLeadPortalPassword,
+  leadPortalStatus,
+  leadPortalStatusLabel,
+  type LeadPortalStatus,
+} from "./model/lead-portal-access";
+import { LeadPortalAccessDetail, PortalCredentialsDialog } from "./ui/lead-portal-access";
+const PORTAL_STATUS_DOT: Record<LeadPortalStatus, string> = {
+  none: "bg-transparent",
+  disabled: "bg-rose-500",
+  never_logged_in: "bg-amber-400",
+  password_pending: "bg-amber-400",
+  active: "bg-emerald-500",
+};
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const LEAD_DEFAULT_FROZEN_COLUMNS = ["lead"];
@@ -680,6 +694,35 @@ function useLeadsPageContent() {
       resetKey: leadPaginationResetKey,
     });
   }
+  // One-time password of a login created from the "new lead" sheet.
+  const [issuedPortalAccess, setIssuedPortalAccess] = useState<{
+    email: string;
+    password: string;
+    firstName: string;
+  } | null>(null);
+  // Rows opened with the chevron before the name show the patient login.
+  const [expandedLeadIds, setExpandedLeadIds] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleLeadExpanded = useCallback((leadId: string) => {
+    setExpandedLeadIds((current) => {
+      const next = new Set(current);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  }, []);
+  const canIssuePortalPassword = canIssueLeadPortalPassword(user?.role);
+  const renderLeadRowDetail = useCallback(
+    (row: LeadListItem) =>
+      expandedLeadIds.has(row.id) ? (
+        <LeadPortalAccessDetail
+          lead={row}
+          lang={lang}
+          canIssue={canIssuePortalPassword}
+          onChanged={() => setVersion((current) => current + 1)}
+        />
+      ) : null,
+    [canIssuePortalPassword, expandedLeadIds, lang],
+  );
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
     () => {
       const columns: ColumnDef<LeadListItem>[] = [
@@ -692,11 +735,46 @@ function useLeadsPageContent() {
         sortable: true,
         width: 260,
         pinned: "left",
-        render: (row) => (
-          <span className="truncate font-mono text-xs text-foreground">
-            {`${row.first_name} ${row.last_name}`.trim()}
-          </span>
-        ),
+        render: (row) => {
+          const expanded = expandedLeadIds.has(row.id);
+          return (
+            <span className="flex min-w-0 items-center gap-1">
+              <button
+                type="button"
+                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-expanded={expanded}
+                aria-label={
+                  lang === "de"
+                    ? expanded ? "Portalzugang ausblenden" : "Portalzugang anzeigen"
+                    : expanded ? "Скрыть доступ пациента" : "Показать доступ пациента"
+                }
+                data-testid={`lead-expand-${row.id}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleLeadExpanded(row.id);
+                }}
+              >
+                <ChevronRight
+                  className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
+                  aria-hidden="true"
+                />
+              </button>
+              <span className="truncate font-mono text-xs text-foreground">
+                {`${row.first_name} ${row.last_name}`.trim()}
+              </span>
+              {row.portal_account ? (
+                <span
+                  aria-hidden="true"
+                  title={leadPortalStatusLabel(leadPortalStatus(row.portal_account), lang)}
+                  className={cn(
+                    "size-1.5 shrink-0 rounded-full",
+                    PORTAL_STATUS_DOT[leadPortalStatus(row.portal_account)],
+                  )}
+                />
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         id: "lead_type",
@@ -926,9 +1004,12 @@ function useLeadsPageContent() {
       return columns.filter((column) => conciergeColumns.has(column.id));
     },
     [
+      expandedLeadIds,
+      lang,
       locale,
       permissions.canOpen,
       t,
+      toggleLeadExpanded,
     ]
   );
 
@@ -1177,6 +1258,14 @@ function useLeadsPageContent() {
       const created = await createLead(payload);
       setCreateOpen(false);
       setCreateForm(blankLeadForm());
+      const portalPassword = created.portal_account?.one_time_password;
+      if (created.portal_account && portalPassword) {
+        setIssuedPortalAccess({
+          email: created.portal_account.email,
+          password: portalPassword,
+          firstName: payload.first_name,
+        });
+      }
       if (permissions.canConvert) openLeadWizard(created.id);
       else reload();
     } catch (createFetchError) {
@@ -2814,6 +2903,7 @@ function useLeadsPageContent() {
           <DataTableSurface
             rows={pagedLeads}
             columns={leadColumns}
+            renderRowDetail={renderLeadRowDetail}
             rowId={(row) => row.id}
             defaultDensity="comfortable"
             defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
@@ -3050,9 +3140,11 @@ function useLeadsPageContent() {
                         }
                       />
                     </LeadField>
-                    <LeadField label={t.patients_email}>
+                    <LeadField label={`${t.patients_email} *`}>
                       <Input
                         type="email"
+                        required
+                        autoComplete="email"
                         className={shellInputClassName}
                         value={createForm.email}
                         onChange={(event) =>
@@ -3165,6 +3257,12 @@ function useLeadsPageContent() {
         </Suspense>
       ) : null}
 
+      <PortalCredentialsDialog
+        credentials={issuedPortalAccess}
+        created
+        lang={lang}
+        onClose={() => setIssuedPortalAccess(null)}
+      />
       <Dialog
         open={pendingConvertLead !== null}
         onOpenChange={(open) => {

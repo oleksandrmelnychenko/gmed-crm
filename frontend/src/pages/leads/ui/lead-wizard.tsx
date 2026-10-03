@@ -192,6 +192,7 @@ import {
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
+import { PortalCredentialsDialog } from "./lead-portal-access";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import {
   discoveryReferrerMissing,
@@ -2391,7 +2392,20 @@ function validateMasterDraft(
 
   const email = draft.email.trim();
   const phone = draft.phone.trim();
-  if (!email && !phone) {
+  if (!repeatIntake && !email) {
+    // A new lead gets a patient login, the address is its user name
+    // (owner decision 2026-10-03).
+    errors.email = tx(
+      "Укажите электронную почту — это логин пациента в портале",
+      "E-Mail-Adresse angeben – sie ist der Login des Patienten im Portal",
+    );
+    if (phone && !isValidPhoneNumber(phone)) {
+      errors.phone = tx(
+        "Введите корректный номер телефона",
+        "Gültige Telefonnummer eingeben",
+      );
+    }
+  } else if (!email && !phone) {
     const contactRequired = tx(
       "Укажите электронную почту или телефон",
       "E-Mail oder Telefonnummer angeben",
@@ -2753,6 +2767,13 @@ export function LeadWizard({
   >({});
   const [commercialQuoteError, setCommercialQuoteError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
+  // One-time password of the patient login created with the lead; shown once.
+  const [issuedPortalAccess, setIssuedPortalAccess] = useState<{
+    email: string;
+    password: string;
+    firstName: string;
+    language: string;
+  } | null>(null);
   const [autosaveError, setAutosaveError] = useState("");
   const [autosaveErrorDetail, setAutosaveErrorDetail] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -4201,6 +4222,15 @@ export function LeadWizard({
           targetLeadId = created.id;
           hydrated.current = targetLeadId;
           lastPersistedLeadIdRef.current = targetLeadId;
+          const portalPassword = created.portal_account?.one_time_password;
+          if (created.portal_account && portalPassword) {
+            setIssuedPortalAccess({
+              email: created.portal_account.email,
+              password: portalPassword,
+              firstName: snapshot.draft.firstName.trim(),
+              language: snapshot.draft.language,
+            });
+          }
         }
 
         lastPersistedLeadIdRef.current = targetLeadId;
@@ -6336,7 +6366,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label="E-Mail"
-                  required={!draft.phone.trim()}
+                  required={!isRepeatIntake || !draft.phone.trim()}
                   error={visibleMasterError("email")}
                   errorId={`${MASTER_FIELD_IDS.email}-error`}
                 >
@@ -6346,7 +6376,7 @@ ${serviceCommentLines.join("\n")}`
                     autoComplete="email"
                     spellCheck={false}
                     type="email"
-                    aria-required={!draft.phone.trim()}
+                    aria-required={!isRepeatIntake || !draft.phone.trim()}
                     aria-invalid={Boolean(visibleMasterError("email"))}
                     aria-describedby={visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : undefined}
                     className={inputClass}
@@ -9256,6 +9286,13 @@ ${serviceCommentLines.join("\n")}`
           </form>
         </DialogContent>
       </Dialog>
+      <PortalCredentialsDialog
+        credentials={issuedPortalAccess}
+        created
+        lang={lang}
+        defaultLanguage={issuedPortalAccess?.language}
+        onClose={() => setIssuedPortalAccess(null)}
+      />
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
