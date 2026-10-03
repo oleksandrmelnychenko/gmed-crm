@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   checklistBmi,
-  checklistGroupDeclined,
+  checklistGroupFolded,
+  checklistUnfolded,
   composeChecklistText,
   emptySpecializationChecklist,
   isChecklistTemplate,
@@ -41,6 +42,20 @@ describe("parseChecklistTemplate", () => {
     ]);
     expect(items.every((item) => item.yesNo)).toBe(true);
     expect(items.map((item) => item.child)).toEqual([false, ...Array(9).fill(true)]);
+    // Without a condition of its own, every question unfolds on "ja".
+    expect(items.every((item) => item.unfoldOn === "ja")).toBe(true);
+  });
+
+  it("lets a question unfold its follow-ups on nein instead", () => {
+    const [main, child, declined] = parseChecklistTemplate(
+      "Beschwerdefrei (ja/nein + if nein: Seit wann)\n- Schmerzen (ja/nein + wenn ja: Note)\nImpfschutz vollständig (ja/nein + bei nein: Fehlende Impfungen)",
+    );
+    expect(main).toMatchObject({ yesNo: true, unfoldOn: "nein", fields: [{ kind: "text", label: "Seit wann" }] });
+    expect(child).toMatchObject({ child: true, yesNo: true, unfoldOn: "ja", fields: [{ kind: "text", label: "" }] });
+    expect(declined).toMatchObject({ yesNo: true, unfoldOn: "nein", fields: [{ kind: "text", label: "Fehlende Impfungen" }] });
+    expect(checklistUnfolded(main, { value: "nein" })).toBe(true);
+    expect(checklistUnfolded(main, { value: "ja" })).toBe(false);
+    expect(checklistUnfolded(main, undefined)).toBe(false);
   });
 
   it("derives the follow-up fields: number, note, measurements with BMI and options", () => {
@@ -133,11 +148,36 @@ describe("composeChecklistText", () => {
     expect(checklistBmi(items[5], { fields: { field1: "92" } })).toBe("");
   });
 
-  it("leaves out the questions of a group that was answered with nein", () => {
-    const answers = { "0": { value: "nein" as const }, "1": { value: "ja" as const } };
-    expect(checklistGroupDeclined(items, items[1], answers)).toBe(true);
-    expect(checklistGroupDeclined(items, items[0], answers)).toBe(false);
-    expect(composeChecklistText({ ...emptySpecializationChecklist(CLINIC_TEMPLATE), answers })).toBe("CVRF: nein");
+  it("keeps the sub-questions folded until the main question is answered with ja", () => {
+    // Answered "nein": the sub-questions stay folded and are not printed.
+    const declined = { "0": { value: "nein" as const }, "1": { value: "ja" as const } };
+    expect(checklistGroupFolded(items, items[1], declined)).toBe(true);
+    expect(checklistGroupFolded(items, items[0], declined)).toBe(false);
+    expect(composeChecklistText({ ...emptySpecializationChecklist(CLINIC_TEMPLATE), answers: declined })).toBe("CVRF: nein");
+    // Not answered yet: folded as well, so the sub-questions appear only on "ja".
+    const unanswered = { "1": { value: "ja" as const } };
+    expect(checklistGroupFolded(items, items[1], unanswered)).toBe(true);
+    expect(composeChecklistText({ ...emptySpecializationChecklist(CLINIC_TEMPLATE), answers: unanswered })).toBe("");
+    expect(checklistGroupFolded(items, items[1], { "0": { value: "ja" } })).toBe(false);
+  });
+
+  it("unfolds a group on nein when its line says so, and always shows lines under a heading", () => {
+    const template = "Beschwerdefrei (ja/nein + if nein: Seit wann)\n- Schmerzen (ja/nein + if ja: Note)\nMedikation:\n- Antikoagulation (ja/nein)";
+    const parsed = parseChecklistTemplate(template);
+    expect(checklistGroupFolded(parsed, parsed[1], {})).toBe(true);
+    expect(checklistGroupFolded(parsed, parsed[1], { "0": { value: "ja" } })).toBe(true);
+    expect(checklistGroupFolded(parsed, parsed[1], { "0": { value: "nein" } })).toBe(false);
+    expect(checklistGroupFolded(parsed, parsed[3], {})).toBe(false);
+    expect(
+      composeChecklistText({
+        ...emptySpecializationChecklist(template),
+        answers: {
+          "0": { value: "nein", fields: { field1: "März 2026" } },
+          "1": { value: "ja", fields: { note1: "lumbal" } },
+          "3": { value: "nein" },
+        },
+      }),
+    ).toBe(["Beschwerdefrei: nein (Seit wann: März 2026)", "- Schmerzen: ja (lumbal)", "Medikation:", "- Antikoagulation: nein"].join("\n"));
   });
 
   it("prints a heading only above answered questions", () => {
