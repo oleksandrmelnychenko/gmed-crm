@@ -125,6 +125,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   personnel: FolderLock,
   "my-personnel-file": IdCard,
   lead_request: ClipboardList,
+  sanctions: ShieldAlert,
   "admin/signatures": FileSignature,
   "admin/activity": History,
   "admin/security": Fingerprint,

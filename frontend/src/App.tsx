@@ -254,6 +254,12 @@ const MyPersonnelFilePage = lazy(() =>
   })),
 );
 
+const SanctionsPage = lazy(() =>
+  import("@/pages/sanctions/page").then((module) => ({
+    default: module.SanctionsPage,
+  })),
+);
+
 const AdminActivityPage = lazy(() =>
   import("@/pages/admin-activity").then((module) => ({
     default: module.AdminActivityPage,
@@ -458,6 +464,7 @@ function AppRoutes() {
             <Route path="personnel" element={<PersonnelPage />} />
             <Route path="personnel/:employeeId" element={<PersonnelEmployeePage />} />
             <Route path="my-personnel-file" element={<MyPersonnelFilePage />} />
+            <Route path="sanctions" element={<SanctionsPage />} />
             <Route path="admin/activity" element={<AdminActivityPage />} />
             <Route path="admin/security" element={<AdminSecurityPage />} />
             <Route path="admin/health" element={<AdminHealthPage />} />
