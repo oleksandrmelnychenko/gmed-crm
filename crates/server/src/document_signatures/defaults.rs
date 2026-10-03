@@ -188,16 +188,18 @@ async fn order_payer_signer(state: &AppState, source: &PgRow) -> Result<Option<S
     if template.as_deref() != Some("cost_coverage_declaration") {
         return Ok(None);
     }
-    let (Some(order_id), Some(patient_id)) = (
-        source
-            .try_get::<Option<Uuid>, _>("order_id")
-            .unwrap_or_default(),
-        source
-            .try_get::<Option<Uuid>, _>("patient_id")
-            .unwrap_or_default(),
-    ) else {
+    let Some(order_id) = source
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default()
+    else {
         return Ok(None);
     };
+    // A lead's order has no patient yet: its payer (from the lead's payer
+    // declaration) is a contact that needs none.
+    let patient_id = source
+        .try_get::<Option<Uuid>, _>("patient_id")
+        .unwrap_or_default()
+        .unwrap_or(Uuid::nil());
     let mut conn = state.db.acquire().await.map_err(db_error)?;
     let inherited = crate::routes::invoices::payer::inherited_invoice_payer(
         &mut conn,
@@ -299,6 +301,11 @@ pub(super) async fn suggested(
     if let Some(id) = patient_id
         && matches!(auth.role, Role::Ceo | Role::PatientManager)
         && patients::has_patient_access(state, auth, id).await?
+    {
+        payer = order_payer_signer(state, source).await?;
+    } else if patient_id.is_none()
+        && lead_id.is_some()
+        && matches!(auth.role, Role::Ceo | Role::PatientManager)
     {
         payer = order_payer_signer(state, source).await?;
     }
