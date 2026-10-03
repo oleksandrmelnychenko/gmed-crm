@@ -69,3 +69,38 @@ describe("portalCredentialsMessage", () => {
     expect(patientMessageLanguage("EN")).toBe("en");
   });
 });
+
+describe("portal e-mail conflicts", () => {
+  it("names the owner of a taken address instead of a generic conflict", async () => {
+    const { leadErrorMessage } = await import("./leads-model");
+    const error = Object.assign(new Error("Email already belongs to an account"), {
+      status: 409,
+      body: {
+        code: "portal_email_taken",
+        owner: {
+          name: "Anna Müller",
+          role: "patient",
+          lead_id: null,
+          lead_name: null,
+          patient_id: "p1",
+          patient_code: "P-00123",
+          patient_name: "Anna Müller",
+        },
+      },
+    });
+    expect(leadErrorMessage(error, (ru) => ru)).toBe(
+      "Этот адрес уже используется: Anna Müller · пациент P-00123. Укажите другую электронную почту",
+    );
+    expect(leadErrorMessage(error, (_ru, de) => de)).toContain("Anna Müller · Patient P-00123");
+  });
+
+  it("describes staff owners with their role", async () => {
+    const { portalEmailOwnerLabel } = await import("./lead-portal-access");
+    expect(
+      portalEmailOwnerLabel(
+        { name: "Max Muster", role: "sales", lead_id: null, lead_name: null, patient_id: null, patient_code: null, patient_name: null },
+        "ru",
+      ),
+    ).toBe("Max Muster · сотрудник (продажи)");
+  });
+});

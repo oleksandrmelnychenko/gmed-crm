@@ -17,11 +17,36 @@ import type {
   LeadGateForm,
   LeadPermissions,
 } from "./types";
+import { portalEmailOwnerFromError, portalEmailOwnerLabel } from "./lead-portal-access";
 
 type LeadErrorTranslator = (ru: string, de: string) => string;
 type LeadErrorTranslation = readonly [ru: string, de: string];
 
 const LEAD_ERROR_MESSAGES: Record<string, LeadErrorTranslation> = {
+  "a valid email is required": [
+    "Укажите корректную электронную почту — это логин пациента в портале",
+    "Gültige E-Mail-Adresse angeben – sie ist der Login des Patienten im Portal",
+  ],
+  "a valid email is required: it is the patient's login": [
+    "Укажите корректную электронную почту — это логин пациента в портале",
+    "Gültige E-Mail-Adresse angeben – sie ist der Login des Patienten im Portal",
+  ],
+  "the lead needs a valid email before patient access can be issued": [
+    "Сначала укажите у лида корректную электронную почту",
+    "Zuerst eine gültige E-Mail-Adresse beim Lead hinterlegen",
+  ],
+  "a minor gets no own login; the parents use their account": [
+    "У несовершеннолетнего нет собственного доступа — данные вносят родители через свой аккаунт",
+    "Minderjährige erhalten keinen eigenen Zugang – die Eltern nutzen ihr Konto",
+  ],
+  "only the ceo or a patient manager can issue patient access": [
+    "Доступ пациенту выдают только CEO или менеджер пациентов",
+    "Den Patientenzugang vergeben nur CEO oder Patientenmanager",
+  ],
+  "the patient account is deactivated": [
+    "Доступ пациента отключён",
+    "Der Patientenzugang ist deaktiviert",
+  ],
   "lead is not selected": ["Обращение не выбрано", "Kein Lead ausgewählt"],
   "lead could not be saved": ["Не удалось сохранить обращение", "Lead konnte nicht gespeichert werden"],
   "lead not found": ["Лид больше не найден", "Der Lead wurde nicht gefunden"],
@@ -219,6 +244,14 @@ export function leadErrorMessage(
     : error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
       ? ((error as { message: string }).message).trim()
       : "";
+  const emailOwner = portalEmailOwnerFromError(error);
+  if (emailOwner) {
+    const lang = tx("ru", "de") === "de" ? "de" : "ru";
+    return tx(
+      `Этот адрес уже используется: ${portalEmailOwnerLabel(emailOwner, lang)}. Укажите другую электронную почту`,
+      `Diese Adresse wird bereits verwendet: ${portalEmailOwnerLabel(emailOwner, lang)}. Bitte eine andere E-Mail-Adresse angeben`,
+    );
+  }
   const normalized = message.toLocaleLowerCase("en-US");
   const exact = LEAD_ERROR_MESSAGES[normalized];
   if (exact) return tx(exact[0], exact[1]);

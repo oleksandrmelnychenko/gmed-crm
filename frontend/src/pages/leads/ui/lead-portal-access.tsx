@@ -24,6 +24,7 @@ import {
   portalCredentialsMessage,
   type PatientMessageLanguage,
 } from "../model/lead-portal-access";
+import { leadErrorMessage } from "../model/leads-model";
 
 type Lang = string;
 
@@ -62,7 +63,7 @@ export function LeadPortalAccessDetail({
       setIssued(result);
       onChanged?.();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      setError(leadErrorMessage(nextError, (ru, de) => (lang === "de" ? de : ru)));
     } finally {
       setBusy(false);
     }

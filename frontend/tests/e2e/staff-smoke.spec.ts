@@ -3004,7 +3004,7 @@ test.describe("lead onboarding wizard", () => {
       wizard.getByRole("button", { name: "Personendaten: Vorname: Pflichtfeld", exact: true }),
     ).toBeVisible();
     await expect(
-      wizard.getByRole("button", { name: "Personendaten: E-Mail oder Telefonnummer angeben", exact: true }),
+      wizard.getByRole("button", { name: "Personendaten: E-Mail-Adresse angeben – sie ist der Login des Patienten im Portal", exact: true }),
     ).toBeVisible();
     expect(createRequests).toBe(0);
 
