@@ -4806,7 +4806,11 @@ export function LeadWizard({
   async function finishIntake(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
     setError("");
-    if (step1Portal.mode === "patient" && Object.keys(strictMasterErrors).length > 0) {
+    if (
+      step1Portal.mode === "patient"
+      && Object.keys(masterErrors).length === 0
+      && Object.keys(strictMasterErrors).length > 0
+    ) {
       // Completing the intake needs the full master data the patient has not sent yet.
       setError(tx(
         "Ждём данные пациента: заполните данные клиента или дождитесь, пока пациент заполнит их в портале.",
