@@ -59,6 +59,7 @@ GMED (агенція) підтверджує замовлення або рам�
 - `POST /orders/{id}/commercial-basis` з `signed_agency: true` (лише перехід false → true; `signed_patient` у тому ж запиті враховується);
 - `POST /framework-contracts/{id}/status` → `signed` і створення договору ліда одразу зі статусом `signed`;
 - `POST /documents/{id}/mark-signed` з видом `framework_contract` для документа ліда;
+- `POST /documents/{id}/paper-signature` (скан підписаного на папері) для `framework_contract` або `single_order` ліда — паперовий підпис фіксує підписи обох сторін, тобто й GMED;
 - `POST /signature-packages` / запит на підпис, у якому підписує `agency`, для `framework_contract` або `single_order` ліда: клієнт підписує першим у тому самому запиті (послідовність провайдера), тому перевіряється декларація; Kostenübernahmeerklärung у тому самому пакеті з підписантом `payer` зараховується, бо платник теж підписує до GMED.
 
 Шлюз діє для неконвертованих лідів; замовлення пацієнтів без ліда не змінюються. Візард показує рядок «Клиент подписал ✓ → Плательщик подписал согласие ✓ → GMED подписывает» і причини блокування.
