@@ -9,12 +9,13 @@ import { ApiRequestError } from "@/lib/api";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { downloadDocumentFile } from "../data/document-api";
+import { PaperSignatureSection } from "./paper-signature-section";
 import { SignatureConnectionDialog } from "./signature-connection-dialog";
 import { SignatureSignerFields } from "./signature-signer-fields";
 import { SignaturePackageComposer, emptyPackageSelection, expiryInstant, resolvePackage, type PackageSelection } from "./signature-package-composer";
 import {
   abandonSignatureRequest, combinedSignerPolicy, createSignaturePackage, packageMinimumLevel, downloadSignatureReport, fetchPackageCandidates, fetchSignatureState,
-  isSignaturePending, recordSignatureDelivery, resolveSignatureReview, signatureAction, signatureErrorText, signatureFrameCoverage, signatureReasonValid, signerPolicyError,
+  isSignaturePending, recordPaperSignature, recordSignatureDelivery, resolveSignatureReview, signatureAction, signatureErrorText, signatureFrameCoverage, signatureReasonValid, signerPolicyError,
   validSigners, type DeliveryChannel, type PackageCandidates, type SignatureRequest, type SignatureState, type SignatureStatus, type Signer, type SignerPolicy, type SignerRole,
 } from "../data/document-signature-api";
 
@@ -171,6 +172,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
   const [revision, setRevision] = useState(0);
   const [awaitingState, setAwaitingState] = useState(false);
   const [refreshCheck, setRefreshCheck] = useState<{ id: string; before?: string } | null>(null);
+  const [paperSigned, setPaperSigned] = useState(false);
   const busyRef = useRef(false);
   const onDoneRef = useRef(onDone);
   const onStateChangeRef = useRef(onStateChange);
@@ -507,6 +509,18 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               </div>
             </div>
           </section> : null}
+          {paperSigned ? <p role="status" data-paper-signature-stored className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">{tx("Скан сохранён как подписанная версия документа.", "Der Scan wurde als unterschriebene Fassung des Dokuments gespeichert.")}</p> : null}
+          {state.can_sign_on_paper && !pending && !paperSigned ? <PaperSignatureSection lang={lang === "de" ? "de" : "ru"} electronicFormExcluded={state.electronic_form_excluded} disabled={mutationDisabled}
+            onSubmit={async (scan, signedOn) => {
+              let stored = false;
+              await run(async () => {
+                await recordPaperSignature(documentId, scan, signedOn);
+                stored = true;
+                setPaperSigned(true);
+                onDoneRef.current?.();
+              });
+              return stored;
+            }} /> : null}
         </> : null}
       </div> : null}
     </details>

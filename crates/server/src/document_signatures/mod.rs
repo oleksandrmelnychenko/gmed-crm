@@ -7,6 +7,7 @@ mod effects;
 pub(crate) mod frames;
 mod legal;
 pub(crate) mod package;
+mod paper;
 pub mod provider;
 pub mod retention;
 mod review;
@@ -44,6 +45,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .merge(connection::router())
         .merge(defaults::router())
+        .merge(paper::router())
         .merge(review::router())
         .route("/document-signatures/statuses", get(summary::list))
         .route("/documents/{id}/signature-requests", get(list).post(create))
@@ -473,6 +475,7 @@ async fn list(
         "signing_packages":signing_packages,
         "scope":{"patient_id":source.get::<Option<Uuid>,_>("patient_id"),"lead_id":source.get::<Option<Uuid>,_>("lead_id")},
         "electronic_form_excluded":electronic_form_excluded(&source),
+        "can_sign_on_paper":can_send && paper::possible(&source),
         "ineligible_reason":eligibility(&source).or_else(|| electronic_form_excluded(&source).map(|_| "electronic_form_excluded")),
         "requests":requests})))
 }

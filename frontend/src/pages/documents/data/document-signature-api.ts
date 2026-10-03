@@ -49,6 +49,8 @@ export type SignatureState = {
   minimum_level?: SignatureLevel;
   scope?: { patient_id: string | null; lead_id: string | null };
   electronic_form_excluded?: string | null;
+  /** Staff may upload the scan of a copy signed on paper for this document. */
+  can_sign_on_paper?: boolean;
   ineligible_reason: string | null; requests: SignatureRequest[];
   suggested_signers?: Signer[];
   review_package?: { template: "privacy_information" | "cost_estimate"; documents: { id: string; title: string; version: number }[] } | null;
@@ -90,6 +92,17 @@ export const fetchPackageCandidates = (documentId: string) => apiFetch<PackageCa
 // timeout cancelled a request that would have succeeded moments later.
 const CREATE_SIGNATURE_REQUEST_TIMEOUT_MS = 90_000;
 export const createSignatureRequest = (id: string, signers: Signer[], attachmentDocumentId?: string, signingDocumentIds: string[] = []) => apiFetch<{ id: string }>(`/documents/${id}/signature-requests`, { method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS, body: JSON.stringify({ signers, ...(attachmentDocumentId ? { attachment_document_id: attachmentDocumentId } : {}), ...(signingDocumentIds.length ? { signing_document_ids: signingDocumentIds } : {}) }) });
+/** Stores the scan of the copy signed on paper as the signed next version of the document. */
+export function recordPaperSignature(documentId: string, scan: File, signedOn: string) {
+  const form = new FormData();
+  form.set("file", scan);
+  if (signedOn) form.set("signed_on", signedOn);
+  return apiFetch<{ ok: boolean; document_id: string; replaced_document_id: string; signed_at: string }>(
+    `/documents/${documentId}/paper-signature`,
+    // The scan is malware-scanned before it is stored.
+    { method: "POST", body: form, timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS },
+  );
+}
 export const createSignaturePackage = (draft: PackageDraft) => apiFetch<{ id: string }>("/signature-packages", {
   method: "POST", timeoutMs: CREATE_SIGNATURE_REQUEST_TIMEOUT_MS,
   body: JSON.stringify({
@@ -245,6 +258,21 @@ export function signatureErrorText(code: string | null | undefined, tx: (ru: str
       return tx("Информационные документы прикладываются для ознакомления и не подписываются.", "Informationsdokumente werden zur Kenntnisnahme beigefügt und nicht unterschrieben.");
     case "signature_package_size":
       return tx("В пакете должно быть от 1 до 10 документов.", "Ein Paket enthält 1 bis 10 Dokumente.");
+    case "paper_signature_scan_required":
+      return tx("Выберите файл со сканом подписанного документа.", "Wählen Sie die Datei mit dem Scan des unterschriebenen Dokuments.");
+    case "paper_signature_scan_type":
+      return tx("Скан должен быть файлом PDF, JPG или PNG.", "Der Scan muss eine PDF-, JPG- oder PNG-Datei sein.");
+    case "paper_signature_scan_too_large":
+      return tx("Скан больше 25 МБ.", "Der Scan ist größer als 25 MB.");
+    case "paper_signature_date_invalid":
+      return tx("Дата подписи не может быть в будущем.", "Das Unterschriftsdatum darf nicht in der Zukunft liegen.");
+    case "signature_scan_failed":
+      return tx("Файл не прошёл проверку на вредоносное содержимое.", "Die Datei hat die Schadsoftware-Prüfung nicht bestanden.");
+    case "document_already_signed":
+      return tx("Документ уже подписан.", "Das Dokument ist bereits unterschrieben.");
+    case "document_superseded":
+    case "document_unavailable":
+      return tx("Это не актуальная версия документа. Откройте текущую версию.", "Dies ist nicht die aktuelle Fassung des Dokuments. Öffnen Sie die aktuelle Fassung.");
     case "signature_withdraw_failed":
       return tx("Skribble не подтвердил отзыв. Запрос остаётся открытым — повторите позже.", "Skribble hat das Zurückziehen nicht bestätigt. Die Anfrage bleibt offen – versuchen Sie es später erneut.");
     default:
