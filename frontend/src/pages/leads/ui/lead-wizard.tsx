@@ -7598,7 +7598,8 @@ ${serviceCommentLines.join("\n")}`
               {leadId ? (
                 <LeadSigningPackagePanel
                   leadId={leadId}
-                  contractDocument={inheritedContract ? null : commercialDocuments.framework_contract[0] ?? null}
+                  contractDocument={inheritedContract ? null : sortWizardDocumentsNewestFirst(commercialDocuments.framework_contract)[0] ?? null}
+                  orderDocument={sortWizardDocumentsNewestFirst(commercialDocuments.single_order)[0] ?? null}
                   contractSigned={contract?.status === "signed"}
                   inheritedContract={inheritedContract}
                   onDone={() => { void refreshDocumentsState(); }}

@@ -27,6 +27,9 @@ pub(super) fn signing_companions(
             "confidentiality_release",
             "privacy_consents",
         ],
+        // Without a new contract (a signed contract of the patient still
+        // applies, or none is generated yet) the order carries the consents.
+        Some("single_order") if lead_intake => &["confidentiality_release", "privacy_consents"],
         Some("confidentiality_release") => &["privacy_consents"],
         _ => &[],
     }
@@ -50,6 +53,7 @@ pub(super) fn signing_slots(
         Some("framework_contract") if lead_intake => {
             vec![&["single_order"][..], MINOR_CONSENTS]
         }
+        Some("single_order") if lead_intake => vec![MINOR_CONSENTS],
         _ => vec![],
     }
 }
@@ -1102,7 +1106,16 @@ mod tests {
             ]
         );
         assert!(signing_companions(Some("framework_contract"), false).is_empty());
-        assert!(signing_companions(Some("single_order"), true).is_empty());
+        // Without a new contract the order carries the consents of the lead.
+        assert_eq!(
+            signing_companions(Some("single_order"), true),
+            ["confidentiality_release", "privacy_consents"]
+        );
+        assert!(signing_companions(Some("single_order"), false).is_empty());
+        assert_eq!(
+            signing_slots(Some("single_order"), true, true),
+            vec![MINOR_CONSENTS]
+        );
         // A minor's onboarding package carries the guardians' declaration.
         assert_eq!(
             signing_slots(Some("framework_contract"), true, true),
