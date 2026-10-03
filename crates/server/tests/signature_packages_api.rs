@@ -1391,6 +1391,140 @@ async fn package_validation_matrix_and_rbac() {
     assert_eq!(status, StatusCode::ACCEPTED, "{value}");
 }
 
+/// TASK-FB4D: the cost estimate of an order travels with the order, and the
+/// medical cost calculation goes along as an attachment whenever the order
+/// has one.
+#[tokio::test]
+async fn single_order_package_takes_its_cost_estimate_and_the_calculation_when_there_is_one() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "1985-07-07").await;
+    let seed_order = |number: &'static str| {
+        let pool = env.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+                   VALUES ($1, $2, 'execution', 'active', $3) RETURNING id"#,
+            )
+            .bind(format!("{number}-{}", Uuid::new_v4().simple()))
+            .bind(patient)
+            .bind(env.admin_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let order = seed_order("AUF-A").await;
+    let other_order = seed_order("AUF-B").await;
+    let of_order = |document: Uuid, order: Uuid| {
+        let pool = env.pool.clone();
+        async move {
+            sqlx::query("UPDATE documents SET order_id=$2 WHERE id=$1")
+                .bind(document)
+                .bind(order)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    };
+    let order_document = upload(&env, patient, Doc::new("single_order", 1)).await;
+    let estimate = upload(&env, patient, Doc::new("order_cost_estimate", 1)).await;
+    let other_estimate = upload(&env, patient, Doc::new("order_cost_estimate", 1)).await;
+    of_order(order_document, order).await;
+    of_order(estimate, order).await;
+    of_order(other_estimate, other_order).await;
+
+    // The composer starts with the order and its own cost estimate.
+    let presets = |document: Uuid| {
+        let app = env.app.clone();
+        let bearer = env.ceo.clone();
+        async move {
+            let (status, candidates) = call(
+                &app,
+                "GET",
+                &format!("/api/v1/signature-packages/candidates?document_id={document}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{candidates}");
+            candidates["preset_document_ids"].clone()
+        }
+    };
+    assert_eq!(presets(order_document).await, json!([estimate]));
+    // A cost estimate on its own suggests nothing more.
+    assert_eq!(presets(estimate).await, json!([]));
+
+    // No medical cost calculation for this order: the package goes without one.
+    let without = send_package(
+        &env,
+        json!({"document_ids":[order_document, estimate],"signers":both_parties()}),
+    )
+    .await;
+    until_pending(&env, without).await;
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM document_signature_attachments WHERE request_id=$1",
+            without
+        )
+        .await,
+        0
+    );
+    let (status, value) = call(
+        &env.app,
+        "POST",
+        &format!("/api/v1/document-signature-requests/{without}/withdraw"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    for _ in 0..100 {
+        if status_of(&env.pool, without).await == "withdrawn" {
+            break;
+        }
+        poll_request_now(&env.state, without).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(status_of(&env.pool, without).await, "withdrawn");
+
+    // Once the order has a calculation it is mandatory again, and only its own counts.
+    let calculation = upload(&env, patient, Doc::new("cost_estimate", 1)).await;
+    let other_calculation = upload(&env, patient, Doc::new("cost_estimate", 1)).await;
+    of_order(calculation, order).await;
+    of_order(other_calculation, other_order).await;
+    for (attachments, code) in [
+        (json!([]), "review_attachment_required"),
+        (json!([other_calculation]), "review_attachment_changed"),
+    ] {
+        let (status, value) = call(
+            &env.app,
+            "POST",
+            "/api/v1/signature-packages",
+            &env.ceo,
+            Some(json!({"document_ids":[order_document, estimate],"attachment_ids":attachments,"signers":both_parties()})),
+        )
+        .await;
+        assert!(status.is_client_error(), "{code}: {status} {value}");
+        assert_eq!(value["error"], code, "{value}");
+    }
+    let with = send_package(
+        &env,
+        json!({"document_ids":[order_document, estimate],"attachment_ids":[calculation],"signers":both_parties()}),
+    )
+    .await;
+    until_pending(&env, with).await;
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM document_signature_attachments WHERE request_id=$1",
+            with
+        )
+        .await,
+        1
+    );
+}
+
 /// A document generated before the generators recorded their signature places
 /// has its frames found in the PDF itself; inside a package they move to the
 /// pages the document takes in the merged bundle.
