@@ -325,6 +325,7 @@ export type DocumentComplianceKind =
   | "identity"
   | "framework_contract"
   | "enhanced_due_diligence"
+  | "cost_coverage_declaration"
   | "other";
 
 export type MarkDocumentSignedResponse = {

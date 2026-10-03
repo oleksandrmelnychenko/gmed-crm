@@ -672,7 +672,9 @@ function usePatientProfileTabContent({
           <ProfileSummaryLine
             label={t.patients_nationality}
             value={fieldValue(
-              nationalityNameForDisplay(detail.nationality, getLang()),
+              detail.citizenships?.length
+                ? detail.citizenships.map((code) => countryNameForDisplay(code, getLang())).join(", ")
+                : nationalityNameForDisplay(detail.nationality, getLang()),
               t.common_not_set,
             )}
             onEdit={editAction}

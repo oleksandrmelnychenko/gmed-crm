@@ -435,6 +435,8 @@ struct UpdatePatientRequest {
     legal_status: Option<Value>,
     clinical_warnings: Option<String>,
     notes: Option<Value>,
+    /// ISO 3166-1 alpha-2 codes; replaces the list (first = nationality).
+    citizenships: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -1456,7 +1458,7 @@ const ALLOWED_PATIENT_COUNTRIES: [&str; 21] = [
     "United Kingdom",
     "United States",
 ];
-const ISO_3166_ALPHA_2_COUNTRY_CODES: &[&str] = &[
+pub(crate) const ISO_3166_ALPHA_2_COUNTRY_CODES: &[&str] = &[
     "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW", "AX", "AZ",
     "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ", "BR", "BS",
     "BT", "BV", "BW", "BY", "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK", "CL", "CM", "CN",
@@ -2689,7 +2691,7 @@ async fn get_patient(
 
     match sqlx::query(
         r#"SELECT id, patient_id, title, first_name, last_name,
-                  birth_date, gender, nationality, residence_country,
+                  birth_date, gender, nationality, citizenships, residence_country,
                   languages, functional_labels, phone_primary, phone_secondary, email,
                   address_street, address_city, address_zip, address_country,
                   insurance_provider, insurance_number, insurance_type,
@@ -2717,7 +2719,7 @@ async fn get_patient(
 
             let policies = load_patient_field_policies(&state, &auth).await?;
             let contacts = load_patient_contacts(&state, patient_id).await?;
-            let patient_json = build_patient_detail_json(
+            let mut patient_json = build_patient_detail_json(
                 &auth,
                 &policies,
                 PatientDetailInput {
@@ -2911,6 +2913,20 @@ async fn get_patient(
                     })?,
                 },
             );
+            // Citizenships (ISO codes, several) follow the nationality policy.
+            if matches!(
+                field_access(&policies, "nationality", auth.role.has_full_access()),
+                Some(FieldAccess::Visible | FieldAccess::Masked)
+            ) && let Some(map) = patient_json.as_object_mut()
+            {
+                map.insert(
+                    "citizenships".to_string(),
+                    json!(
+                        r.try_get::<Vec<String>, _>("citizenships")
+                            .unwrap_or_default()
+                    ),
+                );
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "view_patient",
                 Some(auth.user_id),
@@ -3704,6 +3720,15 @@ async fn update_patient(
         .as_ref()
         .and_then(|value| value.0.get("compliance_completed").and_then(Value::as_bool))
         .unwrap_or(false);
+    let citizenships = match body
+        .citizenships
+        .as_deref()
+        .map(crate::services::citizenships::normalize_citizenships)
+        .transpose()
+    {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3788,6 +3813,7 @@ async fn update_patient(
         "gender_updated": gender_updated,
         "contract_status": contract_status,
         "compliance_completed": compliance_completed,
+        "citizenships": citizenships,
     });
 
     match result {
@@ -3797,6 +3823,26 @@ async fn update_patient(
                     replace_patient_contacts_tx(&mut tx, patient_uuid, contacts).await
             {
                 return response;
+            }
+            // Several citizenships (ISO codes); `nationality` keeps the first
+            // one for readers that expect a single country.
+            if let Some(codes) = citizenships.as_ref()
+                && let Err(e) = sqlx::query(
+                    "UPDATE patients
+                     SET citizenships = $2, nationality = COALESCE($2[1], nationality),
+                         updated_at = now()
+                     WHERE id = $1",
+                )
+                .bind(patient_uuid)
+                .bind(codes)
+                .execute(&mut *tx)
+                .await
+            {
+                tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to update patient citizenships");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update patient",
+                );
             }
             if let Err(e) = tx.commit().await {
                 tracing::error!(error = %e, patient_id = %patient_uuid, "Failed to commit patient update transaction");

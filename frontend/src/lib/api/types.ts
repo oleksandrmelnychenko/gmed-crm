@@ -27,6 +27,8 @@ export interface Lead {
   phone: string | null;
   source: string | null;
   country: string | null;
+  /** Citizenships as ISO 3166-1 alpha-2 codes (several possible). */
+  citizenships?: string[];
   intake_source: string | null;
   flow: string | null;
   lead_type?: string | null;

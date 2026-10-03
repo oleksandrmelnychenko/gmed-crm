@@ -8,6 +8,8 @@ const SIGNABLE_DOCUMENT_TYPES = new Set([
   "single_order",
   "order_cost_estimate",
   "enhanced_due_diligence",
+  // The third-party payer's Kostenübernahmeerklärung (payer and GMED sign it).
+  "cost_coverage_declaration",
 ]);
 
 type SigningDocument = Pick<DocumentItem,

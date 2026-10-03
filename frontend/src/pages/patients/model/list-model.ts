@@ -26,6 +26,8 @@ export type PatientSummary = {
 };
 
 export type PatientDetail = PatientSummary & {
+  /** Citizenships as ISO 3166-1 alpha-2 codes; `nationality` keeps the first. */
+  citizenships?: string[];
   updated_at?: string;
   phone_secondary?: string | null;
   contacts?: PatientContact[];

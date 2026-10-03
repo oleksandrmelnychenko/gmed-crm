@@ -1897,6 +1897,15 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
     .fetch_one(&env.pool)
     .await
     .unwrap();
+    // GMED countersigns a lead's contract only with a complete payer declaration.
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations (lead_id, payer_kind, source_of_funds)
+         VALUES ($1, 'self', 'employment')",
+    )
+    .bind(lead)
+    .execute(&env.pool)
+    .await
+    .unwrap();
     let mut ids = Vec::new();
     for doc in [
         Doc::new("framework_contract", 1)

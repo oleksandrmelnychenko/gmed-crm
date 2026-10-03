@@ -5700,8 +5700,11 @@ async fn cost_coverage_declaration_includes_contract_obligations_and_annexes() {
     assert_eq!(status, StatusCode::OK);
     assert!(bytes.starts_with(b"%PDF-"));
     let pdf_text = extract_pdf_text(&bytes);
-    assert!(pdf_text.contains("Übernahme der Vertragspflichten"));
-    assert!(pdf_text.contains("sämtliche Pflichten des Auftraggebers"));
+    // Schuldbeitritt (owner decision 2026-10-03): the patient stays liable.
+    assert!(pdf_text.contains("Schuldbeitritt und gesamtschuldnerische Haftung"));
+    assert!(pdf_text.contains("Keine Bürgschaft"));
+    assert!(!pdf_text.contains("Übernahme der Vertragspflichten"));
+    assert!(pdf_text.contains("Information nach Art. 14 DSGVO"));
     assert!(pdf_text.contains("Herr Justus Geldgeber"));
     assert!(pdf_text.contains("Bestandteile der Kostenübernahmeerklärung"));
     assert!(pdf_text.contains("3. Einzelauftrag"));

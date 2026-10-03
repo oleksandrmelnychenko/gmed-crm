@@ -197,6 +197,24 @@ pub(super) async fn create_request(
     policy
         .validate(&signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
+    // GMED countersigns a lead's contract or order only once the payer
+    // declaration is complete (third party: cost assumption signed first).
+    crate::routes::lead_payer::check_signature_request(
+        &state.db,
+        &rows
+            .iter()
+            .map(|row| crate::routes::lead_payer::SigningDocument {
+                template: template_of(row),
+                lead_id: row.get("lead_id"),
+                order_id: row.get("order_id"),
+            })
+            .collect::<Vec<_>>(),
+        &signers
+            .iter()
+            .map(|signer| signer.role.as_str())
+            .collect::<Vec<_>>(),
+    )
+    .await?;
 
     // § 126a BGB: the level never falls below the strictest document.
     let minimum = rows.iter().map(minimum_level).max().unwrap_or_default();

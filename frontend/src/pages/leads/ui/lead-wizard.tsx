@@ -59,7 +59,18 @@ import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { CountrySelect, countryLabel } from "@/components/ui/country-select";
+import { CountrySelect, countryCodeFromStoredValue, countryLabel } from "@/components/ui/country-select";
+import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
+import { nationalityCountryCode } from "@/pages/patients/model/nationalities";
+import {
+  payerAmlCountries,
+  payerGateErrorText,
+  payerReadinessReasonFields,
+  payerReadinessReasonLabels,
+  payerReadinessReasonSteps,
+} from "../model/lead-payer";
+import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
+import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
 import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import {
   Dialog,
@@ -299,7 +310,8 @@ type Draft = {
   state: string;
   zip: string;
   country: string;
-  registrationCountry: string;
+  /** ISO codes (several citizenships); the first one is also stored as registration_country. */
+  citizenships: string[];
   passportExpiry: string;
   amlEnhancedDueDiligence: AmlEnhancedDueDiligenceDraft;
   language: string;
@@ -835,6 +847,7 @@ function autosavePayload(
     state: draft.state.trim(),
     zip_code: draft.zip.trim(),
     country: draft.country.trim(),
+    citizenships: normalizeCitizenships(draft.citizenships),
     primary_language: draft.language.trim(),
     primary_concern_text: draft.concern.trim(),
     additional_concerns: draft.anamnese.trim(),
@@ -866,7 +879,7 @@ function autosavePayload(
       program_date_to: draft.programDateTo,
       framework_contract_id: draft.frameworkContractId || null,
       cost_threshold: draft.costThreshold,
-      registration_country: draft.registrationCountry,
+      registration_country: draft.citizenships[0] ?? "",
       passport_expiry: draft.passportExpiry,
       document_consents: {
         provider_release: draft.providerReleaseConsent,
@@ -1471,7 +1484,9 @@ function draftFromLead(lead: LeadDetail): Draft {
     state: lead.state ?? "",
     zip: lead.zip_code ?? "",
     country: lead.country ?? "",
-    registrationCountry: inputString(lead.wizard_state?.["registration_country"]),
+    citizenships: lead.citizenships?.length
+      ? normalizeCitizenships(lead.citizenships)
+      : normalizeCitizenships([countryCodeFromStoredValue(inputString(lead.wizard_state?.["registration_country"]))]),
     passportExpiry: inputString(lead.wizard_state?.["passport_expiry"]),
     amlEnhancedDueDiligence: amlEnhancedDueDiligenceFromLead(lead),
     language: normalizedLanguageCode(lead.primary_language) || normalizedLanguageCode(lead.locale),
@@ -1547,7 +1562,7 @@ function blankDraft(): Draft {
     state: "",
     zip: "",
     country: "",
-    registrationCountry: "",
+    citizenships: [],
     passportExpiry: "",
     amlEnhancedDueDiligence: blankAmlEnhancedDueDiligence(),
     language: "",
@@ -1622,7 +1637,9 @@ function draftFromExistingPatient(patient: PatientDetail): Draft {
     city: patient.address_city?.trim() ?? "",
     zip: patient.address_zip?.trim() ?? "",
     country: patient.address_country?.trim() || patient.residence_country?.trim() || "",
-    registrationCountry: patient.nationality?.trim() ?? "",
+    citizenships: patient.citizenships?.length
+      ? normalizeCitizenships(patient.citizenships)
+      : normalizeCitizenships([nationalityCountryCode(patient.nationality)]),
     passportExpiry: patient.passport_expiry?.trim() ?? "",
     language: normalizedLanguageCode(patient.languages?.[0]),
     hasInsurance: insuranceProvider || insuranceNumber || insuranceType ? "yes" : "",
@@ -2017,6 +2034,8 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
 }
 
 function errorText(error: unknown, tx: Tx): string {
+  const payerGate = payerGateErrorText(error, tx);
+  if (payerGate) return payerGate;
   if (error instanceof Error && error.message === "Generate the current order document before confirming its signatures") {
     return tx("Сначала создайте актуальную версию документа заказа, затем подтвердите подписи", "Erstellen Sie zuerst die aktuelle Auftragsversion und bestätigen Sie anschließend die Unterschriften");
   }
@@ -2072,6 +2091,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     [COST_ESTIMATE_WORK_TYPES_REASON]: tx("Выберите медицинские виды работ для предварительного расчёта", "Medizinische Leistungsarten für die vorläufige Kostenkalkulation auswählen"),
     "Required prepayment is not complete": tx("Укажите полученную предоплату", "Erforderliche Vorauszahlung erfassen"),
     "Lead is already converted": tx("Пациент уже создан", "Patient wurde bereits angelegt"),
+    ...payerReadinessReasonLabels(tx),
   };
   return labels[reason] ?? tx("Проверьте незавершённые данные", "Unvollständige Angaben prüfen");
 }
@@ -2110,6 +2130,7 @@ function readinessReasonStep(reason: string): StepId {
     [COST_ESTIMATE_WORK_TYPES_REASON]: "order",
     "Required prepayment is not complete": "commercial",
     "Lead is already converted": "release",
+    ...payerReadinessReasonSteps(),
   };
   return steps[reason] ?? "release";
 }
@@ -2178,6 +2199,7 @@ function readinessReasonFieldId(reason: string, draft: Draft | null) {
     "Order cost estimate document is missing": ORDER_COST_ESTIMATE_DOCUMENT_ID,
     "Cost estimate document is missing": COST_ESTIMATE_DOCUMENT_ID,
     "Preliminary cost calculation document is missing": COST_ESTIMATE_DOCUMENT_ID,
+    ...payerReadinessReasonFields(),
   };
   if (reason === COST_ESTIMATE_WORK_TYPES_REASON) {
     // The work-type list appears once a specialization is chosen.
@@ -2282,6 +2304,7 @@ function documentsValidationIssues(
   documents: Record<WizardDocumentKind, DocumentItem[]>,
   tx: Tx,
   existingChecks?: Map<string, boolean>,
+  payerCountries: readonly string[] = [],
 ): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
@@ -2332,7 +2355,7 @@ function documentsValidationIssues(
     });
   }
   const amlRequired = Boolean(
-    amlRiskForCountries(draft.country, draft.registrationCountry)
+    amlRiskForCountries(draft.country, ...draft.citizenships, ...payerCountries)
     || draft.amlEnhancedDueDiligence.pepContractPartner
     || draft.amlEnhancedDueDiligence.pepBeneficialOwner
   );
@@ -2701,6 +2724,15 @@ export function LeadWizard({
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
+  // "Кто платит": the payer declaration feeds the AML country risk, the
+  // documents step and the signing order of the commercial step. It follows
+  // every lead refresh (order signatures, documents, readiness).
+  const payer = useLeadPayerDeclaration(open ? leadId : null);
+  const payerCountries = useMemo(() => payerAmlCountries(payer.data), [payer.data]);
+  const reloadPayer = payer.reload;
+  useEffect(() => {
+    if (lead) void reloadPayer();
+  }, [lead, reloadPayer]);
   const retentionDays = daysUntilRetentionDeadline(lead?.retention_deadline_at);
   // A repeat intake (lead opened for an existing patient) keeps its patient
   // review even when reopened from the leads registry, so the patient's valid
@@ -3686,8 +3718,8 @@ export function LeadWizard({
   );
   const quote = orderQuotes[0] ?? null;
   const amlRisk = useMemo(
-    () => draft ? amlRiskForCountries(draft.country, draft.registrationCountry) : null,
-    [draft?.country, draft?.registrationCountry],
+    () => draft ? amlRiskForCountries(draft.country, ...draft.citizenships, ...payerCountries) : null,
+    [draft?.country, draft?.citizenships, payerCountries],
   );
   const amlPepTriggered = Boolean(
     draft?.amlEnhancedDueDiligence.pepContractPartner
@@ -3750,7 +3782,16 @@ export function LeadWizard({
       && item.has_stored_file !== false
       && !wizardDocumentKind(item)
       && !(item.is_medical && !item.generated_template_id)
-      && !["framework_contract", "single_order", "order_cost_estimate", "cost_estimate"].includes(item.generated_template_id ?? "")
+      && !["framework_contract", "single_order", "order_cost_estimate", "cost_estimate", "cost_coverage_declaration"].includes(item.generated_template_id ?? "")
+    )),
+    [documents],
+  );
+  // The third-party payer's Kostenübernahmeerklärung (payer section).
+  const costAssumptionDocuments = useMemo(
+    () => documents.filter((item) => (
+      !item.file_deleted_at
+      && item.has_stored_file !== false
+      && item.generated_template_id === "cost_coverage_declaration"
     )),
     [documents],
   );
@@ -3902,7 +3943,7 @@ export function LeadWizard({
       return issues;
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined);
+      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, payerCountries);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -3913,7 +3954,7 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, payerCountries]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -4387,13 +4428,23 @@ export function LeadWizard({
     } : current);
   };
 
-  function handleAmlCountryChange(
-    key: "country" | "registrationCountry",
-    value: string | null,
-  ) {
-    const country = key === "country" ? value : draft?.country;
-    const registrationCountry = key === "registrationCountry" ? value : draft?.registrationCountry;
-    const nextRisk = amlRiskForCountries(country, registrationCountry);
+  /**
+   * Residence, every citizenship and a third-party payer's countries feed the
+   * AML country risk; the review sheet opens when a new risky country appears.
+   */
+  function handleAmlCountryChange(change: {
+    country?: string | null;
+    citizenships?: string[];
+    payerCountries?: readonly string[];
+  }) {
+    const country = change.country !== undefined ? change.country : draft?.country;
+    const citizenships = change.citizenships ?? draft?.citizenships ?? [];
+    const nextRisk = amlRiskForCountries(
+      country,
+      ...citizenships,
+      ...(change.payerCountries ?? payerCountries),
+    );
+    const newRiskCountry = nextRisk?.countries.some((code) => !amlRisk?.countries.includes(code)) ?? false;
     const affectedThirdCountry = nextRisk?.countries
       .map((code) => countryLabel(code, "de"))
       .join(", ") ?? "";
@@ -4401,7 +4452,8 @@ export function LeadWizard({
     clearServerValidation();
     setDraft((current) => current ? {
       ...current,
-      [key]: value ?? "",
+      ...(change.country !== undefined ? { country: change.country ?? "" } : {}),
+      ...(change.citizenships ? { citizenships: normalizeCitizenships(change.citizenships) } : {}),
       amlEnhancedDueDiligence: nextRisk ? {
         ...current.amlEnhancedDueDiligence,
         affectedThirdCountry,
@@ -4417,7 +4469,7 @@ export function LeadWizard({
         highRiskCountryResident: false,
       },
     } : current);
-    if (nextRisk) {
+    if (nextRisk && newRiskCountry) {
       setAmlSheetError("");
       setAmlSheetOpen(true);
     }
@@ -4735,7 +4787,7 @@ export function LeadWizard({
       window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
       return false;
     }
-    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined);
+    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, payerCountries);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
@@ -5896,6 +5948,35 @@ ${serviceCommentLines.join("\n")}`
       onSelect={id => { if (reviewContracts.some(item => item.id === id)) setDraft(current => current ? { ...current, frameworkContractId: id } : current); }} />
     {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "" } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
+  // Client → payer → GMED, with the payer's Kostenübernahmeerklärung.
+  const payerSignatureFlow = leadId ? (
+    <LeadPayerSignatureFlow
+      leadId={leadId}
+      status={payer.data?.status ?? null}
+      documents={costAssumptionDocuments}
+      disabled={isBusy}
+      canGenerate
+      tx={tx}
+      errorText={(nextError) => errorText(nextError, tx)}
+      onChanged={() => { void refreshDocumentsState().catch(showWizardError); }}
+      renderDocuments={(items) => (
+        <WizardDocumentRows
+          documents={items}
+          complianceKind="cost_coverage_declaration"
+          emptyLabel=""
+          lang={lang}
+          busy={busy}
+          disabled={isBusy}
+          tx={tx}
+          onOpen={(document) => void openOrDownloadDocument(document)}
+          onDownload={(document) => void downloadDocument(document)}
+          onSign={(document, kind) => void signDocument(document.id, kind)}
+          onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+          onChanged={() => { void refreshDocumentsState(); }}
+        />
+      )}
+    />
+  ) : null;
   const stepIndex = STEPS.findIndex((item) => item.id === step);
   const previousStep = STEPS[stepIndex - 1];
   const nextStep = STEPS[stepIndex + 1];
@@ -6495,16 +6576,16 @@ ${serviceCommentLines.join("\n")}`
                     lang={lang}
                     className={selectClass}
                     aria-label={tx("Страна проживания", "Wohnsitzland")}
-                    onChange={(value) => handleAmlCountryChange("country", value)}
+                    onChange={(value) => handleAmlCountryChange({ country: value })}
                   />
                 </Field>
-                <Field label={tx("Гражданство", "Staatsangehörigkeit")}>
-                  <CountrySelect
-                    value={draft.registrationCountry}
-                    lang={lang}
+                <Field label={tx("Гражданство (можно несколько)", "Staatsangehörigkeiten (mehrere möglich)")}>
+                  <CitizenshipMultiSelect
+                    id="lead-wizard-citizenships"
+                    value={draft.citizenships}
                     className={selectClass}
-                    aria-label={tx("Гражданство", "Staatsangehörigkeit")}
-                    onChange={(value) => handleAmlCountryChange("registrationCountry", value)}
+                    placeholder={tx("Гражданство", "Staatsangehörigkeit")}
+                    onChange={(next) => handleAmlCountryChange({ citizenships: next })}
                   />
                 </Field>
               </div>
@@ -7026,6 +7107,25 @@ ${serviceCommentLines.join("\n")}`
             <section className="space-y-5">
               {patientDocumentReview}
               {patientContractReview}
+              {leadId ? (
+                <LeadPayerDeclarationSection
+                  leadId={leadId}
+                  data={payer.data}
+                  loading={payer.loading}
+                  loadError={payer.error}
+                  disabled={isBusy}
+                  canEdit
+                  lang={lang}
+                  tx={tx}
+                  errorText={(nextError) => errorText(nextError, tx)}
+                  onSave={async (form) => {
+                    const saved = await payer.save(form);
+                    handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
+                    await refreshCommercialState().catch(() => undefined);
+                  }}
+                />
+              ) : null}
+              {leadId && payer.data?.status.cost_assumption.required ? payerSignatureFlow : null}
               {amlRequired || wizardDocuments.enhanced_due_diligence.length > 0 ? (
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
@@ -7833,6 +7933,7 @@ ${serviceCommentLines.join("\n")}`
                 {renderCommercialDocumentError("single_order")}
                 </Section>
               </div>
+              {payerSignatureFlow}
               <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
                 <div>
                 <ToggleRow

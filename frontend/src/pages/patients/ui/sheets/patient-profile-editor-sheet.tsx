@@ -13,10 +13,10 @@ import {
   PatientFormSection as FormSection,
   FunctionalLabelChips,
   LanguageChips,
-  NationalitySelect,
   parseFunctionalLabels,
 } from "../shared/patient-form-primitives";
 import { Button } from "@/components/ui/button";
+import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
@@ -450,10 +450,11 @@ function PatientProfileEditorFormSections({
                 ) : null}
                 <div className="grid gap-2.5 md:grid-cols-2">
                   <FormField label={dictionary.patient_profile_editor_nationality}>
-                    <NationalitySelect
-                      value={form.nationality}
-                      onChange={(value) => updateField("nationality", value)}
-                      placeholder={dictionary.common_not_set}
+                    <CitizenshipMultiSelect
+                      value={form.citizenships}
+                      onChange={(value) => updateField("citizenships", value)}
+                      placeholder={dictionary.patient_profile_editor_nationality}
+                      className={cn("w-full", formInputClassName)}
                     />
                   </FormField>
                   <FormField label={dictionary.patient_profile_editor_residence_country}>
@@ -1124,7 +1125,9 @@ function PatientProfileEditorSheetContent({
           phone_secondary: contactPayload.phoneSecondary,
           email: contactPayload.email,
           contacts: contactPayload.contacts,
-          nationality: form.nationality,
+          // Several citizenships; `nationality` keeps the first for older readers.
+          nationality: form.citizenships[0] ?? form.nationality,
+          citizenships: form.citizenships,
           residence_country: form.residenceCountry,
           languages: form.languages.split(",").flatMap((value) => {
             const language = value.trim();

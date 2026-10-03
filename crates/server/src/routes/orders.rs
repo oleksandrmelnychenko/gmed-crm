@@ -3584,6 +3584,18 @@ async fn create_order(
             {
                 return resp;
             }
+            // A third-party payer declared on the lead pays this order.
+            if let Some(source_lead_id) = source_lead_id
+                && let Err(error) = super::lead_payer::sync_lead_order_payers(
+                    &state.db,
+                    source_lead_id,
+                    auth.user_id,
+                )
+                .await
+            {
+                tracing::error!(%error, order_id = %r.id, "order payer from lead declaration");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "create_order",
                 Some(auth.user_id),
@@ -5203,6 +5215,20 @@ async fn update_order_commercial_basis(
                 );
             }
         }
+    }
+
+    // GMED confirms a lead's order only after the client signed it and the
+    // payer declaration is complete (third party: signed cost assumption).
+    if body.signed_agency == Some(true)
+        && order_lead_id.is_some()
+        && let Err(response) = super::lead_payer::check_order_agency_signature(
+            &state.db,
+            order_id,
+            body.signed_patient,
+        )
+        .await
+    {
+        return response;
     }
 
     let total_estimated = match body.total_estimated.as_deref() {

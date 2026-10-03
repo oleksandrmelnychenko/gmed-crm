@@ -238,6 +238,16 @@ async fn seed_complete_lead_onboarding(app: &TestApp, lead_id: Uuid) -> SeededOn
     .execute(pool)
     .await
     .unwrap();
+    // "Кто платит": the patient pays from their salary (synthetic).
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (lead_id, payer_kind, source_of_funds)
+           VALUES ($1, 'self', 'employment')
+           ON CONFLICT (lead_id) DO NOTHING"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
 
     let existing_case_id: Option<Uuid> = sqlx::query_scalar(
         r#"SELECT id FROM cases
@@ -2089,7 +2099,8 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
 
     sqlx::query(
         r#"UPDATE leads
-           SET wizard_state = wizard_state || '{"registration_country":"AT","passport_expiry":"2035-06-30"}'::jsonb
+           SET wizard_state = wizard_state || '{"registration_country":"AT","passport_expiry":"2035-06-30"}'::jsonb,
+               citizenships = '{AT,UA}'::text[]
            WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -2128,6 +2139,23 @@ async fn patient_first_conversion_activates_the_prospect_and_keeps_case_provenan
         activated.3.map(|value| value.to_string()).as_deref(),
         Some("2035-06-30")
     );
+    // Several citizenships and the payer declaration go to the patient.
+    let (citizenships, payer_kind): (Vec<String>, Option<String>) = sqlx::query_as(
+        "SELECT citizenships, legal_status #>> '{payer_declaration,payer_kind}' FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(citizenships, ["AT", "UA"]);
+    assert_eq!(payer_kind.as_deref(), Some("self"));
+    let declaration_patient: Option<Uuid> =
+        sqlx::query_scalar("SELECT patient_id FROM lead_payer_declarations WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(declaration_patient, Some(patient_id));
     let patient_count: i64 = sqlx::query_scalar("SELECT count(*) FROM patients WHERE email = $1")
         .bind(&email)
         .fetch_one(pool)

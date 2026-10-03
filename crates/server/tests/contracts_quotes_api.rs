@@ -443,6 +443,45 @@ async fn framework_contract_can_be_completed_for_lead_without_creating_patient()
     assert_eq!(listed.as_array().expect("contracts").len(), 1);
     assert_eq!(listed[0]["lead_id"], lead_id.to_string());
 
+    // GMED countersigns only after the client signed the order and the payer
+    // declaration is complete (lead_payer.rs).
+    let (status, blocked) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {blocked}");
+    assert_eq!(blocked["error"], "payer_gate_blocked");
+    assert_eq!(
+        blocked["reasons"],
+        json!([
+            "client_order_signature_missing",
+            "payer_declaration_missing"
+        ])
+    );
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations (lead_id, payer_kind, source_of_funds)
+         VALUES ($1, 'self', 'savings')",
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO orders (order_number, contract_id, source_lead_id, signed_patient, created_by)
+         VALUES ($1, $2, $3, true, $4)",
+    )
+    .bind(format!("A-{tag}"))
+    .bind(Uuid::parse_str(contract_id).unwrap())
+    .bind(lead_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let (status, signed) = json_request(
         &app,
         "POST",
@@ -486,8 +525,31 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
         })),
     )
     .await;
+    // A lead's contract cannot start signed by GMED before the client and payer.
+    assert_eq!(status, StatusCode::CONFLICT, "response: {contract}");
+    assert_eq!(contract["error"], "payer_gate_blocked");
+    let (status, contract) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({
+            "lead_id": lead_id,
+            "status": "sent",
+            "client_reference": format!("lead-onboarding:{lead_id}:framework")
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "response: {contract}");
     let contract_id = contract["id"].as_str().expect("contract id");
+    sqlx::query(
+        "INSERT INTO lead_payer_declarations (lead_id, payer_kind, source_of_funds)
+         VALUES ($1, 'self', 'employment')",
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let order_payload = json!({
         "source_lead_id": lead_id,
