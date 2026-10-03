@@ -228,8 +228,11 @@ where
 }
 
 /// Deactivates and anonymises the account of a purged lead, in the purge
-/// transaction. An account that already belongs to a patient record (a
-/// converted or repeat patient) stays untouched; only the lead link goes.
+/// transaction. An account that still reaches something else — a patient
+/// record (a converted or repeat patient) or, as a parent, another request —
+/// stays untouched; only the lead link goes. The portal intake data of the
+/// lead and its parents' logins go too
+/// ([`crate::routes::lead_portal_guardians::revoke_for_purged_lead_in_tx`]).
 /// Returns the deactivated account so the caller can revoke its sessions after
 /// the commit — the request middleware already rejects an inactive account.
 pub(crate) async fn disable_for_lead_in_tx(
@@ -237,25 +240,34 @@ pub(crate) async fn disable_for_lead_in_tx(
     lead_id: Uuid,
     processed_by: Option<Uuid>,
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    crate::routes::lead_portal_intake::purge_portal_intake_in_tx(tx, lead_id).await?;
+    crate::routes::lead_portal_guardians::revoke_for_purged_lead_in_tx(tx, lead_id, processed_by)
+        .await?;
     let Some(user_id) = portal_user_of_lead(&mut **tx, lead_id).await? else {
         return Ok(None);
     };
-    let owned_by_patient: bool = sqlx::query_scalar(
-        r#"SELECT EXISTS(
-               SELECT 1 FROM patient_assignments
-               WHERE user_id = $1 AND revoked_at IS NULL
-           )"#,
-    )
-    .bind(user_id)
-    .fetch_one(&mut **tx)
-    .await?;
+    let keeps_access =
+        crate::routes::lead_portal_guardians::has_other_active_links(tx, user_id, lead_id).await?;
     sqlx::query("UPDATE leads SET portal_user_id = NULL WHERE id = $1")
         .bind(lead_id)
         .execute(&mut **tx)
         .await?;
-    if owned_by_patient {
+    if keeps_access {
         return Ok(None);
     }
+    anonymize_and_disable_in_tx(tx, user_id, lead_id, processed_by).await?;
+    Ok(Some(user_id))
+}
+
+/// Switches a lead's login off for good: no identifying data, an unusable
+/// password, revoked sessions and pending sign-ins, audit row in the same
+/// transaction. The row stays because audit rows and documents refer to it.
+pub(crate) async fn anonymize_and_disable_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: Uuid,
+    lead_id: Uuid,
+    processed_by: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
     // The row stays (audit rows and documents refer to it) without anything
     // that identifies the person; the random hash makes the login unusable.
     let unusable_hash = password::hash_password(&password_policy::generate_one_time_password())
@@ -305,11 +317,12 @@ pub(crate) async fn disable_for_lead_in_tx(
         ),
     )
     .await?;
-    Ok(Some(user_id))
+    Ok(())
 }
 
 /// Gives the converted patient record the lead's login, so the person keeps
-/// one account from the first contact on.
+/// one account from the first contact on, and the consents given in the
+/// portal for the lead (Art. 9 consent to process uploaded health data).
 pub(crate) async fn link_to_patient_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -328,6 +341,13 @@ pub(crate) async fn link_to_patient_in_tx(
     .bind(lead_id)
     .bind(patient_id)
     .bind(assigned_by)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE consent_records SET patient_id = $2 WHERE lead_id = $1 AND patient_id IS NULL",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
     .execute(&mut **tx)
     .await?;
     Ok(())

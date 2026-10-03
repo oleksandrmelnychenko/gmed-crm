@@ -34,6 +34,8 @@ pub mod invoice_imports;
 pub mod invoices;
 pub mod key_rotation;
 pub mod lead_portal_account;
+pub mod lead_portal_guardians;
+pub mod lead_portal_intake;
 pub mod leads;
 pub mod legal;
 pub mod me;
@@ -102,6 +104,8 @@ pub fn protected_router() -> Router<AppState> {
         .merge(contracts::router())
         .merge(leads::router())
         .merge(lead_portal_account::router())
+        .merge(lead_portal_guardians::router())
+        .merge(lead_portal_intake::router())
         .merge(orders::router())
         .merge(order_intakes::router())
         .merge(patient_financials::router())

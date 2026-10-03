@@ -56,6 +56,8 @@ async fn get_me(
         Ok(Some(u)) => {
             let has_personnel_file =
                 crate::routes::personnel::has_own_file(&state, auth.user_id).await;
+            let (portal_mode, lead_portal) =
+                crate::routes::lead_portal_intake::me_portal(&state, &auth).await;
             let password_reset_required: bool =
                 u.try_get("password_reset_required").unwrap_or(false);
             let password_changed_at: Option<chrono::DateTime<Utc>> =
@@ -79,6 +81,11 @@ async fn get_me(
                     .flatten(),
                 "password_change_required": password_change_required,
                 "has_personnel_file": has_personnel_file,
+                // Patient logins: `lead` while the login reaches only requests
+                // (the lead cabinet), else `patient`; null for staff. The
+                // requests the login fills in (2026-10-03).
+                "portal_mode": portal_mode,
+                "lead_portal": lead_portal,
             }))
             .into_response()
         }

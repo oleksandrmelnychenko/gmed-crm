@@ -26,7 +26,7 @@ const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 const MAX_BUNDLE_BYTES: usize = 512 * 1024;
 const MAX_ATTACHMENTS: usize = 20;
 
-async fn validate_lead_attachment(
+pub(crate) async fn validate_lead_attachment(
     file_name: &str,
     content_type: Option<&str>,
     data: &[u8],
@@ -595,6 +595,11 @@ async fn list_leads(
                     lead
                 });
             }
+            if !concierge_grid_only {
+                // Patient portal progress for the access row (2026-10-03).
+                crate::routes::lead_portal_intake::attach_list_progress(&state.db, &mut leads)
+                    .await;
+            }
             Json(leads).into_response()
         }
         Err(e) => {
@@ -969,7 +974,7 @@ fn normalized_patient_relation_type(value: Option<&str>) -> &'static str {
     }
 }
 
-fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
+pub(crate) fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
     matches!(
         normalized_patient_relation_type(value),
         "parent" | "guardian"
