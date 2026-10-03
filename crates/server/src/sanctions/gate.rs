@@ -6,6 +6,10 @@
 //! | open hit (until the CEO decides) | blocked | blocked | blocked |
 //! | blocked country (CEO can lift per lead) | blocked | blocked | allowed |
 //!
+//! The countersignature is `signed_agency` on the order, a framework contract
+//! set to `signed`, an e-signature package with an agency signer and a paper
+//! signature of an order or contract document.
+//!
 //! A false-positive decision unblocks. Winding down stays possible: cancelling
 //! an order or an order service, terminating a framework contract, rejecting
 //! or deleting a quote, supplier invoices and dunning are never blocked.
@@ -297,11 +301,15 @@ pub enum Rule {
     QuoteStatus,
     /// A package with an agency signer is the countersignature.
     SignatureRequest,
+    /// A signature recorded on paper (multipart scan): the countersignature
+    /// for order and contract documents, other work for the rest
+    /// ([`paper_signature_is_countersign`]).
+    PaperSignature,
 }
 
 impl Rule {
     fn needs_body(self) -> bool {
-        !matches!(self, Rule::Always(_))
+        !matches!(self, Rule::Always(_) | Rule::PaperSignature)
     }
 
     /// The action of a request, or `None` when it passes.
@@ -312,6 +320,7 @@ impl Rule {
             .unwrap_or_default();
         match self {
             Rule::Always(action) => Some(action),
+            Rule::PaperSignature => Some(GateAction::OrderContractWork),
             Rule::LeadQualify => (status == "qualified").then_some(GateAction::QualifyOrConvert),
             Rule::OrderStatus => (status != "cancelled").then_some(GateAction::OrderContractWork),
             Rule::OrderCommercialBasis => Some(
@@ -421,6 +430,9 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
         ["documents", document, "signature-requests"] if *method == Method::POST => {
             Some((Target::Document(id(document)?), Rule::SignatureRequest))
         }
+        ["documents", document, "paper-signature"] if *method == Method::POST => {
+            Some((Target::Document(id(document)?), Rule::PaperSignature))
+        }
         _ => None,
     }
 }
@@ -528,6 +540,28 @@ pub async fn resolve_scope(
     Ok(scope)
 }
 
+/// Whether a paper signature of the document is the agency's countersignature:
+/// order and contract documents (framework contract, single order, cost
+/// coverage declaration) and anything attached to an order. Consents and
+/// other patient-only documents are not.
+async fn paper_signature_is_countersign(
+    db: &gmed_db::DbPool,
+    document_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let countersign: Option<bool> = sqlx::query_scalar(
+        r#"SELECT order_id IS NOT NULL
+                  OR COALESCE(generated_template_id, '') IN
+                     ('framework_contract', 'single_order', 'cost_coverage_declaration')
+                  OR COALESCE(art, '') IN
+                     ('framework_contract', 'single_order', 'cost_coverage_declaration')
+           FROM documents WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(countersign.unwrap_or(false))
+}
+
 /// Middleware on the protected router: blocks guarded requests.
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let Some((target, rule)) = classify(request.method(), request.uri().path()) else {
@@ -556,14 +590,20 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
         return next.run(request).await;
     };
     let outcome = async {
+        let mut action = action;
+        if let (Rule::PaperSignature, Target::Document(document_id)) = (rule, target)
+            && paper_signature_is_countersign(&state.db, document_id).await?
+        {
+            action = GateAction::AgencyCountersign;
+        }
         let scope = resolve_scope(&state.db, target, &body).await?;
         let block = evaluate(&state, scope.clone(), action).await?;
-        Ok::<_, sqlx::Error>((scope, block))
+        Ok::<_, sqlx::Error>((scope, block, action))
     }
     .await;
     match outcome {
-        Ok((_, None)) => next.run(request).await,
-        Ok((scope, Some(block))) => {
+        Ok((_, None, _)) => next.run(request).await,
+        Ok((scope, Some(block), action)) => {
             let user_id = request
                 .extensions()
                 .get::<AuthUser>()
@@ -823,6 +863,16 @@ mod tests {
         assert_eq!(
             post("/documents/{id}/signature-requests"),
             Some((Target::Document(uuid()), Rule::SignatureRequest))
+        );
+        // A signature on paper: the scan is multipart, the document decides.
+        assert_eq!(
+            post("/documents/{id}/paper-signature"),
+            Some((Target::Document(uuid()), Rule::PaperSignature))
+        );
+        assert!(!Rule::PaperSignature.needs_body());
+        assert_eq!(
+            Rule::PaperSignature.action(&Value::Null),
+            Some(GateAction::OrderContractWork)
         );
     }
 
