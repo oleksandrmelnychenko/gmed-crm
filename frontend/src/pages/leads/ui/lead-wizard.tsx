@@ -193,6 +193,7 @@ import {
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog } from "./lead-portal-access";
+import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import {
   discoveryReferrerMissing,
@@ -7593,6 +7594,15 @@ ${serviceCommentLines.join("\n")}`
                   <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
                   {tx("Загружается каталог услуг…", "Leistungskatalog wird geladen…")}
                 </div>
+              ) : null}
+              {leadId ? (
+                <LeadSigningPackagePanel
+                  leadId={leadId}
+                  contractDocument={inheritedContract ? null : commercialDocuments.framework_contract[0] ?? null}
+                  contractSigned={contract?.status === "signed"}
+                  inheritedContract={inheritedContract}
+                  onDone={() => { void refreshDocumentsState(); }}
+                />
               ) : null}
               <div id={FRAMEWORK_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
