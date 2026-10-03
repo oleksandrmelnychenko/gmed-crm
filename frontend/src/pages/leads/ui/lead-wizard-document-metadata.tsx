@@ -6,6 +6,8 @@ import { cachedNumberFormat } from "@/lib/intl-cache";
 import { formatDateTime } from "@/pages/leads/model/leads-model";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
+import { PatientUploadMark } from "./lead-wizard-portal-intake";
+
 export const metadataPillClass = "rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums";
 
 type LeadWizardDocumentMetadataProps = {
@@ -112,6 +114,7 @@ export function LeadWizardDocumentMetadata({
           <time dateTime={document.created_at}>{generatedAtLabel}</time>
         </Badge>
       ) : null}
+      <PatientUploadMark documentId={document.id} lang={lang} />
     </>
   );
 }

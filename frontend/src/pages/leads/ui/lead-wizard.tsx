@@ -193,6 +193,25 @@ import {
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog } from "./lead-portal-access";
+import {
+  PatientDataPendingNotice,
+  PatientUpdatedBanner,
+  PortalInquiryConsentLine,
+  PortalUploadsProvider,
+  Step1FillModeSwitch,
+  Step1PortalFieldNote,
+  Step1PortalProvider,
+  Step1PortalSummary,
+  useStep1PortalField,
+} from "./lead-wizard-portal-intake";
+import { useLeadStep1Portal } from "../model/use-lead-step1-portal";
+import {
+  PATIENT_FILLED_KEYS,
+  PORTAL_FIELD_BY_DRAFT_KEY,
+  mergePatientUpdates,
+  patientDataPending,
+  relaxMasterErrors,
+} from "../model/lead-portal-intake";
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
 import { narrativeForIntakeSave } from "./lead-wizard.clinical-state";
 import {
@@ -619,6 +638,18 @@ const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
   insuranceType: "lead-wizard-insurance-type",
   insuranceProvider: "lead-wizard-insurance-provider",
   insuranceNumber: "lead-wizard-insurance-number",
+};
+
+/** Error ids of the step-1 fields the patient portal knows (see `Step1PortalProvider`). */
+const STEP1_PORTAL_ERROR_IDS: Record<string, string> = {
+  firstName: `${MASTER_FIELD_IDS.firstName}-error`,
+  lastName: `${MASTER_FIELD_IDS.lastName}-error`,
+  birthDate: `${MASTER_FIELD_IDS.birthDate}-error`,
+  legalSex: `${MASTER_FIELD_IDS.legalSex}-error`,
+  phone: `${MASTER_FIELD_IDS.phone}-error`,
+  street: `${MASTER_FIELD_IDS.street}-error`,
+  city: `${MASTER_FIELD_IDS.city}-error`,
+  zip: `${MASTER_FIELD_IDS.zip}-error`,
 };
 
 const STEPS: Array<{ id: StepId; ru: string; de: string }> = [
@@ -2448,6 +2479,7 @@ function Field({
   error,
   errorId,
   required = false,
+  portalField,
 }: {
   label: ReactNode;
   children: ReactNode;
@@ -2455,13 +2487,18 @@ function Field({
   error?: string;
   errorId?: string;
   required?: boolean;
+  /** Lead column the patient fills in the portal (step 1), for fields without an error id. */
+  portalField?: string;
 }) {
+  // In "the patient fills it in" mode the field is optional and says so.
+  const { patientFills } = useStep1PortalField(errorId, portalField);
   return (
     <label className={cn("min-w-0 space-y-1.5", className)}>
       <span className={cn(tokens.text.label, "block")}>
         {label}
-        {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+        {required && !patientFills ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
       </span>
+      <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
       {children}
       {error ? (
         <span id={errorId} role="alert" className="block text-xs leading-4 text-destructive">
@@ -3391,6 +3428,39 @@ export function LeadWizard({
     setDocuments(nextDocuments);
   }, [leadId, patientReview.refresh]);
 
+  // Patient portal (owner decision 2026-10-03): the patient's step-1 changes
+  // are taken into fields staff have not edited since the last load.
+  const step1PortalLeadRef = useRef<LeadDetail | null>(null);
+  useEffect(() => {
+    step1PortalLeadRef.current = lead;
+  }, [lead]);
+  const mergePatientStep1 = useCallback(async () => {
+    if (!leadId) return;
+    clearApiCache(`/leads/${leadId}`);
+    const fresh = await fetchLeadDetail(leadId).catch(() => null);
+    if (!fresh || hydrated.current !== leadId) return;
+    const previous = step1PortalLeadRef.current;
+    if (previous) {
+      const base = draftFromLead(previous);
+      const next = draftFromLead(fresh);
+      setDraft((current) => (current ? mergePatientUpdates(current, base, next) ?? current : current));
+    }
+    setLead(fresh);
+  }, [leadId]);
+  const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
+  const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
+  const patientUploadDocuments = useMemo(() => {
+    const ids = new Set(step1Portal.intake?.uploads.map((upload) => upload.document_id) ?? []);
+    return documents.filter((item) => ids.has(item.id) && !item.file_deleted_at && item.has_stored_file !== false);
+  }, [documents, step1Portal.intake]);
+  const reloadStep1PortalState = step1Portal.reload;
+  const reloadStep1Portal = useCallback(() => {
+    void reloadStep1PortalState();
+  }, [reloadStep1PortalState]);
+  useEffect(() => {
+    wizardStateBaseRef.current = { ...wizardStateBaseRef.current, step1_fill_mode: step1Portal.mode };
+  }, [step1Portal.mode]);
+
   // Files added from the patient card or the documents page while the wizard
   // was open show up when the medical, documents or commercial step is opened again.
   useEffect(() => {
@@ -3878,10 +3948,19 @@ export function LeadWizard({
       </div>
     );
   };
-  const masterErrors = useMemo(
+  const strictMasterErrors = useMemo(
     () => validateMasterDraft(draft, tx, isRepeatIntake),
     [draft, isRepeatIntake, tx],
   );
+  // "The patient fills it in": only names and e-mail are needed for the lead.
+  const masterErrors = useMemo(
+    () => relaxMasterErrors(strictMasterErrors, step1Portal.mode, (key) => {
+      const value = draft?.[key as keyof Draft];
+      return typeof value === "string" ? value.trim() !== "" : Boolean(value);
+    }),
+    [draft, step1Portal.mode, strictMasterErrors],
+  );
+  const waitingForPatientData = patientDataPending(step1Portal.mode, draft);
   const orderIssues = useMemo(() => orderValidationIssues(draft, tx), [draft, tx]);
   const validationIssues = useMemo<ValidationIssue[]>(() => {
     if (!validationContext) return [];
@@ -4727,6 +4806,19 @@ export function LeadWizard({
   async function finishIntake(targetStep: StepId): Promise<boolean> {
     if (!leadId || !draft) return false;
     setError("");
+    if (
+      step1Portal.mode === "patient"
+      && Object.keys(masterErrors).length === 0
+      && Object.keys(strictMasterErrors).length > 0
+    ) {
+      // Completing the intake needs the full master data the patient has not sent yet.
+      setError(tx(
+        "Ждём данные пациента: заполните данные клиента или дождитесь, пока пациент заполнит их в портале.",
+        "Warten auf die Daten des Patienten: Personendaten ausfüllen oder warten, bis der Patient sie im Portal einträgt.",
+      ));
+      setStep("master_data");
+      return false;
+    }
     if (!ensureMasterDataReady()) return false;
     if (!draft.concern.trim()) {
       setValidationContext({ kind: "medical" });
@@ -5925,7 +6017,11 @@ ${serviceCommentLines.join("\n")}`
     && draft?.trustedContacts.some((contact) => contact.id === trustedContactEditor.id),
   );
   return (
-    <>
+    <PortalUploadsProvider
+      intake={step1Portal.intake}
+      canReview={canReviewPortalUploads}
+      onReviewed={reloadStep1Portal}
+    >
       <Dialog
         open={open}
         modal={!documentPreview}
@@ -6182,7 +6278,24 @@ ${serviceCommentLines.join("\n")}`
                 />
                 </Section>
               ) : null}
-              <Section title={tx("Личные данные", "Persönliche Daten")}>
+              <Step1PortalProvider
+                mode={step1Portal.mode}
+                intake={step1Portal.intake}
+                errorIdByDraftKey={STEP1_PORTAL_ERROR_IDS}
+                patientFilledKeys={PATIENT_FILLED_KEYS}
+                portalFieldByDraftKey={PORTAL_FIELD_BY_DRAFT_KEY}
+                tx={tx}
+              >
+              <Section
+                title={tx("Личные данные", "Persönliche Daten")}
+                accessory={isRepeatIntake ? null : (
+                  <Step1FillModeSwitch mode={step1Portal.mode} onChange={step1Portal.setMode} disabled={isBusy} tx={tx} />
+                )}
+              >
+              {step1Portal.patientUpdatedAt ? (
+                <PatientUpdatedBanner at={step1Portal.patientUpdatedAt} onClose={step1Portal.dismissPatientUpdate} tx={tx} />
+              ) : null}
+              {isRepeatIntake ? null : <Step1PortalSummary intake={step1Portal.intake} mode={step1Portal.mode} tx={tx} />}
               <div className="grid gap-4 md:grid-cols-2">
                 {intakeAsksDiscoverySource(isRepeatIntake) ? (
                 <div className="space-y-4">
@@ -6284,7 +6397,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("firstName", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")}>
+                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} portalField="middle_name">
                   <Input
                     className={inputClass}
                     name="middle_name"
@@ -6416,7 +6529,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("whatsappNumber", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")}>
+                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")} portalField="primary_language">
                   <NativeComboboxSelect name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
                     <option value="">{tx("Выберите", "Auswählen")}</option>
                     {draft.language && !LANGUAGE_OPTIONS.some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
@@ -6489,7 +6602,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("zip", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Страна проживания", "Wohnsitzland")}>
+                <Field label={tx("Страна проживания", "Wohnsitzland")} portalField="country">
                   <CountrySelect
                     value={draft.country}
                     lang={lang}
@@ -6592,6 +6705,7 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               ) : null}
               </Section>
+              </Step1PortalProvider>
               {isMinor(draft.birthDate, new Date()) ? (
                 <Section
                   title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
@@ -6800,7 +6914,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 )}
               >
-                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : <LeadMedicalIntakeForm
+                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice onOpenStep1={() => setStep("master_data")} tx={tx} /> : <LeadMedicalIntakeForm
                   lead={lead}
                   tx={tx}
                   lang={lang}
@@ -7026,6 +7140,23 @@ ${serviceCommentLines.join("\n")}`
             <section className="space-y-5">
               {patientDocumentReview}
               {patientContractReview}
+              <PortalInquiryConsentLine intake={step1Portal.intake} tx={tx} />
+              {patientUploadDocuments.length > 0 ? (
+                <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Загружено пациентом", "Vom Patienten hochgeladen")}>
+                  <WizardDocumentRows
+                    documents={patientUploadDocuments}
+                    emptyLabel=""
+                    lang={lang}
+                    busy={busy}
+                    disabled={isBusy}
+                    tx={tx}
+                    onOpen={(document) => void openOrDownloadDocument(document)}
+                    onDownload={(document) => void downloadDocument(document)}
+                    onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                    onChanged={() => { void refreshDocumentsState(); }}
+                  />
+                </Section>
+              ) : null}
               {amlRequired || wizardDocuments.enhanced_due_diligence.length > 0 ? (
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
@@ -9438,6 +9569,6 @@ ${serviceCommentLines.join("\n")}`
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </PortalUploadsProvider>
   );
 }
