@@ -48,6 +48,8 @@ import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
 import {
   canAccessStaffRoute,
+  isLeadPortalUser,
+  listLeadPortalNavItems,
   listPatientPortalNavItems,
   listStaffNavItems,
   type PatientPortalNavItem,
@@ -122,6 +124,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   "admin/datev": Plug,
   personnel: FolderLock,
   "my-personnel-file": IdCard,
+  lead_request: ClipboardList,
   "admin/signatures": FileSignature,
   "admin/activity": History,
   "admin/security": Fingerprint,
@@ -150,7 +153,12 @@ export function NavPanel() {
     Boolean(user) && !isPatientPortal,
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
   );
-  const patientPortalNav = isPatientPortal ? listPatientPortalNavItems().map(toPatientNavItem) : [];
+  const patientPortalNav = isPatientPortal
+    ? (isLeadPortalUser(user)
+        ? listLeadPortalNavItems()
+        : listPatientPortalNavItems({ leadRequests: Boolean(user?.lead_portal?.requests) })
+      ).map(toPatientNavItem)
+    : [];
   const staffNavBySection =
     user && user.role !== "patient"
       ? groupStaffNavItems(

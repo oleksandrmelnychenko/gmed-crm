@@ -34,6 +34,13 @@ export interface User {
   password_change_required?: boolean;
   /** The user is linked to an employee record: "my personnel file" is available. */
   has_personnel_file?: boolean;
+  /**
+   * Patient logins: `lead` while the login reaches only requests (the lead
+   * cabinet: request page, account, legal notice), `patient` otherwise.
+   */
+  portal_mode?: "lead" | "patient" | null;
+  /** Requests (leads) this patient login fills in. */
+  lead_portal?: { requests: number } | null;
 }
 
 interface AuthContextValue {

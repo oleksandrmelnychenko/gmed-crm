@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   ALL_STAFF_ROLES,
+  canAccessLeadPortalRoute,
   canAccessPatientPortalRoute,
   canAccessStaffRoute,
+  isLeadPortalUser,
+  listLeadPortalNavItems,
   listPatientPortalNavItems,
   listStaffNavItems,
   staffHrefIfAllowed,
@@ -494,5 +497,33 @@ describe("patient portal routes", () => {
       "/account",
       "/legal",
     ]);
+  });
+});
+
+describe("lead cabinet routes (owner decision 2026-10-03)", () => {
+  it("is decided by the server flag, not guessed", () => {
+    expect(isLeadPortalUser({ role: "patient", portal_mode: "lead" })).toBe(true);
+    expect(isLeadPortalUser({ role: "patient", portal_mode: "patient" })).toBe(false);
+    expect(isLeadPortalUser({ role: "patient" })).toBe(false);
+    expect(isLeadPortalUser({ role: "ceo", portal_mode: "lead" })).toBe(false);
+    expect(isLeadPortalUser(null)).toBe(false);
+  });
+
+  it("offers only the request page, the account and the legal notice", () => {
+    expect(listLeadPortalNavItems().map((item) => item.to)).toEqual(["/", "/account", "/legal"]);
+    expect(canAccessLeadPortalRoute("/")).toBe(true);
+    expect(canAccessLeadPortalRoute("/account")).toBe(true);
+    for (const path of ["/notifications", "/chat", "/appointments", "/documents", "/invoices", "/privacy", "/request"]) {
+      expect(canAccessLeadPortalRoute(path)).toBe(false);
+    }
+  });
+
+  it("adds the request page to the portal of a patient who also fills in a request", () => {
+    expect(listPatientPortalNavItems({ leadRequests: true }).map((item) => item.to).slice(0, 2)).toEqual([
+      "/",
+      "/request",
+    ]);
+    expect(listPatientPortalNavItems().map((item) => item.to)).not.toContain("/request");
+    expect(canAccessPatientPortalRoute("/request")).toBe(true);
   });
 });

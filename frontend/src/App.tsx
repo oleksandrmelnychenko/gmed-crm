@@ -278,6 +278,11 @@ const LegalNoticePage = lazy(() =>
 const TwoFactorPage = lazy(() =>
   import("@/pages/two-factor").then((module) => ({ default: module.TwoFactorPage })),
 );
+const LeadRequestPage = lazy(() =>
+  import("@/pages/patient-lead/lead-request-page").then((module) => ({
+    default: module.LeadRequestPage,
+  })),
+);
 const AccountPage = lazy(() =>
   import("@/pages/account").then((module) => ({ default: module.AccountPage })),
 );
@@ -402,6 +407,7 @@ function AppRoutes() {
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="notifications" element={<PatientNotificationsPage />} />
+            <Route path="request" element={<LeadRequestPage />} />
             <Route path="chat" element={<ChatPage />} />
             <Route path="notes" element={<InternalNotesPage />} />
             <Route path="reports" element={<ReportsPage />} />

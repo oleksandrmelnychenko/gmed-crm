@@ -14,7 +14,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { clearApiCache } from "@/lib/api";
 import { useNavState } from "@/lib/nav-state";
-import { canAccessStaffRoute, staffHrefIfAllowed } from "@/lib/staff-route-access";
+import { canAccessStaffRoute, isLeadPortalUser, staffHrefIfAllowed } from "@/lib/staff-route-access";
 import { useNewLeadCounter } from "@/lib/use-nav-counters";
 import { cn } from "@/lib/utils";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
@@ -160,6 +160,8 @@ export function Topbar() {
   const [unread, setUnread] = useState(0);
   const [onlineUsers, setOnlineUsers] = useState<ActiveSession[]>([]);
   const isPatientPortal = user?.role === "patient";
+  // The lead cabinet has no notifications (owner decision 2026-10-03).
+  const leadCabinet = isLeadPortalUser(user);
   const showLeadShortcut = Boolean(
     user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities),
   );
@@ -289,7 +291,7 @@ export function Topbar() {
     let cancelled = false;
 
     function load() {
-      if (cancelled) return;
+      if (cancelled || leadCabinet) return;
       if (isPatientPortal) {
         void fetchUnreadNotificationCount().then((count) => {
           if (!cancelled) setUnread(count);
@@ -312,13 +314,14 @@ export function Topbar() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isPatientPortal]);
+  }, [isPatientPortal, leadCabinet]);
 
   useDebouncedRealtimeSubscription(TOPBAR_REALTIME_EVENTS, (_event, events) => {
     if (events.some((event) => event.type.startsWith("announcement."))) {
       clearApiCache("/announcements/active");
     }
     if (events.every((event) => event.type.startsWith("announcement."))) return;
+    if (leadCabinet) return;
 
     clearApiCache("/notifications");
     clearApiCache("/notifications/unread-count");
@@ -536,6 +539,7 @@ export function Topbar() {
           ) : null}
 
           {/* Notifications */}
+          {leadCabinet ? null : (
           <TopbarIconButton
             onClick={() => {
               setNotifOpen(!notifOpen);
@@ -550,6 +554,7 @@ export function Topbar() {
               </span>
             )}
           </TopbarIconButton>
+          )}
 
           {/* Lang */}
           <button
@@ -566,7 +571,7 @@ export function Topbar() {
       </header>
 
       {/* Notification panel */}
-      {notifOpen && (
+      {notifOpen && !leadCabinet && (
         <NotificationPanel
           onClose={() => setNotifOpen(false)}
           onUnreadChange={setUnread}

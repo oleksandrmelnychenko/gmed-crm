@@ -110,6 +110,46 @@ export function leadRetentionNotificationCopy(
           body: `Не квалифицирован и нет подписанного согласия${date ? `; удаление ${date}` : ""}. Все документы удаляются вместе с ним.`,
         };
   }
+  // Lead portal (crates/server/src/routes/lead_portal_intake.rs, 2026-10-03).
+  if (item.kind === "lead_portal_submitted") {
+    const [filled, total, documents] = (item.body ?? "").match(/\d+/g) ?? [];
+    return lang === "de"
+      ? {
+          title: "Patient hat die Anfrage gesendet",
+          body: filled ? `Persönliche Daten: ${filled} von ${total} Angaben, Unterlagen: ${documents ?? 0}.` : null,
+        }
+      : {
+          title: "Пациент отправил данные заявки",
+          body: filled ? `Личные данные: заполнено ${filled} из ${total}, документов: ${documents ?? 0}.` : null,
+        };
+  }
+  if (item.kind === "lead_portal_minor") {
+    return lang === "de"
+      ? {
+          title: "Patient ist unter 18: Zugang für die Eltern anlegen",
+          body: "Im Portal wurde ein Geburtsdatum unter 18 eingegeben. Minderjährige haben keinen eigenen Zugang.",
+        }
+      : {
+          title: "Пациенту меньше 18: выдайте доступ родителю",
+          body: "В портале указана дата рождения младше 18 лет. У несовершеннолетних нет своего входа.",
+        };
+  }
+  if (item.kind === "lead_portal_consent_revoked") {
+    const health = /health data/i.test(item.body ?? "");
+    return lang === "de"
+      ? {
+          title: health
+            ? "Einwilligung zu Gesundheitsdaten widerrufen"
+            : "Einwilligung zur Bearbeitung der Anfrage widerrufen",
+          body: "Der Patient hat die Einwilligung im Portal widerrufen. Bitte über das weitere Vorgehen entscheiden.",
+        }
+      : {
+          title: health
+            ? "Отозвано согласие на обработку данных о здоровье"
+            : "Отозвано согласие на обработку данных обращения",
+          body: "Пациент отозвал согласие в портале. Решите, как действовать дальше.",
+        };
+  }
   if (item.kind === "lead_retention_blocked") {
     return lang === "de"
       ? {
