@@ -1722,7 +1722,11 @@ fn document_satisfies_compliance_kind(
             "consent_data_release_single",
         ]),
         "confidentiality_release" => matches_document_kind(&["confidentiality_release"]),
-        "identity" => matches_document_kind(&["identity"]),
+        // A passport uploaded on the patient card or through the portal is an
+        // identity document too; it is confirmed in place, not uploaded again.
+        "identity" => {
+            matches_document_kind(&["identity", "passport", "passport_scan", "reisepass"])
+        }
         "framework_contract" => matches_document_kind(&["framework_contract"]),
         "enhanced_due_diligence" => matches_document_kind(&["enhanced_due_diligence"]),
         "other" => true,

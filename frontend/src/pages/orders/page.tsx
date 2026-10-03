@@ -251,6 +251,7 @@ import type {
 } from "./model/types";
 import { OrderAmendmentsPanel } from "./ui/order-amendments-panel";
 import { OrderEconomicsTable } from "./ui/order-economics-table";
+import { OrderExistingPatientDocuments } from "./ui/order-existing-patient-documents";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
 import { ScopedOrderDetail } from "./ui/scoped-order-detail";
@@ -1130,6 +1131,8 @@ function useOrdersPageContent() {
   const [statusError, setStatusError] = useState<string | null>(null);
   const [workflowCreateError, setWorkflowCreateError] = useState<string | null>(null);
   const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
+  // The signed framework contract the new order is attached to (create sheet).
+  const [createContractId, setCreateContractId] = useState<string | null>(null);
   const [externalInvoiceAllocationId, setExternalInvoiceAllocationId] = useState<string | null>(null);
   const [orderEconomics, setOrderEconomics] = useState<OrderEconomics | null>(null);
   const [orderEconomicsLoading, setOrderEconomicsLoading] = useState(false);
@@ -2608,7 +2611,8 @@ function useOrdersPageContent() {
       const agencyServiceId = searchParams.get("service") ?? "";
       const created = await createOrder({
         patient_id: createForm.patientId,
-        contract_id: null,
+        // Without a choice the server attaches the latest signed contract.
+        contract_id: createContractId,
         needs_description: optString(createForm.needsDescription),
         ...orderPrepaymentPayload(createForm.prepayment),
       });
@@ -9070,6 +9074,23 @@ function useOrdersPageContent() {
                   </div>
                 ) : null}
                     </div>
+                  </OrderSheetSection>
+                ) : null}
+
+                {createForm.patientId ? (
+                  <OrderSheetSection
+                    title={lang === "de" ? "Vorhandene Dokumente des Patienten" : "Имеющиеся документы пациента"}
+                  >
+                    <OrderExistingPatientDocuments
+                      key={createForm.patientId}
+                      patientId={createForm.patientId}
+                      lang={lang}
+                      selectedContractId={createContractId}
+                      onSelectContract={setCreateContractId}
+                      onOpenPatient={() =>
+                        staffGo(`/patients?patient=${createForm.patientId}`)
+                      }
+                    />
                   </OrderSheetSection>
                 ) : null}
 

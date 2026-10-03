@@ -11,7 +11,7 @@ import type { ContractItem } from "@/pages/contracts/model/types";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientOrderRecheck } from "../model/types";
 import { formatIntakeDate, INTAKE_CHECK_LABELS, isContractUsable } from "../model/order-intake";
-import { contractUsability, CONTRACT_USABILITY_LABELS, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
+import { contractUsability, CONTRACT_USABILITY_LABELS, identityDocumentOnFile, passportReviewStatus, PASSPORT_REVIEW_LABELS } from "../model/order-document-review";
 import { OrderWizardSection } from "./order-wizard-tables";
 
 const tableClass = "rounded-none border-0 bg-transparent shadow-none sm:max-h-[400px]";
@@ -41,8 +41,10 @@ export function OrderExistingContractsTable({ contracts, selectedId, lang, busy,
 /** A check of the current request itself (consents, documents) rather than of the patient card. */
 export type RequestReviewRow = { key: string; label: string; ready: boolean; status: string; detail: string; action?: { label: string; onClick: () => void } };
 type ReviewRow = RequestReviewRow;
-export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang, busy, requestRows = [], onRefresh, onOpenDocuments, onSaveExpiry }: {
+export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang, busy, requestRows = [], compact = false, onRefresh, onOpenDocuments, onSaveExpiry }: {
   readiness: PatientOrderRecheck; documents: DocumentItem[]; dateTo: string | null; lang: Lang; busy: boolean; requestRows?: RequestReviewRow[];
+  /** For a narrow sheet: the details go under the status instead of into their own column. */
+  compact?: boolean;
   onRefresh: () => void; onOpenDocuments: () => void; onSaveExpiry: (expiry: string) => Promise<boolean | undefined>;
 }) {
   const language = lang === "de" ? 1 : 0;
@@ -54,6 +56,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
     .map(doc => doc.signed_at!).sort().at(-1);
   const consentDate = signedOn("dsgvo") ?? signedOn("privacy_consents");
   const releaseDate = signedOn("confidentiality_release");
+  const identity = identityDocumentOnFile(documents);
   const outstanding = readiness.debt_management?.outstanding_balance ?? readiness.outstanding_balance;
   const rows: ReviewRow[] = [
     // Process mapping 2B: the debt check comes before a new order. Debt never blocks by itself; it is shown for attention.
@@ -72,19 +75,26 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
         : readiness[key] ? tx("Подтверждено в карточке", "In der Akte bestätigt") : tx("Нужно проверить / дополнить", "Prüfen / ergänzen"),
       detail: key === "compliance_ready" && consentDate ? `${tx("Согласие подписано", "Einwilligung unterzeichnet")}: ${formatIntakeDate(consentDate)}`
         : key === "confidentiality_release_ready" && releaseDate ? `${tx("Подписано", "Unterzeichnet")}: ${formatIntakeDate(releaseDate)}`
+        // The passport already on file is named, so nobody uploads it a second time.
+        : key === "identity_ready" && identity?.verifiedAt ? `${tx("Проверен", "Geprüft")}: ${formatIntakeDate(identity.verifiedAt)}${identity.name ? ` · ${identity.name}` : ""}`
+        : key === "identity_ready" && identity ? `${tx("Файл есть, ждёт подтверждения", "Datei vorhanden, Bestätigung offen")}${identity.name ? `: ${identity.name}` : ""}`
         : key === "document_pack_ready" && readiness.document_alerts.missing_count > 0 ? `${tx("Не хватает документов", "Fehlende Dokumente")}: ${readiness.document_alerts.missing_count}` : "—",
     })),
     ...requestRows,
   ];
-  const columns: ColumnDef<ReviewRow>[] = [
+  const columns: ColumnDef<ReviewRow>[] = compact ? [
+    { id: "document", label: tx("Документ / проверка", "Dokument / Prüfung"), accessor: row => row.label, minWidth: 170, render: row => <span className="font-medium">{row.label}</span> },
+    { id: "status", label: tx("Статус и сведения", "Status und Angaben"), accessor: row => row.status, minWidth: 250,
+      render: row => <span className="block space-y-1 py-1"><ReviewBadge ready={row.ready}>{row.status}</ReviewBadge>{row.detail !== "—" ? <span className="block break-words text-[11px] leading-4 text-muted-foreground">{row.detail}</span> : null}</span> },
+  ] : [
     { id: "document", label: tx("Документ / проверка", "Dokument / Prüfung"), accessor: row => row.label, minWidth: 265, render: row => <span className="font-medium">{row.label}</span> },
     { id: "status", label: tx("Статус", "Status"), accessor: row => row.status, minWidth: 250, render: row => <ReviewBadge ready={row.ready}>{row.status}</ReviewBadge> },
     { id: "detail", label: tx("Срок / сведения", "Gültigkeit / Angaben"), accessor: row => row.detail, minWidth: 245 },
   ];
   return <OrderWizardSection flush title={tx("Проверка документов пациента", "Patientendokumente prüfen")}
     accessory={<Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onRefresh}><RefreshCw className="size-3.5" />{tx("Проверить снова", "Erneut prüfen")}</Button>}>
-    <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: 44 }} mobilePrimaryColumnId="document" className={tableClass}
-      rowActionsWidth={210} rowActions={row => row.action ? <Button type="button" size="sm" variant={row.ready ? "outline" : "default"} disabled={busy} onClick={row.action.onClick}>{row.action.label}</Button> : row.key.startsWith("request:") ? null : row.key === "debt" ? null : row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
+    <DataTable rows={rows} columns={columns} rowId={row => row.key} density="compact" rowHeightOverrides={{ compact: compact ? 68 : 44 }} mobilePrimaryColumnId="document" className={tableClass}
+      rowActionsWidth={compact ? 200 : 210} rowActions={row => row.action ? <Button type="button" size="sm" variant={row.ready ? "outline" : "default"} disabled={busy} onClick={row.action.onClick}>{row.action.label}</Button> : row.key.startsWith("request:") ? null : row.key === "debt" ? null : row.key === "passport" ? <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => { setExpiry(readiness.passport_expiry ?? ""); setEditing(true); }}>{tx("Обновить срок", "Gültigkeit ändern")}</Button> : <Button type="button" size="sm" disabled={busy} onClick={onOpenDocuments}><Eye className="size-3.5" />{tx("Посмотреть документы", "Dokumente ansehen")}</Button>} />
     {editing ? <div role="group" aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} className="space-y-3 border-t p-3 sm:p-4">
       <Field label={tx("Паспорт действителен до", "Reisepass gültig bis")}><Input aria-label={tx("Паспорт действителен до", "Reisepass gültig bis")} type="date" value={expiry} onChange={event => setExpiry(event.target.value)} className="max-w-xs" /></Field>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" disabled={busy || !expiry || expiry === readiness.passport_expiry} onClick={() => { void onSaveExpiry(expiry).then(saved => { if (saved) setEditing(false); }); }}>{tx("Сохранить срок в карточке пациента", "Gültigkeit in Patientenakte speichern")}</Button><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setEditing(false)}>{tx("Отмена", "Abbrechen")}</Button></div>
