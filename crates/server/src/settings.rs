@@ -118,6 +118,11 @@ pub async fn update_setting(
     if key.starts_with(PERSONNEL_SETTING_PREFIX) {
         return Err(UpdateError::NotFound);
     }
+    // The blocked countries belong to the CEO (`PUT /sanctions/settings/
+    // blocked-countries`), not to the IT admin settings page.
+    if key == crate::sanctions::policy::BLOCKED_COUNTRIES_SETTING {
+        return Err(UpdateError::NotFound);
+    }
     let json_value = match key {
         "agency_name" => validate_string_setting(value, 160, false, "Agency name")?,
         "agency_care_of" => validate_string_setting(value, 160, true, "Agency care-of")?,

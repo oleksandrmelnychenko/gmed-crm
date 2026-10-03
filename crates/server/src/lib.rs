@@ -24,6 +24,7 @@ pub(crate) mod pdf_text;
 pub mod rate_limit;
 pub mod realtime;
 pub mod routes;
+pub mod sanctions;
 pub mod security_headers;
 pub(crate) mod service_description;
 pub mod services;
@@ -93,12 +94,18 @@ fn build_app_inner(app_state: state::AppState) -> Router {
     //      successful unannotated background polls, using the AuthUser left
     //      behind by require_auth
     //   3. rate_limit::apply_general — per-IP token bucket
-    // Innermost: a lead-only patient login reaches only its request page and
-    // account (lead cabinet, owner decision 2026-10-03).
+    // Innermost, after authentication: a lead-only patient login reaches only
+    // its request page and account (lead cabinet, owner decision 2026-10-03),
+    // then the sanctions and blocked-country gate
+    // (docs/architecture/sanctions-screening_ua.md).
     let protected_routes = routes::protected_router()
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             routes::lead_portal_intake::lead_portal_guard,
+        ))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            sanctions::gate::middleware,
         ))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),

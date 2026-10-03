@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Synthetic test file in the EU FSF XML 1.1 layout. Every name, date and
+     reference is invented; no real listed person or entity is reproduced. -->
+<export xmlns="http://eu.europa.ec/fpi/fsd/export" generationDate="2026-09-30T18:00:00.000+02:00" globalFileId="990001">
+  <sanctionEntity designationDetails="" unitedNationId="" euReferenceNumber="EU.9001.01" logicalId="900101" designationDate="2099-01-02">
+    <remark>Synthetic test person &amp; no real data.</remark>
+    <regulation regulationType="regulation" organisationType="council" publicationDate="2099-01-02" entryIntoForceDate="2099-01-03" numberTitle="2099/1 (OJ L 1)" programme="UKR" logicalId="1">
+      <publicationUrl>https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32099R0001&amp;qid=1</publicationUrl>
+    </regulation>
+    <subjectType code="person" classificationCode="P"/>
+    <nameAlias firstName="Testomir" middleName="Ivanovich" lastName="KORNEEV" wholeName="Testomir Ivanovich KORNEEV" function="" gender="M" title="" nameLanguage="" strong="true" regulationLanguage="en" logicalId="11">
+      <regulationSummary regulationType="regulation" publicationDate="2099-01-02" numberTitle="2099/1 (OJ L 1)" publicationUrl="https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32099R0001"/>
+    </nameAlias>
+    <nameAlias firstName="Testomir" middleName="" lastName="KORNEJEW" wholeName="Testomir KORNEJEW" function="" gender="M" title="" nameLanguage="DE" strong="false" regulationLanguage="en" logicalId="12"/>
+    <nameAlias firstName="Тестомир" middleName="Иванович" lastName="Корнеев" wholeName="Тестомир Иванович Корнеев" function="" gender="M" title="" nameLanguage="RU" strong="true" regulationLanguage="en" logicalId="13"/>
+    <citizenship region="" countryIso2Code="RU" countryDescription="RUSSIAN FEDERATION" regulationLanguage="en" logicalId="14"/>
+    <birthdate circa="false" calendarType="GREGORIAN" city="Testgrad" zipCode="" birthdate="1961-03-14" dayOfMonth="14" monthOfYear="3" year="1961" region="" place="" countryIso2Code="RU" countryDescription="RUSSIAN FEDERATION" regulationLanguage="en" logicalId="15"/>
+    <address city="Testgrad" street="Synthetic street 1" poBox="" zipCode="000000" countryIso2Code="RU" countryDescription="RUSSIAN FEDERATION" logicalId="16"/>
+    <identification diplomatic="false" knownExpired="false" knownFalse="false" reportedLost="false" revokedByIssuer="false" identificationTypeCode="passport" identificationTypeDescription="National passport" number="0000000" logicalId="17"/>
+  </sanctionEntity>
+  <sanctionEntity designationDetails="" unitedNationId="QDi.999" euReferenceNumber="EU.9001.02" logicalId="900102">
+    <regulation regulationType="amendment" organisationType="commission" publicationDate="2099-02-01" entryIntoForceDate="2099-02-01" numberTitle="2099/2 (OJ L 2)" programme="SYR" logicalId="2">
+      <publicationUrl>https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32099R0002</publicationUrl>
+    </regulation>
+    <subjectType code="person" classificationCode="P"/>
+    <nameAlias firstName="Zorana" middleName="" lastName="MILETICH-BAUER" wholeName="Zorana MILETICH-BAUER" function="" gender="F" title="" nameLanguage="" strong="true" regulationLanguage="en" logicalId="21"/>
+    <citizenship region="" countryIso2Code="00" countryDescription="UNKNOWN" regulationLanguage="en" logicalId="22"/>
+    <birthdate circa="true" calendarType="GREGORIAN" city="" zipCode="" birthdate="" dayOfMonth="" monthOfYear="" year="1978" region="" place="" countryIso2Code="00" countryDescription="UNKNOWN" regulationLanguage="en" logicalId="23"/>
+  </sanctionEntity>
+  <sanctionEntity designationDetails="" unitedNationId="" euReferenceNumber="EU.9002.01" logicalId="900201">
+    <regulation regulationType="regulation" organisationType="council" publicationDate="2099-03-01" entryIntoForceDate="2099-03-01" numberTitle="2099/3 (OJ L 3)" programme="RUS" logicalId="3">
+      <publicationUrl>https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32099R0003</publicationUrl>
+    </regulation>
+    <subjectType code="enterprise" classificationCode="E"/>
+    <nameAlias firstName="" middleName="" lastName="" wholeName="OOO Polartek Shipping" function="" gender="" title="" nameLanguage="" strong="true" regulationLanguage="en" logicalId="31"/>
+  </sanctionEntity>
+</export>

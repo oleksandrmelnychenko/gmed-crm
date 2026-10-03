@@ -3052,6 +3052,16 @@ async fn anonymize_patient_record(
         ));
     }
 
+    // Sanctions screening results follow the patient's retention.
+    if let Err(e) = crate::sanctions::screening::purge_for_patient_in_tx(&mut tx, patient_id).await
+    {
+        tracing::error!(error = %e, patient_id = %patient_id, "remove sanctions hits during patient erasure");
+        return Err(err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        ));
+    }
+
     let assignments_revoked = sqlx::query(
         "UPDATE patient_assignments SET revoked_at = now() WHERE patient_id = $1 AND revoked_at IS NULL",
     )
