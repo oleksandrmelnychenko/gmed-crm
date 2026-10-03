@@ -4,11 +4,16 @@
  * Staff write the template in the specialization directory as plain lines.
  * A line that ends with a bracket such as `(ja/nein + if ja: Note)` becomes a
  * yes/no question with follow-up fields; everything else stays a heading. The
- * answers are stored next to the readable text that is composed from them, so
- * the anamnesis prints and reads like hand-written text.
+ * follow-ups of a question — its own fields and the dash lines below it —
+ * unfold only once it is answered with the answer the bracket names ("ja"
+ * unless it says `if nein`). The answers are stored next to the readable text
+ * that is composed from them, so the anamnesis prints and reads like
+ * hand-written text.
  */
 
 export type ChecklistFieldKind = "text" | "number" | "bmi";
+
+export type ChecklistAnswerValue = "ja" | "nein";
 
 export type ChecklistField = {
   key: string;
@@ -25,12 +30,18 @@ export type ChecklistItem = {
   /** A line starting with a dash belongs to the group opened above it. */
   child: boolean;
   yesNo: boolean;
+  /**
+   * The answer that unfolds the follow-ups of a yes/no question: its own
+   * fields and options, and the dash lines below it. "ja" unless the
+   * bracket says `if nein`.
+   */
+  unfoldOn: ChecklistAnswerValue;
   options: string[];
   fields: ChecklistField[];
 };
 
 export type ChecklistAnswer = {
-  value?: "ja" | "nein" | null;
+  value?: ChecklistAnswerValue | null;
   options?: string[];
   fields?: Record<string, string>;
 };
@@ -47,7 +58,10 @@ export type SpecializationChecklist = {
 
 // The clinic also writes "ja nein" without the slash and "note text" for a note.
 const YES_NO_RE = /^ja\s*[/\s]\s*nein$/i;
-const SPEC_RE = /\bja\s*[/\s]\s*nein\b|\b(?:if|wenn|falls)\s+ja\b/i;
+const SPEC_RE = /\bja\s*[/\s]\s*nein\b|\b(?:if|wenn|falls|bei)\s+(?:ja|nein)\b/i;
+// "if nein:" (also "wenn", "falls", "bei") makes the follow-ups unfold on "nein".
+const UNFOLD_ON_NEIN_RE = /\b(?:if|wenn|falls|bei)\s+nein\b/i;
+const CONDITION_PREFIX_RE = /^(?:if|wenn|falls|bei)\s+(?:ja|nein)\s*:?\s*/i;
 const NOTE_RE = /^(?:note|notes|note\s+text|notiz|notizen|bemerkung|kommentar|text|freitext)$/i;
 const NUMBER_MARK_RE = /\(\s*(?:number|zahl|nummer)\s*\)/i;
 const UNIT_RE = /^(.*?)\s+in\s+([A-Za-zµ%/²]{1,8})$/;
@@ -108,7 +122,15 @@ export function parseChecklistTemplate(template: string | null | undefined): Che
     const child = /^[-–—•*]\s*/.test(line);
     line = line.replace(/^[-–—•*]\s*/, "").replace(/[:\s]+$/, "");
     if (!line) return;
-    const item: ChecklistItem = { index: items.length, label: line, child, yesNo: false, options: [], fields: [] };
+    const item: ChecklistItem = {
+      index: items.length,
+      label: line,
+      child,
+      yesNo: false,
+      unfoldOn: "ja",
+      options: [],
+      fields: [],
+    };
     const bracket = trailingBracket(line);
     const single = bracket ? bracket.inside.trim() : "";
     if (bracket && bracket.before.trim() && (SPEC_RE.test(single) || NOTE_RE.test(single) || NUMBER_MARK_RE.test(`(${single})`))) {
@@ -117,10 +139,11 @@ export function parseChecklistTemplate(template: string | null | undefined): Che
         item.fields.push({ key: "field0", kind: "number", label: "", unit: "" });
       } else {
         item.yesNo = SPEC_RE.test(single);
+        if (item.yesNo && UNFOLD_ON_NEIN_RE.test(single)) item.unfoldOn = "nein";
         splitTopLevel(bracket.inside, "+").forEach((part, position) => {
           const token = part
             .replace(/^[\s:]+/, "")
-            .replace(/^(?:if|wenn|falls)\s+ja\s*:?\s*/i, "")
+            .replace(CONDITION_PREFIX_RE, "")
             .replace(/[\s:]+$/, "");
           if (!token || YES_NO_RE.test(token)) return;
           const alternatives = splitTopLevel(token, "/").map((value) => value.trim()).filter(Boolean);
@@ -186,17 +209,32 @@ export function checklistBmi(item: ChecklistItem, answer: ChecklistAnswer | unde
   return (weight / (height / 100) ** 2).toFixed(1).replace(".", ",");
 }
 
-/** Whether the group a child line belongs to was answered with "nein". */
-export function checklistGroupDeclined(
+/** The line without a dash that opens the group a child line belongs to. */
+function checklistGroupOf(items: ChecklistItem[], item: ChecklistItem): ChecklistItem | null {
+  if (!item.child) return null;
+  for (let index = item.index - 1; index >= 0; index -= 1) {
+    if (!items[index].child) return items[index];
+  }
+  return null;
+}
+
+/** Whether a question's follow-ups are unfolded: it is answered the way its bracket names. */
+export function checklistUnfolded(item: ChecklistItem, answer: ChecklistAnswer | undefined): boolean {
+  return !item.yesNo || answer?.value === item.unfoldOn;
+}
+
+/**
+ * Whether a child line stays folded: its group is a yes/no question that is
+ * not (yet) answered the way that unfolds its sub-questions. Lines under a
+ * plain heading are always shown.
+ */
+export function checklistGroupFolded(
   items: ChecklistItem[],
   item: ChecklistItem,
   answers: Record<string, ChecklistAnswer>,
 ): boolean {
-  if (!item.child) return false;
-  for (let index = item.index - 1; index >= 0; index -= 1) {
-    if (!items[index].child) return answers[String(index)]?.value === "nein";
-  }
-  return false;
+  const group = checklistGroupOf(items, item);
+  return group !== null && !checklistUnfolded(group, answers[String(group.index)]);
 }
 
 function answerDetails(item: ChecklistItem, answer: ChecklistAnswer): string {
@@ -225,8 +263,8 @@ export function composeChecklistText(checklist: SpecializationChecklist): string
       if (!item.child) pendingHeading = item.label;
       continue;
     }
-    if (checklistGroupDeclined(items, item, checklist.answers)) continue;
-    const details = !item.yesNo || answer.value === "ja" ? answerDetails(item, answer) : "";
+    if (checklistGroupFolded(items, item, checklist.answers)) continue;
+    const details = checklistUnfolded(item, answer) ? answerDetails(item, answer) : "";
     if (item.yesNo ? !answer.value : !details) continue;
     if (pendingHeading !== null) {
       lines.push(`${pendingHeading}:`);

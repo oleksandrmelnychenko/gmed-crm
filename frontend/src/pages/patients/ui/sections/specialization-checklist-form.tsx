@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils";
 import {
   checklistBmi,
-  checklistGroupDeclined,
+  checklistGroupFolded,
+  checklistUnfolded,
   parseChecklistTemplate,
   type ChecklistAnswer,
   type ChecklistItem,
@@ -14,9 +15,10 @@ const inputClass =
   "h-8 rounded-md border border-border bg-field px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 
 /**
- * The yes/no questions of a specialization's anamnesis template. Follow-up
- * fields appear once a question is answered with "ja"; the questions of a
- * group answered with "nein" are hidden.
+ * The yes/no questions of a specialization's anamnesis template. The
+ * follow-ups of a question — its fields and the sub-questions below it —
+ * unfold once it is answered the way its template line names ("ja" unless
+ * the line says `if nein`); until then they stay folded.
  */
 export function SpecializationChecklistForm({
   checklist,
@@ -39,7 +41,7 @@ export function SpecializationChecklistForm({
   return (
     <div data-specialization-checklist className="space-y-1.5">
       {items.map((item) => {
-        if (checklistGroupDeclined(items, item, checklist.answers)) return null;
+        if (checklistGroupFolded(items, item, checklist.answers)) return null;
         const answer = checklist.answers[String(item.index)] ?? {};
         const interactive = item.yesNo || item.fields.length > 0;
         if (!interactive) {
@@ -49,7 +51,7 @@ export function SpecializationChecklistForm({
             </p>
           );
         }
-        const open = !item.yesNo || answer.value === "ja";
+        const open = checklistUnfolded(item, answer);
         return (
           <div
             key={item.index}

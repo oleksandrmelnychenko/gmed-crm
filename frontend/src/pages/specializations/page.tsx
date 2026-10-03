@@ -1033,8 +1033,8 @@ function SpecializationSheet({
                   />
                   <p className="text-xs text-muted-foreground">
                     {tx(
-                      "Подставляется в «Анамнез по специализации», когда специализацию добавляют в анамнез. Строка со скобкой (ja/nein) становится вопросом «да/нет»; после «+ if ja:» через «+» перечисляются уточнения: Note — заметка, «… (Number)» — число, «Gewicht in kg» — число с единицей, BMI — расчёт по весу и росту, «A/B/C» — варианты. Строка с дефисом относится к группе над ней.",
-                      "Wird in „Fachspezifische Anamnese“ eingesetzt, sobald die Spezialisierung zur Anamnese hinzugefügt wird. Eine Zeile mit der Klammer (ja/nein) wird zur Ja/Nein-Frage; nach „+ if ja:“ folgen mit „+“ getrennt die Zusatzangaben: Note – Notiz, „… (Number)“ – Zahl, „Gewicht in kg“ – Zahl mit Einheit, BMI – Berechnung aus Gewicht und Größe, „A/B/C“ – Auswahl. Eine Zeile mit Spiegelstrich gehört zur Gruppe darüber.",
+                      "Подставляется в «Анамнез по специализации», когда специализацию добавляют в анамнез. Строка со скобкой (ja/nein) становится вопросом «да/нет»; после «+ if ja:» через «+» перечисляются уточнения: Note — заметка, «… (Number)» — число, «Gewicht in kg» — число с единицей, BMI — расчёт по весу и росту, «A/B/C» — варианты. Строки с дефисом под вопросом — его подвопросы: они и уточнения раскрываются только после ответа «да»; с «+ if nein:» — после ответа «нет».",
+                      "Wird in „Fachspezifische Anamnese“ eingesetzt, sobald die Spezialisierung zur Anamnese hinzugefügt wird. Eine Zeile mit der Klammer (ja/nein) wird zur Ja/Nein-Frage; nach „+ if ja:“ folgen mit „+“ getrennt die Zusatzangaben: Note – Notiz, „… (Number)“ – Zahl, „Gewicht in kg“ – Zahl mit Einheit, BMI – Berechnung aus Gewicht und Größe, „A/B/C“ – Auswahl. Zeilen mit Spiegelstrich unter einer Frage sind ihre Unterfragen: sie und die Zusatzangaben klappen erst nach der Antwort „Ja“ auf; mit „+ if nein:“ nach der Antwort „Nein“.",
                     )}
                   </p>
                   {isChecklistTemplate(draft.anamnesisTemplate) ? (
