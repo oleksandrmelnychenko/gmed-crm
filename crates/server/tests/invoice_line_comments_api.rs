@@ -122,10 +122,12 @@ async fn seed_order(pool: &PgPool, patient_id: Uuid, created_by: Uuid, tag: &str
     .execute(pool)
     .await
     .unwrap();
+    // Quote lines follow the creation time of the services; rows of one
+    // statement share it, so the first service gets an earlier one.
     sqlx::query(
-        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
-           VALUES ($1, 'Quartalsbetreuung', 2, 100, 19, 'approved'),
-                  ($1, 'Terminorganisation', 1, 50, 19, 'approved')"#,
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status, created_at)
+           VALUES ($1, 'Quartalsbetreuung', 2, 100, 19, 'approved', now() - interval '1 minute'),
+                  ($1, 'Terminorganisation', 1, 50, 19, 'approved', now())"#,
     )
     .bind(order_id)
     .execute(pool)
