@@ -98,6 +98,18 @@ async fn record(
     {
         return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
     }
+    // A paper-signed contract or order of a lead carries GMED's signature as
+    // well: only once the payer declaration is complete (lead_payer.rs).
+    crate::routes::lead_payer::check_signature_request(
+        &state.db,
+        &[crate::routes::lead_payer::SigningDocument {
+            template: template_of(&source),
+            lead_id: source.get("lead_id"),
+            order_id: source.get("order_id"),
+        }],
+        &["client", "agency"],
+    )
+    .await?;
 
     let mut file: Option<(Vec<u8>, String, String)> = None;
     let mut signed_on: Option<String> = None;
