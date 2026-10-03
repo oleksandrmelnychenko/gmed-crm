@@ -209,6 +209,7 @@ export type StandardDocumentNameMetadataInput = Omit<
 };
 
 const DOCUMENT_ART_LABELS: Record<string, string> = {
+  aml_asset_origin_evidence: "Herkunftsnachweis (GwG)",
   appointment_confirmation: "Terminbestätigung",
   confidentiality_release: "Schweigepflichtsentbindung",
   consent_data_release: "Einverständniserklärung",

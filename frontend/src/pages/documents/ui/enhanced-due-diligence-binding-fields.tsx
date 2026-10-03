@@ -7,9 +7,15 @@ import { Input } from "@/components/ui/input";
 import { checkboxClass } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import {
+  parseAssetOriginEvidence,
+  serializeAssetOriginEvidence,
+} from "@/pages/documents/model/asset-origin-evidence";
+import {
+  ASSET_ORIGIN_EVIDENCE_BINDING_KEY,
   parseEnhancedDueDiligenceCountries,
   type DocumentBindingForm,
 } from "@/pages/documents/model/document-bindings";
+import { AssetOriginEvidenceField } from "@/pages/documents/ui/asset-origin-evidence-field";
 
 const inputClassName =
   "h-9 w-full rounded-md border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
@@ -21,6 +27,8 @@ const textareaClassName = cn(
 type EnhancedDueDiligenceBindingFieldsProps = {
   bindings: DocumentBindingForm;
   lang: "de" | "ru";
+  /** The patient the form is generated for; the proofs of asset origin are filed under it. */
+  patientId?: string | null;
   onChange: (key: string, value: string) => void;
 };
 
@@ -71,6 +79,7 @@ function AmlToggle({
 export function EnhancedDueDiligenceBindingFields({
   bindings,
   lang,
+  patientId,
   onChange,
 }: EnhancedDueDiligenceBindingFieldsProps) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
@@ -210,6 +219,14 @@ export function EnhancedDueDiligenceBindingFields({
             className={textareaClassName}
           />
         </AmlField>
+        <AssetOriginEvidenceField
+          value={parseAssetOriginEvidence(bindings[ASSET_ORIGIN_EVIDENCE_BINDING_KEY])}
+          subject={{ patientId }}
+          lang={lang}
+          onChange={(next) =>
+            onChange(ASSET_ORIGIN_EVIDENCE_BINDING_KEY, serializeAssetOriginEvidence(next))
+          }
+        />
       </section>
 
       <section className="space-y-4 border-t border-border pt-5">

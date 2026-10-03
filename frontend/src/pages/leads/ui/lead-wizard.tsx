@@ -124,6 +124,12 @@ import {
   uploadDocument,
   type DocumentComplianceKind,
 } from "@/pages/documents/data/document-api";
+import {
+  AML_ASSET_ORIGIN_EVIDENCE_ART,
+  parseAssetOriginEvidence,
+  type AssetOriginEvidence,
+} from "@/pages/documents/model/asset-origin-evidence";
+import { AssetOriginEvidenceField } from "@/pages/documents/ui/asset-origin-evidence-field";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
@@ -250,6 +256,8 @@ type AmlEnhancedDueDiligenceDraft = {
   individualReview: boolean;
   riskReason: string;
   assetOrigin: string;
+  /** Uploaded proofs of the origin of the assets (§ 15 Abs. 4 Nr. 2 GwG). */
+  assetOriginEvidence: AssetOriginEvidence[];
   pepContractPartner: boolean;
   pepBeneficialOwner: boolean;
   pepOfficeFunction: string;
@@ -457,6 +465,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
     individualReview: false,
     riskReason: "",
     assetOrigin: "",
+    assetOriginEvidence: [],
     pepContractPartner: false,
     pepBeneficialOwner: false,
     pepOfficeFunction: "",
@@ -942,6 +951,7 @@ function amlEnhancedDueDiligenceFromLead(lead: LeadDetail): AmlEnhancedDueDilige
     individualReview: stored["individualReview"] === true,
     riskReason: inputString(stored["riskReason"]),
     assetOrigin: inputString(stored["assetOrigin"]),
+    assetOriginEvidence: parseAssetOriginEvidence(stored["assetOriginEvidence"]),
     pepContractPartner: stored["pepContractPartner"] === true,
     pepBeneficialOwner: stored["pepBeneficialOwner"] === true,
     pepOfficeFunction: inputString(stored["pepOfficeFunction"]),
@@ -1942,6 +1952,8 @@ export function preferPersistedCommercialLines(
 }
 
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
+  // A proof of the origin of assets belongs to the due-diligence form, whatever its file is called.
+  if (item.art === AML_ASSET_ORIGIN_EVIDENCE_ART) return null;
   const templateId = item.generated_template_id?.trim().toLowerCase();
   if (templateId === "privacy_information") return "privacy_information";
   if (templateId === "enhanced_due_diligence") return "enhanced_due_diligence";
@@ -8484,6 +8496,13 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchAml("assetOrigin", event.target.value)}
                     />
                   </Field>
+                  <AssetOriginEvidenceField
+                    value={draft.amlEnhancedDueDiligence.assetOriginEvidence}
+                    subject={{ leadId }}
+                    lang={lang}
+                    disabled={isBusy}
+                    onChange={(next) => patchAml("assetOriginEvidence", next)}
+                  />
                 </section>
 
                 <section className="space-y-4 border-t border-border pt-5">

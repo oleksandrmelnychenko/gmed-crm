@@ -1,6 +1,10 @@
 import { countryNameForGermanDocument } from "@/components/ui/country-select";
 import { appDateKey } from "@/lib/app-time-zone";
 import type { ServiceDescriptionItem } from "@/lib/service-description";
+import {
+  parseAssetOriginEvidence,
+  serializeAssetOriginEvidence,
+} from "@/pages/documents/model/asset-origin-evidence";
 
 export type BindingFieldKind =
   | "text"
@@ -17,6 +21,12 @@ export type BindingFieldDef = {
 };
 
 export type DocumentBindingForm = Record<string, string>;
+
+/**
+ * Binding of the due-diligence form that holds the uploaded proofs of the
+ * origin of assets, as JSON text (the form keeps string values only).
+ */
+export const ASSET_ORIGIN_EVIDENCE_BINDING_KEY = "assetOriginEvidence";
 
 export type PatientPartyBindingSource = {
   address_city?: string | null;
@@ -219,6 +229,8 @@ function enhancedDueDiligencePayload(bindings: DocumentBindingForm) {
     const value = bindings[field.key]?.trim();
     if (value) aml[field.key] = value;
   }
+  const evidence = parseAssetOriginEvidence(bindings[ASSET_ORIGIN_EVIDENCE_BINDING_KEY]);
+  if (evidence.length > 0) aml[ASSET_ORIGIN_EVIDENCE_BINDING_KEY] = evidence;
   return { aml_enhanced_due_diligence: aml };
 }
 
@@ -838,6 +850,10 @@ export function hydrateDocumentBindings(
         hydrated[field.key] = String(value).trim();
       }
     }
+    const evidence = serializeAssetOriginEvidence(
+      parseAssetOriginEvidence(source[ASSET_ORIGIN_EVIDENCE_BINDING_KEY]),
+    );
+    if (evidence) hydrated[ASSET_ORIGIN_EVIDENCE_BINDING_KEY] = evidence;
     return hydrated;
   }
 

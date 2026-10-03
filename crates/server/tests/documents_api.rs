@@ -9552,3 +9552,137 @@ async fn minor_single_order_names_both_parents_and_their_signature_frames() {
     assert!(text.contains("Max Muster"), "{text}");
     assert!(text.contains("zugunsten des Patienten"), "{text}");
 }
+
+/// § 15 Abs. 4 Nr. 2 GwG: the proofs of the origin of the assets are uploaded
+/// with the due-diligence form, listed in its PDF by their stored name, and
+/// must belong to the same patient.
+#[tokio::test]
+async fn enhanced_due_diligence_lists_uploaded_asset_origin_evidence() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("aml-evidence");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let other_patient_id = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+
+    let upload_evidence = |owner: Uuid, art: &'static str, file_name: &'static str| {
+        let app = app.clone();
+        let bearer = admin_bearer.clone();
+        async move {
+            let (status, body) = multipart_upload(
+                &app,
+                "/api/v1/documents/upload",
+                &bearer,
+                &[
+                    ("patient_id", owner.to_string()),
+                    ("auto_name", format!("Herkunftsnachweis {file_name}")),
+                    ("art", art.to_string()),
+                    ("category", "compliance_aml".to_string()),
+                    ("status", "active".to_string()),
+                    ("visibility", "internal".to_string()),
+                ],
+                file_name,
+                "application/pdf",
+                b"%PDF-test-binary%",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+        }
+    };
+    let evidence_id =
+        upload_evidence(patient_id, "aml_asset_origin_evidence", "Kaufvertrag.pdf").await;
+    let foreign_id =
+        upload_evidence(other_patient_id, "aml_asset_origin_evidence", "Fremd.pdf").await;
+    let other_kind_id = upload_evidence(patient_id, "arztbrief", "Arztbrief.pdf").await;
+
+    let generate = |evidence: Value| {
+        let app = app.clone();
+        let bearer = admin_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &bearer,
+                Some(json!({
+                    "template_id": "enhanced_due_diligence",
+                    "patient_id": patient_id,
+                    "language": "de",
+                    "bindings": { "aml_enhanced_due_diligence": {
+                        "riskTier": "pep",
+                        "internalRiskAnalysis": true,
+                        "individualReview": false,
+                        "pepBeneficialOwner": false,
+                        "highRiskCountryTransaction": false,
+                        "highRiskCountryResident": false,
+                        "unusualComplexOrLarge": false,
+                        "unusualPattern": false,
+                        "noLawfulPurpose": false,
+                        "riskReason": "Politisch exponierte Person",
+                        "assetOrigin": "Verkauf einer Immobilie",
+                        "assetOriginEvidence": evidence,
+                        "pepContractPartner": true,
+                        "pepOfficeFunction": "Abgeordnete",
+                        "pepAssetOrigin": "Gehalt",
+                        "managerApprovalName": "Leitung Beispiel",
+                        "continuousMonitoring": "Prüfung jeder Zahlung",
+                        "reviewerName": "Bearbeiter Beispiel",
+                        "reviewDate": "2026-10-03"
+                    } }
+                })),
+            )
+            .await
+        }
+    };
+
+    // A proof of another patient, or a document that is no proof, is refused.
+    for wrong in [foreign_id, other_kind_id, Uuid::new_v4()] {
+        let (status, body) = generate(json!([{ "documentId": wrong }])).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["message"], "Asset origin evidence document not found");
+    }
+
+    // The caller's file name is ignored; the stored one is used and printed.
+    let (status, generated) = generate(json!([
+        { "documentId": evidence_id, "filename": "umbenannt.pdf" },
+        { "documentId": evidence_id }
+    ]))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let stored = &detail["generated_bindings"]["aml_enhanced_due_diligence"]["assetOriginEvidence"];
+    assert_eq!(stored.as_array().map(Vec::len), Some(1), "{detail}");
+    assert_eq!(stored[0]["documentId"], evidence_id.to_string());
+    assert_eq!(stored[0]["filename"], "Kaufvertrag.pdf");
+    assert!(stored[0]["uploadedOn"].is_string(), "{detail}");
+
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = extract_pdf_text(&bytes);
+    assert!(
+        text.contains("Nachweise zur Herkunft der Vermögenswerte"),
+        "{text}"
+    );
+    assert!(
+        text.contains("1. Kaufvertrag.pdf (hochgeladen am"),
+        "{text}"
+    );
+    assert!(!text.contains("umbenannt.pdf"), "{text}");
+}
