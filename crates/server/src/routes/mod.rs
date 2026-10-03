@@ -33,6 +33,7 @@ pub mod interpreters;
 pub mod invoice_imports;
 pub mod invoices;
 pub mod key_rotation;
+pub mod lead_portal_account;
 pub mod leads;
 pub mod legal;
 pub mod me;
@@ -100,6 +101,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(concierge_operational_items::router())
         .merge(contracts::router())
         .merge(leads::router())
+        .merge(lead_portal_account::router())
         .merge(orders::router())
         .merge(order_intakes::router())
         .merge(patient_financials::router())

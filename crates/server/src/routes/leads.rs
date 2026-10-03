@@ -374,6 +374,35 @@ async fn list_lead_referrer_patients(
     }
 }
 
+/// Login state of the lead's patient account in a list row; null without one.
+fn lead_portal_account_summary(row: &sqlx::postgres::PgRow) -> Value {
+    match row
+        .try_get::<Option<Uuid>, _>("portal_user_id")
+        .ok()
+        .flatten()
+    {
+        Some(user_id) => json!({
+            "user_id": user_id,
+            "is_active": row
+                .try_get::<Option<bool>, _>("portal_active")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
+            "password_change_pending": row
+                .try_get::<Option<bool>, _>("portal_password_change_pending")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
+            "last_login_at": row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_last_login_at")
+                .ok()
+                .flatten()
+                .map(|value| value.to_rfc3339()),
+        }),
+        None => Value::Null,
+    }
+}
+
 async fn list_leads(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -409,7 +438,12 @@ async fn list_leads(
                   intake_source, flow, qualification_status, compliance_status,
                   submitted_at, created_at, console_promoted_at, console_promoted_by,
                   failed_outcome_status, failed_reason, failed_processed_at, status_changed_at,
-                  repeat_patient_id,
+                  repeat_patient_id, portal_user_id,
+                  (SELECT u.is_active FROM users u WHERE u.id = leads.portal_user_id) AS portal_active,
+                  (SELECT u.password_reset_required FROM users u WHERE u.id = leads.portal_user_id)
+                      AS portal_password_change_pending,
+                  (SELECT max(tf.created_at) FROM token_families tf WHERE tf.user_id = leads.portal_user_id)
+                      AS portal_last_login_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR $2::text IS NOT NULL
@@ -533,6 +567,8 @@ async fn list_leads(
                     "conversion_ready": conversion_ready,
                     // Phase 1 classification: a brand-new lead or an existing customer.
                     "repeat_patient_id": r.try_get::<Option<Uuid>, _>("repeat_patient_id").unwrap_or_default(),
+                    // The patient login of the lead, for the expandable row.
+                    "portal_account": lead_portal_account_summary(&r),
                     "failed_outcome": {
                         "status": r
                             .try_get::<String, _>("failed_outcome_status")
@@ -940,7 +976,7 @@ fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
     )
 }
 
-fn is_minor_on(date_of_birth: Option<NaiveDate>, today: NaiveDate) -> bool {
+pub(crate) fn is_minor_on(date_of_birth: Option<NaiveDate>, today: NaiveDate) -> bool {
     let Some(date_of_birth) = date_of_birth else {
         return false;
     };
@@ -2349,6 +2385,16 @@ async fn create_lead(
     if body.first_name.trim().is_empty() || body.last_name.trim().is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
     }
+    // Every manual lead gets a patient login (owner decision 2026-10-03), so
+    // the address is mandatory and must not belong to another account.
+    let Some(portal_email) =
+        crate::routes::lead_portal_account::normalize_portal_email(body.email.as_deref())
+    else {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "A valid email is required",
+        );
+    };
 
     if let Some(creation_key) = body.creation_key {
         match sqlx::query_scalar::<_, Uuid>(
@@ -2399,7 +2445,7 @@ async fn create_lead(
             first_name: body.first_name.trim(),
             last_name: body.last_name.trim(),
             date_of_birth,
-            email: body.email.as_deref(),
+            email: Some(&portal_email),
             phone: body.phone.as_deref(),
             guardians: &trusted_contacts,
         },
@@ -2408,8 +2454,33 @@ async fn create_lead(
     {
         return response;
     }
+    // A minor gets no login of their own (owner decision 2026-10-03): the
+    // parents fill in the data through their account, and the address may be
+    // a parent's address that already has one.
+    let creates_portal_account = !is_minor_on(date_of_birth, crate::app_time::today());
+    if creates_portal_account {
+        match crate::routes::lead_portal_account::email_owner(&state.db, &portal_email, None)
+            .await
+        {
+            Ok(None) => {}
+            Ok(Some(owner)) => {
+                return crate::routes::lead_portal_account::email_taken_response(owner);
+            }
+            Err(error) => {
+                tracing::error!(%error, "check lead portal email");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+            }
+        }
+    }
 
-    match sqlx::query_as::<_, (Uuid, bool)>(
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, "begin lead creation");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+        }
+    };
+    let inserted = sqlx::query_as::<_, (Uuid, bool)>(
         r#"INSERT INTO leads (
                 first_name, last_name, email, phone, source, country,
                 notes, created_by, intake_source, creation_key, date_of_birth,
@@ -2421,7 +2492,7 @@ async fn create_lead(
     )
     .bind(body.first_name.trim())
     .bind(body.last_name.trim())
-    .bind(body.email.as_deref())
+    .bind(&portal_email)
     .bind(body.phone.as_deref())
     .bind(body.source.as_deref())
     .bind(body.country.as_deref())
@@ -2430,59 +2501,104 @@ async fn create_lead(
     .bind(body.creation_key)
     .bind(date_of_birth)
     .bind(&trusted_contacts)
-    .fetch_one(&state.db)
-    .await
-    {
-        Ok((id, inserted)) => {
-            if !inserted {
-                return Json(json!({"id":id,"idempotent_replay":true})).into_response();
-            }
-            state.audit_sender.try_send(audit::domain_event(
-                "create_lead",
-                Some(auth.user_id),
-                "lead",
-                Some(id),
-                json!({}),
-            ));
-            if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
-                &state,
-                crate::routes::workflow_lifecycle::RecordEvent {
-                    entity_type: "lead",
-                    entity_id: id,
-                    from_stage: None,
-                    to_stage: "new",
-                    transition_kind: "created",
-                    changed_by: Some(auth.user_id),
-                    note: None,
-                    metadata: json!({
-                        "source": body.source,
-                        "intake_source": "manual",
-                    }),
-                },
+    .fetch_one(&mut *tx)
+    .await;
+    let (id, portal_account) = match inserted {
+        Ok((id, false)) => {
+            return Json(json!({"id":id,"idempotent_replay":true})).into_response();
+        }
+        Ok((id, true)) if !creates_portal_account => (id, None),
+        Ok((id, true)) => {
+            let name = format!("{} {}", body.first_name.trim(), body.last_name.trim());
+            match crate::routes::lead_portal_account::create_for_lead_in_tx(
+                &mut tx,
+                id,
+                &portal_email,
+                &name,
+                auth.user_id,
             )
             .await
             {
-                return resp;
+                Ok(account) => (id, Some(account)),
+                Err(error) if crate::routes::lead_portal_account::is_unique_violation(&error) => {
+                    drop(tx);
+                    return match crate::routes::lead_portal_account::email_owner(
+                        &state.db,
+                        &portal_email,
+                        None,
+                    )
+                    .await
+                    {
+                        Ok(Some(owner)) => {
+                            crate::routes::lead_portal_account::email_taken_response(owner)
+                        }
+                        _ => err(StatusCode::CONFLICT, "Email already belongs to an account"),
+                    };
+                }
+                Err(error) => {
+                    tracing::error!(%error, lead = %id, "create lead portal account");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
+                }
             }
-            crate::realtime::publish_lead_event(
-                &state,
-                Some(auth.user_id),
-                "lead.created",
-                id,
-                json!({
-                    "source": body.source,
-                    "intake_source": "manual",
-                }),
-            )
-            .await;
-            tracing::info!(by = %auth.user_id, lead = %id, "Lead created manually");
-            (StatusCode::CREATED, Json(json!({ "id": id }))).into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, "create lead");
-            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }
+    };
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, lead = %id, "commit lead creation");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create lead");
     }
+    state.audit_sender.try_send(audit::domain_event(
+        "create_lead",
+        Some(auth.user_id),
+        "lead",
+        Some(id),
+        json!({}),
+    ));
+    if let Err(resp) = crate::routes::workflow_lifecycle::record_event(
+        &state,
+        crate::routes::workflow_lifecycle::RecordEvent {
+            entity_type: "lead",
+            entity_id: id,
+            from_stage: None,
+            to_stage: "new",
+            transition_kind: "created",
+            changed_by: Some(auth.user_id),
+            note: None,
+            metadata: json!({
+                "source": body.source,
+                "intake_source": "manual",
+            }),
+        },
+    )
+    .await
+    {
+        return resp;
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.created",
+        id,
+        json!({
+            "source": body.source,
+            "intake_source": "manual",
+        }),
+    )
+    .await;
+    tracing::info!(by = %auth.user_id, lead = %id, "Lead created manually");
+    (
+        StatusCode::CREATED,
+        Json(json!({
+            "id": id,
+            "portal_account": portal_account.as_ref().map(|account| {
+                crate::routes::lead_portal_account::new_account_payload(account, auth.role)
+            }),
+        })),
+    )
+        .into_response()
 }
 
 async fn retired_repeat_patient_intake() -> axum::response::Response {
@@ -3570,7 +3686,8 @@ async fn update_lead(
     let current_identity = match sqlx::query(
         r#"SELECT first_name, last_name, date_of_birth, email, phone,
                   trusted_contacts, repeat_patient_id, prospect_patient_id,
-                  converted_patient_id, qualification_status, compliance_status
+                  converted_patient_id, qualification_status, compliance_status,
+                  portal_user_id
              FROM leads WHERE id = $1"#,
     )
     .bind(lead_id)
@@ -3665,6 +3782,39 @@ async fn update_lead(
     {
         return response;
     }
+    // A lead with a patient login keeps a usable, unique login address.
+    let portal_user_id: Option<Uuid> = current_identity
+        .try_get("portal_user_id")
+        .unwrap_or_default();
+    let portal_email = match (portal_user_id, changed_email.as_deref()) {
+        (Some(portal_user_id), Some(email)) => {
+            let Some(email) =
+                crate::routes::lead_portal_account::normalize_portal_email(Some(email))
+            else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "A valid email is required: it is the patient's login",
+                );
+            };
+            match crate::routes::lead_portal_account::email_owner(
+                &state.db,
+                &email,
+                Some(portal_user_id),
+            )
+            .await
+            {
+                Ok(None) => Some(email),
+                Ok(Some(owner)) => {
+                    return crate::routes::lead_portal_account::email_taken_response(owner);
+                }
+                Err(error) => {
+                    tracing::error!(%error, lead_id = %lead_id, "check lead portal email");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+        _ => None,
+    };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3801,6 +3951,18 @@ async fn update_lead(
         Err(e) => {
             tracing::error!(error = %e, lead_id = %lead_id, "update lead");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    }
+    if let Some(email) = portal_email.as_deref() {
+        match crate::routes::lead_portal_account::sync_email_in_tx(&mut tx, lead_id, email).await {
+            Ok(_) => {}
+            Err(error) if crate::routes::lead_portal_account::is_unique_violation(&error) => {
+                return err(StatusCode::CONFLICT, "Email already belongs to an account");
+            }
+            Err(error) => {
+                tracing::error!(%error, lead_id = %lead_id, "sync lead portal email");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
     }
     // The audit row commits with the change (a compliance change is a status
@@ -6142,6 +6304,17 @@ async fn convert_lead(
         tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer lead onboarding artifacts");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    if let Err(error) = crate::routes::lead_portal_account::link_to_patient_in_tx(
+        &mut tx,
+        lead_id,
+        patient_id,
+        auth.user_id,
+    )
+    .await
+    {
+        tracing::error!(%error, lead_id = %lead_id, patient_id = %patient_id, "link lead portal account");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     if let Err(error) = sqlx::query(
         r#"WITH consent_evidence AS (
@@ -7464,6 +7637,8 @@ async fn purge_lead_and_prospect_in_tx(
         Some(patient_id) => Some(purge_prospect_patient_in_tx(tx, lead_id, patient_id).await?),
         None => None,
     };
+    // The patient login lives as long as the lead (owner decision 2026-10-03).
+    crate::routes::lead_portal_account::disable_for_lead_in_tx(tx, lead_id, processed_by).await?;
 
     let result = anonymize_lead_pii(
         &mut **tx,

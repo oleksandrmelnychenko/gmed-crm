@@ -59,6 +59,12 @@ export type DataTableProps<T> = {
   rowAccent?: (row: T) => string | null;
   rowBackground?: (row: T) => string | null;
   rowActions?: (row: T) => ReactNode;
+  /**
+   * Full-width panel rendered under a row (an expandable row). Return null to
+   * keep the row plain. With this prop rows are measured, so the panel may
+   * have any height.
+   */
+  renderRowDetail?: (row: T) => ReactNode | null;
   rowActionsAlwaysVisible?: boolean;
   rowActionsLabel?: ReactNode;
   rowActionsWidth?: number;
@@ -133,6 +139,7 @@ function useDataTableContent<T>({
   rowAccent,
   rowBackground,
   rowActions,
+  renderRowDetail,
   rowActionsAlwaysVisible = true,
   rowActionsLabel,
   rowActionsWidth = 44,
@@ -254,6 +261,19 @@ function useDataTableContent<T>({
   useEffect(() => {
     virtualizer.measure();
   }, [rowHeight, virtualizer]);
+
+  // A row detail panel stays in view while the columns scroll sideways, so it
+  // is as wide as the visible part of the table, not as the column grid.
+  const measuredRows = Boolean(renderRowDetail);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!measuredRows || !element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setViewportWidth(element.clientWidth));
+    observer.observe(element);
+    setViewportWidth(element.clientWidth);
+    return () => observer.disconnect();
+  }, [measuredRows]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
@@ -551,10 +571,11 @@ function useDataTableContent<T>({
                     }
                   : {}),
               };
+              const detail = renderRowDetail ? renderRowDetail(row) : null;
 
-              return (
+              const rowNode = (
                 <div
-                  key={id}
+                  key={measuredRows ? undefined : id}
                   role="row"
                   aria-rowindex={vRow.index + 2}
                   aria-selected={isActive}
@@ -568,10 +589,14 @@ function useDataTableContent<T>({
                     onRowClick(row);
                   }}
                   tabIndex={onRowClick ? -1 : undefined}
-                  className="data-table-row group/row absolute inset-x-0 grid cursor-pointer items-center border-b border-border/30 transition-[background-color,box-shadow]"
+                  className={cn(
+                    "data-table-row group/row grid cursor-pointer items-center border-b border-border/30 transition-[background-color,box-shadow]",
+                    measuredRows ? "relative" : "absolute inset-x-0",
+                  )}
                   style={{
-                    top: vRow.start,
-                    height: vRow.size,
+                    ...(measuredRows
+                      ? { height: rowHeight }
+                      : { top: vRow.start, height: vRow.size }),
                     gridTemplateColumns: gridTemplate,
                     ...effectiveRowTone,
                   }}
@@ -641,6 +666,29 @@ function useDataTableContent<T>({
                       <span className="flex items-center justify-end gap-1">
                         {rowActions(row)}
                       </span>
+                    </div>
+                  ) : null}
+                </div>
+              );
+
+              if (!measuredRows) return rowNode;
+              return (
+                <div
+                  key={id}
+                  data-index={vRow.index}
+                  ref={virtualizer.measureElement}
+                  className="absolute inset-x-0"
+                  style={{ top: vRow.start }}
+                >
+                  {rowNode}
+                  {detail ? (
+                    <div
+                      role="row"
+                      data-row-detail={id}
+                      className="sticky left-0 border-b border-border/40 bg-muted/20"
+                      style={viewportWidth ? { width: viewportWidth } : undefined}
+                    >
+                      {detail}
                     </div>
                   ) : null}
                 </div>
@@ -743,6 +791,18 @@ function useDataTableContent<T>({
                       {rowActions(row)}
                     </div>
                   ) : null}
+                  {renderRowDetail ? (() => {
+                    const detail = renderRowDetail(row);
+                    return detail ? (
+                      <div
+                        className="mt-3 border-t border-border/60 pt-2.5"
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                      >
+                        {detail}
+                      </div>
+                    ) : null;
+                  })() : null}
                 </article>
               );
             })}

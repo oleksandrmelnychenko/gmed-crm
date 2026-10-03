@@ -56,9 +56,53 @@ export function fetchLeadReferrerPatients(search = "") {
   });
 }
 
+/** Patient login issued for a lead; the password only for CEO / patient managers. */
+export type LeadPortalAccountIssued = {
+  user_id: string;
+  email: string;
+  created: boolean;
+  one_time_password: string | null;
+};
+
 export type CreateLeadResponse = {
   id: string;
+  idempotent_replay?: boolean;
+  portal_account?: LeadPortalAccountIssued;
 };
+
+/** Owner of an e-mail address that a lead may not take (409 `portal_email_taken`). */
+export type PortalEmailOwner = {
+  user_id: string | null;
+  name: string | null;
+  role: string | null;
+  is_active: boolean | null;
+  lead_id: string | null;
+  lead_name: string | null;
+  patient_id: string | null;
+  patient_code: string | null;
+  patient_name: string | null;
+};
+
+export type LeadPortalAccountState = {
+  account: {
+    user_id: string;
+    email: string | null;
+    is_active: boolean;
+    password_change_pending: boolean;
+    created_at: string | null;
+    last_login_at: string | null;
+  } | null;
+  can_issue_password: boolean;
+};
+
+export function fetchLeadPortalAccount(leadId: string) {
+  return apiFetch<LeadPortalAccountState>(`/leads/${leadId}/portal-account`);
+}
+
+/** Creates the login of a lead without one, or issues a new one-time password. */
+export function issueLeadPortalAccess(leadId: string) {
+  return postJson<LeadPortalAccountIssued>(`/leads/${leadId}/portal-account`, {});
+}
 
 export function createLead(payload: CreateLeadBody) {
   return postJson<CreateLeadResponse>("/leads", payload as unknown as JsonPayload);

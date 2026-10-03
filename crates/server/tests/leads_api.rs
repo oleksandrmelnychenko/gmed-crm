@@ -975,6 +975,7 @@ async fn lead_contacts_are_unique_except_for_a_minor_and_linked_guardian() {
             "first_name": "Another",
             "last_name": "Adult",
             "date_of_birth": "1991-02-03",
+            "email": "another.adult@example.com",
             "phone": "0049 (170) 123-45-67"
         })),
     )
@@ -1140,7 +1141,7 @@ async fn qualify_lead_flow() {
         "POST",
         "/api/v1/leads",
         &sales,
-        Some(json!({ "first_name": "Qualify", "last_name": "Test" })),
+        Some(json!({ "first_name": "Qualify", "last_name": "Test", "email": "qualify.test@example.com" })),
     )
     .await;
     let lead_id = body["id"].as_str().unwrap();
@@ -1179,7 +1180,7 @@ async fn qualify_lead_invalid_status_rejected() {
         "POST",
         "/api/v1/leads",
         &app.auth_header("sales"),
-        Some(json!({ "first_name": "Bad", "last_name": "Status" })),
+        Some(json!({ "first_name": "Bad", "last_name": "Status", "email": "bad.status@example.com" })),
     )
     .await;
     let lead_id = body["id"].as_str().unwrap();
@@ -1206,7 +1207,7 @@ async fn convert_lead_requires_qualified() {
         "POST",
         "/api/v1/leads",
         &pm,
-        Some(json!({ "first_name": "Convert", "last_name": "Fail" })),
+        Some(json!({ "first_name": "Convert", "last_name": "Fail", "email": "convert.fail@example.com" })),
     )
     .await;
     let lead_id = body["id"].as_str().unwrap();
@@ -1244,7 +1245,7 @@ async fn convert_lead_requires_patient_manager() {
         "POST",
         "/api/v1/leads",
         &app.auth_header("sales"),
-        Some(json!({ "first_name": "Convert", "last_name": "Rbac" })),
+        Some(json!({ "first_name": "Convert", "last_name": "Rbac", "email": "convert.rbac@example.com" })),
     )
     .await;
     let lead_id = body["id"].as_str().unwrap();
@@ -5703,4 +5704,340 @@ async fn repeat_intake_counts_the_patients_signed_consent_as_compliance() {
         readiness_check_passed(&detail, "compliance_completed"),
         "{detail}"
     );
+}
+
+/// Every manual lead gets a patient login in the same transaction; only the
+/// CEO and patient managers see the one-time password (owner decision
+/// 2026-10-03).
+#[tokio::test]
+async fn manual_lead_gets_a_patient_login() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let sales = app.auth_header("sales");
+    let pm = app.auth_header("patient_manager");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &sales,
+        Some(json!({ "first_name": "No", "last_name": "Email" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["message"], "A valid email is required");
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Anna",
+            "last_name": "Portal",
+            "email": " Anna.Portal@Example.com "
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let account = &created["portal_account"];
+    assert_eq!(account["email"], "anna.portal@example.com", "{created}");
+    assert_eq!(account["created"], true);
+    let first_password = account["one_time_password"].as_str().unwrap().to_string();
+    assert!(!first_password.is_empty());
+
+    let (role, name, is_active, reset_required): (String, String, bool, bool) = sqlx::query_as(
+        r#"SELECT u.role, u.name, u.is_active, u.password_reset_required
+           FROM leads l JOIN users u ON u.id = l.portal_user_id
+           WHERE l.id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (role.as_str(), name.as_str(), is_active, reset_required),
+        ("patient", "Anna Portal", true, true)
+    );
+    let audited: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM audit_log WHERE action = 'create_lead_portal_account' AND entity_id = $1)",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(audited);
+
+    // The list row carries the login state for the expandable row.
+    let (status, list) = json_request(&app, "GET", "/api/v1/leads", &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let row = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == lead_id.to_string())
+        .expect("lead in list");
+    assert_eq!(row["portal_account"]["is_active"], true, "{row}");
+    assert_eq!(row["portal_account"]["password_change_pending"], true);
+    assert!(row["portal_account"]["last_login_at"].is_null());
+
+    // Sales creates leads too, but does not get the password.
+    let (status, by_sales) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &sales,
+        Some(json!({
+            "first_name": "Bert",
+            "last_name": "Portal",
+            "email": "bert.portal@example.com"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{by_sales}");
+    assert!(
+        by_sales["portal_account"]["user_id"].is_string(),
+        "{by_sales}"
+    );
+    assert!(
+        by_sales["portal_account"]["one_time_password"].is_null(),
+        "{by_sales}"
+    );
+    let sales_lead = by_sales["id"].as_str().unwrap();
+
+    let (status, state) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{sales_lead}/portal-account"),
+        &sales,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["account"]["email"], "bert.portal@example.com");
+    assert_eq!(state["account"]["password_change_pending"], true);
+    assert_eq!(state["can_issue_password"], false);
+
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{sales_lead}/portal-account"),
+        &sales,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A patient manager hands over a fresh one-time password.
+    let (status, issued) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-account"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["created"], false);
+    let second_password = issued["one_time_password"].as_str().unwrap();
+    assert_ne!(second_password, first_password);
+}
+
+/// Login addresses are unique: a lead may not take the address of any
+/// account, and the error names the owner.
+#[tokio::test]
+async fn lead_email_of_an_existing_account_is_rejected_with_its_owner() {
+    let Some(app) = test_app().await else { return };
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &app.auth_header("patient_manager"),
+        Some(json!({
+            "first_name": "Taken",
+            "last_name": "Address",
+            "email": "LEADS-API-SALES@example.com"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "portal_email_taken");
+    assert_eq!(body["owner"]["role"], "sales");
+    assert_eq!(body["owner"]["name"], "sales leads-api");
+    let leads: i64 = sqlx::query_scalar("SELECT count(*) FROM leads WHERE last_name = 'Address'")
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(leads, 0, "nothing is created on a conflict");
+}
+
+/// A corrected lead e-mail moves the login with it; an address of another
+/// account is refused.
+#[tokio::test]
+async fn lead_email_change_moves_the_patient_login() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Clara",
+            "last_name": "Portal",
+            "email": "clara.typo@example.com"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap();
+    let user_id: Uuid = created["portal_account"]["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "email": "leads-api-ceo@example.com" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["owner"]["role"], "ceo");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "email": "Clara.Portal@example.com" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+    assert_eq!(email, "clara.portal@example.com");
+}
+
+/// The login lives as long as the lead: deleting the lead deactivates and
+/// anonymises it and revokes its sessions.
+#[tokio::test]
+async fn deleting_a_lead_disables_its_patient_login() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Dora",
+            "last_name": "Portal",
+            "email": "dora.portal@example.com"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let user_id: Uuid = created["portal_account"]["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    sqlx::query("INSERT INTO token_families (user_id) VALUES ($1)")
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let (status, deleted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+
+    let (email, name, is_active): (String, String, bool) =
+        sqlx::query_as("SELECT email, name, is_active FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(!is_active);
+    assert!(!email.contains("dora"), "{email}");
+    assert_eq!(name, "Deleted lead");
+    let open_sessions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM token_families WHERE user_id = $1 AND NOT is_revoked",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(open_sessions, 0);
+    let linked: Option<Uuid> = sqlx::query_scalar("SELECT portal_user_id FROM leads WHERE id = $1")
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(linked.is_none());
+
+    // The address is free again for a new lead.
+    let (status, again) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Dora",
+            "last_name": "Portal",
+            "email": "dora.portal@example.com"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{again}");
+}
+
+/// A minor gets no login of their own: the address may be a parent's address
+/// that already has an account (owner decision 2026-10-03).
+#[tokio::test]
+async fn a_minor_lead_gets_no_patient_login() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Kid",
+            "last_name": "Portal",
+            "date_of_birth": "2016-04-05",
+            "email": "leads-api-ceo@example.com"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert!(created["portal_account"].is_null(), "{created}");
+    let lead_id = created["id"].as_str().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-account"),
+        &pm,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 }

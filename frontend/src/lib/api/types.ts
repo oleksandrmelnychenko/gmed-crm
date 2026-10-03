@@ -51,6 +51,16 @@ export interface Lead {
   submitted_at: string | null;
   created_at: string;
   attachment_count?: number;
+  /** The patient login created with the lead; null for leads without one. */
+  portal_account?: LeadPortalAccountSummary | null;
+}
+
+export interface LeadPortalAccountSummary {
+  user_id: string;
+  is_active: boolean;
+  /** The one-time password has not been replaced yet. */
+  password_change_pending: boolean;
+  last_login_at: string | null;
 }
 
 export interface ConvertLeadResponse {
