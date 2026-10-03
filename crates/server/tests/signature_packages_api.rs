@@ -1525,6 +1525,256 @@ async fn single_order_package_takes_its_cost_estimate_and_the_calculation_when_t
     );
 }
 
+/// Posts a scan to `/documents/{id}/paper-signature`.
+async fn paper_signature(
+    env: &Env,
+    document: Uuid,
+    file: (&str, &str, &[u8]),
+    signed_on: Option<&str>,
+) -> (StatusCode, Value) {
+    let (file_name, mime, bytes) = file;
+    let boundary = format!("----gmed-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    if let Some(signed_on) = signed_on {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"signed_on\"\r\n\r\n{signed_on}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: {mime}\r\n\r\n").as_bytes());
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/documents/{document}/paper-signature"))
+        .header("Authorization", &env.ceo)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = env.app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+/// TASK-FB4D: a document signed on paper. The scan becomes the signed next
+/// version, and the contract and the order follow as after an electronic
+/// signature.
+#[tokio::test]
+async fn paper_signature_stores_the_scan_as_the_signed_version_with_the_same_effects() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "1985-07-07").await;
+    let contract_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO framework_contracts (patient_id, contract_number, valid_from, conditions, status, created_by)
+           VALUES ($1, $2, CURRENT_DATE, '{}'::jsonb, 'draft', $3) RETURNING id"#,
+    )
+    .bind(patient)
+    .bind(format!("FC-{}", Uuid::new_v4().simple()))
+    .bind(env.admin_id)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let order: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, created_by)
+           VALUES ($1, $2, $3, 'execution', 'active', $4) RETURNING id"#,
+    )
+    .bind(format!("AUF-{}", Uuid::new_v4().simple()))
+    .bind(patient)
+    .bind(contract_id)
+    .bind(env.admin_id)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let contract = upload(&env, patient, Doc::new("framework_contract", 2)).await;
+    let order_document = upload(&env, patient, Doc::new("single_order", 1)).await;
+    let information = upload(&env, patient, Doc::new("privacy_information", 1)).await;
+    let consents = upload(&env, patient, Doc::new("privacy_consents", 1)).await;
+    sqlx::query("UPDATE documents SET order_id=$2 WHERE id=$1")
+        .bind(order_document)
+        .bind(order)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let scan = pdf(1, 0, false);
+    let today = gmed_server::app_time::today();
+    let yesterday = (today - chrono::Duration::days(1)).to_string();
+    let tomorrow = (today + chrono::Duration::days(1)).to_string();
+    let pdf_scan = ("scan.pdf", "application/pdf", &scan[..]);
+
+    // Refusals leave the document as it is.
+    for (document, file, signed_on, code) in [
+        (
+            information,
+            pdf_scan,
+            None,
+            "informational_document_not_signable",
+        ),
+        (
+            contract,
+            ("scan.txt", "text/plain", &b"kein Scan"[..]),
+            None,
+            "paper_signature_scan_type",
+        ),
+        (
+            contract,
+            ("scan.pdf", "application/pdf", &b""[..]),
+            None,
+            "paper_signature_scan_required",
+        ),
+        (
+            contract,
+            pdf_scan,
+            Some(tomorrow.as_str()),
+            "paper_signature_date_invalid",
+        ),
+    ] {
+        let (status, value) = paper_signature(&env, document, file, signed_on).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{code}: {value}");
+        assert_eq!(value["error"], code, "{value}");
+    }
+    // A document that is out for electronic signature is not signed on paper too.
+    let pending = send_package(
+        &env,
+        json!({"document_ids":[consents],"signers":[signer("Erika", "erika@example.org", "client")]}),
+    )
+    .await;
+    until_pending(&env, pending).await;
+    let (status, value) = paper_signature(&env, consents, pdf_scan, None).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{value}");
+    assert_eq!(value["error"], "signature_already_pending");
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM documents WHERE patient_id=$1 AND signed_at IS NOT NULL",
+            patient
+        )
+        .await,
+        0
+    );
+
+    // The contract: the scan replaces the generated PDF as its signed version.
+    let (status, value) = paper_signature(
+        &env,
+        contract,
+        ("Vertrag unterschrieben.pdf", "application/pdf", &scan[..]),
+        Some(yesterday.as_str()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    assert_eq!(value["replaced_document_id"], contract.to_string());
+    assert_eq!(value["compliance_kind"], "framework_contract");
+    let signed = Uuid::parse_str(value["document_id"].as_str().unwrap()).unwrap();
+    assert_ne!(signed, contract);
+    let row = sqlx::query(
+        "SELECT replaces_document_id, version_number, generated_template_id, ursprung, original_filename,
+                signed_by, compliance_kind, (signed_at AT TIME ZONE 'Europe/Berlin')::date::text AS signed_on
+         FROM documents WHERE id=$1",
+    )
+    .bind(signed)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row.get::<Option<Uuid>, _>("replaces_document_id"),
+        Some(contract)
+    );
+    assert_eq!(row.get::<i32, _>("version_number"), 2);
+    assert_eq!(
+        row.get::<Option<String>, _>("generated_template_id")
+            .as_deref(),
+        Some("framework_contract")
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("ursprung").as_deref(),
+        Some("paper_signature")
+    );
+    assert_eq!(
+        row.get::<String, _>("original_filename"),
+        "Vertrag unterschrieben.pdf"
+    );
+    assert_eq!(row.get::<Option<Uuid>, _>("signed_by"), Some(env.admin_id));
+    assert_eq!(
+        row.get::<Option<String>, _>("compliance_kind").as_deref(),
+        Some("framework_contract")
+    );
+    assert_eq!(row.get::<String, _>("signed_on"), yesterday);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT status FROM framework_contracts WHERE id=$1")
+            .bind(contract_id)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap(),
+        "signed"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT legal_status->>'contract_status' FROM patients WHERE id=$1"
+        )
+        .bind(patient)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap()
+        .as_deref(),
+        Some("signed")
+    );
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM audit_log WHERE action='document_paper_signature_recorded' AND context->>'signed_document_id'=$1::text",
+            signed
+        )
+        .await,
+        1
+    );
+    // The replaced version cannot be signed again; neither can the signed one.
+    for (document, code) in [
+        (contract, "document_superseded"),
+        (signed, "document_already_signed"),
+    ] {
+        let (status, value) = paper_signature(&env, document, pdf_scan, None).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{value}");
+        assert_eq!(value["error"], code, "{value}");
+    }
+
+    // The order: a paper copy carries the signatures of both parties; a photo is accepted too.
+    let png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0];
+    let (status, value) = paper_signature(
+        &env,
+        order_document,
+        ("auftrag.png", "image/png", &png[..]),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let (signed_patient, signed_agency): (bool, bool) =
+        sqlx::query_as("SELECT signed_patient, signed_agency FROM orders WHERE id=$1")
+            .bind(order)
+            .fetch_one(&env.pool)
+            .await
+            .unwrap();
+    assert!(signed_patient && signed_agency);
+    // The panel offers the paper path only while it is possible.
+    let (_, state) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/documents/{order_document}/signature-requests"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(state["can_sign_on_paper"], false, "{state}");
+}
+
 /// A document generated before the generators recorded their signature places
 /// has its frames found in the PDF itself; inside a package they move to the
 /// pages the document takes in the merged bundle.

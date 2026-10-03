@@ -292,6 +292,131 @@ pub(super) async fn apply(
     Ok(())
 }
 
+/// The signed document the business effects are derived from.
+#[derive(Clone, Copy)]
+pub(super) struct SignedDocument<'a> {
+    pub(super) document_id: Uuid,
+    pub(super) template: Option<&'a str>,
+    pub(super) art: &'a str,
+    pub(super) patient_id: Option<Uuid>,
+    pub(super) lead_id: Option<Uuid>,
+    pub(super) order_id: Option<Uuid>,
+}
+
+/// How the signature was given, for the audit trail of its effects.
+pub(super) struct SignatureSource {
+    /// `electronic_signature` or `paper_signature`.
+    pub(super) name: &'static str,
+    pub(super) request_id: Option<Uuid>,
+    /// The staff member who recorded a paper signature; `None` for an
+    /// electronic one, whose signers are external.
+    pub(super) actor: Option<Uuid>,
+}
+
+/// What a signed document means for the records around it, whichever way it
+/// was signed: a framework contract becomes signed, a single order records
+/// which parties signed. The details of what changed are added to `effects`.
+pub(super) async fn apply_business_effects(
+    tx: &mut Tx<'_>,
+    document: &SignedDocument<'_>,
+    signed_at: DateTime<Utc>,
+    source: &SignatureSource,
+    client_signed: bool,
+    agency_signed: bool,
+    effects: &mut Value,
+) -> Result<(), &'static str> {
+    let SignedDocument {
+        document_id,
+        template,
+        art,
+        patient_id,
+        lead_id,
+        order_id,
+    } = *document;
+    if template == Some("framework_contract") || art == "framework_contract" {
+        let contract_id: Option<Uuid> = sqlx::query_scalar(
+            r#"SELECT COALESCE(
+                   (SELECT o.contract_id FROM orders o WHERE o.id = $1),
+                   (SELECT fc.id FROM framework_contracts fc
+                    WHERE $1::uuid IS NULL
+                      AND (($2::uuid IS NOT NULL AND fc.patient_id = $2)
+                           OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND fc.lead_id = $3))
+                    ORDER BY fc.created_at DESC, fc.id DESC LIMIT 1))"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(lead_id)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(database)?;
+        if let Some(contract_id) = contract_id {
+            let updated = sqlx::query(
+                r#"UPDATE framework_contracts
+                   SET status = 'signed', signed_at = COALESCE(signed_at, $2)
+                   WHERE id = $1 AND status IN ('draft', 'sent')
+                   RETURNING patient_id"#,
+            )
+            .bind(contract_id)
+            .bind(signed_at)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(database)?;
+            if let Some(updated) = updated {
+                if let Some(patient) = updated.get::<Option<Uuid>, _>("patient_id") {
+                    crate::routes::contracts::sync_patient_contract_status_tx(tx, patient)
+                        .await
+                        .map_err(database)?;
+                }
+                audit::write_in_transaction(
+                    tx,
+                    &audit::domain_event(
+                        "update_framework_contract_status",
+                        source.actor,
+                        "framework_contract",
+                        Some(contract_id),
+                        json!({"status":"signed","signed_at":signed_at.to_rfc3339(),
+                            "source":source.name,"request_id":source.request_id,
+                            "document_id":document_id}),
+                    ),
+                )
+                .await
+                .map_err(database)?;
+                effects["framework_contract_id"] = json!(contract_id);
+            }
+        }
+    }
+    if template == Some("single_order")
+        && let Some(order_id) = order_id
+        && (client_signed || agency_signed)
+    {
+        let order = sqlx::query(
+            r#"UPDATE orders
+               SET signed_patient = signed_patient OR $2,
+                   signed_agency = signed_agency OR $3,
+                   signed_patient_at = CASE WHEN $2 AND NOT signed_patient THEN $4 ELSE signed_patient_at END,
+                   signed_agency_at = CASE WHEN $3 AND NOT signed_agency THEN $4 ELSE signed_agency_at END,
+                   signed_at = CASE WHEN (signed_patient OR $2) AND (signed_agency OR $3)
+                                    THEN COALESCE(signed_at, $4) ELSE signed_at END,
+                   updated_at = now()
+               WHERE id = $1
+               RETURNING signed_patient, signed_agency"#,
+        )
+        .bind(order_id)
+        .bind(client_signed)
+        .bind(agency_signed)
+        .bind(signed_at)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(database)?;
+        if let Some(order) = order {
+            effects["order_id"] = json!(order_id);
+            effects["order_signed_patient"] = json!(order.get::<bool, _>("signed_patient"));
+            effects["order_signed_agency"] = json!(order.get::<bool, _>("signed_agency"));
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn apply_one(
     tx: &mut Tx<'_>,
@@ -363,87 +488,27 @@ async fn apply_one(
         "compliance_kind": kind,
         "level": request_level(request).as_str(),
     });
-    if template.as_deref() == Some("framework_contract") || art == "framework_contract" {
-        let contract_id: Option<Uuid> = sqlx::query_scalar(
-            r#"SELECT COALESCE(
-                   (SELECT o.contract_id FROM orders o WHERE o.id = $1),
-                   (SELECT fc.id FROM framework_contracts fc
-                    WHERE $1::uuid IS NULL
-                      AND (($2::uuid IS NOT NULL AND fc.patient_id = $2)
-                           OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND fc.lead_id = $3))
-                    ORDER BY fc.created_at DESC, fc.id DESC LIMIT 1))"#,
-        )
-        .bind(order_id)
-        .bind(patient_id)
-        .bind(lead_id)
-        .fetch_one(&mut **tx)
-        .await
-        .map_err(database)?;
-        if let Some(contract_id) = contract_id {
-            let updated = sqlx::query(
-                r#"UPDATE framework_contracts
-                   SET status = 'signed', signed_at = COALESCE(signed_at, $2)
-                   WHERE id = $1 AND status IN ('draft', 'sent')
-                   RETURNING patient_id"#,
-            )
-            .bind(contract_id)
-            .bind(signed_at)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(database)?;
-            if let Some(updated) = updated {
-                if let Some(patient) = updated.get::<Option<Uuid>, _>("patient_id") {
-                    crate::routes::contracts::sync_patient_contract_status_tx(tx, patient)
-                        .await
-                        .map_err(database)?;
-                }
-                audit::write_in_transaction(
-                    tx,
-                    &audit::domain_event(
-                        "update_framework_contract_status",
-                        None,
-                        "framework_contract",
-                        Some(contract_id),
-                        json!({"status":"signed","signed_at":signed_at.to_rfc3339(),
-                            "source":"electronic_signature","request_id":request_id,
-                            "document_id":document_id}),
-                    ),
-                )
-                .await
-                .map_err(database)?;
-                effects["framework_contract_id"] = json!(contract_id);
-            }
-        }
-    }
-    if template.as_deref() == Some("single_order")
-        && let Some(order_id) = order_id
-        && (client_signed || agency_signed)
-    {
-        let order = sqlx::query(
-            r#"UPDATE orders
-               SET signed_patient = signed_patient OR $2,
-                   signed_agency = signed_agency OR $3,
-                   signed_patient_at = CASE WHEN $2 AND NOT signed_patient THEN $4 ELSE signed_patient_at END,
-                   signed_agency_at = CASE WHEN $3 AND NOT signed_agency THEN $4 ELSE signed_agency_at END,
-                   signed_at = CASE WHEN (signed_patient OR $2) AND (signed_agency OR $3)
-                                    THEN COALESCE(signed_at, $4) ELSE signed_at END,
-                   updated_at = now()
-               WHERE id = $1
-               RETURNING signed_patient, signed_agency"#,
-        )
-        .bind(order_id)
-        .bind(client_signed)
-        .bind(agency_signed)
-        .bind(signed_at)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(database)?;
-        if let Some(order) = order {
-            effects["order_id"] = json!(order_id);
-            effects["order_signed_patient"] = json!(order.get::<bool, _>("signed_patient"));
-            effects["order_signed_agency"] = json!(order.get::<bool, _>("signed_agency"));
-        }
-    }
+    apply_business_effects(
+        tx,
+        &SignedDocument {
+            document_id,
+            template: template.as_deref(),
+            art: &art,
+            patient_id,
+            lead_id,
+            order_id,
+        },
+        signed_at,
+        &SignatureSource {
+            name: "electronic_signature",
+            request_id: Some(request_id),
+            actor: None,
+        },
+        client_signed,
+        agency_signed,
+        &mut effects,
+    )
+    .await?;
     audit::write_in_transaction(
         tx,
         &audit::domain_event(

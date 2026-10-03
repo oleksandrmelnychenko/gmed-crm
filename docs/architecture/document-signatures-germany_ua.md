@@ -349,6 +349,40 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
 архівований результат робочим підписаним документом і застосовує ті самі
 ефекти; відхилення залишає його лише доказом.
 
+### Підпис на папері (TASK-FB4D, 2026-10-03)
+
+Коли документ підписано від руки (або закон виключає електронну форму,
+`electronic_form_excluded`), працівник завантажує скан підписаного примірника:
+`POST /documents/{id}/paper-signature` (multipart: `file` — PDF/JPG/PNG до
+25 МБ, необов'язковий `signed_on` — `YYYY-MM-DD`, не в майбутньому). Код —
+`document_signatures/paper.rs`, блок «Подписано на бумаге» у панелі підпису.
+
+- Права ті самі, що й для е-підпису: CEO і Patient Manager з правом
+  редагування документа (`signature_document_access`).
+- Скан стає **наступною версією** документа (як і результат е-підпису):
+  `replaces_document_id`, `version_number + 1`, `ursprung = 'paper_signature'`,
+  шаблон і `generated_bindings` зберігаються; попередня версія лишається в
+  історії. `signed_at` — дата підпису, `signed_by` — працівник, який вніс скан.
+- Наслідки ті самі, що після е-підпису, через спільну
+  `effects::apply_business_effects`: договір → `signed`, для `single_order` —
+  підписи обох сторін у заказі, згоди й `legal_status`, `consent_records`
+  з `source = paper_signature` і SHA-256 скана, статус compliance ліда.
+- Відмови: `document_already_signed`, `document_superseded`,
+  `document_unavailable`, `informational_document_not_signable`,
+  `signature_already_pending` (документ у відкритому е-запиті — спершу
+  відкликати), `paper_signature_scan_required` / `_scan_type` /
+  `_scan_too_large` / `_date_invalid`, `signature_scan_failed` (антивірус).
+- Аудит: `document_paper_signature_recorded` у тій самій транзакції.
+- Стан панелі (`GET /documents/{id}/signature-requests`) містить
+  `can_sign_on_paper`.
+- Один скан покриває один документ. Якщо на папері підписано кілька
+  документів одним файлом, скан завантажується до кожного з них.
+- Незмінність байтів скана тригером (як для е-підписаних PDF) не вводилася:
+  оригінал на папері зберігається в агентстві, скан — його копія.
+
+Старий шлях «Отметить подписанным» (`POST /documents/{id}/mark-signed`, без
+файла) лишається для підтвердження посвідчення особи й випадків без скана.
+
 ### Інші зміни
 
 - Документ в активному запиті не можна версіонувати, перегенерувати чи
