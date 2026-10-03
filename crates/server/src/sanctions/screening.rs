@@ -1,0 +1,1151 @@
+//! Who is screened, when, and what happens to a possible match.
+//!
+//! Subjects:
+//! * the patient of a lead (`lead_patient`);
+//! * for a minor patient, the lead's trusted contacts whose relation is
+//!   parent or guardian (`lead_guardian`);
+//! * the third-party payer of a lead (`lead_payer`) from
+//!   `lead_payer_declarations` — see [`load_payer_subjects`];
+//! * patients (`patient`) that are active or inactive. Prospective patients
+//!   are covered by their lead.
+//!
+//! Triggers: database triggers queue a lead or patient whenever a screened
+//! field changes (any writer: wizard, public intake, patient portal); the
+//! worker in [`spawn_screening_worker`] screens the queue. A new list version
+//! re-screens every open subject ([`rescreen_all`]). The gate screens the
+//! lead once more right before qualification, conversion and the agency
+//! countersignature.
+
+use std::collections::{HashMap, HashSet};
+use std::time::Duration;
+
+use chrono::NaiveDate;
+use serde::Serialize;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use sqlx::Row;
+use uuid::Uuid;
+
+use super::fsf::ListEntry;
+use super::matching::{Match, Subject};
+use super::normalize::{country_code, name_tokens};
+use super::store::{self, ActiveIndex};
+use super::{HIT_ENTITY_TYPE, POSSIBLE_MATCH_NOTIFICATION_KIND};
+use crate::audit;
+use crate::state::AppState;
+
+const QUEUE_POLL_SECONDS: u64 = 15;
+const QUEUE_BATCH: i64 = 50;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SubjectKind {
+    LeadPatient,
+    LeadGuardian,
+    LeadPayer,
+    Patient,
+}
+
+impl SubjectKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LeadPatient => "lead_patient",
+            Self::LeadGuardian => "lead_guardian",
+            Self::LeadPayer => "lead_payer",
+            Self::Patient => "patient",
+        }
+    }
+}
+
+/// One screened person or organisation and whose record it belongs to.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubjectRecord {
+    pub kind: SubjectKind,
+    pub lead_id: Option<Uuid>,
+    pub patient_id: Option<Uuid>,
+    /// Guardian contact id or payer declaration id; empty for the patient.
+    pub subject_ref: String,
+    pub subject: Subject,
+    /// ISO codes of the residence country (country policy only).
+    pub residence: Vec<String>,
+    /// Relation of a guardian as entered.
+    pub relation: Option<String>,
+}
+
+impl SubjectRecord {
+    /// Citizenships and residence, the countries the country policy checks.
+    pub fn countries(&self) -> Vec<String> {
+        let mut countries = self.subject.citizenships.clone();
+        for code in &self.residence {
+            if !countries.contains(code) {
+                countries.push(code.clone());
+            }
+        }
+        countries
+    }
+
+    fn snapshot(&self) -> Value {
+        json!({
+            "first_name": self.subject.first_name,
+            "middle_name": self.subject.middle_name,
+            "last_name": self.subject.last_name,
+            "date_of_birth": self.subject.date_of_birth,
+            "citizenships": self.subject.citizenships,
+            "residence": self.residence,
+            "organisation": self.subject.organisation,
+            "relation": self.relation,
+        })
+    }
+}
+
+/// The subjects of one lead.
+#[derive(Debug, Clone)]
+pub struct LeadSubjects {
+    pub lead_id: Uuid,
+    pub converted_patient_id: Option<Uuid>,
+    pub prospect_patient_id: Option<Uuid>,
+    pub subjects: Vec<SubjectRecord>,
+}
+
+fn text(row: &sqlx::postgres::PgRow, column: &str) -> String {
+    row.try_get::<Option<String>, _>(column)
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn non_empty(value: String) -> Option<String> {
+    if value.is_empty() { None } else { Some(value) }
+}
+
+fn iso_codes(values: &[String]) -> Vec<String> {
+    let mut codes = Vec::new();
+    for value in values {
+        if let Some(code) = country_code(value)
+            && !codes.contains(&code)
+        {
+            codes.push(code);
+        }
+    }
+    codes
+}
+
+fn json_text(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn json_codes(value: &Value, key: &str) -> Vec<String> {
+    match value.get(key) {
+        Some(Value::Array(items)) => iso_codes(
+            &items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
+        ),
+        Some(Value::String(single)) => iso_codes(std::slice::from_ref(single)),
+        _ => Vec::new(),
+    }
+}
+
+fn json_date(value: &Value, key: &str) -> Option<NaiveDate> {
+    let raw = json_text(value, key);
+    NaiveDate::parse_from_str(raw.get(..10).unwrap_or(&raw), "%Y-%m-%d").ok()
+}
+
+/// Parent or legal guardian, in the languages staff type relations in.
+pub fn is_guardian_relation(relation: &str) -> bool {
+    let relation = relation.trim().to_lowercase();
+    [
+        "parent",
+        "mother",
+        "father",
+        "guardian",
+        "eltern",
+        "mutter",
+        "vater",
+        "vormund",
+        "sorgeberecht",
+        "мать",
+        "мама",
+        "отец",
+        "папа",
+        "родител",
+        "опекун",
+        "опека",
+        "мати",
+        "батьк",
+        "опікун",
+        "піклувальн",
+    ]
+    .iter()
+    .any(|word| relation.contains(word))
+}
+
+/// A person's full name split into given names and the last word.
+fn split_full_name(name: &str) -> (String, String) {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    match words.as_slice() {
+        [] => (String::new(), String::new()),
+        [single] => (String::new(), (*single).to_string()),
+        [given @ .., last] => (given.join(" "), (*last).to_string()),
+    }
+}
+
+fn is_anonymized_lead(first_name: &str, last_name: &str, failed_outcome: &str) -> bool {
+    failed_outcome == "delete_anonymized"
+        || (first_name == crate::routes::leads::ANONYMIZED_FIRST_NAME && last_name == "Lead")
+}
+
+/// The subjects of a lead; `None` when the lead does not exist or has been
+/// anonymised.
+pub async fn load_lead_subjects(
+    db: &gmed_db::DbPool,
+    lead_id: Uuid,
+) -> Result<Option<LeadSubjects>, sqlx::Error> {
+    Ok(load_leads_subjects(db, &[lead_id])
+        .await?
+        .into_iter()
+        .next())
+}
+
+/// The subjects of several leads with two queries; anonymised and missing
+/// leads are left out.
+pub async fn load_leads_subjects(
+    db: &gmed_db::DbPool,
+    lead_ids: &[Uuid],
+) -> Result<Vec<LeadSubjects>, sqlx::Error> {
+    if lead_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        r#"SELECT id, first_name, middle_name, last_name, date_of_birth, citizenships,
+                  country, wizard_state->>'registration_country' AS registration_country,
+                  trusted_contacts, failed_outcome_status, converted_patient_id,
+                  prospect_patient_id
+           FROM leads
+           WHERE id = ANY($1)"#,
+    )
+    .bind(lead_ids)
+    .fetch_all(db)
+    .await?;
+    let mut payers = load_payer_rows(db, lead_ids).await;
+    let today = crate::app_time::today();
+    let mut leads = Vec::with_capacity(rows.len());
+    for row in rows {
+        let lead_id: Uuid = row.try_get("id")?;
+        let payer_rows = payers.remove(&lead_id).unwrap_or_default();
+        if let Some(lead) = lead_subjects_from_row(&row, &payer_rows, today) {
+            leads.push(lead);
+        }
+    }
+    Ok(leads)
+}
+
+fn lead_subjects_from_row(
+    row: &sqlx::postgres::PgRow,
+    payer_rows: &[Value],
+    today: NaiveDate,
+) -> Option<LeadSubjects> {
+    let lead_id: Uuid = row.try_get("id").ok()?;
+    let first_name = text(row, "first_name");
+    let last_name = text(row, "last_name");
+    if is_anonymized_lead(&first_name, &last_name, &text(row, "failed_outcome_status")) {
+        return None;
+    }
+    let date_of_birth: Option<NaiveDate> = row.try_get("date_of_birth").unwrap_or(None);
+    let mut citizenships = iso_codes(
+        &row.try_get::<Vec<String>, _>("citizenships")
+            .unwrap_or_default(),
+    );
+    if let Some(code) = country_code(&text(row, "registration_country"))
+        && !citizenships.contains(&code)
+    {
+        citizenships.push(code);
+    }
+    let residence: Vec<String> = country_code(&text(row, "country")).into_iter().collect();
+
+    let mut subjects = vec![SubjectRecord {
+        kind: SubjectKind::LeadPatient,
+        lead_id: Some(lead_id),
+        patient_id: None,
+        subject_ref: String::new(),
+        subject: Subject {
+            first_name,
+            middle_name: non_empty(text(row, "middle_name")),
+            last_name,
+            date_of_birth,
+            citizenships,
+            organisation: false,
+        },
+        residence,
+        relation: None,
+    }];
+
+    if crate::routes::leads::is_minor_on(date_of_birth, today) {
+        let contacts: Value = row
+            .try_get::<Option<Value>, _>("trusted_contacts")
+            .unwrap_or(None)
+            .unwrap_or(Value::Null);
+        for (position, contact) in contacts.as_array().into_iter().flatten().enumerate() {
+            let relation = json_text(contact, "relation");
+            if !is_guardian_relation(&relation) {
+                continue;
+            }
+            let (first, last) = split_full_name(&json_text(contact, "name"));
+            let mut residence = json_codes(contact, "country");
+            for code in json_codes(contact, "residence_country") {
+                if !residence.contains(&code) {
+                    residence.push(code);
+                }
+            }
+            let subject_ref = contact
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("contact-{position}"));
+            subjects.push(SubjectRecord {
+                kind: SubjectKind::LeadGuardian,
+                lead_id: Some(lead_id),
+                patient_id: None,
+                subject_ref,
+                subject: Subject {
+                    first_name: first,
+                    middle_name: None,
+                    last_name: last,
+                    date_of_birth: json_date(contact, "birth_date"),
+                    citizenships: json_codes(contact, "citizenships"),
+                    organisation: false,
+                },
+                residence,
+                relation: non_empty(relation),
+            });
+        }
+    }
+
+    subjects.extend(payer_subjects(lead_id, payer_rows));
+
+    Some(LeadSubjects {
+        lead_id,
+        converted_patient_id: row.try_get("converted_patient_id").unwrap_or(None),
+        prospect_patient_id: row.try_get("prospect_patient_id").unwrap_or(None),
+        subjects,
+    })
+}
+
+/// Payer declarations of the leads as JSON rows, by lead.
+///
+/// The declaration table `lead_payer_declarations` (columns `lead_id`,
+/// `payer_kind` 'self' | 'third_party', `first_name`, `last_name`,
+/// `date_of_birth`, `citizenships`, `country`) is created by the payer
+/// declaration work that lands separately. Until its migration exists this
+/// returns nothing (`to_regclass` guard). Rows are read as JSON so that
+/// additional columns (for example an organisation name) do not break
+/// screening.
+pub async fn load_payer_rows(db: &gmed_db::DbPool, lead_ids: &[Uuid]) -> HashMap<Uuid, Vec<Value>> {
+    let mut by_lead: HashMap<Uuid, Vec<Value>> = HashMap::new();
+    let exists: Result<bool, sqlx::Error> =
+        sqlx::query_scalar("SELECT to_regclass('public.lead_payer_declarations') IS NOT NULL")
+            .fetch_one(db)
+            .await;
+    if !matches!(exists, Ok(true)) || lead_ids.is_empty() {
+        return by_lead;
+    }
+    let rows: Vec<(Uuid, Value)> = match sqlx::query_as(
+        "SELECT d.lead_id, to_jsonb(d) FROM lead_payer_declarations d WHERE d.lead_id = ANY($1)",
+    )
+    .bind(lead_ids)
+    .fetch_all(db)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::warn!(error = %error, "Payer declarations unreadable for sanctions screening");
+            return by_lead;
+        }
+    };
+    for (lead_id, row) in rows {
+        by_lead.entry(lead_id).or_default().push(row);
+    }
+    by_lead
+}
+
+/// Third-party payers among a lead's declarations. A payer without a first
+/// name is screened as an organisation against list entities.
+pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
+    let mut subjects = Vec::new();
+    for (position, row) in rows.iter().enumerate() {
+        if json_text(row, "payer_kind") != "third_party" {
+            continue;
+        }
+        let first_name = json_text(row, "first_name");
+        let organisation_name = ["organisation_name", "organization_name", "company_name"]
+            .iter()
+            .map(|key| json_text(row, key))
+            .find(|value| !value.is_empty());
+        let (organisation, last_name) = match (first_name.is_empty(), organisation_name) {
+            (true, Some(name)) => (true, name),
+            (true, None) => (true, json_text(row, "last_name")),
+            (false, _) => (false, json_text(row, "last_name")),
+        };
+        let subject_ref = match row.get("id") {
+            Some(Value::String(id)) => id.clone(),
+            Some(Value::Number(id)) => id.to_string(),
+            _ => format!("payer-{position}"),
+        };
+        subjects.push(SubjectRecord {
+            kind: SubjectKind::LeadPayer,
+            lead_id: Some(lead_id),
+            patient_id: None,
+            subject_ref,
+            subject: Subject {
+                first_name,
+                middle_name: None,
+                last_name,
+                date_of_birth: json_date(row, "date_of_birth"),
+                citizenships: json_codes(row, "citizenships"),
+                organisation,
+            },
+            residence: json_codes(row, "country"),
+            relation: Some("payer".to_string()),
+        });
+    }
+    subjects
+}
+
+/// A patient as a subject; `None` for missing, prospective, deleted or
+/// anonymised records.
+pub async fn load_patient_subject(
+    db: &gmed_db::DbPool,
+    patient_id: Uuid,
+) -> Result<Option<SubjectRecord>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT id, first_name, last_name, birth_date, citizenships, nationality,
+                  residence_country, address_country, lifecycle_status,
+                  legal_status ? 'anonymized_at' AS anonymized
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let lifecycle = text(&row, "lifecycle_status");
+    let anonymized: bool = row
+        .try_get::<Option<bool>, _>("anonymized")
+        .unwrap_or(None)
+        .unwrap_or(false);
+    if anonymized || matches!(lifecycle.as_str(), "prospective" | "deleted") {
+        return Ok(None);
+    }
+    let mut citizenships = iso_codes(
+        &row.try_get::<Vec<String>, _>("citizenships")
+            .unwrap_or_default(),
+    );
+    if let Some(code) = country_code(&text(&row, "nationality"))
+        && !citizenships.contains(&code)
+    {
+        citizenships.push(code);
+    }
+    let residence = iso_codes(&[
+        text(&row, "residence_country"),
+        text(&row, "address_country"),
+    ]);
+    Ok(Some(SubjectRecord {
+        kind: SubjectKind::Patient,
+        lead_id: None,
+        patient_id: Some(patient_id),
+        subject_ref: String::new(),
+        subject: Subject {
+            first_name: text(&row, "first_name"),
+            middle_name: None,
+            last_name: text(&row, "last_name"),
+            date_of_birth: row.try_get("birth_date").unwrap_or(None),
+            citizenships,
+            organisation: false,
+        },
+        residence,
+        relation: None,
+    }))
+}
+
+/// Normalised fingerprint of what we know about a subject: a false-positive
+/// decision covers exactly this data.
+pub fn subject_fingerprint(subject: &Subject) -> String {
+    let mut tokens: Vec<String> = name_tokens(&format!(
+        "{} {} {}",
+        subject.first_name,
+        subject.middle_name.as_deref().unwrap_or_default(),
+        subject.last_name
+    ))
+    .into_iter()
+    .map(|token| token.canon)
+    .collect();
+    tokens.sort();
+    let mut citizenships = subject.citizenships.clone();
+    citizenships.sort();
+    let material = json!({
+        "tokens": tokens,
+        "dob": subject.date_of_birth,
+        "citizenships": citizenships,
+        "organisation": subject.organisation,
+    });
+    hex::encode(Sha256::digest(material.to_string().as_bytes()))
+}
+
+/// Fingerprint of a list entry's identifying data: when the EU amends the
+/// names, dates or citizenships, a false-positive decision is reviewed again.
+pub fn entry_fingerprint(entry: &ListEntry) -> String {
+    let mut names: Vec<String> = entry.names.iter().map(|name| name.display()).collect();
+    names.sort();
+    let mut citizenships = entry.citizenships.clone();
+    citizenships.sort();
+    let material = json!({
+        "names": names,
+        "birth_dates": entry.birth_dates,
+        "citizenships": citizenships,
+    });
+    hex::encode(Sha256::digest(material.to_string().as_bytes()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Owner {
+    Lead(Uuid),
+    Patient(Uuid),
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ScreenReport {
+    pub list_version_date: Option<NaiveDate>,
+    pub new_hits: Vec<Uuid>,
+}
+
+/// Screens a lead and stores its possible matches.
+pub async fn screen_lead(state: &AppState, lead_id: Uuid) -> Result<ScreenReport, sqlx::Error> {
+    let Some(index) = store::active_index(&state.db).await? else {
+        return Ok(ScreenReport::default());
+    };
+    let subjects = load_lead_subjects(&state.db, lead_id)
+        .await?
+        .map(|lead| lead.subjects)
+        .unwrap_or_default();
+    screen_owner(state, &index, Owner::Lead(lead_id), subjects).await
+}
+
+/// Screens a patient and stores its possible matches.
+pub async fn screen_patient(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<ScreenReport, sqlx::Error> {
+    let Some(index) = store::active_index(&state.db).await? else {
+        return Ok(ScreenReport::default());
+    };
+    let subjects: Vec<SubjectRecord> = load_patient_subject(&state.db, patient_id)
+        .await?
+        .into_iter()
+        .collect();
+    screen_owner(state, &index, Owner::Patient(patient_id), subjects).await
+}
+
+/// Possible matches of each subject against the index (CPU work off the
+/// async runtime).
+async fn compute_matches(
+    index: &ActiveIndex,
+    subjects: Vec<SubjectRecord>,
+) -> Result<Vec<(SubjectRecord, Vec<(ListEntry, Match)>)>, sqlx::Error> {
+    let index = index.index.clone();
+    tokio::task::spawn_blocking(move || {
+        subjects
+            .into_iter()
+            .map(|record| {
+                let matches = index
+                    .screen(&record.subject)
+                    .into_iter()
+                    .map(|found| (index.entry(found.entry_index).clone(), found))
+                    .collect();
+                (record, matches)
+            })
+            .collect()
+    })
+    .await
+    .map_err(|error| sqlx::Error::Protocol(format!("sanctions screening task: {error}")))
+}
+
+struct ExistingHit {
+    id: Uuid,
+    key: (String, String, String),
+    status: String,
+    subject_fingerprint: String,
+    entry_fingerprint: String,
+}
+
+async fn screen_owner(
+    state: &AppState,
+    index: &ActiveIndex,
+    owner: Owner,
+    subjects: Vec<SubjectRecord>,
+) -> Result<ScreenReport, sqlx::Error> {
+    let computed = compute_matches(index, subjects).await?;
+    let (owner_column, owner_id) = match owner {
+        Owner::Lead(id) => ("lead_id", id),
+        Owner::Patient(id) => ("patient_id", id),
+    };
+
+    let mut tx = state.db.begin().await?;
+    let rows = sqlx::query(&format!(
+        r#"SELECT id, subject_kind, subject_ref, list_logical_id, status,
+                  subject_fingerprint, entry_fingerprint
+           FROM sanctions_hits
+           WHERE {owner_column} = $1
+           FOR UPDATE"#
+    ))
+    .bind(owner_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    let mut existing = Vec::with_capacity(rows.len());
+    for row in rows {
+        existing.push(ExistingHit {
+            id: row.try_get("id")?,
+            key: (
+                row.try_get("subject_kind")?,
+                row.try_get("subject_ref")?,
+                row.try_get("list_logical_id")?,
+            ),
+            status: row.try_get("status")?,
+            subject_fingerprint: row.try_get("subject_fingerprint")?,
+            entry_fingerprint: row.try_get("entry_fingerprint")?,
+        });
+    }
+
+    // A patient converted from a lead keeps the CEO's false-positive
+    // decisions about the lead's patient as long as the data are the same.
+    let inherited: HashSet<(String, String, String)> = match owner {
+        Owner::Patient(patient_id) => sqlx::query_as::<_, (String, String, String)>(
+            r#"SELECT h.list_logical_id, h.subject_fingerprint, h.entry_fingerprint
+               FROM sanctions_hits h
+               JOIN leads l ON l.id = h.lead_id
+               WHERE l.converted_patient_id = $1
+                 AND h.subject_kind = 'lead_patient'
+                 AND h.status = 'false_positive'"#,
+        )
+        .bind(patient_id)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .collect(),
+        Owner::Lead(_) => HashSet::new(),
+    };
+
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+    let mut new_hits = Vec::new();
+    for (record, matches) in computed {
+        let subject_fp = subject_fingerprint(&record.subject);
+        for (entry, found) in matches {
+            let key = (
+                record.kind.as_str().to_string(),
+                record.subject_ref.clone(),
+                entry.logical_id.clone(),
+            );
+            seen.insert(key.clone());
+            let entry_fp = entry_fingerprint(&entry);
+            let same_key: Vec<&ExistingHit> =
+                existing.iter().filter(|hit| hit.key == key).collect();
+            let details = json!({
+                "score": found.score,
+                "name_score": found.name_score,
+                "matched_name": found.matched_name,
+                "dob": found.dob,
+                "citizenship": found.citizenship,
+            });
+            let entry_json = serde_json::to_value(&entry)
+                .map_err(|error| sqlx::Error::Protocol(format!("serialize entry: {error}")))?;
+
+            if let Some(open) = same_key.iter().find(|hit| hit.status == "open") {
+                sqlx::query(
+                    r#"UPDATE sanctions_hits
+                       SET score = $2, match_details = $3, list_version_id = $4,
+                           list_entry = $5, entry_fingerprint = $6,
+                           subject_snapshot = $7, subject_fingerprint = $8,
+                           still_matches = true, last_screened_at = now(), updated_at = now()
+                       WHERE id = $1"#,
+                )
+                .bind(open.id)
+                .bind(found.score)
+                .bind(&details)
+                .bind(index.version_id)
+                .bind(&entry_json)
+                .bind(&entry_fp)
+                .bind(record.snapshot())
+                .bind(&subject_fp)
+                .execute(&mut *tx)
+                .await?;
+                continue;
+            }
+            let decided = same_key.iter().find(|hit| {
+                hit.status == "confirmed"
+                    || (hit.status == "false_positive"
+                        && hit.subject_fingerprint == subject_fp
+                        && hit.entry_fingerprint == entry_fp)
+            });
+            if let Some(decided) = decided {
+                sqlx::query(
+                    r#"UPDATE sanctions_hits
+                       SET still_matches = true, last_screened_at = now(), updated_at = now()
+                       WHERE id = $1"#,
+                )
+                .bind(decided.id)
+                .execute(&mut *tx)
+                .await?;
+                continue;
+            }
+            if inherited.contains(&(
+                entry.logical_id.clone(),
+                subject_fp.clone(),
+                entry_fp.clone(),
+            )) {
+                continue;
+            }
+
+            let (lead_id, patient_id) = match owner {
+                Owner::Lead(id) => (Some(id), None),
+                Owner::Patient(id) => (None, Some(id)),
+            };
+            let inserted: Option<Uuid> = sqlx::query_scalar(
+                r#"INSERT INTO sanctions_hits
+                       (subject_kind, lead_id, patient_id, subject_ref, subject_snapshot,
+                        subject_fingerprint, list_version_id, list_logical_id, list_entry,
+                        entry_fingerprint, score, match_details)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                   ON CONFLICT DO NOTHING
+                   RETURNING id"#,
+            )
+            .bind(record.kind.as_str())
+            .bind(lead_id)
+            .bind(patient_id)
+            .bind(&record.subject_ref)
+            .bind(record.snapshot())
+            .bind(&subject_fp)
+            .bind(index.version_id)
+            .bind(&entry.logical_id)
+            .bind(&entry_json)
+            .bind(&entry_fp)
+            .bind(found.score)
+            .bind(&details)
+            .fetch_optional(&mut *tx)
+            .await?;
+            if let Some(hit_id) = inserted {
+                audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        "sanctions_hit_created",
+                        None,
+                        HIT_ENTITY_TYPE,
+                        Some(hit_id),
+                        json!({
+                            "subject_kind": record.kind.as_str(),
+                            "lead_id": lead_id,
+                            "patient_id": patient_id,
+                            "list_version_id": index.version_id,
+                            "list_logical_id": entry.logical_id,
+                            "eu_reference": entry.eu_reference,
+                            "score": found.score,
+                        }),
+                    ),
+                )
+                .await?;
+                new_hits.push(hit_id);
+            }
+        }
+    }
+
+    for hit in &existing {
+        if hit.status != "false_positive" && !seen.contains(&hit.key) {
+            sqlx::query(
+                r#"UPDATE sanctions_hits
+                   SET still_matches = false, last_screened_at = now(), updated_at = now()
+                   WHERE id = $1"#,
+            )
+            .bind(hit.id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+
+    if !new_hits.is_empty() {
+        notify_ceo_about_hits(state, &new_hits).await;
+    }
+    Ok(ScreenReport {
+        list_version_date: Some(index.list_date),
+        new_hits,
+    })
+}
+
+/// Tells every active CEO about new possible matches. The notification names
+/// nobody; the review page shows the details.
+async fn notify_ceo_about_hits(state: &AppState, hits: &[Uuid]) {
+    let recipients: Vec<Uuid> = match sqlx::query_scalar(
+        "SELECT id FROM users WHERE is_active = true AND role = 'ceo' ORDER BY created_at",
+    )
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(recipients) => recipients,
+        Err(error) => {
+            tracing::error!(error = %error, "Load CEO recipients for sanctions hits");
+            return;
+        }
+    };
+    for hit_id in hits {
+        for recipient in &recipients {
+            let inserted: Result<Uuid, sqlx::Error> = sqlx::query_scalar(
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                   VALUES ($1, $2, 'Possible EU sanctions list match',
+                           'Review the possible match on the sanctions page.', $3, $4)
+                   RETURNING id"#,
+            )
+            .bind(recipient)
+            .bind(POSSIBLE_MATCH_NOTIFICATION_KIND)
+            .bind(HIT_ENTITY_TYPE)
+            .bind(hit_id)
+            .fetch_one(&state.db)
+            .await;
+            match inserted {
+                Ok(notification_id) => {
+                    crate::realtime::publish_notification_event(
+                        state,
+                        *recipient,
+                        "notification.created",
+                        Some(notification_id),
+                        json!({ "entity_type": HIT_ENTITY_TYPE, "entity_id": hit_id }),
+                    )
+                    .await;
+                }
+                Err(error) => {
+                    tracing::error!(error = %error, hit_id = %hit_id, "Notify CEO about sanctions hit");
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiveStatus {
+    Clear,
+    PossibleMatch,
+    /// No list has been imported yet.
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LiveCheck {
+    pub status: LiveStatus,
+    pub list_version_date: Option<NaiveDate>,
+}
+
+/// Screens a name without storing anything (wizard step 1).
+pub async fn live_check(state: &AppState, subject: Subject) -> Result<LiveCheck, sqlx::Error> {
+    let Some(index) = store::active_index(&state.db).await? else {
+        return Ok(LiveCheck {
+            status: LiveStatus::Unavailable,
+            list_version_date: None,
+        });
+    };
+    let shared = index.index.clone();
+    let possible = tokio::task::spawn_blocking(move || !shared.screen(&subject).is_empty())
+        .await
+        .map_err(|error| sqlx::Error::Protocol(format!("sanctions live check: {error}")))?;
+    Ok(LiveCheck {
+        status: if possible {
+            LiveStatus::PossibleMatch
+        } else {
+            LiveStatus::Clear
+        },
+        list_version_date: Some(index.list_date),
+    })
+}
+
+/// Screens queued leads and patients. Returns how many queue items were
+/// taken.
+pub async fn process_queue(state: &AppState) -> Result<usize, sqlx::Error> {
+    let items: Vec<(String, Uuid)> = sqlx::query_as(
+        r#"DELETE FROM sanctions_screening_queue
+           WHERE (subject_type, subject_id) IN (
+               SELECT subject_type, subject_id
+               FROM sanctions_screening_queue
+               ORDER BY queued_at
+               LIMIT $1
+               FOR UPDATE SKIP LOCKED
+           )
+           RETURNING subject_type, subject_id"#,
+    )
+    .bind(QUEUE_BATCH)
+    .fetch_all(&state.db)
+    .await?;
+    if items.is_empty() {
+        return Ok(0);
+    }
+    // Without a list nothing can be screened; the first import re-screens
+    // every open subject anyway.
+    if store::active_version(&state.db).await?.is_none() {
+        return Ok(items.len());
+    }
+    for (subject_type, subject_id) in &items {
+        let result = match subject_type.as_str() {
+            "lead" => screen_lead(state, *subject_id).await.map(|_| ()),
+            "patient" => screen_patient(state, *subject_id).await.map(|_| ()),
+            _ => Ok(()),
+        };
+        if let Err(error) = result {
+            tracing::error!(error = %error, subject_type, subject_id = %subject_id, "Sanctions screening failed; queued again");
+            let _ = sqlx::query(
+                r#"INSERT INTO sanctions_screening_queue (subject_type, subject_id)
+                   VALUES ($1, $2) ON CONFLICT DO NOTHING"#,
+            )
+            .bind(subject_type)
+            .bind(subject_id)
+            .execute(&state.db)
+            .await;
+        }
+    }
+    Ok(items.len())
+}
+
+/// Polls the screening queue.
+pub fn spawn_screening_worker(state: AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(QUEUE_POLL_SECONDS));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            if let Err(error) = process_queue(&state).await {
+                tracing::error!(error = %error, "Sanctions screening queue failed");
+            }
+        }
+    });
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct RescreenReport {
+    pub leads: usize,
+    pub patients: usize,
+    pub new_hits: usize,
+    pub errors: usize,
+}
+
+/// Screens every open lead and every active or inactive patient again, after
+/// a new list version.
+pub async fn rescreen_all(state: &AppState) -> Result<RescreenReport, sqlx::Error> {
+    let lead_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM leads
+           WHERE qualification_status NOT IN ('converted', 'archived', 'deleted')
+             AND COALESCE(failed_outcome_status, 'none') <> 'delete_anonymized'
+             AND NOT (first_name = $1 AND last_name = 'Lead')
+           UNION
+           SELECT DISTINCT lead_id FROM sanctions_hits
+           WHERE lead_id IS NOT NULL AND status <> 'false_positive'"#,
+    )
+    .bind(crate::routes::leads::ANONYMIZED_FIRST_NAME)
+    .fetch_all(&state.db)
+    .await?;
+    let patient_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM patients
+           WHERE lifecycle_status IN ('active', 'inactive')
+             AND NOT (legal_status ? 'anonymized_at')
+           UNION
+           SELECT DISTINCT patient_id FROM sanctions_hits
+           WHERE patient_id IS NOT NULL AND status <> 'false_positive'"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    let mut report = RescreenReport::default();
+    for lead_id in lead_ids {
+        match screen_lead(state, lead_id).await {
+            Ok(result) => {
+                report.leads += 1;
+                report.new_hits += result.new_hits.len();
+            }
+            Err(error) => {
+                report.errors += 1;
+                tracing::error!(error = %error, lead_id = %lead_id, "Sanctions re-screening of a lead failed");
+            }
+        }
+    }
+    for patient_id in patient_ids {
+        match screen_patient(state, patient_id).await {
+            Ok(result) => {
+                report.patients += 1;
+                report.new_hits += result.new_hits.len();
+            }
+            Err(error) => {
+                report.errors += 1;
+                tracing::error!(error = %error, patient_id = %patient_id, "Sanctions re-screening of a patient failed");
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Removes the screening results of a purged lead (and of its prospect
+/// patient) with their notifications, inside the purge transaction: they
+/// follow the lead's retention.
+pub async fn purge_for_lead_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE entity_type = $2
+             AND entity_id IN (
+                 SELECT h.id FROM sanctions_hits h
+                 WHERE h.lead_id = $1
+                    OR h.patient_id = (
+                        SELECT l.prospect_patient_id FROM leads l
+                        WHERE l.id = $1 AND l.converted_patient_id IS NULL
+                    )
+             )"#,
+    )
+    .bind(lead_id)
+    .bind(HIT_ENTITY_TYPE)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        r#"DELETE FROM sanctions_hits
+           WHERE lead_id = $1
+              OR patient_id = (
+                  SELECT l.prospect_patient_id FROM leads l
+                  WHERE l.id = $1 AND l.converted_patient_id IS NULL
+              )"#,
+    )
+    .bind(lead_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM sanctions_country_overrides WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM sanctions_screening_queue WHERE subject_type = 'lead' AND subject_id = $1",
+    )
+    .bind(lead_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Removes the screening results of an erased patient inside the erasure
+/// transaction.
+pub async fn purge_for_patient_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE entity_type = $2
+             AND entity_id IN (SELECT id FROM sanctions_hits WHERE patient_id = $1)"#,
+    )
+    .bind(patient_id)
+    .bind(HIT_ENTITY_TYPE)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM sanctions_hits WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query("DELETE FROM sanctions_country_overrides WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut **tx)
+        .await?;
+    sqlx::query(
+        "DELETE FROM sanctions_screening_queue WHERE subject_type = 'patient' AND subject_id = $1",
+    )
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guardian_relations_are_recognised_in_all_staff_languages() {
+        for relation in [
+            "Mother",
+            "father",
+            "Parent",
+            "Legal guardian",
+            "Mutter",
+            "Vormund",
+            "мама",
+            "Отец",
+            "опекун",
+            "батько",
+        ] {
+            assert!(is_guardian_relation(relation), "{relation}");
+        }
+        for relation in ["Spouse", "Brother", "Freund", "друг", ""] {
+            assert!(!is_guardian_relation(relation), "{relation}");
+        }
+    }
+
+    #[test]
+    fn full_names_split_into_given_names_and_surname() {
+        assert_eq!(
+            split_full_name("Anna Maria Beispiel"),
+            ("Anna Maria".into(), "Beispiel".into())
+        );
+        assert_eq!(split_full_name(" Solo "), (String::new(), "Solo".into()));
+        assert_eq!(split_full_name(""), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn fingerprints_ignore_spelling_noise_but_not_identity_changes() {
+        let base = Subject {
+            first_name: "Testomir".into(),
+            last_name: "Korneev".into(),
+            citizenships: vec!["RU".into(), "DE".into()],
+            ..Subject::default()
+        };
+        let noisy = Subject {
+            first_name: " TESTOMIR ".into(),
+            last_name: "Korneev".into(),
+            citizenships: vec!["DE".into(), "RU".into()],
+            ..Subject::default()
+        };
+        assert_eq!(subject_fingerprint(&base), subject_fingerprint(&noisy));
+        let born = Subject {
+            date_of_birth: NaiveDate::from_ymd_opt(1990, 1, 1),
+            ..base.clone()
+        };
+        assert_ne!(subject_fingerprint(&base), subject_fingerprint(&born));
+    }
+
+    #[test]
+    fn subject_countries_combine_citizenship_and_residence() {
+        let record = SubjectRecord {
+            kind: SubjectKind::LeadPatient,
+            lead_id: None,
+            patient_id: None,
+            subject_ref: String::new(),
+            subject: Subject {
+                citizenships: vec!["UA".into()],
+                ..Subject::default()
+            },
+            residence: vec!["RU".into(), "UA".into()],
+            relation: None,
+        };
+        assert_eq!(record.countries(), vec!["UA", "RU"]);
+    }
+}

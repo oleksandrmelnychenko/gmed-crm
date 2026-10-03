@@ -149,6 +149,9 @@ capabilities! {
     DatevRead => "datev.read",
     // Security incidents
     IncidentsManage => "incidents.manage",
+    // EU sanctions list screening: possible matches, decisions, list file,
+    // blocked countries and their per-lead lift (CEO only, decision 2026-10-03).
+    SanctionsReview => "sanctions.review",
     // Personnel files (Personalakte); the employee's own file is an
     // ownership check, not a capability.
     PersonnelView => "personnel.view",
@@ -641,6 +644,14 @@ mod tests {
         assert!(C::PersonnelRetention.is_write());
         assert!(!C::PersonnelView.is_write());
         assert!(!C::PersonnelHealthView.is_write());
+    }
+
+    #[test]
+    fn only_ceo_reviews_sanctions_hits() {
+        for role in STAFF_ROLES {
+            assert_eq!(role.can(C::SanctionsReview), *role == Role::Ceo, "{role:?}");
+        }
+        assert!(C::SanctionsReview.is_write());
     }
 
     #[test]
