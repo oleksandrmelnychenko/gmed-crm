@@ -14,6 +14,7 @@ import {
 import { StatusBadge } from "@/components/record-workspace/recipes/status-badge";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lead } from "@/lib/api/types";
+import { copyText, selectElementText } from "@/lib/copy-text";
 
 import { issueLeadPortalAccess, type LeadPortalAccountIssued } from "../data/leads-api";
 import {
@@ -192,13 +193,19 @@ export function PortalCredentialsDialog({
     patientMessageLanguage(defaultLanguage),
   );
 
-  async function copy(key: string, text: string) {
-    try {
-      await navigator.clipboard.writeText(text);
+  const [copyFailed, setCopyFailed] = useState<string | null>(null);
+
+  // On failure the text is selected so it can be copied with Ctrl+C.
+  async function copy(key: string, text: string, event: { currentTarget: Element }) {
+    const dialog = event.currentTarget.closest("[role='dialog']");
+    if (await copyText(text, dialog)) {
       setCopied(key);
-    } catch {
-      setCopied(null);
+      setCopyFailed(null);
+      return;
     }
+    setCopied(null);
+    setCopyFailed(key);
+    selectElementText(dialog?.querySelector(`[data-copy-source='${key}']`));
   }
 
   const loginUrl = typeof window === "undefined" ? "/login" : `${window.location.origin}/login`;
@@ -212,6 +219,7 @@ export function PortalCredentialsDialog({
       onOpenChange={(open) => {
         if (!open) {
           setCopied(null);
+          setCopyFailed(null);
           onClose();
         }
       }}
@@ -237,11 +245,11 @@ export function PortalCredentialsDialog({
           <div className="space-y-4 text-sm">
             <dl className="grid grid-cols-[6rem_1fr_auto] items-center gap-x-3 gap-y-2">
               <dt className="text-muted-foreground">{de ? "Login" : "Логин"}</dt>
-              <dd className="truncate" data-testid="portal-credentials-email">{credentials.email}</dd>
-              <CopyButton copied={copied === "email"} label={de ? "Kopieren" : "Копировать"} onClick={() => void copy("email", credentials.email)} />
+              <dd className="select-all truncate" data-copy-source="email" data-testid="portal-credentials-email">{credentials.email}</dd>
+              <CopyButton copied={copied === "email"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("email", credentials.email, event)} />
               <dt className="text-muted-foreground">{de ? "Passwort" : "Пароль"}</dt>
-              <dd className="font-mono" data-testid="portal-credentials-password">{credentials.password}</dd>
-              <CopyButton copied={copied === "password"} label={de ? "Kopieren" : "Копировать"} onClick={() => void copy("password", credentials.password)} />
+              <dd className="select-all font-mono" data-copy-source="password" data-testid="portal-credentials-password">{credentials.password}</dd>
+              <CopyButton copied={copied === "password"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("password", credentials.password, event)} />
             </dl>
             <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
               <div className="flex items-center justify-between gap-2">
@@ -266,18 +274,29 @@ export function PortalCredentialsDialog({
                   ))}
                 </div>
               </div>
-              <pre className="whitespace-pre-wrap break-words font-sans text-xs text-foreground">{message}</pre>
+              <pre className="select-all whitespace-pre-wrap break-words font-sans text-xs text-foreground" data-copy-source="message">{message}</pre>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 className="h-7 gap-1.5 rounded-md text-xs"
-                onClick={() => void copy("message", message)}
+                onClick={(event) => void copy("message", message, event)}
               >
                 {copied === "message" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
                 {de ? "Nachricht kopieren" : "Скопировать сообщение"}
               </Button>
             </div>
+            <p className="min-h-4 text-xs" role="status" aria-live="polite">
+              {copied ? (
+                <span className="text-emerald-700">{de ? "Kopiert" : "Скопировано"}</span>
+              ) : copyFailed ? (
+                <span className="text-amber-700">
+                  {de
+                    ? "Kopieren hat der Browser blockiert – Text ist markiert, mit Strg+C kopieren"
+                    : "Браузер не дал скопировать — текст выделен, скопируйте его через Ctrl+C"}
+                </span>
+              ) : null}
+            </p>
           </div>
         ) : null}
         <DialogFooter>
@@ -288,7 +307,15 @@ export function PortalCredentialsDialog({
   );
 }
 
-function CopyButton({ copied, label, onClick }: { copied: boolean; label: string; onClick: () => void }) {
+function CopyButton({
+  copied,
+  label,
+  onClick,
+}: {
+  copied: boolean;
+  label: string;
+  onClick: (event: { currentTarget: Element }) => void;
+}) {
   return (
     <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={label} onClick={onClick}>
       {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}

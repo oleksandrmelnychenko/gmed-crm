@@ -1126,7 +1126,17 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
           wizard_state: {},
         });
       }
-      return json(route, { id: createdId });
+      return json(route, {
+        id: createdId,
+        portal_account: payload.email
+          ? {
+              user_id: "00000000-0000-0000-0000-000000000991",
+              email: payload.email,
+              created: true,
+              one_time_password: "Kq7-mP2x-Rw9t",
+            }
+          : null,
+      });
     }
 
     if (path === "/leads" || path.startsWith("/leads?")) {
@@ -2975,7 +2985,9 @@ test.describe("lead onboarding wizard", () => {
 
   test("new lead starts in the wizard and is created after valid master data", async ({
     page,
+    context,
   }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const createdId = "00000000-0000-0000-0000-000000000990";
     let createRequests = 0;
     page.on("request", (request) => {
@@ -3026,6 +3038,20 @@ test.describe("lead onboarding wizard", () => {
     );
     await medicalStep.click();
     const request = await createRequest;
+
+    // The CEO sees the patient login once; the copy buttons fill the clipboard.
+    const credentials = page.getByRole("dialog", { name: "Zugang für den Patienten angelegt" });
+    await expect(credentials).toBeVisible();
+    await expect(credentials.getByTestId("portal-credentials-email")).toHaveText("neue.person@example.com");
+    await expect(credentials.getByTestId("portal-credentials-password")).toHaveText("Kq7-mP2x-Rw9t");
+    await credentials.getByRole("button", { name: "Kopieren" }).nth(1).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("Kq7-mP2x-Rw9t");
+    await credentials.getByRole("button", { name: "Nachricht kopieren" }).click();
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toContain("Einmalpasswort: Kq7-mP2x-Rw9t");
+    await credentials.getByRole("button", { name: "Fertig" }).click();
+    await expect(credentials).toBeHidden();
 
     expect(request.postDataJSON()).toMatchObject({
       first_name: "Neue",
