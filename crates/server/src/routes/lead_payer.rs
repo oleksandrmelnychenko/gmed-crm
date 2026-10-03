@@ -612,68 +612,87 @@ pub(crate) async fn load_payer_state(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<PayerState, sqlx::Error> {
-    let lead_citizenships: Vec<String> =
-        sqlx::query_scalar("SELECT citizenships FROM leads WHERE id = $1")
-            .bind(lead_id)
-            .fetch_optional(&mut *conn)
-            .await?
-            .unwrap_or_default();
-    let row = sqlx::query(&format!(
-        "SELECT {DECLARATION_COLUMNS} FROM lead_payer_declarations WHERE lead_id = $1"
+    // One round trip: the leads list evaluates readiness for every row.
+    let declaration_columns = DECLARATION_COLUMNS
+        .split(',')
+        .map(|column| format!("d.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let Some(row) = sqlx::query(&format!(
+        r#"SELECT lead.citizenships AS lead_citizenships, {declaration_columns},
+                  latest_order.id AS order_id, latest_order.order_number,
+                  latest_order.signed_patient, latest_order.signed_agency,
+                  cost.id AS cost_document_id, cost.signed_at AS cost_signed_at,
+                  cost.payer_identity_version
+           FROM leads lead
+           LEFT JOIN lead_payer_declarations d ON d.lead_id = lead.id
+           LEFT JOIN LATERAL (
+               SELECT o.id, o.order_number, o.signed_patient, o.signed_agency
+               FROM orders o
+               WHERE o.source_lead_id = lead.id
+               ORDER BY o.created_at DESC, o.id DESC
+               LIMIT 1
+           ) latest_order ON true
+           LEFT JOIN LATERAL (
+               SELECT doc.id, doc.signed_at,
+                      doc.generated_bindings ->> '_payer_identity_version' AS payer_identity_version
+               FROM documents doc
+               WHERE doc.generated_template_id = 'cost_coverage_declaration'
+                 AND doc.status <> 'archived'
+                 AND doc.file_deleted_at IS NULL
+                 AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = doc.id)
+                 AND (doc.lead_id = lead.id
+                      OR doc.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = lead.id))
+               ORDER BY doc.created_at DESC, doc.id DESC
+               LIMIT 1
+           ) cost ON true
+           WHERE lead.id = $1"#
     ))
     .bind(lead_id)
     .fetch_optional(&mut *conn)
-    .await?;
+    .await?
+    else {
+        return Ok(PayerState::default());
+    };
     let mut state = PayerState {
-        lead_citizenships,
+        lead_citizenships: row.try_get("lead_citizenships").unwrap_or_default(),
         ..PayerState::default()
     };
-    if let Some(row) = row {
+    if row
+        .try_get::<Option<String>, _>("payer_kind")
+        .ok()
+        .flatten()
+        .is_some()
+    {
         state.declaration = Some(Declaration::from_row(&row));
-        state.identity_changed_at = row.try_get("identity_changed_at").ok();
+        state.identity_changed_at = row.try_get("identity_changed_at").ok().flatten();
         state.patient_id = row.try_get("patient_id").unwrap_or_default();
-        state.created_at = row.try_get("created_at").ok();
-        state.updated_at = row.try_get("updated_at").ok();
+        state.created_at = row.try_get("created_at").ok().flatten();
+        state.updated_at = row.try_get("updated_at").ok().flatten();
     }
-    if let Some(order) = sqlx::query(
-        r#"SELECT id, order_number, signed_patient, signed_agency
-           FROM orders
-           WHERE source_lead_id = $1
-           ORDER BY created_at DESC, id DESC
-           LIMIT 1"#,
-    )
-    .bind(lead_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    {
-        state.order_id = order.try_get("id").ok();
-        state.order_number = order.try_get("order_number").unwrap_or_default();
-        state.order_signed_patient = order.try_get("signed_patient").unwrap_or(false);
-        state.order_signed_agency = order.try_get("signed_agency").unwrap_or(false);
+    if let Some(order_id) = row.try_get::<Option<Uuid>, _>("order_id").ok().flatten() {
+        state.order_id = Some(order_id);
+        state.order_number = row.try_get("order_number").unwrap_or_default();
+        state.order_signed_patient = row
+            .try_get::<Option<bool>, _>("signed_patient")
+            .ok()
+            .flatten()
+            .unwrap_or(false);
+        state.order_signed_agency = row
+            .try_get::<Option<bool>, _>("signed_agency")
+            .ok()
+            .flatten()
+            .unwrap_or(false);
     }
-    if let Some(document) = sqlx::query(
-        r#"SELECT d.id, d.signed_at,
-                  d.generated_bindings ->> '_payer_identity_version' AS payer_identity_version
-           FROM documents d
-           WHERE d.generated_template_id = 'cost_coverage_declaration'
-             AND d.status <> 'archived'
-             AND d.file_deleted_at IS NULL
-             AND NOT EXISTS (SELECT 1 FROM documents n WHERE n.replaces_document_id = d.id)
-             AND (d.lead_id = $1
-                  OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = $1))
-           ORDER BY d.created_at DESC, d.id DESC
-           LIMIT 1"#,
-    )
-    .bind(lead_id)
-    .fetch_optional(&mut *conn)
-    .await?
+    if let Some(document_id) = row
+        .try_get::<Option<Uuid>, _>("cost_document_id")
+        .ok()
+        .flatten()
     {
-        let names: Option<String> = document
-            .try_get("payer_identity_version")
-            .unwrap_or_default();
+        let names: Option<String> = row.try_get("payer_identity_version").unwrap_or_default();
         state.cost_assumption = CostAssumptionDocument {
-            document_id: document.try_get("id").ok(),
-            signed_at: document.try_get("signed_at").unwrap_or_default(),
+            document_id: Some(document_id),
+            signed_at: row.try_get("cost_signed_at").unwrap_or_default(),
             current: names.is_some() && names == state.identity_changed_at.map(identity_version),
         };
     }

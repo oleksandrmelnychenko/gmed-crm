@@ -366,6 +366,26 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
     .await
     .unwrap();
     assert!(marker.is_some(), "the document records the payer it names");
+    // The e-signature composer suggests the declared payer as `payer` signer.
+    let (status, candidates) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/signature-packages/candidates?document_id={document_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{candidates}");
+    assert!(
+        candidates["suggested_signers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |signer| signer["role"] == "payer" && signer["email"] == "erika.zahler@example.org"
+            ),
+        "{candidates}"
+    );
 
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert!(
