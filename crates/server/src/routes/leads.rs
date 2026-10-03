@@ -2008,7 +2008,10 @@ async fn apply_repeat_patient_readiness(
     input.identity_document_verified |= legal["identity_verified"] == true;
     input.dsgvo_document_signed |= legal["dsgvo_signed"] == true;
     input.confidentiality_release_signed |= legal["confidentiality_release_signed"] == true;
-    if legal["compliance_completed"] == true {
+    // A lead's compliance is "signed" once its DSGVO consent is signed. For a
+    // repeat request the patient's signed consent counts the same way, also
+    // when the patient was not created through the wizard (TASK-A164).
+    if legal["compliance_completed"] == true || input.dsgvo_document_signed {
         input.compliance_status = "signed".to_string();
     }
     let patient_id: Uuid = row.try_get("patient_id").unwrap_or_default();

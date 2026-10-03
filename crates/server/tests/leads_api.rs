@@ -5644,3 +5644,63 @@ async fn previous_requests_list_only_completed_requests_of_the_patient() {
     let (status, _) = json_request(&app, "GET", &path, &app.auth_header("interpreter"), None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+/// TASK-A164: the patient's signed data-protection consent counts for a repeat
+/// request, also when the patient was not created through the wizard and so
+/// never got the `compliance_completed` flag.
+#[tokio::test]
+async fn repeat_intake_counts_the_patients_signed_consent_as_compliance() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let create = |patient: Uuid| {
+        let pm = pm.clone();
+        let app = &app;
+        async move {
+            let (status, created) = json_request(
+                app,
+                "POST",
+                "/api/v1/leads",
+                &pm,
+                Some(json!({
+                    "first_name": "Repeat",
+                    "last_name": "Regression",
+                    "repeat_patient_id": patient,
+                    "creation_key": Uuid::new_v4()
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{created}");
+            let lead = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+            let (status, detail) =
+                json_request(app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+            assert_eq!(status, StatusCode::OK, "{detail}");
+            detail
+        }
+    };
+
+    // No consent on file: compliance is still open.
+    let without = seed_repeat_patient(&app, true).await;
+    let detail = create(without).await;
+    assert!(
+        !readiness_check_passed(&detail, "compliance_completed"),
+        "{detail}"
+    );
+
+    // The consent was signed on the patient card; the wizard flag was never set.
+    let with_consent = seed_repeat_patient(&app, true).await;
+    sqlx::query(
+        r#"UPDATE patients
+           SET legal_status = '{"dsgvo_signed": true, "compliance_completed": false}'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(with_consent)
+    .execute(pool)
+    .await
+    .unwrap();
+    let detail = create(with_consent).await;
+    assert!(
+        readiness_check_passed(&detail, "compliance_completed"),
+        "{detail}"
+    );
+}

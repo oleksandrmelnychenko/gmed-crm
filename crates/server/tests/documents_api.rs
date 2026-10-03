@@ -9686,3 +9686,78 @@ async fn enhanced_due_diligence_lists_uploaded_asset_origin_evidence() {
     );
     assert!(!text.contains("umbenannt.pdf"), "{text}");
 }
+
+/// TASK-A164: a passport that is already in the patient's file is confirmed as
+/// the identity document in place; it does not have to be uploaded again.
+#[tokio::test]
+async fn passport_on_file_is_confirmed_as_the_identity_document() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("passport-identity");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let upload = |art: &'static str, file_name: &'static str| {
+        let app = app.clone();
+        let bearer = admin_bearer.clone();
+        async move {
+            let (status, body) = multipart_upload(
+                &app,
+                "/api/v1/documents/upload",
+                &bearer,
+                &[
+                    ("patient_id", patient_id.to_string()),
+                    ("auto_name", format!("Dokument {file_name}")),
+                    ("art", art.to_string()),
+                    ("status", "active".to_string()),
+                    ("visibility", "internal".to_string()),
+                ],
+                file_name,
+                "application/pdf",
+                b"%PDF-test-binary%",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+        }
+    };
+    let passport = upload("passport_scan", "reisepass.pdf").await;
+    let letter = upload("arztbrief", "arztbrief.pdf").await;
+    let confirm = |document: Uuid| {
+        let app = app.clone();
+        let bearer = admin_bearer.clone();
+        async move {
+            json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/documents/{document}/mark-signed"),
+                &bearer,
+                Some(json!({ "compliance_kind": "identity" })),
+            )
+            .await
+        }
+    };
+
+    // Any other document is still no identity document.
+    let (status, body) = confirm(letter).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, body) = confirm(passport).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (kind, verified): (Option<String>, bool) = sqlx::query_as(
+        "SELECT compliance_kind, signed_at IS NOT NULL FROM documents WHERE id = $1",
+    )
+    .bind(passport)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kind.as_deref(), Some("identity"));
+    assert!(verified);
+    let identity_verified: Option<bool> = sqlx::query_scalar(
+        "SELECT (legal_status->>'identity_verified')::boolean FROM patients WHERE id = $1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(identity_verified, Some(true));
+}
