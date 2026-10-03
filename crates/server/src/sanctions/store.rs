@@ -28,7 +28,8 @@ pub const MIN_ENTRY_RATIO: f64 = 0.5;
 /// The UI warns when the last successful update is older than this.
 pub const STALE_AFTER_DAYS: i64 = 7;
 const ENTRY_INSERT_CHUNK: usize = 500;
-const INDEX_CACHE_SIZE: usize = 3;
+/// The active version and, right after an import, the previous one.
+const INDEX_CACHE_SIZE: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
