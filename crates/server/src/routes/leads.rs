@@ -2459,8 +2459,7 @@ async fn create_lead(
     // a parent's address that already has one.
     let creates_portal_account = !is_minor_on(date_of_birth, crate::app_time::today());
     if creates_portal_account {
-        match crate::routes::lead_portal_account::email_owner(&state.db, &portal_email, None)
-            .await
+        match crate::routes::lead_portal_account::email_owner(&state.db, &portal_email, None).await
         {
             Ok(None) => {}
             Ok(Some(owner)) => {
