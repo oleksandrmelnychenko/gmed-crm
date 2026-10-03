@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, Copy, KeyRound, LoaderCircle, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,15 @@ import {
   type PatientMessageLanguage,
 } from "../model/lead-portal-access";
 import { leadErrorMessage } from "../model/leads-model";
+import { portalProgressText } from "../model/lead-portal-intake";
+import {
+  fetchLeadPortalIntake,
+  issueLeadGuardianAccess,
+  resetLeadGuardianPassword,
+  revokeLeadGuardianAccess,
+  type LeadGuardianAccessIssued,
+  type LeadPortalIntake,
+} from "../data/lead-portal-intake-api";
 
 type Lang = string;
 
@@ -129,6 +138,16 @@ export function LeadPortalAccessDetail({
         </Button>
       ) : null}
       {error ? <p className="w-full text-rose-700">{error}</p> : null}
+      {lead.portal_intake && (status !== "none" || lead.portal_intake.guardians > 0) ? (
+        <p className="w-full text-muted-foreground" data-testid="lead-portal-progress">
+          {portalProgressText(
+            { ...lead.portal_intake, submitted_at: lead.portal_intake.submitted_at },
+            (ru, deText) => (de ? deText : ru),
+            formatAppDateTime,
+          ).join(" · ")}
+        </p>
+      ) : null}
+      <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} />
 
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>
         <DialogContent className="max-w-md">
@@ -320,5 +339,160 @@ function CopyButton({
     <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={label} onClick={onClick}>
       {copied ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
     </Button>
+  );
+}
+
+/**
+ * Parents' logins for a minor's request (owner decision 2026-10-03: a minor
+ * has no own login). CEO and patient managers issue, renew or revoke them
+ * for a trusted contact with relation parent / guardian and an e-mail.
+ */
+export function LeadGuardianAccess({
+  lead,
+  lang,
+  canIssue,
+  onChanged,
+}: {
+  lead: Lead;
+  lang: Lang;
+  canIssue: boolean;
+  onChanged?: () => void;
+}) {
+  const de = lang === "de";
+  const tx = (ru: string, deText: string) => (de ? deText : ru);
+  const [intake, setIntake] = useState<LeadPortalIntake | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [issued, setIssued] = useState<{ email: string; password: string; created: boolean } | null>(null);
+  const [notice, setNotice] = useState("");
+
+  const load = useCallback(async () => {
+    try {
+      setIntake(await fetchLeadPortalIntake(lead.id));
+    } catch {
+      setIntake(null);
+    }
+  }, [lead.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function run(key: string, action: () => Promise<LeadGuardianAccessIssued | { login_deactivated: boolean }>) {
+    setBusy(key);
+    setError("");
+    setNotice("");
+    try {
+      const result = await action();
+      if ("one_time_password" in result) {
+        if (result.one_time_password) {
+          setIssued({ email: result.email, password: result.one_time_password, created: result.created });
+        } else if (result.reused) {
+          setNotice(tx(
+            "У родителя уже есть вход: он войдёт со своим паролем и увидит эту заявку.",
+            "Der Elternteil hat bereits einen Zugang: Er meldet sich mit seinem Passwort an und sieht diese Anfrage.",
+          ));
+        }
+      }
+      await load();
+      onChanged?.();
+    } catch (nextError) {
+      setError(leadErrorMessage(nextError, tx));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const links = intake?.guardians.links.filter((link) => !link.revoked_at) ?? [];
+  const candidates = intake?.guardians.candidates.filter((candidate) => !candidate.access_id) ?? [];
+  if (!intake || (!intake.minor && links.length === 0)) return null;
+
+  return (
+    <div className="w-full space-y-1.5 border-t border-border/60 pt-2" data-testid="lead-guardian-access">
+      <p className="font-medium text-foreground">
+        {tx("Доступ родителей (несовершеннолетний)", "Zugang der Eltern (minderjährig)")}
+      </p>
+      {links.map((link) => (
+        <div key={link.access_id} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span>
+            {link.name ?? "—"} <span className="text-muted-foreground">{link.email ?? ""}</span>
+          </span>
+          <span className="text-muted-foreground">
+            {tx("Последний вход: ", "Letzte Anmeldung: ")}
+            {link.last_login_at ? formatAppDateTime(link.last_login_at) : "—"}
+          </span>
+          {canIssue ? (
+            <span className="ml-auto flex gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 rounded-md text-xs"
+                disabled={busy !== null}
+                onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id))}
+              >
+                <KeyRound className="size-3.5" />
+                {tx("Новый пароль", "Neues Passwort")}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 rounded-md text-xs text-rose-700"
+                disabled={busy !== null}
+                onClick={() => {
+                  if (!window.confirm(tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?"))) return;
+                  void run(`revoke-${link.access_id}`, () => revokeLeadGuardianAccess(lead.id, link.access_id));
+                }}
+              >
+                {tx("Отозвать", "Widerrufen")}
+              </Button>
+            </span>
+          ) : null}
+        </div>
+      ))}
+      {candidates.map((candidate) => {
+        const contactId = candidate.trusted_contact_id;
+        return (
+          <div key={contactId ?? candidate.name ?? ""} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>
+              {candidate.name ?? "—"}{" "}
+              <span className="text-muted-foreground">
+                {[candidate.relation, candidate.email ?? tx("нет e-mail", "keine E-Mail")].filter(Boolean).join(" · ")}
+              </span>
+            </span>
+            {canIssue && contactId && candidate.email ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="ml-auto h-7 gap-1.5 rounded-md text-xs"
+                disabled={busy !== null}
+                onClick={() => void run(`issue-${contactId}`, () => issueLeadGuardianAccess(lead.id, contactId))}
+              >
+                {busy === `issue-${contactId}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+                {tx("Выдать доступ", "Zugang anlegen")}
+              </Button>
+            ) : null}
+          </div>
+        );
+      })}
+      {links.length === 0 && candidates.length === 0 ? (
+        <p className="text-muted-foreground">
+          {tx(
+            "Добавьте в шаге «Данные клиента» мать, отца или законного представителя с e-mail.",
+            "Unter „Personendaten“ Mutter, Vater oder gesetzlichen Vertreter mit E-Mail ergänzen.",
+          )}
+        </p>
+      ) : null}
+      {notice ? <p className="text-emerald-700">{notice}</p> : null}
+      {error ? <p className="text-rose-700">{error}</p> : null}
+      <PortalCredentialsDialog
+        credentials={issued ? { email: issued.email, password: issued.password, firstName: "" } : null}
+        created={issued?.created ?? false}
+        lang={lang}
+        onClose={() => setIssued(null)}
+      />
+    </div>
   );
 }
