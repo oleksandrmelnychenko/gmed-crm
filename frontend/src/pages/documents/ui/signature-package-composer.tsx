@@ -51,10 +51,24 @@ const sizeLabel = (bytes: number | null) => bytes == null ? "" : bytes >= 1024 *
 export function resolvePackage(candidates: PackageCandidates | null, selection: PackageSelection) {
   const byId = new Map((candidates?.documents ?? []).map(document => [document.id, document]));
   const selected = selection.documentIds.flatMap(id => byId.get(id) ? [byId.get(id)!] : []);
-  const required = requiredAttachmentTemplates(selected);
+  const companions = requiredAttachmentTemplates(selected);
   const orderIds = new Set(selected.filter(document => document.companion === "cost_estimate").map(document => document.order_id));
-  const attachmentOptions = Object.fromEntries(required.map(template => [template, (candidates?.attachments ?? []).filter(attachment =>
+  const attachmentOptions = Object.fromEntries(companions.map(template => [template, (candidates?.attachments ?? []).filter(attachment =>
     attachment.template === template && (template !== "cost_estimate" || orderIds.has(attachment.order_id)))]));
+  // The medical cost calculation exists only for orders with medical work
+  // types; a cost estimate whose order has none is sent without it.
+  const required = companions.filter(template => template !== "cost_estimate" || attachmentOptions[template].length > 0);
+  const withoutCostCalculation = companions.includes("cost_estimate") && !required.includes("cost_estimate");
+  // Cost estimates of the single orders in the package that are not in it yet.
+  const orderEstimates = selected
+    .filter(document => document.template === "single_order" && document.order_id)
+    .flatMap(order => {
+      const estimates = (candidates?.documents ?? []).filter(document =>
+        document.template === "order_cost_estimate" && document.order_id === order.order_id);
+      if (estimates.some(estimate => selection.documentIds.includes(estimate.id))) return [];
+      const eligible = estimates.find(estimate => !estimate.ineligible_reason);
+      return eligible ? [{ orderDocumentId: order.id, estimateId: eligible.id }] : [];
+    });
   const attachmentIds = required.flatMap(template => {
     const options = attachmentOptions[template] ?? [];
     const chosen = selection.attachments[template] || (options.length === 1 ? options[0].id : "");
@@ -63,7 +77,7 @@ export function resolvePackage(candidates: PackageCandidates | null, selection: 
   const warnings = candidates ? packageWarnings(selected, candidates.limits) : [];
   const minimumLevel = packageMinimumLevel(selected.map(document => document.minimum_level));
   return {
-    selected, required, attachmentOptions, attachmentIds, warnings, minimumLevel,
+    selected, required, attachmentOptions, attachmentIds, warnings, minimumLevel, withoutCostCalculation, orderEstimates,
     complete: selected.length === selection.documentIds.length && attachmentIds.length === required.length,
     blocked: warnings.some(blockingWarning),
   };
@@ -132,6 +146,18 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
         })}
       </ol>
       {resolved.warnings.filter(warning => !warning.document_id).map(warning => <Banner key={warning.kind} tone="error">{warningText(warning, tx)}</Banner>)}
+      {resolved.orderEstimates.map(({ orderDocumentId, estimateId }) => <div key={estimateId} data-package-missing-estimate={orderDocumentId} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-200">
+        <span>{tx("Смета к заказу (Kostenvoranschlag) не входит в пакет — клиент получит её отдельным приглашением.", "Der Kostenvoranschlag zum Einzelauftrag ist nicht im Paket – der Kunde erhält ihn mit einer eigenen Einladung.")}</span>
+        <Button type="button" size="sm" variant="outline" disabled={disabled || selection.documentIds.length >= candidates.limits.max_documents} onClick={() => {
+          const next = [...selection.documentIds];
+          next.splice(next.indexOf(orderDocumentId) + 1, 0, estimateId);
+          update({ documentIds: next });
+        }}><Plus className="size-4" />{tx("Добавить смету", "Kostenvoranschlag hinzufügen")}</Button>
+      </div>)}
+      {resolved.withoutCostCalculation ? <p data-package-without-cost-calculation className="text-xs leading-5 text-amber-700 dark:text-amber-300">{tx(
+        "Для заказа этой сметы нет предварительного расчёта медицинских расходов — пакет уйдёт без него.",
+        "Zum Auftrag dieses Kostenvoranschlags gibt es keine vorläufige medizinische Kostenkalkulation – das Paket wird ohne sie versendet.",
+      )}</p> : null}
       {available.length > 0 && selection.documentIds.length < candidates.limits.max_documents ? <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Добавить документ этого пациента/лида", "Dokument dieser Person hinzufügen")}
         <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value="" disabled={disabled} onChange={event => { const id = event.target.value; if (id) update({ documentIds: [...selection.documentIds, id] }); }}>
           <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>

@@ -111,6 +111,42 @@ describe("signature package composer rules", () => {
     expect(missing.complete).toBe(false);
   });
 
+  it("sends a cost estimate with its medical cost calculation, or without one when the order has none", () => {
+    const order = candidate("order", { title: "Einzelauftrag", template: "single_order", order_id: "o1", signer_policy: "both_parties", minimum_level: "QES" });
+    const estimate = candidate("estimate", { title: "Kostenvoranschlag", template: "order_cost_estimate", order_id: "o1", signer_policy: "flexible", companion: "cost_estimate" });
+    const otherEstimate = candidate("other", { template: "order_cost_estimate", order_id: "o2", companion: "cost_estimate" });
+    const calculation = { id: "calc", title: "Vorläufige Kostenkalkulation", template: "cost_estimate", art: "cost_estimate", version: 1, order_id: "o1", size: 10 };
+
+    // The calculation of the same order is attached; another order's is not offered.
+    const pool = candidates([order, estimate, otherEstimate], [calculation]);
+    const withCalculation = resolvePackage(pool, { ...emptyPackageSelection("order"), documentIds: ["order", "estimate"] });
+    expect(withCalculation.required).toEqual(["cost_estimate"]);
+    expect(withCalculation.attachmentIds).toEqual(["calc"]);
+    expect(withCalculation.complete).toBe(true);
+    expect(withCalculation.withoutCostCalculation).toBe(false);
+    expect(withCalculation.orderEstimates).toEqual([]);
+
+    // No calculation for the order: nothing is required and the package can go.
+    const withoutCalculation = resolvePackage(candidates([order, estimate]), { ...emptyPackageSelection("order"), documentIds: ["order", "estimate"] });
+    expect(withoutCalculation.required).toEqual([]);
+    expect(withoutCalculation.complete).toBe(true);
+    expect(withoutCalculation.withoutCostCalculation).toBe(true);
+
+    // An order without its estimate: the composer offers to add the eligible one.
+    const orderOnly = resolvePackage(pool, emptyPackageSelection("order"));
+    expect(orderOnly.orderEstimates).toEqual([{ orderDocumentId: "order", estimateId: "estimate" }]);
+    expect(resolvePackage(candidates([order, { ...estimate, ineligible_reason: "signature_already_pending" }]), emptyPackageSelection("order")).orderEstimates).toEqual([]);
+
+    const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="order" candidates={candidates([order, estimate])} previewedDocumentIds={[]}
+      selection={emptyPackageSelection("order")} onChange={vi.fn()} />);
+    expect(markup).toContain("Kostenvoranschlag hinzufügen");
+    const sent = renderToStaticMarkup(<SignaturePackageComposer documentId="order" candidates={candidates([order, estimate])} previewedDocumentIds={[]}
+      selection={{ ...emptyPackageSelection("order"), documentIds: ["order", "estimate"] }} onChange={vi.fn()} />);
+    expect(sent).not.toContain("Kostenvoranschlag hinzufügen");
+    expect(sent).toContain("das Paket wird ohne sie versendet");
+    expect(sent).not.toContain("Erstellen Sie zuerst das Dokument");
+  });
+
   it("renders the selection in order, disables AES under a contract and lists attachments", () => {
     const pool = candidates(
       [candidate("contract", { title: "Rahmenvertrag", template: "framework_contract", signer_policy: "both_parties", minimum_level: "QES", companion: "privacy_information" }), candidate("consent", { title: "Einwilligung", has_frames: false })],

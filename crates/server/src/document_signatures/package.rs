@@ -173,14 +173,44 @@ pub(super) async fn signing_options(
     Ok(Value::Array(packages))
 }
 
+/// The cost estimate (Kostenvoranschlag, Anlage 1) of the order a single order
+/// document belongs to: the newest eligible one. It is signed in the same
+/// package, so the client gets one invitation for the order and its estimate.
+async fn order_cost_estimate_of(
+    state: &AppState,
+    auth: &AuthUser,
+    source: &PgRow,
+    order_document: &PgRow,
+) -> Result<Option<Uuid>, Response> {
+    let Some(order) = order_document.get::<Option<Uuid>, _>("order_id") else {
+        return Ok(None);
+    };
+    for id in scope_documents(state, source, &["order_cost_estimate"]).await? {
+        if let Ok(row) = signature_document_access(state, auth, id, true).await
+            && same_scope(source, &row)
+            && row.get::<Option<Uuid>, _>("order_id") == Some(order)
+            && eligibility(&row).is_none()
+        {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
 /// The suggested companions of a source as document IDs (the newest eligible
-/// document per slot), used by the composer as its initial selection.
+/// document per slot), used by the composer as its initial selection. A single
+/// order, as the source or as a companion, is followed by its cost estimate.
 pub(super) async fn preset_document_ids(
     state: &AppState,
     auth: &AuthUser,
     source: &PgRow,
 ) -> Result<Vec<Uuid>, Response> {
     let mut ids = Vec::new();
+    if template_of(source).as_deref() == Some("single_order")
+        && let Some(estimate) = order_cost_estimate_of(state, auth, source, source).await?
+    {
+        ids.push(estimate);
+    }
     for slot in source_slots(state, source).await? {
         for id in scope_documents(state, source, slot).await? {
             if let Ok(row) = signature_document_access(state, auth, id, true).await
@@ -188,6 +218,12 @@ pub(super) async fn preset_document_ids(
                 && eligibility(&row).is_none()
             {
                 ids.push(id);
+                if template_of(&row).as_deref() == Some("single_order")
+                    && let Some(estimate) =
+                        order_cost_estimate_of(state, auth, source, &row).await?
+                {
+                    ids.push(estimate);
+                }
                 break;
             }
         }
@@ -530,9 +566,32 @@ pub(super) fn attachment_scope_matches(template: &str, members: &[&PgRow], row: 
         })
 }
 
+/// Whether a current medical cost calculation exists for the order of a cost
+/// estimate in the package. Orders without medical work types have none.
+async fn cost_calculation_available(
+    state: &AppState,
+    auth: &AuthUser,
+    members: &[&PgRow],
+) -> Result<bool, Response> {
+    let Some(first) = members.first() else {
+        return Ok(false);
+    };
+    for id in scope_documents(state, first, &["cost_estimate"]).await? {
+        if let Ok(row) = signature_document_access(state, auth, id, false).await
+            && attachment_scope_matches("cost_estimate", members, &row)
+            && eligibility(&row).is_none()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Validates the informational attachments of a request. Every companion the
 /// signed documents require must be attached (Art. 13/14 DSGVO information,
-/// the medical cost calculation); nothing else may be.
+/// the medical cost calculation); nothing else may be. The cost calculation is
+/// required whenever the order of the cost estimate has one; an order without
+/// medical work types has none, and its cost estimate is signed without it.
 pub(super) async fn prepare_attachments(
     state: &AppState,
     auth: &AuthUser,
@@ -546,6 +605,11 @@ pub(super) async fn prepare_attachments(
         {
             required.push(template);
         }
+    }
+    if required.contains(&"cost_estimate")
+        && !cost_calculation_available(state, auth, members).await?
+    {
+        required.retain(|template| *template != "cost_estimate");
     }
     let mut unique = selected.to_vec();
     unique.sort();
