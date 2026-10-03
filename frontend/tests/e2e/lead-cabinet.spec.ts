@@ -1,0 +1,259 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+// Lead cabinet (owner decision 2026-10-03): a patient login that reaches only
+// requests sees the request page, the account and the legal notice. Mocked
+// API, synthetic data.
+
+type Mode = "lead" | "patient";
+
+const CONSENT_VERSION = "2026-10-03";
+
+function leadRequest() {
+  return {
+    lead_id: "lead-1",
+    access_kind: "self",
+    created_at: "2026-10-03T08:00:00Z",
+    personal_data: {
+      first_name: "Anna",
+      middle_name: null,
+      last_name: "Muster",
+      date_of_birth: null,
+      legal_sex: null,
+      citizenships: [] as string[],
+      street_address: null,
+      zip_code: null,
+      city: null,
+      country: null,
+      phone: null,
+      primary_language: null,
+    } as Record<string, unknown>,
+    progress: {
+      filled: 2,
+      total: 11,
+      missing_for_submit: ["date_of_birth", "legal_sex", "citizenships", "street_address", "zip_code", "city", "country"],
+    },
+    minor: false,
+    documents: [] as Record<string, unknown>[],
+    max_documents: 30,
+    consents: {
+      health_data_processing: {
+        type: "health_data_processing",
+        version: CONSENT_VERSION,
+        texts: { de: "Ich willige ein … (Art. 9 Abs. 2 lit. a DSGVO) …", ru: "Я даю согласие … (ст. 9) …" },
+        given_at: null as string | null,
+      },
+      lead_inquiry_processing: {
+        type: "lead_inquiry_processing",
+        version: CONSENT_VERSION,
+        texts: {
+          de: "Ich bin einverstanden, dass meine Angaben zur Bearbeitung meiner Anfrage verarbeitet werden.",
+          ru: "Я согласен(на), что мои данные обрабатываются для рассмотрения моего обращения.",
+        },
+        given_at: null as string | null,
+      },
+    } as Record<string, { type: string; version: string; texts: Record<string, string>; given_at: string | null }>,
+    submitted_at: null as string | null,
+    retention_deadline_at: "2026-10-17T08:00:00Z",
+  };
+}
+
+async function setDatePickerValue(input: Locator, value: string) {
+  const displayValue = value.split("-").reverse().join(".");
+  await input.evaluate((node, nextValue) => {
+    const nativeInput = node as HTMLInputElement;
+    const valueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+    valueSetter?.call(nativeInput, nextValue);
+    nativeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    nativeInput.dispatchEvent(new Event("change", { bubbles: true }));
+  }, displayValue);
+  await expect(input).toHaveValue(displayValue);
+}
+
+const SUBMIT_FIELDS = ["date_of_birth", "legal_sex", "citizenships", "street_address", "zip_code", "city", "country"];
+
+function recompute(request: ReturnType<typeof leadRequest>) {
+  const data = request.personal_data;
+  const filled = (field: string) => {
+    const value = data[field];
+    return Array.isArray(value) ? value.length > 0 : Boolean(value);
+  };
+  request.progress.missing_for_submit = SUBMIT_FIELDS.filter((field) => !filled(field));
+  request.progress.filled = [
+    "first_name", "last_name", ...SUBMIT_FIELDS, "phone", "primary_language",
+  ].filter(filled).length;
+}
+
+async function setup(page: Page, mode: Mode, options: { leadRequests?: number } = {}) {
+  const request = leadRequest();
+  const calls = { personalData: [] as Record<string, unknown>[], consents: [] as string[], uploads: 0, submits: 0, blocked: [] as string[] };
+
+  await page.addInitScript(() => {
+    localStorage.setItem("gmed_lang", "de");
+    localStorage.setItem("gmed_access_token", "lead-cabinet-token");
+  });
+  await page.routeWebSocket("**/api/**", (socket) => socket.close());
+  await page.route("**/api/v1/**", async (route) => {
+    const req = route.request();
+    const path = new URL(req.url()).pathname.replace("/api/v1", "");
+    const method = req.method();
+
+    if (path === "/me") {
+      return route.fulfill({
+        json: {
+          id: "lead-user",
+          email: "anna.muster@example.com",
+          name: "Anna Muster",
+          role: "patient",
+          capabilities: [],
+          created_at: "2026-10-03T08:00:00Z",
+          preferred_language: "de",
+          password_change_required: false,
+          portal_mode: mode,
+          lead_portal: options.leadRequests ? { requests: options.leadRequests } : mode === "lead" ? { requests: 1 } : null,
+        },
+      });
+    }
+    if (path === "/me/lead-requests") return route.fulfill({ json: { requests: [request] } });
+    if (path === "/me/lead-requests/lead-1/personal-data" && method === "POST") {
+      const patch = req.postDataJSON() as Record<string, unknown>;
+      calls.personalData.push(patch);
+      Object.assign(request.personal_data, patch);
+      recompute(request);
+      return route.fulfill({ json: request });
+    }
+    if (path === "/me/lead-requests/lead-1/consent" && method === "POST") {
+      const body = req.postDataJSON() as { purpose: string; version: string };
+      calls.consents.push(body.purpose);
+      request.consents[body.purpose].given_at = "2026-10-03T09:15:00Z";
+      return route.fulfill({ status: 201, json: { purpose: body.purpose, given_at: "2026-10-03T09:15:00Z", version: body.version } });
+    }
+    if (path === "/me/lead-requests/lead-1/documents" && method === "POST") {
+      calls.uploads += 1;
+      request.documents.push({
+        id: `doc-${calls.uploads}`,
+        file_name: "befund.pdf",
+        size_bytes: 2048,
+        mime_type: "application/pdf",
+        uploaded_at: "2026-10-03T09:20:00Z",
+        uploaded_by_me: true,
+        reviewed: false,
+        can_delete: true,
+      });
+      return route.fulfill({ status: 201, json: request });
+    }
+    if (path === "/me/lead-requests/lead-1/submit" && method === "POST") {
+      calls.submits += 1;
+      request.submitted_at = "2026-10-03T09:30:00Z";
+      return route.fulfill({ json: request });
+    }
+    if (path === "/me/profile") {
+      return route.fulfill({ json: { id: "lead-user", email: "anna.muster@example.com", name: "Anna Muster", role: "patient", phone: null, preferred_language: "de" } });
+    }
+    if (mode === "lead" && (path.startsWith("/me/") || path.startsWith("/notifications"))) {
+      // The server closes the rest of the portal to a lead login.
+      calls.blocked.push(path);
+      return route.fulfill({ status: 403, json: { error: "Forbidden", code: "lead_portal_only", message: "Lead portal only" } });
+    }
+    if (path === "/notifications/unread-count") return route.fulfill({ json: { count: 0 } });
+    return route.fulfill({ json: [] });
+  });
+  return { request, calls };
+}
+
+test.describe("lead cabinet", () => {
+  test("a lead login sees only its request, the account and the legal notice", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(page.getByTestId("lead-request-deadline")).toContainText("Bitte bis 17.10.2026 ausfüllen.");
+    const nav = page.locator("nav");
+    await expect(nav.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Konto" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Meine Dokumente" })).toHaveCount(0);
+    await expect(page.getByTitle("Benachrichtigungen")).toHaveCount(0);
+
+    // Other portal pages lead back to the request page.
+    await page.goto("/documents");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+    expect(calls.blocked).toEqual([]);
+  });
+
+  test("the patient enters the data, agrees, uploads and sends", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+
+    await page.locator("#lead-request-city").fill("Berlin");
+    await page.locator("#lead-request-zip_code").fill("10115");
+    await page.locator("#lead-request-street_address").fill("Musterstraße 1");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    expect(calls.personalData.at(-1)).toMatchObject({ city: "Berlin", zip_code: "10115", street_address: "Musterstraße 1" });
+    expect(Object.keys(calls.personalData.at(-1) ?? {})).not.toContain("first_name");
+
+    await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox")).toBeChecked();
+    await expect(page.getByTestId("lead-request-inquiry-consent")).toContainText("Zugestimmt am 03.10.2026");
+    expect(calls.consents).toEqual(["lead_inquiry_processing"]);
+
+    await page.getByRole("button", { name: "Weiter" }).click();
+    const upload = page.getByRole("button", { name: "Dateien auswählen" });
+    await expect(upload).toBeDisabled();
+    await page.getByTestId("lead-request-health-consent").getByRole("checkbox").click();
+    await expect(page.getByTestId("lead-request-health-consent").getByRole("checkbox")).toBeChecked();
+    await expect(upload).toBeEnabled();
+    await page.locator("#lead-request-files").setInputFiles({
+      name: "befund.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+    });
+    await expect(page.getByTestId("lead-request-document-list")).toContainText("befund.pdf");
+
+    await page.getByRole("button", { name: "Weiter" }).click();
+    const send = page.getByTestId("lead-request-submit");
+    // Date of birth, sex, citizenship and country are still missing.
+    await expect(send).toBeDisabled();
+    await expect(page.getByTestId("lead-request-send")).toContainText("Geburtsdatum");
+
+    await page.getByRole("button", { name: "Angaben ändern" }).click();
+    await setDatePickerValue(page.locator("#lead-request-date_of_birth"), "1988-05-01");
+    await expect.poll(() => calls.personalData.some((patch) => patch.date_of_birth === "1988-05-01")).toBe(true);
+    await page.getByRole("combobox", { name: "Geschlecht laut Ausweis" }).click();
+    await page.getByRole("option", { name: "Weiblich" }).click();
+    await expect.poll(() => calls.personalData.some((patch) => patch.legal_sex === "female")).toBe(true);
+    await page.getByRole("combobox", { name: "Wohnsitzland" }).click();
+    await page.getByRole("option", { name: "Deutschland" }).first().click();
+    await page.locator("#lead-request-citizenships").click();
+    await page.getByRole("option", { name: "Deutschland" }).first().click();
+    await expect.poll(() => calls.personalData.some((patch) => Array.isArray(patch.citizenships))).toBe(true);
+
+    await page.getByRole("button", { name: "Weiter" }).click();
+    await page.getByRole("button", { name: "Weiter" }).click();
+    await expect(send).toBeEnabled();
+    await send.click();
+    await expect(page.getByTestId("lead-request-sent")).toContainText("03.10.2026");
+    expect(calls.submits).toBe(1);
+  });
+
+  test("the lead cabinet fits a phone screen", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setup(page, "lead");
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+  });
+});
+
+test.describe("patient portal after conversion", () => {
+  test("a patient login keeps the full portal and gets the request page when it fills one in", async ({ page }) => {
+    await setup(page, "patient", { leadRequests: 1 });
+    await page.goto("/");
+    const nav = page.locator("nav");
+    await expect(nav.getByRole("link", { name: "Meine Dokumente" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+    await nav.getByRole("link", { name: "Ihre Anfrage" }).click();
+    await expect(page).toHaveURL(/\/request$/);
+    await expect(page.getByTestId("lead-request")).toBeVisible();
+  });
+});

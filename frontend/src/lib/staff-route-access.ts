@@ -661,13 +661,50 @@ function normalizePathname(pathname: string): string {
  * Whether a patient may open this pathname inside the portal shell.
  * Query string is ignored; only mounted portal routes are allowed.
  */
+/** A patient who also fills in a request (e.g. as a parent) gets it after the dashboard. */
+const PATIENT_LEAD_REQUEST_ITEM: PatientPortalNavItem = {
+  id: "lead_request",
+  to: "/request",
+  labelKey: "nav_my_request",
+};
+
 export function canAccessPatientPortalRoute(pathname: string): boolean {
   const p = normalizePathname(pathname);
-  return PATIENT_PORTAL_NAV_ITEMS.some((item) => item.to === p);
+  return p === PATIENT_LEAD_REQUEST_ITEM.to || PATIENT_PORTAL_NAV_ITEMS.some((item) => item.to === p);
 }
 
-export function listPatientPortalNavItems(): PatientPortalNavItem[] {
-  return [...PATIENT_PORTAL_NAV_ITEMS];
+export function listPatientPortalNavItems(options: { leadRequests?: boolean } = {}): PatientPortalNavItem[] {
+  if (!options.leadRequests) return [...PATIENT_PORTAL_NAV_ITEMS];
+  const [dashboard, ...rest] = PATIENT_PORTAL_NAV_ITEMS;
+  return [dashboard, PATIENT_LEAD_REQUEST_ITEM, ...rest];
+}
+
+/**
+ * Lead cabinet (owner decision 2026-10-03): a patient login that reaches only
+ * requests (`/me.portal_mode === "lead"`) sees the request page, the account
+ * and the legal notice — nothing else of the patient portal. The server
+ * enforces the same (`lead_portal_only`).
+ */
+const LEAD_PORTAL_NAV_ITEMS: readonly PatientPortalNavItem[] = [
+  { id: "lead_request", to: "/", labelKey: "nav_my_request" },
+  { id: "account", to: "/account", labelKey: "nav_account" },
+  { id: "legal", to: "/legal", labelKey: "nav_legal_notice" },
+] as const;
+
+export function canAccessLeadPortalRoute(pathname: string): boolean {
+  const p = normalizePathname(pathname);
+  return LEAD_PORTAL_NAV_ITEMS.some((item) => item.to === p);
+}
+
+export function listLeadPortalNavItems(): PatientPortalNavItem[] {
+  return [...LEAD_PORTAL_NAV_ITEMS];
+}
+
+/** The login is in the lead cabinet: decided by the server flag, never guessed. */
+export function isLeadPortalUser(
+  user: { role?: string | null; portal_mode?: string | null } | null | undefined,
+): boolean {
+  return user?.role === "patient" && user.portal_mode === "lead";
 }
 
 /**

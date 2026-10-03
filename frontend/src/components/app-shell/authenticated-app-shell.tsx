@@ -3,7 +3,12 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { NavStateProvider } from "@/lib/nav-state";
-import { canAccessPatientPortalRoute, canAccessStaffRoute } from "@/lib/staff-route-access";
+import {
+  canAccessLeadPortalRoute,
+  canAccessPatientPortalRoute,
+  canAccessStaffRoute,
+  isLeadPortalUser,
+} from "@/lib/staff-route-access";
 
 import { AppShellFrame } from "./app-shell-frame";
 import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
@@ -39,13 +44,17 @@ export function AuthenticatedAppShell() {
     return <Navigate to="/account/password-required" replace />;
   }
 
+  const leadCabinet = isLeadPortalUser(user);
+  if (leadCabinet && !canAccessLeadPortalRoute(location.pathname)) {
+    return <Navigate to="/" replace />;
+  }
   if (user.role === "patient" && !canAccessPatientPortalRoute(location.pathname)) {
     return <Navigate to="/" replace />;
   }
 
   return (
     <NavStateProvider>
-      <ChatDeviceSetup />
+      {leadCabinet ? null : <ChatDeviceSetup />}
       <AuthenticatedAppShellContent />
     </NavStateProvider>
   );

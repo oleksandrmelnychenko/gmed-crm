@@ -451,4 +451,26 @@ describe("lead retention notifications", () => {
     expect(localizedNotificationCopy(blocked, "ru").title).toBe("Срок хранения лида истёк — нужно решение");
     expect(localizedNotificationCopy(blocked, "de").title).toBe("Lead ist zur Löschung fällig – Entscheidung nötig");
   });
+
+  it("tells staff what the patient did in the lead portal", () => {
+    const submitted = retention(
+      "lead_portal_submitted",
+      "Patient sent the request data",
+      "Personal data: 9 of 11 fields, 2 documents.",
+    );
+    expect(localizedNotificationCopy(submitted, "ru")).toEqual({
+      title: "Пациент отправил данные заявки",
+      body: "Личные данные: заполнено 9 из 11, документов: 2.",
+    });
+    expect(localizedNotificationCopy(submitted, "de").body).toBe("Persönliche Daten: 9 von 11 Angaben, Unterlagen: 2.");
+    expect(notificationHrefForRole(submitted, "patient_manager")).toBe("/leads?lead=lead-1");
+    const revoked = retention(
+      "lead_portal_consent_revoked",
+      "Patient withdrew the consent to process health data",
+      "The patient withdrew the consent in the portal (health data). Decide on the documents already uploaded.",
+    );
+    expect(localizedNotificationCopy(revoked, "de").title).toBe("Einwilligung zu Gesundheitsdaten widerrufen");
+    const minor = retention("lead_portal_minor", "Patient is under 18: issue the parents' access", "");
+    expect(localizedNotificationCopy(minor, "ru").title).toBe("Пациенту меньше 18: выдайте доступ родителю");
+  });
 });

@@ -17,6 +17,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
+import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { TwoFactorSection } from "@/pages/two-factor";
 
 function useUiText() {
@@ -31,6 +32,9 @@ function useUiText() {
  */
 export function AccountPage() {
   const { l } = useUiText();
+  const { user } = useAuth();
+  // The lead cabinet keeps the account to profile, language and password.
+  const leadCabinet = isLeadPortalUser(user);
   return (
     <div className="space-y-4" data-testid="account-page">
       <PageHeader title={l("account_title")} description={l("account_subtitle")} />
@@ -38,10 +42,14 @@ export function AccountPage() {
       <Section title={l("account_password_title")}>
         <ChangePasswordForm />
       </Section>
-      <Section title={l("twofactor_title")}>
-        <TwoFactorSection />
-      </Section>
-      <SessionsSection />
+      {leadCabinet ? null : (
+        <>
+          <Section title={l("twofactor_title")}>
+            <TwoFactorSection />
+          </Section>
+          <SessionsSection />
+        </>
+      )}
     </div>
   );
 }
