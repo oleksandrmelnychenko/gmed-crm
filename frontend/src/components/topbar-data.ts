@@ -72,6 +72,10 @@ export function localizedNotificationCopy(
   if (leadRetentionCopy) return leadRetentionCopy;
   const personnelCopy = personnelNotificationCopy(item, lang);
   if (personnelCopy) return personnelCopy;
+  if (item.kind === "sanctions_possible_match") {
+    const tr = translationsFor(lang);
+    return { title: tr.sanctions_notification_title, body: tr.sanctions_notification_body };
+  }
   const digestCopy = complianceDigestNotificationCopy(item, lang);
   if (digestCopy) return digestCopy;
   const overdueSupplierCopy = externalInvoiceOverdueNotificationCopy(item, lang);
@@ -726,6 +730,8 @@ export function notificationHrefForRole(item: Notification, role: string) {
     const tab = PERSONNEL_NOTIFICATION_TABS[item.kind];
     return tab ? `/personnel?tab=${tab}` : "/personnel";
   }
+  // A possible EU sanctions list match is reviewed by the CEO.
+  if (item.entity_type === "sanctions_hit") return role === "ceo" ? "/sanctions" : null;
   if (!item.entity_id) return null;
   if (item.entity_type === "message_peer") return `/chat?peer=${item.entity_id}`;
   if (item.entity_type === "lead") return `/leads?lead=${item.entity_id}`;

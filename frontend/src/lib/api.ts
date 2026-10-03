@@ -499,11 +499,18 @@ async function readApiErrorBody(res: Response): Promise<ApiErrorBody | null> {
 const LOCALIZED_API_ERRORS: Record<string, string> = {
   // A document out for electronic signature cannot get a new version or be archived.
   signature_pending: "api_signature_pending",
+  // Sanctions and blocked-country gate (crates/server/src/sanctions/gate.rs).
+  sanctions_confirmed: "api_sanctions_confirmed",
+  sanctions_review_pending: "api_sanctions_review_pending",
+  blocked_country: "api_blocked_country",
 };
 
 function apiErrorMessage(body: ApiErrorBody | null, res: Response) {
   const localized = body?.error ? LOCALIZED_API_ERRORS[body.error] : undefined;
-  if (localized) return uiText(localized);
+  if (localized) {
+    const countriesLabel = typeof body?.countries_label === "string" ? body.countries_label : "";
+    return uiText(localized, undefined, { countries_label: countriesLabel });
+  }
   return body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
 }
 

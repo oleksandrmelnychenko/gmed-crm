@@ -62,6 +62,7 @@ import { hasCapability } from "@/lib/permissions";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { canManageAdminAccount } from "@/pages/admin-users.helpers";
+import { SanctionsListSettings } from "@/pages/sanctions/list-settings";
 import {
   approvePendingMfaLogin,
   fetchAdminSettingsWorkspace,
@@ -384,6 +385,7 @@ function useAdminSettingsPageContent() {
   // pending login is a change to the CEO account, so it needs
   // `users.manage_ceo` (the CEO).
   const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
+  const canReviewSanctions = hasCapability(currentUser, "sanctions.review");
   const tr = t as unknown as Record<string, string>;
   const [settingsState, dispatchSettingsState] = useReducer(
     adminSettingsReducer,
@@ -1014,6 +1016,8 @@ function useAdminSettingsPageContent() {
 
         {!loading && !error ? (
           <>
+            {/* EU sanctions list and blocked countries: the CEO's (sanctions.review). */}
+            {canReviewSanctions ? <SanctionsListSettings /> : null}
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {SETTINGS_GROUPS.map((group) => {
                 const GroupIcon = group.icon;
