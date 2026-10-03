@@ -522,6 +522,20 @@ async fn uploads_need_the_health_consent_and_can_be_withdrawn_until_review() {
     assert_eq!(intake["progress"]["documents"], 1, "{intake}");
     assert_eq!(intake["uploads_hidden"], true);
     assert_eq!(intake["uploads"], json!([]));
+    assert_eq!(intake["can_review_uploads"], false);
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(intake["can_review_uploads"], true, "{intake}");
+    assert!(
+        intake["uploads"][0]["consent_given_at"].is_string(),
+        "{intake}"
+    );
 
     // Withdrawing the consent blocks further uploads.
     let (status, _) = json_request(

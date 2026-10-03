@@ -2143,6 +2143,7 @@ async fn get_lead_portal_intake(
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "can_issue": crate::routes::lead_portal_account::may_issue_portal_password(auth.role),
+        "can_review_uploads": medical && auth.can(Capability::LeadsEdit),
     }))
     .into_response()
 }
