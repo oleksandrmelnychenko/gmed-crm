@@ -177,6 +177,8 @@ import {
 import type { PatientDetail } from "@/pages/patients/model/list-model";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
+import { SanctionsLeadBanner, SanctionsLiveCheckNotice } from "@/pages/sanctions/components";
+import { isSanctionsGateError, liveCheckInput } from "@/pages/sanctions/model";
 import {
   fetchSpecializationWorkTypes,
   type SpecializationWorkType,
@@ -3260,6 +3262,8 @@ export function LeadWizard({
               orders: await fetchOrders(leadOrdersPath),
             };
           } catch (bootstrapError) {
+            // A sanctions or country block has its own banner.
+            if (isSanctionsGateError(bootstrapError)) return { bootstrapError: null, orders: existingOrders };
             return { bootstrapError, orders: existingOrders };
           }
         });
@@ -6194,6 +6198,7 @@ ${serviceCommentLines.join("\n")}`
         </nav>
 
         <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain px-4 py-5 outline-none [scrollbar-gutter:stable] sm:px-5">
+          <SanctionsLeadBanner leadId={leadId} refreshKey={lead} className="mb-5" />
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
               <Banner tone="error">
@@ -6401,6 +6406,18 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("suffix", event.target.value)}
                   />
                 </Field>
+                <SanctionsLiveCheckNotice
+                  className="md:col-span-2 -mt-2"
+                  input={liveCheckInput({
+                    firstName: draft.firstName,
+                    lastName: draft.lastName,
+                    middleName: draft.middleName,
+                    birthDate: draft.birthDate,
+                    citizenships: draft.registrationCountry ? [draft.registrationCountry] : [],
+                    leadId,
+                  })}
+                />
+
                 <Field
                   label={tx("Дата рождения", "Geburtsdatum")}
                   required

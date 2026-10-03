@@ -7923,6 +7923,8 @@ async fn purge_lead_side_records_in_tx(
         .bind(lead_id)
         .execute(&mut **tx)
         .await?;
+    // Sanctions screening results follow the lead's retention.
+    crate::sanctions::screening::purge_for_lead_in_tx(tx, lead_id).await?;
     sqlx::query("DELETE FROM user_notifications WHERE entity_type = 'lead' AND entity_id = $1")
         .bind(lead_id)
         .execute(&mut **tx)

@@ -8,6 +8,7 @@ import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
 import { personnelDe } from "./catalogs/personnel";
 import { revenueDe } from "./catalogs/revenue";
+import { sanctionsDe } from "./catalogs/sanctions";
 import { sharedCoreDe } from "./catalogs/shared";
 import { staffAccessDe } from "./catalogs/staff-access";
 
@@ -1810,5 +1811,6 @@ export const de = {
   ...patientsPortalDe,
   ...personnelDe,
   ...revenueDe,
+  ...sanctionsDe,
   ...sharedCoreDe,
 } satisfies Translations;

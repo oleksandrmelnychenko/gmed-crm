@@ -61,6 +61,7 @@ pub mod provider_people;
 pub mod providers;
 pub mod realtime;
 pub mod retention;
+pub mod sanctions;
 pub mod security_incidents;
 pub mod service_packages;
 pub mod sops;
@@ -147,4 +148,5 @@ pub fn protected_router() -> Router<AppState> {
         .merge(user_notifications::router())
         .merge(messages::router())
         .merge(workflow_checklists::router())
+        .merge(sanctions::router())
 }

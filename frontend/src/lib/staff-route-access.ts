@@ -317,6 +317,15 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     capability: "admin.compliance",
     nav: { section: "dsgvo", labelKey: "nav_compliance" },
   },
+  // EU sanctions list screening, CEO only (docs/architecture/sanctions-screening_ua.md).
+  {
+    id: "sanctions",
+    match: "prefix",
+    path: "/sanctions",
+    roles: ["ceo"],
+    capability: "sanctions.review",
+    nav: { section: "dsgvo", labelKey: "nav_sanctions", after: "admin/compliance" },
+  },
   {
     id: "incidents",
     match: "exact",

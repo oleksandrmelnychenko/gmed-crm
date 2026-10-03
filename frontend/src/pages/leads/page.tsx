@@ -158,6 +158,7 @@ import {
   type LeadPortalStatus,
 } from "./model/lead-portal-access";
 import { LeadPortalAccessDetail, PortalCredentialsDialog } from "./ui/lead-portal-access";
+import { LeadSanctionsBadge, useLeadSanctionsFlags } from "@/pages/sanctions/components";
 const PORTAL_STATUS_DOT: Record<LeadPortalStatus, string> = {
   none: "bg-transparent",
   disabled: "bg-rose-500",
@@ -711,6 +712,8 @@ function useLeadsPageContent() {
     });
   }, []);
   const canIssuePortalPassword = canIssueLeadPortalPassword(user?.role);
+  // Sanctions / blocked-country badge next to the name.
+  const sanctionsFlags = useLeadSanctionsFlags(permissions.canViewPage, version);
   const renderLeadRowDetail = useCallback(
     (row: LeadListItem) =>
       expandedLeadIds.has(row.id) ? (
@@ -772,6 +775,7 @@ function useLeadsPageContent() {
                   )}
                 />
               ) : null}
+              <LeadSanctionsBadge flag={sanctionsFlags.get(row.id)} />
             </span>
           );
         },
@@ -1008,6 +1012,7 @@ function useLeadsPageContent() {
       lang,
       locale,
       permissions.canOpen,
+      sanctionsFlags,
       t,
       toggleLeadExpanded,
     ]

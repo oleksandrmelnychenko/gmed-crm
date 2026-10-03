@@ -8,6 +8,7 @@ import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
 import { personnelRu } from "./catalogs/personnel";
 import { revenueRu } from "./catalogs/revenue";
+import { sanctionsRu } from "./catalogs/sanctions";
 import { sharedCoreRu } from "./catalogs/shared";
 import { staffAccessRu } from "./catalogs/staff-access";
 
@@ -1801,5 +1802,6 @@ export const ru = {
   ...patientsPortalRu,
   ...personnelRu,
   ...revenueRu,
+  ...sanctionsRu,
   ...sharedCoreRu,
 } satisfies Translations;
