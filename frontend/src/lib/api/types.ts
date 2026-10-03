@@ -55,6 +55,16 @@ export interface Lead {
   attachment_count?: number;
   /** The patient login created with the lead; null for leads without one. */
   portal_account?: LeadPortalAccountSummary | null;
+  /** What the patient did in the portal (step-1 fields, uploads, sent, parents' logins). */
+  portal_intake?: LeadPortalIntakeSummary | null;
+}
+
+export interface LeadPortalIntakeSummary {
+  filled: number;
+  total: number;
+  documents: number;
+  guardians: number;
+  submitted_at: string | null;
 }
 
 export interface LeadPortalAccountSummary {
