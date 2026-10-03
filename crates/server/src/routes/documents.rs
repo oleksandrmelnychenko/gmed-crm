@@ -1128,7 +1128,7 @@ struct GeneratedConsentContext {
     generated_at: chrono::DateTime<chrono::Utc>,
 }
 
-struct StagedDocumentDelete {
+pub(crate) struct StagedDocumentDelete {
     original_path: PathBuf,
     staged_path: PathBuf,
 }
@@ -12876,7 +12876,7 @@ pub(crate) async fn remove_document_blob(storage_key: &str) {
     }
 }
 
-async fn stage_document_file_delete(
+pub(crate) async fn stage_document_file_delete(
     storage_key: Option<&str>,
 ) -> Result<Option<StagedDocumentDelete>, axum::response::Response> {
     let Some(storage_key) = storage_key.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -12909,7 +12909,7 @@ async fn stage_document_file_delete(
     }
 }
 
-async fn rollback_staged_document_delete(staged: &StagedDocumentDelete) {
+pub(crate) async fn rollback_staged_document_delete(staged: &StagedDocumentDelete) {
     if let Err(error) = tokio::fs::rename(&staged.staged_path, &staged.original_path).await {
         tracing::error!(
             error = %error,
@@ -12920,7 +12920,7 @@ async fn rollback_staged_document_delete(staged: &StagedDocumentDelete) {
     }
 }
 
-async fn finalize_staged_document_delete(staged: &StagedDocumentDelete) {
+pub(crate) async fn finalize_staged_document_delete(staged: &StagedDocumentDelete) {
     if let Err(error) = tokio::fs::remove_file(&staged.staged_path).await {
         tracing::warn!(
             error = %error,
