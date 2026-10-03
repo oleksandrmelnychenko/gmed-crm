@@ -137,16 +137,28 @@ export function SignatureRequestMembers({ request, documentId }: { request: Sign
   return <>
     {packaged ? <div className="space-y-1.5 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5" data-signature-members>
       <p className="text-xs font-medium text-foreground">{tx(`Пакет из ${members.length} документов — один подписанный PDF`, `Paket aus ${members.length} Dokumenten – eine signierte PDF`)}</p>
-      <ol className="space-y-1 text-xs">
-        {members.map(member => <li key={member.document_id} className={member.document_id === documentId ? "font-medium text-foreground" : "text-muted-foreground"}>
-          {member.position + 1}. {member.accessible ? `${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}` : tx("Документ без доступа", "Dokument ohne Zugriff")}
-          {pageRange(member.page_start, member.page_count, tx) ? ` · ${pageRange(member.page_start, member.page_count, tx)}` : ""}
-          {member.document_id === documentId ? tx(" · этот документ", " · dieses Dokument") : ""}
-        </li>)}
+      <ol className="divide-y divide-border/50 text-xs">
+        {members.map(member => {
+          const current = member.document_id === documentId;
+          const pages = pageRange(member.page_start, member.page_count, tx);
+          return <li key={member.document_id} data-signature-member={member.document_id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-1.5 text-foreground">
+            <span className={current ? "min-w-0 break-words font-semibold" : "min-w-0 break-words"}>
+              <span className="mr-1 font-mono text-muted-foreground">{member.position + 1}.</span>{" "}
+              {member.accessible ? `${member.title ?? ""}${member.version ? ` · v${member.version}` : ""}` : tx("Документ без доступа", "Dokument ohne Zugriff")}
+            </span>
+            <span className="flex shrink-0 flex-wrap items-center gap-1.5">
+              {current ? <StatusBadge tone="info">{tx("этот документ", "dieses Dokument")}</StatusBadge> : null}
+              {pages ? <Badge variant="outline" className="rounded-full font-mono text-[10px] text-foreground">{pages}</Badge> : null}
+            </span>
+          </li>;
+        })}
       </ol>
-      {request.result_document_id ? <p className="text-[11px] leading-5 text-muted-foreground">{tx("Подписанный оригинал — общий PDF пакета; документ не разделяется, иначе подпись теряет силу.", "Das signierte Original ist die gemeinsame PDF des Pakets; sie wird nicht aufgeteilt, sonst verliert die Signatur ihre Wirkung.")}</p> : null}
+      {request.result_document_id ? <p className="text-[11px] leading-5 text-foreground">{tx("Подписанный оригинал — общий PDF пакета; документ не разделяется, иначе подпись теряет силу.", "Das signierte Original ist die gemeinsame PDF des Pakets; sie wird nicht aufgeteilt, sonst verliert die Signatur ihre Wirkung.")}</p> : null}
     </div> : null}
-    {request.attachments?.length ? <p className="text-xs text-muted-foreground">{tx("Для ознакомления", "Zur Kenntnisnahme")}: {request.attachments.map(attachment => attachment.title ?? tx("документ без доступа", "Dokument ohne Zugriff")).join(", ")}</p> : null}
+    {request.attachments?.length ? <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground" data-signature-attachments>
+      <StatusBadge tone="neutral" className="text-foreground">{tx("Для ознакомления", "Zur Kenntnisnahme")}</StatusBadge>
+      <span className="min-w-0 break-words">{request.attachments.map(attachment => attachment.title ?? tx("документ без доступа", "Dokument ohne Zugriff")).join(", ")}</span>
+    </p> : null}
   </>;
 }
 
@@ -366,7 +378,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
               <div className="space-y-1">
                 <AdminSectionTitle>{index === 0 ? tx("Текущий запрос", "Aktuelle Anfrage") : tx("Предыдущий запрос", "Frühere Anfrage")}</AdminSectionTitle>
-                <time dateTime={request.created_at} className="block text-[11px] text-muted-foreground">{formatAppDateTime(request.created_at)}</time>
+                <time dateTime={request.created_at} className="block font-mono text-[11px] text-foreground">{formatAppDateTime(request.created_at)}</time>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
                 {request.level ? <StatusBadge tone="neutral">{request.test_mode ? "DEMO" : request.level}</StatusBadge> : null}
@@ -375,8 +387,8 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
             </div>
             <div className="space-y-2 p-4">
               <SignatureRequestMembers request={request} documentId={documentId} />
-              {request.expires_at || request.invitation_note ? <p className="text-xs text-muted-foreground">{request.expires_at ? `${tx("Подписать до", "Unterschreiben bis")} ${formatAppDate(request.expires_at)}` : ""}{request.expires_at && request.invitation_note ? " · " : ""}{request.invitation_note ?? ""}</p> : null}
-              {refreshCheck?.id === request.id ? <p role="status" className="text-xs leading-5 text-muted-foreground">
+              {request.expires_at || request.invitation_note ? <p className="text-xs text-foreground">{request.expires_at ? `${tx("Подписать до", "Unterschreiben bis")} ${formatAppDate(request.expires_at)}` : ""}{request.expires_at && request.invitation_note ? " · " : ""}{request.invitation_note ?? ""}</p> : null}
+              {refreshCheck?.id === request.id ? <p role="status" className="text-xs leading-5 text-foreground">
                 {request.updated_at && request.updated_at !== refreshCheck.before
                   ? request.last_error
                     ? tx("Проверка не завершена: не удалось получить результат от Skribble. Повторная попытка выполнится автоматически.", "Prüfung nicht abgeschlossen: Das Ergebnis konnte nicht von Skribble abgerufen werden. Ein neuer Versuch erfolgt automatisch.")
@@ -387,12 +399,18 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               </p> : null}
               {request.signers.map(signer => {
                 const signed = request.evidence.signatures?.some(s => s.email.toLowerCase() === signer.email.toLowerCase() && s.status === "SIGNED");
-                return <div key={signer.email} className="flex flex-col gap-1 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between"><span className="break-words font-medium text-foreground">{signer.first_name} {signer.last_name} · {signer.email}</span><span className={signed ? "shrink-0 text-emerald-700" : "shrink-0 text-muted-foreground"}>{signed ? tx("Подписано", "Unterzeichnet") : request.status === "pending" ? tx("Ожидает подписи", "Unterschrift ausstehend") : tx("Подпись не подтверждена", "Unterschrift nicht bestätigt")}</span></div>;
+                return <div key={signer.email} data-signature-signer={signed ? "signed" : request.status === "pending" ? "waiting" : "unconfirmed"} className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <span className="min-w-0">
+                    <span className="block break-words font-semibold text-foreground">{signer.first_name} {signer.last_name}</span>
+                    <span className="block break-all text-foreground">{signer.email}</span>
+                  </span>
+                  <StatusBadge tone={signed ? "success" : request.status === "pending" ? "warning" : "neutral"} className={signed || request.status === "pending" ? "shrink-0 self-start sm:self-center" : "shrink-0 self-start text-foreground sm:self-center"}>{signed ? tx("Подписано", "Unterzeichnet") : request.status === "pending" ? tx("Ожидает подписи", "Unterschrift ausstehend") : tx("Подпись не подтверждена", "Unterschrift nicht bestätigt")}</StatusBadge>
+                </div>;
               })}
-              {request.status === "pending" && !request.last_error ? <p className="text-xs leading-5 text-muted-foreground">{tx("Приглашение отправлено на E-Mail. После подписания PDF появится здесь автоматически.", "Die Einladung wurde per E-Mail versendet. Nach der Unterschrift erscheint die PDF hier automatisch.")}</p> : null}
+              {request.status === "pending" && !request.last_error ? <p className="text-xs leading-5 text-foreground">{tx("Приглашение отправлено на E-Mail. После подписания PDF появится здесь автоматически.", "Die Einladung wurde per E-Mail versendet. Nach der Unterschrift erscheint die PDF hier automatisch.")}</p> : null}
               {request.status === "pending" && !request.last_error ? (() => {
                 const frames = signatureFrameCoverage(request.signers);
-                return <p data-signature-frames={frames} className={frames === "all" ? "text-xs leading-5 text-muted-foreground" : "text-xs leading-5 text-amber-700"}>{frames === "all"
+                return <p data-signature-frames={frames} className={frames === "all" ? "text-xs leading-5 text-foreground" : "text-xs leading-5 text-amber-700"}>{frames === "all"
                   ? tx("Места подписи размечены в документе: подписанту достаточно нажать «Подписать».", "Die Unterschriftsfelder sind im Dokument gesetzt: Zum Unterzeichnen genügt ein Klick.")
                   : frames === "some"
                     ? tx("Места подписи размечены не для всех подписантов: остальные разместят подпись в документе сами.", "Die Unterschriftsfelder sind nicht für alle Personen gesetzt: Die übrigen platzieren ihre Unterschrift selbst.")
@@ -401,7 +419,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
               {request.status === "submission_unknown" && request.last_error === "provider_signers_mismatch" ? <p role="alert" className="text-xs leading-5 text-amber-700">{tx("Не удалось сопоставить подписантов в ответе Skribble. Требуется проверка подключения; повторное приглашение не отправляйте.", "Die Personen in der Skribble-Antwort konnten nicht zugeordnet werden. Die Verbindung muss geprüft werden; senden Sie keine zweite Einladung.")}</p> : null}
               {request.status === "error" && request.last_error === "provider_rate_limited" ? <p role="alert" className="text-xs leading-5 text-amber-700">{tx("Skribble временно ограничил число запросов. Приглашения не отправлены. Повторите отправку позже.", "Skribble hat die Anzahl der Anfragen vorübergehend begrenzt. Es wurden keine Einladungen versendet. Versuchen Sie den Versand später erneut.")}</p> : null}
               {request.last_error === "provider_response_too_large" ? <Banner tone="warning">{tx("Подписанный PDF больше 40 МБ и не может быть загружен. Обратитесь к администратору.", "Die signierte PDF ist größer als 40 MB und kann nicht übernommen werden. Wenden Sie sich an die Administration.")}</Banner> : null}
-              {request.last_error && request.status === "pending" ? <p className="text-xs leading-5 text-muted-foreground">{tx("Синхронизация повторится автоматически. Подписывать заново не нужно.", "Die Synchronisierung wird automatisch wiederholt. Erneutes Signieren ist nicht nötig.")}</p> : null}
+              {request.last_error && request.status === "pending" ? <p className="text-xs leading-5 text-foreground">{tx("Синхронизация повторится автоматически. Подписывать заново не нужно.", "Die Synchronisierung wird automatisch wiederholt. Erneutes Signieren ist nicht nötig.")}</p> : null}
               {request.status === "completed" && !request.test_mode ? request.delivered_to_signers_at
                 ? <p className="text-xs text-emerald-700">{tx("Подписанная копия передана подписантам", "Signierte Kopie an die Unterzeichnenden übergeben")}: {formatAppDateTime(request.delivered_to_signers_at)}{request.delivery_channel ? ` · ${tx(...deliveryChannels[request.delivery_channel])}` : ""}</p>
                 : request.can_record_delivery && state.can_send ? <div className="space-y-2 rounded-lg border border-amber-200/80 bg-amber-50/60 px-3 py-2.5 text-xs dark:border-amber-800 dark:bg-amber-950/30">
@@ -434,7 +452,7 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
                     if (reason) void run(() => resolveSignatureReview(request.id, "reject", reason));
                   }}>{tx("Отклонить подпись", "Unterschrift verwerfen")}</Button>
                 </> : null}
-                {request.closed_kind ? <p className="w-full text-xs leading-5 text-muted-foreground">{tx(...closedKindLabels[request.closed_kind])}{request.closed_at ? ` · ${formatAppDateTime(request.closed_at)}` : ""}{request.close_reason && request.closed_kind !== "auto_expired" ? ` · ${request.close_reason}` : ""}</p> : null}
+                {request.closed_kind ? <p className="w-full text-xs leading-5 text-foreground">{tx(...closedKindLabels[request.closed_kind])}{request.closed_at ? ` · ${formatAppDateTime(request.closed_at)}` : ""}{request.close_reason && request.closed_kind !== "auto_expired" ? ` · ${request.close_reason}` : ""}</p> : null}
               </div>
             </div>
           </section>;

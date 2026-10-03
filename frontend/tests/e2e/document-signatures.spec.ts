@@ -146,7 +146,11 @@ test("package composer adds a document of the same patient, previews both and li
   await expect.poll(() => fixture.packageSubmissions.length).toBe(1);
   expect(fixture.packageSubmissions[0]).toEqual({ document_ids: [documentId, secondId], signers: [client], attachment_ids: [], level: "QES", language: "de" });
   await expect(dialog.getByText("Paket aus 2 Dokumenten – eine signierte PDF", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("1. Rahmenvertrag – Testperson · v1 · S. 1 · dieses Dokument", { exact: true })).toBeVisible();
+  // One row per document: number, title and version, then the chips.
+  const firstMember = dialog.locator("[data-signature-member]").first();
+  await expect(firstMember).toContainText("1. Rahmenvertrag – Testperson · v1");
+  await expect(firstMember.getByText("dieses Dokument", { exact: true })).toBeVisible();
+  await expect(firstMember.getByText("S. 1", { exact: true })).toBeVisible();
 });
 
 const document = { id: documentId, auto_name: "Rahmenvertrag – Testperson", original_filename: "vertrag.pdf", art: "framework_contract", category: "administrative", status: "active", visibility: "internal", is_medical: false, mime_type: "application/pdf", has_stored_file: true, file_size: 1000, version_root_document_id: documentId, version_number: 1, version_count: 1, is_latest_version: true, patient_id: null, order_id: null, appointment_id: null, klinik: null, ursprung: null, notes: null, generated_template_id: "framework_contract", data_sensitivity: "internal", created_at: "2026-09-05T10:00:00Z", updated_at: "2026-09-05T10:00:00Z" };

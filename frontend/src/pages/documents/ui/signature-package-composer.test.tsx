@@ -188,10 +188,18 @@ describe("signature request members", () => {
   it("lists every document with its pages and marks the current one", () => {
     const markup = renderToStaticMarkup(<SignatureRequestMembers request={request} documentId="consent" />);
     expect(markup).toContain("Paket aus 3 Dokumenten");
-    expect(markup).toContain("1. Rahmenvertrag · v3 · S. 1–2");
-    expect(markup).toContain("2. Dokument ohne Zugriff · S. 3");
-    expect(markup).toContain("3. Einwilligung · v1 · S. 4–6 · dieses Dokument");
-    expect(markup).toContain("Zur Kenntnisnahme: Datenschutzinformation");
+    // One row per document: number, title and version, then the chips.
+    const rows = [...markup.matchAll(/<li[^>]*data-signature-member="([^"]+)"[^>]*>(.*?)<\/li>/g)]
+      .map(match => [match[1], match[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()]);
+    expect(rows).toEqual([
+      ["contract", "1. Rahmenvertrag · v3 S. 1–2"],
+      ["order", "2. Dokument ohne Zugriff S. 3"],
+      ["consent", "3. Einwilligung · v1 dieses Dokument S. 4–6"],
+    ]);
+    // Every document is printed in the foreground colour, not only the current one.
+    expect(markup).not.toMatch(/<li[^>]*class="[^"]*text-muted-foreground/);
+    const attachments = /<p[^>]*data-signature-attachments[^>]*>(.*?)<\/p>/.exec(markup)?.[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    expect(attachments).toBe("Zur Kenntnisnahme Datenschutzinformation");
     expect(markup).toContain("nicht aufgeteilt");
   });
 
