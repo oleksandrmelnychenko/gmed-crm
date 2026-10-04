@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { warmUpDevServer } from "./dev-server-warm-up";
 import { pickerSection } from "./helpers";
-
 
 const patientId = "00000000-0000-0000-0000-000000000301";
 const financeUrl = `/patients/${patientId}?tab=finance`;
@@ -64,8 +62,6 @@ async function prepare(page: Page, lang = "ru", role = "ceo") {
   });
   return { entries, requests, errors, state, hold(from: string) { state.holdFrom = from; wait = new Promise<void>(resolve => { release = resolve; }); return () => { state.holdFrom = ""; release?.(); }; } };
 }
-
-warmUpDevServer();
 
 test("patient finance carries earlier balances, drills into months and links to invoices", async ({ page }) => {
   const api = await prepare(page);

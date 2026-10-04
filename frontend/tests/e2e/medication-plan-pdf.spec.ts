@@ -1,8 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { warmUpDevServer } from "./dev-server-warm-up";
-
-warmUpDevServer();
 
 async function mount(page: Page, lang: "ru" | "de", view = "overview", empty = false) {
   await page.addInitScript((value) => {

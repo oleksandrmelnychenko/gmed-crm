@@ -1,7 +1,4 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { warmUpDevServer } from "./dev-server-warm-up";
-
-warmUpDevServer();
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
