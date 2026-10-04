@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { lazyPageLoad } from "./lazy-pages";
 
 /**
  * CEO review of possible EU sanctions list matches with a mocked API. All
@@ -107,6 +108,7 @@ async function setup(page: Page, lang = "ru") {
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
   });
   await page.goto("/sanctions");
+  await expect(page.getByTestId("sanctions-hit")).toBeVisible(lazyPageLoad);
   return { calls };
 }
 
@@ -144,8 +146,9 @@ test("the CEO compares the match with the list entry and records a false positiv
   ]);
 });
 
-test("FiSaLis opens without any data in the URL and the name goes to the clipboard", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: "http://127.0.0.1:5187" });
+test("FiSaLis opens without any data in the URL and the name goes to the clipboard", async ({ page, context, baseURL }) => {
+  // The app's own origin, whatever port the dev server runs on.
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(baseURL!).origin });
   await setup(page);
   const card = page.getByTestId("sanctions-hit");
   const popupPromise = context.waitForEvent("page");

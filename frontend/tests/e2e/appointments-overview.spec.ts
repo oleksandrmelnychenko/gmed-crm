@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { coldStartTestTimeout, lazyPageLoad } from "./lazy-pages";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -9,6 +10,7 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 test.describe("appointments overview detail", () => {
+  test.describe.configure({ timeout: coldStartTestTimeout });
   test("staff overview shows mapped roles, warning copy and linked records sections correctly", async ({
     page,
   }) => {
@@ -237,7 +239,7 @@ test.describe("appointments overview detail", () => {
       .locator("section")
       .filter({ hasText: "Status und Zuständigkeiten" })
       .first();
-    await expect(summarySection).toBeVisible();
+    await expect(summarySection).toBeVisible(lazyPageLoad);
     await expect(summarySection).toContainText("Arzt");
     await expect(summarySection).toContainText("Claudia Neumann");
     // Appointments name interpreters by their job, not the generic staff role.
@@ -266,7 +268,8 @@ test.describe("appointments overview detail", () => {
     await expect(linkedSection.getByRole("button", { name: /^Auftrag\b/ })).toBeVisible();
     await expect(linkedSection.getByRole("button", { name: /^Klinik\b/ })).toBeVisible();
     await expect(linkedSection.getByRole("button", { name: /^Dokumente\b/ })).toBeVisible();
-    await expect(linkedSection.getByRole("button", { name: /^Fälle\b/ })).toBeVisible();
+    // Cases moved into the patient record (f32f77f7); there is no cases tile.
+    await expect(linkedSection.getByRole("button", { name: /^Fälle\b/ })).toHaveCount(0);
     await expect(linkedSection).not.toContainText("Arbeitsbereich öffnen");
     await expect(linkedSection).not.toContainText("Schnellvorschau");
   });

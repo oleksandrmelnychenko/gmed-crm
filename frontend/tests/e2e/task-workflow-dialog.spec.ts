@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { ConciergeTask } from "../../src/pages/concierge/model";
+import { openWorkCenter } from "./lazy-pages";
 
 const titles = { root: "Подготовить визит", child: "Проверить документы", event: "Встреча с врачом", nested: "Уточнить время", done: "Отправить маршрут", archived: "Прошлая поездка" };
 const updatedAt = "2026-09-10T10:00:00Z";
@@ -61,7 +62,7 @@ async function setup(page: Page, lang: "ru" | "de" = "ru", readonly = false) {
     if (path.endsWith("/expense-context")) return route.fulfill({ json: { patient: null, service: null, task: null, mapped_order: null } });
     return route.fulfill({ json: [] });
   });
-  await page.goto("/task-manager");
+  await openWorkCenter(page, "/task-manager");
   await expect(page.locator('[data-workflow-task-id="root"]')).toBeVisible();
   return state;
 }
@@ -131,7 +132,7 @@ test("workflow refreshes a conflicting version and keeps errors next to controls
   await start.click();
   await expect(dialog.getByRole("alert")).toContainText("Задача уже изменена");
   await expect.poll(() => state.reads).toBeGreaterThan(reads);
-  await expect(dialog.getByTestId("workflow-item-child").getByText("Открыта", { exact: true })).toBeVisible();
+  await expect(dialog.getByTestId("workflow-item-child").getByText("Открыто", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("alert")).toBeInViewport();
   state.fail = 0;
   await start.click();

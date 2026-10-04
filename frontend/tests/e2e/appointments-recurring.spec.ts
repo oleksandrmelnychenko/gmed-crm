@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { coldStartTestTimeout, lazyPageLoad } from "./lazy-pages";
 import { chooseComboboxOption } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
@@ -10,6 +11,7 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 test.describe("appointments recurring flows", () => {
+  test.describe.configure({ timeout: coldStartTestTimeout });
   test("staff can cancel a whole recurring series from the detail workspace", async ({
     page,
   }) => {
@@ -299,6 +301,7 @@ test.describe("appointments recurring flows", () => {
     const statusScopeSelect = page.getByRole("combobox", {
       name: /Statusänderung anwenden auf/i,
     });
+    await expect(statusScopeSelect).toBeVisible(lazyPageLoad);
     await chooseComboboxOption(page, statusScopeSelect, /Ganze Serie|Вся серия/i);
 
     const cancelWholeSeriesButton = page
@@ -318,9 +321,21 @@ test.describe("appointments recurring flows", () => {
       };
       return payload.status === "cancelled" && payload.recurrence_scope === "series";
     });
-    await Promise.all([statusChangeRequest, cancelWholeSeriesButton.click()]);
+    await cancelWholeSeriesButton.click();
+    // Cancelling asks for confirmation and names the affected count (762ee6c4).
+    const confirmation = page.getByRole("alertdialog", { name: /Termin wirklich absagen\?/i });
+    await expect(confirmation).toContainText("(3)");
+    await Promise.all([
+      statusChangeRequest,
+      confirmation.getByRole("button", { name: /^Termin absagen$/i }).click(),
+    ]);
+    await expect(confirmation).toBeHidden();
 
-    await expect(cancelWholeSeriesButton).toHaveAttribute("aria-pressed", "true");
+    // The refreshed appointment is cancelled; with no active occurrence left the
+    // scope is back to this appointment.
+    await expect(
+      page.getByRole("button", { name: /Diesen Termin absagen/i }).last(),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   test("staff can save recurring rule edits and refresh the appointment list", async ({
