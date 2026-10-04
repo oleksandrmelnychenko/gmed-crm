@@ -1103,7 +1103,6 @@ function useAdminCompliancePageContent() {
 
           <Section title={t.compliance_privacy_review_queue}>
             <AdminTableCard
-              title={t.compliance_privacy_review_queue}
               description={`${t.compliance_stat_requested} ${privacyCounters.requested} - ${t.compliance_stat_hold} ${privacyCounters.retentionHold} - ${t.compliance_stat_approved} ${privacyCounters.approved} - ${t.compliance_stat_overdue} ${privacyCounters.overdue}`}
               count={privacyQueue.length}
             >
