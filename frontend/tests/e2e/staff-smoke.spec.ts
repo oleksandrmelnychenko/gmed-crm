@@ -1,9 +1,6 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { warmUpDevServer } from "./dev-server-warm-up";
 import { chooseComboboxOption, pickerSection } from "./helpers";
-
-warmUpDevServer();
 
 // A real one-page PDF: the lead wizard renders previews with pdf.js.
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
@@ -4435,7 +4432,6 @@ test.describe("responsive staff workspace", () => {
   });
 });
 
-
 test("repeat examination is the single patient entry to the order wizard", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("gmed_lang", "de"));
   await page.routeWebSocket("**/api/**", socket => socket.close());
@@ -4466,7 +4462,6 @@ test("repeat examination is the single patient entry to the order wizard", async
   await expect(wizard.getByRole("tab")).toHaveCount(7);
   expect(writes.filter(path => /order-intakes|leads|prospect/.test(path))).toEqual([]);
 });
-
 
 test("leads page hides patient document review for an unconverted lead linked to an active patient", async ({page}) => {
   await page.addInitScript(() => localStorage.setItem("gmed_lang", "ru"));

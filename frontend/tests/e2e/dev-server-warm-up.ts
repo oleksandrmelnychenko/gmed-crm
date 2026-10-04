@@ -1,16 +1,15 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "@playwright/test";
+import type { Browser } from "@playwright/test";
 
 /**
  * The Vite dev server compiles a module on its first request. At the start of
  * a run many workers ask for the same large lazy chunks at once (staff shell,
  * patient workspace, clinical tab), and on a busy machine the first render
  * took up to a minute, longer than the 10 s expect and even the 60 s test
- * timeout. The warm-up below loads every lazily imported app module once per
- * worker, before the file's tests start, so tests measure the app and not the
- * compiler. It is best effort: a failed warm-up never fails a test.
+ * timeout. The global setup loads every lazily imported app module once,
+ * before any worker starts, so tests measure the app and not the compiler.
  */
 const WARM_UP_TIMEOUT = 300_000;
 
@@ -50,35 +49,31 @@ export function lazyAppModuleUrls(): string[] {
   return [...urls].sort();
 }
 
-let warmedInWorker = false;
-
-/** Registers a `beforeAll` hook that warms the dev server once per worker. */
-export function warmUpDevServer() {
-  test.beforeAll(async ({ browser }, testInfo) => {
-    if (warmedInWorker) return;
-    testInfo.setTimeout(WARM_UP_TIMEOUT + 30_000);
-    const context = await browser.newContext({ baseURL: testInfo.project.use.baseURL });
-    try {
-      const page = await context.newPage();
-      await page.route("**/api/v1/**", (route) => route.fulfill({ status: 503, json: { error: "warm-up" } }));
-      await page.routeWebSocket("**/api/**", (socket) => socket.close());
-      // The login page loads the app shell's static module graph.
-      await page.goto("/login", { timeout: WARM_UP_TIMEOUT });
-      const failed = await page.evaluate(async ({ urls, budget }) => {
-        const settled = Promise.allSettled(urls.map((url) => import(/* @vite-ignore */ url)));
-        const results = await Promise.race([
-          settled,
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), budget)),
-        ]);
-        if (!results) return ["(warm-up budget exceeded)"];
-        return urls.filter((_, index) => results[index].status === "rejected");
-      }, { urls: lazyAppModuleUrls(), budget: WARM_UP_TIMEOUT - 30_000 });
-      if (failed.length > 0) console.warn(`[warm-up] not loaded: ${failed.join(", ")}`);
-    } catch (error) {
-      console.warn(`[warm-up] skipped: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      warmedInWorker = true;
-      await context.close();
-    }
-  });
+/**
+ * Loads the app shell and every lazily imported app module once. Best effort:
+ * it logs what it could not load and never throws.
+ */
+export async function warmUpDevServer(browser: Browser, baseURL: string) {
+  const context = await browser.newContext({ baseURL });
+  try {
+    const page = await context.newPage();
+    await page.route("**/api/v1/**", (route) => route.fulfill({ status: 503, json: { error: "warm-up" } }));
+    await page.routeWebSocket("**/api/**", (socket) => socket.close());
+    // The login page loads the app shell's static module graph.
+    await page.goto("/login", { timeout: WARM_UP_TIMEOUT });
+    const failed = await page.evaluate(async ({ urls, budget }) => {
+      const settled = Promise.allSettled(urls.map((url) => import(/* @vite-ignore */ url)));
+      const results = await Promise.race([
+        settled,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), budget)),
+      ]);
+      if (!results) return ["(warm-up budget exceeded)"];
+      return urls.filter((_, index) => results[index].status === "rejected");
+    }, { urls: lazyAppModuleUrls(), budget: WARM_UP_TIMEOUT - 30_000 });
+    if (failed.length > 0) console.warn(`[warm-up] not loaded: ${failed.join(", ")}`);
+  } catch (error) {
+    console.warn(`[warm-up] skipped: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await context.close();
+  }
 }

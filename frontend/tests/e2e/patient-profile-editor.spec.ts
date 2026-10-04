@@ -1,7 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { warmUpDevServer } from "./dev-server-warm-up";
-
-warmUpDevServer();
 
 for (const lang of ["ru", "de"]) {
   for (const width of [1440, 390]) {

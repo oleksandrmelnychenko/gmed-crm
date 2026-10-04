@@ -1,8 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { warmUpDevServer } from "./dev-server-warm-up";
-
-warmUpDevServer();
 
 const patientId = "91c88f4c-6b3d-4af2-a8b1-066b178a6701";
 async function prepare(page: Page, lang: "ru" | "de", role = "ceo") {

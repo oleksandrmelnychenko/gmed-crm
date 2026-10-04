@@ -1,5 +1,4 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { warmUpDevServer } from "./dev-server-warm-up";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -193,8 +192,6 @@ function patientGrid(page: Page) {
 async function openPatientsAsCeo(page: Page) {
   await loginAsCeo(page).then(() => page.goto("/patients"));
 }
-
-warmUpDevServer();
 
 test.describe("patients data-table", () => {
   test.beforeEach(async ({ page }) => {
