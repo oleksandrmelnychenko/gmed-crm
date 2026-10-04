@@ -167,8 +167,8 @@ for (const [lang, role] of [["ru", "ceo"], ["de", "patient_manager"], ["ru", "co
     const detail = page.getByTestId("hotel-detail-dialog");
     await expect(detail.getByRole("heading", { name: "Hotel Neue Mitte", exact: true })).toBeVisible();
     await expect(detail.getByRole("button", { name: lang === "ru" ? "Добавить файл" : "Datei hinzufügen", exact: true })).toBeVisible();
-    if (lang === "ru") await expect(detail.getByRole("link", { name: "Карточка гостиницы", exact: true })).toHaveAttribute("href", "/providers/hotel-created");
-    else await expect(detail.getByText("Hotelprofil", { exact: true })).toHaveAttribute("aria-disabled", "true");
+    // Every role that may edit hotels also holds providers.view (RBAC capability snapshot), so the profile link is live.
+    await expect(detail.getByRole("link", { name: lang === "ru" ? "Карточка гостиницы" : "Hotelprofil", exact: true })).toHaveAttribute("href", "/providers/hotel-created");
     await expect(page.getByTestId("hotel-stays-table").locator("tbody tr")).toHaveCount(0);
     await detail.locator("footer").getByRole("button", { name: lang === "ru" ? "Закрыть" : "Schließen", exact: true }).click();
     await expect(page.getByRole("button", { name: "Hotel Neue Mitte", exact: true })).toBeVisible();
@@ -331,6 +331,9 @@ test("empty, unavailable and read-only states are explicit", async ({ page }) =>
   const state = await setup(page, "ru", "ceo_assistant");
   await page.goto("/hotels");
   await expect(page.getByRole("button", { name: "Добавить гостиницу", exact: true })).toHaveCount(0);
+  // Filters only read: they stay usable in the read-only view.
+  for (const filter of ["Гостиница", "Город", "Валюта", "Бронирования", "Завтраки"]) await expect(page.getByRole("combobox", { name: filter, exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Поиск гостиницы или города", { exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Hotel Lindenhof", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("spinbutton").first()).toBeDisabled();
   await expect(page.getByRole("button", { name: "Добавить файл", exact: true })).toHaveCount(0);
