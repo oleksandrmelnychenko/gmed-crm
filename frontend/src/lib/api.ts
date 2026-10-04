@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth-storage";
 
 const CLIENT_API_ORIGIN =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
+  (import.meta.env?.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ?? "";
 const API_PREFIX = "/api/v1";
 const AUTH_REFRESH_LOCK_NAME = "gmed-auth-refresh";
 export const AUTH_SESSION_EXPIRED_EVENT = "gmed:auth-session-expired";

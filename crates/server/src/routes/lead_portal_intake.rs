@@ -2591,7 +2591,8 @@ mod tests {
                 assert!(text.contains("9"), "{language}");
                 assert!(inquiry_consent_text(kind, language).is_some(), "{language}");
             }
-            assert!(health_consent_text(kind, "en").is_none());
+            assert!(health_consent_text(kind, "tr").is_none());
+            assert!(inquiry_consent_text(kind, "tr").is_none());
         }
     }
 
