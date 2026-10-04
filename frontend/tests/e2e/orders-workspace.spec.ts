@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { chooseComboboxOption } from "./helpers";
+import { chooseComboboxOption, pickerSection } from "./helpers";
 
 const orderId = "00000000-0000-0000-0000-000000000901";
 const patientId = "00000000-0000-0000-0000-000000000301";
@@ -90,6 +90,17 @@ async function prepare(page: Page, lang = "ru") {
     if (path === "/orders/" + orderId + "/workflow-checklist") body = {scope_type:"order", scope_id:orderId, open_count:0, completed_count:0, items:[]};
     if (path === "/orders") body = [order];
     if (path === "/patients") body = [{id:patientId, first_name:"Toni", last_name:"Müller", patient_id:"P-20260906-0031"}];
+    // The cancel dialog asks the server what cancelling a line does; none of these lines is invoiced.
+    const preview = path.match(/^\/orders\/[^/]+\/leistungen\/([^/]+)\/cancellation-preview$/);
+    if (preview) {
+      const line: Record<string, unknown> = order.leistungen.find(item => item.id === preview[1]) ?? {};
+      body = {
+        order_leistung_id:preview[1], order_id:orderId, status:line.status, description:line.description,
+        quantity:line.quantity, line_gross:"0", currency:"EUR", draft_invoice_ids:[], requires_credit_note:false,
+        credit_total_gross:"0", credit_notes:[], blocked_reason:line.status === "cancelled" ? "order_service_already_cancelled" : null,
+        can_issue_credit_note:true,
+      };
+    }
     if (path.includes("taxonomy")) body = {nodes:[]};
     if (path === "/stats/overview") body = {};
     await route.fulfill({json:body});
@@ -268,10 +279,12 @@ for (const lang of ["ru", "de"]) {
       await expect(heading).toBeVisible();
       expect((await heading.boundingBox())!.width).toBeGreaterThan(width === 390 ? 250 : 500);
       const economics = orderFinance(page, lang);
-      // Four headline tiles, then plan (4) and actual state (8) once the full calculation is open.
+      // Four headline tiles, then plan (4) and actual state (11: billed, received, open,
+      // open invoices, advance available, patient credit, paid directly, and four margin
+      // tiles) once the full calculation is open.
       await expect(economics.locator("dd:visible")).toHaveCount(4);
       await openFullEconomics(page, lang);
-      await expect(economics.locator("dd:visible")).toHaveCount(16);
+      await expect(economics.locator("dd:visible")).toHaveCount(19);
       const overflow = await economics.locator("dd").evaluateAll(nodes => nodes.filter(node => node.scrollWidth > node.clientWidth + 1).map(node => node.textContent));
       expect(overflow).toEqual([]);
       await page.screenshot({path:`../artifacts/design-qa/order-overview-${lang}-${width}.png`, fullPage:true});
@@ -493,9 +506,12 @@ test("a planned service is cancelled with a required reason and shows it afterwa
     return route.fulfill({json:{id:"service-1", order_id:orderId, status:"cancelled", cancelled_at:"2026-09-25T10:15:00Z", cancelled_by:"order-test-user", cancellation_reason:body.reason}});
   });
   await page.goto(`/orders/${orderId}?section=services`);
-  // Only the planned line offers the action.
-  await expect(page.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(1);
-  await page.getByRole("button", {name:"Отменить услугу", exact:true}).click();
+  // Every line that is not cancelled yet offers the action (decision 2026-09-29).
+  const plannedLine = page.locator("article").filter({has:page.getByRole("heading", {name:"QA interpreter block", exact:true})});
+  const deliveredLine = page.locator("article").filter({has:page.getByRole("heading", {name:"QA delivered service", exact:true})});
+  await expect(plannedLine.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(1);
+  await expect(deliveredLine.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(1);
+  await plannedLine.getByRole("button", {name:"Отменить услугу", exact:true}).click();
   const dialog = page.getByRole("dialog", {name:"Отменить услугу", exact:true});
   await expect(dialog.getByText("QA interpreter block", {exact:true})).toBeVisible();
   const submit = dialog.getByRole("button", {name:"Отменить услугу", exact:true});
@@ -507,11 +523,13 @@ test("a planned service is cancelled with a required reason and shows it afterwa
   await expect(submit).toBeEnabled();
   await submit.click();
   await expect(dialog).toBeHidden();
-  expect(cancelBodies).toEqual([{reason:"Часы уже выставлены по отчёту переводчика"}]);
+  // No released invoice bills the line, so no credit note is requested.
+  expect(cancelBodies).toEqual([{reason:"Часы уже выставлены по отчёту переводчика", issue_credit_note:false}]);
   const note = page.getByTestId("leistung-cancellation-note");
   await expect(note).toContainText("Отменено");
   await expect(note).toContainText("Причина: Часы уже выставлены по отчёту переводчика");
-  await expect(page.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(0);
+  await expect(plannedLine.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(0);
+  await expect(deliveredLine.getByRole("button", {name:"Отменить услугу", exact:true})).toHaveCount(1);
 });
 
 test("a cancellation conflict shows a localized error and reloads the line", async ({page}) => {
@@ -519,17 +537,17 @@ test("a cancellation conflict shows a localized error and reloads the line", asy
   const line: Record<string, unknown> = {id:"service-1", description:"QA interpreter block", quantity:"4", unit_price:"80", currency:"EUR", vat_rate:"19", status:"planned", notes:null};
   order.leistungen.push(line);
   await page.route(`**/orders/${orderId}/leistungen/service-1/cancel`, route => {
-    // Someone delivered the line meanwhile.
-    Object.assign(line, {status:"delivered", delivered_at:"2026-09-25T10:00:00Z"});
-    return route.fulfill({status:409, json:{error:"Only a planned order service can be cancelled"}});
+    // Someone cancelled the line meanwhile (any line that is not cancelled yet can be cancelled).
+    Object.assign(line, {status:"cancelled", cancelled_at:"2026-09-25T10:00:00Z", cancellation_reason:"Cancelled elsewhere"});
+    return route.fulfill({status:409, json:{error:"Conflict", code:"order_service_already_cancelled", message:"The order service is already cancelled", order_leistung_id:"service-1"}});
   });
   await page.goto(`/orders/${orderId}?section=services`);
   await page.getByRole("button", {name:"Leistung stornieren", exact:true}).click();
   const dialog = page.getByRole("dialog", {name:"Leistung stornieren", exact:true});
   await dialog.getByLabel("Stornogrund").fill("Doppelt geplant");
   await dialog.getByRole("button", {name:"Leistung stornieren", exact:true}).click();
-  await expect(dialog.getByRole("alert")).toContainText("Nur geplante Leistungen lassen sich stornieren");
-  await expect(dialog.getByRole("alert")).not.toContainText("Only a planned order service");
+  await expect(dialog.getByRole("alert")).toContainText("Die Leistung ist bereits storniert.");
+  await expect(dialog.getByRole("alert")).not.toContainText("The order service is already cancelled");
   // The typed reason is unsaved input, so closing asks before discarding it.
   await dialog.getByRole("button", {name:"Abbrechen", exact:true}).click();
   await page.getByRole("button", {name:"Ohne Speichern schließen", exact:true}).click();
@@ -710,8 +728,12 @@ test("follow-up blockers open the milestone planner, which plans and creates the
   await expect(planner).toBeInViewport();
   const week = planner.getByTestId("followup-milestone-post_1w");
   await chooseComboboxOption(page, week.getByRole("combobox", {name:"Через 1 неделю: статус"}), /Запланировано/);
-  // Prefilled one week after the closure anchor, shown as DD.MM.YYYY.
-  await expect(week.getByLabel("Через 1 неделю: дата")).toHaveValue("05.10.2026");
+  // Prefilled one week after the closure anchor, shown as DD.MM.YYYY in the segmented date field.
+  const date = week.getByRole("group", {name:"Через 1 неделю: дата", exact:true});
+  await expect(date.getByRole("spinbutton", {name:pickerSection.day})).toHaveText("05");
+  await expect(date.getByRole("spinbutton", {name:pickerSection.month})).toHaveText("10");
+  await expect(date.getByRole("spinbutton", {name:pickerSection.year})).toHaveText("2026");
+  await expect(date.locator("input")).toHaveValue("05.10.2026");
   await week.getByRole("button", {name:"Создать напоминание", exact:true}).click();
   await expect(week.getByRole("status")).toHaveText("Напоминание на 05.10.2026 создано.");
   const reminder = writes.find(write => write.path === "/appointments/appointment-anchor/reminders");
