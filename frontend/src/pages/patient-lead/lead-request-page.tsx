@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, CircleAlert, FileText, LoaderCircle, Pencil, Send, Trash2, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  CircleAlert,
+  CircleCheck,
+  Clock,
+  FileText,
+  LoaderCircle,
+  Pencil,
+  Send,
+  Trash2,
+  Upload,
+  UserRound,
+} from "lucide-react";
 
-import { Banner, SuccessBanner } from "@/components/ui-shell";
+import { Banner, Section, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -240,11 +254,17 @@ function LeadRequestView({
   const guardian = request.access_kind === "guardian";
   const [step, setStep] = useState<Step>(request.submitted_at ? "send" : "data");
   const deadline = request.retention_deadline_at ? formatAppDate(request.retention_deadline_at) : "";
+  // The same step tabs as the staff lead wizard (design taken over 2026-10-04).
+  const steps = [
+    { id: "data", label: text.stepData, Icon: UserRound, done: missingForSubmit(request).length === 0 && consentGiven(request, INQUIRY_CONSENT) },
+    { id: "documents", label: text.stepDocuments, Icon: FileText, done: request.documents.length > 0 },
+    { id: "send", label: text.stepSend, Icon: Send, done: Boolean(request.submitted_at) },
+  ] as const;
 
   return (
-    <article className="space-y-5" data-testid="lead-request">
-      <header className="space-y-2">
-        <h1 className="text-xl font-semibold leading-tight sm:text-2xl">
+    <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
+      <header className="space-y-2 border-b border-border px-4 py-4 sm:px-5">
+        <h1 className="text-lg font-semibold leading-tight">
           {guardian
             ? `${text.titleGuardian}: ${[request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ")}`
             : text.title}
@@ -252,49 +272,63 @@ function LeadRequestView({
         <p className="text-sm text-muted-foreground">{guardian ? text.introGuardian : text.intro}</p>
         {deadline && !request.submitted_at ? (
           <div
-            className="rounded-xl border border-border bg-muted/30 px-3 py-2 text-sm"
+            className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
             data-testid="lead-request-deadline"
           >
-            <p className="font-medium">{text.deadline(deadline)}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{text.deadlineNote}</p>
+            <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium">{text.deadline(deadline)}</p>
+              <p className="mt-0.5 text-xs opacity-80">{text.deadlineNote}</p>
+            </div>
           </div>
         ) : null}
       </header>
 
-      <ol className="grid grid-cols-3 gap-2" aria-label={text.title}>
-        {(
-          [
-            ["data", text.stepData],
-            ["documents", text.stepDocuments],
-            ["send", text.stepSend],
-          ] as const
-        ).map(([id, label], index) => (
-          <li key={id}>
-            <button
-              type="button"
-              aria-current={step === id ? "step" : undefined}
-              className={cn(
-                "flex h-full w-full flex-col items-start gap-1 rounded-xl border px-2 py-2 text-left text-sm transition-colors sm:flex-row sm:items-center sm:gap-2 sm:px-2.5",
-                step === id
-                  ? "border-[var(--brand)] bg-[var(--brand-soft)] font-medium text-[var(--brand)]"
-                  : "border-border text-muted-foreground hover:bg-muted/40",
-              )}
-              onClick={() => setStep(id)}
-            >
-              <span
-                className={cn(
-                  "flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
-                  step === id ? "bg-[var(--brand)] text-white" : "bg-muted text-muted-foreground",
-                )}
-              >
-                {index + 1}
-              </span>
-              <span className="text-[13px] leading-tight sm:text-sm">{label}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
+      <nav
+        className="overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        aria-label={text.title}
+      >
+        <div className="flex w-full justify-center px-3 py-2.5 sm:w-max sm:min-w-full sm:px-4">
+          <div className="t-tabs lead-wizard-step-tabs lead-cabinet-step-tabs" role="tablist">
+            {steps.map((item, index) => {
+              const selected = item.id === step;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  data-step={item.id}
+                  aria-selected={selected}
+                  aria-current={selected ? "step" : undefined}
+                  className="t-tab lead-wizard-step-tab focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setStep(item.id)}
+                >
+                  <item.Icon aria-hidden="true" className={cn("size-4 shrink-0", item.done && !selected && "max-sm:hidden")} />
+                  {item.done && !selected ? (
+                    <CircleCheck aria-hidden="true" className="size-4 shrink-0 text-emerald-600 sm:hidden" />
+                  ) : null}
+                  <span className="whitespace-nowrap">{item.label}</span>
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none max-sm:hidden",
+                      selected
+                        ? "bg-white/20 text-white"
+                        : item.done
+                          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
+                          : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {item.done ? <Check aria-hidden="true" className="size-3" /> : index + 1}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </nav>
 
+      <div className="px-4 pt-5 sm:px-5">
       {step === "data" ? (
         <PersonalDataStep request={request} text={text} lang={lang} onChange={onChange} onNext={() => setStep("documents")} />
       ) : null}
@@ -311,7 +345,33 @@ function LeadRequestView({
       {step === "send" ? (
         <SendStep request={request} text={text} onChange={onChange} onEdit={(target) => setStep(target)} />
       ) : null}
+      </div>
     </article>
+  );
+}
+
+const STEP_COUNT = 3;
+
+/** The bottom bar of a step, as in the staff lead wizard: progress and save state above the buttons. */
+function StepFooter({
+  index,
+  text,
+  status,
+  children,
+}: {
+  index: number;
+  text: LeadRequestText;
+  status?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border bg-card px-4 py-3 sm:-mx-5 sm:px-5">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <span>{text.stepOf(index, STEP_COUNT)}</span>
+        {status}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">{children}</div>
+    </div>
   );
 }
 
@@ -386,11 +446,9 @@ function PersonalDataStep({
   });
 
   return (
-    <section className="space-y-4" data-testid="lead-request-data">
-      <div className="flex justify-end">
-        <SaveIndicator state={saveState} text={text} />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+    <section className="space-y-6" data-testid="lead-request-data">
+      <Section title={text.sectionPerson}>
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         <FormField field="first_name" text={text} error={errorFor("first_name")} required>
           <Input
             {...fieldProps("first_name")}
@@ -420,6 +478,7 @@ function PersonalDataStep({
         </FormField>
         <FormField field="date_of_birth" text={text} error={errorFor("date_of_birth")} required>
           <Input
+            key={`date_of_birth-${lang}`}
             {...fieldProps("date_of_birth")}
             className={inputClass}
             type="date"
@@ -455,6 +514,10 @@ function PersonalDataStep({
             onChange={(next) => set("citizenships", next)}
           />
         </FormField>
+      </div>
+      </Section>
+      <Section title={text.sectionAddress}>
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
           <Input
             {...fieldProps("street_address")}
@@ -491,6 +554,10 @@ function PersonalDataStep({
             onChange={(code) => set("country", code ?? "")}
           />
         </FormField>
+      </div>
+      </Section>
+      <Section title={text.sectionContact}>
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         <FormField field="phone" text={text} error={errorFor("phone")}>
           <Input
             {...fieldProps("phone")}
@@ -517,23 +584,31 @@ function PersonalDataStep({
           </NativeComboboxSelect>
         </FormField>
       </div>
+      </Section>
 
-      <ConsentCheckbox
-        request={request}
-        purpose={INQUIRY_CONSENT}
-        text={text}
-        lang={lang}
-        onChange={onChange}
-        label={consentText(request, INQUIRY_CONSENT, lang) || text.inquiryConsentLabel}
-        testId="lead-request-inquiry-consent"
-        privacyLink
-      />
+      <Section title={text.sectionConsent}>
+        <ConsentCheckbox
+          request={request}
+          purpose={INQUIRY_CONSENT}
+          text={text}
+          lang={lang}
+          onChange={onChange}
+          label={consentText(request, INQUIRY_CONSENT, lang) || text.inquiryConsentLabel}
+          testId="lead-request-inquiry-consent"
+          privacyLink
+        />
+      </Section>
 
-      <div className="flex justify-end">
-        <Button type="button" onClick={onNext}>
-          {text.next}
+      <StepFooter index={1} text={text} status={<SaveIndicator state={saveState} text={text} />}>
+        <Button type="button" variant="outline" className="h-9" disabled>
+          <ArrowLeft aria-hidden="true" className="size-3.5" />
+          {text.back}
         </Button>
-      </div>
+        <Button type="button" className="h-9" onClick={onNext}>
+          {text.next}
+          <ArrowRight aria-hidden="true" className="size-3.5" />
+        </Button>
+      </StepFooter>
     </section>
   );
 }
@@ -642,7 +717,7 @@ function ConsentCheckbox({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card px-3 py-3" data-testid={testId}>
+    <div className="rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid={testId}>
       <label className="flex items-start gap-3 text-sm">
         <input
           type="checkbox"
@@ -720,11 +795,9 @@ function DocumentsStep({
   }
 
   return (
-    <section className="space-y-4" data-testid="lead-request-documents">
-      <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>
-      <div className="space-y-2">
-        <h2 className="text-sm font-semibold">{text.healthConsentTitle}</h2>
-        <p className="whitespace-pre-line rounded-xl bg-muted/30 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+    <section className="space-y-6" data-testid="lead-request-documents">
+      <Section title={text.healthConsentTitle}>
+        <p className="whitespace-pre-line rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
           {consentText(request, HEALTH_CONSENT, lang)}
         </p>
         <ConsentCheckbox
@@ -736,8 +809,10 @@ function DocumentsStep({
           onChange={onChange}
           testId="lead-request-health-consent"
         />
-      </div>
+      </Section>
 
+      <Section title={text.sectionUpload}>
+      <p className="text-sm text-muted-foreground">{text.documentsIntro}</p>
       <div className="space-y-2">
         <input
           ref={fileInput}
@@ -772,7 +847,7 @@ function DocumentsStep({
         ))}
       </div>
 
-      <ul className="divide-y divide-border rounded-xl border border-border" data-testid="lead-request-document-list">
+      <ul className="divide-y divide-border rounded-lg border border-border" data-testid="lead-request-document-list">
         {request.documents.length === 0 ? (
           <li className="px-3 py-3 text-sm text-muted-foreground">{text.noDocuments}</li>
         ) : (
@@ -803,15 +878,18 @@ function DocumentsStep({
         )}
       </ul>
       <p className="text-xs text-muted-foreground">{text.documentsOptional}</p>
+      </Section>
 
-      <div className="flex justify-between gap-2">
-        <Button type="button" variant="outline" onClick={onBack}>
+      <StepFooter index={2} text={text}>
+        <Button type="button" variant="outline" className="h-9" onClick={onBack}>
+          <ArrowLeft aria-hidden="true" className="size-3.5" />
           {text.back}
         </Button>
-        <Button type="button" onClick={onNext}>
+        <Button type="button" className="h-9" onClick={onNext}>
           {text.next}
+          <ArrowRight aria-hidden="true" className="size-3.5" />
         </Button>
-      </div>
+      </StepFooter>
     </section>
   );
 }
@@ -846,7 +924,7 @@ function SendStep({
   }
 
   return (
-    <section className="space-y-4" data-testid="lead-request-send">
+    <section className="space-y-6" data-testid="lead-request-send">
       {request.submitted_at ? (
         <SuccessBanner>
           <p className="font-semibold">{text.sentTitle}</p>
@@ -854,7 +932,7 @@ function SendStep({
           <p className="mt-1 text-xs">{text.sentAgainHint}</p>
         </SuccessBanner>
       ) : null}
-      <h2 className="text-base font-semibold">{text.sendTitle}</h2>
+      <Section title={text.sendTitle}>
       <ul className="space-y-1 text-sm">
         <li>{text.sendSummaryFields(request.progress.filled, request.progress.total)}</li>
         <li>{text.sendSummaryDocuments(request.documents.length)}</li>
@@ -881,15 +959,17 @@ function SendStep({
         </div>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-        <Button type="button" variant="outline" onClick={() => onEdit(request.submitted_at ? "data" : "documents")}>
+      </Section>
+      <StepFooter index={3} text={text}>
+        <Button type="button" variant="outline" className="h-9" onClick={() => onEdit(request.submitted_at ? "data" : "documents")}>
+          <ArrowLeft aria-hidden="true" className="size-3.5" />
           {request.submitted_at ? text.editData : text.back}
         </Button>
-        <Button type="button" className="gap-2" disabled={!ready || busy} onClick={() => void send()} data-testid="lead-request-submit">
-          {busy ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Send aria-hidden="true" className="size-4" />}
+        <Button type="button" className="h-9 gap-2" disabled={!ready || busy} onClick={() => void send()} data-testid="lead-request-submit">
+          {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
           {busy ? text.sending : request.submitted_at ? text.sendAgain : text.sendButton}
         </Button>
-      </div>
+      </StepFooter>
     </section>
   );
 }

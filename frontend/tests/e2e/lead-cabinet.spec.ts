@@ -243,7 +243,7 @@ test.describe("lead cabinet", () => {
 
     await languages.getByRole("radio", { name: "UA" }).click();
     await expect(page.getByRole("heading", { name: "Ваша заявка" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /Документи/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Документи/ })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Прізвище" })).toBeVisible();
 
     await languages.getByRole("radio", { name: "EN" }).click();
