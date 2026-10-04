@@ -71,6 +71,27 @@ async function openCreate(page: Page, lang = "ru") {
   return dialog;
 }
 
+// The page header renders its actions in the page and in the top bar. On desktop only
+// the top-bar copy may ever be shown: a first frame with the in-page copy let a click
+// resolve to the button that was hidden right after, and the click then waited forever.
+test("on desktop the header actions appear only in the top bar", async ({ page }) => {
+  await prepare(page);
+  await page.addInitScript(() => {
+    // Every DOM state another task (a user, a test) could see, not only painted frames.
+    const shown: string[] = [];
+    Object.assign(window, { __inPageHeaderActions: shown });
+    new MutationObserver(() => {
+      for (const button of document.querySelectorAll("button")) {
+        if (button.textContent?.trim() === "Исходящий счёт" && !button.closest("header") && button.getBoundingClientRect().width > 0) shown.push(button.outerHTML);
+      }
+    }).observe(document, { subtree: true, childList: true, attributes: true });
+  });
+  await page.goto("/invoices");
+  await expect(page.locator("header").getByRole("button", { name: "Исходящий счёт", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Исходящий счёт", exact: true })).toHaveCount(1);
+  expect(await page.evaluate(() => (window as unknown as { __inPageHeaderActions: string[] }).__inPageHeaderActions)).toEqual([]);
+});
+
 // The separate order-service approval step before invoicing was dropped (b6e12b62),
 // so a not-yet-approved service no longer holds back the invoice.
 test("an unapproved order service does not block creating the final invoice", async ({ page }) => {
