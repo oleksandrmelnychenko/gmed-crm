@@ -83,8 +83,9 @@ function recompute(request: ReturnType<typeof leadRequest>) {
   ].filter(filled).length;
 }
 
-async function setup(page: Page, mode: Mode, options: { leadRequests?: number } = {}) {
+async function setup(page: Page, mode: Mode, options: { leadRequests?: number; primaryLanguage?: string } = {}) {
   const request = leadRequest();
+  request.personal_data.primary_language = options.primaryLanguage ?? null;
   const calls = { personalData: [] as Record<string, unknown>[], consents: [] as string[], uploads: 0, submits: 0, blocked: [] as string[] };
 
   await page.addInitScript(() => {
@@ -251,6 +252,77 @@ test.describe("lead cabinet", () => {
 
     await page.reload();
     await expect(page.getByRole("heading", { name: "Your request" })).toBeVisible();
+  });
+
+  test("the language button of the top bar and the cabinet switch agree", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/");
+    const languages = page.getByTestId("lead-cabinet-language");
+    const portalLanguage = page.locator("header button:has(svg.lucide-globe)");
+    const menu = page.locator("nav");
+
+    // German and Russian are the portal's languages: both controls switch the menu and the cabinet.
+    await portalLanguage.click();
+    await expect(page.getByRole("heading", { name: "Ваша заявка" })).toBeVisible();
+    await expect(languages.getByRole("radio", { name: "RU" })).toHaveAttribute("aria-checked", "true");
+    await expect(menu.getByRole("link", { name: "Ваша заявка" })).toBeVisible();
+    await languages.getByRole("radio", { name: "DE" }).click();
+    await expect(menu.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+
+    // Ukrainian exists only in the cabinet: the top bar button changes the menu, the cabinet stays.
+    await languages.getByRole("radio", { name: "UA" }).click();
+    await portalLanguage.click();
+    await expect(menu.getByRole("link", { name: "Ваша заявка" })).toBeVisible();
+    await expect(languages.getByRole("radio", { name: "UA" })).toHaveAttribute("aria-checked", "true");
+    await expect(page.getByRole("textbox", { name: "Прізвище" })).toBeVisible();
+  });
+
+  test("a Russian request opens the whole portal in Russian once, then the person's choice counts", async ({ page }) => {
+    await setup(page, "lead", { primaryLanguage: "ru" });
+    await page.goto("/");
+    const languages = page.getByTestId("lead-cabinet-language");
+    await expect(page.getByRole("heading", { name: "Ваша заявка" })).toBeVisible();
+    await expect(page.locator("nav").getByRole("link", { name: "Ваша заявка" })).toBeVisible();
+    await expect(languages.getByRole("radio", { name: "RU" })).toHaveAttribute("aria-checked", "true");
+
+    await page.locator("header button:has(svg.lucide-globe)").click();
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(page.locator("nav").getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+  });
+
+  test("the calendar of the date of birth speaks the cabinet language", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/");
+    const languages = page.getByTestId("lead-cabinet-language");
+    const openCalendar = page.getByTestId("lead-request-data").locator("[data-picker-anchor] button").first();
+    const month = (locale: string) =>
+      new RegExp(new Intl.DateTimeFormat(locale, { month: "long", timeZone: "Europe/Berlin" }).format(new Date()), "i");
+
+    await languages.getByRole("radio", { name: "UA" }).click();
+    await openCalendar.click();
+    await expect(page.locator(".MuiPickersCalendarHeader-label")).toHaveText(month("uk"));
+    await expect(page.locator(".MuiDayCalendar-weekDayLabel").first()).toHaveText("П");
+    await page.keyboard.press("Escape");
+
+    await languages.getByRole("radio", { name: "EN" }).click();
+    await openCalendar.click();
+    await expect(page.locator(".MuiPickersCalendarHeader-label")).toHaveText(month("en-GB"));
+    // English weeks start on Monday here, as everywhere in the app.
+    await expect(page.locator(".MuiDayCalendar-weekDayLabel").first()).toHaveText("M");
+  });
+
+  test("the step footer stays on screen while the form scrolls", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/");
+    const next = page.getByTestId("lead-request-data").getByRole("button", { name: "Weiter" });
+    // The form is longer than the screen; "Weiter" must not need scrolling.
+    await expect(page.locator("#lead-request-first_name")).toBeInViewport();
+    await expect(next).toBeInViewport();
+    await next.click();
+    await expect(page.getByTestId("lead-request-documents")).toBeVisible();
   });
 
   test("the lead cabinet fits a phone screen", async ({ page }) => {

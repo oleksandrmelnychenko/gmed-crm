@@ -6,7 +6,10 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { TimePicker } from "@mui/x-date-pickers/TimePicker"
 import { deDE, enUS, ruRU, ukUA } from "@mui/x-date-pickers/locales"
 import dayjs, { type Dayjs } from "dayjs"
+import "dayjs/locale/en-gb"
+import "dayjs/locale/uk"
 
+import { AppAdapterDayjs } from "@/lib/app-date-adapter"
 import { useLang, type Lang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
@@ -117,6 +120,14 @@ export const PICKER_LOCALE_TEXT = {
 } satisfies Record<Lang | "uk" | "en", unknown>
 
 export type PickerLang = keyof typeof PICKER_LOCALE_TEXT
+
+/** dayjs locale of a picker language: the month and weekday names of the calendar. */
+export const PICKER_ADAPTER_LOCALE = {
+  de: "de",
+  ru: "ru",
+  uk: "uk",
+  en: "en-gb",
+} satisfies Record<PickerLang, string>
 
 /**
  * The visible label of a date field for its accessible name. Date fields sit
@@ -319,9 +330,13 @@ function Input({
     }
 
     // The anchor finds the field's visible label; `contents` keeps it out of
-    // the layout. The nested provider only adds the UI-language texts.
+    // the layout. The nested provider only adds the UI-language texts; a picker
+    // in its own language also gets its own calendar names.
     const wrapPicker = (picker: React.ReactNode) => (
-      <LocalizationProvider localeText={PICKER_LOCALE_TEXT[pickerLang ?? lang]}>
+      <LocalizationProvider
+        {...(pickerLang ? { dateAdapter: AppAdapterDayjs, adapterLocale: PICKER_ADAPTER_LOCALE[pickerLang] } : {})}
+        localeText={PICKER_LOCALE_TEXT[pickerLang ?? lang]}
+      >
         <span ref={pickerAnchorRef} data-picker-anchor="" className="contents">
           {picker}
         </span>

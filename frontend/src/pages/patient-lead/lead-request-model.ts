@@ -100,7 +100,7 @@ export function canSubmit(request: Pick<LeadRequest, "progress" | "consents">, i
   return request.progress.missing_for_submit.length === 0 && consentGiven(request, inquiryPurpose);
 }
 
-/** The consent text in the portal language, German as fallback. */
+/** The consent text in the cabinet language, German as fallback. */
 export function consentText(request: Pick<LeadRequest, "consents">, purpose: string, lang: string): string {
   const texts = request.consents[purpose]?.texts ?? {};
   return texts[lang] ?? texts.de ?? "";
