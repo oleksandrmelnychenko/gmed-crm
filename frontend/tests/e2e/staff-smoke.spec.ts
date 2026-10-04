@@ -1,6 +1,9 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { warmUpDevServer } from "./dev-server-warm-up";
 import { chooseComboboxOption, pickerSection } from "./helpers";
+
+warmUpDevServer();
 
 // A real one-page PDF: the lead wizard renders previews with pdf.js.
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));

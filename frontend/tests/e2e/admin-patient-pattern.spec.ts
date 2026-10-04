@@ -1,4 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { warmUpDevServer } from "./dev-server-warm-up";
+
+warmUpDevServer();
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -548,6 +551,8 @@ async function installAdminPatternMocks(page: Page) {
     if (path === "/admin/compliance/consents") return json(route, complianceDashboard);
     if (path === "/admin/compliance/consents/expired") return json(route, expiredConsents);
     if (path === "/admin/compliance/privacy-requests") return json(route, privacyQueue);
+    if (path === "/admin/compliance/incidents" && method === "GET") return json(route, []);
+    if (path === "/admin/compliance/patient/patient-001/recipients") return json(route, []);
     if (path === "/admin/compliance/patient/patient-001/consents") return json(route, patientConsents);
     if (path === "/admin/compliance/patient/patient-001/privacy-requests") {
       return json(route, patientPrivacyRequests);
@@ -583,7 +588,8 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
   ).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-notifications-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
-  await page.getByText("Primary SMTP").click();
+  // The DataTable also renders a (hidden) card list for phones; click the grid row.
+  await page.getByRole("table").getByText("Primary SMTP").click();
   await expect(page.getByRole("heading", { name: /Primary SMTP/i })).toBeVisible();
 
   await page.goto("/admin/health");
@@ -618,14 +624,18 @@ test("admin routes stay on the patients-style shell", async ({ page }) => {
 
   await page.goto("/admin/activity");
   await expect(page.locator("h1", { hasText: "Aktivitätsprotokoll" })).toBeVisible();
-  await page.getByText(/Einstellung aktualisiert|update setting/i).click();
+  await page.getByRole("table").getByText(/Einstellung aktualisiert|update setting/i).click();
   await expect(page.getByRole("heading", { name: /Einstellung aktualisiert|update setting/i })).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-activity-sheet.png", fullPage: true });
   await page.keyboard.press("Escape");
 
   await page.goto("/admin/compliance?patient=patient-001");
   await expect(page.locator("h1", { hasText: "DSGVO / Compliance" })).toBeVisible();
-  await expect(page.getByText(/Patienten-Einwilligungsregister/i)).toBeVisible();
-  await expect(page.getByText(/Privacy-Review-Queue|Datenschutz-Warteschlange/i)).toBeVisible();
+  // The patient consent register became the per-patient consent section (2026-09-17).
+  await expect(page.getByRole("heading", { name: "Einwilligungen des Patienten" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Prüf-Warteschlange Datenschutz" }).first(),
+  ).toBeVisible();
+  await expect(page.getByRole("table").getByText("PT-001 - Anna Muster")).toBeVisible();
   await page.screenshot({ path: "test-results/admin-pattern-compliance.png", fullPage: true });
 });

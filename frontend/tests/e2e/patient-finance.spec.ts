@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { warmUpDevServer } from "./dev-server-warm-up";
 import { pickerSection } from "./helpers";
 
 
@@ -63,6 +64,8 @@ async function prepare(page: Page, lang = "ru", role = "ceo") {
   });
   return { entries, requests, errors, state, hold(from: string) { state.holdFrom = from; wait = new Promise<void>(resolve => { release = resolve; }); return () => { state.holdFrom = ""; release?.(); }; } };
 }
+
+warmUpDevServer();
 
 test("patient finance carries earlier balances, drills into months and links to invoices", async ({ page }) => {
   const api = await prepare(page);
@@ -166,7 +169,9 @@ for (const lang of ["ru", "de"]) for (const width of [1440, 390]) {
 }
 
 test("staff without financial API access cannot open the period overview by URL", async ({ page }) => {
-  const api = await prepare(page, "ru", "it_admin");
+  // Concierge may open the patient but has no `invoices.view` (IT admin lost
+  // patient access with the role cabinets of 2026-09-20).
+  const api = await prepare(page, "ru", "concierge");
   await page.goto(financeUrl);
   await expect(page).toHaveURL(new RegExp(`/patients/${patientId}$`));
   await expect(page.getByTestId("patient-finance")).toHaveCount(0);

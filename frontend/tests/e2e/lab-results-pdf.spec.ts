@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { warmUpDevServer } from "./dev-server-warm-up";
+
+warmUpDevServer();
 
 const patientId = "patient-medication-test";
 

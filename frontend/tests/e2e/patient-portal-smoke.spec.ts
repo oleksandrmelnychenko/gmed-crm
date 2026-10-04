@@ -1,5 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { warmUpDevServer } from "./dev-server-warm-up";
 import { chooseComboboxOption, pickerValueInput } from "./helpers";
+
+warmUpDevServer();
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -712,7 +715,8 @@ test.describe("patient portal smoke flows", () => {
       ),
     ).toBeVisible();
     await expect(
-      page.locator("td").getByText(/Hochgeladen 10\. Apr\.? 2026|Uploaded 10 Apr 2026/i),
+      // Dates are DD.MM.YYYY in every language (2026-09-28).
+      page.locator("td").getByText(/(Hochgeladen|Uploaded) 10\.04\.2026/i),
     ).toBeVisible();
   });
 
