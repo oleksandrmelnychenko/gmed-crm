@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useLayoutEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
@@ -25,8 +25,11 @@ function topbarTitleQueryMatches() {
 
 export function PageHeader({ title, actions }: PageHeaderProps) {
   // Lazy init covers client-side navigations (slot already in DOM); the
-  // effect covers the very first app render where the shell commits together
-  // with the page. One-time DOM sync for the portal target.
+  // layout effect covers the very first app render where the shell commits
+  // together with the page. One-time DOM sync for the portal target. It runs
+  // before paint: a passive effect let the in-page actions show for a frame
+  // on desktop and then hid them, so a click aimed at them could land on the
+  // copy that was about to disappear.
   const [topbarSlot, setTopbarSlot] = useState<HTMLElement | null>(() =>
     typeof document === "undefined" ? null : document.getElementById("topbar-page-slot"),
   );
@@ -36,7 +39,7 @@ export function PageHeader({ title, actions }: PageHeaderProps) {
     () => false,
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setTopbarSlot(document.getElementById("topbar-page-slot"));
   }, []);
 
