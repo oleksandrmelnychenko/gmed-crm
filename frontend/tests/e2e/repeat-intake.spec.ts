@@ -13,6 +13,11 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
   }, lang);
   const reviewReads: string[] = [];
   const writes: {path: string; body: Record<string, unknown>}[] = [];
+  // Step 1 screens the typed name against the EU sanctions list 700 ms after it
+  // changes. Without a lead (lead_id null) `POST /sanctions/check` only reads
+  // the list, so it is kept apart from the writes; with a lead the server also
+  // screens that lead, which counts as a write.
+  const sanctionsChecks: Record<string, unknown>[] = [];
   const history = [
     {id: "00000000-0000-0000-0000-000000000666", case_id: "00000000-0000-0000-0000-000000000777", anamnese_aktuelle: "Previous episode", anamnese_vorgeschichte: "Preserved history", is_active: true, anamnese_at: "2025-01-01T10:00:00Z"},
     {id: "00000000-0000-0000-0000-000000000888", case_id: null, anamnese_aktuelle: "Older episode", is_active: false, anamnese_at: "2024-01-01T10:00:00Z"},
@@ -20,9 +25,11 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
   let narrative: Record<string, unknown> | null = withNarrative ? {...history[0]} : null;
   let attachAttempts = 0;
   let failureSent = false;
+  // A lead with `repeat_patient_id` runs the repeat mode from any entry point
+  // (isRepeatIntakeLead), so the ordinary lead opened through "Lead intake" has none.
   let lead: Record<string, unknown> = {
     id: leadId, first_name: "Anna", last_name: "Beispiel", qualification_status: "in_progress",
-    intake_model: "patient_first", repeat_patient_id: patientId, wizard_state: withDocuments && asLead ? {framework_contract_id: "valid-contract"} : {}, services: [], attachments: [],
+    intake_model: "patient_first", repeat_patient_id: asLead ? null : patientId, wizard_state: withDocuments && asLead ? {framework_contract_id: "valid-contract"} : {}, services: [], attachments: [],
     ...(convertedLead || linkedPatientLifecycle ? {converted_patient_id: convertedLead ? patientId : null, prospect_patient_id: patientId, prospect_patient_lifecycle: linkedPatientLifecycle ?? "active"} : {}),
     readiness: {conversion_ready: false, blocking_reasons: [], steps: [], checks: []},
   };
@@ -37,7 +44,8 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
     const post = route.request().method() === "POST";
     const body = post ? route.request().postDataJSON() as Record<string, unknown> : {};
-    if (post) writes.push({path, body});
+    if (post && path === "/sanctions/check" && !body.lead_id) sanctionsChecks.push(body);
+    else if (post) writes.push({path, body});
     if (!post && path.endsWith("/recheck")) reviewReads.push(path);
     const shouldFail = !failureSent && (
       (failAt === "create" && path === "/leads" && post)
@@ -51,6 +59,8 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
     }
     let response: unknown = [];
     if (path === "/leads" && post) response = {id: leadId};
+    else if (path === "/me") response = {id: "repeat-intake-user", email: "intake@example.test", name: "Intake QA", role: "ceo", created_at: "2026-01-01T00:00:00Z"};
+    else if (path === "/sanctions/check") response = {status: "clear", list_version_date: "2026-10-01"};
     else if (path === `/patients/${patientId}/repeat-intakes`) response = hasOrder ? [{id:leadId,created_at:"2026-09-13T10:00:00Z",concern:"Saved repeat"}] : [];
     else if (path === `/patients/${patientId}/previous-requests`) response = [{id: "00000000-0000-0000-0000-000000000aaa", created_at: "2026-03-01T09:00:00Z", concern: "Knee pain after sports injury", specialties: [], order_number: "A-PREVIOUS-001", date_from: "2026-03-02", date_to: "2026-03-06"}];
     else if (path === `/leads/${leadId}/update`) { lead = {...lead, ...body}; response = {ok: true}; }
@@ -94,16 +104,26 @@ async function mount(page: Page, lang: "ru" | "de" = "ru", failAt?: "attach" | "
     import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);
     window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type;
     window.__vite_plugin_react_preamble_installed__ = true;
-    import('/tests/e2e/fixtures/repeat-intake-harness.tsx');</script></body></html>`}));
+    // A cold dev server re-optimizes dependencies on the first import and answers
+    // "504 Outdated Optimize Dep"; reload like Vite's own client would (its HMR socket
+    // may be unavailable in the test browser).
+    import('/tests/e2e/fixtures/repeat-intake-harness.tsx').catch(error => {
+      const reloads = Number(sessionStorage.getItem('harness-reloads') ?? 0);
+      if (reloads >= 3) throw error;
+      sessionStorage.setItem('harness-reloads', String(reloads + 1));
+      location.reload();
+    });</script></body></html>`}));
   await page.goto("/repeat-intake-harness");
   await page.getByRole("button", {name: asLead ? "Lead intake" : "Repeat intake", exact: true}).click();
-  return {writes, reviewReads, wizard: page.getByRole("dialog", {name: lang === "ru" ? "Оформление обращения" : "Lead-Aufnahme", exact: true})};
+  return {writes, sanctionsChecks, reviewReads, wizard: page.getByRole("dialog", {name: lang === "ru" ? "Оформление обращения" : "Lead-Aufnahme", exact: true})};
 }
 
 test("opening and closing a repeat intake preserves identity and creates nothing", async ({page}) => {
-  const {writes, wizard} = await mount(page);
+  const {writes, sanctionsChecks, wizard} = await mount(page);
   await expect(wizard.locator('input[name="first_name"]')).toHaveValue("Anna");
   await expect(wizard.locator('input[name="last_name"]')).toHaveValue("Beispiel");
+  // The prefilled name is screened once, without a lead to attach the result to.
+  await expect.poll(() => sanctionsChecks).toEqual([expect.objectContaining({first_name: "Anna", last_name: "Beispiel", lead_id: null})]);
   await wizard.getByRole("button", {name: "Закрыть", exact: true}).click();
   await expect(wizard).toBeHidden();
   expect(writes).toEqual([]);
@@ -232,10 +252,14 @@ for (const lang of ["ru", "de"] as const) {
     }
     await wizard.getByRole("tab", {name: tx("Проверка документов", "Dokumentenprüfung"), exact: false}).click();
     await expect(wizard.getByText(tx("Паспорт просрочен", "Reisepass abgelaufen"), {exact: true}).filter({visible: true})).toBeVisible();
-    const useContract = wizard.getByRole("button", {name: tx("Использовать договор: FC-PREVIOUS", "Vertrag verwenden: FC-PREVIOUS"), exact: true});
-    await expect(useContract).toBeVisible();
-    await expect(wizard.getByRole("button", {name: /(?:Использовать договор|Vertrag verwenden): FC-(?:TERMINATED|UNSIGNED)/})).toHaveCount(0);
-    await useContract.click();
+    // The patient's latest signed contract is preselected: framework contracts are
+    // open-ended until terminated, so the new order attaches to it. Terminated and
+    // unsigned contracts cannot be used.
+    await expect(wizard.getByRole("row", {name: /FC-PREVIOUS/})).toContainText(tx("Выбран", "Ausgewählt"));
+    for (const number of ["FC-TERMINATED", "FC-UNSIGNED"]) {
+      await expect(wizard.getByRole("row", {name: new RegExp(number)})).not.toContainText(tx("Выбран", "Ausgewählt"));
+    }
+    await expect(wizard.getByRole("button", {name: /(?:Использовать договор|Vertrag verwenden): FC-/})).toHaveCount(0);
     await expect.poll(() => writes.some(item => item.path.endsWith("/update") && (item.body.wizard_state as Record<string, unknown>)?.framework_contract_id === "valid-contract")).toBe(true);
     expect(writes.filter(item => item.path === "/framework-contracts" || item.path.includes("/framework-contracts/"))).toEqual([]);
     await wizard.getByRole("button", {name: tx("Обновить срок", "Gültigkeit ändern"), exact: true}).click();
@@ -287,9 +311,11 @@ test("saved repeat is resumed through the patient entry without creating another
   await expect(wizard.getByText("Penicillin",{exact:true})).toBeVisible();
   await expect(wizard.getByText("Данные сохранены",{exact:true})).toBeVisible();
   await wizard.getByRole("button",{name:"Закрыть",exact:true}).click();
+  await expect(wizard).toBeHidden();
+  // The only saved repeat draft is resumed directly, without a picker choice.
   await page.getByRole("button",{name:"Repeat intake",exact:true}).click();
-  await page.getByRole("button",{name:"Продолжить",exact:true}).click();
   await expect(wizard).toBeVisible();
+  await expect(page.getByRole("dialog",{name:"Повторное обращение",exact:true})).toHaveCount(0);
   await wizard.getByRole("tab",{name:/Медицинская характеристика/}).click();
   await expect(wizard.getByText("Penicillin",{exact:true})).toBeVisible();
   expect(writes.filter(x=>x.path==="/leads")).toHaveLength(1);
