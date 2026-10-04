@@ -25,6 +25,7 @@ import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { ApiRequestError } from "@/lib/api";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -91,6 +92,7 @@ function storedCabinetLang(): LeadCabinetLang | null {
 
 export function LeadRequestPage() {
   const { lang: portalLang, setLang: setPortalLang } = useLang();
+  const accountLang = useAuth().user?.preferred_language ?? null;
   // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
   // choice is remembered, otherwise the language the person entered for the
   // request is used, then the portal language.
@@ -135,10 +137,12 @@ export function LeadRequestPage() {
   }, [load]);
 
   // First visit of a request in German or Russian: the whole portal takes that
-  // language once; afterwards the person's own choice counts.
+  // language once, unless the account already has a language of its own (a
+  // patient with the full portal); afterwards the person's own choice counts.
   useEffect(() => {
-    if (!chosenLang && (requestLang === "de" || requestLang === "ru")) chooseLang(requestLang);
-  }, [chosenLang, requestLang, chooseLang]);
+    if (chosenLang || accountLang) return;
+    if (requestLang === "de" || requestLang === "ru") chooseLang(requestLang);
+  }, [accountLang, chosenLang, requestLang, chooseLang]);
 
   const replaceRequest = useCallback((next: LeadRequest) => {
     setRequests((current) =>

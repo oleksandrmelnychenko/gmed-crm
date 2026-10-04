@@ -83,9 +83,15 @@ function recompute(request: ReturnType<typeof leadRequest>) {
   ].filter(filled).length;
 }
 
-async function setup(page: Page, mode: Mode, options: { leadRequests?: number; primaryLanguage?: string } = {}) {
+async function setup(
+  page: Page,
+  mode: Mode,
+  options: { leadRequests?: number; primaryLanguage?: string; accountLanguage?: "de" | "ru" | null } = {},
+) {
   const request = leadRequest();
   request.personal_data.primary_language = options.primaryLanguage ?? null;
+  // The language saved on the account; a new lead login has none.
+  const accountLanguage = options.accountLanguage === undefined ? "de" : options.accountLanguage;
   const calls = { personalData: [] as Record<string, unknown>[], consents: [] as string[], uploads: 0, submits: 0, blocked: [] as string[] };
 
   await page.addInitScript(() => {
@@ -107,7 +113,7 @@ async function setup(page: Page, mode: Mode, options: { leadRequests?: number; p
           role: "patient",
           capabilities: [],
           created_at: "2026-10-03T08:00:00Z",
-          preferred_language: "de",
+          preferred_language: accountLanguage,
           password_change_required: false,
           portal_mode: mode,
           lead_portal: options.leadRequests ? { requests: options.leadRequests } : mode === "lead" ? { requests: 1 } : null,
@@ -148,7 +154,7 @@ async function setup(page: Page, mode: Mode, options: { leadRequests?: number; p
       return route.fulfill({ json: request });
     }
     if (path === "/me/profile") {
-      return route.fulfill({ json: { id: "lead-user", email: "anna.muster@example.com", name: "Anna Muster", role: "patient", phone: null, preferred_language: "de" } });
+      return route.fulfill({ json: { id: "lead-user", email: "anna.muster@example.com", name: "Anna Muster", role: "patient", phone: null, preferred_language: accountLanguage } });
     }
     if (mode === "lead" && (path.startsWith("/me/") || path.startsWith("/notifications"))) {
       // The server closes the rest of the portal to a lead login.
@@ -279,7 +285,7 @@ test.describe("lead cabinet", () => {
   });
 
   test("a Russian request opens the whole portal in Russian once, then the person's choice counts", async ({ page }) => {
-    await setup(page, "lead", { primaryLanguage: "ru" });
+    await setup(page, "lead", { primaryLanguage: "ru", accountLanguage: null });
     await page.goto("/");
     const languages = page.getByTestId("lead-cabinet-language");
     await expect(page.getByRole("heading", { name: "Ваша заявка" })).toBeVisible();
@@ -291,6 +297,15 @@ test.describe("lead cabinet", () => {
     await page.reload();
     await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
     await expect(page.locator("nav").getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+  });
+
+  test("a language saved on the account is not replaced by the language of the request", async ({ page }) => {
+    await setup(page, "lead", { primaryLanguage: "ru", accountLanguage: "de" });
+    await page.goto("/");
+    await expect(page.getByTestId("lead-request")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(page.locator("nav").getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(page.getByTestId("lead-cabinet-language").getByRole("radio", { name: "DE" })).toHaveAttribute("aria-checked", "true");
   });
 
   test("the calendar of the date of birth speaks the cabinet language", async ({ page }) => {

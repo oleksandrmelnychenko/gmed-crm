@@ -438,7 +438,8 @@ export function asLeadCabinetLang(value: string | null | undefined): LeadCabinet
  * the cabinet then follows the portal, so its language button in the top bar
  * and the switch above the title never disagree. Without a choice the
  * language of the request applies if it is UA or EN; a DE/RU request language
- * is taken over into the portal once (see `LeadRequestPage`).
+ * is taken over into the portal once, for an account without a language of
+ * its own (see `LeadRequestPage`).
  */
 export function resolveLeadCabinetLang(
   chosen: LeadCabinetLang | null,
