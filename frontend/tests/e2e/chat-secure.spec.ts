@@ -1050,7 +1050,10 @@ test.describe("chat secure flows", () => {
     });
     expect(content.type).toBe("application/pdf");
     expect(content.text).toBe(pdf);
-    await page.keyboard.press("Escape");
+    // Chrome's PDF viewer takes keyboard focus once the PDF has loaded; Escape from the
+    // dialog itself closes it whether or not the browser renders PDFs inline.
+    await page.getByRole("dialog").getByRole("button", { name: "Schließen", exact: true }).press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("button", { name: "Vorschau: corrupt.pdf", exact: true }).click();
     await expect(page.getByRole("dialog").getByText(/Keine Vorschau verfügbar/)).toBeVisible();
     await expect(page.getByRole("dialog").getByRole("button", { name: "Herunterladen", exact: true })).toBeEnabled();

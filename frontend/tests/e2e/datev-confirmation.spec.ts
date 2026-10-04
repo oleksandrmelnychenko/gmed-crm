@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setup, confirm, expectedTarget } from "./datev-fixture";
+import { setup, confirm, expectedTarget, ownCallback } from "./datev-fixture";
 
 for (const operation of ["check", "read"] as const) test(`${operation} rejects stale confirmation and requires a new target`, async ({ page }) => {
   const { panel, setStatus } = await setup(page, true);
@@ -42,7 +42,7 @@ for (const operation of ["authorize", "disconnect"] as const) test(`${operation}
   const { panel, setStatus } = await setup(page, true, "ru", disconnected ? { status: "disconnected", has_tokens: false } : {});
   const label = disconnected ? "Подключить через DATEV" : "DATEV · Отключить доступ";
   await panel.getByRole("button", { name: label, exact: true }).click();
-  await expect(page.getByRole("dialog")).toContainText("http://127.0.0.1:5174/api/v1/datev/oauth/callback");
+  await expect(page.getByRole("dialog")).toContainText(ownCallback(new URL(page.url()).origin));
   const nextGeneration = "00000000-0000-0000-0000-000000000099";
   setStatus({ generation: nextGeneration });
   const requests: unknown[] = [];

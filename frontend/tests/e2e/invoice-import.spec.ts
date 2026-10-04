@@ -478,8 +478,11 @@ test("accounting ledger exposes and opens an imported invoice original", async (
   await expect(originalButton).toBeVisible();
   await expect(originalButton).toHaveAttribute("title", "supplier-original.pdf");
 
+  // The ledger shows the readable operation; the technical posting text stays in the title.
+  const posting = page.getByTitle("External invoice payment R-42", { exact: true }).first();
+  await expect(posting).toHaveText(/^(Оплата счета поставщика|Zahlung der Lieferantenrechnung)$/);
   const rowPopupPromise = page.waitForEvent("popup");
-  await page.getByText("External invoice payment R-42", { exact: true }).first().click();
+  await posting.click();
   const rowPopup = await rowPopupPromise;
   await expect.poll(originalRequestCount).toBe(1);
   await rowPopup.close();

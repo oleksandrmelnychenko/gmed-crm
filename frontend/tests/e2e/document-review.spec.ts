@@ -22,10 +22,13 @@ for (const lang of ["ru", "de"] as const) {
         import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);
         window.$RefreshReg$=()=>{}; window.$RefreshSig$=()=>(type)=>type; window.__vite_plugin_react_preamble_installed__=true;
         await import('/tests/e2e/fixtures/document-review.tsx');</script></html>` }));
+      // The harness module compiles on first use; its first status request marks the component as mounted.
+      const mounted = page.waitForRequest(request => request.url().endsWith("/review-status"));
       await page.goto("/__document-review");
+      await mounted;
       await expect(page.getByText(lang === "ru" ? "Не отправлен" : "Nicht versendet", { exact: true })).toBeVisible();
       expect(commands).toEqual([]);
-      await page.getByRole("button", { name: lang === "ru" ? "Отметить отправку" : "Versand vermerken", exact: true }).click();
+      await page.getByRole("button", { name: lang === "ru" ? "Отметить как отправленный" : "Als versendet markieren", exact: true }).click();
       await expect(page.getByText(lang === "ru" ? /письмо не отправляется/ : /versendet keine E-Mail/)).toBeVisible();
       expect(commands).toEqual([]);
       await page.getByRole("button", { name: lang === "ru" ? "Подтверждаю" : "Bestätigen", exact: true }).click();
