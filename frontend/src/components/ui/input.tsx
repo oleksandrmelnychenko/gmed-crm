@@ -106,7 +106,13 @@ export const PICKER_LOCALE_TEXT = {
   de: deDE.components.MuiLocalizationProvider.defaultProps.localeText,
   ru: ruRU.components.MuiLocalizationProvider.defaultProps.localeText,
   // The lead cabinet also speaks UA and EN.
-  uk: ukUA.components.MuiLocalizationProvider.defaultProps.localeText,
+  // MUI ships Latin placeholders for Ukrainian; use ДД.ММ.РРРР.
+  uk: {
+    ...ukUA.components.MuiLocalizationProvider.defaultProps.localeText,
+    fieldYearPlaceholder: (params: { digitAmount: number }) => "Р".repeat(params.digitAmount),
+    fieldMonthPlaceholder: (params: { contentType: string }) => (params.contentType === "letter" ? "ММММ" : "ММ"),
+    fieldDayPlaceholder: () => "ДД",
+  },
   en: enUS.components.MuiLocalizationProvider.defaultProps.localeText,
 } satisfies Record<Lang | "uk" | "en", unknown>
 

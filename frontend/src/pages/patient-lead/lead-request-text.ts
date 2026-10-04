@@ -62,6 +62,12 @@ export type LeadRequestText = {
   noRequest: string;
   requestFor: string;
   language: string;
+  sectionPerson: string;
+  sectionAddress: string;
+  sectionContact: string;
+  sectionConsent: string;
+  sectionUpload: string;
+  stepOf: (index: number, total: number) => string;
 };
 
 const de: LeadRequestText = {
@@ -143,6 +149,12 @@ const de: LeadRequestText = {
   noRequest: "Für Ihr Konto ist derzeit keine offene Anfrage vorhanden.",
   requestFor: "Anfrage für",
   language: "Sprache",
+  sectionPerson: "Persönliche Daten",
+  sectionAddress: "Adresse",
+  sectionContact: "Kontakt",
+  sectionConsent: "Einwilligung",
+  sectionUpload: "Ihre Unterlagen",
+  stepOf: (index, total) => `Schritt ${index} von ${total}`,
 };
 
 const ru: LeadRequestText = {
@@ -223,6 +235,12 @@ const ru: LeadRequestText = {
   noRequest: "Для вашего аккаунта сейчас нет открытой заявки.",
   requestFor: "Заявка для",
   language: "Язык",
+  sectionPerson: "Личные данные",
+  sectionAddress: "Адрес",
+  sectionContact: "Контакт",
+  sectionConsent: "Согласие",
+  sectionUpload: "Ваши документы",
+  stepOf: (index, total) => `Шаг ${index} из ${total}`,
 };
 
 const uk: LeadRequestText = {
@@ -303,6 +321,12 @@ const uk: LeadRequestText = {
   noRequest: "Для вашого акаунта зараз немає відкритої заявки.",
   requestFor: "Заявка для",
   language: "Мова",
+  sectionPerson: "Особисті дані",
+  sectionAddress: "Адреса",
+  sectionContact: "Контакт",
+  sectionConsent: "Згода",
+  sectionUpload: "Ваші документи",
+  stepOf: (index, total) => `Крок ${index} з ${total}`,
 };
 
 const en: LeadRequestText = {
@@ -383,6 +407,12 @@ const en: LeadRequestText = {
   noRequest: "There is no open request for your account at the moment.",
   requestFor: "Request for",
   language: "Language",
+  sectionPerson: "Personal details",
+  sectionAddress: "Address",
+  sectionContact: "Contact",
+  sectionConsent: "Consent",
+  sectionUpload: "Your documents",
+  stepOf: (index, total) => `Step ${index} of ${total}`,
 };
 
 /** Languages of the lead cabinet: the portal's DE/RU plus UA and EN. */
