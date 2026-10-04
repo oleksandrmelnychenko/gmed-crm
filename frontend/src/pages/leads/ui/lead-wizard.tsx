@@ -6526,7 +6526,7 @@ ${serviceCommentLines.join("\n")}`
                     lastName: draft.lastName,
                     middleName: draft.middleName,
                     birthDate: draft.birthDate,
-                    citizenships: draft.registrationCountry ? [draft.registrationCountry] : [],
+                    citizenships: draft.citizenships,
                     leadId,
                   })}
                 />
