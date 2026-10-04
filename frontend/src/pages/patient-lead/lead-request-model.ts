@@ -1,3 +1,5 @@
+import { cachedLanguageDisplayNames } from "@/lib/intl-cache";
+
 import type { LeadRequest, LeadRequestPersonalData, PersonalDataPatch } from "./lead-request-api";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
@@ -108,9 +110,34 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export function formatFileSize(size: number | null | undefined, lang: string): string {
   if (!size || size <= 0) return "";
-  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const locale = cabinetLocale(lang);
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toLocaleString(locale, { maximumFractionDigits: 1 })} MB`;
   }
   return `${Math.max(1, Math.round(size / 1024)).toLocaleString(locale)} KB`;
+}
+
+/** Number and name locale of a cabinet language (DE, EN, UA, RU). */
+export function cabinetLocale(lang: string): string {
+  switch (lang) {
+    case "de":
+      return "de-DE";
+    case "en":
+      return "en-GB";
+    case "uk":
+      return "uk-UA";
+    default:
+      return "ru-RU";
+  }
+}
+
+/** A language code as a name in the cabinet language, e.g. "uk" → "українська". */
+export function languageName(code: string, lang: string): string {
+  const display = cachedLanguageDisplayNames(cabinetLocale(lang).slice(0, 2));
+  try {
+    const name = display?.of(code) ?? code;
+    return name.charAt(0).toLocaleUpperCase(cabinetLocale(lang)) + name.slice(1);
+  } catch {
+    return code;
+  }
 }

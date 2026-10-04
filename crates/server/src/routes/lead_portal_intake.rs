@@ -48,8 +48,9 @@ use gmed_domain::role::Role;
 /// Version of the consent texts below. A new wording needs a new version; a
 /// consent to an older version does not count any more.
 pub(crate) const HEALTH_CONSENT_VERSION: &str = "2026-10-03";
-/// Languages of the consent texts (the patient portal speaks DE and RU).
-const CONSENT_LANGUAGES: [&str; 2] = ["de", "ru"];
+/// Languages of the consent texts: the portal speaks DE and RU, the lead
+/// cabinet also UA and EN (owner request 2026-10-04).
+const CONSENT_LANGUAGES: [&str; 4] = ["de", "ru", "uk", "en"];
 /// Active uploads per lead through the portal.
 const MAX_PORTAL_UPLOADS: i64 = 30;
 
@@ -128,6 +129,16 @@ pub(crate) fn inquiry_consent_text(kind: AccessKind, language: &str) -> Option<&
             "Я согласен(на), что мои данные и данные моего ребёнка обрабатываются для рассмотрения \
              обращения."
         }
+        (AccessKind::Own, "uk") => {
+            "Я погоджуюся, що мої дані обробляються для розгляду мого звернення."
+        }
+        (AccessKind::Own, "en") => "I agree that my details are processed to handle my request.",
+        (AccessKind::Guardian, "uk") => {
+            "Я погоджуюся, що мої дані та дані моєї дитини обробляються для розгляду звернення."
+        }
+        (AccessKind::Guardian, "en") => {
+            "I agree that my details and my child's details are processed to handle the request."
+        }
         _ => return None,
     })
 }
@@ -176,6 +187,45 @@ pub(crate) fn health_consent_text(kind: AccessKind, language: &str) -> Option<&'
              его в портале или обратившись в GMed; отзыв действует на будущее и не влияет на \
              законность обработки до отзыва. Если сотрудничество не состоится, заявка и документы \
              удаляются по истечении указанного срока."
+        }
+        (AccessKind::Own, "uk") => {
+            "Я даю згоду на те, щоб GMed обробляла дані про моє здоров'я, які я завантажую в цей \
+             портал (наприклад, виписки, висновки, знімки та аналізи), щоб розглянути мою заявку й \
+             підготувати можливе лікування в Німеччині (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям \
+             GMed передає ці документи лише після окремої згоди. Згода добровільна. Я можу будь-коли \
+             відкликати її в порталі або звернувшись до GMed; відкликання діє на майбутнє і не \
+             впливає на законність обробки до нього. Якщо співпраця не відбудеться, заявку та \
+             документи буде видалено після закінчення зазначеного строку."
+        }
+        (AccessKind::Own, "en") => {
+            "I consent to GMed processing the health data I upload to this portal (for example \
+             doctors' letters, findings, images and lab results) in order to review my request and \
+             prepare a possible treatment in Germany (Art. 9(2)(a) GDPR). GMed passes these documents \
+             on to clinics and doctors only after a separate consent. The consent is voluntary. I can \
+             withdraw it at any time in the portal or by contacting GMed, with effect for the \
+             future; the lawfulness of the processing up to then is not affected. If no cooperation \
+             comes about, the request and the documents are deleted when the stated deadline has \
+             passed."
+        }
+        (AccessKind::Guardian, "uk") => {
+            "Як батько, мати або законний представник я даю згоду на те, щоб GMed обробляла дані про \
+             здоров'я моєї дитини, які я завантажую в цей портал (наприклад, виписки, висновки, \
+             знімки та аналізи), щоб розглянути заявку й підготувати можливе лікування в Німеччині \
+             (ст. 9 п. 2 літ. a DSGVO). Клінікам і лікарям GMed передає ці документи лише після \
+             окремої згоди. Згода добровільна. Я можу будь-коли відкликати її в порталі або \
+             звернувшись до GMed; відкликання діє на майбутнє і не впливає на законність обробки до \
+             нього. Якщо співпраця не відбудеться, заявку та документи буде видалено після закінчення \
+             зазначеного строку."
+        }
+        (AccessKind::Guardian, "en") => {
+            "As a parent or legal guardian I consent to GMed processing my child's health data that \
+             I upload to this portal (for example doctors' letters, findings, images and lab \
+             results) in order to review the request and prepare a possible treatment in Germany \
+             (Art. 9(2)(a) GDPR). GMed passes these documents on to clinics and doctors only after a \
+             separate consent. The consent is voluntary. I can withdraw it at any time in the portal \
+             or by contacting GMed, with effect for the future; the lawfulness of the processing up \
+             to then is not affected. If no cooperation comes about, the request and the documents \
+             are deleted when the stated deadline has passed."
         }
         _ => return None,
     })

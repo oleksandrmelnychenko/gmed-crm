@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, CircleAlert, FileText, LoaderCircle, Send, Trash2, Upload } from "lucide-react";
+import { Check, CircleAlert, FileText, LoaderCircle, Pencil, Send, Trash2, Upload } from "lucide-react";
 
 import { Banner, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
-import { LANGUAGE_OPTIONS, languageLabel } from "@/components/ui/language-multi-select";
+import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { ApiRequestError } from "@/lib/api";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -33,6 +33,7 @@ import {
   consentText,
   draftFromPersonalData,
   formatFileSize,
+  languageName,
   missingForSubmit,
   personalDataPatch,
   rejectedValue,
@@ -40,7 +41,13 @@ import {
   type PersonalField,
   type RejectedValue,
 } from "./lead-request-model";
-import { leadRequestText, type LeadRequestText } from "./lead-request-text";
+import {
+  LEAD_CABINET_LANGS,
+  asLeadCabinetLang,
+  leadRequestText,
+  type LeadCabinetLang,
+  type LeadRequestText,
+} from "./lead-request-text";
 
 type Step = "data" | "documents" | "send";
 
@@ -57,17 +64,48 @@ function errorMessage(error: unknown): string {
  * parent for a minor — enters the personal data, uploads documents and sends
  * the request to the manager. Nothing else of the patient portal is shown.
  */
+const CABINET_LANG_STORAGE_KEY = "gmed_lead_cabinet_lang";
+
+function storedCabinetLang(): LeadCabinetLang | null {
+  try {
+    return asLeadCabinetLang(window.localStorage.getItem(CABINET_LANG_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
 export function LeadRequestPage() {
-  const { lang } = useLang();
+  const { lang: portalLang, setLang: setPortalLang } = useLang();
+  // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
+  // choice is remembered, otherwise the language the person entered for the
+  // request is used, then the portal language.
+  const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(storedCabinetLang);
+  const [requestLang, setRequestLang] = useState<LeadCabinetLang | null>(null);
+  const lang: LeadCabinetLang = chosenLang ?? requestLang ?? asLeadCabinetLang(portalLang) ?? "de";
   const text = leadRequestText(lang);
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
 
+  const chooseLang = useCallback(
+    (next: LeadCabinetLang) => {
+      setChosenLang(next);
+      try {
+        window.localStorage.setItem(CABINET_LANG_STORAGE_KEY, next);
+      } catch {
+        // The choice then lasts for this visit only.
+      }
+      // The rest of the portal (menu, account) speaks DE and RU.
+      if (next === "de" || next === "ru") setPortalLang(next);
+    },
+    [setPortalLang],
+  );
+
   const load = useCallback(async () => {
     setError("");
     try {
       const loaded = await fetchMyLeadRequests();
+      setRequestLang(asLeadCabinetLang(loaded[0]?.personal_data.primary_language));
       setRequests(loaded);
       setSelected((current) =>
         current && loaded.some((request) => request.lead_id === current) ? current : loaded[0]?.lead_id ?? null,
@@ -89,7 +127,7 @@ export function LeadRequestPage() {
 
   if (error) {
     return (
-      <LeadCabinetFrame>
+      <LeadCabinetFrame lang={lang} onLang={chooseLang}>
         <Banner tone="error">{text.loadFailed}</Banner>
         <Button type="button" variant="outline" onClick={() => void load()}>
           {text.retry}
@@ -99,7 +137,7 @@ export function LeadRequestPage() {
   }
   if (!requests) {
     return (
-      <LeadCabinetFrame>
+      <LeadCabinetFrame lang={lang} onLang={chooseLang}>
         <div role="status" className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
           <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
         </div>
@@ -109,7 +147,7 @@ export function LeadRequestPage() {
   const request = requests.find((item) => item.lead_id === selected) ?? null;
   if (!request) {
     return (
-      <LeadCabinetFrame>
+      <LeadCabinetFrame lang={lang} onLang={chooseLang}>
         <h1 className="text-xl font-semibold">{text.title}</h1>
         <p className="text-sm text-muted-foreground">{text.noRequest}</p>
       </LeadCabinetFrame>
@@ -117,7 +155,7 @@ export function LeadRequestPage() {
   }
 
   return (
-    <LeadCabinetFrame>
+    <LeadCabinetFrame lang={lang} onLang={chooseLang}>
       {requests.length > 1 ? (
         <div className="flex flex-wrap gap-2" role="tablist" aria-label={text.requestFor}>
           {requests.map((item) => (
@@ -144,9 +182,45 @@ export function LeadRequestPage() {
   );
 }
 
-function LeadCabinetFrame({ children }: { children: ReactNode }) {
+function LeadCabinetFrame({
+  lang,
+  onLang,
+  children,
+}: {
+  lang: LeadCabinetLang;
+  onLang: (lang: LeadCabinetLang) => void;
+  children: ReactNode;
+}) {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-5 pb-16" data-testid="lead-cabinet">
+      <div className="flex justify-end">
+        <div
+          role="radiogroup"
+          aria-label={leadRequestText(lang).language}
+          className="inline-flex rounded-lg border border-border bg-card p-0.5"
+          data-testid="lead-cabinet-language"
+        >
+          {LEAD_CABINET_LANGS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={lang === option.value}
+              title={option.name}
+              lang={option.value}
+              className={cn(
+                "min-w-10 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                lang === option.value
+                  ? "bg-[var(--brand)] text-white"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              )}
+              onClick={() => onLang(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
       {children}
     </div>
   );
@@ -200,7 +274,7 @@ function LeadRequestView({
               type="button"
               aria-current={step === id ? "step" : undefined}
               className={cn(
-                "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left text-sm transition-colors",
+                "flex h-full w-full flex-col items-start gap-1 rounded-xl border px-2 py-2 text-left text-sm transition-colors sm:flex-row sm:items-center sm:gap-2 sm:px-2.5",
                 step === id
                   ? "border-[var(--brand)] bg-[var(--brand-soft)] font-medium text-[var(--brand)]"
                   : "border-border text-muted-foreground hover:bg-muted/40",
@@ -215,7 +289,7 @@ function LeadRequestView({
               >
                 {index + 1}
               </span>
-              <span className="truncate">{label}</span>
+              <span className="text-[13px] leading-tight sm:text-sm">{label}</span>
             </button>
           </li>
         ))}
@@ -350,6 +424,7 @@ function PersonalDataStep({
             className={inputClass}
             type="date"
             autoComplete="bday"
+            pickerLang={asLeadCabinetLang(lang) ?? undefined}
             max={appDateKey()}
             value={draft.date_of_birth}
             onChange={(event) => set("date_of_birth", event.target.value)}
@@ -374,6 +449,7 @@ function PersonalDataStep({
           <CitizenshipMultiSelect
             id="lead-request-citizenships"
             value={draft.citizenships}
+            lang={lang}
             placeholder={text.citizenshipsPlaceholder}
             invalid={Boolean(errorFor("citizenships"))}
             onChange={(next) => set("citizenships", next)}
@@ -435,7 +511,7 @@ function PersonalDataStep({
             <option value="">{text.choose}</option>
             {LANGUAGE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {languageLabel(option.value, lang === "de" ? "de" : "ru")}
+                {languageName(option.value, lang)}
               </option>
             ))}
           </NativeComboboxSelect>
@@ -549,7 +625,7 @@ function ConsentCheckbox({
     setError("");
     try {
       if (checked) {
-        const result = await giveLeadConsent(request.lead_id, purpose, consent.version, lang === "de" ? "de" : "ru");
+        const result = await giveLeadConsent(request.lead_id, purpose, consent.version, lang);
         onChange({
           ...request,
           consents: { ...request.consents, [purpose]: { ...consent, given_at: result.given_at } },
@@ -792,7 +868,14 @@ function SendStep({
             ))}
             {!inquiryConsent ? <li>{text.inquiryConsentMissing}</li> : null}
           </ul>
-          <Button type="button" variant="link" className="h-auto px-0 text-amber-900" onClick={() => onEdit("data")}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2 gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+            onClick={() => onEdit("data")}
+          >
+            <Pencil aria-hidden="true" className="size-3.5" />
             {text.editData}
           </Button>
         </div>
