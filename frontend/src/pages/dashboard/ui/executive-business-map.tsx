@@ -402,13 +402,13 @@ export function ExecutiveBusinessMap({
   const moneyTone = signalTone(netCashFlow);
   const providerTone = signalTone(payables, true);
   const ordersTotal = overview?.orders
-    ?? operations?.orders_by_phase_valued.reduce((sum, row) => sum + row.count, 0)
+    ?? operations?.orders_by_phase_valued?.reduce((sum, row) => sum + row.count, 0)
     ?? 0;
   const orderTone = ordersTotal > 0 ? "warning" : "good";
   const patientTone = activePatientCount > 0 ? "good" : "warning";
   const patientTrend = monthly.map((item) => ({ label: item.month, value: item.count }));
-  const orderTrend = operations?.orders_by_phase_valued.map((item) => ({ label: item.phase, value: item.count })) ?? [];
-  const providerTrend = operations?.top_providers.slice(0, 8).map((item) => ({ label: item.name, value: item.appointment_count })) ?? [];
+  const orderTrend = operations?.orders_by_phase_valued?.map((item) => ({ label: item.phase, value: item.count })) ?? [];
+  const providerTrend = operations?.top_providers?.slice(0, 8).map((item) => ({ label: item.name, value: item.appointment_count })) ?? [];
   const cashTrend = cashData.map((item) => ({ label: item.label, value: item.net }));
 
   const statusLabel = (tone: "good" | "warning" | "danger") => tone === "good" ? copy.good : tone === "warning" ? copy.warning : copy.danger;
@@ -488,7 +488,7 @@ export function ExecutiveBusinessMap({
               label={copy.orderCount}
               value={loading ? "—" : String(ordersTotal)}
               chart={<Suspense fallback={null}><ExecutiveSparkline data={orderTrend} tone={orderTone} /></Suspense>}
-              detail={<><span className="font-medium text-foreground">{copy.pipeline}:</span> {operations?.orders_by_phase_valued.length ?? 0} {copy.phases}, {openTasksCount} {copy.openActionsShort}.</>}
+              detail={<><span className="font-medium text-foreground">{copy.pipeline}:</span> {operations?.orders_by_phase_valued?.length ?? 0} {copy.phases}, {openTasksCount} {copy.openActionsShort}.</>}
               action={copy.orderAction}
               onClick={() => go("/orders")}
             />
@@ -501,7 +501,7 @@ export function ExecutiveBusinessMap({
               label={copy.providerPayables}
               value={loading ? "—" : money.format(payables)}
               chart={<Suspense fallback={null}><ExecutiveSparkline data={providerTrend} tone={providerTone} /></Suspense>}
-              detail={<><span className="font-medium text-foreground">{copy.network}:</span> {operations?.top_providers.length ?? 0} {copy.providersInSelection}.</>}
+              detail={<><span className="font-medium text-foreground">{copy.network}:</span> {operations?.top_providers?.length ?? 0} {copy.providersInSelection}.</>}
               action={copy.providerAction}
               onClick={() => go("/company-finance?tab=providers")}
             />
