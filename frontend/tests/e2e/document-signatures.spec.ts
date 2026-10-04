@@ -192,6 +192,8 @@ async function prepare(page: Page, enabled = true) {
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "");
     let body: unknown = [];
     if (path === "/me") body = { id: documentId, email: "fixture@example.org", name: "Signaturtest", role: "ceo", created_at: document.created_at };
+    // The fixture token has no expiry, so the session refreshes whenever the window regains focus.
+    if (path === "/auth/refresh") body = { access_token: "signature-fixture", refresh_token: "signature-fixture-refresh" };
     if (path === "/documents") body = [document];
     if (path === `/documents/${documentId}`) body = document;
     if (path === `/documents/${documentId}/versions`) body = [document];
@@ -359,7 +361,10 @@ test("registry action opens the selected PDF without navigating the row and also
   await expect(signing.getByLabel("Vorname", { exact: true }).first()).toHaveValue("");
   await page.setViewportSize({ width: 390, height: 844 });
   await signing.screenshot({ path: "../artifacts/design-qa/signature-nested-mobile.png" });
-  await page.keyboard.press("Escape");
+  // Chrome's PDF viewer in the preview underneath takes keyboard focus once its PDF has
+  // loaded, which may happen after the signing dialog opened. Press Escape from inside
+  // the signing dialog, as a user working in it would.
+  await signing.getByLabel("Vorname", { exact: true }).first().press("Escape");
   await expect(signing).toHaveCount(0);
   await expect(preview).toBeVisible();
   expect(fixture.submissions).toHaveLength(0);

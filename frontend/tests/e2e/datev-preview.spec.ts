@@ -36,9 +36,9 @@ test("connection stays disconnected and demo never writes or contacts DATEV", as
   await page.setViewportSize({ width: 1500, height: 1000 });
   await page.goto("/invoices?source=datev");
   await expect(page.getByRole("heading", { name: "Оригиналы счетов из DATEV" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Подключение DATEV", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Подключение DATEV настраивает администратор.")).toBeVisible();
-  await expect(page.locator('a[href="/admin/datev"]')).toHaveCount(0);
+  // Billing holds datev.read (RBAC capability snapshot): it may open the connection page, not set it up.
+  await expect(page.getByRole("button", { name: "Подключение DATEV", exact: true })).toBeVisible();
+  await expect(page.getByText("Подключение DATEV настраивает администратор.")).toHaveCount(0);
   await page.getByRole("button", { name: "Открыть демо", exact: true }).click();
   const panel = page.getByTestId("datev-workspace");
   await expect(panel.getByText("Демонстрационные данные.", { exact: false })).toBeVisible();
@@ -70,6 +70,17 @@ test("connection stays disconnected and demo never writes or contacts DATEV", as
   await page.getByRole("option", { name: /Mia Beispiel/ }).click();
   await expect(invoice.getByRole("combobox", { name: "Демо-заказ", exact: true })).not.toContainText("DEMO-O-1001");
   await expect(invoice.getByRole("checkbox")).not.toBeChecked();
+  expect(writes).toEqual([]);
+  expect(datevRequests).toEqual([]);
+});
+
+test("a role without DATEV access is told that an administrator connects DATEV", async ({ page }) => {
+  const { writes, datevRequests } = await prepare(page, "patient_manager");
+  await page.goto("/invoices?source=datev");
+  await expect(page.getByRole("heading", { name: "Оригиналы счетов из DATEV" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Подключение DATEV", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Подключение DATEV настраивает администратор.")).toBeVisible();
+  await expect(page.locator('a[href="/admin/datev"]')).toHaveCount(0);
   expect(writes).toEqual([]);
   expect(datevRequests).toEqual([]);
 });

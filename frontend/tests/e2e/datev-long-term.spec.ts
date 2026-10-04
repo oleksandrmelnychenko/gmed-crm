@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { setup, confirm, expectedTarget } from "./datev-fixture";
+import { setup, confirm, expectedTarget, ownCallback } from "./datev-fixture";
 
 const long = "DATEV · Подключить на длительный срок", force = "DATEV · Отключить без подтверждения";
 const target = { revision: expectedTarget.revision, generation: expectedTarget.generation, mode: "sandbox" };
@@ -35,7 +35,7 @@ test("an unconfirmed revocation can be left only through an explicit forced disc
   await page.route("**/admin/datev/disconnect", async (route) => {
     const payload = route.request().postDataJSON(); pending.calls.push({ path: "/admin/datev/disconnect", payload });
     pending.setStatus({ status: "disconnected", has_tokens: false });
-    return route.fulfill({ json: { configured: true, ...target, redirect_uri: "http://127.0.0.1:5174/api/v1/datev/oauth/callback", exchange_enabled: true, status: "disconnected", has_tokens: false, long_term: false, revocation_confirmed: false, accounting_writes_enabled: false, invoice_originals_supported: false } });
+    return route.fulfill({ json: { configured: true, ...target, redirect_uri: ownCallback(new URL(route.request().url()).origin), exchange_enabled: true, status: "disconnected", has_tokens: false, long_term: false, revocation_confirmed: false, accounting_writes_enabled: false, invoice_originals_supported: false } });
   });
   await confirm(page, pending.panel, force);
   await expect(pending.panel).toContainText("DATEV не подтвердил отзыв");

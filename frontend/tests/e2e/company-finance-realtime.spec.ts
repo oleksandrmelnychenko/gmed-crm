@@ -198,13 +198,19 @@ for (const lang of ["ru", "de"] as const) test(`incoming invoice approval and pa
   const table = workspace.getByRole("table");
   await expect(table.getByText("LIVE-INVOICE-1", { exact: true })).toBeVisible();
   await expect(table.getByText(lang === "ru" ? "На проверке" : "Zu prüfen", { exact: true })).toBeVisible();
-  const pay = workspace.getByRole("button", { name: lang === "ru" ? "Записать оплату" : "Zahlung erfassen", exact: true });
+  // The row action first asks who paid; a company expense can only be paid by GMed.
+  const pay = workspace.getByRole("button", { name: lang === "ru" ? "Оплата" : "Zahlung", exact: true }).filter({ visible: true });
   const bounds = await pay.boundingBox();
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(1440);
   await pay.click();
-  const dialog = page.getByRole("dialog");
+  const choice = page.getByRole("dialog", { name: lang === "ru" ? "Оплата входящего счёта" : "Zahlung der Eingangsrechnung", exact: true });
+  const paidByGmed = choice.getByRole("button", { name: lang === "ru" ? /^Оплатила GMed/ : /^Von GMed bezahlt/ });
+  await expect(paidByGmed).toBeDisabled();
   expect(api.payments).toHaveLength(0);
-  await dialog.getByRole("button", { name: lang === "ru" ? "Подтвердить счёт" : "Rechnung freigeben", exact: true }).click();
+  await choice.getByRole("button", { name: lang === "ru" ? "Подтвердить счёт" : "Rechnung freigeben", exact: true }).click();
+  await paidByGmed.click();
+  await expect(choice).toHaveCount(0);
+  const dialog = page.getByRole("dialog");
   const amount = dialog.getByLabel(lang === "ru" ? "Сумма выплаты" : "Zahlungsbetrag", { exact: true });
   await expect(amount).toHaveValue("100.00");
   await amount.fill("40");
@@ -222,8 +228,11 @@ for (const lang of ["ru", "de"] as const) test(`incoming invoice approval and pa
   await page.screenshot({ path: `../artifacts/design-qa/incoming-invoices-${lang}-desktop.png` });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
-  await expect(workspace.getByRole("button", { name: lang === "ru" ? "История оплат" : "Zahlungsverlauf", exact: true })).toBeVisible();
+  await expect(pay).toBeVisible();
   await page.screenshot({ path: `../artifacts/design-qa/incoming-invoices-${lang}-mobile.png`, fullPage: true });
+  // The paid invoice keeps its GMed payment history reachable on a phone.
+  await pay.click();
+  await expect(choice.getByRole("button", { name: lang === "ru" ? /^История оплат GMed/ : /^GMed-Zahlungsverlauf/ })).toBeEnabled();
 });
 
 test("financial events update balances without a refresh button and coalesce during a slow request", async ({ page }) => {
