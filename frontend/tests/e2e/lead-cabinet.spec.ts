@@ -235,6 +235,24 @@ test.describe("lead cabinet", () => {
     expect(calls.submits).toBe(1);
   });
 
+  test("the lead switches the cabinet to Ukrainian or English and keeps the choice", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/");
+    const languages = page.getByTestId("lead-cabinet-language");
+    await expect(languages.getByRole("radio", { name: "DE" })).toHaveAttribute("aria-checked", "true");
+
+    await languages.getByRole("radio", { name: "UA" }).click();
+    await expect(page.getByRole("heading", { name: "Ваша заявка" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Документи/ })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Прізвище" })).toBeVisible();
+
+    await languages.getByRole("radio", { name: "EN" }).click();
+    await expect(page.getByRole("heading", { name: "Your request" })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Your request" })).toBeVisible();
+  });
+
   test("the lead cabinet fits a phone screen", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await setup(page, "lead");

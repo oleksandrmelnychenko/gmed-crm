@@ -3,8 +3,8 @@ import type { Lang } from "@/lib/i18n";
 import type { PersonalField } from "./lead-request-model";
 
 /**
- * Texts of the lead cabinet (the patient portal speaks DE and RU; the
- * language follows the portal toggle and the account setting).
+ * Texts of the lead cabinet in DE, EN, UA and RU (the rest of the patient
+ * portal speaks DE and RU; owner request 2026-10-04 for UA and EN).
  */
 export type LeadRequestText = {
   title: string;
@@ -61,6 +61,7 @@ export type LeadRequestText = {
   retry: string;
   noRequest: string;
   requestFor: string;
+  language: string;
 };
 
 const de: LeadRequestText = {
@@ -141,6 +142,7 @@ const de: LeadRequestText = {
   retry: "Erneut versuchen",
   noRequest: "Für Ihr Konto ist derzeit keine offene Anfrage vorhanden.",
   requestFor: "Anfrage für",
+  language: "Sprache",
 };
 
 const ru: LeadRequestText = {
@@ -220,8 +222,195 @@ const ru: LeadRequestText = {
   retry: "Повторить",
   noRequest: "Для вашего аккаунта сейчас нет открытой заявки.",
   requestFor: "Заявка для",
+  language: "Язык",
 };
 
-export function leadRequestText(lang: Lang | string): LeadRequestText {
-  return lang === "de" ? de : ru;
+const uk: LeadRequestText = {
+  title: "Ваша заявка",
+  titleGuardian: "Заявка для вашої дитини",
+  intro: "Будь ласка, заповніть свої особисті дані та завантажте документи. Усе зберігається автоматично.",
+  introGuardian:
+    "Будь ласка, заповніть особисті дані дитини та завантажте документи. Усе зберігається автоматично.",
+  deadline: (date) => `Будь ласка, заповніть до ${date}.`,
+  deadlineNote:
+    "З міркувань захисту даних заявки, робота над якими до цієї дати не продовжена, після неї видаляються автоматично.",
+  stepData: "Дані",
+  stepDocuments: "Документи",
+  stepSend: "Надсилання",
+  fields: {
+    first_name: "Ім'я",
+    middle_name: "По батькові / друге ім'я",
+    last_name: "Прізвище",
+    date_of_birth: "Дата народження",
+    legal_sex: "Стать за документами",
+    citizenships: "Громадянство",
+    street_address: "Вулиця і будинок",
+    zip_code: "Поштовий індекс",
+    city: "Місто",
+    country: "Країна проживання",
+    phone: "Телефон",
+    primary_language: "Бажана мова",
+  },
+  legalSexOptions: {
+    female: "Жіноча",
+    male: "Чоловіча",
+    diverse: "Інша",
+    no_entry: "Без зазначення",
+  },
+  choose: "Виберіть",
+  citizenshipsPlaceholder: "Додати країну",
+  required: "Обов'язкове поле",
+  saving: "Зберігається…",
+  saved: "Збережено",
+  notSaved: "Не збережено",
+  invalidField: "Будь ласка, перевірте це поле.",
+  minorNeedsGuardian:
+    "Для осіб, молодших 18 років, заявку заповнюють батьки або законний представник. Ми повідомили вашу команду і зв'яжемося з вами.",
+  next: "Далі",
+  back: "Назад",
+  inquiryConsentLabel: "Я погоджуюся, що мої дані обробляються для розгляду мого звернення.",
+  privacyLink: "Інформація про захист даних",
+  consentGivenAt: (dateTime) => `Згоду надано ${dateTime}`,
+  consentWithdraw: "Відкликати згоду",
+  consentWithdrawConfirm: "Відкликати згоду? Відкликання діє на майбутнє; ми отримаємо повідомлення.",
+  documentsIntro:
+    "Завантажте медичні документи, які у вас уже є (виписки, висновки, знімки, аналізи). PDF, JPG або PNG, до 25 МБ на файл. Цей крок необов'язковий.",
+  healthConsentTitle: "Згода на обробку даних про здоров'я",
+  healthConsentLabel: "Я даю згоду (обов'язково перед першим завантаженням).",
+  uploadButton: "Вибрати файли",
+  uploading: "Завантажується…",
+  uploadNeedsConsent: "Щоб завантажити файли, спершу підтвердьте згоду вище.",
+  fileTooLarge: (name) => `${name} більший за 25 МБ.`,
+  noDocuments: "Документи ще не завантажено.",
+  documentsOptional: "Заявку можна надіслати і без документів.",
+  removeDocument: "Видалити",
+  documentTakenOver: "Прийнято в роботу",
+  maxDocuments: (count) => `Не більше ${count} файлів на заявку.`,
+  sendTitle: "Надіслати вашому менеджеру",
+  sendSummaryFields: (filled, total) => `Особисті дані: заповнено ${filled} з ${total}`,
+  sendSummaryDocuments: (count) => `Документи: ${count}`,
+  missingTitle: "Будь ласка, доповніть:",
+  inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних у розділі «Дані».",
+  sendButton: "Надіслати менеджеру",
+  sending: "Надсилається…",
+  sentTitle: "Дякуємо!",
+  sentBody: (dateTime) => `Ваші дані надіслано ${dateTime}. Ми зв'яжемося з вами.`,
+  sentAgainHint: "Змінили щось після надсилання? Просто надішліть дані ще раз.",
+  sendAgain: "Надіслати ще раз",
+  editData: "Змінити дані",
+  loadFailed: "Не вдалося завантажити заявку.",
+  retry: "Спробувати ще раз",
+  noRequest: "Для вашого акаунта зараз немає відкритої заявки.",
+  requestFor: "Заявка для",
+  language: "Мова",
+};
+
+const en: LeadRequestText = {
+  title: "Your request",
+  titleGuardian: "Request for your child",
+  intro: "Please enter your personal details and upload your documents. Everything is saved automatically.",
+  introGuardian:
+    "Please enter your child's personal details and upload the documents. Everything is saved automatically.",
+  deadline: (date) => `Please complete by ${date}.`,
+  deadlineNote:
+    "For data protection reasons, requests that are not taken further by then are deleted automatically after this date.",
+  stepData: "Details",
+  stepDocuments: "Documents",
+  stepSend: "Send",
+  fields: {
+    first_name: "First name",
+    middle_name: "Middle name",
+    last_name: "Last name",
+    date_of_birth: "Date of birth",
+    legal_sex: "Sex as in your ID",
+    citizenships: "Citizenship(s)",
+    street_address: "Street and number",
+    zip_code: "Postcode",
+    city: "City",
+    country: "Country of residence",
+    phone: "Phone",
+    primary_language: "Preferred language",
+  },
+  legalSexOptions: {
+    female: "Female",
+    male: "Male",
+    diverse: "Diverse",
+    no_entry: "Not specified",
+  },
+  choose: "Select",
+  citizenshipsPlaceholder: "Add country",
+  required: "Required",
+  saving: "Saving…",
+  saved: "Saved",
+  notSaved: "Not saved",
+  invalidField: "Please check this entry.",
+  minorNeedsGuardian:
+    "For persons under 18 the parents or the legal guardian fill in the request. We have informed your team and will get in touch.",
+  next: "Next",
+  back: "Back",
+  inquiryConsentLabel: "I agree that my details are processed to handle my request.",
+  privacyLink: "Privacy information",
+  consentGivenAt: (dateTime) => `Agreed on ${dateTime}`,
+  consentWithdraw: "Withdraw consent",
+  consentWithdrawConfirm: "Withdraw your consent? The withdrawal applies to the future; we will be informed.",
+  documentsIntro:
+    "Upload medical documents you already have (doctors' letters, findings, images, lab results). PDF, JPG or PNG, up to 25 MB per file. This step is optional.",
+  healthConsentTitle: "Consent to health data processing",
+  healthConsentLabel: "I consent (required before the first upload).",
+  uploadButton: "Choose files",
+  uploading: "Uploading…",
+  uploadNeedsConsent: "To upload files, first confirm the consent above.",
+  fileTooLarge: (name) => `${name} is larger than 25 MB.`,
+  noDocuments: "No documents uploaded yet.",
+  documentsOptional: "You can also send the request without documents.",
+  removeDocument: "Remove",
+  documentTakenOver: "Taken over by us",
+  maxDocuments: (count) => `At most ${count} files per request.`,
+  sendTitle: "Send to your contact person",
+  sendSummaryFields: (filled, total) => `Personal details: ${filled} of ${total}`,
+  sendSummaryDocuments: (count) => `Documents: ${count}`,
+  missingTitle: "Please add:",
+  inquiryConsentMissing: "Please agree to the processing of your details under \"Details\".",
+  sendButton: "Send to the manager",
+  sending: "Sending…",
+  sentTitle: "Thank you!",
+  sentBody: (dateTime) => `Your details were sent on ${dateTime}. We will get in touch.`,
+  sentAgainHint: "Changed something afterwards? Just send your details again.",
+  sendAgain: "Send again",
+  editData: "Edit details",
+  loadFailed: "The request could not be loaded.",
+  retry: "Try again",
+  noRequest: "There is no open request for your account at the moment.",
+  requestFor: "Request for",
+  language: "Language",
+};
+
+/** Languages of the lead cabinet: the portal's DE/RU plus UA and EN. */
+export type LeadCabinetLang = "de" | "en" | "uk" | "ru";
+
+export const LEAD_CABINET_LANGS: readonly { value: LeadCabinetLang; label: string; name: string }[] = [
+  { value: "de", label: "DE", name: "Deutsch" },
+  { value: "en", label: "EN", name: "English" },
+  { value: "uk", label: "UA", name: "Українська" },
+  { value: "ru", label: "RU", name: "Русский" },
+];
+
+/** A stored or preferred language as a cabinet language, if it is one. */
+export function asLeadCabinetLang(value: string | null | undefined): LeadCabinetLang | null {
+  const code = (value ?? "").trim().toLowerCase().split(/[-_]/)[0];
+  if (code === "ua") return "uk";
+  return code === "de" || code === "en" || code === "uk" || code === "ru" ? code : null;
+}
+
+export function leadRequestText(lang: Lang | LeadCabinetLang | string): LeadRequestText {
+  switch (asLeadCabinetLang(lang)) {
+    case "de":
+      return de;
+    case "en":
+      return en;
+    case "uk":
+      return uk;
+    default:
+      return ru;
+  }
 }

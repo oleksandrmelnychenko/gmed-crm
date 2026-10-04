@@ -29,6 +29,7 @@ export function CitizenshipMultiSelect({
   className,
   id,
   invalid = false,
+  lang: displayLang,
 }: {
   value: readonly string[];
   onChange: (next: string[]) => void;
@@ -37,8 +38,11 @@ export function CitizenshipMultiSelect({
   className?: string;
   id?: string;
   invalid?: boolean;
+  /** Language of the country names; defaults to the UI language. */
+  lang?: string;
 }) {
-  const { t, lang } = useLang();
+  const { t, lang: uiLang } = useLang();
+  const lang = displayLang ?? uiLang;
   const selected = normalizeCitizenships(value);
   const options = COUNTRY_CODES.map((code) => ({ value: code, label: `${countryLabel(code, lang)} (${code})` }))
     .sort((left, right) => left.label.localeCompare(right.label, lang));

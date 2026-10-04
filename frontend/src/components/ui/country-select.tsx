@@ -120,13 +120,18 @@ export function countryCodeForDisplay(value: string | null | undefined) {
   return COUNTRY_CODE_SET.has(code) ? code : "";
 }
 
+/** Locale for country names: the UI languages plus UA and EN (lead cabinet). */
+export function countryNameLocale(lang: string): string {
+  return lang === "de" || lang === "en" || lang === "uk" ? lang : "ru";
+}
+
 /** Localized human-readable country name for an ISO alpha-2 code. */
 export function countryLabel(code: string | null | undefined, lang: string): string {
   if (!code) {
     return "";
   }
   const upper = code.toUpperCase();
-  const display = cachedRegionDisplayNames(lang === "de" ? "de" : "ru");
+  const display = cachedRegionDisplayNames(countryNameLocale(lang));
   if (!display) return upper;
   try {
     return display.of(upper) ?? upper;
@@ -158,7 +163,7 @@ export function CountrySelect({
 }) {
   const selectedValue = countryCodeFromStoredValue(value);
   const options = useMemo(() => {
-    const collator = new Intl.Collator(lang === "de" ? "de" : "ru");
+    const collator = new Intl.Collator(countryNameLocale(lang));
     const knownOptions = COUNTRY_CODES.map((code) => ({ code, label: countryLabel(code, lang) })).sort(
       (a, b) => collator.compare(a.label, b.label),
     );

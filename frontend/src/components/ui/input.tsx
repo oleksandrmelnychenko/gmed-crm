@@ -4,7 +4,7 @@ import { DatePicker } from "@mui/x-date-pickers/DatePicker"
 import { DateTimePicker } from "@mui/x-date-pickers/DateTimePicker"
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider"
 import { TimePicker } from "@mui/x-date-pickers/TimePicker"
-import { deDE, ruRU } from "@mui/x-date-pickers/locales"
+import { deDE, enUS, ruRU, ukUA } from "@mui/x-date-pickers/locales"
 import dayjs, { type Dayjs } from "dayjs"
 
 import { useLang, type Lang } from "@/lib/i18n"
@@ -105,7 +105,12 @@ export function pickerFieldReadOnly(
 export const PICKER_LOCALE_TEXT = {
   de: deDE.components.MuiLocalizationProvider.defaultProps.localeText,
   ru: ruRU.components.MuiLocalizationProvider.defaultProps.localeText,
-} satisfies Record<Lang, unknown>
+  // The lead cabinet also speaks UA and EN.
+  uk: ukUA.components.MuiLocalizationProvider.defaultProps.localeText,
+  en: enUS.components.MuiLocalizationProvider.defaultProps.localeText,
+} satisfies Record<Lang | "uk" | "en", unknown>
+
+export type PickerLang = keyof typeof PICKER_LOCALE_TEXT
 
 /**
  * The visible label of a date field for its accessible name. Date fields sit
@@ -167,8 +172,12 @@ function Input({
   max,
   step,
   "data-readonly": readOnlyExempt,
+  pickerLang,
   ...props
-}: React.ComponentProps<"input"> & ReadOnlyExemptProps) {
+}: React.ComponentProps<"input"> & ReadOnlyExemptProps & {
+  /** Language of the date picker texts; defaults to the UI language. */
+  pickerLang?: PickerLang
+}) {
   const readOnlyScope = useReadOnly()
   const disabled =
     disabledProp || readOnlyDisables(readOnlyScope, { type, "data-readonly": readOnlyExempt })
@@ -306,7 +315,7 @@ function Input({
     // The anchor finds the field's visible label; `contents` keeps it out of
     // the layout. The nested provider only adds the UI-language texts.
     const wrapPicker = (picker: React.ReactNode) => (
-      <LocalizationProvider localeText={PICKER_LOCALE_TEXT[lang]}>
+      <LocalizationProvider localeText={PICKER_LOCALE_TEXT[pickerLang ?? lang]}>
         <span ref={pickerAnchorRef} data-picker-anchor="" className="contents">
           {picker}
         </span>
