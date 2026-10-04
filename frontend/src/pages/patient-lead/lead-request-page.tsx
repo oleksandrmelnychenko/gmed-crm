@@ -25,6 +25,7 @@ import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
 import { checkboxClass, inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
 import { ApiRequestError } from "@/lib/api";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -59,6 +60,7 @@ import {
   LEAD_CABINET_LANGS,
   asLeadCabinetLang,
   leadRequestText,
+  resolveLeadCabinetLang,
   type LeadCabinetLang,
   type LeadRequestText,
 } from "./lead-request-text";
@@ -90,12 +92,13 @@ function storedCabinetLang(): LeadCabinetLang | null {
 
 export function LeadRequestPage() {
   const { lang: portalLang, setLang: setPortalLang } = useLang();
+  const accountLang = useAuth().user?.preferred_language ?? null;
   // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
   // choice is remembered, otherwise the language the person entered for the
   // request is used, then the portal language.
   const [chosenLang, setChosenLang] = useState<LeadCabinetLang | null>(storedCabinetLang);
   const [requestLang, setRequestLang] = useState<LeadCabinetLang | null>(null);
-  const lang: LeadCabinetLang = chosenLang ?? requestLang ?? asLeadCabinetLang(portalLang) ?? "de";
+  const lang = resolveLeadCabinetLang(chosenLang, requestLang, portalLang);
   const text = leadRequestText(lang);
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -132,6 +135,14 @@ export function LeadRequestPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // First visit of a request in German or Russian: the whole portal takes that
+  // language once, unless the account already has a language of its own (a
+  // patient with the full portal); afterwards the person's own choice counts.
+  useEffect(() => {
+    if (chosenLang || accountLang) return;
+    if (requestLang === "de" || requestLang === "ru") chooseLang(requestLang);
+  }, [accountLang, chosenLang, requestLang, chooseLang]);
 
   const replaceRequest = useCallback((next: LeadRequest) => {
     setRequests((current) =>
@@ -262,7 +273,8 @@ function LeadRequestView({
   ] as const;
 
   return (
-    <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
+    // `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer.
+    <article className="overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
       <header className="space-y-2 border-b border-border px-4 py-4 sm:px-5">
         <h1 className="text-lg font-semibold leading-tight">
           {guardian
@@ -365,7 +377,8 @@ function StepFooter({
   children: ReactNode;
 }) {
   return (
-    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border bg-card px-4 py-3 sm:-mx-5 sm:px-5">
+    // The page scrolls with a bottom padding; the `after` strip covers the form that would show through it.
+    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
         <span>{text.stepOf(index, STEP_COUNT)}</span>
         {status}

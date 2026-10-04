@@ -23,7 +23,7 @@ export type LeadRequestPersonalData = {
 export type LeadRequestConsent = {
   type: string;
   version: string;
-  /** The exact text per language (de, ru); what is shown is what is stored. */
+  /** The exact text per language (de, ru, uk, en); what is shown is what is stored. */
   texts: Record<string, string>;
   given_at: string | null;
 };

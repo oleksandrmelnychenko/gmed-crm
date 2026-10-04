@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { cabinetLocale, formatFileSize, languageName } from "./lead-request-model";
-import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText } from "./lead-request-text";
+import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText, resolveLeadCabinetLang } from "./lead-request-text";
 
 describe("lead cabinet languages", () => {
   it("speaks DE, EN, UA and RU", () => {
@@ -20,6 +20,19 @@ describe("lead cabinet languages", () => {
     expect(asLeadCabinetLang(null)).toBeNull();
     // Unknown languages fall back to Russian, like the portal.
     expect(leadRequestText("tr").title).toBe("Ваша заявка");
+  });
+
+  it("keeps a UA or EN choice and lets a DE/RU cabinet follow the portal language", () => {
+    // UA and EN exist only in the cabinet: the portal toggle does not undo them.
+    expect(resolveLeadCabinetLang("uk", "de", "ru")).toBe("uk");
+    expect(resolveLeadCabinetLang("en", null, "de")).toBe("en");
+    // A DE/RU choice is the portal language: the top bar toggle switches the cabinet too.
+    expect(resolveLeadCabinetLang("de", "de", "ru")).toBe("ru");
+    expect(resolveLeadCabinetLang("ru", "uk", "de")).toBe("de");
+    // No choice yet: a UA/EN request language applies, otherwise the portal language.
+    expect(resolveLeadCabinetLang(null, "uk", "de")).toBe("uk");
+    expect(resolveLeadCabinetLang(null, "de", "ru")).toBe("ru");
+    expect(resolveLeadCabinetLang(null, null, "de")).toBe("de");
   });
 
   it("formats sizes and language names in the cabinet language", () => {

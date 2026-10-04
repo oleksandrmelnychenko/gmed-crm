@@ -6,6 +6,7 @@ import {
   getTimePickerReferenceDate,
   normalizeInputStep,
   parseTimeValue,
+  PICKER_ADAPTER_LOCALE,
   PICKER_LOCALE_TEXT,
   pickerVisibleLabel,
   pickerFieldReadOnly,
@@ -73,6 +74,16 @@ describe("Input", () => {
     expect(PICKER_LOCALE_TEXT.ru.fieldDayPlaceholder?.({} as never)).toBe("ДД");
     expect(PICKER_LOCALE_TEXT.de.fieldDayPlaceholder?.({} as never)).toBe("TT");
     expect(PICKER_LOCALE_TEXT.ru.fieldYearPlaceholder?.({ digitAmount: 4 } as never)).toBe("ГГГГ");
+  });
+
+  it("gives a picker with its own language Ukrainian or English texts and calendar names", () => {
+    expect(PICKER_LOCALE_TEXT.uk.fieldDayPlaceholder()).toBe("ДД");
+    expect(PICKER_LOCALE_TEXT.uk.fieldYearPlaceholder({ digitAmount: 4 })).toBe("РРРР");
+    expect(PICKER_LOCALE_TEXT.en.cancelButtonLabel).toBe("Cancel");
+    // The month and weekday names come from the dayjs locale; English weeks start on Monday.
+    expect(dayjs("2026-10-04").locale(PICKER_ADAPTER_LOCALE.uk).format("MMMM")).toBe("жовтень");
+    expect(dayjs("2026-10-04").locale(PICKER_ADAPTER_LOCALE.en).format("MMMM")).toBe("October");
+    expect(dayjs.Ls[PICKER_ADAPTER_LOCALE.en]?.weekStart).toBe(1);
   });
 
   it("names a date field by the text of its visible label, not by the field itself", () => {

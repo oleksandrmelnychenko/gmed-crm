@@ -109,6 +109,17 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/clinical-document-import.spec.ts
 
+      # The specs import app models. When one of those stops loading in Node,
+      # Playwright collects no test at all; that stayed unnoticed on main.
+      - name: Browser specs load
+        working-directory: frontend
+        run: npx playwright test --list
+
+      # Mocked API; the patient-facing lead cabinet in four languages.
+      - name: Lead cabinet browser gate
+        working-directory: frontend
+        run: npx playwright test tests/e2e/lead-cabinet.spec.ts
+
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 30
