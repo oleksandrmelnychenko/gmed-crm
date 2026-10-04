@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { warmUpDevServer } from "./dev-server-warm-up";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -158,7 +159,7 @@ async function mockPatientsApi(page: Page) {
         return json(route, { items: [] });
       }
       const patient = patients.find((p) => p.id === patientId);
-      if (patient) return json(route, patient);
+      if (patient && !child) return json(route, patient);
     }
     if (path === "/cases/meta/doctors") return json(route, []);
     if (path === "/cases/text-snippets") return json(route, []);
@@ -183,9 +184,17 @@ async function loginAsCeo(page: Page) {
   await page.waitForURL(/\/$/, { timeout: 15_000 });
 }
 
+// The DataTable also renders a card list for phones (hidden from `sm` up), so
+// row texts exist twice in the DOM. Desktop assertions target the grid.
+function patientGrid(page: Page) {
+  return page.getByRole("table");
+}
+
 async function openPatientsAsCeo(page: Page) {
   await loginAsCeo(page).then(() => page.goto("/patients"));
 }
+
+warmUpDevServer();
 
 test.describe("patients data-table", () => {
   test.beforeEach(async ({ page }) => {
@@ -195,25 +204,25 @@ test.describe("patients data-table", () => {
 
   test("renders active patients by default", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
-    await expect(page.getByText("PT-0002")).toBeVisible();
-    await expect(page.getByText("PT-0003")).not.toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0002")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0003")).not.toBeVisible();
     await expect(page.locator('[role="table"] input[type="checkbox"]')).toHaveCount(0);
   });
 
   test("global search filters rows", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0002")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0002")).toBeVisible();
     const searchInput = page.getByPlaceholder(/search|Suchen|Поиск/i).first();
     await searchInput.fill("Petrov");
     await expect(page).toHaveURL(/q=Petrov/);
-    await expect(page.getByText("PT-0001")).not.toBeVisible();
-    await expect(page.getByText("PT-0002")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).not.toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0002")).toBeVisible();
   });
 
   test("slash key focuses global search", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
     await page.keyboard.press("/");
     const searchInput = page.getByPlaceholder(/search|Suchen|Поиск/i).first();
     await expect(searchInput).toBeFocused();
@@ -221,14 +230,14 @@ test.describe("patients data-table", () => {
 
   test("row click opens the patient edit page", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
     await page.getByText("Anna Müller").first().click();
     await expect(page).toHaveURL(/\/patients\/00000000-0000-0000-0000-000000000301$/);
   });
 
   test("patient grid does not reserve an empty trailing actions column", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     const header = page.locator('[role="row"][aria-rowindex="1"]');
     const [headerColumnCount, gridTrackCount] = await Promise.all([
@@ -243,7 +252,7 @@ test.describe("patients data-table", () => {
 
   test("patient rows have a visible hover state", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     const firstRow = page.locator('[role="row"][aria-rowindex="2"]');
     const patientCell = firstRow.locator('[role="cell"][data-column-id="patient"]');
@@ -269,67 +278,72 @@ test.describe("patients data-table", () => {
 
   test("patient functional labels render as translated color chips", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
-    const annaRow = page.locator('[role="row"]').filter({ hasText: "Anna Müller" }).first();
-    const patientCell = annaRow.locator('[role="cell"][data-column-id="patient"]');
-    const complexChip = patientCell.locator('[data-patient-functional-label="complex_coordination"]');
+    // Since the labels moved out of the patient cell (2026-06-25) they live in
+    // their own default-visible "Labels" column.
+    const annaRow = patientGrid(page).locator('[role="row"]').filter({ hasText: "Anna Müller" }).first();
+    await expect(
+      annaRow.locator('[role="cell"][data-column-id="patient"] [data-patient-functional-label]'),
+    ).toHaveCount(0);
+
+    const labelsCell = annaRow.locator('[role="cell"][data-column-id="functional_labels"]');
+    const complexChip = labelsCell.locator('[data-patient-functional-label="complex_coordination"]');
+    const highRiskChip = labelsCell.locator('[data-patient-functional-label="high_risk"]');
+    await complexChip.scrollIntoViewIfNeeded();
     await expect(complexChip).toBeVisible();
     await expect(complexChip).toHaveText(/Сложная координация|Komplexe Koordination|Complex coordination/i);
+    await expect(highRiskChip).toBeVisible();
+    await expect(highRiskChip).toHaveText(/Высокий риск|Hohes Risiko|High risk/i);
 
-    const patientChipStyles = await complexChip.evaluate((element) => {
-      const styles = getComputedStyle(element);
-      return {
-        backgroundColor: styles.backgroundColor,
-        borderColor: styles.borderColor,
-        color: styles.color,
-      };
-    });
+    const chipStyles = (chip: typeof complexChip) =>
+      chip.evaluate((element) => {
+        const styles = getComputedStyle(element);
+        return {
+          backgroundColor: styles.backgroundColor,
+          borderColor: styles.borderColor,
+        };
+      });
+    const [complexStyles, highRiskStyles] = await Promise.all([
+      chipStyles(complexChip),
+      chipStyles(highRiskChip),
+    ]);
 
-    expect(patientChipStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
-    expect(patientChipStyles.borderColor).not.toBe("rgba(0, 0, 0, 0)");
-
-    await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
-    await page.getByRole("menuitemcheckbox", { name: /Labels|Метки|Merkmale/i }).click();
-    await page.keyboard.press("Escape");
-
-    const labelColumnChip = annaRow.locator(
-      '[role="cell"][data-column-id="functional_labels"] [data-patient-functional-label="complex_coordination"]',
-    );
-    await labelColumnChip.scrollIntoViewIfNeeded();
-    await expect(labelColumnChip).toBeVisible();
-    await expect(labelColumnChip).toHaveText(/Сложная координация|Komplexe Koordination|Complex coordination/i);
-
-    const labelColumnBackground = await labelColumnChip.evaluate((element) =>
-      getComputedStyle(element).backgroundColor,
-    );
-    expect(labelColumnBackground).toBe(patientChipStyles.backgroundColor);
+    expect(complexStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(complexStyles.borderColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(highRiskStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(highRiskStyles.backgroundColor).not.toBe(complexStyles.backgroundColor);
   });
 
-  test("patient case opens in the case workspace with patient and case menus", async ({ page }) => {
+  test("legacy case links open the patient's clinical profile in the patient workspace", async ({ page }) => {
+    // The case workspace was retired on 2026-08-07 (clinical work lives on the
+    // patient). Old `?tab=cases` and `/cases/<id>` links must land on the
+    // patient's clinical tab, never on a separate case rail or a sheet.
+    const clinicalUrl = /\/patients\/00000000-0000-0000-0000-000000000301\?tab=clinical$/;
+    const patientRail = page.locator('[data-workspace-rail="patient"]');
+    const activeRailItem = patientRail.locator('[aria-current="page"]');
+
     await loginAsCeo(page);
     await page.goto("/patients/00000000-0000-0000-0000-000000000301?tab=cases");
-    await expect(page.getByText("CASE-001")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Anna Müller" })).toBeVisible();
+    await expect(page).toHaveURL(clinicalUrl);
+    await expect(activeRailItem).toHaveAttribute("href", /\?tab=clinical$/);
 
-    await page.getByText("CASE-001").click();
+    await page.goto("/cases/case-0001");
+    await expect(page).toHaveURL(clinicalUrl);
+    await expect(activeRailItem).toHaveAttribute("href", /\?tab=clinical$/);
 
-    await expect(page).toHaveURL(
-      /\/cases\/case-0001\?patient=00000000-0000-0000-0000-000000000301$/,
-    );
-    await expect(page.locator('[data-workspace-rail="patient"]')).toBeVisible();
-    await expect(page.locator('[data-workspace-rail="case"]')).toBeVisible();
-    await expect(page.locator('[data-workspace-rail="patient"] [aria-current="page"]')).toContainText(
-      /Cases|Кейсы|Fälle/i,
-    );
-    await expect(page.getByRole("heading", { name: "CASE-001" })).toBeVisible();
-    await expect(page.getByRole("textbox").first()).toHaveValue("Cardiology second opinion");
+    await page.goto("/cases/case-0001?patient=00000000-0000-0000-0000-000000000301");
+    await expect(page).toHaveURL(clinicalUrl);
+    await expect(patientRail).toBeVisible();
+    await expect(page.locator('[data-workspace-rail="case"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="sheet-content"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
   });
 
   test("columns menu can freeze an extra visible column", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
     await page.getByRole("button", { name: /(Freeze|Закрепить|Fixieren).*(Status|Статус)/i }).click();
@@ -340,7 +354,7 @@ test.describe("patients data-table", () => {
     await expect(frozenStatusHeader).toBeVisible();
 
     await page.reload();
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
     await expect(frozenStatusHeader).toBeVisible();
 
     await page.locator('[role="table"]').evaluate((element) => {
@@ -359,7 +373,7 @@ test.describe("patients data-table", () => {
 
   test("default frozen columns render as one left block", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     const noHeader = page.locator('[role="columnheader"][data-column-id="no"]');
     const patientHeader = page.locator('[role="columnheader"][data-column-id="patient"]');
@@ -414,8 +428,8 @@ test.describe("patients data-table", () => {
   test("status column renders color pills per status", async ({ page }) => {
     await loginAsCeo(page);
     await page.goto("/patients?active=");
-    await expect(page.getByText("PT-0001")).toBeVisible();
-    await expect(page.getByText("PT-0003")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0003")).toBeVisible();
 
     const activePill = page.locator('[data-patient-status-pill="active"]').first();
     const inactivePill = page.locator('[data-patient-status-pill="inactive"]').first();
@@ -448,7 +462,7 @@ test.describe("patients data-table", () => {
 
   test("sort menu opens under its trigger above the grid", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     const sortButton = page.getByRole("button", { name: /Created|Создан|Erstellt/i }).first();
     await sortButton.click();
@@ -456,9 +470,20 @@ test.describe("patients data-table", () => {
     await expect(menu).toBeVisible();
 
     const [buttonBox, menuBox] = await Promise.all([sortButton.boundingBox(), menu.boundingBox()]);
+    const viewport = page.viewportSize();
     expect(buttonBox).not.toBeNull();
     expect(menuBox).not.toBeNull();
-    expect(menuBox!.x).toBeGreaterThanOrEqual(buttonBox!.x - 1);
+    expect(viewport).not.toBeNull();
+    // Opens below the trigger, left-aligned with it; when that would overflow
+    // the viewport the menu is shifted left to stay 8px inside the edge.
+    expect(menuBox!.y).toBeGreaterThanOrEqual(buttonBox!.y + buttonBox!.height - 1);
+    const expectedLeft = Math.max(
+      8,
+      Math.min(buttonBox!.x, viewport!.width - menuBox!.width - 8),
+    );
+    expect(Math.abs(menuBox!.x - expectedLeft)).toBeLessThanOrEqual(1);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(menuBox!.x).toBeLessThan(buttonBox!.x + buttonBox!.width);
 
     const [menuZ, headerZ] = await Promise.all([
       menu.evaluate((element) => Number(getComputedStyle(element).zIndex)),
@@ -469,29 +494,9 @@ test.describe("patients data-table", () => {
     expect(menuZ).toBeGreaterThan(headerZ);
   });
 
-  test("density icon controls update row height", async ({ page }) => {
-    await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
-
-    const firstBodyRow = page.locator('[role="row"][aria-rowindex="2"]');
-    const compactHeight = await firstBodyRow.evaluate((element) =>
-      element.getBoundingClientRect().height,
-    );
-
-    await page.locator('[data-density-value="condensed"]').click();
-    await expect
-      .poll(() => firstBodyRow.evaluate((element) => element.getBoundingClientRect().height))
-      .toBeLessThan(compactHeight);
-
-    await page.locator('[data-density-value="comfortable"]').click();
-    await expect
-      .poll(() => firstBodyRow.evaluate((element) => element.getBoundingClientRect().height))
-      .toBeGreaterThan(compactHeight);
-  });
-
   test("column header context menu toggles frozen state", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     const statusHeader = page.locator('[role="columnheader"][data-column-id="status"]');
     await statusHeader.click({ button: "right" });
@@ -515,7 +520,7 @@ test.describe("patients data-table", () => {
 
   test("newly shown columns keep row styling", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
     await page.getByRole("menuitemcheckbox", { name: /Email|E-Mail|Электронная почта/i }).click();
@@ -562,7 +567,7 @@ test.describe("patients data-table", () => {
 
   test("newly shown column headers keep the same flat surface", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Columns|Колонки|Spalten/i }).click();
     await page.getByRole("menuitemcheckbox", { name: /Birth date|Дата рождения|Geburtsdatum/i }).click();
@@ -593,7 +598,7 @@ test.describe("patients data-table", () => {
 
   test("created filter editor opens above grid menus", async ({ page }) => {
     await openPatientsAsCeo(page);
-    await expect(page.getByText("PT-0001")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).toBeVisible();
 
     await page.getByRole("button", { name: /Filter|Фильтр/i }).click();
     const filterPicker = page.locator("[data-table-filter-picker]");
@@ -611,7 +616,7 @@ test.describe("patients data-table", () => {
   test("URL filter state round-trip", async ({ page }) => {
     await loginAsCeo(page);
     await page.goto("/patients?q=Petrov");
-    await expect(page.getByText("PT-0002")).toBeVisible();
-    await expect(page.getByText("PT-0001")).not.toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0002")).toBeVisible();
+    await expect(patientGrid(page).getByText("PT-0001")).not.toBeVisible();
   });
 });

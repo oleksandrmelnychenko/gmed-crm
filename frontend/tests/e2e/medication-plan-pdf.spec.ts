@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { warmUpDevServer } from "./dev-server-warm-up";
+
+warmUpDevServer();
 
 async function mount(page: Page, lang: "ru" | "de", view = "overview", empty = false) {
   await page.addInitScript((value) => {
@@ -74,16 +77,29 @@ test("PDF export prevents duplicate requests and recovers after an error", async
   await expect(page.getByText("Не удалось сформировать медикаментозный план. Повторите попытку.")).toBeVisible();
   await expect(button).toBeEnabled();
   expect(requests).toBe(1);
-  await page.route("**/medikationsplan.pdf?*", route => route.fulfill({status: 422, contentType: "application/json", body: '{"error":"Unprocessable Entity","message":"medication_plan_empty"}'}));
+  await page.route("**/medikationsplan.pdf?*", route => {
+    requests += 1;
+    return route.fulfill({status: 422, contentType: "application/json", body: '{"error":"Unprocessable Entity","message":"medication_plan_empty"}'});
+  });
   await button.click();
   await expect(page.getByText("Нет актуальных препаратов для медикаментозного плана.")).toBeVisible();
-  await expect(button).toBeEnabled();
+  // An empty plan from the server is information, not a retryable failure:
+  // the action stays disabled and explains why (since 2026-09-08).
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute("title", "Нет актуальных препаратов для медикаментозного плана.");
+  expect(requests).toBe(2);
 });
 
 test("medication PDF action explains when the patient has no current medications", async ({page}) => {
+  let requests = 0;
+  await page.route("**/medikationsplan.pdf?*", route => {
+    requests += 1;
+    return route.fulfill({status: 422, contentType: "application/json", body: '{"error":"Unprocessable Entity","message":"medication_plan_empty"}'});
+  });
   const button = await mount(page, "de", "overview", true);
-  await page.route("**/medikationsplan.pdf?*", route => route.fulfill({status: 422, contentType: "application/json", body: '{"error":"Unprocessable Entity","message":"medication_plan_empty"}'}));
-  await button.click();
-  await expect(page.getByText("Keine aktuellen Medikamente für den Medikationsplan vorhanden.")).toBeVisible();
-  await expect(button).toBeEnabled();
+  // The availability check runs before any export: no current medication
+  // means no PDF request and a disabled action that names the reason.
+  await expect(button).toBeDisabled();
+  await expect(button).toHaveAttribute("title", "Keine aktuellen Medikamente für den Medikationsplan vorhanden.");
+  expect(requests).toBe(0);
 });
