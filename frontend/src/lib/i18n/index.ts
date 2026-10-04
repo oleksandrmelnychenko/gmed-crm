@@ -1655,7 +1655,8 @@ export type Lang = "de" | "ru";
 
 const LANG_KEY = "gmed_lang";
 const LANG_EVENT = "gmed:lang-change";
-const DEFAULT_LANG = resolveDefaultLanguage(import.meta.env.VITE_DEFAULT_LANG);
+// `import.meta.env` is absent when Node loads this module (Playwright specs import app models).
+const DEFAULT_LANG = resolveDefaultLanguage(import.meta.env?.VITE_DEFAULT_LANG);
 
 export function getLang(): Lang {
   if (typeof window === "undefined") return DEFAULT_LANG;

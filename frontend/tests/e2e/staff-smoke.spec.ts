@@ -2323,7 +2323,9 @@ test.describe("lead wizard UX", () => {
       await field.getByRole("spinbutton", { name: pickerSection.hours }).fill("15");
       await field.getByRole("spinbutton", { name: pickerSection.minutes }).fill("30");
       await field.getByRole("spinbutton", { name: pickerSection.minutes }).press("Tab");
-      const expected = await page.evaluate(() => new Date("2026-09-12T15:30").toISOString());
+      // The app keeps every time in Europe/Berlin, whatever the browser time zone:
+      // 12.09.2026 15:30 in Berlin (CEST, UTC+2) is 13:30 UTC.
+      const expected = "2026-09-12T13:30:00.000Z";
       await expect.poll(() => deadline).toBe(expected);
       await expect(input).toHaveValue("12.09.2026 15:30");
       await expect(wizard.getByText("Rechnung ausstehend", { exact: true })).toBeVisible();
