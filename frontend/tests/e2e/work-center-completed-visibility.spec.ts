@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { openWorkCenter } from "./lazy-pages";
 
 const now = new Date("2026-09-10T12:00:00Z");
 const oldId = "10000000-0000-0000-0000-000000000003";
@@ -58,7 +59,7 @@ async function mockTasks(page: Page, lang: "ru" | "de", role = "ceo") {
 for (const lang of ["ru", "de"] as const) {
   test(`old completions hide automatically and remain searchable and reopenable in ${lang}`, async ({ page }, info) => {
     const state = await mockTasks(page, lang);
-    await page.goto("/task-manager");
+    await openWorkCenter(page, "/task-manager");
     await expect(page.getByRole("heading", { name: "Active task", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Recent completion", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Old completion", exact: true })).toHaveCount(0);
@@ -88,7 +89,7 @@ for (const lang of ["ru", "de"] as const) {
 test("an open work center hides a completion when it reaches seven days without a reload", async ({ page }) => {
   const state = await mockTasks(page, "ru");
   state.tasks = [{ ...state.tasks[1], title: "Crossing seven days", completed_at: "2026-09-03T12:00:30Z" }];
-  await page.goto("/task-manager");
+  await openWorkCenter(page, "/task-manager");
   await expect(page.getByRole("heading", { name: "Crossing seven days" })).toBeVisible();
   await page.clock.fastForward(61_000);
   await expect(page.getByRole("heading", { name: "Crossing seven days" })).toHaveCount(0);
@@ -99,7 +100,7 @@ test("an open work center hides a completion when it reaches seven days without 
 for (const lang of ["ru", "de"] as const) {
   test(`completed status offers archive, persists it and restores from the archive in ${lang}`, async ({ page }) => {
     const state = await mockTasks(page, lang);
-    await page.goto("/task-manager");
+    await openWorkCenter(page, "/task-manager");
     const card = page.locator("article").filter({ has: page.getByRole("heading", { name: "Recent completion", exact: true }) });
     await card.getByRole("combobox", { name: lang === "ru" ? "Изменить статус" : "Status ändern", exact: true }).click();
     await page.getByRole("option", { name: lang === "ru" ? "В архив" : "Archivieren", exact: true }).click();
@@ -127,7 +128,7 @@ test("archiving from task details preserves a failed choice and supports restori
   let reject = true;
   await page.route(`**/concierge-operational-items/${oldId}/archive`, route => reject
     ? route.fulfill({ status: 503, json: { message: "Temporary archive failure" } }) : route.fallback());
-  await page.goto(`/task-manager?task=${oldId}`);
+  await openWorkCenter(page, `/task-manager?task=${oldId}`);
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("combobox", { name: "Статус", exact: true }).click();
   await page.getByRole("option", { name: "В архив", exact: true }).click();
@@ -140,7 +141,7 @@ test("archiving from task details preserves a failed choice and supports restori
   await expect(dialog.getByRole("button", { name: "Восстановить", exact: true })).toBeVisible();
   await expect(dialog.getByRole("combobox", { name: "Статус", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Восстановить", exact: true }).click();
-  await expect(dialog.getByRole("combobox", { name: "Статус", exact: true })).toHaveText("Выполнена");
+  await expect(dialog.getByRole("combobox", { name: "Статус", exact: true })).toHaveText("Выполнено");
   expect(state.mutations).toEqual([`/concierge-operational-items/${oldId}/archive`, `/concierge-operational-items/${oldId}/restore`]);
 });
 
@@ -148,14 +149,14 @@ test("archive status is unavailable for unfinished tasks and assignees without a
   const state = await mockTasks(page, "ru", "concierge");
   state.tasks[1].assigned_by = "manager";
   state.tasks[2].assigned_by = "manager";
-  await page.goto("/task-manager");
+  await openWorkCenter(page, "/task-manager");
   for (const title of ["Active task", "Recent completion"]) {
     const card = page.locator("article").filter({ has: page.getByRole("heading", { name: title, exact: true }) });
     await card.getByRole("combobox", { name: "Изменить статус", exact: true }).click();
     await expect(page.getByRole("option", { name: "В архив", exact: true })).toHaveCount(0);
     await page.keyboard.press("Escape");
   }
-  await page.goto(`/task-manager?task=${oldId}`);
+  await openWorkCenter(page, `/task-manager?task=${oldId}`);
   await page.getByRole("dialog").getByRole("combobox", { name: "Статус", exact: true }).click();
   await expect(page.getByRole("option", { name: "В архив", exact: true })).toHaveCount(0);
   expect(state.mutations).toEqual([]);

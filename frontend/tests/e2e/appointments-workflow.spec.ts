@@ -1,4 +1,5 @@
 import { expect, test, type Route } from "@playwright/test";
+import { coldStartTestTimeout, lazyPageLoad } from "./lazy-pages";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -9,6 +10,7 @@ function json(route: Route, body: unknown, status = 200) {
 }
 
 test.describe("appointments workflow detail", () => {
+  test.describe.configure({ timeout: coldStartTestTimeout });
   test("staff workflow uses the current cockpit pattern and business warning copy", async ({
     page,
   }) => {
@@ -312,7 +314,7 @@ test.describe("appointments workflow detail", () => {
     const blockers = page
       .getByRole("status")
       .filter({ hasText: "Vor dem Abschluss sind noch offene operative Punkte zu prüfen." });
-    await expect(blockers).toBeVisible();
+    await expect(blockers).toBeVisible(lazyPageLoad);
     await expect(blockers).toContainText("2 Checklistenpunkte sind noch offen.");
     await expect(blockers).toContainText(
       "Dolmetscherbericht oder Freigabe ist noch ausstehend.",

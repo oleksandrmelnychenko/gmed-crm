@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+import { coldStartTestTimeout, lazyPageLoad } from "./lazy-pages";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -8,14 +9,13 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
+// The browser clock starts at 28.09.2026 12:00 in Berlin, so "today" never
+// depends on the real date or on the zone of the machine running the test.
+const clockNow = new Date("2026-09-28T10:00:00Z");
+const berlinToday = "2026-09-28";
+
 function berlinDate(offsetDays: number) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Berlin",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-  const value = new Date(`${parts}T12:00:00Z`);
+  const value = new Date(`${berlinToday}T12:00:00Z`);
   value.setUTCDate(value.getUTCDate() + offsetDays);
   return value.toISOString().slice(0, 10);
 }
@@ -101,6 +101,7 @@ async function openMockedAppointment(
     created_at: "2026-09-01T10:00:00Z",
   };
 
+  await page.clock.install({ time: clockNow });
   await page.addInitScript(() => {
     window.localStorage.setItem("gmed_lang", "de");
   });
@@ -195,7 +196,7 @@ async function openMockedAppointment(
 async function expectWorkflowReady(page: Page) {
   await expect(
     page.getByRole("button", { name: completeAndScheduleButton }).first(),
-  ).toBeVisible();
+  ).toBeVisible(lazyPageLoad);
   await expect(
     page.getByRole("button", { name: completedStatusButton }),
   ).toBeVisible();
@@ -209,6 +210,7 @@ async function openReportReview(page: Page) {
 }
 
 test.describe("appointment completion date rule", () => {
+  test.describe.configure({ timeout: coldStartTestTimeout });
   test("a future appointment keeps completion closed with a hint", async ({ page }) => {
     const { statusPosts } = await openMockedAppointment(page, berlinDate(10));
     await expectWorkflowReady(page);
