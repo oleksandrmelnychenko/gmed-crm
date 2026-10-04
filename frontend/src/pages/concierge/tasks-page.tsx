@@ -216,13 +216,9 @@ export function ConciergeTaskManagerPage() {
     };
   }, [labels.loadFailed, taskListPath, user, version]);
 
-  useEffect(() => {
-    if (loading || !detailTaskId || tasks.some((task) => task.id === detailTaskId)) return;
-    setDetailTaskId(null);
-    const next = new URLSearchParams(searchParams);
-    next.delete("task");
-    setSearchParams(next, { replace: true });
-  }, [detailTaskId, loading, searchParams, setSearchParams, tasks]);
+  // A `?task=` that the list does not have (any more) keeps its dialog open:
+  // the dialog itself reports the task as deleted or unavailable and hides its
+  // actions. Do not close it from here; that raced the notice.
 
   async function changeTaskStatus(task: ConciergeTask, status: string): Promise<string | null> {
     if (updatingTaskId || task.archived_at || !canChangeConciergeTaskStatus(task, user?.id, user?.role)) return labels.updateFailed;
