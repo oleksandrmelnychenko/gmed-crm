@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { AuthProvider } from "../../../src/lib/auth";
 import { LeadWizard } from "../../../src/pages/leads/ui/lead-wizard";
 import type { PatientDetail } from "../../../src/pages/patients/model/list-model";
 import "../../../src/index.css";
@@ -33,6 +34,11 @@ function Harness() {
   </>;
 }
 
-createRoot(document.getElementById("root")!).render(
-  <LocalizationProvider dateAdapter={AdapterDayjs}><Harness /></LocalizationProvider>,
+// The wizard runs inside the signed-in staff app (its signature actions read
+// the user). Vite can re-import this entry with a timestamp after a dependency
+// update; reuse its root so the previous dialog portal unmounts normally.
+const host = window as typeof window & { repeatIntakeRoot?: ReturnType<typeof createRoot> };
+host.repeatIntakeRoot ??= createRoot(document.getElementById("root")!);
+host.repeatIntakeRoot.render(
+  <AuthProvider><LocalizationProvider dateAdapter={AdapterDayjs}><Harness /></LocalizationProvider></AuthProvider>,
 );
