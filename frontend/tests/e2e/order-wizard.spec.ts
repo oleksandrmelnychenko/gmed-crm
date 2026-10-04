@@ -73,9 +73,20 @@ async function setup(page: Page, language: "ru" | "de", resume = false, failLoad
   await page.route("**/__order-wizard-qa*", route => route.fulfill({ contentType: "text/html", body: `<html><meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module">
     import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window);
     window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => type => type; window.__vite_plugin_react_preamble_installed__ = true;
-    await import('/tests/e2e/fixtures/order-wizard.tsx');</script></html>` }));
+    // A cold dev server re-optimizes dependencies on the first import and answers
+    // "504 Outdated Optimize Dep"; reload like Vite's own client would (its HMR socket
+    // may be unavailable in the test browser).
+    try { await import('/tests/e2e/fixtures/order-wizard.tsx'); } catch (error) {
+      const reloads = Number(sessionStorage.getItem('harness-reloads') ?? 0);
+      if (reloads >= 3) throw error;
+      sessionStorage.setItem('harness-reloads', String(reloads + 1));
+      location.reload();
+    }</script></html>` }));
   await page.goto(`/__order-wizard-qa${resume ? "?order=intake-qa" : ""}`);
-  await expect(page.getByRole("navigation")).toBeVisible();
+  // The harness imports the whole wizard module graph from the dev server; the first,
+  // uncached load (and a reload after re-optimized dependencies) can take longer
+  // than the default expect timeout on a busy machine.
+  await expect(page.getByRole("navigation")).toBeVisible({ timeout: 30_000 });
   return state;
 }
 
@@ -171,10 +182,10 @@ test("preliminary cost calculation asks for medical work types instead of using 
   const addSpecialization = dialog.getByRole("combobox", { name: "Добавить специализацию", exact: true });
   await addSpecialization.click();
   await page.getByRole("option", { name: "Кардиология", exact: true }).click();
-  await expect(dialog.getByText(/в каталоге нет видов работ/)).toBeVisible();
+  await expect(dialog.getByText(/в каталоге пока нет медицинских видов работ, поэтому предварительный расчёт не требуется/)).toBeVisible();
   await chooseEstimate();
   await expect(create).toBeDisabled();
-  await expect(dialog.getByText(/в каталоге нет видов работ/)).toBeVisible();
+  await expect(dialog.getByText(/в каталоге пока нет медицинских видов работ, поэтому предварительный расчёт не требуется/)).toBeVisible();
 
   await steps.nth(1).click();
   await addSpecialization.click();
