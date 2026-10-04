@@ -6692,7 +6692,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(value) => handleAmlCountryChange({ country: value })}
                   />
                 </Field>
-                <Field label={tx("Гражданство (можно несколько)", "Staatsangehörigkeiten (mehrere möglich)")}>
+                <Field label={tx("Гражданство (можно несколько)", "Staatsangehörigkeiten (mehrere möglich)")} portalField="citizenships">
                   <CitizenshipMultiSelect
                     id="lead-wizard-citizenships"
                     value={draft.citizenships}
