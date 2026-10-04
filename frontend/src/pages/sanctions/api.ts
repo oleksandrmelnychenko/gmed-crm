@@ -202,6 +202,41 @@ export type CountryBlocksResponse = {
   }[];
 };
 
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+
+/**
+ * The lead status with safe defaults: a partial or unexpected response (older
+ * server, proxy error page parsed as JSON) must not break the lead wizard.
+ */
+export function normalizeLeadSanctionsStatus(raw: unknown, leadId: string): LeadSanctionsStatus {
+  const value = raw && typeof raw === "object" ? (raw as Partial<LeadSanctionsStatus>) : {};
+  const country: Partial<LeadSanctionsStatus["country"]> =
+    value.country && typeof value.country === "object" ? value.country : {};
+  const screening = value.screening;
+  return {
+    lead_id: typeof value.lead_id === "string" ? value.lead_id : leadId,
+    list_version_date: typeof value.list_version_date === "string" ? value.list_version_date : null,
+    list_available: value.list_available === true,
+    list_stale: value.list_stale === true,
+    screening:
+      screening === "clear" || screening === "review_pending" || screening === "confirmed"
+        ? screening
+        : "not_screened",
+    open_hits: typeof value.open_hits === "number" ? value.open_hits : 0,
+    confirmed_hits: typeof value.confirmed_hits === "number" ? value.confirmed_hits : 0,
+    sanctions_block: value.sanctions_block && typeof value.sanctions_block === "object" ? value.sanctions_block : null,
+    country: {
+      blocked_countries: stringList(country.blocked_countries),
+      found: stringList(country.found),
+      blocking: stringList(country.blocking),
+      lift: country.lift && typeof country.lift === "object" ? country.lift : null,
+    },
+    can_lift_country_block: value.can_lift_country_block === true,
+    can_review: value.can_review === true,
+  };
+}
+
 const json = (body: unknown): RequestInit => ({
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -212,10 +247,13 @@ export const sanctionsApi = {
   check: (input: LiveCheckInput, signal?: AbortSignal) =>
     apiFetch<LiveCheckResult>("/sanctions/check", { ...json(input), signal }),
   leadStatus: (leadId: string) =>
-    apiFetch<LeadSanctionsStatus>(`/sanctions/leads/${encodeURIComponent(leadId)}/status`, {
+    apiFetch<unknown>(`/sanctions/leads/${encodeURIComponent(leadId)}/status`, {
       forceFresh: true,
-    }),
-  leadFlags: () => apiFetch<LeadSanctionsFlag[]>("/sanctions/leads/flags", { forceFresh: true }),
+    }).then((raw) => normalizeLeadSanctionsStatus(raw, leadId)),
+  leadFlags: () =>
+    apiFetch<unknown>("/sanctions/leads/flags", { forceFresh: true }).then((raw) =>
+      Array.isArray(raw) ? (raw as LeadSanctionsFlag[]) : [],
+    ),
   liftLeadCountryBlock: (leadId: string, reason: string) =>
     apiFetch<CountryLift>(
       `/sanctions/leads/${encodeURIComponent(leadId)}/country-override`,
