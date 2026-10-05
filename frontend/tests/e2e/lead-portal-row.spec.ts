@@ -105,6 +105,10 @@ test("the expanded lead row shows the patient portal at a glance", async ({ page
     return { background: getComputedStyle(button).backgroundColor, brand };
   });
   expect(colours.background).toBe(colours.brand);
+  // It stands right beside the status, not at the far end of the wide row.
+  const badge = await fresh.getByText("Ещё не входил", { exact: true }).boundingBox();
+  const button = await action.boundingBox();
+  expect(button!.x - (badge!.x + badge!.width)).toBeLessThan(40);
 
   await page.screenshot({ path: "test-results/lead-portal-row.png" });
 });
