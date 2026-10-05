@@ -111,6 +111,10 @@ const ineligibleMessages: Record<string, [string, string]> = {
   document_unavailable: ["Документ архивирован или его файл удалён.", "Das Dokument ist archiviert oder seine Datei wurde gelöscht."],
   document_superseded: ["Это предыдущая версия. Откройте текущую версию документа для подписи.", "Dies ist eine frühere Version. Öffnen Sie die aktuelle Dokumentversion zur Unterschrift."],
   document_already_signed: ["Этот документ уже отмечен как подписанный.", "Dieses Dokument ist bereits als unterzeichnet markiert."],
+  informational_document_not_signable: [
+    "Это информационный документ: его не подписывают. Он автоматически уходит как приложение для ознакомления вместе с договором, заказом или согласием — отправьте на подпись их.",
+    "Dies ist ein Informationsdokument: Es wird nicht unterschrieben. Es geht automatisch als Anlage zur Kenntnisnahme mit dem Vertrag, dem Auftrag oder der Einwilligung mit – senden Sie diese zur Unterschrift.",
+  ],
   electronic_form_excluded: ["Для этого документа закон исключает электронную форму — нужна подпись на бумаге.", "Für dieses Dokument ist die elektronische Form gesetzlich ausgeschlossen – Unterschrift auf Papier erforderlich."],
 };
 

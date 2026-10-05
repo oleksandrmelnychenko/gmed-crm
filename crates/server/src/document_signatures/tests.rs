@@ -1201,6 +1201,26 @@ async fn verify_review_package_and_manager_acknowledgement(
             .body(Body::from(body.to_string()))
             .unwrap()
     };
+    // The informational document itself is never sent for signature; its state
+    // says so, so the client shows the reason instead of a composer.
+    let info_state = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/documents/{info}/signature-requests"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(info_state.status(), StatusCode::OK);
+    let info_state: Value =
+        serde_json::from_slice(&to_bytes(info_state.into_body(), 100_000).await.unwrap()).unwrap();
+    assert_eq!(
+        info_state["ineligible_reason"],
+        "informational_document_not_signable"
+    );
+
     let path = format!("/documents/{primary}/signature-requests");
     assert_eq!(
         app.clone()

@@ -476,7 +476,12 @@ async fn list(
         "scope":{"patient_id":source.get::<Option<Uuid>,_>("patient_id"),"lead_id":source.get::<Option<Uuid>,_>("lead_id")},
         "electronic_form_excluded":electronic_form_excluded(&source),
         "can_sign_on_paper":can_send && paper::possible(&source),
-        "ineligible_reason":eligibility(&source).or_else(|| electronic_form_excluded(&source).map(|_| "electronic_form_excluded")),
+        // An informational document (privacy information, cost estimate) is
+        // attached for acknowledgement and never signed itself: saying so
+        // here keeps the client from offering a composer that cannot send.
+        "ineligible_reason":eligibility(&source)
+            .or_else(|| electronic_form_excluded(&source).map(|_| "electronic_form_excluded"))
+            .or_else(|| legal::informational(template_of(&source).as_deref()).then_some("informational_document_not_signable")),
         "requests":requests})))
 }
 

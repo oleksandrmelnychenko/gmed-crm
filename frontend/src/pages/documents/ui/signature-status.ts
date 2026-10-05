@@ -17,6 +17,18 @@ const SIGNATURE_STATUS_TEXT: Record<string, [string, string]> = {
   error: ["Ошибка подписания", "Signatur fehlgeschlagen"],
 };
 
+const INFORMATIONAL_DOCUMENT_KINDS = ["privacy_information", "cost_estimate"];
+
+/**
+ * Informational documents (privacy information, cost estimate) travel as
+ * attachments for acknowledgement and are never the subject of a signature
+ * request; the server refuses them (`informational_document_not_signable`).
+ */
+export function isInformationalDocument(document: { generated_template_id?: string | null; art?: string | null }): boolean {
+  const template = document.generated_template_id?.trim().toLowerCase();
+  return INFORMATIONAL_DOCUMENT_KINDS.includes(template || (document.art ?? "").trim().toLowerCase());
+}
+
 /** Label of a signature request status; unknown values read as "needs review". */
 export function signatureStatusText(status: string, lang: string) {
   const [ru, de] = SIGNATURE_STATUS_TEXT[status] ?? SIGNATURE_STATUS_TEXT.needs_review;
