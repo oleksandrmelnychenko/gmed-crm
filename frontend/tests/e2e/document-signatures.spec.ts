@@ -500,7 +500,7 @@ test("configured connection checks explicitly and retains setup when active sign
     else if (action === "check" && checkFails) await route.fulfill({ status: 503, json: { error: "provider_login_failed" } });
     else await route.fulfill({ json: {} });
   });
-  await page.goto("/admin/signature-api");
+  await page.goto("/admin/api-connections");
   const disconnect = page.getByRole("button", { name: "Verbindung trennen", exact: true });
   const check = page.getByRole("button", { name: "Verbindung prüfen", exact: true });
   await expect(check).toBeEnabled();
@@ -539,7 +539,7 @@ for (const [lang, mode] of [["ru", "demo"], ["de", "live"]] as const) {
       await discovery;
       await route.fulfill({ json: { configured: true, region: "DE", mode, username: savedUsername, source: "database" } });
     });
-    await page.goto("/admin/signature-api");
+    await page.goto("/admin/api-connections");
     const key = page.getByLabel(lang === "ru" ? "API-ключ" : "API-Schlüssel", { exact: true });
     const username = page.getByLabel(lang === "ru" ? "Имя API-пользователя" : "API-Benutzername", { exact: true });
     const change = page.getByRole("button", { name: lang === "ru" ? "Изменить подключение" : "Verbindung ändern", exact: true });
@@ -696,7 +696,7 @@ for (const [lang, initialStatus] of [["ru", 503], ["de", 404]] as const) {
         await route.fallback();
       }
     });
-    await page.goto("/admin/signature-api");
+    await page.goto("/admin/api-connections");
     const username = page.getByLabel(lang === "ru" ? "Имя API-пользователя" : "API-Benutzername", { exact: true });
     const key = page.getByLabel(lang === "ru" ? "API-ключ" : "API-Schlüssel", { exact: true });
     const save = page.getByRole("button", { name: lang === "ru" ? "Проверить и подключить" : "Prüfen und verbinden", exact: true });
@@ -755,16 +755,16 @@ test("separate German connection dialog validates setup and clears the secret", 
   // the signature page keeps the representatives and only links to it.
   await page.locator('a[href="/admin/signatures"]').click();
   await expect(page.getByRole("heading", { name: "Elektronische Signatur", exact: true })).toBeVisible();
-  await expect(page.getByTestId("signature-api-link")).toBeVisible();
+  await expect(page.getByTestId("api-connections-link")).toBeVisible();
   await expect(page.getByText("api_demo_fixture", { exact: true })).toHaveCount(0);
-  await page.locator('nav a[href="/admin/signature-api"]').click();
-  await expect(page).toHaveURL(/\/admin\/signature-api$/);
-  await expect(page.getByRole("heading", { name: "Skribble-API", exact: true })).toBeVisible();
+  await page.locator('nav a[href="/admin/api-connections"]').click();
+  await expect(page).toHaveURL(/\/admin\/api-connections$/);
+  await expect(page.getByRole("heading", { name: "API-Verbindungen", exact: true })).toBeVisible();
   await expect(page.getByText("api_demo_fixture", { exact: true })).toBeVisible();
   await expect(page.getByLabel("API-Schlüssel", { exact: true })).toHaveCount(0);
   await page.evaluate(() => localStorage.setItem("gmed_lang", "ru"));
   await page.reload();
-  await expect(page.getByRole("heading", { name: "API Skribble", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "API-подключения", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Кабинет Skribble", exact: true })).toHaveAttribute("href", "https://my.skribble.de/");
   await page.locator('a[href="/admin/signatures"]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: "../artifacts/design-qa/signature-admin-desktop.png" });

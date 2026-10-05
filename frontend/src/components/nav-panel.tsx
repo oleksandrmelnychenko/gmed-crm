@@ -128,7 +128,7 @@ const NAV_ICONS: Record<string, React.ElementType> = {
   lead_request: ClipboardList,
   sanctions: ShieldAlert,
   "admin/signatures": FileSignature,
-  "admin/signature-api": KeySquare,
+  "admin/api-connections": KeySquare,
   "admin/activity": History,
   "admin/security": Fingerprint,
   "admin/health": HeartPulse,
