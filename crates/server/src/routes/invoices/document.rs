@@ -31,7 +31,7 @@ pub(super) const RECIPIENT_COLUMNS: &str = r#"
 
 /// The party the invoice is addressed to.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(super) struct InvoiceRecipient {
+pub(crate) struct InvoiceRecipient {
     pub name: String,
     pub street: Option<String>,
     pub zip: Option<String>,
@@ -65,7 +65,7 @@ fn country_code(country: Option<&str>, residence_country: Option<&str>) -> Optio
 
 /// Which postal address parts a recipient lacks for § 14 Abs. 4 Nr. 1 UStG
 /// and the e-invoice buyer address (BG-8 with country code BT-55).
-pub(super) fn missing_address_parts(recipient: &InvoiceRecipient) -> Vec<&'static str> {
+pub(crate) fn missing_address_parts(recipient: &InvoiceRecipient) -> Vec<&'static str> {
     let mut missing = Vec::new();
     if recipient.name.trim().is_empty() {
         missing.push("name");

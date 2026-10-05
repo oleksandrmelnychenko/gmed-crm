@@ -4,9 +4,11 @@
 //! patient record, or a free-text contact, with its own e-mail and postal
 //! address. A new invoice takes the payer of its head order (a family order
 //! paid by one person), else of its own order, else the patient's default
-//! payer relation, else the contracting party when that is the patient's
-//! legal representatives (a minor's parents). The record is taken as a whole,
-//! never mixed field by field from different people.
+//! payer relation, else the third party the patient's payer declaration
+//! names (the lead's "Кто платит", kept with the patient after conversion),
+//! else the contracting party when that is the patient's legal
+//! representatives (a minor's parents). The record is taken as a whole, never
+//! mixed field by field from different people.
 //!
 //! The recipient is resolved by the database function
 //! `invoice_recipient_resolve` and frozen into `recipient_snapshot` when the
@@ -33,9 +35,14 @@ use super::{
 };
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::routes::lead_payer;
 use crate::services::contracting_party::{self, ContractingParty, PartyKind, is_minor_on};
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
+
+/// The recipient as `invoice_recipient_resolve` builds it, for readers
+/// outside the invoice module (the patient card's payer summary).
+pub(crate) use document::{InvoiceRecipient, missing_address_parts};
 
 pub(crate) const PAYER_ROLE_CONTRACTING_PARTY: &str = "contracting_party";
 pub(crate) const PAYER_ROLE_COST_BEARER: &str = "cost_bearer";
@@ -390,7 +397,8 @@ pub(crate) async fn adapt_payer_to_patient(
 #[derive(Clone, Debug, Default)]
 pub struct InheritedPayer {
     pub record: PayerRecord,
-    /// `head_order`, `order`, `default_payer`, `contracting_party` or `none`.
+    /// `head_order`, `order`, `default_payer`, `payer_declaration`,
+    /// `contracting_party` or `none`.
     pub source: &'static str,
     /// A minor patient would receive the invoice: the creation answer warns
     /// and the release asks for confirmation.
@@ -453,6 +461,19 @@ pub async fn inherited_invoice_payer(
                 ..PayerRecord::default()
             },
             source: "default_payer",
+            minor_without_payer: false,
+        });
+    }
+    // The third party the patient's payer declaration names (the lead's
+    // "Кто платит"), as a free-text contact with the declared address — the
+    // record the declaration wrote on the lead's orders. A self-payer
+    // declaration sets nothing; the steps below decide then.
+    if let Some(declared) = lead_payer::patient_declaration(conn, patient_id).await?
+        && let Some(record) = declared.declaration.order_payer_record(None)
+    {
+        return Ok(InheritedPayer {
+            record,
+            source: "payer_declaration",
             minor_without_payer: false,
         });
     }

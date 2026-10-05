@@ -55,6 +55,7 @@ pub mod orders;
 pub mod patient_document_requests;
 pub mod patient_financials;
 pub mod patient_next_actions;
+pub mod patient_payer_summary;
 pub mod patient_portal_access;
 pub mod patient_recommendations;
 pub mod patients;
@@ -119,6 +120,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(orders::router())
         .merge(order_intakes::router())
         .merge(patient_financials::router())
+        .merge(patient_payer_summary::router())
         .merge(patient_recommendations::router())
         .merge(patient_next_actions::router())
         .merge(patient_document_requests::router())

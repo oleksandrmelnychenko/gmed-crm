@@ -25,7 +25,14 @@
 //! marked signed, an electronic signature request with an agency signer) only
 //! after the client has signed the order and the declaration is complete — for
 //! a third party including the signed Kostenübernahmeerklärung. Client and
-//! payer sign first, GMED second. See
+//! payer sign first, GMED second.
+//!
+//! After conversion the declaration belongs to the patient record
+//! ([`patient_declaration`]: the one of the most recently converted lead). It
+//! is shown on the patient card (`routes/patient_payer_summary.rs`), pre-sets
+//! the payer of a new order of the patient ([`preset_order_payer_from_patient`])
+//! and is a step of the payer a new invoice inherits
+//! (`invoices/payer.rs::inherited_invoice_payer`). See
 //! `docs/architecture/lead-payer-declaration_ua.md`.
 
 use axum::{
@@ -217,7 +224,7 @@ impl Declaration {
     /// Who pays, as the order payer record (a free-text contact with the
     /// payer's address, role `cost_bearer`) and in the cost assumption
     /// declaration: the name of the organisation, or first and last name.
-    fn payer_name(&self) -> Option<String> {
+    pub(crate) fn payer_name(&self) -> Option<String> {
         let name = if self.is_organisation() {
             self.organisation_name
                 .as_deref()
@@ -253,6 +260,56 @@ impl Declaration {
             _ => return None,
         };
         Some(label.to_string())
+    }
+
+    /// The third party as the payer record of an order or invoice: a
+    /// free-text contact with the payer's e-mail, phone, relationship and
+    /// address, role `cost_bearer`. `None` for a self-payer and for a third
+    /// party without a name. `notes` are the record's own notes, which the
+    /// declaration never writes.
+    pub(crate) fn order_payer_record(&self, notes: Option<String>) -> Option<PayerRecord> {
+        if !self.is_third_party() {
+            return None;
+        }
+        Some(PayerRecord {
+            payer_patient_id: None,
+            payer_patient_relation_id: None,
+            contact_name: Some(self.payer_name()?),
+            contact_email: self.email.clone(),
+            contact_phone: self.phone.clone(),
+            contact_relationship: self.relationship_label(),
+            notes,
+            address_street: self.street.clone(),
+            address_zip: self.zip.clone(),
+            address_city: self.city.clone(),
+            address_country: self.country.clone(),
+            payer_role: Some(PAYER_ROLE_COST_BEARER.to_string()),
+        })
+    }
+
+    /// What the patient card shows of the declaration: who pays and how the
+    /// payer is reached. None of the GwG answers (own account, beneficial
+    /// owner, source of funds), no date or place of birth, no citizenships —
+    /// those stay in the lead wizard.
+    pub(crate) fn billing_json(&self) -> Value {
+        json!({
+            "payer_kind": self.payer_kind,
+            "payer_type": self.payer_type,
+            "name": self.payer_name(),
+            "organisation_name": self.organisation_name,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "relationship_kind": self.relationship_kind,
+            "relationship": self.relationship,
+            "street": self.street,
+            "zip": self.zip,
+            "city": self.city,
+            "country": self.country,
+            "email": self.email,
+            "phone": self.phone,
+            "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
+            "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
+        })
     }
 
     /// The fields that name the payer: a change makes an earlier
@@ -1721,6 +1778,62 @@ pub(crate) async fn load_declaration(
     .map(Declaration::from_row))
 }
 
+/// The declaration that counts for a patient after conversion, and the lead
+/// it was made for.
+#[derive(Clone, Debug)]
+pub(crate) struct PatientDeclaration {
+    pub lead_id: Uuid,
+    pub declaration: Declaration,
+    /// When the lead was converted (its last status change; nothing writes
+    /// the status of a converted lead afterwards).
+    pub converted_at: DateTime<Utc>,
+    /// When the payer named now was declared (`identity_changed_at`).
+    pub declared_at: Option<DateTime<Utc>>,
+}
+
+/// The declaration of a patient: the one of the most recently converted lead
+/// of the patient (a repeat intake converts a lead of its own and overwrites
+/// the summary in `patients.legal_status.payer_declaration` the same way).
+/// `None` for a patient created without a lead. An open, unconverted lead of
+/// the patient never counts here.
+pub(crate) async fn patient_declaration(
+    conn: &mut PgConnection,
+    patient_id: Uuid,
+) -> Result<Option<PatientDeclaration>, sqlx::Error> {
+    let declaration_columns = DECLARATION_COLUMNS
+        .split(',')
+        .map(|column| format!("d.{}", column.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let row = sqlx::query(&format!(
+        r#"SELECT d.lead_id, l.status_changed_at AS converted_at, {declaration_columns}
+           FROM lead_payer_declarations d
+           JOIN leads l ON l.id = d.lead_id
+           WHERE d.patient_id = $1 AND l.converted_patient_id = $1
+           ORDER BY l.status_changed_at DESC NULLS LAST, d.updated_at DESC, d.lead_id DESC
+           LIMIT 1"#
+    ))
+    .bind(patient_id)
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|row| PatientDeclaration {
+        lead_id: row.try_get("lead_id").unwrap_or_default(),
+        declaration: Declaration::from_row(&row),
+        converted_at: row
+            .try_get::<DateTime<Utc>, _>("converted_at")
+            .unwrap_or_else(|_| Utc::now()),
+        declared_at: row
+            .try_get::<Option<DateTime<Utc>>, _>("identity_changed_at")
+            .ok()
+            .flatten()
+            .or_else(|| {
+                row.try_get::<Option<DateTime<Utc>>, _>("created_at")
+                    .ok()
+                    .flatten()
+            }),
+    }))
+}
+
 /// The cabinet's view of the declaration; `null` until the question is answered.
 pub(crate) fn portal_payload(declaration: Option<&Declaration>) -> Value {
     declaration.map_or(Value::Null, Declaration::portal_json)
@@ -1956,21 +2069,8 @@ async fn sync_order_payers(
         let order_id: Uuid = order.try_get("id")?;
         let previous = PayerRecord::from_row(&order, "");
         let next = if declaration.is_third_party() {
-            match declaration.payer_name() {
-                Some(name) => PayerRecord {
-                    payer_patient_id: None,
-                    payer_patient_relation_id: None,
-                    contact_name: Some(name),
-                    contact_email: declaration.email.clone(),
-                    contact_phone: declaration.phone.clone(),
-                    contact_relationship: declaration.relationship_label(),
-                    notes: previous.notes.clone(),
-                    address_street: declaration.street.clone(),
-                    address_zip: declaration.zip.clone(),
-                    address_city: declaration.city.clone(),
-                    address_country: declaration.country.clone(),
-                    payer_role: Some(PAYER_ROLE_COST_BEARER.to_string()),
-                },
+            match declaration.order_payer_record(previous.notes.clone()) {
+                Some(next) => next,
                 None => continue,
             }
         } else if previous.payer_role.as_deref() == Some(PAYER_ROLE_COST_BEARER) {
@@ -1981,53 +2081,76 @@ async fn sync_order_payers(
         if next == previous {
             continue;
         }
-        sqlx::query(
-            "UPDATE orders SET
-                payer_patient_id = $2,
-                payer_patient_relation_id = $3,
-                payer_contact_name = $4,
-                payer_contact_email = $5,
-                payer_contact_phone = $6,
-                payer_contact_relationship = $7,
-                payer_notes = $8,
-                payer_address_street = $9,
-                payer_address_zip = $10,
-                payer_address_city = $11,
-                payer_address_country = $12,
-                payer_role = $13,
-                payer_updated_by = $14,
-                payer_updated_at = now(),
-                updated_at = now()
-             WHERE id = $1",
+        write_order_payer(
+            tx,
+            order_id,
+            &previous,
+            &next,
+            actor,
+            json!({ "source": "lead_payer_declaration", "lead_id": lead_id }),
         )
-        .bind(order_id)
-        .bind(next.payer_patient_id)
-        .bind(next.payer_patient_relation_id)
-        .bind(&next.contact_name)
-        .bind(&next.contact_email)
-        .bind(&next.contact_phone)
-        .bind(&next.contact_relationship)
-        .bind(&next.notes)
-        .bind(&next.address_street)
-        .bind(&next.address_zip)
-        .bind(&next.address_city)
-        .bind(&next.address_country)
-        .bind(&next.payer_role)
-        .bind(actor)
-        .execute(&mut *tx)
         .await?;
-        let mut event = audit::domain_diff_event(
-            "set_order_payer",
-            Some(actor),
-            "order",
-            Some(order_id),
-            previous.to_audit_json(),
-            next.to_audit_json(),
-        );
-        event.context = json!({ "source": "lead_payer_declaration", "lead_id": lead_id });
-        audit::write_in_transaction(&mut *tx, &event).await?;
     }
     Ok(())
+}
+
+/// Writes the payer of an order (the row is already locked by the caller)
+/// and audits the change like the order payer dialog (`set_order_payer`,
+/// old and new payer, `context` says where the payer came from) in the same
+/// transaction.
+async fn write_order_payer(
+    tx: &mut PgConnection,
+    order_id: Uuid,
+    previous: &PayerRecord,
+    next: &PayerRecord,
+    actor: Uuid,
+    context: Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE orders SET
+            payer_patient_id = $2,
+            payer_patient_relation_id = $3,
+            payer_contact_name = $4,
+            payer_contact_email = $5,
+            payer_contact_phone = $6,
+            payer_contact_relationship = $7,
+            payer_notes = $8,
+            payer_address_street = $9,
+            payer_address_zip = $10,
+            payer_address_city = $11,
+            payer_address_country = $12,
+            payer_role = $13,
+            payer_updated_by = $14,
+            payer_updated_at = now(),
+            updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(order_id)
+    .bind(next.payer_patient_id)
+    .bind(next.payer_patient_relation_id)
+    .bind(&next.contact_name)
+    .bind(&next.contact_email)
+    .bind(&next.contact_phone)
+    .bind(&next.contact_relationship)
+    .bind(&next.notes)
+    .bind(&next.address_street)
+    .bind(&next.address_zip)
+    .bind(&next.address_city)
+    .bind(&next.address_country)
+    .bind(&next.payer_role)
+    .bind(actor)
+    .execute(&mut *tx)
+    .await?;
+    let mut event = audit::domain_diff_event(
+        "set_order_payer",
+        Some(actor),
+        "order",
+        Some(order_id),
+        previous.to_audit_json(),
+        next.to_audit_json(),
+    );
+    event.context = context;
+    audit::write_in_transaction(&mut *tx, &event).await
 }
 
 /// Sets the payer of a newly created lead order from the declaration.
@@ -2042,6 +2165,81 @@ pub(crate) async fn sync_lead_order_payers(
         sync_order_payers(&mut tx, lead_id, &declaration, actor).await?;
     }
     tx.commit().await
+}
+
+/// A new order of a converted patient starts with the third party the
+/// patient's declaration names as payer (role `cost_bearer`), like a lead's
+/// order does. Nothing is written — `Ok(false)` — when the order already has
+/// a payer, when a relation of the patient is the default payer (a later,
+/// patient-level decision by staff that wins over the declaration), or when
+/// the declaration names no third party. The change is audited with
+/// `source = patient_payer_declaration`.
+pub(crate) async fn preset_order_payer_from_patient(
+    tx: &mut PgConnection,
+    order_id: Uuid,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let Some(order) = sqlx::query(&format!(
+        "SELECT {} FROM orders o WHERE o.id = $1 FOR UPDATE",
+        payer_columns("o", "")
+    ))
+    .bind(order_id)
+    .fetch_optional(&mut *tx)
+    .await?
+    else {
+        return Ok(false);
+    };
+    let previous = PayerRecord::from_row(&order, "");
+    if previous.is_set() {
+        return Ok(false);
+    }
+    let has_default_payer: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM patient_relations WHERE patient_id = $1 AND is_default_payer)",
+    )
+    .bind(patient_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if has_default_payer {
+        return Ok(false);
+    }
+    let Some(declared) = patient_declaration(&mut *tx, patient_id).await? else {
+        return Ok(false);
+    };
+    let Some(next) = declared
+        .declaration
+        .order_payer_record(previous.notes.clone())
+    else {
+        return Ok(false);
+    };
+    write_order_payer(
+        tx,
+        order_id,
+        &previous,
+        &next,
+        actor,
+        json!({
+            "source": "patient_payer_declaration",
+            "lead_id": declared.lead_id,
+            "patient_id": patient_id,
+        }),
+    )
+    .await?;
+    Ok(true)
+}
+
+/// [`preset_order_payer_from_patient`] in a transaction of its own, for an
+/// order created outside one.
+pub(crate) async fn preset_patient_order_payer(
+    db: &gmed_db::DbPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    actor: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    let written = preset_order_payer_from_patient(&mut tx, order_id, patient_id, actor).await?;
+    tx.commit().await?;
+    Ok(written)
 }
 
 #[cfg(test)]
@@ -2617,5 +2815,48 @@ mod tests {
         let mut own = portal("self");
         own.contact_consent = Some(true);
         assert_eq!(save(&agreed, &own).contact_consent_at, None);
+    }
+
+    #[test]
+    fn the_order_payer_record_and_the_card_projection_name_the_third_party_only() {
+        let third_party = informed(from_input(&input("third_party")).unwrap());
+        let record = third_party
+            .order_payer_record(Some("Notiz".into()))
+            .unwrap();
+        assert_eq!(record.contact_name.as_deref(), Some("Erika Muster"));
+        assert_eq!(record.contact_relationship.as_deref(), Some("Tochter"));
+        assert_eq!(record.address_country.as_deref(), Some("DE"));
+        assert_eq!(record.notes.as_deref(), Some("Notiz"));
+        assert_eq!(record.payer_role.as_deref(), Some(PAYER_ROLE_COST_BEARER));
+        let mut nameless = third_party.clone();
+        nameless.first_name = None;
+        nameless.last_name = None;
+        assert!(nameless.order_payer_record(None).is_none());
+        assert!(
+            from_input(&input("self"))
+                .unwrap()
+                .order_payer_record(None)
+                .is_none()
+        );
+
+        // The card sees the payer and the contact, never the GwG answers.
+        let card = third_party.billing_json();
+        assert_eq!(card["name"], "Erika Muster");
+        assert_eq!(card["payer_type"], "person");
+        assert!(card["payer_informed_at"].is_string());
+        for key in [
+            "date_of_birth",
+            "place_of_birth",
+            "citizenships",
+            "source_of_funds",
+            "acts_on_own_account",
+            "beneficial_owner_name",
+        ] {
+            assert!(card.get(key).is_none(), "{key} must not be shown");
+        }
+        let own = from_input(&input("self")).unwrap().billing_json();
+        assert_eq!(own["payer_kind"], "self");
+        assert!(own["name"].is_null());
+        assert!(own["payer_type"].is_null());
     }
 }

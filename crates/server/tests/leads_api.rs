@@ -6226,3 +6226,285 @@ async fn a_wizard_save_with_an_older_contact_list_keeps_the_representative_from_
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert_eq!(lead["trusted_contacts"], json!([]), "{lead}");
 }
+
+/// A minor lead (Mia Muster) whose parents Anna and Ben are trusted contacts
+/// with the given ids; the mother has a structured address from the cabinet.
+/// Qualified and compliant like a lead right before conversion; with
+/// `prospect_patient_id` a repeat request of that patient (which, like the
+/// repeat intake, carries the patient's e-mail).
+async fn seed_minor_lead_with_parents(
+    app: &TestApp,
+    email: &str,
+    anna: Uuid,
+    ben: Uuid,
+    prospect_patient_id: Option<Uuid>,
+) -> Uuid {
+    let pool = &app.suite.pool;
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, phone, date_of_birth, legal_sex,
+                              country, primary_language, street_address, city, zip_code,
+                              qualification_status, compliance_status, intake_source,
+                              consent_healthcare, consent_privacy_practices, trusted_contacts,
+                              intake_model, prospect_patient_id, created_by)
+           VALUES ('Mia', 'Muster', $1, '+49 30 555 0101', DATE '2016-04-05', 'female', 'DE',
+                   'de', 'Hauptstr. 1', 'Berlin', '10115', 'qualified', 'signed',
+                   'staff_wizard', true, true, $2,
+                   CASE WHEN $3::uuid IS NULL THEN 'legacy' ELSE 'patient_first' END, $3, $4)
+           RETURNING id"#,
+    )
+    .bind(email)
+    .bind(json!([
+        { "id": anna, "name": "Anna Muster", "relation": "mother",
+          "email": "anna.muster@example.com", "phone": "+49 30 000000",
+          "birth_date": "1985-03-02" },
+        { "id": ben, "name": "Ben Muster", "relation": "father",
+          "email": "ben.muster@example.com" },
+    ]))
+    .bind(prospect_patient_id)
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_representatives (lead_id, contact_id, role, contact_origin, first_name,
+                                             last_name, street, zip, city, country)
+           VALUES ($1, $2, 'legal_representative', 'portal', 'Anna', 'Muster', 'Musterweg 1',
+                   '10115', 'Berlin', 'DE')"#,
+    )
+    .bind(lead_id)
+    .bind(anna)
+    .execute(pool)
+    .await
+    .unwrap();
+    lead_id
+}
+
+/// The mother declares herself as the payer (as the cabinet does); the
+/// Kostenübernahmeerklärung of the lead's order is generated and signed.
+async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id: Uuid) {
+    let pm = app.auth_header("patient_manager");
+    let (status, saved) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &pm,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "acts_on_own_account": true,
+            "source_of_funds": "employment",
+            "first_name": "Anna",
+            "last_name": "Muster",
+            "date_of_birth": "1985-03-02",
+            "street": "Musterweg 1",
+            "zip": "10115",
+            "city": "Berlin",
+            "country": "DE",
+            "citizenships": ["DE"],
+            "relationship_kind": "parent",
+            "email": "anna.muster@example.com",
+            "phone": "+49 30 000000",
+            "payer_informed": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (status, generated) = json_request(
+        app,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.auth_header("ceo"),
+        Some(json!({
+            "template_id": "cost_coverage_declaration",
+            "lead_id": lead_id,
+            "order_id": order_id,
+            "language": "de",
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = generated["id"].as_str().unwrap().to_string();
+    let (status, marked) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/mark-signed"),
+        &pm,
+        Some(json!({ "compliance_kind": "cost_coverage_declaration" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{marked}");
+}
+
+async fn convert_ready_lead(app: &TestApp, lead_id: Uuid) -> Uuid {
+    let pm = app.auth_header("patient_manager");
+    let (status, lead) =
+        json_request(app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert_eq!(lead["readiness"]["conversion_ready"], true, "{lead}");
+    let (status, converted) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/convert"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    Uuid::parse_str(converted["patient_id"].as_str().unwrap()).unwrap()
+}
+
+type RelationRow = (
+    Uuid,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    bool,
+);
+
+async fn parent_relations(pool: &PgPool, patient_id: Uuid) -> Vec<RelationRow> {
+    sqlx::query_as(
+        r#"SELECT id, related_name, relation_type, email, address_street, address_zip,
+                  address_city, address_country, is_default_payer
+           FROM patient_relations WHERE patient_id = $1 ORDER BY related_name"#,
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// Conversion of a minor whose mother pays: the relation carries her e-mail
+/// and the structured address from the cabinet, she is the patient's default
+/// payer (audited), and a second conversion into the same patient changes
+/// none of it.
+#[tokio::test]
+async fn converting_a_minor_makes_the_paying_parent_the_default_payer_with_her_address() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_email = format!("mia-{}@example.com", Uuid::new_v4().simple());
+    let lead_id = seed_minor_lead_with_parents(&app, &lead_email, anna, ben, None).await;
+    let artifacts = seed_complete_lead_onboarding(&app, lead_id).await;
+    declare_mother_as_payer_and_sign(&app, lead_id, artifacts.order_id).await;
+    let patient_id = convert_ready_lead(&app, lead_id).await;
+
+    let relations = parent_relations(pool, patient_id).await;
+    assert_eq!(relations.len(), 2, "{relations:?}");
+    let (anna_relation, name, relation_type, email, street, zip, city, country, default_payer) =
+        relations[0].clone();
+    assert_eq!(name, "Anna Muster");
+    assert_eq!(relation_type, "parent");
+    assert_eq!(email.as_deref(), Some("anna.muster@example.com"));
+    assert_eq!(street.as_deref(), Some("Musterweg 1"));
+    assert_eq!(zip.as_deref(), Some("10115"));
+    assert_eq!(city.as_deref(), Some("Berlin"));
+    assert_eq!(country.as_deref(), Some("DE"));
+    assert!(default_payer, "the paying parent is the default payer");
+    let (_, name, _, email, street, _, _, _, default_payer) = relations[1].clone();
+    assert_eq!(name, "Ben Muster");
+    assert_eq!(email.as_deref(), Some("ben.muster@example.com"));
+    assert!(street.is_none(), "no address entered for the father");
+    assert!(!default_payer);
+    let audits: Vec<Value> = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'set_default_payer_on_conversion'
+             AND entity_type = 'patient' AND entity_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(audits.len(), 1, "{audits:?}");
+    assert_eq!(audits[0]["lead_id"], lead_id.to_string());
+    assert_eq!(audits[0]["relation_id"], anna_relation.to_string());
+    // The lead-stage order keeps the free-text payer the declaration wrote.
+    let order_payer: (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT payer_contact_name, payer_role FROM orders WHERE id = $1")
+            .bind(artifacts.order_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        order_payer,
+        (Some("Anna Muster".into()), Some("cost_bearer".into()))
+    );
+
+    // The patient card: the invoice goes to the mother as contracting party
+    // through the default-payer rule; the identification of the converted
+    // lead names her on the payer line.
+    let (status, summary) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/payer-summary"),
+        &app.auth_header("ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(summary["patient_is_minor"], true, "{summary}");
+    assert_eq!(summary["source"]["lead_id"], lead_id.to_string());
+    assert_eq!(summary["declaration"]["name"], "Anna Muster");
+    assert_eq!(summary["invoice_recipient"]["source"], "default_payer");
+    assert_eq!(summary["invoice_recipient"]["role"], "contracting_party");
+    assert_eq!(summary["invoice_recipient"]["kind"], "relation");
+    assert_eq!(summary["invoice_recipient"]["name"], "Anna Muster");
+    assert_eq!(summary["invoice_recipient"]["street"], "Musterweg 1");
+    assert_eq!(summary["invoice_recipient"]["missing"], json!([]));
+    assert_eq!(
+        summary["invoice_recipient"]["payer_patient_relation_id"],
+        anna_relation.to_string()
+    );
+    assert_eq!(
+        summary["contracting_party"]["representatives"][0]["is_default_payer"], true,
+        "{summary}"
+    );
+    assert_eq!(
+        summary["identification"]["payer"]["same_person_as"],
+        format!("representative:{anna}"),
+        "{summary}"
+    );
+
+    // A second request of the same patient (repeat intake), converted into
+    // the same record: no second default payer, no error, the mark as it was.
+    let second_lead =
+        seed_minor_lead_with_parents(&app, &lead_email, anna, ben, Some(patient_id)).await;
+    let artifacts = seed_complete_lead_onboarding(&app, second_lead).await;
+    declare_mother_as_payer_and_sign(&app, second_lead, artifacts.order_id).await;
+    let same_patient = convert_ready_lead(&app, second_lead).await;
+    assert_eq!(same_patient, patient_id);
+    let relations = parent_relations(pool, patient_id).await;
+    assert_eq!(relations.len(), 2, "{relations:?}");
+    assert_eq!(relations[0].0, anna_relation);
+    assert!(relations[0].8);
+    assert!(!relations[1].8);
+    let audits: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE action = 'set_default_payer_on_conversion'
+             AND entity_type = 'patient' AND entity_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+    let (status, summary) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/payer-summary"),
+        &app.auth_header("ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(
+        summary["source"]["lead_id"],
+        second_lead.to_string(),
+        "{summary}"
+    );
+    assert_eq!(summary["invoice_recipient"]["source"], "default_payer");
+}

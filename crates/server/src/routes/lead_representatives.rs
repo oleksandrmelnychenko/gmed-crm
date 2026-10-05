@@ -535,10 +535,22 @@ impl Loaded {
 }
 
 /// Reads the representation of a lead in the caller's connection or
-/// transaction; `None` when the lead does not exist.
+/// transaction, with the lead's age judged today; `None` when the lead does
+/// not exist.
 pub(crate) async fn load(
     conn: &mut PgConnection,
     lead_id: Uuid,
+) -> Result<Option<Loaded>, sqlx::Error> {
+    load_on(conn, lead_id, crate::app_time::today()).await
+}
+
+/// [`load`] with the lead's age judged on `on`: a converted lead is read as
+/// of its conversion day, so the parents of a child who has turned 18 since
+/// stay its representatives (the identification status of the patient card).
+pub(crate) async fn load_on(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    on: NaiveDate,
 ) -> Result<Option<Loaded>, sqlx::Error> {
     let Some(lead) = sqlx::query(
         r#"SELECT l.date_of_birth, l.trusted_contacts,
@@ -643,7 +655,7 @@ pub(crate) async fn load(
         lead.try_get::<Option<NaiveDate>, _>("date_of_birth")
             .ok()
             .flatten(),
-        crate::app_time::today(),
+        on,
     );
     let representatives = resolve(minor, &contacts, &rows, &logins, &answers);
     Ok(Some(Loaded {

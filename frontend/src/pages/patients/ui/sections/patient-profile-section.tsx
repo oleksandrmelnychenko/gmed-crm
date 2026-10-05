@@ -51,6 +51,7 @@ import {
 } from "../../model/patient-lead-origin";
 import { LegalStatusPill } from "../shared/legal-status-pill";
 import { FormSection, humanizeFunctionalLabel } from "../shared/patient-form-primitives";
+import { PatientPayerSummaryCard } from "./patient-payer-summary";
 
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
 const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
@@ -754,6 +755,10 @@ function usePatientProfileTabContent({
             editLabel={editPatientFieldLabel(t.patients_insurance_number, t.patient_profile_edit_field_aria)}
           />
         </ProfileSummaryCard>
+
+        {canViewInvoices && id ? (
+          <PatientPayerSummaryCard patientId={id} staffGo={staffGo} reloadKey={detail} />
+        ) : null}
 
         <ProfileSummaryCard
           title={t.patient_profile_address}

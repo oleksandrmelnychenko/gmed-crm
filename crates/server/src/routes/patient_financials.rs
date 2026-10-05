@@ -118,7 +118,10 @@ fn can_manage_patient_balance(role: Role) -> bool {
     role.can(Capability::InvoicesFinance)
 }
 
-async fn ensure_patient_access(
+/// Access to a patient's financials: the CEO, the CEO Assistant and Billing
+/// see every patient; everybody else needs an active assignment (403 without
+/// one). Shared with the patient card's payer summary.
+pub(crate) async fn ensure_patient_access(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,

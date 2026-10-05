@@ -265,6 +265,16 @@ async fn create(
     .execute(&mut *tx)
     .await
     .map_err(db_error)?;
+    // The third party the patient's payer declaration names pays the new
+    // order (unless staff set a default payer relation).
+    super::lead_payer::preset_order_payer_from_patient(
+        &mut tx,
+        body.request_id,
+        patient,
+        auth.user_id,
+    )
+    .await
+    .map_err(db_error)?;
     sqlx::query("INSERT INTO order_intakes(order_id,data,baseline_facts) VALUES($1,$2,$3)")
         .bind(body.request_id)
         .bind(json!(Draft {

@@ -15,9 +15,14 @@
 //! (`representative:<id>`, see [`crate::routes::lead_representatives`]) is a
 //! person of its own, and a signature is attributed by the signer's e-mail
 //! address. A parent who also pays is one person, shown on both lines. The
-//! status is information only — the lead wizard and the identification sheet
-//! show it, nothing is blocked by it. See
-//! `docs/architecture/gwg-identification-sheet_ua.md`.
+//! status is information only — the lead wizard, the identification sheet
+//! and the payer block of the patient card show it, nothing is blocked by it.
+//!
+//! A converted lead keeps its status: its documents moved to the patient, so
+//! the signatures are looked for among the patient's documents too, the
+//! minor is judged as of the conversion day, and the own-account payment —
+//! which usually arrives after conversion — is still confirmed on the lead.
+//! See `docs/architecture/gwg-identification-sheet_ua.md`.
 
 use axum::{
     Json, Router,
@@ -138,7 +143,7 @@ impl IdentificationStatus {
         self.representatives.iter().find(|person| person.id == id)
     }
 
-    fn to_json(&self) -> Value {
+    pub(crate) fn to_json(&self) -> Value {
         json!({
             "minor": self.minor,
             "contract_partner": self.contract_partner.to_json(),
@@ -326,17 +331,42 @@ async fn third_party_payer_since(
     .await
 }
 
+/// The patient a converted lead became, and when it was converted (the
+/// lead's last status change; nothing changes the status of a converted lead
+/// afterwards). `None` for an open lead.
+async fn conversion_of(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<(Uuid, DateTime<Utc>)>, sqlx::Error> {
+    let converted: Option<(Option<Uuid>, DateTime<Utc>)> =
+        sqlx::query_as("SELECT converted_patient_id, status_changed_at FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_optional(conn)
+            .await?;
+    Ok(converted.and_then(|(patient_id, changed_at)| patient_id.map(|id| (id, changed_at))))
+}
+
 /// Loads the identification state of a lead in the caller's connection or
 /// transaction: the qualified signatures on the lead's documents (and on the
 /// documents of the lead's orders, as primary document or package member) and
 /// the confirmed own-account payments. For a minor they are attributed to the
 /// legal representatives ([`signature_owner`]); nothing counts for the child.
+///
+/// A converted lead's documents moved to the patient (`documents.patient_id`,
+/// `lead_id = NULL`), so the documents of the converted patient and of its
+/// orders count as well; what an earlier payer signed is still left out by
+/// `identity_changed_at`. The minor is judged as of the conversion day, so
+/// the parents stay the persons to identify after the child's 18th birthday.
 pub(crate) async fn load_identification_status(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<IdentificationStatus, sqlx::Error> {
     let payer_since = third_party_payer_since(&mut *conn, lead_id).await?;
-    let representation = lead_representatives::load(&mut *conn, lead_id)
+    let conversion = conversion_of(&mut *conn, lead_id).await?;
+    let judged_on = conversion
+        .map(|(_, converted_at)| crate::app_time::date_of(converted_at))
+        .unwrap_or_else(crate::app_time::today);
+    let representation = lead_representatives::load_on(&mut *conn, lead_id, judged_on)
         .await?
         .unwrap_or_default()
         .representation;
@@ -354,6 +384,9 @@ pub(crate) async fn load_identification_status(
                SELECT d.id FROM documents d
                WHERE d.lead_id = $1
                   OR d.order_id IN (SELECT o.id FROM orders o WHERE o.source_lead_id = $1)
+                  OR ($2::uuid IS NOT NULL
+                      AND (d.patient_id = $2
+                           OR d.order_id IN (SELECT o.id FROM orders o WHERE o.patient_id = $2)))
            )
            SELECT r.test_mode, r.signed_at, r.evidence, r.signers
            FROM document_signature_requests r
@@ -366,6 +399,7 @@ pub(crate) async fn load_identification_status(
                         AND m.document_id IN (SELECT id FROM lead_documents)))"#,
     )
     .bind(lead_id)
+    .bind(conversion.map(|(patient_id, _)| patient_id))
     .fetch_all(&mut *conn)
     .await?;
     let signatures: Vec<RoleSignature> = requests
@@ -559,6 +593,8 @@ struct OwnAccountPaymentInput {
 /// patient (`contract_partner`, not for a minor), the third-party payer
 /// (`payer`) or a legal representative of a minor (`representative:<id>`).
 /// The mark of a payer who is one of the parents is the mark of that parent.
+/// A converted lead stays open for this mark: the payment usually arrives
+/// after conversion (owner default 2026-10-06); a deleted lead does not.
 async fn set_own_account_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -601,28 +637,15 @@ async fn set_own_account_payment(
         Ok(tx) => tx,
         Err(error) => return database_error(error, "begin own-account payment"),
     };
-    let lead = match sqlx::query(
-        "SELECT converted_patient_id, qualification_status FROM leads WHERE id = $1 FOR UPDATE",
-    )
-    .bind(lead_id)
-    .fetch_optional(&mut *tx)
-    .await
+    let lead = match sqlx::query("SELECT qualification_status FROM leads WHERE id = $1 FOR UPDATE")
+        .bind(lead_id)
+        .fetch_optional(&mut *tx)
+        .await
     {
         Ok(Some(row)) => row,
         Ok(None) => return error(StatusCode::NOT_FOUND, "not_found", "Lead not found"),
         Err(error) => return database_error(error, "lock own-account payment lead"),
     };
-    if lead
-        .try_get::<Option<Uuid>, _>("converted_patient_id")
-        .unwrap_or_default()
-        .is_some()
-    {
-        return error(
-            StatusCode::CONFLICT,
-            "lead_converted",
-            "The lead is converted; its identification belongs to the patient record",
-        );
-    }
     if lead
         .try_get::<String, _>("qualification_status")
         .unwrap_or_default()

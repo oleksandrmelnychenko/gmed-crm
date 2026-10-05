@@ -6244,6 +6244,32 @@ async fn convert_lead(
         }
     }
 
+    // What the cabinet holds about the lead's representatives (a legal
+    // representative's structured address) goes into the relation, and the
+    // parent who pays becomes the patient's default payer: invoices of a
+    // minor are then addressed to that parent as contracting party (the
+    // existing default-payer rule), not to a second free-text contact.
+    let representatives_on_file = match super::lead_representatives::load(&mut tx, lead_id).await {
+        Ok(loaded) => loaded.unwrap_or_default(),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load lead representation for conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let payer_declaration = match super::lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(declaration) => declaration,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load payer declaration for conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let paying_parent = super::lead_representatives::payer_same_person(
+        &representatives_on_file.representation,
+        payer_declaration.as_ref(),
+    );
+    // Name and type of the paying parent's relation, once its entry is seen.
+    let mut paying_parent_relation: Option<(String, &str)> = None;
+
     for trusted_contact in trusted_contacts.as_array().into_iter().flatten() {
         let Some(contact) = trusted_contact.as_object() else {
             continue;
@@ -6261,6 +6287,23 @@ async fn convert_lead(
             .get("related_patient_id")
             .and_then(Value::as_str)
             .and_then(|value| Uuid::parse_str(value).ok());
+        let contact_id = super::lead_representatives::entry_id(trusted_contact);
+        let email = contact
+            .get("email")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        let address = contact_id
+            .and_then(|id| representatives_on_file.row_of(id))
+            .map(|row| {
+                (
+                    row.street.clone(),
+                    row.zip.clone(),
+                    row.city.clone(),
+                    row.country.clone(),
+                )
+            })
+            .unwrap_or_default();
         let notes = [
             contact
                 .get("email")
@@ -6283,12 +6326,14 @@ async fn convert_lead(
         .collect::<Vec<_>>()
         .join("\n");
 
+        let relation_type = normalized_patient_relation_type(relation);
         if let Err(error) = sqlx::query(
             r#"INSERT INTO patient_relations (
                     patient_id, related_patient_id, related_name, relation_type,
-                    is_emergency_contact, phone, notes
+                    is_emergency_contact, phone, notes, email,
+                    address_street, address_zip, address_city, address_country
                )
-               SELECT $1, $2, $3, $4, true, $5, $6
+               SELECT $1, $2, $3, $4, true, $5, $6, $7, $8, $9, $10, $11
                WHERE NOT EXISTS (
                    SELECT 1 FROM patient_relations existing
                    WHERE existing.patient_id = $1
@@ -6302,14 +6347,79 @@ async fn convert_lead(
         .bind(patient_id)
         .bind(related_patient_id)
         .bind(name)
-        .bind(normalized_patient_relation_type(relation))
+        .bind(relation_type)
         .bind(contact.get("phone").and_then(Value::as_str))
         .bind((!notes.is_empty()).then_some(notes.as_str()))
+        .bind(email)
+        .bind(&address.0)
+        .bind(&address.1)
+        .bind(&address.2)
+        .bind(&address.3)
         .execute(&mut *tx)
         .await
         {
             tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "transfer trusted contact to patient relation");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+        if contact_id.is_some()
+            && contact_id == paying_parent
+            && related_patient_id.is_none()
+            && is_parent_or_guardian_relation(relation)
+        {
+            paying_parent_relation = Some((name.to_string(), relation_type));
+        }
+    }
+
+    // The parent who pays is the default payer unless the patient already
+    // has one (a repeat conversion keeps the mark staff set, and the unique
+    // index allows one only). Never backfilled for earlier conversions.
+    if let Some((related_name, relation_type)) = paying_parent_relation {
+        let marked = sqlx::query_scalar::<_, Uuid>(
+            r#"UPDATE patient_relations
+               SET is_default_payer = true
+               WHERE id = (
+                   SELECT candidate.id FROM patient_relations candidate
+                   WHERE candidate.patient_id = $1
+                     AND candidate.related_patient_id IS NULL
+                     AND candidate.related_name = $2
+                     AND candidate.relation_type = $3
+                   ORDER BY candidate.created_at DESC, candidate.id DESC
+                   LIMIT 1
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM patient_relations existing
+                   WHERE existing.patient_id = $1 AND existing.is_default_payer
+               )
+               RETURNING id"#,
+        )
+        .bind(patient_id)
+        .bind(&related_name)
+        .bind(relation_type)
+        .fetch_optional(&mut *tx)
+        .await;
+        match marked {
+            Ok(Some(relation_id)) => {
+                if let Err(error) = audit::write_in_transaction(
+                    &mut tx,
+                    &audit::domain_event(
+                        "set_default_payer_on_conversion",
+                        Some(auth.user_id),
+                        "patient",
+                        Some(patient_id),
+                        json!({ "lead_id": lead_id, "relation_id": relation_id }),
+                    ),
+                )
+                .await
+                {
+                    tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "audit default payer on conversion");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "mark paying parent as default payer");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
         }
     }
 

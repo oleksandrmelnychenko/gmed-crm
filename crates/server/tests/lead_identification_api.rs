@@ -594,8 +594,8 @@ async fn staff_confirm_and_take_back_the_own_account_payment() {
     assert!(payment["note"].is_null(), "{renewed}");
     assert!(instant(&payment["confirmed_at"]) >= first_confirmed_at);
 
-    // A deleted or converted lead is closed for changes, like its payer
-    // declaration; the status can still be read.
+    // A deleted lead is closed for changes, like its payer declaration; the
+    // status can still be read.
     sqlx::query("UPDATE leads SET qualification_status = 'deleted' WHERE id = $1")
         .bind(lead_id)
         .execute(pool)
@@ -611,33 +611,6 @@ async fn staff_confirm_and_take_back_the_own_account_payment() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{error}");
     assert_eq!(error["error"], "lead_deleted");
-    let patient_id: Uuid = sqlx::query_scalar(
-        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, nationality, created_by)
-           VALUES ($1, 'Anna', 'Muster', DATE '1985-02-03', 'female', 'German', $2) RETURNING id"#,
-    )
-    .bind(format!("P-IDENT-{}", Uuid::new_v4().simple()))
-    .bind(app.suite.admin_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2 WHERE id = $1",
-    )
-    .bind(lead_id)
-    .bind(patient_id)
-    .execute(pool)
-    .await
-    .unwrap();
-    let (status, error) = json_request(
-        &app,
-        "POST",
-        &path,
-        &pm,
-        Some(json!({ "confirmed": false })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{error}");
-    assert_eq!(error["error"], "lead_converted");
     let (status, kept) = json_request(
         &app,
         "GET",
@@ -648,6 +621,355 @@ async fn staff_confirm_and_take_back_the_own_account_payment() {
     .await;
     assert_eq!(status, StatusCode::OK, "{kept}");
     assert_eq!(kept, renewed);
+
+    // A converted lead stays open for the mark: the payment usually arrives
+    // after the conversion (owner default 2026-10-06), and the patient card
+    // reads the status of the converted lead.
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, nationality, created_by)
+           VALUES ($1, 'Anna', 'Muster', DATE '1985-02-03', 'female', 'German', $2) RETURNING id"#,
+    )
+    .bind(format!("P-IDENT-{}", Uuid::new_v4().simple()))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2,
+                          status_changed_at = now() WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, revoked) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({ "confirmed": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert!(
+        revoked["contract_partner"]["own_account_payment"].is_null(),
+        "{revoked}"
+    );
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &path,
+        &sales,
+        Some(json!({ "confirmed": true, "note": "nach Konvertierung" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(
+        confirmed["contract_partner"]["own_account_payment"]["confirmed_by_name"],
+        staff_name("sales"),
+        "{confirmed}"
+    );
+    let (status, kept) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/identification-status"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    assert_eq!(kept, confirmed);
+}
+
+/// A patient record the converted lead became.
+async fn seed_patient(app: &TestApp, first_name: &str, birth_date: &str) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, $2, 'Muster', $3::date, 'female', $4) RETURNING id"#,
+    )
+    .bind(format!("P-IDENT-{}", Uuid::new_v4().simple()))
+    .bind(first_name)
+    .bind(birth_date)
+    .bind(app.suite.admin_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+}
+
+/// Converts a lead the way the conversion does for what the identification
+/// reads: the lead's documents move to the patient (`lead_id` cleared), the
+/// lead is marked converted at `converted_at`.
+async fn convert_by_sql(
+    app: &TestApp,
+    lead_id: Uuid,
+    patient_id: Uuid,
+    converted_at: DateTime<Utc>,
+) {
+    sqlx::query("UPDATE documents SET patient_id = $2, lead_id = NULL WHERE lead_id = $1")
+        .bind(lead_id)
+        .bind(patient_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query(r#"UPDATE lead_payer_declarations SET patient_id = $2 WHERE lead_id = $1"#)
+        .bind(lead_id)
+        .bind(patient_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2,
+                            status_changed_at = $3 WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(converted_at)
+    .execute(app.pool())
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_converted_lead_keeps_its_signatures_and_its_representatives() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let status_of = |lead_id: Uuid| format!("/api/v1/leads/{lead_id}/identification-status");
+
+    // The adult signed the framework contract; the conversion moved the
+    // document to the patient. The signature still counts for the lead.
+    let lead_id = seed_lead(pool).await;
+    let contract = seed_document(&app, Some(lead_id)).await;
+    let client_signed_at = Utc::now() - Duration::days(3);
+    seed_signature_request(
+        &app,
+        contract,
+        "completed",
+        "QES",
+        false,
+        vec![signer("client", "QES", client_signed_at)],
+    )
+    .await;
+    let patient_id = seed_patient(&app, "Anna", "1985-02-03").await;
+    convert_by_sql(&app, lead_id, patient_id, Utc::now() - Duration::days(2)).await;
+    let (status, converted) = json_request(&app, "GET", &status_of(lead_id), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    assert_eq!(
+        instant(&converted["contract_partner"]["qes"]["signed_at"]).timestamp(),
+        client_signed_at.timestamp(),
+        "{converted}"
+    );
+    // A signature on a document of one of the patient's orders counts too.
+    let order_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO orders (order_number, patient_id, created_by) VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(format!("A-IDENT-{}", Uuid::new_v4().simple()))
+    .bind(patient_id)
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let order_document = seed_document(&app, None).await;
+    sqlx::query("UPDATE documents SET order_id = $2 WHERE id = $1")
+        .bind(order_document)
+        .bind(order_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let later = Utc::now() - Duration::days(1);
+    seed_signature_request(
+        &app,
+        order_document,
+        "completed",
+        "QES",
+        false,
+        vec![signer("client", "QES", later)],
+    )
+    .await;
+    let (_, with_order) = json_request(&app, "GET", &status_of(lead_id), &pm, None).await;
+    assert_eq!(
+        instant(&with_order["contract_partner"]["qes"]["signed_at"]).timestamp(),
+        later.timestamp(),
+        "{with_order}"
+    );
+
+    // A second request of the same patient names another payer: what the
+    // first payer signed does not count for the second (named later), what
+    // the second signs on a document of the patient does.
+    let first_payer_signed_at = Utc::now() - Duration::hours(10);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &pm,
+        Some(third_party_payer()),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "a converted lead's declaration is closed"
+    );
+    let second_lead = seed_lead(pool).await;
+    let mut other = third_party_payer();
+    other["last_name"] = json!("Anders");
+    other["email"] = json!("erika.anders@example.com");
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{second_lead}/payer-declaration"),
+        &pm,
+        Some(other),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    // The first payer's signature, dated before the second payer was named,
+    // sits on a document of the patient now.
+    let earlier_cost_assumption = seed_document(&app, None).await;
+    sqlx::query("UPDATE documents SET patient_id = $2 WHERE id = $1")
+        .bind(earlier_cost_assumption)
+        .bind(patient_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    seed_signature_request(
+        &app,
+        earlier_cost_assumption,
+        "completed",
+        "QES",
+        false,
+        vec![signature_by(
+            "payer",
+            "viktor.zahler@example.com",
+            first_payer_signed_at,
+        )],
+    )
+    .await;
+    convert_by_sql(
+        &app,
+        second_lead,
+        patient_id,
+        Utc::now() - Duration::hours(1),
+    )
+    .await;
+    let (status, second) = json_request(&app, "GET", &status_of(second_lead), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert!(second["payer"]["qes"].is_null(), "{second}");
+    let named_at: DateTime<Utc> = sqlx::query_scalar(
+        "SELECT identity_changed_at FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(second_lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let second_payer_signed_at = named_at + Duration::milliseconds(1);
+    let moved_cost_assumption = seed_document(&app, None).await;
+    sqlx::query("UPDATE documents SET patient_id = $2 WHERE id = $1")
+        .bind(moved_cost_assumption)
+        .bind(patient_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    seed_signature_request(
+        &app,
+        moved_cost_assumption,
+        "completed",
+        "QES",
+        false,
+        vec![signature_by(
+            "payer",
+            "erika.anders@example.com",
+            second_payer_signed_at,
+        )],
+    )
+    .await;
+    let (_, second) = json_request(&app, "GET", &status_of(second_lead), &pm, None).await;
+    assert_eq!(
+        instant(&second["payer"]["qes"]["signed_at"]).timestamp(),
+        second_payer_signed_at.timestamp(),
+        "{second}"
+    );
+
+    // A minor who turned 18 since the conversion: the lead is read as of
+    // the conversion day, so the parents stay the persons to identify.
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    let eighteen_today = gmed_server::app_time::today()
+        .checked_sub_months(chrono::Months::new(18 * 12))
+        .unwrap();
+    let grown_up = seed_minor_lead(
+        pool,
+        json!([
+            { "id": anna, "name": "Anna Muster", "relation": "mother",
+              "email": "anna.muster@example.com" },
+            { "id": ben, "name": "Ben Muster", "relation": "father" },
+        ]),
+    )
+    .await;
+    sqlx::query("UPDATE leads SET date_of_birth = $2 WHERE id = $1")
+        .bind(grown_up)
+        .bind(eighteen_today)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, adult_today) = json_request(&app, "GET", &status_of(grown_up), &pm, None).await;
+    assert_eq!(adult_today["minor"], false, "{adult_today}");
+    let young_patient = seed_patient(&app, "Mia", &eighteen_today.to_string()).await;
+    let converted_at = Utc::now() - Duration::days(10);
+    convert_by_sql(&app, grown_up, young_patient, converted_at).await;
+    let (status, as_of_conversion) =
+        json_request(&app, "GET", &status_of(grown_up), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{as_of_conversion}");
+    assert_eq!(as_of_conversion["minor"], true, "{as_of_conversion}");
+    assert_eq!(
+        as_of_conversion["representatives"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2,
+        "{as_of_conversion}"
+    );
+    // The parents' marks are still confirmed on the converted lead.
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/leads/{grown_up}/identification-status/representative:{anna}/own-account-payment"
+        ),
+        &pm,
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert!(
+        representative_line(&confirmed, anna)["own_account_payment"].is_object(),
+        "{confirmed}"
+    );
+    // Nothing moves the status date of a converted lead: the status
+    // transitions and the failed-lead flow refuse it, so the conversion day
+    // stays the day the minor is judged on.
+    for (path, body) in [
+        (
+            format!("/api/v1/leads/{grown_up}/qualify"),
+            json!({ "status": "in_progress" }),
+        ),
+        (
+            format!("/api/v1/leads/{grown_up}/failed-flow"),
+            json!({ "resolution": "archive", "reason": "duplicate" }),
+        ),
+    ] {
+        let (status, refused) = json_request(&app, "POST", &path, &pm, Some(body)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{path}: {refused}");
+    }
+    let unchanged: DateTime<Utc> =
+        sqlx::query_scalar("SELECT status_changed_at FROM leads WHERE id = $1")
+            .bind(grown_up)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(unchanged.timestamp(), converted_at.timestamp());
+    let (_, still) = json_request(&app, "GET", &status_of(grown_up), &pm, None).await;
+    assert_eq!(still["minor"], true, "{still}");
 }
 
 #[tokio::test]

@@ -230,6 +230,49 @@ async fn set_invoice_payer(
     .await
 }
 
+/// The patient's lead, converted, with its payer declaration linked to the
+/// patient: Viktor Zahler pays as a third party (`third_party`), or the
+/// patient pays (`self`).
+async fn seed_converted_declaration(pool: &PgPool, patient_id: Uuid, payer_kind: &str) -> Uuid {
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              qualification_status, compliance_status, intake_source,
+                              converted_patient_id, status_changed_at)
+           VALUES ('Kind', 'Muster', $1, DATE '1980-05-05', 'diverse', 'converted', 'signed',
+                   'staff_wizard', $2, now() - interval '1 hour')
+           RETURNING id"#,
+    )
+    .bind(format!("lead-{}@example.com", Uuid::new_v4().simple()))
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let third_party = payer_kind == "third_party";
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, patient_id, payer_kind, payer_type, first_name, last_name, date_of_birth,
+               street, zip, city, country, citizenships, relationship_kind, email,
+               source_of_funds, payer_informed_at)
+           VALUES ($1, $2, $3,
+                   CASE WHEN $4 THEN 'person' END, CASE WHEN $4 THEN 'Viktor' END,
+                   CASE WHEN $4 THEN 'Zahler' END, CASE WHEN $4 THEN DATE '1970-05-01' END,
+                   CASE WHEN $4 THEN 'Ringstr. 9' END, CASE WHEN $4 THEN '1010' END,
+                   CASE WHEN $4 THEN 'Wien' END, CASE WHEN $4 THEN 'AT' END,
+                   CASE WHEN $4 THEN '{AT}'::text[] ELSE '{}'::text[] END,
+                   CASE WHEN $4 THEN 'relative' END,
+                   CASE WHEN $4 THEN 'viktor.zahler@example.com' END,
+                   'employment', CASE WHEN $4 THEN now() END)"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(payer_kind)
+    .bind(third_party)
+    .execute(pool)
+    .await
+    .unwrap();
+    lead_id
+}
+
 struct Fixture {
     app: axum::Router,
     pool: PgPool,
@@ -560,6 +603,130 @@ async fn minor_patient_invoices_go_to_the_parents_by_default() {
             .await
             .unwrap();
     assert!(inherited.minor_without_payer);
+}
+
+#[tokio::test]
+async fn the_declared_third_party_pays_the_invoice_after_the_default_payer_and_before_the_parents()
+{
+    let Some(fx) = fixture("payer-declared").await else {
+        return;
+    };
+
+    // An adult whose lead declared Viktor Zahler: the draft of an order
+    // without a payer goes to him as cost bearer, with the declared address.
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1980-05-05", true).await;
+    seed_converted_declaration(&fx.pool, patient, "third_party").await;
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(draft["payer"]["contact_name"], "Viktor Zahler", "{draft}");
+    assert_eq!(draft["payer"]["role"], "cost_bearer");
+    assert_eq!(draft["payer"]["patient_relation_id"], Value::Null);
+    assert_eq!(draft["recipient"]["kind"], "contact");
+    assert_eq!(draft["recipient"]["name"], "Viktor Zahler");
+    assert_eq!(draft["recipient"]["city"], "Wien");
+    assert_eq!(draft["recipient"]["email"], "viktor.zahler@example.com");
+    assert_eq!(
+        draft["recipient"]["service_recipient_name"],
+        format!("Kind {} Muster", fx.tag),
+        "the adult patient stays the Leistungsempfänger"
+    );
+
+    // Billing may still clear the payer of the draft: an empty body means
+    // "the patient receives the invoice", as before.
+    let (status, cleared) = set_invoice_payer(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["payer"]["contact_name"], Value::Null, "{cleared}");
+    assert_eq!(cleared["recipient"]["kind"], "patient");
+
+    // A second draft starts with the declared payer again and releases to
+    // him: the frozen recipient names the declared third party.
+    let second = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    let second_id = second["id"].as_str().unwrap().to_string();
+    assert_eq!(second["payer"]["contact_name"], "Viktor Zahler", "{second}");
+    let (status, released) = release(&fx.app, &fx.billing, &second_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&second_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot["name"], "Viktor Zahler");
+    assert_eq!(snapshot["kind"], "contact");
+    assert_eq!(snapshot["payer_role"], "cost_bearer");
+    assert_eq!(snapshot["city"], "Wien");
+
+    // A minor whose parents are recorded: the declaration beats the parents
+    // as contracting party; a default payer set by staff beats the
+    // declaration.
+    let child = seed_patient(
+        &fx.pool,
+        fx.admin_id,
+        &format!("{}-c", fx.tag),
+        "2016-03-04",
+        true,
+    )
+    .await;
+    let mother = seed_relation(&fx.pool, child, "Erika Muster", "parent", None, true).await;
+    seed_converted_declaration(&fx.pool, child, "third_party").await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+    let inherited =
+        gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, child)
+            .await
+            .unwrap();
+    assert_eq!(inherited.source, "payer_declaration");
+    assert_eq!(
+        inherited.record.contact_name.as_deref(),
+        Some("Viktor Zahler")
+    );
+    assert_eq!(inherited.record.payer_role.as_deref(), Some("cost_bearer"));
+    assert!(!inherited.minor_without_payer);
+    let child_order = seed_order(&fx.pool, child, fx.admin_id, &format!("{}-c", fx.tag)).await;
+    let child_quote = create_quote(&fx.app, &fx.manager, child_order).await;
+    let child_draft = create_draft(&fx.app, &fx.billing, &child_quote, "final").await;
+    assert_eq!(
+        child_draft["payer"]["contact_name"], "Viktor Zahler",
+        "{child_draft}"
+    );
+    assert_eq!(
+        child_draft["recipient"]["service_recipient_name"],
+        "Erika Muster"
+    );
+    sqlx::query("UPDATE patient_relations SET is_default_payer = true WHERE id = $1")
+        .bind(mother)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let inherited =
+        gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, child)
+            .await
+            .unwrap();
+    assert_eq!(inherited.source, "default_payer");
+    assert_eq!(inherited.record.payer_patient_relation_id, Some(mother));
+    assert_eq!(
+        inherited.record.payer_role.as_deref(),
+        Some("contracting_party")
+    );
+
+    // A self-payer declaration sets nothing: the parents as before.
+    let own = seed_patient(
+        &fx.pool,
+        fx.admin_id,
+        &format!("{}-s", fx.tag),
+        "2016-03-04",
+        true,
+    )
+    .await;
+    let own_mother = seed_relation(&fx.pool, own, "Erika Muster", "parent", None, true).await;
+    seed_converted_declaration(&fx.pool, own, "self").await;
+    let inherited =
+        gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, own)
+            .await
+            .unwrap();
+    assert_eq!(inherited.source, "contracting_party");
+    assert_eq!(inherited.record.payer_patient_relation_id, Some(own_mother));
 }
 
 #[tokio::test]

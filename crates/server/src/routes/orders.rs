@@ -3568,6 +3568,22 @@ async fn create_order(
                 tracing::error!(%error, order_id = %r.id, "order payer from lead declaration");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
+            // An order of a converted patient starts with the third party the
+            // patient's payer declaration names (unless staff set a default
+            // payer relation).
+            if source_lead_id.is_none()
+                && let Some(patient_id) = patient_id
+                && let Err(error) = super::lead_payer::preset_patient_order_payer(
+                    &state.db,
+                    r.id,
+                    patient_id,
+                    auth.user_id,
+                )
+                .await
+            {
+                tracing::error!(%error, order_id = %r.id, "order payer from patient declaration");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
             state.audit_sender.try_send(audit::domain_event(
                 "create_order",
                 Some(auth.user_id),

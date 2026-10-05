@@ -1019,3 +1019,197 @@ async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leav
     .unwrap();
     assert_eq!(cleared, (None, None, None));
 }
+
+/// A converted patient (adult, full address) whose lead declared `payer`,
+/// as the conversion leaves them: the lead converted, the declaration
+/// linked to the patient.
+async fn seed_converted_patient(app: &TestApp, payer_kind: &str, third_party: bool) -> Uuid {
+    let pool = app.pool();
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by,
+                                 email, phone_primary, languages, residence_country,
+                                 address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Ben', 'Muster', DATE '1980-05-05', 'male', $2, $3, '+49 30 1', '{de}',
+                   'DE', 'Patientenweg 3', '10117', 'Berlin', 'DE')
+           RETURNING id"#,
+    )
+    .bind(format!("P-CONV-{tag}"))
+    .bind(app.suite.admin_id)
+    .bind(format!("ben-{tag}@example.com"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              qualification_status, compliance_status, intake_source,
+                              converted_patient_id, status_changed_at)
+           VALUES ('Ben', 'Muster', $1, DATE '1980-05-05', 'male', 'converted', 'signed',
+                   'staff_wizard', $2, now() - interval '1 hour')
+           RETURNING id"#,
+    )
+    .bind(format!("ben-lead-{tag}@example.com"))
+    .bind(patient_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, patient_id, payer_kind, payer_type, first_name, last_name, date_of_birth,
+               street, zip, city, country, citizenships, relationship_kind, email, phone,
+               source_of_funds, payer_informed_at)
+           VALUES ($1, $2, $3,
+                   CASE WHEN $4 THEN 'person' END, CASE WHEN $4 THEN 'Viktor' END,
+                   CASE WHEN $4 THEN 'Zahler' END, CASE WHEN $4 THEN DATE '1970-05-01' END,
+                   CASE WHEN $4 THEN 'Ringstr. 9' END, CASE WHEN $4 THEN '1010' END,
+                   CASE WHEN $4 THEN 'Wien' END, CASE WHEN $4 THEN 'AT' END,
+                   CASE WHEN $4 THEN '{AT}'::text[] ELSE '{}'::text[] END,
+                   CASE WHEN $4 THEN 'relative' END,
+                   CASE WHEN $4 THEN 'viktor.zahler@example.com' END,
+                   CASE WHEN $4 THEN '+43 1 0000000' END,
+                   'employment', CASE WHEN $4 THEN now() END)"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .bind(payer_kind)
+    .bind(third_party)
+    .execute(pool)
+    .await
+    .unwrap();
+    patient_id
+}
+
+/// Name, role, e-mail, relationship, city, country and relation of an
+/// order's payer.
+type OrderPayerRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<Uuid>,
+);
+
+/// The payer of an order as the card and the dialog read it.
+async fn full_order_payer(pool: &PgPool, order_id: Uuid) -> Value {
+    let row: OrderPayerRow = sqlx::query_as(
+        r#"SELECT payer_contact_name, payer_role, payer_contact_email, payer_contact_relationship,
+                  payer_address_city, payer_address_country, payer_patient_relation_id
+           FROM orders WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    json!({
+        "name": row.0,
+        "role": row.1,
+        "email": row.2,
+        "relationship": row.3,
+        "city": row.4,
+        "country": row.5,
+        "relation_id": row.6,
+    })
+}
+
+async fn order_payer_audit(pool: &PgPool, order_id: Uuid) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'set_order_payer' AND entity_id = $1
+         ORDER BY created_at, id",
+    )
+    .bind(order_id)
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_new_order_of_a_converted_patient_starts_with_the_declared_third_party() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let ceo = app.bearer("ceo");
+    let declared = seed_converted_patient(&app, "third_party", true).await;
+    let viktor = json!({
+        "name": "Viktor Zahler",
+        "role": "cost_bearer",
+        "email": "viktor.zahler@example.com",
+        "relationship": "Verwandte/r",
+        "city": "Wien",
+        "country": "AT",
+        "relation_id": null,
+    });
+
+    // POST /orders for the patient: the declared payer, audited with its
+    // source.
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &ceo,
+        Some(json!({ "patient_id": declared, "needs_description": "Nachsorge" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let order_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    assert_eq!(full_order_payer(pool, order_id).await, viktor);
+    let audits = order_payer_audit(pool, order_id).await;
+    assert_eq!(audits.len(), 1, "{audits:?}");
+    assert_eq!(audits[0]["source"], "patient_payer_declaration");
+    assert_eq!(audits[0]["patient_id"], declared.to_string());
+    assert!(audits[0]["lead_id"].is_string(), "{audits:?}");
+
+    // The patient order wizard pre-sets the same payer in its transaction.
+    let request_id = Uuid::new_v4();
+    let (status, intake) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{declared}/order-intakes"),
+        &ceo,
+        Some(json!({ "request_id": request_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(full_order_payer(pool, request_id).await, viktor);
+    assert_eq!(order_payer_audit(pool, request_id).await.len(), 1);
+
+    // A self-payer sets nothing.
+    let own = seed_converted_patient(&app, "self", false).await;
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &ceo,
+        Some(json!({ "patient_id": own, "needs_description": "Nachsorge" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let order_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    assert!(full_order_payer(pool, order_id).await["name"].is_null());
+    assert!(order_payer_audit(pool, order_id).await.is_empty());
+
+    // A default payer relation set by staff wins over the declaration: the
+    // order starts without a payer and the invoice takes the relation.
+    let with_default = seed_converted_patient(&app, "third_party", true).await;
+    sqlx::query(
+        r#"INSERT INTO patient_relations (patient_id, related_name, relation_type, is_default_payer,
+                                          address_street, address_zip, address_city, address_country)
+           VALUES ($1, 'Olga Zahler', 'sibling', true, 'Nebenweg 2', '10115', 'Berlin', 'DE')"#,
+    )
+    .bind(with_default)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &ceo,
+        Some(json!({ "patient_id": with_default, "needs_description": "Nachsorge" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let order_id = Uuid::parse_str(created["id"].as_str().unwrap()).unwrap();
+    assert!(full_order_payer(pool, order_id).await["name"].is_null());
+    assert!(order_payer_audit(pool, order_id).await.is_empty());
+}
