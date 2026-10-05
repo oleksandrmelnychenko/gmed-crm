@@ -1,7 +1,6 @@
 import { FileSignature, Mail } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
-import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { buttonVariants } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/ui-shell";
@@ -10,6 +9,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { SignatureConnectionForm } from "@/pages/documents/ui/signature-connection-dialog";
 import { SignatureDefaultsSettings } from "@/pages/documents/ui/signature-defaults-settings";
+import { MailConnectionForm } from "@/pages/admin/ui/mail-connection-form";
 
 type ApiTab = "signature" | "email";
 
@@ -65,31 +65,7 @@ export function AdminApiConnectionsPage() {
         </TabsContent>
 
         <TabsContent value="email" className="grid min-w-0 gap-3">
-          {/* The key of the mail service still lives in the server
-              configuration (GMED_MITTARO_API_KEY, GMED_MAIL_FROM); this block
-              becomes its form once the mailer reads a stored connection. */}
-          <section
-            className="min-w-0 overflow-hidden rounded-lg border border-border/70 bg-card"
-            data-testid="mail-connection"
-          >
-            <div className="border-b border-border/60 bg-muted/20 px-3.5 py-2.5">
-              <AdminSectionTitle>{tx("Подключение Mittaro", "Mittaro-Verbindung")}</AdminSectionTitle>
-            </div>
-            <div className="space-y-2 p-3.5 text-xs leading-5 text-muted-foreground">
-              <p>
-                {tx(
-                  "Письма из системы отправляются через Mittaro — сервис транзакционных писем с серверами в Германии.",
-                  "E-Mails aus dem System werden über Mittaro versendet – einen Dienst für Transaktions-E-Mails mit Servern in Deutschland.",
-                )}
-              </p>
-              <p>
-                {tx(
-                  "API-ключ и адрес отправителя пока задаются в конфигурации сервера. Ввод ключа и тестовое письмо на этой вкладке появятся следующим обновлением.",
-                  "API-Schlüssel und Absenderadresse stehen vorerst in der Serverkonfiguration. Eingabe des Schlüssels und Test-E-Mail folgen auf diesem Reiter mit dem nächsten Update.",
-                )}
-              </p>
-            </div>
-          </section>
+          <MailConnectionForm canConfigure={admin} />
         </TabsContent>
       </Tabs>
     </div>

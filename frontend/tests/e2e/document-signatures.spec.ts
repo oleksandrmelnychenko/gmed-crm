@@ -781,6 +781,54 @@ test("separate German connection dialog validates setup and clears the secret", 
   expect(fixture.submissions).toHaveLength(0);
 });
 
+test("the Mittaro tab saves the key without showing it again and sends a test letter", async ({ page }) => {
+  await prepare(page);
+  let connection: Record<string, unknown> = {
+    provider: "mittaro",
+    configured: false,
+    reason_code: "mittaro_api_key_missing",
+    source: "none",
+    sender: null,
+    reply_to: null,
+    key_hint: null,
+    console_url: "https://console.gmed-health.test",
+  };
+  const saves: unknown[] = [];
+  const testLetters: unknown[] = [];
+  await page.route("**/api/v1/mail/connection", async route => {
+    if (route.request().method() === "GET") return route.fulfill({ json: connection });
+    const body = route.request().postDataJSON() as { sender: string; reply_to: string | null };
+    saves.push(body);
+    connection = { ...connection, configured: true, reason_code: "ready", source: "database", sender: body.sender, reply_to: body.reply_to, key_hint: "…AB12" };
+    return route.fulfill({ json: connection });
+  });
+  await page.route("**/api/v1/mail/connection/test", async route => {
+    testLetters.push(route.request().postDataJSON());
+    return route.fulfill({ json: { sent_to: "fixture@example.org", message_id: "email_01TEST" } });
+  });
+
+  await page.goto("/admin/api-connections?tab=email");
+  const section = page.getByTestId("mail-connection");
+  await expect(section).toContainText("Mittaro-Verbindung");
+  const key = section.getByLabel("API-Schlüssel", { exact: true });
+  await expect(key).toHaveAttribute("type", "password");
+  await expect(section.getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();
+  await key.fill("tx_live_fixtureAB12");
+  await section.getByLabel("Absender", { exact: true }).fill("zugang@gmed-health.test");
+  await section.getByRole("button", { name: "Speichern", exact: true }).click();
+  await expect(section.getByRole("status")).toContainText("Verbindung gespeichert");
+  expect(saves).toEqual([{ api_key: "tx_live_fixtureAB12", sender: "zugang@gmed-health.test", reply_to: null }]);
+  // The key is not shown again and never kept in the browser.
+  await expect(section.getByTestId("mail-connection-sender")).toHaveText("zugang@gmed-health.test");
+  await expect(section).toContainText("…AB12");
+  await expect(section.getByLabel("API-Schlüssel", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage }))).not.toContain("tx_live_fixtureAB12");
+
+  await section.getByTestId("mail-connection-test").click();
+  await expect(section.getByRole("status")).toHaveText("Test-E-Mail an fixture@example.org gesendet.");
+  expect(testLetters).toEqual([{ to: null, language: "de" }]);
+});
+
 
 for (const lang of ["de", "ru"] as const) {
   test(`central agency defaults and document client form an editable preview workspace in ${lang}`, async ({ page }) => {
