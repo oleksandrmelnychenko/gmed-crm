@@ -237,7 +237,7 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
                 <KeyRound aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="font-mono">{connection.key_hint ?? ""}</span>
                 <span className="text-muted-foreground">
-                  · {savedKey ? tx("сохранён здесь", "hier gespeichert") : tx("из конфигурации сервера", "aus der Serverkonfiguration")}
+                  · {tx("сохранён, повторный ввод не нужен", "gespeichert, keine erneute Eingabe nötig")}
                 </span>
               </dd>
             </div>
@@ -347,8 +347,8 @@ export function MailConnectionForm({ canConfigure }: { canConfigure: boolean }) 
             </label>
             <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
               {tx(
-                "Ключ шифруется на сервере и больше не показывается. Сохранённое здесь подключение заменяет ключ из конфигурации сервера.",
-                "Der Schlüssel wird verschlüsselt auf dem Server gespeichert und nicht mehr angezeigt. Eine hier gespeicherte Verbindung ersetzt den Schlüssel aus der Serverkonfiguration.",
+                "Ключ сохраняется в зашифрованном виде и больше не показывается.",
+                "Der Schlüssel wird verschlüsselt gespeichert und nicht mehr angezeigt.",
               )}
             </p>
           </fieldset>
