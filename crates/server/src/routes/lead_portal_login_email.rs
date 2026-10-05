@@ -24,8 +24,9 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::auth::password;
-use crate::mail::templates::{self, AgencyIdentity, MailLanguage, PortalLoginEmail};
-use crate::mail::{MailError, OutgoingEmail};
+use crate::mail::connection::current_mailer;
+use crate::mail::templates::{self, MailLanguage, PortalLoginEmail};
+use crate::mail::{MailError, OutgoingEmail, coded, error_response};
 use crate::routes::lead_portal_account::{may_issue_portal_password, normalize_portal_email};
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -37,34 +38,9 @@ pub fn router() -> Router<AppState> {
     )
 }
 
-fn coded(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
-    (
-        status,
-        Json(json!({
-            "error": status.canonical_reason().unwrap_or("error"),
-            "code": code,
-            "message": message,
-        })),
-    )
-        .into_response()
-}
-
 fn internal(error: impl std::fmt::Display, lead_id: Uuid, what: &str) -> axum::response::Response {
     tracing::error!(%error, %lead_id, what, "lead portal login e-mail");
     coded(StatusCode::INTERNAL_SERVER_ERROR, "internal", "Failed")
-}
-
-/// HTTP answer for a delivery failure, with a code the dialog translates.
-fn mail_error_response(error: &MailError) -> axum::response::Response {
-    let status = match error {
-        MailError::NotConfigured => StatusCode::SERVICE_UNAVAILABLE,
-        MailError::QuotaReached => StatusCode::TOO_MANY_REQUESTS,
-        MailError::Unavailable(_) | MailError::Request | MailError::InvalidResponse => {
-            StatusCode::SERVICE_UNAVAILABLE
-        }
-        MailError::Rejected(_) | MailError::InvalidMessage(_) => StatusCode::BAD_GATEWAY,
-    };
-    coded(status, error.code(), &error.to_string())
 }
 
 /// The same password, language and address never go out twice: a repeat
@@ -78,35 +54,6 @@ fn idempotency_key(user_id: Uuid, password_hash: &str, language: MailLanguage, t
         .as_bytes(),
     );
     format!("gmed-portal-login-{}", hex::encode(digest))
-}
-
-/// Company identity for the e-mail footer; a missing setting drops its line.
-async fn load_agency_identity(state: &AppState) -> AgencyIdentity {
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
-        r#"SELECT key, value #>> '{}'
-           FROM system_settings
-           WHERE key IN ('agency_name', 'agency_address', 'agency_phone',
-                         'agency_email', 'agency_website')"#,
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_else(|error| {
-        tracing::warn!(%error, "agency identity for e-mail footer");
-        Vec::new()
-    });
-    let mut agency = AgencyIdentity::default();
-    for (key, value) in rows {
-        let value = value.map(|value| value.trim().to_string());
-        match key.as_str() {
-            "agency_name" => agency.name = value,
-            "agency_address" => agency.address = value,
-            "agency_phone" => agency.phone = value,
-            "agency_email" => agency.email = value,
-            "agency_website" => agency.website = value,
-            _ => {}
-        }
-    }
-    agency
 }
 
 /// Last sign-in e-mail per login of `lead_id`, newest first.
@@ -167,7 +114,14 @@ async fn get_login_emails(
         Ok(history) => history,
         Err(error) => return internal(error, lead_id, "history"),
     };
-    let capability = state.mailer.capability();
+    let capability = match current_mailer(&state).await {
+        Ok(mailer) => mailer.capability(),
+        Err(code) => crate::mail::MailCapability {
+            provider: crate::mail::PROVIDER_ID,
+            available: false,
+            reason_code: code,
+        },
+    };
     Json(json!({
         "available": capability.available,
         "reason_code": capability.reason_code,
@@ -212,8 +166,18 @@ async fn send_login_email(
             "The issued password is required",
         );
     }
-    let Some(console_url) = state.mailer.console_url().map(str::to_string) else {
-        return mail_error_response(&MailError::NotConfigured);
+    let mailer = match current_mailer(&state).await {
+        Ok(mailer) => mailer,
+        Err(code) => {
+            return coded(
+                StatusCode::SERVICE_UNAVAILABLE,
+                code,
+                "Mail connection unavailable",
+            );
+        }
+    };
+    let Some(console_url) = mailer.console_url().map(str::to_string) else {
+        return error_response(&MailError::NotConfigured);
     };
 
     let row = match sqlx::query(
@@ -327,7 +291,7 @@ async fn send_login_email(
         }
         _ => None,
     };
-    let agency = load_agency_identity(&state).await;
+    let agency = crate::mail::agency_identity(&state.db).await;
     let login_url = format!("{console_url}/login");
     let logo_url = templates::logo_url(&console_url);
     let rendered = templates::portal_login(&PortalLoginEmail {
@@ -349,7 +313,7 @@ async fn send_login_email(
         idempotency_key: idempotency_key(body.user_id, &password_hash, language, &recipient),
     };
 
-    let result = state.mailer.send(&outgoing).await;
+    let result = mailer.send(&outgoing).await;
     let (status_text, message_id, error_code) = match &result {
         Ok(sent) => ("sent", Some(sent.message_id.clone()), None),
         Err(error) => ("failed", None, Some(error.code())),
@@ -415,7 +379,7 @@ async fn send_login_email(
             "replayed": sent.replayed,
         }))
         .into_response(),
-        Err(error) => mail_error_response(&error),
+        Err(error) => error_response(&error),
     }
 }
 
@@ -466,7 +430,7 @@ mod tests {
                 "mail_unavailable",
             ),
         ] {
-            let response = mail_error_response(&error);
+            let response = error_response(&error);
             assert_eq!(response.status(), status);
             assert_eq!(error.code(), code);
         }
